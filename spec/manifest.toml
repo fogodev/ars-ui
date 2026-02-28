@@ -1,0 +1,1153 @@
+# spec/manifest.toml — routing table for agents
+# Auto-generated from spec directory structure and component file headers.
+
+[meta]
+version                = "0.3"
+total_components       = 111   # [components.*] entries only
+total_format_utilities = 6     # [format_utilities] entries (FormatNumber, FormatDate, etc.)
+
+# ──────────────────────────────────────────────
+# Foundation documents
+# ──────────────────────────────────────────────
+
+[foundation]
+overview          = "foundation/00-overview.md"
+architecture      = "foundation/01-architecture.md"
+component-catalog = "foundation/02-component-catalog.md"
+accessibility     = "foundation/03-accessibility.md"
+i18n              = "foundation/04-internationalization.md"
+interactions      = "foundation/05-interactions.md"
+collections       = "foundation/06-collections.md"
+forms             = "foundation/07-forms.md"
+adapter-leptos    = "foundation/08-adapter-leptos.md"
+adapter-dioxus    = "foundation/09-adapter-dioxus.md"
+spec-template     = "foundation/10-component-spec-template.md"
+dom-utilities     = "foundation/11-dom-utilities.md"
+
+# ──────────────────────────────────────────────
+# Shared type documents
+# ──────────────────────────────────────────────
+
+[shared]
+date-time-types     = "shared/date-time-types.md"
+selection-patterns  = "shared/selection-patterns.md"
+layout-shared-types = "shared/layout-shared-types.md"
+z-index-stacking    = "shared/z-index-stacking.md"
+
+# ──────────────────────────────────────────────
+# Testing documents
+# ──────────────────────────────────────────────
+
+[testing]
+overview                  = "testing/00-overview.md"
+unit-tests                = "testing/01-unit-tests.md"
+integration-tests         = "testing/02-integration-tests.md"
+snapshot-tests            = "testing/03-snapshot-tests.md"
+aria-helpers              = "testing/04-aria-helpers.md"
+adapter-harness           = "testing/05-adapter-harness.md"
+accessibility-testing     = "testing/06-accessibility-testing.md"
+ssr-hydration             = "testing/07-ssr-hydration.md"
+i18n-testing              = "testing/08-i18n-testing.md"
+state-machine-correctness = "testing/09-state-machine-correctness.md"
+keyboard-focus            = "testing/10-keyboard-focus.md"
+form-validation           = "testing/11-form-validation.md"
+advanced                  = "testing/12-advanced.md"
+policies                  = "testing/13-policies.md"
+ci                        = "testing/14-ci.md"
+test-harness              = "testing/15-test-harness.md"
+
+# ══════════════════════════════════════════════
+# Components — input
+# ══════════════════════════════════════════════
+
+[components.checkbox]
+path            = "components/input/checkbox.md"
+category        = "input"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
+shared_deps     = []
+related         = ["checkbox-group"]
+
+[components.checkbox-group]
+path            = "components/input/checkbox-group.md"
+category        = "input"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
+shared_deps     = []
+related         = ["checkbox"]
+
+[components.editable]
+path            = "components/input/editable.md"
+category        = "input"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
+shared_deps     = []
+related         = []
+
+[components.file-trigger]
+path            = "components/input/file-trigger.md"
+category        = "input"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
+shared_deps     = []
+related         = ["file-upload"]
+
+[components.number-input]
+path            = "components/input/number-input.md"
+category        = "input"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
+shared_deps     = []
+related         = []
+
+[components.password-input]
+path            = "components/input/password-input.md"
+category        = "input"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
+shared_deps     = []
+related         = ["text-field"]
+
+[components.pin-input]
+path            = "components/input/pin-input.md"
+category        = "input"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
+shared_deps     = []
+related         = []
+
+[components.radio-group]
+path            = "components/input/radio-group.md"
+category        = "input"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
+shared_deps     = []
+related         = []
+
+[components.range-slider]
+path            = "components/input/range-slider.md"
+category        = "input"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
+shared_deps     = []
+related         = ["slider"]
+
+[components.search-input]
+path            = "components/input/search-input.md"
+category        = "input"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
+shared_deps     = []
+related         = ["text-field"]
+
+[components.slider]
+path            = "components/input/slider.md"
+category        = "input"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
+shared_deps     = []
+related         = ["range-slider"]
+
+[components.switch]
+path            = "components/input/switch.md"
+category        = "input"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
+shared_deps     = []
+related         = []
+
+[components.text-field]
+path            = "components/input/text-field.md"
+category        = "input"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
+shared_deps     = []
+related         = ["textarea", "password-input", "search-input"]
+
+[components.textarea]
+path            = "components/input/textarea.md"
+category        = "input"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
+shared_deps     = []
+related         = ["text-field"]
+
+# ══════════════════════════════════════════════
+# Components — selection
+# ══════════════════════════════════════════════
+
+[components.autocomplete]
+path            = "components/selection/autocomplete.md"
+category        = "selection"
+foundation_deps = ["architecture", "accessibility", "interactions", "collections"]
+shared_deps     = ["selection-patterns"]
+related         = []
+
+[components.combobox]
+path            = "components/selection/combobox.md"
+category        = "selection"
+foundation_deps = ["architecture", "accessibility", "interactions", "collections"]
+shared_deps     = ["selection-patterns"]
+related         = []
+
+[components.context-menu]
+path            = "components/selection/context-menu.md"
+category        = "selection"
+foundation_deps = ["architecture", "accessibility", "interactions", "collections"]
+shared_deps     = ["selection-patterns"]
+related         = []
+
+[components.listbox]
+path            = "components/selection/listbox.md"
+category        = "selection"
+foundation_deps = ["architecture", "accessibility", "interactions", "collections"]
+shared_deps     = ["selection-patterns"]
+related         = []
+
+[components.menu]
+path            = "components/selection/menu.md"
+category        = "selection"
+foundation_deps = ["architecture", "accessibility", "interactions", "collections"]
+shared_deps     = ["selection-patterns"]
+related         = []
+
+[components.menu-bar]
+path            = "components/selection/menu-bar.md"
+category        = "selection"
+foundation_deps = ["architecture", "accessibility", "interactions", "collections"]
+shared_deps     = ["selection-patterns"]
+related         = []
+
+[components.select]
+path            = "components/selection/select.md"
+category        = "selection"
+foundation_deps = ["architecture", "accessibility", "interactions", "collections"]
+shared_deps     = ["selection-patterns"]
+related         = []
+
+[components.tags-input]
+path            = "components/selection/tags-input.md"
+category        = "selection"
+foundation_deps = ["architecture", "accessibility", "interactions", "collections"]
+shared_deps     = ["selection-patterns"]
+related         = []
+
+[components.segment-group]
+path            = "components/selection/segment-group.md"
+category        = "selection"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = ["radio-group", "toggle-group"]
+
+# ══════════════════════════════════════════════
+# Components — overlay
+# ══════════════════════════════════════════════
+
+[components.alert-dialog]
+path            = "components/overlay/alert-dialog.md"
+category        = "overlay"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = ["z-index-stacking"]
+related         = ["dialog"]
+
+[components.dialog]
+path            = "components/overlay/dialog.md"
+category        = "overlay"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = ["z-index-stacking"]
+related         = []
+
+[components.drawer]
+path            = "components/overlay/drawer.md"
+category        = "overlay"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = ["z-index-stacking"]
+related         = ["dialog"]
+
+[components.floating-panel]
+path            = "components/overlay/floating-panel.md"
+category        = "overlay"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = ["z-index-stacking"]
+related         = []
+
+[components.hover-card]
+path            = "components/overlay/hover-card.md"
+category        = "overlay"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = ["z-index-stacking"]
+related         = ["popover", "tooltip"]
+
+[components.popover]
+path            = "components/overlay/popover.md"
+category        = "overlay"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = ["z-index-stacking"]
+related         = ["dialog"]
+
+[components.presence]
+path            = "components/overlay/presence.md"
+category        = "overlay"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = []
+
+[components.toast]
+path            = "components/overlay/toast.md"
+category        = "overlay"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = ["z-index-stacking"]
+related         = []
+
+[components.tooltip]
+path            = "components/overlay/tooltip.md"
+category        = "overlay"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = ["z-index-stacking"]
+related         = ["hover-card"]
+
+[components.tour]
+path            = "components/overlay/tour.md"
+category        = "overlay"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = ["z-index-stacking"]
+related         = []
+
+# ══════════════════════════════════════════════
+# Components — navigation
+# ══════════════════════════════════════════════
+
+[components.accordion]
+path            = "components/navigation/accordion.md"
+category        = "navigation"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = []
+
+[components.breadcrumbs]
+path            = "components/navigation/breadcrumbs.md"
+category        = "navigation"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = []
+
+[components.link]
+path            = "components/navigation/link.md"
+category        = "navigation"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = []
+
+[components.navigation-menu]
+path            = "components/navigation/navigation-menu.md"
+category        = "navigation"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = ["z-index-stacking"]
+related         = ["menu", "menu-bar", "tabs"]
+
+[components.pagination]
+path            = "components/navigation/pagination.md"
+category        = "navigation"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = []
+
+[components.steps]
+path            = "components/navigation/steps.md"
+category        = "navigation"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = []
+
+[components.tabs]
+path            = "components/navigation/tabs.md"
+category        = "navigation"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = []
+
+[components.tree-view]
+path            = "components/navigation/tree-view.md"
+category        = "navigation"
+foundation_deps = ["architecture", "accessibility", "interactions", "collections"]
+shared_deps     = []
+related         = []
+
+# ══════════════════════════════════════════════
+# Components — date-time
+# ══════════════════════════════════════════════
+
+[components.calendar]
+path            = "components/date-time/calendar.md"
+category        = "date-time"
+foundation_deps = ["architecture", "accessibility", "i18n", "interactions"]
+shared_deps     = ["date-time-types"]
+related         = ["range-calendar", "date-picker", "date-range-picker"]
+
+[components.date-field]
+path            = "components/date-time/date-field.md"
+category        = "date-time"
+foundation_deps = ["architecture", "accessibility", "i18n", "interactions", "forms"]
+shared_deps     = ["date-time-types"]
+related         = ["date-picker", "date-range-field", "time-field"]
+
+[components.date-picker]
+path            = "components/date-time/date-picker.md"
+category        = "date-time"
+foundation_deps = ["architecture", "accessibility", "i18n", "interactions", "forms"]
+shared_deps     = ["date-time-types"]
+related         = ["calendar", "date-field", "date-range-picker"]
+
+[components.date-range-field]
+path            = "components/date-time/date-range-field.md"
+category        = "date-time"
+foundation_deps = ["architecture", "accessibility", "i18n", "interactions", "forms"]
+shared_deps     = ["date-time-types"]
+related         = ["date-field", "date-range-picker"]
+
+[components.date-range-picker]
+path            = "components/date-time/date-range-picker.md"
+category        = "date-time"
+foundation_deps = ["architecture", "accessibility", "i18n", "interactions", "forms"]
+shared_deps     = ["date-time-types"]
+related         = ["calendar", "range-calendar", "date-field", "date-range-field"]
+
+[components.date-time-picker]
+path            = "components/date-time/date-time-picker.md"
+category        = "date-time"
+foundation_deps = ["architecture", "accessibility", "i18n", "interactions", "forms"]
+shared_deps     = ["date-time-types"]
+related         = ["date-picker", "time-field", "calendar"]
+
+[components.time-field]
+path            = "components/date-time/time-field.md"
+category        = "date-time"
+foundation_deps = ["architecture", "accessibility", "i18n", "interactions", "forms"]
+shared_deps     = ["date-time-types"]
+related         = ["date-field", "date-time-picker"]
+
+[components.range-calendar]
+path            = "components/date-time/range-calendar.md"
+category        = "date-time"
+foundation_deps = ["architecture", "accessibility", "i18n", "interactions"]
+shared_deps     = ["date-time-types"]
+related         = ["calendar", "date-range-picker"]
+
+# ══════════════════════════════════════════════
+# Components — data-display
+# ══════════════════════════════════════════════
+
+[components.avatar]
+path            = "components/data-display/avatar.md"
+category        = "data-display"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.badge]
+path            = "components/data-display/badge.md"
+category        = "data-display"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.grid-list]
+path            = "components/data-display/grid-list.md"
+category        = "data-display"
+foundation_deps = ["architecture", "accessibility", "collections", "interactions"]
+shared_deps     = []
+related         = []
+
+[components.marquee]
+path            = "components/data-display/marquee.md"
+category        = "data-display"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.meter]
+path            = "components/data-display/meter.md"
+category        = "data-display"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.progress]
+path            = "components/data-display/progress.md"
+category        = "data-display"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.rating-group]
+path            = "components/data-display/rating-group.md"
+category        = "data-display"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.skeleton]
+path            = "components/data-display/skeleton.md"
+category        = "data-display"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.stat]
+path            = "components/data-display/stat.md"
+category        = "data-display"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.table]
+path            = "components/data-display/table.md"
+category        = "data-display"
+foundation_deps = ["architecture", "accessibility", "collections", "interactions"]
+shared_deps     = []
+related         = []
+
+[components.tag-group]
+path            = "components/data-display/tag-group.md"
+category        = "data-display"
+foundation_deps = ["architecture", "accessibility", "collections", "interactions"]
+shared_deps     = []
+related         = []
+
+# ══════════════════════════════════════════════
+# Components — layout
+# ══════════════════════════════════════════════
+
+[components.aspect-ratio]
+path            = "components/layout/aspect-ratio.md"
+category        = "layout"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.carousel]
+path            = "components/layout/carousel.md"
+category        = "layout"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = ["layout-shared-types"]
+related         = []
+
+[components.collapsible]
+path            = "components/layout/collapsible.md"
+category        = "layout"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = ["layout-shared-types"]
+related         = []
+
+[components.portal]
+path            = "components/layout/portal.md"
+category        = "layout"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = ["layout-shared-types"]
+related         = []
+
+[components.scroll-area]
+path            = "components/layout/scroll-area.md"
+category        = "layout"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = ["layout-shared-types"]
+related         = []
+
+[components.splitter]
+path            = "components/layout/splitter.md"
+category        = "layout"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = ["layout-shared-types"]
+related         = []
+
+[components.stack]
+path            = "components/layout/stack.md"
+category        = "layout"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = ["layout-shared-types"]
+related         = ["center", "grid"]
+
+[components.center]
+path            = "components/layout/center.md"
+category        = "layout"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = ["layout-shared-types"]
+related         = ["stack", "grid"]
+
+[components.grid]
+path            = "components/layout/grid.md"
+category        = "layout"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = ["layout-shared-types"]
+related         = ["stack", "center"]
+
+[components.toolbar]
+path            = "components/layout/toolbar.md"
+category        = "layout"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = ["layout-shared-types"]
+related         = []
+
+[components.frame]
+path            = "components/layout/frame.md"
+category        = "layout"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = ["aspect-ratio"]
+
+# ══════════════════════════════════════════════
+# Components — specialized
+# ══════════════════════════════════════════════
+
+[components.angle-slider]
+path            = "components/specialized/angle-slider.md"
+category        = "specialized"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = ["color-picker"]
+
+[components.clipboard]
+path            = "components/specialized/clipboard.md"
+category        = "specialized"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = []
+
+[components.color-area]
+path            = "components/specialized/color-area.md"
+category        = "specialized"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = ["color-picker", "color-slider"]
+
+[components.color-field]
+path            = "components/specialized/color-field.md"
+category        = "specialized"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = ["color-picker"]
+
+[components.color-picker]
+path = "components/specialized/color-picker.md"
+category = "specialized"
+tier = "complex"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps = []
+related = [
+    "color-area",
+    "color-slider",
+    "color-field",
+    "color-swatch",
+    "color-swatch-picker",
+    "color-wheel",
+    "angle-slider"
+]
+
+[components.color-slider]
+path            = "components/specialized/color-slider.md"
+category        = "specialized"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = ["color-picker", "color-area"]
+
+[components.color-swatch]
+path            = "components/specialized/color-swatch.md"
+category        = "specialized"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = ["color-swatch-picker", "color-picker"]
+
+[components.color-swatch-picker]
+path            = "components/specialized/color-swatch-picker.md"
+category        = "specialized"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = ["color-swatch", "color-picker"]
+
+[components.color-wheel]
+path            = "components/specialized/color-wheel.md"
+category        = "specialized"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = ["color-picker"]
+
+[components.contextual-help]
+path            = "components/specialized/contextual-help.md"
+category        = "specialized"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = ["popover"]
+
+[components.file-upload]
+path            = "components/specialized/file-upload.md"
+category        = "specialized"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = []
+
+[components.image-cropper]
+path            = "components/specialized/image-cropper.md"
+category        = "specialized"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = []
+
+[components.qr-code]
+path            = "components/specialized/qr-code.md"
+category        = "specialized"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = []
+
+[components.signature-pad]
+path            = "components/specialized/signature-pad.md"
+category        = "specialized"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = []
+
+[components.timer]
+path            = "components/specialized/timer.md"
+category        = "specialized"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = []
+
+# ══════════════════════════════════════════════
+# Components — utility
+# ══════════════════════════════════════════════
+
+[components.action-group]
+path            = "components/utility/action-group.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility", "interactions", "i18n"]
+shared_deps     = []
+related         = ["toggle-group"]
+
+[components.as-child]
+path            = "components/utility/as-child.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.button]
+path            = "components/utility/button.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = ["toggle-button"]
+
+[components.client-only]
+path            = "components/utility/client-only.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.dismissable]
+path            = "components/utility/dismissable.md"
+category        = "utility"
+internal        = true
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.download-trigger]
+path            = "components/utility/download-trigger.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.drop-zone]
+path            = "components/utility/drop-zone.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
+shared_deps     = []
+related         = []
+
+[components.ars-provider]
+path            = "components/utility/ars-provider.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.focus-ring]
+path            = "components/utility/focus-ring.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.focus-scope]
+path            = "components/utility/focus-scope.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.group]
+path            = "components/utility/group.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = ["fieldset", "action-group"]
+
+[components.heading]
+path            = "components/utility/heading.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.highlight]
+path            = "components/utility/highlight.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.keyboard]
+path            = "components/utility/keyboard.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.landmark]
+path            = "components/utility/landmark.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.live-region]
+path            = "components/utility/live-region.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.separator]
+path            = "components/utility/separator.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.swap]
+path            = "components/utility/swap.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility", "interactions"]
+shared_deps     = []
+related         = []
+
+[components.toggle]
+path            = "components/utility/toggle.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = ["toggle-group", "toggle-button"]
+
+[components.visually-hidden]
+path            = "components/utility/visually-hidden.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = []
+
+[components.z-index-allocator]
+path            = "components/utility/z-index-allocator.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = ["z-index-stacking"]
+related         = []
+
+[components.field]
+path            = "components/utility/field.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility", "forms"]
+shared_deps     = []
+related         = ["fieldset"]
+
+[components.fieldset]
+path            = "components/utility/fieldset.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility", "forms"]
+shared_deps     = []
+related         = ["field"]
+
+[components.toggle-button]
+path            = "components/utility/toggle-button.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
+shared_deps     = []
+related         = ["button", "toggle-group", "toggle"]
+
+[components.toggle-group]
+path            = "components/utility/toggle-group.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility", "interactions", "forms", "collections"]
+shared_deps     = []
+related         = ["toggle-button", "toggle"]
+
+[components.form]
+path            = "components/utility/form.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility", "forms"]
+shared_deps     = []
+related         = ["field", "fieldset"]
+
+# ══════════════════════════════════════════════
+# Leptos adapter — per-component files
+# ══════════════════════════════════════════════
+
+[leptos_adapters]
+# navigation
+accordion            = "leptos-components/navigation/accordion.md"
+breadcrumbs          = "leptos-components/navigation/breadcrumbs.md"
+link                 = "leptos-components/navigation/link.md"
+navigation-menu      = "leptos-components/navigation/navigation-menu.md"
+pagination           = "leptos-components/navigation/pagination.md"
+steps                = "leptos-components/navigation/steps.md"
+tabs                 = "leptos-components/navigation/tabs.md"
+tree-view            = "leptos-components/navigation/tree-view.md"
+# input
+checkbox             = "leptos-components/input/checkbox.md"
+checkbox-group       = "leptos-components/input/checkbox-group.md"
+editable             = "leptos-components/input/editable.md"
+file-trigger         = "leptos-components/input/file-trigger.md"
+number-input         = "leptos-components/input/number-input.md"
+password-input       = "leptos-components/input/password-input.md"
+pin-input            = "leptos-components/input/pin-input.md"
+radio-group          = "leptos-components/input/radio-group.md"
+range-slider         = "leptos-components/input/range-slider.md"
+search-input         = "leptos-components/input/search-input.md"
+slider               = "leptos-components/input/slider.md"
+switch               = "leptos-components/input/switch.md"
+text-field           = "leptos-components/input/text-field.md"
+textarea             = "leptos-components/input/textarea.md"
+# selection
+autocomplete         = "leptos-components/selection/autocomplete.md"
+combobox             = "leptos-components/selection/combobox.md"
+context-menu         = "leptos-components/selection/context-menu.md"
+listbox              = "leptos-components/selection/listbox.md"
+menu                 = "leptos-components/selection/menu.md"
+menu-bar             = "leptos-components/selection/menu-bar.md"
+segment-group        = "leptos-components/selection/segment-group.md"
+select               = "leptos-components/selection/select.md"
+tags-input           = "leptos-components/selection/tags-input.md"
+# overlay
+alert-dialog         = "leptos-components/overlay/alert-dialog.md"
+dialog               = "leptos-components/overlay/dialog.md"
+drawer               = "leptos-components/overlay/drawer.md"
+floating-panel       = "leptos-components/overlay/floating-panel.md"
+hover-card           = "leptos-components/overlay/hover-card.md"
+popover              = "leptos-components/overlay/popover.md"
+presence             = "leptos-components/overlay/presence.md"
+toast                = "leptos-components/overlay/toast.md"
+tooltip              = "leptos-components/overlay/tooltip.md"
+tour                 = "leptos-components/overlay/tour.md"
+# data-display
+avatar               = "leptos-components/data-display/avatar.md"
+badge                = "leptos-components/data-display/badge.md"
+grid-list            = "leptos-components/data-display/grid-list.md"
+marquee              = "leptos-components/data-display/marquee.md"
+meter                = "leptos-components/data-display/meter.md"
+progress             = "leptos-components/data-display/progress.md"
+rating-group         = "leptos-components/data-display/rating-group.md"
+skeleton             = "leptos-components/data-display/skeleton.md"
+stat                 = "leptos-components/data-display/stat.md"
+table                = "leptos-components/data-display/table.md"
+tag-group            = "leptos-components/data-display/tag-group.md"
+# date-time
+calendar             = "leptos-components/date-time/calendar.md"
+date-field           = "leptos-components/date-time/date-field.md"
+date-picker          = "leptos-components/date-time/date-picker.md"
+date-range-field     = "leptos-components/date-time/date-range-field.md"
+date-range-picker    = "leptos-components/date-time/date-range-picker.md"
+date-time-picker     = "leptos-components/date-time/date-time-picker.md"
+range-calendar       = "leptos-components/date-time/range-calendar.md"
+time-field           = "leptos-components/date-time/time-field.md"
+# layout
+aspect-ratio         = "leptos-components/layout/aspect-ratio.md"
+carousel             = "leptos-components/layout/carousel.md"
+center               = "leptos-components/layout/center.md"
+collapsible          = "leptos-components/layout/collapsible.md"
+frame                = "leptos-components/layout/frame.md"
+grid                 = "leptos-components/layout/grid.md"
+portal               = "leptos-components/layout/portal.md"
+scroll-area          = "leptos-components/layout/scroll-area.md"
+splitter             = "leptos-components/layout/splitter.md"
+stack                = "leptos-components/layout/stack.md"
+toolbar              = "leptos-components/layout/toolbar.md"
+# specialized
+angle-slider         = "leptos-components/specialized/angle-slider.md"
+clipboard            = "leptos-components/specialized/clipboard.md"
+color-area           = "leptos-components/specialized/color-area.md"
+color-field          = "leptos-components/specialized/color-field.md"
+color-picker         = "leptos-components/specialized/color-picker.md"
+color-slider         = "leptos-components/specialized/color-slider.md"
+color-swatch         = "leptos-components/specialized/color-swatch.md"
+color-swatch-picker  = "leptos-components/specialized/color-swatch-picker.md"
+color-wheel          = "leptos-components/specialized/color-wheel.md"
+contextual-help      = "leptos-components/specialized/contextual-help.md"
+file-upload          = "leptos-components/specialized/file-upload.md"
+image-cropper        = "leptos-components/specialized/image-cropper.md"
+qr-code              = "leptos-components/specialized/qr-code.md"
+signature-pad        = "leptos-components/specialized/signature-pad.md"
+timer                = "leptos-components/specialized/timer.md"
+# utility
+action-group         = "leptos-components/utility/action-group.md"
+ars-provider         = "leptos-components/utility/ars-provider.md"
+as-child             = "leptos-components/utility/as-child.md"
+button               = "leptos-components/utility/button.md"
+client-only          = "leptos-components/utility/client-only.md"
+dismissable          = "leptos-components/utility/dismissable.md"
+download-trigger     = "leptos-components/utility/download-trigger.md"
+drop-zone            = "leptos-components/utility/drop-zone.md"
+field                = "leptos-components/utility/field.md"
+fieldset             = "leptos-components/utility/fieldset.md"
+focus-ring           = "leptos-components/utility/focus-ring.md"
+focus-scope          = "leptos-components/utility/focus-scope.md"
+form                 = "leptos-components/utility/form.md"
+group                = "leptos-components/utility/group.md"
+heading              = "leptos-components/utility/heading.md"
+highlight            = "leptos-components/utility/highlight.md"
+keyboard             = "leptos-components/utility/keyboard.md"
+landmark             = "leptos-components/utility/landmark.md"
+live-region          = "leptos-components/utility/live-region.md"
+separator            = "leptos-components/utility/separator.md"
+swap                 = "leptos-components/utility/swap.md"
+toggle               = "leptos-components/utility/toggle.md"
+toggle-button        = "leptos-components/utility/toggle-button.md"
+toggle-group         = "leptos-components/utility/toggle-group.md"
+visually-hidden      = "leptos-components/utility/visually-hidden.md"
+z-index-allocator    = "leptos-components/utility/z-index-allocator.md"
+
+# ══════════════════════════════════════════════
+# Dioxus adapter — per-component files
+# ══════════════════════════════════════════════
+
+[dioxus_adapters]
+# navigation
+accordion            = "dioxus-components/navigation/accordion.md"
+breadcrumbs          = "dioxus-components/navigation/breadcrumbs.md"
+link                 = "dioxus-components/navigation/link.md"
+navigation-menu      = "dioxus-components/navigation/navigation-menu.md"
+pagination           = "dioxus-components/navigation/pagination.md"
+steps                = "dioxus-components/navigation/steps.md"
+tabs                 = "dioxus-components/navigation/tabs.md"
+tree-view            = "dioxus-components/navigation/tree-view.md"
+# input
+checkbox             = "dioxus-components/input/checkbox.md"
+checkbox-group       = "dioxus-components/input/checkbox-group.md"
+editable             = "dioxus-components/input/editable.md"
+file-trigger         = "dioxus-components/input/file-trigger.md"
+number-input         = "dioxus-components/input/number-input.md"
+password-input       = "dioxus-components/input/password-input.md"
+pin-input            = "dioxus-components/input/pin-input.md"
+radio-group          = "dioxus-components/input/radio-group.md"
+range-slider         = "dioxus-components/input/range-slider.md"
+search-input         = "dioxus-components/input/search-input.md"
+slider               = "dioxus-components/input/slider.md"
+switch               = "dioxus-components/input/switch.md"
+text-field           = "dioxus-components/input/text-field.md"
+textarea             = "dioxus-components/input/textarea.md"
+# selection
+autocomplete         = "dioxus-components/selection/autocomplete.md"
+combobox             = "dioxus-components/selection/combobox.md"
+context-menu         = "dioxus-components/selection/context-menu.md"
+listbox              = "dioxus-components/selection/listbox.md"
+menu                 = "dioxus-components/selection/menu.md"
+menu-bar             = "dioxus-components/selection/menu-bar.md"
+segment-group        = "dioxus-components/selection/segment-group.md"
+select               = "dioxus-components/selection/select.md"
+tags-input           = "dioxus-components/selection/tags-input.md"
+# overlay
+alert-dialog         = "dioxus-components/overlay/alert-dialog.md"
+dialog               = "dioxus-components/overlay/dialog.md"
+drawer               = "dioxus-components/overlay/drawer.md"
+floating-panel       = "dioxus-components/overlay/floating-panel.md"
+hover-card           = "dioxus-components/overlay/hover-card.md"
+popover              = "dioxus-components/overlay/popover.md"
+presence             = "dioxus-components/overlay/presence.md"
+toast                = "dioxus-components/overlay/toast.md"
+tooltip              = "dioxus-components/overlay/tooltip.md"
+tour                 = "dioxus-components/overlay/tour.md"
+# data-display
+avatar               = "dioxus-components/data-display/avatar.md"
+badge                = "dioxus-components/data-display/badge.md"
+grid-list            = "dioxus-components/data-display/grid-list.md"
+marquee              = "dioxus-components/data-display/marquee.md"
+meter                = "dioxus-components/data-display/meter.md"
+progress             = "dioxus-components/data-display/progress.md"
+rating-group         = "dioxus-components/data-display/rating-group.md"
+skeleton             = "dioxus-components/data-display/skeleton.md"
+stat                 = "dioxus-components/data-display/stat.md"
+table                = "dioxus-components/data-display/table.md"
+tag-group            = "dioxus-components/data-display/tag-group.md"
+# date-time
+calendar             = "dioxus-components/date-time/calendar.md"
+date-field           = "dioxus-components/date-time/date-field.md"
+date-picker          = "dioxus-components/date-time/date-picker.md"
+date-range-field     = "dioxus-components/date-time/date-range-field.md"
+date-range-picker    = "dioxus-components/date-time/date-range-picker.md"
+date-time-picker     = "dioxus-components/date-time/date-time-picker.md"
+range-calendar       = "dioxus-components/date-time/range-calendar.md"
+time-field           = "dioxus-components/date-time/time-field.md"
+# layout
+aspect-ratio         = "dioxus-components/layout/aspect-ratio.md"
+carousel             = "dioxus-components/layout/carousel.md"
+center               = "dioxus-components/layout/center.md"
+collapsible          = "dioxus-components/layout/collapsible.md"
+frame                = "dioxus-components/layout/frame.md"
+grid                 = "dioxus-components/layout/grid.md"
+portal               = "dioxus-components/layout/portal.md"
+scroll-area          = "dioxus-components/layout/scroll-area.md"
+splitter             = "dioxus-components/layout/splitter.md"
+stack                = "dioxus-components/layout/stack.md"
+toolbar              = "dioxus-components/layout/toolbar.md"
+# specialized
+angle-slider         = "dioxus-components/specialized/angle-slider.md"
+clipboard            = "dioxus-components/specialized/clipboard.md"
+color-area           = "dioxus-components/specialized/color-area.md"
+color-field          = "dioxus-components/specialized/color-field.md"
+color-picker         = "dioxus-components/specialized/color-picker.md"
+color-slider         = "dioxus-components/specialized/color-slider.md"
+color-swatch         = "dioxus-components/specialized/color-swatch.md"
+color-swatch-picker  = "dioxus-components/specialized/color-swatch-picker.md"
+color-wheel          = "dioxus-components/specialized/color-wheel.md"
+contextual-help      = "dioxus-components/specialized/contextual-help.md"
+file-upload          = "dioxus-components/specialized/file-upload.md"
+image-cropper        = "dioxus-components/specialized/image-cropper.md"
+qr-code              = "dioxus-components/specialized/qr-code.md"
+signature-pad        = "dioxus-components/specialized/signature-pad.md"
+timer                = "dioxus-components/specialized/timer.md"
+# utility
+action-group         = "dioxus-components/utility/action-group.md"
+ars-provider         = "dioxus-components/utility/ars-provider.md"
+as-child             = "dioxus-components/utility/as-child.md"
+button               = "dioxus-components/utility/button.md"
+client-only          = "dioxus-components/utility/client-only.md"
+dismissable          = "dioxus-components/utility/dismissable.md"
+download-trigger     = "dioxus-components/utility/download-trigger.md"
+drop-zone            = "dioxus-components/utility/drop-zone.md"
+field                = "dioxus-components/utility/field.md"
+fieldset             = "dioxus-components/utility/fieldset.md"
+focus-ring           = "dioxus-components/utility/focus-ring.md"
+focus-scope          = "dioxus-components/utility/focus-scope.md"
+form                 = "dioxus-components/utility/form.md"
+group                = "dioxus-components/utility/group.md"
+heading              = "dioxus-components/utility/heading.md"
+highlight            = "dioxus-components/utility/highlight.md"
+keyboard             = "dioxus-components/utility/keyboard.md"
+landmark             = "dioxus-components/utility/landmark.md"
+live-region          = "dioxus-components/utility/live-region.md"
+separator            = "dioxus-components/utility/separator.md"
+swap                 = "dioxus-components/utility/swap.md"
+toggle               = "dioxus-components/utility/toggle.md"
+toggle-button        = "dioxus-components/utility/toggle-button.md"
+toggle-group         = "dioxus-components/utility/toggle-group.md"
+visually-hidden      = "dioxus-components/utility/visually-hidden.md"
+z-index-allocator    = "dioxus-components/utility/z-index-allocator.md"
+
+# ══════════════════════════════════════════════
+# Format utilities
+# ══════════════════════════════════════════════
+
+[format_utilities]
+FormatNumber       = { path = "foundation/04-internationalization.md", foundation_deps = ["i18n"] }
+FormatDate         = { path = "foundation/04-internationalization.md", foundation_deps = ["i18n"] }
+FormatTime         = { path = "foundation/04-internationalization.md", foundation_deps = ["i18n"] }
+FormatRelativeTime = { path = "foundation/04-internationalization.md", foundation_deps = ["i18n"] }
+FormatByte         = { path = "foundation/04-internationalization.md", foundation_deps = ["i18n"] }
+FormatList         = { path = "foundation/04-internationalization.md", foundation_deps = ["i18n"] }

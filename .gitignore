@@ -1,0 +1,6 @@
+.claude/worktrees/
+.claude/worktrees/*
+.agents/*.local*
+
+target/
+Cargo.lock
