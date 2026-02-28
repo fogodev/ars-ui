@@ -1,0 +1,13 @@
+edition = "2024"
+
+# Merge imports into a single use statement per module
+imports_granularity = "Crate"
+
+# Group imports: std/core first, then external crates, then local
+group_imports = "StdExternalCrate"
+
+# Use field init shorthand: `Foo { x }` instead of `Foo { x: x }`
+use_field_init_shorthand = true
+
+# Use `..` in patterns: `Foo { x, .. }` instead of `Foo { x, y: _ }`
+condense_wildcard_suffixes = true

@@ -1,0 +1,2647 @@
+# Dioxus Adapter Specification (`ars-dioxus`)
+
+## 1. Overview
+
+The `ars-dioxus` crate bridges `ars-core` state machines to Dioxus's signal + virtual DOM system.
+
+> **DOM utilities:** Positioning, scroll lock, focus management, and z-index are specified in `11-dom-utilities.md`. The `ars-dom` crate is an optional dependency, enabled by the `web` feature flag.
+
+### 1.1 Key Differences from Leptos Adapter
+
+| Concern        | Leptos (`ars-leptos`)                                               | Dioxus (`ars-dioxus`)                                                                                                                                                                            |
+| -------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Render model   | Fine-grained, no VDOM                                               | Component re-runs on signal change, VDOM diff                                                                                                                                                    |
+| Signal type    | `ReadSignal<T>` / `WriteSignal<T>` (concrete types from `signal()`) | `Signal<T>` (combined read/write, `Copy`); `ReadSignal<T>` (read-only projection; `Signal<T>` and `Memo<T>` convert into it via `From`); `Memo<T>` (derived computation, returned by `derive()`) |
+| Components run | Once only                                                           | When signals read in the component body change (VDOM diff)                                                                                                                                       |
+| Context        | `provide_context` / `use_context`                                   | `use_context_provider` / `use_context`¹                                                                                                                                                          |
+| Children       | `Children` (Box fn)                                                 | `Element`                                                                                                                                                                                        |
+| Named slots    | `#[slot]` macro                                                     | Separate props or explicit `Element` fields                                                                                                                                                      |
+| SSR            | `leptos/ssr` feature                                                | `ssr` ars-dioxus feature (enables `dioxus/server` internally)                                                                                                                                    |
+| Platforms      | Web (WASM)                                                          | Web, Desktop, Mobile, SSR                                                                                                                                                                        |
+| Cleanup        | `on_cleanup`                                                        | `use_drop` hook                                                                                                                                                                                  |
+
+> ¹ Adapter convention: child parts use `try_use_context::<T>().expect("descriptive msg")` rather than `use_context` for better error messages when context is missing.
+
+### 1.2 Design Principles for Dioxus Adapter
+
+1. **Minimize re-renders** via fine-grained `Signal` splitting
+2. **Component re-runs are OK** because VDOM diffing makes them cheap
+3. **Copy-able context** via `Signal` (which is `Copy + Clone`)
+4. **Multi-platform** via the `DioxusPlatform` abstraction trait
+
+```toml
+# ars-dioxus/Cargo.toml
+[dependencies]
+ars-core = { workspace = true }
+ars-a11y = { workspace = true }
+ars-i18n = { workspace = true }
+ars-interactions = { workspace = true }
+ars-collections = { workspace = true }
+ars-forms = { workspace = true }
+ars-dom = { workspace = true, optional = true }
+dioxus = { version = "0.7" }
+
+[features]
+default = []
+web = ["dioxus/web", "dep:ars-dom", "ars-dom/web"]
+desktop = ["dioxus/desktop"]
+desktop-dom = ["desktop", "dep:ars-dom"]
+mobile = ["dioxus/mobile"]  # Currently resolves to NullPlatform; MobilePlatform pending
+ssr = ["dioxus/server", "dep:ars-dom", "ars-dom/ssr"]
+```
+
+---
+
+## 2. The `use_machine` Hook
+
+````rust
+use std::rc::Rc;
+use dioxus::prelude::*;
+use ars_core::{Machine, Service};
+
+/// Return type from `use_machine`.
+///
+/// `Copy` is valid here because all fields — `ReadSignal`, `Callback`, and
+/// `Signal` — implement `Copy` in Dioxus (they are lightweight handles backed
+/// by arena indices). If future fields are added that do not implement `Copy`,
+/// this derive must be changed to `Clone` only.
+#[derive(Clone, Copy)]
+pub struct UseMachineReturn<M: Machine + 'static>
+where
+    M::State: Clone + PartialEq + 'static,
+    M::Context: Clone + 'static,
+    M::Props: Clone + PartialEq + 'static,
+{
+    /// Read-only projection of the machine state. Obtained from `Signal<T>::into()`,
+    /// which preserves reactive tracking. Reading it in a component creates a
+    /// re-render dependency.
+    pub state: ReadSignal<M::State>,
+
+    /// Send an event. Non-reactive — safe to call from any handler.
+    pub send: Callback<M::Event>,
+
+    /// Access the underlying service for context/props reads and `derive()`.
+    pub service: Signal<Service<M>>,
+
+    /// Monotonically increasing counter that bumps whenever context changes.
+    /// Used by `derive()` to track context invalidation explicitly.
+    pub context_version: ReadSignal<u64>,
+}
+
+impl<M: Machine + 'static> UseMachineReturn<M>
+where
+    M::State: Clone + PartialEq + 'static,
+    M::Context: Clone + 'static,
+    M::Props: Clone + PartialEq + 'static,
+{
+    /// Create a fine-grained memo that derives a value from the connect API.
+    /// Only re-computes when the underlying state changes, and only triggers
+    /// re-renders when the derived value actually changes.
+    ///
+    /// **Safety**: The closure passed to `derive()` must not call `send()` — it is
+    /// a read-only projection of the current state and context.
+    ///
+    /// # Example
+    /// ```rust
+    /// let machine = use_machine::<select::Machine>(props);
+    /// let is_open = machine.derive(|api| api.is_open());
+    /// let aria_label = machine.derive(|api| api.root_attrs().get(&HtmlAttr::Aria(AriaAttr::Label)).map(str::to_owned));
+    /// ```
+    pub fn derive<T: Clone + PartialEq + 'static>(
+        &self,
+        f: impl Fn(&M::Api<'_>) -> T + 'static,
+    ) -> Memo<T> {
+        let state = self.state;
+        let service = self.service;
+        let context_version = self.context_version;
+        use_memo(move || {
+            // Subscribe to both state and context_version so the memo
+            // re-computes when either the state OR the context changes.
+            let _ = &*state.read();
+            let _ = &*context_version.read();
+            let svc = service.peek();
+            // Use a no-op send closure inside derive(). The Api is read-only here —
+            // event handlers must not be called inside a memo. The read lock on
+            // `service` is still held, so calling the real `send` would deadlock
+            // (send → service.write() while service.read() is active).
+            let api = svc.connect(&|_e| {
+                #[cfg(debug_assertions)]
+                panic!("Cannot send events inside derive() — use event handlers from with_api_snapshot() instead");
+            });
+            f(&api)
+        })
+    }
+}
+````
+
+> **Deadlock Warning:** `derive()` holds a read lock on `service`. If `with_api_snapshot()`
+> is called concurrently in the same render cycle and its `send` callback attempts
+> `service.write()`, a deadlock occurs (read lock held → write lock blocked).
+> `with_api_snapshot()` MUST NOT be used while a `derive()` memo is evaluating.
+
+### 2.1 `EphemeralRef` Newtype
+
+The Dioxus adapter uses the same `EphemeralRef<'a, T>` newtype as the Leptos adapter to prevent `Api<'a>` from being stored in signals or hooks. See `08-adapter-leptos.md` section "EphemeralRef Newtype" for the full type definition and rationale.
+
+**Dioxus-specific usage**: The hook-based API wraps `derive()` identically:
+
+**Dioxus signal safety**: Dioxus `Signal<T>` requires `T: 'static`. `EphemeralRef` contains `PhantomData<(Rc<()>, &'a ())>`, which is not `'static`, so the compiler rejects any attempt to store it:
+
+```rust
+// COMPILE ERROR in Dioxus: EphemeralRef does not implement 'static
+let sig = use_signal(|| ephemeral_ref); // ❌ Won't compile
+```
+
+> **Note:** `EphemeralRef` is defined in `ars-core` with a `pub` constructor; all adapters use the same definition.
+> The canonical `PhantomData` is `PhantomData<(Rc<()>, &'a ())>` — providing `!Send`,
+> `!Sync`, and non-`'static` guarantees. See `08-adapter-leptos.md` section
+> "EphemeralRef Newtype" for the full type definition and rationale.
+
+Cross-reference: The full `EphemeralRef` type definition, safety guarantees, and design rationale are in `08-adapter-leptos.md`. Both adapters share the same `EphemeralRef` type from `ars-core`.
+
+> **Note:** Dioxus `with_api_snapshot` is equivalent to Leptos `with_api_snapshot` (both return `T` directly).
+> Leptos additionally provides `with_api_ephemeral` which wraps the result in `EphemeralRef` for
+> extra compile-time safety against storing `Api<'a>` in signals. Dioxus achieves the same safety
+> via read-lock scoping (`svc.read()` borrow ends at the function-scope boundary).
+
+```rust
+use std::collections::HashMap;
+
+impl<M: Machine + 'static> UseMachineReturn<M>
+where
+    M::State: Clone + PartialEq + 'static,
+    M::Context: Clone + 'static,
+    M::Props: Clone + PartialEq + 'static,
+{
+    /// Get a one-shot snapshot of the connect API.
+    /// **Prefer `derive()` for reactive data** — this method does not track dependencies.
+    ///
+    /// **Parity note:** Dioxus does not provide `with_api_ephemeral` (Leptos-only).
+    /// Dioxus achieves the same safety guarantee via read-lock scoping: `svc.read()`
+    /// borrows end at the closure boundary, preventing `Api<'a>` from escaping.
+    ///
+    /// **Deadlock hazard**: MUST NOT be called while a `derive()` memo is evaluating.
+    /// `derive()` holds a read lock on `service`; if `send()` inside this snapshot
+    /// tries `service.write()`, it deadlocks. If write lock acquisition fails,
+    /// the event is deferred to the next microtask via `queue_microtask`.
+    ///
+    /// **Thread-safety note**: The `try_write()` TOCTOU check below is only
+    /// meaningful on WASM's single-threaded executor. On multi-threaded desktop
+    /// targets, another thread could acquire a write lock between `try_write()`
+    /// succeeding and `send.call()` executing. Desktop targets should use
+    /// `spawn` or a channel-based approach for cross-thread event dispatch.
+    pub fn with_api_snapshot<T>(&self, f: impl Fn(&M::Api<'_>) -> T) -> T {
+        let svc = self.service.read();
+        let send = self.send;
+        let service = self.service;
+        let api = svc.connect(&|e| {
+            // Use try_write to avoid deadlock if derive() holds a read lock.
+            // On contention, defer the event to the next microtask.
+            if service.try_write().is_some() {
+                send.call(e);
+            } else {
+                #[cfg(debug_assertions)]
+                log::warn!("with_api_snapshot: write lock contended, deferring event to next microtask");
+                let send = send.clone();
+                #[cfg(target_arch = "wasm32")]
+                // queue_microtask is a utility wrapper provided by ars-dom
+                // that calls web_sys::Window::queue_microtask internally.
+                { queue_microtask(move || send.call(e)); }
+                #[cfg(not(target_arch = "wasm32"))]
+                { spawn(async move { send.call(e); }); }
+            }
+        });
+        f(&api)
+    }
+}
+
+// ID counter: use thread_local Cell on WASM (no atomics), AtomicU64 on desktop.
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static DIOXUS_ID_COUNTER: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+#[cfg(target_arch = "wasm32")]
+fn dioxus_id_counter() -> u64 {
+    DIOXUS_ID_COUNTER.with(|c| { let v = c.get(); c.set(v + 1); v })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+static DIOXUS_ID_COUNTER: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+#[cfg(not(target_arch = "wasm32"))]
+fn dioxus_id_counter() -> u64 { DIOXUS_ID_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed) }
+
+/// Generate a related element ID by appending a suffix.
+/// Example: `related_id("menu-1", "trigger")` -> `"menu-1-trigger"`
+pub fn related_id(base: &str, suffix: &str) -> String {
+    format!("{base}-{suffix}")
+}
+
+/// Internal — creates a single Service shared by both public hooks.
+fn use_machine_inner<M: Machine + 'static>(
+    props: M::Props,
+) -> (UseMachineReturn<M>, Signal<u64>)
+where
+    M::State: Clone + PartialEq + 'static,
+    M::Context: Clone + 'static,
+    M::Props: Clone + PartialEq + 'static,
+{
+    // Auto-inject ID if not provided by the user.
+    // Convention: all Props structs have an `id: String` field.
+    let props = {
+        let mut p = props;
+        if p.id().is_empty() {
+            // Same counter as use_stable_id() — inlined here since use_machine_inner
+            // has no prefix context. Component-level code should use use_stable_id().
+            p.set_id(format!("ars-{}", use_hook(|| dioxus_id_counter())));
+        }
+        p
+    };
+
+    // **Safety**: The `init()` function must not call `api.send()` or otherwise
+    // produce events. It runs during component initialization and event
+    // processing is not yet set up.
+    // Clone props for use_sync_props before moving into use_signal.
+    // use_signal's closure runs exactly once (first mount), consuming `props`.
+    let props_for_sync = props.clone();
+    let mut service_signal = use_signal(|| Service::<M>::new(props));
+    let mut context_version: Signal<u64> = use_signal(|| 0u64);
+
+    // Create state_signal BEFORE use_sync_props to ensure it exists if sync triggers re-render.
+    // Use .peek() to avoid subscribing the component to service_signal changes.
+    let initial_state = service_signal.peek().state().clone();
+    let mut state_signal = use_signal(|| initial_state);
+
+    // Effect cleanups keyed by effect name. On new effects: only replace effects
+    // with matching names, leaving other effects running. On state change: drain ALL.
+    let mut effect_cleanups: Signal<HashMap<&'static str, Box<dyn FnOnce()>>> = use_signal(HashMap::new);
+
+    // Two-phase send callback construction:
+    // The send callback needs to pass itself (as an Rc) into PendingEffect::setup,
+    // but a closure cannot reference itself during construction. We solve this by:
+    // 1. Creating a Signal slot for the callback
+    // 2. Building the callback that reads from the slot
+    // 3. Storing the callback into the slot
+    let mut send_slot: Signal<Option<Callback<M::Event>>> = use_signal(|| None);
+
+    // Automatically sync props on re-render (no manual use_sync_props needed)
+    use_sync_props(service_signal, props_for_sync, context_version, state_signal, send_slot, effect_cleanups);
+
+    // INVARIANT: Effect cleanup functions MUST NOT call `send()`. Doing so would
+    // re-enter the send callback while the signal is being written, causing a panic.
+    //
+    // **Memory leak prevention:** Context/props passed to effect setup closures
+    // should extract only the needed fields (e.g., IDs, flags) rather than
+    // cloning the entire context or props struct. This prevents retaining large
+    // data structures in cleanup closures.
+    //
+    // **Cleanup ordering:** Cleanup functions run in LIFO order (last effect set
+    // up is first to be cleaned up). If a component re-renders during cleanup
+    // (e.g., a signal write triggers a reactive update), defer the new effect
+    // setup to the next microtask to avoid interleaving setup and cleanup.
+
+    let send = use_hook(|| Callback::new(move |event: M::Event| {
+        // Phase 1: Process event in a scoped write
+        let (result, ctx_clone, props_clone) = {
+            let mut svc = service_signal.write();
+            let result = svc.send(event);
+            if result.state_changed {
+                *state_signal.write() = svc.state().clone();
+            }
+            if result.context_changed {
+                *context_version.write() += 1;
+            }
+            let ctx_clone = svc.context().clone();
+            let props_clone = svc.props().clone();
+            (result, ctx_clone, props_clone)
+        }; // write lock dropped here
+
+        // Phase 2: Set up pending effects OUTSIDE the borrow
+        #[cfg(not(feature = "ssr"))]
+        {
+            if result.state_changed {
+                // Full state change: drain ALL effects
+                for (_, cleanup) in effect_cleanups.write().drain() {
+                    cleanup();
+                }
+            } else if !result.pending_effects.is_empty() {
+                // context_only transition: only replace effects with matching names
+                let mut cleanups = effect_cleanups.write();
+                for effect in &result.pending_effects {
+                    if let Some(old_cleanup) = cleanups.remove(effect.name) {
+                        old_cleanup();
+                    }
+                }
+            }
+
+            let send_cb = send_slot.peek().clone();
+            let send_rc: Rc<dyn Fn(M::Event)> = if let Some(cb) = send_cb {
+                Rc::new(move |e| cb.call(e))
+            } else {
+                debug_assert!(false, "send() called before send_slot initialized — event dropped");
+                return; // Silently drop during initialization window
+            };
+
+            for effect in result.pending_effects {
+                let name = effect.name;
+                let cleanup = effect.run(
+                    &ctx_clone,
+                    &props_clone,
+                    send_rc.clone(),
+                );
+                effect_cleanups.write().insert(name, cleanup);
+            }
+        }
+    }));
+
+    // Complete the two-phase pattern: store the send callback so effects can use it
+    use_hook(|| send_slot.set(Some(send)));
+
+    use_drop(move || {
+        for (_, cleanup) in effect_cleanups.write().drain() {
+            cleanup();
+        }
+    });
+
+    let result = UseMachineReturn {
+        state: state_signal.into(), // Signal<T> -> ReadSignal<T> via From impl
+        send,
+        service: service_signal,
+        context_version: context_version.into(),
+    };
+    // Return context_version (not service_signal, which is already in UseMachineReturn.service).
+    // This matches Leptos's pattern where the second value provides write-side context_version
+    // for use_sync_props and on_value_change effects.
+    (result, context_version)
+}
+
+/// Create and manage a machine service with Dioxus reactivity.
+pub fn use_machine<M: Machine + 'static>(props: M::Props) -> UseMachineReturn<M>
+where
+    M::State: Clone + PartialEq + 'static,
+    M::Context: Clone + 'static,
+    M::Props: Clone + PartialEq + 'static,
+{
+    let (result, _) = use_machine_inner::<M>(props);
+    result
+}
+```
+
+### 2.2 SSR Effect Behavior
+
+During server-side rendering, effects are not executed. The `use_machine_inner` hook gates effect setup with `#[cfg(not(feature = "ssr"))]`, ensuring:
+
+- Timer effects (debounce, delay) are not started on the server
+- DOM effects (focus, scroll lock) are not attempted without `web_sys`
+- All ARIA attributes are still computed by `connect()` and included in SSR HTML
+
+#### 2.2.1 Clipboard "Copied" State and SSR Hydration
+
+The Clipboard component follows the same SSR-safe rules as the Leptos adapter (see `08-adapter-leptos.md` section "Clipboard 'Copied' State and SSR Hydration"). Key points:
+
+1. SSR always renders `State::Idle` — the `init()` function returns idle state.
+2. Use CSS animation for the "copied" indicator instead of state-based timeout to avoid hydration races.
+3. The `feedback-timer` effect is gated behind a `has_interacted` flag set only after the first user-initiated `Event::Copy`.
+
+#### 2.2.2 Effect Cleanup SSR Safety
+
+Effect cleanup functions are never executed during SSR. However, effect **setup** closures that capture `web_sys` types will fail to compile for the SSR target. All effect setup closures that reference DOM APIs must be gated with `#[cfg(not(feature = "ssr"))]` or wrapped in a platform check:
+
+```rust
+#[cfg(not(feature = "ssr"))]
+use_effect(move || {
+    // DOM-accessing code here
+});
+```
+
+### 2.3 Reactive Props Sync
+
+All prop syncing is standardized on `use_sync_props`. Adapter components should use this
+single function for all controlled value and prop synchronization rather than implementing
+ad-hoc sync logic.
+
+> **WARNING: Ordering requirement** `use_sync_props` MUST execute
+> before any `derive()` calls in the component body. If `derive()` runs first, it
+> takes a read lock on the `service` signal. When `use_sync_props` subsequently
+> attempts `service.write()`, Dioxus will deadlock (write-blocked-on-read within
+> the same synchronous component body). The `use_machine` hook enforces this by
+> calling `use_sync_props` internally before returning `UseMachineReturn`, so
+> components that use `use_machine` are safe by construction. Components that
+> call `use_sync_props` manually MUST place it before any signal reads.
+
+```rust
+/// Synchronize prop changes to the machine service.
+/// Runs synchronously during component body (not in a deferred effect)
+/// to avoid stale-state rendering cycles.
+///
+/// # SAFETY (re-entrance)
+/// This function performs multiple signal writes (`service.write()`, `context_version.write()`,
+/// `prev_props.write()`) within a single component body execution. This is safe because
+/// Dioxus batches signal writes during the component body — subscribers are not notified
+/// until the component function returns. No re-entrance can occur from these writes.
+/// If Dioxus ever changes to eager notification, this code must be revisited.
+///
+/// `Service::set_props()` returns a `SendResult` that may indicate state and context
+/// changes, plus pending effects. This function processes the result fully: updating
+/// `state_signal`, bumping `context_version`, and running any pending effects.
+///
+/// # Deadlock prevention
+/// Uses `try_write()` as a fallback: if `service.write()` would block (e.g., a
+/// read lock is already held due to incorrect ordering), the prop sync is deferred
+/// to the next microtask via `spawn()`. This prevents a hard deadlock
+/// but emits a debug warning — the component author should fix the ordering.
+pub fn use_sync_props<M: Machine + 'static>(
+    service: Signal<Service<M>>,
+    current_props: M::Props,
+    mut context_version: Signal<u64>,
+    mut state_signal: Signal<M::State>,
+    send_slot: Signal<Option<Callback<M::Event>>>,
+    mut effect_cleanups: Signal<HashMap<&'static str, Box<dyn FnOnce()>>>,
+) where
+    M::Props: Clone + PartialEq + 'static,
+    M::State: Clone + PartialEq + 'static,
+    M::Context: Clone + 'static,
+{
+    let mut prev_props: Signal<Option<M::Props>> = use_signal(|| None);
+
+    // Run synchronously during component body — NOT in use_effect
+    // Use .peek() to avoid subscribing the component to prev_props changes.
+    let prev = prev_props.peek().clone();
+    if prev.as_ref() != Some(&current_props) {
+        if prev.is_some() {
+            // Only sync after first render — init already has correct props.
+            // Use try_write() to avoid deadlock if a read lock is held.
+            match service.try_write() {
+                Some(mut svc) => {
+                    let send_result = svc.set_props(current_props.clone());
+                    if send_result.state_changed {
+                        state_signal.set(svc.state().clone());
+                    }
+                    if send_result.context_changed {
+                        *context_version.write() += 1;
+                    }
+                    #[cfg(not(feature = "ssr"))]
+                    {
+                        let ctx_clone = svc.context().clone();
+                        let props_clone = svc.props().clone();
+                        drop(svc); // release write lock before running effects
+                        let send_cb = send_slot.peek().clone();
+                        if let Some(cb) = send_cb {
+                            let send_rc: Rc<dyn Fn(M::Event)> = Rc::new(move |e| cb.call(e));
+                            for effect in send_result.pending_effects {
+                                let name = effect.name;
+                                let cleanup = effect.run(&ctx_clone, &props_clone, send_rc.clone());
+                                effect_cleanups.write().insert(name, cleanup);
+                            }
+                        }
+                    }
+                }
+                None => {
+                    // Write lock unavailable — defer to next microtask.
+                    // This should not happen when use_sync_props runs before
+                    // derive(), but acts as a safety net.
+                    #[cfg(debug_assertions)]
+                    dioxus::prelude::tracing::warn!(
+                        "use_sync_props: service.try_write() failed — deferring prop sync. \
+                         Ensure use_sync_props runs before any derive() calls."
+                    );
+                    let props_deferred = current_props.clone();
+                    let mut svc_signal = service;
+                    let mut ctx_ver = context_version;
+                    spawn(async move {
+                        let send_result = svc_signal.write().set_props(props_deferred);
+                        if send_result.state_changed {
+                            state_signal.set(svc_signal.read().state().clone());
+                        }
+                        if send_result.context_changed {
+                            *ctx_ver.write() += 1;
+                        }
+                        // Run pending effects (matching the happy-path branch).
+                        #[cfg(not(feature = "ssr"))]
+                        for effect in send_result.pending_effects {
+                            let ctx_clone = svc_signal.read().context().clone();
+                            let props_clone = svc_signal.read().props().clone();
+                            let send_rc: Rc<dyn Fn(_)> = Rc::new(move |_e| { /* adapter wires send */ });
+                            let _cleanup = effect.run(&ctx_clone, &props_clone, send_rc);
+                        }
+                    });
+                }
+            }
+        }
+        *prev_props.write() = Some(current_props);
+    }
+}
+```
+
+> **WARNING: Signal batching fragility** `use_sync_props` relies on the
+> fact that Dioxus batches signal writes during the component body — subscribers are
+> not notified until the component function returns, so no re-render occurs during
+> `use_sync_props` execution. This is a **hard requirement**. If a future Dioxus
+> version changes to eager signal notification, `use_sync_props` MUST be migrated to
+> `use_effect` to avoid re-entrant rendering and stale-state bugs. Test assertions
+> should verify this invariant:
+>
+> ```rust
+> #[test]
+> fn use_sync_props_does_not_trigger_rerender_during_execution() {
+>     // Arrange: set up a component with use_sync_props and a render counter
+>     let render_count = Rc::new(Cell::new(0u32));
+>     // Act: change props that trigger use_sync_props
+>     // Assert: render_count incremented exactly once (the current render),
+>     // NOT twice (which would indicate eager notification mid-body)
+> }
+> ```
+>
+> **Adapter difference:** Leptos provides `use_machine_with_reactive_props` as a separate hook because Leptos effects are fine-grained and can watch individual signals. Dioxus integrates prop sync into `use_machine` via `use_sync_props` because Dioxus uses component-level re-rendering.
+
+Usage example:
+
+```rust
+#[component]
+fn Checkbox(props: CheckboxProps) -> Element {
+    let core_props = build_core_props(&props);
+    // use_machine automatically syncs props via use_sync_props internally
+    let machine = use_machine::<checkbox::Machine>(core_props);
+    // ...
+}
+```
+
+### 2.4 `derive()` and `with_api_snapshot()` Methods
+
+The `derive()` and `with_api_snapshot()` methods are defined on `UseMachineReturn` (see above).
+They wire a real `send` callback into the `connect()` API, so derived values and snapshots
+can dispatch events correctly.
+
+- **`derive(|api| ...)`** — creates a `Memo<T>` that re-computes only when machine state changes
+  and only triggers re-renders when the derived value itself changes. Use this for all reactive
+  attribute/state reads in `rsx!`.
+- **`with_api_snapshot(|api| ...)`** — one-shot, non-reactive read. Prefer `derive()` for
+  anything rendered in the DOM.
+
+```rust
+// Example usage:
+let machine = use_machine::<select::Machine>(props);
+let is_open = machine.derive(|api| api.is_open());
+let root_attrs = machine.derive(|api| attr_map_to_dioxus(api.root_attrs(), &strategy, Some("root")));
+
+// One-shot snapshot (non-reactive):
+let current_value = machine.with_api_snapshot(|api| api.selected_value());
+```
+
+---
+
+## 3. `AttrMap` → Dioxus Attributes
+
+Dioxus uses attribute builders in `rsx!`, not a HashMap. The conversion strategy:
+
+### 3.1 Dynamic Attributes
+
+````rust
+use std::collections::HashSet;
+use std::sync::{LazyLock, Mutex};
+use dioxus::prelude::*;
+use ars_core::{AttrMap, HtmlAttr, AttrValue, CssProperty, StyleStrategy};
+
+/// Intern pool for attribute name strings.
+/// Dioxus `Attribute::new` requires `&'static str`. Known HTML/ARIA attribute
+/// names (class, role, aria-label, tabindex, etc.) are compile-time constants.
+/// Dynamic `data-*` attribute names are interned on first use; the set is
+/// bounded by the number of component parts (~500 across all 111 components),
+/// so total leaked memory is negligible (~10 KB).
+static ATTR_NAMES: LazyLock<Mutex<HashSet<&'static str>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+/// Convert an `HtmlAttr` to a `&'static str` suitable for `Attribute::new`.
+///
+/// Static variants (Class, Id, Role, etc.) return compile-time string slices.
+/// `Data(name)` variants intern `"data-{name}"` via a global pool.
+fn intern_attr_name(attr: &HtmlAttr) -> &'static str {
+    // Fast path: if HtmlAttr has a known static name, return it directly.
+    if let Some(name) = attr.static_name() {
+        return name;
+    }
+    // Slow path: Data(...) attributes — intern the formatted string.
+    let name = attr.to_string(); // e.g., "data-ars-state"
+    let mut pool = ATTR_NAMES.lock().expect("attr name pool");
+    if let Some(&existing) = pool.get(name.as_str()) {
+        return existing;
+    }
+    let leaked: &'static str = Box::leak(name.into_boxed_str());
+    pool.insert(leaked);
+    leaked
+}
+
+// `HtmlAttr::static_name()` is defined in `01-architecture.md` §3.2.
+// It returns `Some(&'static str)` for all non-Data variants:
+//   HtmlAttr::Class => Some("class"),
+//   HtmlAttr::Id => Some("id"),
+//   HtmlAttr::Role => Some("role"),
+//   HtmlAttr::TabIndex => Some("tabindex"),
+//   HtmlAttr::Style => Some("style"),
+//   HtmlAttr::Disabled => Some("disabled"),
+//   HtmlAttr::Aria(AriaAttr::Label) => Some("aria-label"),
+//   ... etc. for all ARIA attributes.
+//   HtmlAttr::Data(_) => None  // dynamic, requires interning
+
+/// Result of converting an `AttrMap` with strategy awareness.
+pub struct DioxusAttrResult {
+    /// Dioxus dynamic attributes ready for spreading via `..attrs`.
+    pub attrs: Vec<Attribute>,
+    /// Styles to apply via CSSOM (`element.style().set_property()`).
+    /// Non-empty only when strategy is `Cssom`.
+    pub cssom_styles: Vec<(CssProperty, String)>,
+    /// CSS rule text to inject into a `<style nonce="...">` block.
+    /// Non-empty only when strategy is `Nonce`.
+    pub nonce_css: String,
+}
+
+/// Convert an `AttrMap` into Dioxus attributes using the given `StyleStrategy`.
+///
+/// - `map.styles` are rendered according to the active strategy.
+/// - `element_id` is required for `Nonce` strategy (used as CSS selector).
+/// - `class` and other space-separated attributes are already merged in the `AttrMap`
+///   by `set()` and flow through the main attrs loop naturally.
+pub fn attr_map_to_dioxus(
+    map: AttrMap,
+    strategy: &StyleStrategy,
+    element_id: Option<&str>,
+) -> DioxusAttrResult {
+    let AttrMapParts { attrs, styles } = map.into_parts();
+
+    let mut result: Vec<Attribute> = attrs.into_iter()
+        .filter_map(|(key, val)| match val {
+            AttrValue::String(s) => Some(Attribute::new(intern_attr_name(&key), AttributeValue::Text(s), None, false)),
+            AttrValue::Bool(true) => Some(Attribute::new(intern_attr_name(&key), AttributeValue::Text("".into()), None, false)),
+            AttrValue::Bool(false) | AttrValue::None => None,
+        })
+        .collect();
+
+    let mut cssom_styles = Vec::new();
+    let mut nonce_css = String::new();
+
+    match strategy {
+        StyleStrategy::Inline => {
+            if !styles.is_empty() {
+                let style_str: String = styles.into_iter()
+                    .map(|(prop, val)| format!("{}: {};", prop, val))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                result.push(Attribute::new("style", AttributeValue::Text(style_str), None, false));
+            }
+        }
+        StyleStrategy::Cssom => {
+            cssom_styles = styles;
+        }
+        StyleStrategy::Nonce(_) => {
+            if !styles.is_empty() {
+                let id = element_id.expect("element_id is required for Nonce style strategy");
+                result.push(Attribute::new("data-ars-style-id", AttributeValue::Text(id.to_string()), None, false));
+                nonce_css = styles_to_nonce_css(id, &styles);
+            }
+        }
+    }
+
+    DioxusAttrResult { attrs: result, cssom_styles, nonce_css }
+}
+
+/// Apply styles to a DOM element via the CSSOM API.
+/// Used when `StyleStrategy::Cssom` is active.
+#[cfg(feature = "web")]
+pub fn apply_styles_cssom(el: &web_sys::HtmlElement, styles: &[(CssProperty, String)]) {
+    let style = el.style();
+    for (prop, val) in styles {
+        let _ = style.set_property(&prop.to_string(), val);
+    }
+}
+
+/// Convert styles to a CSS rule string for nonce-based injection.
+fn styles_to_nonce_css(id: &str, styles: &[(CssProperty, String)]) -> String {
+    let decls: Vec<String> = styles.iter()
+        .map(|(prop, val)| format!("  {}: {};", prop, val))
+        .collect();
+    format!("[data-ars-style-id=\"{}\"] {{\n{}\n}}", id, decls.join("\n"))
+}
+
+/// Macro for spreading attrs in rsx!
+///
+/// Usage:
+/// ```rust
+/// let attrs = api.root_attrs();
+/// let strategy = use_style_strategy();
+/// rsx! {
+///     div { ..attr_map_to_dioxus(attrs, &strategy, Some("my-el")).attrs, {children} }
+/// }
+/// ```
+#[macro_export]
+macro_rules! dioxus_attrs {
+    ($map:expr, $strategy:expr, $id:expr) => {
+        $crate::attr_map_to_dioxus($map, $strategy, $id)
+    };
+}
+````
+
+> **Migration note:** The previous `attr_map_to_dioxus(map: AttrMap) -> Vec<Attribute>` signature is replaced by the strategy-aware version above. Callers must pass a `StyleStrategy` reference (obtained via `use_style_strategy()`) and an optional element ID.
+
+### 3.2 Typed Handler Wiring
+
+Adapters use `derive()` to reactively extract attributes from the connect API,
+and wire event handlers through `send.call()`:
+
+```rust
+// In a Dioxus component:
+let strategy = use_style_strategy();
+let root_attrs = machine.derive(move |api| attr_map_to_dioxus(api.root_attrs(), &strategy, Some("checkbox-root")));
+let data_state = machine.derive(|api| api.data_state().to_string());
+
+rsx! {
+    div {
+        ..root_attrs.read().attrs,
+        "data-ars-state": data_state(),
+        onclick: move |_| machine.send.call(Event::Toggle),
+        onkeydown: move |ev| {
+            match dioxus_key_to_keyboard_key(&ev.key()).0 {
+                KeyboardKey::Enter | KeyboardKey::Space => machine.send.call(Event::Toggle),
+                _ => {}
+            }
+        },
+        {props.children}
+    }
+}
+```
+
+### 3.3 Event Listener Options
+
+> **Event listener options.** AttrMap handlers may include `EventOptions { passive, capture }`
+> metadata. The Dioxus adapter emits these as:
+>
+> - `passive: true` -> listener registered with `{ passive: true }` option via web_sys
+> - `capture: true` -> listener registered with `{ capture: true }` option via web_sys
+>
+> Dioxus does not natively support event modifiers like Leptos. Use `web_sys::EventTarget::add_event_listener_with_event_listener_and_add_event_listener_options()` for fine-grained control.
+
+```rust
+/// Event listener options for passive and capture modes.
+pub struct EventOptions {
+    /// If true, the event listener will not call preventDefault().
+    /// Required for passive scroll/touch listeners.
+    pub passive: bool,
+    /// If true, the event fires during the capture phase.
+    pub capture: bool,
+}
+```
+
+### 3.4 Practical Pattern: Direct rsx! Attribute Building
+
+Components build attributes inline in `rsx!` via the typed connect API:
+
+```rust
+// The connect API for Dioxus provides typed attribute getters:
+impl CheckboxDioxusApi {
+    pub fn control_attrs(&self) -> Vec<(&'static str, String)> {
+        let [(scope_attr, scope_val), (part_attr, part_val)] = checkbox::Part::Control.data_attrs();
+        vec![
+            ("role", "checkbox".to_string()),
+            ("tabindex", "0".to_string()),
+            (scope_attr, scope_val.to_string()),
+            (part_attr, part_val.to_string()),
+            ("aria-checked", self.aria_checked_value().to_string()),
+            ("data-ars-state", self.data_state().to_string()),
+        ]
+    }
+}
+```
+
+### 3.5 CSP Style Strategy
+
+The adapter provides a context-based `StyleStrategy` configuration. Components read the strategy from context and pass it to `attr_map_to_dioxus()`.
+
+```rust
+use dioxus::prelude::*;
+use ars_core::StyleStrategy;
+
+/// Read the current style strategy from context.
+/// Returns `StyleStrategy::Inline` (the default) if no `ArsProvider` is present.
+pub fn use_style_strategy() -> StyleStrategy {
+    try_use_context::<ArsContext>()
+        .map(|ctx| ctx.style_strategy.clone())
+        .unwrap_or_else(|| {
+            warn_missing_provider("use_style_strategy");
+            StyleStrategy::default()
+        })
+}
+```
+
+> **Note:** `ArsStyleProvider` and `ArsStyleCtx` have been removed. The style strategy is
+> now provided by `ArsProvider` (§16) via the `style_strategy` field on `ArsContext`.
+> Components continue to call `use_style_strategy()` unchanged.
+
+#### 3.5.1 Nonce CSS Collector
+
+For `StyleStrategy::Nonce`, a collector component aggregates CSS rules from all ars components and renders them in a single `<style>` element with the provided nonce.
+
+````rust
+/// Context for collecting nonce CSS rules during rendering.
+#[derive(Clone, Debug)]
+pub struct ArsNonceCssCtx {
+    pub rules: Signal<Vec<String>>,
+}
+
+/// Collects nonce CSS from descendant components and renders a `<style nonce="...">` block.
+///
+/// Place this component near the document `<head>`:
+/// ```rust
+/// rsx! {
+///     ArsProvider { style_strategy: StyleStrategy::Nonce(nonce.clone()),
+///         ArsNonceStyle { nonce: nonce.clone() }
+///         App {}
+///     }
+/// }
+/// ```
+#[component]
+pub fn ArsNonceStyle(nonce: String) -> Element {
+    let rules = use_signal(|| Vec::<String>::new());
+    use_context_provider(|| ArsNonceCssCtx { rules });
+
+    let css_text = use_memo(move || rules.read().join("\n"));
+
+    rsx! {
+        style { nonce: nonce, {css_text()} }
+    }
+}
+
+/// Append a CSS rule to the nonce collector.
+/// Called internally by components when `StyleStrategy::Nonce` is active.
+pub fn append_nonce_css(css: String) {
+    if let Some(ctx) = try_use_context::<ArsNonceCssCtx>() {
+        ctx.rules.write().push(css);
+    }
+}
+````
+
+---
+
+## 4. Standard Component Pattern
+
+Library adapter code MUST use explicit `#[derive(Props, Clone, PartialEq)]` structs for every component and sub-part that accepts one or more props. Zero-prop parts (e.g., `fn Backdrop() -> Element`) MAY use a bare function signature. The `#[component]` attribute is still applied to the function itself, but the parameter list is always a single `props: XxxProps` argument.
+
+Rationale: explicit Props structs enable generic type parameters, custom `PartialEq` implementations for re-render control, full control over doc-comment rendering, and `#[props(extends = GlobalAttributes)]` for attribute spreading. This aligns with the Dioxus team recommendation for library code and matches the pattern used in the official `DioxusLabs/components` crate.
+
+### 4.1 Props Derivation
+
+```rust
+use dioxus::prelude::*;
+
+/// Dioxus requires Props to be Clone + PartialEq.
+#[derive(Props, Clone, PartialEq)]
+pub struct CheckboxProps {
+    /// Controlled checked state.
+    pub checked: Option<Signal<checkbox::State>>,
+
+    /// Default checked state for uncontrolled mode.
+    #[props(default)]
+    pub default_checked: checkbox::State,
+
+    /// Whether the checkbox is disabled.
+    #[props(default = false)]
+    pub disabled: bool,
+
+    /// Whether the checkbox is required.
+    #[props(default = false)]
+    pub required: bool,
+
+    /// Name for form submission.
+    pub name: Option<String>,
+
+    /// Value for form submission.
+    #[props(default = "on".to_string())]
+    pub value: String,
+
+    /// Adapter-level callback when checked state changes.
+    /// This is NOT passed to core Props — adapter observes state and calls it.
+    pub on_checked_change: Option<EventHandler<checkbox::State>>,
+
+    pub children: Element,
+}
+```
+
+### 4.2 Root Component
+
+```rust
+#[component]
+pub fn Checkbox(props: CheckboxProps) -> Element {
+    let core_props = checkbox::Props {
+        // Use .peek() to avoid subscribing the component to the checked signal here.
+        // The reactive sync is handled by use_sync_props inside use_machine.
+        checked: props.checked.as_ref().map(|s| *s.peek()),
+        default_checked: props.default_checked,
+        disabled: props.disabled,
+        required: props.required,
+        name: props.name.clone(),
+        value: props.value.clone(),
+    };
+
+    let machine = use_machine::<checkbox::Machine>(core_props);
+
+    let UseMachineReturn { state, send, .. } = machine;
+
+    // Fire on_checked_change callback when state changes.
+    // NOTE: Hooks are called unconditionally to maintain stable hook ordering
+    // across re-renders (Dioxus requirement). The callback invocation is gated
+    // on `on_checked_change` being `Some`.
+    let mut prev_state: Signal<Option<checkbox::State>> = use_signal(|| None);
+    use_effect(move || {
+        let current = state.read().clone();
+        let prev = prev_state.peek().clone();
+        if prev.as_ref() != Some(&current) {
+            if prev.is_some() {
+                if let Some(on_change) = props.on_checked_change {
+                    on_change.call(current);
+                }
+            }
+            *prev_state.write() = Some(current);
+        }
+    });
+
+    // Dual-path controlled value sync:
+    //   1. `use_sync_props` (inside `use_machine`) syncs the full Props struct on re-render,
+    //      handling initial state and bulk prop changes at the machine level.
+    //   2. `use_controlled_prop_sync` / `_optional` (below) sends individual events for
+    //      specific signals, ensuring the machine processes fine-grained state transitions
+    //      (e.g., SetChecked) that trigger side effects like onChange callbacks.
+    // Both paths are needed: use_sync_props alone cannot fire individual events,
+    // and use_controlled_prop_sync alone doesn't handle initial prop reconciliation.
+    // NOTE: Called unconditionally to preserve stable hook ordering. When `checked`
+    // is None (uncontrolled mode), the internal hook still runs but no event is sent.
+    let checked_value = props.checked.map(|sig| *sig.peek());
+    use_controlled_prop_sync_optional(send, checked_value, checkbox::Event::SetChecked);
+    use_controlled_prop_sync(send, props.disabled, checkbox::Event::SetDisabled);
+
+    use_context_provider(|| CheckboxCtx { state, send, service: machine.service, context_version: machine.context_version });
+
+    rsx! { {props.children} }
+}
+
+/// Copy-able context (Signal is Copy).
+#[derive(Clone, Copy)]
+pub struct CheckboxCtx {
+    pub state: ReadSignal<checkbox::State>,
+    pub send: Callback<checkbox::Event>,
+    pub service: Signal<Service<checkbox::Machine>>,
+    pub context_version: ReadSignal<u64>,
+}
+```
+
+### 4.3 Child Parts
+
+```rust
+pub mod checkbox {
+    #[derive(Props, Clone, PartialEq)]
+    pub struct ControlProps {
+        pub class: Option<String>,
+        pub children: Element,
+    }
+
+    #[component]
+    pub fn Control(props: ControlProps) -> Element {
+        let ctx = try_use_context::<CheckboxCtx>()
+            .expect("checkbox::Control must be used inside Checkbox");
+
+        // Reconstruct UseMachineReturn from context to use derive().
+        let machine = UseMachineReturn {
+            state: ctx.state,
+            send: ctx.send,
+            service: ctx.service,
+            context_version: ctx.context_version,
+        };
+
+        // Derive control attributes reactively from the connect API.
+        // This replaces manual state matching and hardcoded ARIA values.
+        let strategy = use_style_strategy();
+        let control_attrs = machine.derive(move |api| attr_map_to_dioxus(api.control_attrs(), &strategy, Some("checkbox-control")));
+        let data_state = machine.derive(|api| api.data_state().to_string());
+
+        rsx! {
+            div {
+                ..control_attrs.read().attrs,
+                "data-ars-state": data_state(),
+                if let Some(cls) = &props.class { class: "{cls}" }
+                onclick: move |_| ctx.send.call(checkbox::Event::Toggle),
+                onkeydown: move |e: KeyboardEvent| {
+                    if dioxus_key_to_keyboard_key(&e.key()).0 == KeyboardKey::Space {
+                        e.prevent_default();
+                        ctx.send.call(checkbox::Event::Toggle);
+                    }
+                },
+                onfocus: move |_| ctx.send.call(checkbox::Event::Focus),
+                onblur: move |_| ctx.send.call(checkbox::Event::Blur),
+                {props.children}
+            }
+        }
+    }
+
+    #[derive(Props, Clone, PartialEq)]
+    pub struct IndicatorProps {
+        /// Only render children when checkbox matches this state.
+        /// When `None`, children are shown for any non-Unchecked state (default).
+        pub match_state: Option<checkbox::State>,
+        pub children: Element,
+    }
+
+    #[component]
+    pub fn Indicator(props: IndicatorProps) -> Element {
+        let ctx = try_use_context::<CheckboxCtx>()
+            .expect("checkbox::Indicator must be used inside Checkbox");
+
+        let should_show = match props.match_state {
+            Some(checkbox::State::Checked) => matches!(*ctx.state.read(), checkbox::State::Checked),
+            Some(checkbox::State::Indeterminate) => matches!(*ctx.state.read(), checkbox::State::Indeterminate),
+            Some(checkbox::State::Unchecked) => matches!(*ctx.state.read(), checkbox::State::Unchecked),
+            None => !matches!(*ctx.state.read(), checkbox::State::Unchecked),
+        };
+
+        let [(scope_attr, scope_val), (part_attr, part_val)] = checkbox::Part::Indicator.data_attrs();
+
+        rsx! {
+            span {
+                "{scope_attr}": scope_val,
+                "{part_attr}": part_val,
+                if should_show { {props.children} }
+            }
+        }
+    }
+
+    /// Accessible label for the checkbox.
+    #[component]
+    pub fn Label(children: Element) -> Element {
+        let [(scope_attr, scope_val), (part_attr, part_val)] = checkbox::Part::Label.data_attrs();
+        rsx! {
+            label {
+                "{scope_attr}": scope_val,
+                "{part_attr}": part_val,
+                {children}
+            }
+        }
+    }
+
+    /// Hidden native input for form submission.
+    #[component]
+    pub fn HiddenInput() -> Element {
+        let ctx = try_use_context::<CheckboxCtx>()
+            .expect("checkbox::HiddenInput must be used inside Checkbox");
+
+        let machine = UseMachineReturn {
+            state: ctx.state,
+            send: ctx.send,
+            service: ctx.service,
+            context_version: ctx.context_version,
+        };
+        let name = machine.derive(|api| api.props().name.clone());
+        let value = machine.derive(|api| api.props().value.clone().unwrap_or_else(|| "on".into()));
+        let required = machine.derive(|api| api.props().required);
+        let checked = machine.derive(|api| api.is_checked());
+
+        rsx! {
+            input {
+                r#type: "checkbox",
+                name: name,
+                value: value,
+                checked: checked,
+                required: required,
+                style: "position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border-width:0",
+                aria_hidden: "true",
+                tabindex: "-1",
+            }
+        }
+    }
+}
+```
+
+---
+
+## 5. Re-render Optimization
+
+Because Dioxus re-runs components on any Signal read, we split state into granular signals:
+
+### 5.1 Granular State Signals
+
+The Dioxus Select adapter builds a `StaticCollection<select::Item>` from children and converts
+`String` values to/from `Key::String` at the boundary. Granular signals ensure minimal
+re-renders.
+
+```rust
+use ars_core::select;
+use ars_collections::{Key, selection::Set, StaticCollection, CollectionBuilder};
+
+/// Instead of one Signal<FullState>, split into concern-specific signals.
+///
+/// This ensures only components that depend on `open` re-render when open changes,
+/// not components that only depend on `highlighted_key`.
+#[derive(Clone, Copy)]
+pub struct SelectCtx {
+    /// Only changes on open/close.
+    pub open: ReadSignal<bool>,
+    /// Only changes when highlighted item changes.
+    pub highlighted_key: ReadSignal<Option<Key>>,
+    /// Only changes when selection changes.
+    pub selection: ReadSignal<selection::Set>,
+    /// Stable send callback — never changes.
+    pub send: Callback<select::Event>,
+    pub service: Signal<Service<select::Machine>>,
+    pub context_version: ReadSignal<u64>,
+}
+
+fn setup_select_ctx(machine: &UseMachineReturn<select::Machine>) -> SelectCtx {
+    let send = machine.send;
+    let service = machine.service;
+    let context_version = machine.context_version;
+
+    // Derive granular signals using Memo
+    let open = machine.derive(|api| api.is_open());
+    let highlighted_key = machine.derive(|api| api.highlighted_key().cloned());
+    let selection = machine.derive(|api| api.selection().clone());
+
+    SelectCtx {
+        open: open.into(),
+        highlighted_key: highlighted_key.into(),
+        selection: selection.into(),
+        send,
+        service,
+        context_version,
+    }
+}
+```
+
+### 5.2 use_memo for Derived Data
+
+```rust
+pub mod select {
+    // In select::Content: only re-renders when open changes
+    #[component]
+    pub fn Content(children: Element) -> Element {
+        let ctx = try_use_context::<SelectCtx>()
+            .expect("select::Content must be used inside Select");
+
+        let [(scope_attr, scope_val), (part_attr, part_val)] = select::Part::Content.data_attrs();
+        rsx! {
+            if *ctx.open.read() {
+                div {
+                    role: "listbox",
+                    "{scope_attr}": scope_val,
+                    "{part_attr}": part_val,
+                    {children}
+                }
+            }
+        }
+    }
+
+    // In select::Item: only re-renders when its selection status changes
+    #[component]
+    pub fn Item(value: String, children: Element) -> Element {
+        let ctx = try_use_context::<SelectCtx>()
+            .expect("select::Item must be used inside Select");
+        let key = Key::String(value.clone());
+        let key_for_selected = key.clone();
+        let key_for_highlighted = key.clone();
+
+        // Note: use_memo caches the derived bool, avoiding unnecessary VDOM diffs
+        // when the parent re-renders for unrelated reasons. The .read() inside the
+        // memo subscribes the memo (not the component) to the signal, so the
+        // component only re-renders when the bool result actually changes.
+        let is_selected = use_memo(move || {
+            ctx.selection.read().contains(&key_for_selected)
+        });
+
+        let is_highlighted = use_memo(move || {
+            ctx.highlighted_key.read().as_ref() == Some(&key_for_highlighted)
+        });
+
+        let key_for_click = key.clone();
+        let key_for_hover = key.clone();
+
+        let [(scope_attr, scope_val), (part_attr, part_val)] = select::Part::Item.data_attrs();
+        rsx! {
+            div {
+                role: "option",
+                "{scope_attr}": scope_val,
+                "{part_attr}": part_val,
+                "aria-selected": (*is_selected.read()).to_string(),
+                "data-ars-highlighted": if *is_highlighted.read() { "true" } else { "false" },
+                onclick: move |_| ctx.send.call(select::Event::SelectItem(key_for_click.clone())),
+                onpointerenter: move |_| ctx.send.call(
+                    select::Event::HighlightItem(Some(key_for_hover.clone()))
+                ),
+                {children}
+            }
+        }
+    }
+}
+```
+
+---
+
+## 6. Multi-Platform Support
+
+### 6.1 Platform Abstraction Trait
+
+```rust
+/// Operations that differ between web and native platforms.
+///
+/// **Note on `Send` bounds:** The futures returned by async methods (e.g.
+/// `set_clipboard`, `open_file_picker`) are `!Send` on WASM targets. On
+/// desktop, Dioxus uses a multi-threaded runtime where futures must be `Send`.
+/// When calling these methods on desktop, use `spawn` (Dioxus `spawn` runs
+/// on the current thread for `!Send` futures) to avoid `Send` bound errors.
+pub trait DioxusPlatform: 'static {
+    /// Focus an element by its ID.
+    fn focus_element(&self, id: &str);
+
+    /// Get the bounding rect of an element.
+    fn get_bounding_rect(&self, id: &str) -> Option<Rect>;
+
+    /// Scroll an element into view.
+    fn scroll_into_view(&self, id: &str);
+
+    /// Write text to the clipboard.
+    fn set_clipboard(&self, text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>>;
+
+    /// Open a native file picker.
+    fn open_file_picker(&self, options: FilePickerOptions) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>>;
+
+    /// Current timestamp in milliseconds.
+    fn now_ms(&self) -> f64;
+
+    /// Generate a UUID.
+    fn new_id(&self) -> String;
+
+    /// Create drag data from a platform-specific drag event.
+    ///
+    /// **Web:** Casts the event to `web_sys::DragEvent` and extracts
+    /// `DataTransfer` contents (files, items, types).
+    ///
+    /// **Desktop:** Extracts native file drop data from the OS event.
+    ///
+    /// Returns `None` if the event does not contain drag data.
+    fn create_drag_data(&self, event: &dyn Any) -> Option<DragData>;
+}
+
+/// Marker that prevents accidental `Send` usage on WASM targets.
+/// Desktop targets ignore this (the runtime handles Send requirements).
+#[cfg(target_arch = "wasm32")]
+pub struct PlatformGuard(core::marker::PhantomData<*const ()>); // *const () is !Send
+
+#[cfg(not(target_arch = "wasm32"))]
+pub struct PlatformGuard; // No restriction on desktop
+
+/// Web implementation using web-sys.
+#[cfg(feature = "web")]
+pub struct WebPlatform;
+
+#[cfg(feature = "web")]
+impl DioxusPlatform for WebPlatform {
+    fn focus_element(&self, id: &str) {
+        if let Some(window) = web_sys::window() {
+            if let Some(doc) = window.document() {
+                if let Some(el) = doc.get_element_by_id(id) {
+                    let _ = el.dyn_ref::<web_sys::HtmlElement>().map(|el| el.focus().ok());
+                }
+            }
+        }
+    }
+
+    fn get_bounding_rect(&self, id: &str) -> Option<Rect> {
+        let el = web_sys::window()?
+            .document()?
+            .get_element_by_id(id)?;
+        let rect = el.get_bounding_client_rect();
+        Some(Rect {
+            x: rect.x(),
+            y: rect.y(),
+            width: rect.width(),
+            height: rect.height(),
+        })
+    }
+
+    fn scroll_into_view(&self, id: &str) {
+        if let Some(window) = web_sys::window() {
+            if let Some(doc) = window.document() {
+                if let Some(el) = doc.get_element_by_id(id) {
+                    el.scroll_into_view();
+                }
+            }
+        }
+    }
+
+    fn set_clipboard(&self, text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
+        let text = text.to_string();
+        Box::pin(async move {
+            let window = web_sys::window().ok_or("No window")?;
+            let clipboard = window.navigator().clipboard();
+            let promise = clipboard.write_text(&text);
+            wasm_bindgen_futures::JsFuture::from(promise)
+                .await
+                .map(|_| ())
+                .map_err(|e| format!("{:?}", e))
+        })
+    }
+
+    fn open_file_picker(&self, _options: FilePickerOptions) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>> {
+        Box::pin(async { vec![] }) // Uses hidden <input type="file"> in FileUpload component
+    }
+
+    /// Returns a monotonically increasing timestamp in milliseconds.
+    /// On web: relative to page load (via `performance.now()`).
+    /// Callers MUST use this only for relative duration measurements (end - start),
+    /// NOT for absolute timestamps or cross-platform timestamp comparison.
+    fn now_ms(&self) -> f64 {
+        web_sys::window()
+            .and_then(|w| w.performance())
+            .map(|p| p.now())
+            .expect("window.performance must be available on web targets")
+    }
+
+    fn new_id(&self) -> String {
+        // Use crypto.randomUUID() on web
+        web_sys::window()
+            .and_then(|w| w.crypto().ok())
+            .map(|c| c.random_uuid())
+            .expect("window.crypto must be available on web targets")
+    }
+
+    fn create_drag_data(&self, event: &dyn Any) -> Option<DragData> {
+        use wasm_bindgen::JsCast;
+        let drag_event = event.downcast_ref::<web_sys::DragEvent>()?;
+        let data_transfer = drag_event.data_transfer()?;
+        Some(DragData::from_web_data_transfer(&data_transfer))
+    }
+}
+
+/// Desktop implementation using native OS APIs.
+#[cfg(feature = "desktop")]
+pub struct DesktopPlatform;
+
+#[cfg(feature = "desktop")]
+impl DioxusPlatform for DesktopPlatform {
+    fn focus_element(&self, _id: &str) {
+        // Desktop: focus is managed by the native window system
+        // For Dioxus desktop, accessibility requires different approach
+    }
+
+    fn get_bounding_rect(&self, _id: &str) -> Option<Rect> {
+        // Web-only for v1. Desktop implementation requires AccessKit layout
+        // integration to obtain element geometry from the native accessibility
+        // tree. Dioxus desktop does not yet expose layout metrics through
+        // AccessKit's node bounds. Returns None — callers must handle gracefully.
+        log::warn!("get_bounding_rect not yet implemented for desktop platform");
+        None
+    }
+
+    fn scroll_into_view(&self, _id: &str) {
+        // Web-only for v1. Desktop implementation requires AccessKit's
+        // scroll-to-visible action or a native platform equivalent.
+        // Dioxus desktop accessibility integration is evolving.
+        log::warn!("scroll_into_view not yet implemented for desktop platform");
+    }
+
+    fn set_clipboard(&self, text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
+        let text = text.to_string();
+        Box::pin(async move {
+            // Use arboard or copypasta crate
+            use arboard::Clipboard;
+            let mut cb = Clipboard::new().map_err(|e| e.to_string())?;
+            cb.set_text(&text).map_err(|e| e.to_string())
+        })
+    }
+
+    fn open_file_picker(&self, options: FilePickerOptions) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>> {
+        Box::pin(async move {
+            // Web-only for v1. Desktop implementation should use the `rfd`
+            // (Rust File Dialog) crate to open native OS file picker dialogs.
+            // Mapping: options.accept → rfd file filters, options.multiple →
+            // rfd::AsyncFileDialog::pick_files vs pick_file.
+            log::warn!("open_file_picker not yet implemented for desktop platform");
+            Vec::new()
+        })
+    }
+
+    /// Returns a monotonically increasing timestamp in milliseconds.
+    /// On desktop: milliseconds since UNIX epoch (via `SystemTime::now()`).
+    /// Callers MUST use this only for relative duration measurements (end - start),
+    /// NOT for absolute timestamps or cross-platform timestamp comparison.
+    fn now_ms(&self) -> f64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock must be after UNIX_EPOCH")
+            .as_millis() as f64
+    }
+
+    fn new_id(&self) -> String {
+        uuid::Uuid::new_v4().to_string()
+    }
+
+    fn create_drag_data(&self, event: &dyn Any) -> Option<DragData> {
+        // Web-only for v1. Desktop implementation requires extracting drag
+        // payload from native OS drag events (NSPasteboard on macOS,
+        // IDataObject on Windows, X11 selections on Linux). Dioxus desktop
+        // does not yet expose native drag event data to Rust components.
+        log::warn!("create_drag_data not yet implemented for desktop platform");
+        None
+    }
+}
+
+/// No-op platform for testing and non-interactive environments.
+pub struct NullPlatform;
+
+impl DioxusPlatform for NullPlatform {
+    fn focus_element(&self, _id: &str) {}
+    fn get_bounding_rect(&self, _id: &str) -> Option<Rect> { None }
+    fn scroll_into_view(&self, _id: &str) {}
+    fn set_clipboard(&self, _text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn open_file_picker(&self, _options: FilePickerOptions) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>> {
+        Box::pin(async { vec![] })
+    }
+    fn now_ms(&self) -> f64 { 0.0 }
+    fn new_id(&self) -> String {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        format!("null-id-{}", COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+    fn create_drag_data(&self, _event: &dyn Any) -> Option<DragData> { None }
+}
+```
+
+### 6.2 Platform Hook (Dioxus-Specific)
+
+> **Note:** The `DioxusPlatform` trait object is
+> provided by `ArsProvider` (§16) via the `dioxus_platform` field on `ArsContext`.
+> The `DioxusPlatform` trait, `WebPlatform`, `DesktopPlatform`, and `NullPlatform`
+> implementations remain defined in §6.1 above. The core `PlatformEffects` trait
+> (focus, timers, scroll-lock, positioning) is also bundled into `ArsProvider`.
+> `DioxusPlatform` is a separate, Dioxus-specific abstraction for platform capabilities
+> not covered by `PlatformEffects` (file pickers, clipboard, drag data).
+
+```rust
+/// Access Dioxus-specific platform services from `ArsContext`.
+/// Fallback: Web > Desktop > NullPlatform (when no `ArsProvider` is present).
+/// Note: The `mobile` feature currently falls through to `NullPlatform`.
+/// When a dedicated `MobilePlatform` is added, update this function
+/// with a `#[cfg(feature = "mobile")]` arm.
+pub fn use_platform() -> Rc<dyn DioxusPlatform> {
+    try_use_context::<ArsContext>()
+        .map(|ctx| Rc::clone(&ctx.dioxus_platform))
+        .unwrap_or_else(|| {
+            warn_missing_provider("use_platform");
+            #[cfg(feature = "web")]
+            { Rc::new(WebPlatform) }
+            #[cfg(all(feature = "desktop", not(feature = "web")))]
+            { Rc::new(DesktopPlatform) }
+            #[cfg(not(any(feature = "web", feature = "desktop")))]
+            { Rc::new(NullPlatform) }
+        })
+}
+```
+
+---
+
+### 6.3 Platform Support Matrix
+
+| Platform                      | Status    | Notes                                                                                                        |
+| ----------------------------- | --------- | ------------------------------------------------------------------------------------------------------------ |
+| Web (WASM)                    | Supported | Full feature set, same as Leptos adapter                                                                     |
+| Desktop (macOS/Windows/Linux) | Supported | Via WebView renderer; all web APIs available                                                                 |
+| SSR                           | Supported | Server-side rendering with hydration                                                                         |
+| Mobile (iOS/Android)          | Planned   | Touch-specific considerations: no hover state, virtual keyboard viewport changes, 44px minimum touch targets |
+
+**Mobile-specific considerations:** On mobile platforms, hover interactions degrade gracefully to focus/press states. Long-press gestures may trigger OS-level context menus, which must be accounted for in interaction handlers. The `inputmode` HTML attribute should be used to control virtual keyboard type (e.g., `numeric`, `email`, `tel`) for appropriate input fields.
+
+---
+
+## 7. Collections Integration
+
+For list-based components (Select, Listbox, Menu, Combobox), Dioxus renders collection items using standard iteration:
+
+````rust
+use ars_collections::{Collection, Key};
+
+/// Render a collection in Dioxus using for-loop iteration with key.
+#[component]
+pub fn CollectionView<T: Clone + PartialEq + 'static>(
+    items: ReadSignal<Vec<T>>,
+    key: fn(&T) -> String,
+    view: fn(T) -> Element,
+) -> Element {
+    rsx! {
+        for item in items.read().iter() {
+            // Dioxus uses `key` attribute for efficient VDOM diffing
+            div { key: "{key(item)}", {view(item.clone())} }
+        }
+    }
+}
+
+/// Select with async-loaded items using use_resource + Suspense:
+///
+/// ```rust
+/// #[component]
+/// fn CountrySelect(on_change: Option<EventHandler<String>>) -> Element {
+///     let countries = use_resource(|| async { fetch_countries().await });
+///
+///     rsx! {
+///         Select { on_value_change: on_change,
+///             select::Trigger { select::ValueText {} }
+///             select::Content {
+///                 SuspenseBoundary {
+///                     fallback: |_| rsx! { div { "Loading..." } },
+///                     match &*countries.read() {
+///                         Some(Ok(items)) => rsx! {
+///                             for c in items.iter() {
+///                                 select::Item { value: c.code.clone(), "{c.name}" }
+///                             }
+///                         },
+///                         _ => rsx! { div { "Loading..." } },
+///                     }
+///                 }
+///             }
+///         }
+///     }
+/// }
+/// ```
+````
+
+---
+
+## 8. Animation and Presence
+
+Overlay exit animations are handled by the **Presence** machine (see `spec/components/overlay/presence.md`). Each overlay component (Dialog, Popover, Tooltip) composes Presence internally:
+
+1. When the overlay's `is_open` becomes `true`, send `presence::Event::Mount`.
+2. When `is_open` becomes `false`, send `presence::Event::Unmount`.
+3. Presence defers unmounting until the CSS exit animation completes.
+4. The adapter reads `presence_api.is_mounted()` to decide whether to render the element.
+
+```rust
+// Usage in a Dioxus overlay component:
+let presence = use_machine::<presence::Machine>(presence::Props::default());
+let is_mounted = presence.derive(|api| api.is_mounted());
+
+// When dialog state changes:
+// Exception: calling send inside this effect is safe — the dependency
+// (is_dialog_open) is an external input, not derived from Presence state,
+// so no reactive loop can form.
+use_effect(move || {
+    if is_dialog_open() {
+        presence.send.call(presence::Event::Mount);
+    } else {
+        presence.send.call(presence::Event::Unmount);
+    }
+});
+
+rsx! {
+    if is_mounted() {
+        div {
+            "data-ars-state": if is_dialog_open() { "open" } else { "closed" },
+            {children}
+        }
+    }
+}
+```
+
+No adapter-level `create_presence()` helper is needed — Presence is a standard machine used via `use_machine`.
+
+---
+
+## 9. Named Slots (Element Props)
+
+Leptos uses the `#[slot]` macro for named slot composition. In Dioxus, named slots are modeled as explicit `Element` props:
+
+````rust
+#[component]
+pub fn Dialog(
+    // Simplified example — uses plain bool for brevity.
+    // Full Dialog (see spec/dioxus-components/) uses Option<Signal<bool>> for reactive controlled open.
+    open: Option<bool>,
+    #[props(default)] default_open: bool,
+    modal: Option<bool>,
+    dialog_title: Option<Element>,
+    dialog_description: Option<Element>,
+    on_open_change: Option<EventHandler<bool>>,
+    children: Element,
+) -> Element {
+    let props = dialog::Props {
+        open,
+        default_open,
+        modal: modal.unwrap_or(true),
+        ..Default::default()
+    };
+
+    // NOTE: This is a simplified slots-pattern example. The full Dialog
+    // implementation (see spec/dioxus-components/) uses `Context` with additional derived
+    // fields (open, title_id, description_id) for granular reactivity.
+    let UseMachineReturn { state, send, service, context_version } = use_machine::<dialog::Machine>(props);
+    use_context_provider(|| Context { state, send, service, context_version });
+
+    // Wire ARIA IDs from dialog context for accessibility.
+    // The full Dialog (see spec/dioxus-components/) derives these from the machine's ID generator.
+    // Simplified illustration — the full implementation (see spec/dioxus-components/) uses derive() for reactive IDs.
+    // NOTE: peek() avoids subscribing to the service signal, preventing full re-renders on every event.
+    let base_id = service.peek().props().id();
+    let title_id = format!("{base_id}-title");
+    let description_id = format!("{base_id}-description");
+
+    rsx! {
+        div {
+            "aria-labelledby": title_id,
+            "aria-describedby": description_id,
+            {children}
+        }
+    }
+}
+
+/// Usage:
+/// ```rust
+/// Dialog {
+///     dialog_title: rsx! { h2 { "My Title" } },
+///     dialog_description: rsx! { p { "Description text" } },
+///     dialog::Trigger { button { "Open" } }
+///     dialog::Content { /* ... */ }
+/// }
+/// ```
+````
+
+## 10. Effect Cleanup and Event Safety
+
+**Problem.** During effect cleanup, removing event listeners can itself trigger synthetic events — `blur` fires when a focused element's listener is removed, `pointerup` may arrive after a transition completes but before new effects are wired. If cleanup and setup overlap, stale callbacks execute against new component state, causing panics or incorrect behavior. In Dioxus, this problem has an additional dimension: the desktop renderer processes events synchronously on the main thread, while the web renderer defers event dispatch to microtasks. Both paths must be handled.
+
+**Rules:**
+
+1. **Cleanup ordering.** All listener removals MUST execute before any new listeners are registered. The adapter enforces this by splitting the hook lifecycle into two phases: a synchronous cleanup phase (via `use_drop`) and a subsequent setup phase.
+
+2. **Idempotent cleanup with `use_drop`.** Use Dioxus `use_drop` for deterministic cleanup instead of relying on `Drop` impls on signals. The `use_drop` callback MUST be safe to call multiple times — guard against double-removal with a `Cell<bool>` flag stored in the hook state.
+
+3. **`Signal::try_write()` for stale-check.** Long-lived callbacks that capture a `Signal` should use `try_write()` (or `try_read()`) before mutating. If the signal's owning scope has been dropped, `try_write()` returns `None` and the write is silently skipped. This replaces the `WeakSend` pattern used in Leptos.
+
+4. **Desktop vs. web timing.** Desktop Dioxus may deliver events synchronously during the same tick as cleanup. Web Dioxus defers to microtasks. The cleanup logic must not assume either ordering — always check validity before acting.
+
+5. **Batch removals, then batch registrations.** Never interleave individual remove/add pairs. Collect all pending removals into a `Vec`, execute them synchronously, then collect and execute all registrations.
+
+```rust
+use std::{cell::{Cell, RefCell}, rc::Rc};
+use dioxus::prelude::*;
+use web_sys::wasm_bindgen::closure::Closure;
+
+// Desktop/mobile targets should use the DioxusPlatform abstraction trait for equivalent functionality.
+#[cfg(feature = "web")]
+/// Attaches an event listener with framework-managed lifecycle cleanup.
+///
+/// Uses raw `web_sys::Closure` and `EventTarget::add_event_listener_with_callback`
+/// directly because framework-specific cleanup primitives (`use_drop`/`Signal` in
+/// Dioxus) require owning the Closure handle. The ars-dom `EventListenerHandle`
+/// utility (11-dom-utilities.md §7) does not integrate with framework reactivity
+/// systems. See v93 follow-up discussion.
+fn use_safe_event_listener(
+    target: Signal<Option<web_sys::HtmlElement>>,
+    event_name: &'static str,
+    handler: impl Fn(web_sys::Event) + 'static,
+) {
+    // Rc<RefCell> holding the active JS closure for removal on cleanup.
+    // Cannot use Signal<Closure<...>> because Closure is not 'static.
+    let closure_handle: Rc<RefCell<Option<Closure<dyn Fn(web_sys::Event)>>>> =
+        use_hook(|| Rc::new(RefCell::new(None)));
+    let cleaned_up = use_hook(|| Cell::new(false));
+
+    // Track a signal so stale callbacks can bail out.
+    let alive = use_signal(|| true);
+
+    let closure_handle_effect = closure_handle.clone();
+    use_effect(move || {
+        let Some(el) = target.read().clone() else { return };
+
+        // Phase 1: Synchronous cleanup of previous listener.
+        if let Some(prev_closure) = closure_handle_effect.borrow_mut().take() {
+            el.remove_event_listener_with_callback(
+                event_name,
+                prev_closure.as_ref().unchecked_ref(),
+            )
+            .ok();
+        }
+
+        // Phase 2: Register new listener with stale-check guard.
+        let alive_signal = alive;
+        let closure = Closure::new(move |event: web_sys::Event| {
+            // Stale-check: if the signal scope is gone, skip.
+            if alive_signal.try_read().is_none() {
+                return;
+            }
+            handler(event);
+        });
+
+        el.add_event_listener_with_callback(
+            event_name,
+            closure.as_ref().unchecked_ref(),
+        )
+        .expect("addEventListener");
+
+        *closure_handle_effect.borrow_mut() = Some(closure);
+        cleaned_up.set(false);
+    });
+
+    // use_drop for deterministic cleanup — idempotent.
+    use_drop(move || {
+        if cleaned_up.get() {
+            return;
+        }
+        cleaned_up.set(true);
+
+        // Signal the stale-check that this scope is dead.
+        if let Some(mut w) = alive.try_write() {
+            *w = false;
+        }
+
+        if let Some(el) = target.try_read().and_then(|r| r.clone()) {
+            if let Some(prev_closure) = closure_handle.borrow_mut().take() {
+                el.remove_event_listener_with_callback(
+                    event_name,
+                    prev_closure.as_ref().unchecked_ref(),
+                )
+                .ok();
+            }
+        }
+    });
+}
+```
+
+---
+
+## 11. API Naming Conventions
+
+All `ars-dioxus` components follow uniform naming conventions for accessors, state, and callbacks. These rules apply across every component in the adapter.
+
+### 11.1 Boolean Accessors — `is_*()` Methods
+
+Boolean state is always accessed through `is_*()` methods, never bare field access:
+
+```rust
+api.is_disabled()       // not: api.disabled
+api.is_open()           // not: api.open
+api.is_checked()        // not: api.checked
+api.is_expanded()       // not: api.expanded
+api.is_readonly()       // not: api.readonly
+api.is_focused()        // not: api.focused
+api.is_indeterminate()  // not: api.indeterminate
+```
+
+### 11.2 Non-Boolean State — Getter Methods or Field Access
+
+Non-boolean values use getter methods (or direct field access for simple data):
+
+```rust
+api.value()             // current value (String, number, etc.)
+api.selected_items()    // current selection set
+api.highlighted_key()   // currently highlighted item key
+api.placeholder()       // placeholder text
+api.orientation()       // Orientation enum
+```
+
+### 11.3 Event Callbacks — `on_*` Naming
+
+All callback props use the `on_*` prefix:
+
+```rust
+on_change               // value changed
+on_select               // item selected
+on_open_change          // open state toggled
+on_checked_change       // checked state toggled
+on_press                // press interaction completed
+on_focus                // element received focus
+on_blur                 // element lost focus
+on_dismiss              // overlay dismissed
+```
+
+### 11.4 Module-Scoped Compound Component Naming
+
+Adapter component specs that expose compound parts must use module scoping instead of
+repeating the component name in every part symbol:
+
+```rust
+pub mod dialog {
+    #[component]
+    pub fn Dialog(props: DialogProps) -> Element
+
+    #[component]
+    pub fn Trigger(children: Element) -> Element
+
+    #[component]
+    pub fn Content(children: Element) -> Element
+}
+```
+
+Rules:
+
+- The root component uses the bare component name (`dialog::Dialog`, `tooltip::Tooltip`).
+- Child parts drop the redundant component prefix (`dialog::Trigger`, not `DialogTrigger`).
+- The primary child-part context inside the module is named `Context`.
+- Secondary contexts or helpers use descriptive non-prefixed names (`GroupContext`, `QueueContext`, `Overlay`, `Control`).
+- Expect or panic messages must use the module-qualified part name (`dialog::Trigger must be used inside Dialog`).
+
+### 11.5 Summary Table
+
+| Category             | Convention                            | Examples                                                 |
+| -------------------- | ------------------------------------- | -------------------------------------------------------- |
+| Boolean accessor     | `is_*()` method                       | `is_disabled()`, `is_open()`, `is_checked()`             |
+| Non-boolean accessor | `value()` / `selected_items()` method | `value()`, `highlighted_key()`, `orientation()`          |
+| Event callback       | `on_*` prop                           | `on_change`, `on_select`, `on_open_change`               |
+| Compound parts       | module-scoped symbols                 | `dialog::Trigger`, `tooltip::Content`, `toast::Provider` |
+
+---
+
+## 12. Callback Naming Convention
+
+All public callback props follow a consistent naming convention across `ars-dioxus` components:
+
+| Pattern                | Usage                                                         | Examples                                                     |
+| ---------------------- | ------------------------------------------------------------- | ------------------------------------------------------------ |
+| `on_<property>_change` | Fires when a **value** changes (controlled component pattern) | `on_value_change`, `on_open_change`, `on_checked_change`     |
+| `on_<action>`          | Fires on a **discrete user action** (not a state change)      | `on_press`, `on_submit`, `on_dismiss`, `on_focus`, `on_blur` |
+
+**Rules:**
+
+- Value-change callbacks always receive the **new value** as their argument (e.g., `EventHandler<bool>` for `on_open_change`)
+- Action callbacks receive either no argument or an event-specific payload — never the full component state
+- Callback props are always `Option<EventHandler<T>>` — omitting a callback is valid and means the consumer does not observe that event
+- Use Dioxus `EventHandler` (not `Callback`) for consistency with the Dioxus ecosystem
+- Convention: `EventHandler<T>` for user-facing callback props (`onclick`, `on_change`). `Callback<T, R>` for internal machine dispatch (send events to state machine).
+
+---
+
+## 13. Event Handling
+
+### 13.1 Event Mapping
+
+```rust
+use dioxus::prelude::*;
+
+/// Dioxus KeyboardEvent -> ars-core KeyboardKey.
+pub fn dioxus_key_to_keyboard_key(key: &Key) -> (KeyboardKey, Option<char>) {
+    match key {
+        Key::Character(c) => {
+            if c == " " {
+                return (KeyboardKey::Space, Some(' '));
+            }
+            let ch = c.chars().next();
+            (KeyboardKey::from_key_str(c), ch)
+        }
+        Key::Enter => (KeyboardKey::Enter, None),
+        Key::Escape => (KeyboardKey::Escape, None),
+        Key::Tab => (KeyboardKey::Tab, None),
+        Key::ArrowUp => (KeyboardKey::ArrowUp, None),
+        Key::ArrowDown => (KeyboardKey::ArrowDown, None),
+        Key::ArrowLeft => (KeyboardKey::ArrowLeft, None),
+        Key::ArrowRight => (KeyboardKey::ArrowRight, None),
+        Key::Home => (KeyboardKey::Home, None),
+        Key::End => (KeyboardKey::End, None),
+        Key::PageUp => (KeyboardKey::PageUp, None),
+        Key::PageDown => (KeyboardKey::PageDown, None),
+        Key::Backspace => (KeyboardKey::Backspace, None),
+        Key::Delete => (KeyboardKey::Delete, None),
+        Key::F1 => (KeyboardKey::F1, None),
+        Key::F2 => (KeyboardKey::F2, None),
+        Key::F3 => (KeyboardKey::F3, None),
+        Key::F4 => (KeyboardKey::F4, None),
+        Key::F5 => (KeyboardKey::F5, None),
+        Key::F6 => (KeyboardKey::F6, None),
+        Key::F7 => (KeyboardKey::F7, None),
+        Key::F8 => (KeyboardKey::F8, None),
+        Key::F9 => (KeyboardKey::F9, None),
+        Key::F10 => (KeyboardKey::F10, None),
+        Key::F11 => (KeyboardKey::F11, None),
+        Key::F12 => (KeyboardKey::F12, None),
+        _ => (KeyboardKey::Unidentified, None),
+    }
+}
+```
+
+### 13.2 Native Element Handler Deduplication
+
+When rendering a machine's keyboard handlers onto a native interactive element (e.g., `<button>`), the adapter MUST strip handlers that duplicate native behavior:
+
+- Native `<button>` fires `click` on Space keyup — the adapter strips the machine's Space key handler to avoid double activation.
+- Native `<a>` fires `click` on Enter — the adapter strips the machine's Enter key handler.
+
+The machine always generates the full handler set (it is DOM-element-agnostic). Deduplication is the adapter's responsibility.
+
+> **Parity note:** This mirrors the Leptos adapter §5.3 "Native Element Handler Deduplication". Both adapters apply the same deduplication rules.
+
+---
+
+## 14. Compound Component Pattern: Module-Scoped Parts
+
+Dioxus compound components use `use_context_provider` in the root component and `try_use_context` in child parts. This example shows a generic Popover with the module-scoped naming pattern.
+
+```rust
+pub mod popover {
+    use std::rc::Rc;
+    use dioxus::prelude::*;
+    use ars_core::Service;
+
+    // --- Context type shared by all parts ---
+
+    #[derive(Clone, Copy)]
+    pub struct Context {
+        pub open: ReadSignal<bool>,
+        pub send: Callback<popover::Event>,
+        pub trigger_id: ReadSignal<String>,
+        pub content_id: ReadSignal<String>,
+        pub service: Signal<Service<popover::Machine>>,
+        pub context_version: ReadSignal<u64>,
+    }
+
+    // --- Root: owns the machine, provides context ---
+
+    #[derive(Props, Clone, PartialEq)]
+    pub struct PopoverProps {
+        pub open: Option<Signal<bool>>,
+        #[props(default = false)]
+        pub default_open: bool,
+        pub children: Element,
+    }
+
+    #[component]
+    pub fn Popover(props: PopoverProps) -> Element {
+        let core_props = popover::Props {
+            open: props.open.as_ref().map(|s| *s.peek()),
+            default_open: props.default_open,
+            ..Default::default()
+        };
+
+        let machine = use_machine::<popover::Machine>(core_props);
+
+        let UseMachineReturn { state, send, .. } = machine;
+
+        // Watch controlled open prop. Uses deferred use_effect (not body-level sync)
+        // because open/close dispatches Open/Close events, which is an intentional
+        // exception to §19's body-level sync rule.
+        // NOTE: Hooks are called unconditionally to maintain stable hook ordering
+        // across re-renders (Dioxus requirement). The effect body gates on
+        // `props.open` being `Some`.
+        let send_clone = send;
+        let mut prev_open: Signal<Option<bool>> = use_signal(|| None);
+        use_effect(move || {
+            if let Some(open_sig) = props.open {
+                let new_open = *open_sig.read();
+                let prev = prev_open.peek().clone();
+                if prev.as_ref() != Some(&new_open) {
+                    if prev.is_some() {
+                        if new_open {
+                            send_clone.call(popover::Event::Open);
+                        } else {
+                            send_clone.call(popover::Event::Close);
+                        }
+                    }
+                    *prev_open.write() = Some(new_open);
+                }
+            }
+        });
+
+        let open = machine.derive(|api| api.is_open());
+
+        // Auto-generated IDs from the machine — avoids collisions with multiple instances.
+        let trigger_id: ReadSignal<String> = machine.derive(|api| api.trigger_id().to_string()).into();
+        let content_id: ReadSignal<String> = machine.derive(|api| api.content_id().to_string()).into();
+
+        // Provide context to all child parts
+        use_context_provider(|| Context {
+            open: open.into(),
+            send,
+            trigger_id,
+            content_id,
+            service: machine.service,
+            context_version: machine.context_version,
+        });
+
+        rsx! { {props.children} }
+    }
+
+    // --- Trigger: reads context, renders the trigger element ---
+
+    #[derive(Props, Clone, PartialEq)]
+    pub struct TriggerProps {
+        pub children: Element,
+    }
+
+    #[component]
+    pub fn Trigger(props: TriggerProps) -> Element {
+        let ctx = try_use_context::<Context>()
+            .expect("popover::Trigger must be used inside Popover");
+
+        let [(scope_attr, scope_val), (part_attr, part_val)] = popover::Part::Trigger.data_attrs();
+        rsx! {
+            button {
+                r#type: "button",
+                id: ctx.trigger_id(),
+                "{scope_attr}": scope_val,
+                "{part_attr}": part_val,
+                "aria-haspopup": "dialog",
+                "aria-expanded": (*ctx.open.read()).to_string(),
+                "aria-controls": ctx.content_id(),
+                onclick: move |_| ctx.send.call(popover::Event::Toggle),
+                {props.children}
+            }
+        }
+    }
+
+    // --- Content: reads context, conditionally renders ---
+
+    #[derive(Props, Clone, PartialEq)]
+    pub struct ContentProps {
+        pub children: Element,
+    }
+
+    #[component]
+    pub fn Content(props: ContentProps) -> Element {
+        let ctx = try_use_context::<Context>()
+            .expect("popover::Content must be used inside Popover");
+
+        let [(scope_attr, scope_val), (part_attr, part_val)] = popover::Part::Content.data_attrs();
+        rsx! {
+            if *ctx.open.read() {
+                div {
+                    id: ctx.content_id(),
+                    role: "dialog",
+                    "{scope_attr}": scope_val,
+                    "{part_attr}": part_val,
+                    "data-ars-state": "open",
+                    onkeydown: move |e: KeyboardEvent| {
+                        if dioxus_key_to_keyboard_key(&e.key()).0 == KeyboardKey::Escape {
+                            ctx.send.call(popover::Event::Close);
+                        }
+                    },
+                    {props.children}
+                }
+            }
+        }
+    }
+
+    // --- Usage ---
+    // rsx! {
+    //     Popover {
+    //         popover::Trigger { "Click me" }
+    //         popover::Content {
+    //             p { "Popover body content" }
+    //             button {
+    //                 onclick: move |_| { /* close */ },
+    //                 "Close"
+    //             }
+    //         }
+    //     }
+    // }
+}
+```
+
+---
+
+> **Per-component adapter examples** have been extracted to individual files under `spec/dioxus-components/{category}/{component}.md`.
+> Use `cargo run -p spec-tool -- deps <component>` to find the Dioxus adapter file for any component.
+
+## 15. SSR Support
+
+```rust
+// For SSR, Dioxus renders components to a string.
+// Components detect the SSR environment via cfg(feature = "ssr").
+
+#[cfg(feature = "ssr")]
+pub fn render_to_string(app: fn() -> Element) -> String {
+    // dioxus::ssr::render: renders a VirtualDom to string for SSR
+    // Dioxus 0.7: use VirtualDom-based rendering for SSR.
+    let mut dom = dioxus::prelude::VirtualDom::new(app);
+    dom.rebuild_in_place();
+    // Dioxus 0.7 re-exports the dioxus_ssr crate as the dioxus::ssr module path.
+    // https://docs.rs/dioxus/latest/dioxus/index.html#reexport.ssr
+    dioxus::ssr::render(&dom)
+}
+
+pub mod tooltip {
+    // Components that need SSR-aware behavior:
+    #[component]
+    pub fn Content(children: Element) -> Element {
+        let ctx = try_use_context::<Context>()
+            .expect("tooltip::Content must be used inside Tooltip");
+
+        #[cfg(feature = "ssr")]
+        {
+            // During SSR: render with display:none, full content for SEO
+            return rsx! {
+                div {
+                    role: "tooltip",
+                    style: "display: none",
+                    {children}
+                }
+            };
+        }
+
+        let [(scope_attr, scope_val), (part_attr, part_val)] = tooltip::Part::Content.data_attrs();
+
+        rsx! {
+            if *ctx.is_visible.read() {
+                div {
+                    role: "tooltip",
+                    "{scope_attr}": scope_val,
+                    "{part_attr}": part_val,
+                    {children}
+                }
+            }
+        }
+    }
+}
+```
+
+---
+
+## 16. ArsProvider Context
+
+`ArsProvider` is the single root provider — the formerly separate `LocaleProvider`,
+`PlatformEffectsProvider`, `ArsStyleProvider`, and `PlatformProvider` are all subsumed.
+The adapter-level context wraps core `ArsContext` values in reactive signals and
+includes the style strategy and the Dioxus-specific platform capabilities trait object.
+
+```rust
+use ars_i18n::{Locale, Direction};
+use ars_core::{ColorMode, PlatformEffects, StyleStrategy, ArsContext as CoreCtx};
+use ars_i18n::IcuProvider;
+
+/// Reactive environment context published by the Dioxus ArsProvider adapter.
+#[derive(Clone)]
+pub struct ArsContext {
+    pub locale: Signal<Locale>,
+    pub direction: Memo<Direction>,
+    pub color_mode: Signal<ColorMode>,
+    pub disabled: Signal<bool>,
+    pub read_only: Signal<bool>,
+    pub id_prefix: Signal<Option<String>>,
+    pub portal_container_id: Signal<Option<String>>,
+    pub root_node_id: Signal<Option<String>>,
+    pub platform: Rc<dyn PlatformEffects>,
+    pub icu_provider: Arc<dyn IcuProvider>,
+    pub i18n_registries: Rc<I18nRegistries>,
+    pub style_strategy: StyleStrategy,
+    /// Dioxus adapter-specific: platform services for file pickers, clipboard, drag data.
+    pub dioxus_platform: Rc<dyn DioxusPlatform>,
+}
+```
+
+The `ArsProvider` component, its props, and rendering are specified in
+`spec/dioxus-components/utility/ars-provider.md`. The component publishes
+`ArsContext` via `use_context_provider` and renders a `<div dir="{dir}">` wrapper.
+The Dioxus adapter resolves `platform` via feature flags: `WebPlatformEffects` (web),
+`DesktopPlatformEffects` (desktop), `NullPlatformEffects` (SSR/tests/mobile fallback).
+
+### 16.1 use_locale()
+
+```rust
+/// Returns the current locale signal. The returned signal is **read-only in practice**:
+/// writing to it does not propagate changes to other components. Use `ArsProvider`
+/// to change the locale for a subtree.
+pub fn use_locale() -> Signal<Locale> {
+    // Intentional: use_signal called unconditionally to satisfy hook ordering rules
+    // (Dioxus hooks must be called in the same order on every render).
+    let fallback = use_signal(|| Locale::parse("en-US").expect("en-US is always a valid BCP 47 locale"));
+    try_use_context::<ArsContext>()
+        .map(|c| c.locale)
+        .unwrap_or_else(|| {
+            warn_missing_provider("use_locale");
+            fallback
+        })
+}
+```
+
+### 16.2 t() — Translatable Text Resolver
+
+```rust
+use ars_i18n::Translate;
+
+/// Resolve a user-defined `Translate` enum variant into a text string for rendering.
+///
+/// Reads the current locale and ICU provider from `ArsProvider` context via
+/// `Signal::read()`, which subscribes the calling component to locale changes.
+/// When locale changes, the component re-renders and `t()` produces the new
+/// string (component-level reactivity — standard Dioxus model).
+///
+/// Included in `ars_dioxus::prelude`.
+///
+/// See `04-internationalization.md` §7.4 for the `Translate` trait definition
+/// and §7.5 for the `t()` function contract.
+pub fn t<T: Translate>(msg: T) -> String {
+    try_use_context::<ArsContext>()
+        .map(|ctx| msg.translate(&ctx.locale.read(), &*ctx.icu_provider))
+        .unwrap_or_else(|| {
+            warn_missing_provider("t");
+            let fallback = Locale::parse("en-US").expect("en-US is always a valid BCP 47 locale");
+            msg.translate(&fallback, &StubIcuProvider)
+        })
+}
+```
+
+**Prelude export:** `pub use crate::i18n::t;`
+
+> **Why `t()` doesn't use hooks:** Unlike `use_locale()`, `t()` reads context via
+> `try_use_context` (a context lookup, not a hook-slot allocation) and then reads
+> signals directly. This makes `t()` safe to call inside conditionals and loops
+> within `rsx!` — it does not affect hook ordering.
+
+---
+
+## 17. Testing
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Pure unit tests on the machines (no Dioxus dependency)
+    #[test]
+    fn dialog_opens_and_closes() {
+        let props = dialog::Props::default();
+        let mut svc = Service::<dialog::Machine>::new(props);
+
+        assert_eq!(*svc.state(), dialog::State::Closed);
+        svc.send(dialog::Event::Open);
+        assert_eq!(*svc.state(), dialog::State::Open);
+        svc.send(dialog::Event::Close);
+        assert_eq!(*svc.state(), dialog::State::Closed);
+    }
+}
+
+// DOM tests using Dioxus test renderer:
+#[test]
+fn checkbox_renders_aria_checked() {
+    let mut dom = VirtualDom::new(|| rsx! {
+        Checkbox { default_checked: checkbox::State::Unchecked,
+            checkbox::Control {
+                checkbox::Indicator { "✓" }
+            }
+        }
+    });
+    dom.rebuild_in_place();
+    // render: takes a &VirtualDom, used for component-level test rendering
+    let html = dioxus::ssr::render(&dom);
+
+    assert!(html.contains(r#"role="checkbox""#));
+    assert!(html.contains(r#"aria-checked="false""#));
+    assert!(html.contains(r#"data-ars-scope="checkbox""#));
+}
+```
+
+Dioxus supports two complementary testing styles:
+
+1. **Raw adapter examples** use `VirtualDom` plus `dioxus::ssr::render(...)` for
+   focused adapter/SSR checks like the example above.
+2. **Shared harness DOM behavior tests** use the framework-agnostic
+   `TestHarness` from [15-test-harness.md](../testing/15-test-harness.md). In
+   that setup, the Dioxus backend owns `ArsProvider` wrapping for
+   `mount_with_locale(...)`, and reactivity is synchronized through
+   `dom.wait_for_work().await` behind the harness `flush()` / `tick()` helpers.
+
+Shared-harness Dioxus tests should not rely on ad hoc zero-delay timer shims to
+observe locale or DOM updates. Interaction helpers already flush the Dioxus
+reactivity cycle before returning, and explicit `tick()` / `flush()` calls are
+the documented way to request an extra post-event boundary when a test needs one.
+
+---
+
+## 18. Leptos / Dioxus API Mapping
+
+Quick reference for translating between the two adapter APIs:
+
+| Concept              | Leptos (`ars-leptos`)                                                                                                 | Dioxus (`ars-dioxus`)                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Basic hook           | `use_machine(props)`                                                                                                  | `use_machine(props)`                                                                                          |
+| Reactive props       | `use_machine_with_reactive_props(signal)`                                                                             | `use_machine(props)` (auto-syncs props internally)                                                            |
+| API access           | `machine.derive(\|api\| ...)`                                                                                         | `machine.derive(\|api\| ...)`                                                                                 |
+| One-shot API read    | `machine.with_api_snapshot(\|api\| ...)` (returns `T`) or `machine.with_api_ephemeral(\|eref\| ...)` (`EphemeralRef`) | `machine.with_api_snapshot(\|api\| ...)` (returns `T`)                                                        |
+| Service wrapper      | `StoredValue<Service<M>>`                                                                                             | `Signal<Service<M>>`                                                                                          |
+| Cleanup              | `on_cleanup`                                                                                                          | `use_drop`                                                                                                    |
+| Context (required)   | `use_context::<T>().expect(msg)` → `T` (descriptive panic)                                                            | `use_context::<T>()` → `T` (panics); adapter uses `try_use_context::<T>().expect(msg)` for descriptive panics |
+| Context (optional)   | `use_context::<T>()` → `Option<T>`                                                                                    | `try_use_context::<T>()` → `Option<T>`                                                                        |
+| Context provider     | `provide_context(value)`                                                                                              | `use_context_provider(\|\| value)`                                                                            |
+| Callback helper      | `emit(cb, value)`                                                                                                     | `emit(cb, value)`                                                                                             |
+| Controlled prop sync | `use_controlled_prop(sig, send, fn)`                                                                                  | `use_controlled_prop_sync(send, val, fn)`                                                                     |
+| `derive()` send      | Uses no-op panic closure (same as Dioxus — StoredValue borrow prevents re-entrant write)                              | Uses no-op panic closure (Signal read lock prevents write)                                                    |
+| ID generation        | `use_id(scope)` [^1]                                                                                                  | `use_stable_id(prefix)` [^1]                                                                                  |
+
+[^1]: Neither `use_id` (Leptos) nor `use_stable_id` (Dioxus) is hydration-safe. SSR+hydration users must provide explicit `id` props until a deterministic tree-position-based ID scheme is implemented. See §20 for details.
+
+---
+
+## 19. Controlled Value Helper
+
+All controlled prop watchers follow the same pattern: track previous value, skip initial, send event on change. This helper extracts the repeated logic using **body-level synchronous sync** (not `use_effect`) to avoid one-frame stale state:
+
+```rust
+/// Watch a prop value and dispatch an event when it changes.
+/// Runs synchronously in the component body — NOT deferred via use_effect.
+/// Skips the initial mount (machine already has correct initial value from props).
+///
+/// **IMPORTANT**: All controlled value watchers MUST use body-level sync,
+/// not `use_effect`. Deferred watchers cause a one-frame stale state window
+/// where `connect()` returns attributes based on the old value.
+pub fn use_controlled_prop_sync<T: Clone + PartialEq + 'static, E: 'static>(
+    send: Callback<E>,
+    current: T,
+    event_fn: impl Fn(T) -> E,
+) {
+    let mut prev: Signal<Option<T>> = use_signal(|| None);
+    let p = prev.peek().clone();
+    if p.as_ref() != Some(&current) {
+        if p.is_some() {
+            send.call(event_fn(current.clone()));
+        }
+        *prev.write() = Some(current);
+    }
+}
+
+/// Like `use_controlled_prop_sync`, but accepts `Option<T>` for props that may be
+/// `None` (uncontrolled mode). The internal `use_signal` hook is **always** called
+/// to preserve stable hook ordering. When `current` is `None`, no event is sent.
+pub fn use_controlled_prop_sync_optional<T: Clone + PartialEq + 'static, E: 'static>(
+    send: Callback<E>,
+    current: Option<T>,
+    event_fn: impl Fn(T) -> E,
+) {
+    let mut prev: Signal<Option<T>> = use_signal(|| None);
+    if let Some(val) = current {
+        let p = prev.peek().clone();
+        if p.as_ref() != Some(&val) {
+            if p.is_some() {
+                send.call(event_fn(val.clone()));
+            }
+            *prev.write() = Some(val);
+        }
+    } else {
+        // Uncontrolled mode: clear previous value without sending an event.
+        if prev.peek().is_some() {
+            *prev.write() = None;
+        }
+    }
+}
+```
+
+### 19.1 Event Callback Helper
+
+````rust
+/// Emit a value through an optional Dioxus EventHandler.
+///
+/// # Example
+/// ```rust
+/// emit(props.on_value_change.as_ref(), selected_value);
+/// ```
+pub fn emit<T: Clone>(handler: Option<&EventHandler<T>>, value: T) {
+    if let Some(h) = handler {
+        h.call(value);
+    }
+}
+
+/// Emit a mapped value through an optional callback.
+pub fn emit_map<T, U: Clone>(handler: Option<&EventHandler<U>>, value: T, f: impl Fn(T) -> U) {
+    if let Some(h) = handler {
+        h.call(f(value));
+    }
+}
+````
+
+---
+
+### 19.2 Hydration-Safe ID Generation
+
+The `dioxus_id_counter()` function (thread-local on WASM, `AtomicU64` on native) is **NOT hydration-safe**. During SSR, the server increments the counter in rendering order; on hydration, the client may increment differently due to lazy loading, code splitting, or Suspense boundaries. This causes ARIA attribute mismatches (`aria-labelledby`, `aria-describedby`, `aria-controls` pointing to wrong elements).
+
+**Requirements:**
+
+1. **Deterministic ID scheme**: Replace `dioxus_id_counter()` with a deterministic ID generation strategy tied to the component tree position, analogous to React's `useId()`. The ID must be identical on server and client for the same component instance.
+
+2. **SSR counter reset**: When the `dioxus/server` feature is active, the ID counter MUST be reset at the start of each SSR request to prevent cross-request counter leakage:
+
+   ```rust
+   #[cfg(all(feature = "ssr", target_arch = "wasm32"))]
+   pub fn reset_id_counter() {
+       DIOXUS_ID_COUNTER.with(|c| c.set(0));
+   }
+   #[cfg(all(feature = "ssr", not(target_arch = "wasm32")))]
+   pub fn reset_id_counter() {
+       DIOXUS_ID_COUNTER.store(0, core::sync::atomic::Ordering::Relaxed);
+   }
+   ```
+
+3. **Hydration mismatch detection**: In debug builds, the client SHOULD compare server-rendered IDs (extracted from the hydrated DOM) with client-generated IDs. On mismatch, emit a console warning:
+   `"ars-ui hydration ID mismatch: server='ars-dialog-7', client='ars-dialog-9'. Component IDs may be non-deterministic across SSR/client boundaries."`
+
+4. **Recommended implementation**: Use Dioxus's built-in hook ordering (which is stable across SSR/hydration) combined with a component-path prefix:
+
+```rust
+fn use_stable_id(prefix: &str) -> String {
+    // Hook ordering is deterministic in Dioxus — same component
+    // at same tree position gets same hook slot on server and client.
+    let id = use_hook(|| dioxus_id_counter());
+    format!("ars-{prefix}-{id}")
+}
+```
+
+> **Warning:** `use_stable_id` currently delegates to `dioxus_id_counter()`, which is NOT
+> hydration-safe. SSR+hydration users MUST provide explicit `id` props on all components
+> until a deterministic tree-position-based ID scheme is implemented.
+
+---
+
+## 20. SSR Hydration Support
+
+### 20.1 FocusScope Hydration Handling
+
+**Problem.** `FocusScope` effects are gated by `#[cfg(not(feature = "ssr"))]`, which means focus restoration logic is skipped entirely during server-side rendering. When the client hydrates, the post-hydration effect calls `document.querySelector()` for a focus target that may no longer exist in the DOM (e.g., a dynamically rendered element the server never produced). Additionally, modal `Dialog` components rendered as open during SSR leave orphaned `inert` attributes on sibling elements because the server never runs the cleanup effect that would remove them.
+
+**Solution.** The following rules govern FocusScope behavior across the SSR-to-hydration boundary:
+
+1. **Emit valid focus targets during SSR.** Server-rendered modal overlays MUST include at least one focusable element in the HTML output. Use a `button` with `autofocus` or an element with `tabindex="-1"` so that the hydration effect has a valid target.
+
+2. **Scan for orphaned `inert` on hydration.** A post-hydration `use_effect` queries all elements with `[inert]` and removes the attribute from any element that is not currently a sibling of an open modal. This prevents "frozen" regions left over from SSR. Cleanup of these attributes uses `use_drop` (Dioxus equivalent of Leptos `on_cleanup`).
+
+3. **Validate focus target existence and visibility.** Before calling `.focus()`, the FocusScope checks that the target element exists and is visible by verifying `element.offset_parent().is_some()`. Elements that are `display: none` or detached return `None` and are skipped.
+
+4. **Gate focus trap activation on hydration completion.** The adapter sets a `data-ars-hydrated` attribute on the document body once hydration is complete. FocusScope defers trap activation until this attribute is present, preventing premature focus movement during partial hydration. In Dioxus, this check is wrapped in a `use_effect` (which only runs on the client), rather than a `#[cfg(not(feature = "ssr"))]` gated `Effect::new` as in the Leptos adapter.
+
+5. **Use `request_animation_frame` for DOM settlement.** After hydration, focus trap activation is wrapped in a `request_animation_frame` callback to ensure the DOM has fully settled before the trap is engaged.
+
+```rust
+use dioxus::prelude::*;
+use web_sys::wasm_bindgen::JsCast;
+
+/// Hydration-safe FocusScope setup for modal overlays.
+/// Called from `use_machine` effect setup after hydration is confirmed.
+///
+/// Dioxus adapter differences from Leptos:
+/// - `use_effect` instead of `#[cfg(not(feature = "ssr"))]` gated `Effect::new`
+/// - `use_drop` instead of `on_cleanup` for cleanup registration
+/// - `Signal<Option<web_sys::HtmlElement>>` instead of `StoredValue`
+/// - Focus operations go through platform abstraction where available
+fn setup_focus_scope_hydration_safe(
+    scope_id: String,
+    mut restore_target: Signal<Option<web_sys::HtmlElement>>,
+) {
+    // Step 1: Clean up orphaned inert attributes left by SSR.
+    // use_effect only runs on the client, so no #[cfg(not(feature = "ssr"))] needed.
+    use_effect(move || {
+        let document = web_sys::window()
+            .expect("window")
+            .document()
+            .expect("document");
+
+        // Gate on hydration completion.
+        let body = document.body().expect("document.body");
+        if body.get_attribute("data-ars-hydrated").is_none() {
+            return;
+        }
+
+        // Remove orphaned inert attributes.
+        let inert_elements = document
+            .query_selector_all("[inert]")
+            .expect("querySelectorAll");
+        for i in 0..inert_elements.length() {
+            if let Some(el) = inert_elements.item(i) {
+                let html_el: web_sys::HtmlElement = el.unchecked_into();
+                // Only remove if no open modal is a sibling.
+                if document
+                    .query_selector("[data-ars-modal-open]")
+                    .ok()
+                    .flatten()
+                    .is_none()
+                {
+                    html_el.remove_attribute("inert").ok();
+                }
+            }
+        }
+
+        // Step 2: Activate focus trap after DOM settles.
+        let scope_el = document
+            .get_element_by_id(&scope_id)
+            .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok());
+
+        if let Some(scope_el) = scope_el {
+            // Use request_animation_frame to wait for DOM settlement.
+            let document_clone = document.clone();
+            let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
+                // Validate target exists and is visible.
+                let target = scope_el
+                    .query_selector("[autofocus], [tabindex]")
+                    .ok()
+                    .flatten()
+                    .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+                    .filter(|el| el.offset_parent().is_some());
+
+                if let Some(el) = target {
+                    // Save the currently focused element BEFORE moving focus,
+                    // so it can be restored when the scope is deactivated.
+                    restore_target.set(
+                        document_clone
+                            .active_element()
+                            .and_then(|ae| ae.dyn_into().ok()),
+                    );
+                    el.focus().ok();
+                }
+            });
+            web_sys::window()
+                .expect("window must exist")
+                .request_animation_frame(cb.as_ref().unchecked_ref())
+                .ok();
+        }
+    });
+
+    // Step 3: Clean up on unmount using use_drop (Dioxus equivalent of on_cleanup).
+    use_drop(move || {
+        // Restore focus to the previously focused element when scope deactivates.
+        if let Some(el) = restore_target.peek().as_ref() {
+            el.focus().ok();
+        }
+    });
+}
+```
+
+### 20.2 HydrationSnapshot
+
+For stateful components that need to preserve state across SSR → client hydration:
+
+````rust
+/// Serialize component state for hydration.
+/// Used for components that need to hydrate with correct initial state
+/// (e.g., Dialog that was opened during SSR, or DatePicker with pre-selected date).
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct HydrationSnapshot<M>
+where
+    M: Machine,
+    M::State: serde::Serialize + serde::de::DeserializeOwned,
+{
+    pub state: M::State,
+    pub id: String,
+}
+
+/// In SSR mode: embed snapshot as a JSON script tag.
+/// In hydration mode: read snapshot and initialize machine from it.
+///
+/// ```rust
+/// #[cfg(feature = "ssr")]
+/// fn serialize_snapshot<M: Machine>(svc: &Service<M>) -> String
+/// where M::State: serde::Serialize {
+///     serde_json::to_string(&HydrationSnapshot::<M> {
+///         state: svc.state().clone(),
+///         id: svc.props().id().to_string(),
+///     }).expect("HydrationSnapshot must be serializable for SSR — ensure State implements Serialize")
+/// }
+/// ```
+````
+
+---
+
+## 21. Error Boundary Pattern
+
+Wrap component trees with `ErrorBoundary` to gracefully handle machine panics
+or unexpected state transitions:
+
+```rust
+#[component]
+pub fn ArsErrorBoundary(children: Element) -> Element {
+    rsx! {
+        ErrorBoundary {
+            handle_error: |ctx: ErrorContext| {
+                rsx! {
+                    div {
+                        "data-ars-error": "true",
+                        role: "alert",
+                        p { "A component encountered an error." }
+                        p { {ctx.error().map(|e| format!("{e}")).unwrap_or_default()} }
+                    }
+                }
+            },
+            {children}
+        }
+    }
+}
+```
+
+---
+
+## 22. Machine Type Parameter Bounds
+
+All `Machine` type parameters in adapter hooks must satisfy `M: Machine + 'static`. This is required because framework reactive primitives (Dioxus `Signal`) require `'static` storage. Consequently, `Machine::Props` must be `'static` — use `Rc<T>` or `Arc<T>` for shared ownership instead of references.
+
+---
+
+## 23. Api Lifetime and Async Event Handlers
+
+`Api` borrows from `Service` and cannot be held across `.await` points. For async event handlers, clone the send callback from the `UseMachineReturn`:
+
+```rust
+let send = machine.send;
+// then use inside async block (Dioxus auto-spawns async in event handlers):
+spawn(async move {
+    let result = fetch_data().await;
+    send.call(MyEvent::DataLoaded(result));
+});
+```
+
+Do not hold `Api` references across await boundaries.
