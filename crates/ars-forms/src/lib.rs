@@ -50,8 +50,9 @@ pub trait Validator<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use alloc::{string::ToString, vec};
+
+    use super::*;
 
     #[test]
     fn empty_validation_result_is_valid() {
