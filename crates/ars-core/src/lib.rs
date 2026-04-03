@@ -259,6 +259,10 @@ impl<M: Machine> Service<M> {
     /// Returns the list of pending side effects that the adapter should execute.
     /// If the event is ignored (transition returns `None`), the returned list is empty.
     #[must_use]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "spec-defined by-value signature; event ownership needed for future effect dispatch"
+    )]
     pub fn send(&mut self, event: M::Event) -> Vec<PendingEffect<M::Event>> {
         let Some(plan) = M::transition(&self.state, &event, &self.context, &self.props) else {
             return Vec::new();

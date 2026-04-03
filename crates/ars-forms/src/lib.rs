@@ -47,3 +47,57 @@ pub trait Validator<T> {
     /// Validates the given value and returns a result with any errors found.
     fn validate(&self, value: &T) -> ValidationResult;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::{string::ToString, vec};
+
+    #[test]
+    fn empty_validation_result_is_valid() {
+        let result = ValidationResult::default();
+        assert!(result.is_valid());
+    }
+
+    #[test]
+    fn validation_result_with_errors_is_not_valid() {
+        let result = ValidationResult {
+            errors: vec![ValidationError {
+                code: "required".to_string(),
+                message: "This field is required".to_string(),
+            }],
+        };
+        assert!(!result.is_valid());
+    }
+
+    #[test]
+    fn field_state_default_not_dirty_not_touched() {
+        let state = FieldState::default();
+        assert!(!state.dirty);
+        assert!(!state.touched);
+    }
+
+    struct RequiredValidator;
+
+    impl Validator<String> for RequiredValidator {
+        fn validate(&self, value: &String) -> ValidationResult {
+            if value.is_empty() {
+                ValidationResult {
+                    errors: vec![ValidationError {
+                        code: "required".to_string(),
+                        message: "Value is required".to_string(),
+                    }],
+                }
+            } else {
+                ValidationResult::default()
+            }
+        }
+    }
+
+    #[test]
+    fn validator_trait_can_be_implemented() {
+        let validator = RequiredValidator;
+        assert!(!validator.validate(&String::new()).is_valid());
+        assert!(validator.validate(&"hello".to_string()).is_valid());
+    }
+}
