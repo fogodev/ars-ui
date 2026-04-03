@@ -13,12 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Cargo fmt
-        run: cargo fmt --all --check
+        run: cargo +nightly fmt --all --check
 
   clippy:
     name: Clippy
