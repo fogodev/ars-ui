@@ -14,6 +14,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Start MCP stdio server exposing all workspace tools.
+    #[cfg(feature = "mcp")]
+    Mcp,
     /// Spec navigation commands.
     Spec {
         #[command(subcommand)]
@@ -109,6 +112,16 @@ fn main() {
     };
 
     let result = match cli.command {
+        #[cfg(feature = "mcp")]
+        Command::Mcp => {
+            let root = std::sync::Arc::new(root);
+            let rt = tokio::runtime::Runtime::new().expect("cannot create tokio runtime");
+            rt.block_on(xtask::mcp::serve(root)).unwrap_or_else(|e| {
+                eprintln!("error: {e}");
+                process::exit(1);
+            });
+            return;
+        }
         Command::Spec { cmd } => match cmd {
             SpecCommand::Info { component } => xtask::spec::info::execute(&root, &component),
             SpecCommand::Deps { component } => xtask::spec::deps::execute(&root, &component),
