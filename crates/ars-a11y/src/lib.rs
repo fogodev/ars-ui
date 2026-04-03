@@ -9,7 +9,19 @@
 
 extern crate alloc;
 
-use alloc::string::String;
+use alloc::{format, string::String};
+
+pub mod aria;
+
+#[cfg(feature = "aria-drag-drop-compat")]
+pub use aria::attribute::AriaDropeffect;
+pub use aria::{
+    attribute::{
+        AriaAttribute, AriaAutocomplete, AriaChecked, AriaCurrent, AriaHasPopup, AriaIdList,
+        AriaIdRef, AriaInvalid, AriaLive, AriaOrientation, AriaPressed, AriaRelevant, AriaSort,
+    },
+    role::AriaRole,
+};
 
 /// Custom data attribute used to expose machine state on the root DOM element.
 ///
@@ -17,58 +29,82 @@ use alloc::string::String;
 /// like `[data-ars-state="open"]` for styling and test assertions.
 pub const DATA_ARS_STATE: &str = "data-ars-state";
 
-/// A WAI-ARIA role that conveys the semantic purpose of a DOM element.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AriaRole {
-    /// An interactive element that triggers an action when activated.
-    Button,
-    /// A checkable input with `true`, `false`, or `mixed` states.
-    Checkbox,
-    /// A modal or non-modal dialog window.
-    Dialog,
-    /// A generic grouping container for related elements.
-    Group,
-    /// An element removed from the accessibility tree (purely decorative).
-    Presentation,
-}
-
-/// A WAI-ARIA state or property attribute applied to a DOM element.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AriaAttribute {
-    /// Defines a human-readable label for the element (`aria-label`).
-    Label,
-    /// References the ID of the element that labels this one (`aria-labelledby`).
-    LabelledBy,
-    /// References the ID of the element that describes this one (`aria-describedby`).
-    DescribedBy,
-    /// Indicates the element's value is invalid (`aria-invalid`).
-    Invalid,
-}
-
-/// A set of related DOM IDs for a component and its associated elements.
+/// Derives component part IDs from an adapter-provided base ID.
 ///
-/// Used to wire up `aria-labelledby`, `aria-describedby`, and `aria-errormessage`
-/// attributes that link a component to its label, description, and error elements.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// The base ID comes from the adapter's hydration-safe ID utility
+/// (e.g., `use_id()` in ars-leptos, scope ID in ars-dioxus).
+/// All relationship attributes (`aria-labelledby`, `aria-describedby`,
+/// `aria-controls`, `aria-activedescendant`) use IDs derived from
+/// this single base to guarantee uniqueness and consistency.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComponentIds {
-    /// The root element's DOM ID.
-    pub root: String,
-    /// The label element's DOM ID, if present.
-    pub label: Option<String>,
-    /// The description element's DOM ID, if present.
-    pub description: Option<String>,
-    /// The error message element's DOM ID, if present.
-    pub error: Option<String>,
+    base: String,
 }
 
 impl ComponentIds {
-    /// Creates a new [`ComponentIds`] with the given root ID and no associated elements.
+    /// Creates from an adapter-provided base ID.
+    /// The base ID must be unique and hydration-safe.
     #[must_use]
-    pub fn named(root: impl Into<String>) -> Self {
+    pub fn from_id(base_id: &str) -> Self {
+        debug_assert!(!base_id.is_empty(), "Component base ID must not be empty");
         Self {
-            root: root.into(),
-            ..Self::default()
+            base: String::from(base_id),
         }
+    }
+
+    /// Returns the base ID (for the root element).
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.base
+    }
+
+    /// Derives a part ID: `"{base}-{part}"`.
+    ///
+    /// Use for fixed structural parts of a component (trigger, content, label, etc.).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use ars_a11y::ComponentIds;
+    /// let ids = ComponentIds::from_id("dialog-3");
+    /// assert_eq!(ids.part("title"), "dialog-3-title");
+    /// assert_eq!(ids.part("content"), "dialog-3-content");
+    /// ```
+    #[must_use]
+    pub fn part(&self, part: &str) -> String {
+        format!("{}-{}", self.base, part)
+    }
+
+    /// Derives a keyed item ID: `"{base}-{part}-{key}"`.
+    ///
+    /// Use for per-item IDs in collection components (lists, grids, trees, menus).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use ars_a11y::ComponentIds;
+    /// let ids = ComponentIds::from_id("listbox-2");
+    /// assert_eq!(ids.item("item", &"option-a"), "listbox-2-item-option-a");
+    /// ```
+    #[must_use]
+    pub fn item(&self, part: &str, key: &impl core::fmt::Display) -> String {
+        format!("{}-{}-{}", self.base, part, key)
+    }
+
+    /// Derives a keyed item sub-part ID: `"{base}-{part}-{key}-{sub}"`.
+    ///
+    /// Use for sub-elements within a keyed item (text label, indicator, etc.).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use ars_a11y::ComponentIds;
+    /// let ids = ComponentIds::from_id("listbox-2");
+    /// assert_eq!(ids.item_part("item", &"opt-a", "text"), "listbox-2-item-opt-a-text");
+    /// ```
+    #[must_use]
+    pub fn item_part(&self, part: &str, key: &impl core::fmt::Display, sub: &str) -> String {
+        format!("{}-{}-{}-{}", self.base, part, key, sub)
     }
 }
 
@@ -79,6 +115,7 @@ mod tests {
     #[test]
     fn aria_role_clone_and_equality() {
         let role = AriaRole::Button;
+        #[expect(clippy::clone_on_copy, reason = "deliberately testing Clone impl")]
         let cloned = role.clone();
         assert_eq!(role, cloned);
         assert_ne!(AriaRole::Button, AriaRole::Dialog);
@@ -86,28 +123,43 @@ mod tests {
 
     #[test]
     fn aria_attribute_clone_and_equality() {
-        let attr = AriaAttribute::Label;
+        let attr = AriaAttribute::Disabled(true);
         let cloned = attr.clone();
         assert_eq!(attr, cloned);
-        assert_ne!(AriaAttribute::Label, AriaAttribute::Invalid);
+        assert_ne!(
+            AriaAttribute::Disabled(true),
+            AriaAttribute::Disabled(false)
+        );
     }
 
     #[test]
-    fn component_ids_named_creates_root_only() {
-        let ids = ComponentIds::named("my-component");
-        assert_eq!(ids.root, "my-component");
-        assert!(ids.label.is_none());
-        assert!(ids.description.is_none());
-        assert!(ids.error.is_none());
+    fn component_ids_from_id_stores_base() {
+        let ids = ComponentIds::from_id("dialog-3");
+        assert_eq!(ids.id(), "dialog-3");
     }
 
     #[test]
-    fn component_ids_default_has_empty_root() {
-        let ids = ComponentIds::default();
-        assert!(ids.root.is_empty());
-        assert!(ids.label.is_none());
-        assert!(ids.description.is_none());
-        assert!(ids.error.is_none());
+    fn component_ids_part_derives_structural_id() {
+        let ids = ComponentIds::from_id("dialog-3");
+        assert_eq!(ids.part("title"), "dialog-3-title");
+        assert_eq!(ids.part("content"), "dialog-3-content");
+        assert_eq!(ids.part("description"), "dialog-3-description");
+    }
+
+    #[test]
+    fn component_ids_item_derives_keyed_id() {
+        let ids = ComponentIds::from_id("listbox-2");
+        assert_eq!(ids.item("item", &"option-a"), "listbox-2-item-option-a");
+        assert_eq!(ids.item("item", &42), "listbox-2-item-42");
+    }
+
+    #[test]
+    fn component_ids_item_part_derives_sub_element_id() {
+        let ids = ComponentIds::from_id("listbox-2");
+        assert_eq!(
+            ids.item_part("item", &"opt-a", "text"),
+            "listbox-2-item-opt-a-text"
+        );
     }
 
     #[test]

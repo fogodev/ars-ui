@@ -29,6 +29,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install Dioxus desktop system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
       - name: Cargo clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
@@ -39,6 +41,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install Dioxus desktop system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
       - name: Cargo check
         run: cargo check --workspace --all-features
 
@@ -69,5 +73,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install Dioxus desktop system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
       - name: Adapter harness tier
         run: cargo test -p ars-test-harness -p ars-test-harness-leptos -p ars-test-harness-dioxus -p ars-leptos -p ars-dioxus --all-targets --all-features

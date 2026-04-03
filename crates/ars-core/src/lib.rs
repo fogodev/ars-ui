@@ -34,16 +34,16 @@ pub type AttrMap = BTreeMap<String, String>;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingEffect<E> {
     /// The identifier for this effect, used by adapters to match and execute it.
-    pub name: String,
+    pub name: &'static str,
     _event: core::marker::PhantomData<E>,
 }
 
 impl<E> PendingEffect<E> {
     /// Creates a new pending effect with the given name.
     #[must_use]
-    pub fn named(name: impl Into<String>) -> Self {
+    pub fn named(name: &'static str) -> Self {
         Self {
-            name: name.into(),
+            name,
             _event: core::marker::PhantomData,
         }
     }
@@ -93,49 +93,85 @@ impl<S, E, C> TransitionPlan<S, E, C> {
 /// A value that may be controlled by the parent or managed internally.
 ///
 /// Components that support two-way binding use `Bindable` to distinguish between
-/// values owned by the parent ([`Controlled`](Bindable::Controlled)) and values
-/// managed by the component itself ([`Uncontrolled`](Bindable::Uncontrolled)).
-/// Calling [`set`](Bindable::set) on a controlled value is a no-op.
+/// values owned by the parent ([`controlled`](Bindable::controlled)) and values
+/// managed by the component itself ([`uncontrolled`](Bindable::uncontrolled)).
+///
+/// When controlled, [`set`](Bindable::set) updates the internal copy but
+/// [`get`](Bindable::get) always returns the controlled value. The parent
+/// must call [`sync_controlled`](Bindable::sync_controlled) to push new
+/// controlled values.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Bindable<T> {
-    /// The parent owns this value; internal [`set`](Bindable::set) calls are ignored.
-    Controlled(T),
-    /// The component owns this value; internal [`set`](Bindable::set) calls update it.
-    Uncontrolled(T),
+pub struct Bindable<T: Clone + PartialEq + Debug> {
+    /// The externally controlled value, or `None` if uncontrolled.
+    controlled: Option<T>,
+    /// The internal value managed by the component.
+    internal: T,
 }
 
-impl<T> Bindable<T> {
+impl<T: Clone + PartialEq + Debug> Bindable<T> {
     /// Creates a controlled bindable owned by the parent.
+    ///
+    /// Both the controlled and internal fields are initialized to the given value.
+    /// The component reads the controlled value via [`get`](Self::get).
     #[must_use]
     pub fn controlled(value: T) -> Self {
-        Self::Controlled(value)
+        Self {
+            internal: value.clone(),
+            controlled: Some(value),
+        }
     }
 
     /// Creates an uncontrolled bindable managed by the component.
+    ///
+    /// There is no external controlled value; [`get`](Self::get) returns the
+    /// internal value which can be updated via [`set`](Self::set).
     #[must_use]
-    pub fn uncontrolled(value: T) -> Self {
-        Self::Uncontrolled(value)
+    pub fn uncontrolled(default: T) -> Self {
+        Self {
+            controlled: None,
+            internal: default,
+        }
     }
 
-    /// Returns a reference to the current value regardless of control mode.
+    /// Returns a reference to the current value.
+    ///
+    /// Returns the controlled value if set, otherwise the internal value.
     #[must_use]
     pub fn get(&self) -> &T {
-        match self {
-            Self::Controlled(value) | Self::Uncontrolled(value) => value,
-        }
+        self.controlled.as_ref().unwrap_or(&self.internal)
     }
 
     /// Returns `true` if this value is controlled by the parent.
     #[must_use]
     pub fn is_controlled(&self) -> bool {
-        matches!(self, Self::Controlled(_))
+        self.controlled.is_some()
     }
 
-    /// Updates the value if it is uncontrolled. Has no effect on controlled values.
+    /// Updates the internal value if uncontrolled. Has no effect on controlled values.
     pub fn set(&mut self, value: T) {
-        if let Self::Uncontrolled(current) = self {
-            *current = value;
+        if self.controlled.is_none() {
+            self.internal = value;
         }
+    }
+
+    /// Pushes a new controlled value from the parent.
+    ///
+    /// Updates both the controlled and internal fields. This should be called
+    /// when the parent's controlled prop changes.
+    pub fn sync_controlled(&mut self, value: Option<T>) {
+        if let Some(ref v) = value {
+            self.internal = v.clone();
+        }
+        self.controlled = value;
+    }
+
+    /// Returns a mutable reference to the internal value.
+    ///
+    /// Use for in-place mutations on collection types to avoid cloning.
+    /// **Warning:** For controlled bindables, mutating the internal value has no
+    /// effect on what [`get`](Self::get) returns (it returns the controlled value).
+    pub fn get_mut_owned(&mut self) -> &mut T {
+        &mut self.internal
     }
 }
 
@@ -144,7 +180,7 @@ impl<T> Bindable<T> {
 /// Each component defines an enum of its parts that implements this trait,
 /// typically via `#[derive(ComponentPart)]`. The connect API uses parts to
 /// produce the correct [`AttrMap`] for each element in the component's DOM tree.
-pub trait ComponentPart: Clone {
+pub trait ComponentPart: Clone + Debug + PartialEq + Eq + core::hash::Hash + 'static {
     /// Returns the root part of this component.
     fn root() -> Self;
     /// Returns the string name of this part (e.g. `"root"`, `"trigger"`).
@@ -174,11 +210,11 @@ pub trait Machine {
     /// The state type representing the machine's current configuration.
     type State: Clone + Debug + PartialEq;
     /// The event type that triggers state transitions.
-    type Event;
+    type Event: Clone + Debug;
     /// Internal context accumulated across transitions (e.g. focused index, scroll offset).
-    type Context: Clone + Default;
+    type Context: Clone + Debug;
     /// External configuration passed in by the parent component.
-    type Props;
+    type Props: Clone + PartialEq;
     /// The connect API type that produces attributes from current state.
     type Api<'a>: ConnectApi
     where
@@ -303,13 +339,13 @@ mod tests {
         Toggle,
     }
 
-    #[derive(Clone, Debug, Default, PartialEq, Eq)]
+    #[derive(Clone, Debug, PartialEq, Eq)]
     struct ToggleContext;
 
-    #[derive(Clone, Debug, Default, PartialEq, Eq)]
+    #[derive(Clone, Debug, PartialEq, Eq)]
     struct ToggleProps;
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
     struct TogglePart;
 
     impl ComponentPart for TogglePart {
@@ -394,5 +430,20 @@ mod tests {
         let mut controlled = Bindable::controlled(1_u8);
         controlled.set(2);
         assert_eq!(controlled.get(), &1);
+    }
+
+    #[test]
+    fn bindable_sync_controlled_updates_both_fields() {
+        let mut b = Bindable::uncontrolled(10_u8);
+        assert!(!b.is_controlled());
+
+        b.sync_controlled(Some(20));
+        assert!(b.is_controlled());
+        assert_eq!(b.get(), &20);
+
+        b.sync_controlled(None);
+        assert!(!b.is_controlled());
+        // Internal was updated to 20 by sync, now reads as uncontrolled
+        assert_eq!(b.get(), &20);
     }
 }

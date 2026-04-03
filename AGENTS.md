@@ -62,7 +62,20 @@ Both adapter preludes must stay symmetric: same items, same structure. When addi
 
 ## Spec Synchronization During Implementation
 
-The specification remains authoritative during implementation.
+The specification is the authoritative contract. It took weeks of deliberate design and MUST be followed.
+
+### Spec-first implementation rule
+
+Before implementing any public type, trait, function, or method:
+
+1. **Read the spec section first.** Find the relevant code example in `spec/`. Use `spec-tool toc <file>` and `grep` to locate it.
+2. **Match the spec exactly.** If the spec defines `struct ComponentIds { base: String }` with methods `from_id()`, `id()`, `part()`, `item()`, `item_part()` — implement exactly that. Do not invent alternative field names, method names, or signatures.
+3. **Cross-check after implementation.** Before presenting code for review, diff every public item against the spec's code examples. Every struct field, every method name, every parameter must match.
+4. **If you must deviate**, there must be a concrete technical reason (e.g., the spec's API cannot compile, or a dependency doesn't expose the needed type). Document the reason in a code comment and flag it to the user explicitly.
+
+Inventing alternative APIs that "seem equivalent" is never acceptable — it silently invalidates the spec's design decisions and all downstream code that depends on those APIs.
+
+### Spec/code mismatch resolution
 
 - If code and spec disagree, resolve the mismatch in the same task or PR.
 - Shared conceptual changes belong in shared or foundation spec files, not only in adapter code.
