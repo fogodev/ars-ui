@@ -1,6 +1,20 @@
 [workspace]
-members  = ["tools/spec-tool"]
-exclude  = ["crates/*"]        # TODO: replace with `members = ["crates/*", ...]` once first crate is added
+members = [
+    "crates/ars-a11y",
+    "crates/ars-collections",
+    "crates/ars-core",
+    "crates/ars-derive",
+    "crates/ars-dioxus",
+    "crates/ars-dom",
+    "crates/ars-forms",
+    "crates/ars-i18n",
+    "crates/ars-interactions",
+    "crates/ars-leptos",
+    "crates/ars-test-harness",
+    "crates/ars-test-harness-dioxus",
+    "crates/ars-test-harness-leptos",
+    "tools/spec-tool",
+]
 resolver = "3"
 
 [workspace.package]
@@ -13,6 +27,7 @@ rust-version = "1.85"
 [workspace.lints.rust]
 unsafe_code                   = "forbid"
 missing_debug_implementations = "warn"
+missing_docs                  = "warn"
 unreachable_pub               = "warn"
 unused_qualifications         = "warn"
 unused_import_braces          = "warn"
@@ -52,3 +67,7 @@ return_self_not_must_use = "warn"
 # Restriction picks
 allow_attributes = "warn"
 clone_on_ref_ptr = "warn"
+
+[profile.release]
+lto = true
+codegen-units = 1

@@ -1,0 +1,118 @@
+name: Task
+description: Agent-ready implementation task.
+title: "task: "
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: Describe the single coherent objective for this task.
+    validations:
+      required: true
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: State what should not be changed as part of this task.
+    validations:
+      required: true
+  - type: textarea
+    id: spec_refs
+    attributes:
+      label: Spec refs
+      description: Cite exact spec files and sections.
+    validations:
+      required: true
+  - type: textarea
+    id: depends_on
+    attributes:
+      label: Depends on
+      description: Reference prerequisite issues, or say none. Native GitHub issue dependencies should be added after creation.
+    validations:
+      required: true
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Layer
+      options:
+        - Core
+        - Subsystem
+        - Harness
+        - Adapter
+        - Component
+        - Spec
+    validations:
+      required: true
+  - type: dropdown
+    id: framework
+    attributes:
+      label: Framework
+      options:
+        - None
+        - Leptos
+        - Dioxus
+        - Both
+    validations:
+      required: true
+  - type: dropdown
+    id: test_tier
+    attributes:
+      label: Test tier
+      options:
+        - Unit
+        - Integration
+        - Adapter
+        - Mixed
+    validations:
+      required: true
+  - type: dropdown
+    id: points
+    attributes:
+      label: Fibonacci points
+      description: Most tasks should be 5 or less. 8 requires explicit rationale. 13 must be split before pickup.
+      options:
+        - "1"
+        - "2"
+        - "3"
+        - "5"
+        - "8"
+        - "13"
+    validations:
+      required: true
+  - type: textarea
+    id: tests_first
+    attributes:
+      label: Tests to add first
+      description: Name the exact tests or suites this task must add or extend before implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Phrase these as observable behavior or validation outcomes.
+    validations:
+      required: true
+  - type: textarea
+    id: spec_impact
+    attributes:
+      label: Spec impact
+      description: State either no change is required or the exact files/sections that must be updated in the same task.
+    validations:
+      required: true
+  - type: textarea
+    id: board_rule
+    attributes:
+      label: Board update rule
+      description: State how this issue should be updated if blocked. Use native GitHub issue dependencies as the blocker graph.
+      placeholder: If blocked, keep Status in Todo and name the dependency or spec ambiguity.
+    validations:
+      required: true
+  - type: textarea
+    id: eight_point_rationale
+    attributes:
+      label: 8-point rationale
+      description: Required only if the task is 8 points.
+      placeholder: Explain why further decomposition would create harmful coupling.
+    validations:
+      required: false

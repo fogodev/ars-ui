@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Workspace Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Cargo check
+        run: cargo check --workspace
+
+  unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Unit test tier
+        run: cargo test -p ars-core -p ars-interactions -p ars-forms
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Integration tier placeholder
+        run: cargo test -p ars-core service_applies_transitions
+
+  adapter:
+    name: Adapter Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Adapter harness tier
+        run: cargo test -p ars-test-harness -p ars-test-harness-leptos -p ars-test-harness-dioxus
