@@ -20,7 +20,7 @@ body:
     id: spec_refs
     attributes:
       label: Spec refs
-      description: Cite exact spec files and sections.
+      description: Cite exact spec files and sections. For adapter work, include the relevant foundation adapter spec (08 or 09) and any agnostic component spec sections the adapter maps.
     validations:
       required: true
   - type: textarea
@@ -91,13 +91,14 @@ body:
     attributes:
       label: Acceptance criteria
       description: Phrase these as observable behavior or validation outcomes.
+      placeholder: "For adapter tasks, include: parity with other adapter verified, deviations documented, spec sync confirmed."
     validations:
       required: true
   - type: textarea
     id: spec_impact
     attributes:
       label: Spec impact
-      description: State either no change is required or the exact files/sections that must be updated in the same task.
+      description: State either no change is required or the exact files/sections that must be updated in the same task. For adapter work, state whether the Mandatory Promotion Rule applies (shared behavior must be promoted to foundation spec, not left only in adapter code). See docs/implementation/adapter-contract.md.
     validations:
       required: true
   - type: textarea

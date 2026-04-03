@@ -94,6 +94,13 @@ ars-ui/
 3. Write tests for new functionality
 4. Open a pull request with a clear description of what changed and why
 
+## Spec Synchronization
+
+If your change affects the specification or adapter layers, review the
+[Adapter contract reference](docs/implementation/adapter-contract.md) before
+opening a PR. The PR template includes an adapter sync checklist that must be
+completed for any adapter or framework-specific work.
+
 ## License
 
 By contributing to ars-ui, you agree that your contributions will be licensed under the same terms as the project: MIT OR Apache-2.0, at the user's choice.
