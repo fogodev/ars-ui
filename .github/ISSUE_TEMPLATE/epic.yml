@@ -83,7 +83,7 @@ body:
     id: spec_impact
     attributes:
       label: Spec impact
-      description: State whether this epic is expected to update the spec.
+      description: State whether this epic is expected to update the spec. For adapter epics, state whether the Mandatory Promotion Rule applies. See docs/implementation/adapter-contract.md.
       placeholder: No spec change required, or list exact files/sections.
     validations:
       required: true

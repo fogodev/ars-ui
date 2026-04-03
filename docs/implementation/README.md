@@ -16,3 +16,4 @@ Start with:
 2. [project-board.md](./project-board.md) for fields, workflow, and sizing rules.
 3. [initial-backlog.md](./initial-backlog.md) for the seed epics and first implementation tasks.
 4. The GitHub Project and initial issue backlog are expected to be kept in sync with these docs.
+5. [adapter-contract.md](./adapter-contract.md) for adapter work obligations and spec-sync checklist.
