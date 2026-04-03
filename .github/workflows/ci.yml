@@ -74,6 +74,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install Dioxus desktop system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
       - name: Adapter harness tier
         run: cargo test -p ars-test-harness -p ars-test-harness-leptos -p ars-test-harness-dioxus -p ars-leptos -p ars-dioxus --all-targets --all-features
