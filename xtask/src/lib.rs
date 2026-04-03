@@ -2,3 +2,4 @@
 
 pub mod manifest;
 pub mod spec;
+pub mod tool;
