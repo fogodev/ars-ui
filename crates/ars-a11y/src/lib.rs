@@ -71,3 +71,47 @@ impl ComponentIds {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aria_role_clone_and_equality() {
+        let role = AriaRole::Button;
+        let cloned = role.clone();
+        assert_eq!(role, cloned);
+        assert_ne!(AriaRole::Button, AriaRole::Dialog);
+    }
+
+    #[test]
+    fn aria_attribute_clone_and_equality() {
+        let attr = AriaAttribute::Label;
+        let cloned = attr.clone();
+        assert_eq!(attr, cloned);
+        assert_ne!(AriaAttribute::Label, AriaAttribute::Invalid);
+    }
+
+    #[test]
+    fn component_ids_named_creates_root_only() {
+        let ids = ComponentIds::named("my-component");
+        assert_eq!(ids.root, "my-component");
+        assert!(ids.label.is_none());
+        assert!(ids.description.is_none());
+        assert!(ids.error.is_none());
+    }
+
+    #[test]
+    fn component_ids_default_has_empty_root() {
+        let ids = ComponentIds::default();
+        assert!(ids.root.is_empty());
+        assert!(ids.label.is_none());
+        assert!(ids.description.is_none());
+        assert!(ids.error.is_none());
+    }
+
+    #[test]
+    fn data_ars_state_constant_value() {
+        assert_eq!(DATA_ARS_STATE, "data-ars-state");
+    }
+}
