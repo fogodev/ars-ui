@@ -7,6 +7,7 @@ pub mod info;
 pub mod profile;
 pub mod related;
 pub mod reverse;
+pub mod search;
 pub mod toc;
 pub mod tools;
 pub mod validate;

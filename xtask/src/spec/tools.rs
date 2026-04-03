@@ -20,6 +20,7 @@ pub fn register_all(registry: &mut ToolRegistry, root: &Arc<SpecRoot>) {
     registry.register(Box::new(TocTool(Arc::clone(root))));
     registry.register(Box::new(ValidateTool(Arc::clone(root))));
     registry.register(Box::new(AdaptersTool(Arc::clone(root))));
+    registry.register(Box::new(SearchTool(Arc::clone(root))));
 }
 
 /// Extract a required string parameter from JSON input.
@@ -311,6 +312,54 @@ impl Tool for AdaptersTool {
         Ok(super::adapters::execute(
             &self.0,
             &get_string(&input, "framework")?,
+        )?)
+    }
+}
+
+#[derive(Debug)]
+struct SearchTool(Arc<SpecRoot>);
+
+impl Tool for SearchTool {
+    fn name(&self) -> &str {
+        "spec_search"
+    }
+
+    fn description(&self) -> &str {
+        "Search spec content by keyword/regex with optional category, section, and tier filters"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Regex pattern to search for"
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Optional category filter (e.g. input, overlay)"
+                },
+                "section": {
+                    "type": "string",
+                    "description": "Optional section filter: states, events, props, accessibility, anatomy, i18n, forms"
+                },
+                "tier": {
+                    "type": "string",
+                    "description": "Optional tier filter: stateless, stateful, complex"
+                }
+            },
+            "required": ["query"]
+        })
+    }
+
+    fn execute(&self, input: Value) -> Result<String, ToolError> {
+        let query = get_string(&input, "query")?;
+        let category = input.get("category").and_then(Value::as_str);
+        let section = input.get("section").and_then(Value::as_str);
+        let tier = input.get("tier").and_then(Value::as_str);
+        Ok(super::search::execute(
+            &self.0, &query, category, section, tier,
         )?)
     }
 }

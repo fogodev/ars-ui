@@ -65,6 +65,20 @@ enum SpecCommand {
         /// Framework: "leptos" or "dioxus".
         framework: String,
     },
+    /// Search spec content by keyword/regex.
+    Search {
+        /// Regex pattern to search for.
+        query: String,
+        /// Category filter.
+        #[arg(long)]
+        category: Option<String>,
+        /// Section filter (states, events, props, accessibility, anatomy, i18n, forms).
+        #[arg(long)]
+        section: Option<String>,
+        /// Tier filter (stateless, stateful, complex).
+        #[arg(long)]
+        tier: Option<String>,
+    },
 }
 
 fn main() {
@@ -102,6 +116,18 @@ fn main() {
             SpecCommand::Adapters { framework } => {
                 xtask::spec::adapters::execute(&root, &framework)
             }
+            SpecCommand::Search {
+                query,
+                category,
+                section,
+                tier,
+            } => xtask::spec::search::execute(
+                &root,
+                &query,
+                category.as_deref(),
+                section.as_deref(),
+                tier.as_deref(),
+            ),
         },
     };
 
