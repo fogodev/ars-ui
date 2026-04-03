@@ -2,6 +2,12 @@
 
 ---
 
+## Issue closure
+
+Closes #
+
+---
+
 ## Spec refs
 
 ---
