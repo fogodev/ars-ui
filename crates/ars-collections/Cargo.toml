@@ -1,0 +1,20 @@
+[package]
+name                   = "ars-collections"
+version                = "0.1.0"
+edition.workspace      = true
+license.workspace      = true
+description.workspace  = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[features]
+i18n  = ["dep:ars-i18n"]
+serde = []
+
+[dependencies]
+ars-a11y = { path = "../ars-a11y", default-features = false }
+ars-core = { path = "../ars-core", default-features = false }
+ars-i18n = { path = "../ars-i18n", optional = true }
+
+[lints]
+workspace = true

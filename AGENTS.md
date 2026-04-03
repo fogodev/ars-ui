@@ -4,6 +4,52 @@
 
 Rust frontend component library using state machines, framework-agnostic core with Leptos/Dioxus adapters.
 
+## Current Phase
+
+The repo is now in active implementation, not spec drafting only.
+
+Agents working on implementation should use the GitHub Project roadmap and issue backlog as the execution source of truth:
+
+- Use the GitHub Project `ars-ui implementation roadmap` to understand active epics, task breakdown, dependencies, status, and iteration planning.
+- Prefer picking a single issue-backed task that is unblocked, sized, and scoped for independent delivery.
+- Do not start work from an epic issue unless the user explicitly asks for planning or further decomposition.
+- Do not start a task that is blocked by unresolved GitHub issue dependencies.
+- Treat native GitHub issue dependencies as the blocker graph and the issue body acceptance criteria as the delivery contract.
+
+## Development Workflow
+
+For implementation tasks:
+
+1. Read the assigned or selected GitHub issue first.
+2. Review the cited spec sections and any dependency issues.
+3. Add or update the named tests first.
+4. Implement only the scope required to make those tests pass.
+5. If implementation changes the intended contract, update the relevant spec in the same task.
+6. Keep the issue, PR, and Project status aligned with the actual work state.
+
+Default delivery rules:
+
+- Follow TDD: tests first, implementation second, verification last.
+- Keep task scope aligned with the issue. If the issue is too large or ambiguous, stop and split or clarify rather than freelancing a bigger change.
+- Prefer tasks sized `1`, `2`, `3`, or `5` points. `8` is exceptional. `13` must be decomposed before implementation.
+- Preserve the crate and dependency layering defined by the architecture and implementation plan.
+- When a task is complete, verify the exact tests and checks named by the issue before considering it done.
+
+### Code Quality Standards
+
+- **Document all public items.** Every public struct, enum, trait, function, constant, type alias, method, field, and variant must have a `///` doc comment. Every `lib.rs` must have a `//!` crate-level doc comment. The workspace enforces `missing_docs` linting — undocumented public items are build failures.
+- **Zero warnings policy.** All code must compile with zero warnings under the workspace's configured clippy and rustc lints. Do not suppress warnings with `#[allow(...)]` unless there is a documented reason. Fix the root cause instead.
+- **Derive documentation from the spec.** Doc comments should describe the *purpose and semantics* of the item as defined in the corresponding `spec/` files, not just restate the type signature.
+
+## Spec Synchronization During Implementation
+
+The specification remains authoritative during implementation.
+
+- If code and spec disagree, resolve the mismatch in the same task or PR.
+- Shared conceptual changes belong in shared or foundation spec files, not only in adapter code.
+- Adapter-specific findings must be reflected back into `spec/foundation/08-adapter-leptos.md` and/or `spec/foundation/09-adapter-dioxus.md` when relevant.
+- Do not leave spec drift behind as follow-up cleanup.
+
 ## Spec Structure
 
 The specification lives in `spec/` with this layout:

@@ -1,0 +1,89 @@
+name: Epic
+description: Top-level delivery lane for a subsystem or milestone.
+title: "epic: "
+labels:
+  - epic
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: State the outcome this epic is responsible for delivering.
+    validations:
+      required: true
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: State what this epic is not responsible for.
+    validations:
+      required: true
+  - type: textarea
+    id: spec_refs
+    attributes:
+      label: Spec refs
+      description: Cite exact spec files and sections.
+      placeholder: |
+        - spec/foundation/01-architecture.md#...
+        - spec/testing/15-test-harness.md#...
+    validations:
+      required: true
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Layer
+      options:
+        - Core
+        - Subsystem
+        - Harness
+        - Adapter
+        - Component
+        - Spec
+    validations:
+      required: true
+  - type: dropdown
+    id: framework
+    attributes:
+      label: Framework
+      options:
+        - None
+        - Leptos
+        - Dioxus
+        - Both
+    validations:
+      required: true
+  - type: dropdown
+    id: points
+    attributes:
+      label: Fibonacci points
+      description: Use 13 only for an epic-level slice that still needs decomposition.
+      options:
+        - "1"
+        - "2"
+        - "3"
+        - "5"
+        - "8"
+        - "13"
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true
+  - type: textarea
+    id: decomposition
+    attributes:
+      label: Decomposition plan
+      description: List the child tasks that will make this epic executable.
+    validations:
+      required: true
+  - type: textarea
+    id: spec_impact
+    attributes:
+      label: Spec impact
+      description: State whether this epic is expected to update the spec.
+      placeholder: No spec change required, or list exact files/sections.
+    validations:
+      required: true

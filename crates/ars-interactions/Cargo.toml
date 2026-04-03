@@ -1,0 +1,19 @@
+[package]
+name                   = "ars-interactions"
+version                = "0.1.0"
+edition.workspace      = true
+license.workspace      = true
+description.workspace  = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[features]
+default               = ["aria-drag-drop-compat"]
+aria-drag-drop-compat = []
+
+[dependencies]
+ars-core = { path = "../ars-core" }
+ars-i18n = { path = "../ars-i18n" }
+
+[lints]
+workspace = true

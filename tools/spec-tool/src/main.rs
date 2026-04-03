@@ -1,3 +1,5 @@
+//! Spec navigation tool — resolves file sets from manifest.toml for LLM reviews.
+
 use std::{
     collections::BTreeMap,
     fs,

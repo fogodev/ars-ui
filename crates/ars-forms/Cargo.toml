@@ -1,0 +1,20 @@
+[package]
+name                   = "ars-forms"
+version                = "0.1.0"
+edition.workspace      = true
+license.workspace      = true
+description.workspace  = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[features]
+default = []
+serde   = []
+
+[dependencies]
+ars-a11y = { path = "../ars-a11y" }
+ars-core = { path = "../ars-core" }
+ars-i18n = { path = "../ars-i18n" }
+
+[lints]
+workspace = true
