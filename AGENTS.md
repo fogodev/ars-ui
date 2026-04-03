@@ -27,7 +27,7 @@ For implementation tasks:
 5. Implement only the scope required to make those tests pass.
 6. If implementation changes the intended contract, update the relevant spec in the same task.
 7. Present the final result for user review before any commit.
-8. After user approval, commit and push a PR targeting `main`.
+8. After user approval, commit and push a PR targeting `main`. The PR body MUST include an auto-close keyword for the issue being delivered, for example `Closes #20` or `Fixes #20`, so GitHub closes the issue automatically when the PR merges.
 9. Only after CI passes and the PR is merged, close the issue.
 
 Never close a GitHub issue without a merged PR that passes CI. Never commit or push without explicit user approval. Keep the issue, PR, and Project board status aligned with the actual work state at every step.
