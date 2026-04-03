@@ -21,11 +21,16 @@ Agents working on implementation should use the GitHub Project roadmap and issue
 For implementation tasks:
 
 1. Read the assigned or selected GitHub issue first.
-2. Review the cited spec sections and any dependency issues.
-3. Add or update the named tests first.
-4. Implement only the scope required to make those tests pass.
-5. If implementation changes the intended contract, update the relevant spec in the same task.
-6. Keep the issue, PR, and Project status aligned with the actual work state.
+2. Move the issue to **In Progress** on the GitHub Project board.
+3. Review the cited spec sections and any dependency issues.
+4. Add or update the named tests first.
+5. Implement only the scope required to make those tests pass.
+6. If implementation changes the intended contract, update the relevant spec in the same task.
+7. Present the final result for user review before any commit.
+8. After user approval, commit and push a PR targeting `main`.
+9. Only after CI passes and the PR is merged, close the issue.
+
+Never close a GitHub issue without a merged PR that passes CI. Never commit or push without explicit user approval. Keep the issue, PR, and Project board status aligned with the actual work state at every step.
 
 Default delivery rules:
 
@@ -38,8 +43,8 @@ Default delivery rules:
 ### Code Quality Standards
 
 - **Document all public items.** Every public struct, enum, trait, function, constant, type alias, method, field, and variant must have a `///` doc comment. Every `lib.rs` must have a `//!` crate-level doc comment. The workspace enforces `missing_docs` linting — undocumented public items are build failures.
-- **Zero warnings policy.** All code must compile with zero warnings under the workspace's configured clippy and rustc lints. Do not suppress warnings with `#[allow(...)]` unless there is a documented reason. Fix the root cause instead.
-- **Derive documentation from the spec.** Doc comments should describe the *purpose and semantics* of the item as defined in the corresponding `spec/` files, not just restate the type signature.
+- **Zero warnings policy.** All code must compile with zero warnings under the workspace's configured clippy and rustc lints. Fix the root cause instead of suppressing. When suppression is genuinely needed, use `#[expect(lint, reason = "...")]` — never `#[allow(...)]`.
+- **Derive documentation from the spec.** Doc comments should describe the _purpose and semantics_ of the item as defined in the corresponding `spec/` files, not just restate the type signature.
 
 ## Spec Synchronization During Implementation
 

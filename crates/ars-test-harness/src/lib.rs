@@ -61,3 +61,33 @@ impl TestHarness {
         self.locale.as_ref()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn element_handle_stores_selector() {
+        let handle = ElementHandle::new("button.primary");
+        assert_eq!(handle.selector(), "button.primary");
+    }
+
+    #[test]
+    fn element_handle_default_has_empty_selector() {
+        let handle = ElementHandle::default();
+        assert!(handle.selector().is_empty());
+    }
+
+    #[test]
+    fn test_harness_with_locale() {
+        let harness = TestHarness::with_locale(Locale::new("en-US"));
+        let locale = harness.locale().expect("locale should be set");
+        assert_eq!(locale.as_str(), "en-US");
+    }
+
+    #[test]
+    fn test_harness_default_has_no_locale() {
+        let harness = TestHarness::default();
+        assert!(harness.locale().is_none());
+    }
+}
