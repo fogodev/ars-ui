@@ -65,6 +65,22 @@ enum SpecCommand {
         /// Framework: "leptos" or "dioxus".
         framework: String,
     },
+    /// Get a compact summary of a component.
+    Digest {
+        /// Component name.
+        component: String,
+    },
+    /// Get full implementation context for a component.
+    Context {
+        /// Component name.
+        component: String,
+        /// Framework: "leptos" or "dioxus" (includes adapter spec).
+        #[arg(long)]
+        framework: Option<String>,
+        /// Include testing specs.
+        #[arg(long)]
+        include_testing: bool,
+    },
     /// Search spec content by keyword/regex.
     Search {
         /// Regex pattern to search for.
@@ -116,6 +132,17 @@ fn main() {
             SpecCommand::Adapters { framework } => {
                 xtask::spec::adapters::execute(&root, &framework)
             }
+            SpecCommand::Digest { component } => xtask::spec::digest::execute(&root, &component),
+            SpecCommand::Context {
+                component,
+                framework,
+                include_testing,
+            } => xtask::spec::context::execute(
+                &root,
+                &component,
+                framework.as_deref(),
+                include_testing,
+            ),
             SpecCommand::Search {
                 query,
                 category,

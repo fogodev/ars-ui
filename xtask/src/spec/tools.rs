@@ -21,6 +21,8 @@ pub fn register_all(registry: &mut ToolRegistry, root: &Arc<SpecRoot>) {
     registry.register(Box::new(ValidateTool(Arc::clone(root))));
     registry.register(Box::new(AdaptersTool(Arc::clone(root))));
     registry.register(Box::new(SearchTool(Arc::clone(root))));
+    registry.register(Box::new(DigestTool(Arc::clone(root))));
+    registry.register(Box::new(ContextTool(Arc::clone(root))));
 }
 
 /// Extract a required string parameter from JSON input.
@@ -360,6 +362,88 @@ impl Tool for SearchTool {
         let tier = input.get("tier").and_then(Value::as_str);
         Ok(super::search::execute(
             &self.0, &query, category, section, tier,
+        )?)
+    }
+}
+
+#[derive(Debug)]
+struct DigestTool(Arc<SpecRoot>);
+
+impl Tool for DigestTool {
+    fn name(&self) -> &str {
+        "spec_digest"
+    }
+
+    fn description(&self) -> &str {
+        "Get a compact summary of a component: states, events, props, accessibility, anatomy"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "component": {
+                    "type": "string",
+                    "description": "Component name"
+                }
+            },
+            "required": ["component"]
+        })
+    }
+
+    fn execute(&self, input: Value) -> Result<String, ToolError> {
+        Ok(super::digest::execute(
+            &self.0,
+            &get_string(&input, "component")?,
+        )?)
+    }
+}
+
+#[derive(Debug)]
+struct ContextTool(Arc<SpecRoot>);
+
+impl Tool for ContextTool {
+    fn name(&self) -> &str {
+        "spec_context"
+    }
+
+    fn description(&self) -> &str {
+        "Get full implementation context: component spec + all deps concatenated with file markers"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "component": {
+                    "type": "string",
+                    "description": "Component name"
+                },
+                "framework": {
+                    "type": "string",
+                    "description": "Optional: leptos or dioxus — includes adapter spec"
+                },
+                "include_testing": {
+                    "type": "boolean",
+                    "description": "Include testing spec (default false)"
+                }
+            },
+            "required": ["component"]
+        })
+    }
+
+    fn execute(&self, input: Value) -> Result<String, ToolError> {
+        let component = get_string(&input, "component")?;
+        let framework = input.get("framework").and_then(Value::as_str);
+        let include_testing = input
+            .get("include_testing")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        Ok(super::context::execute(
+            &self.0,
+            &component,
+            framework,
+            include_testing,
         )?)
     }
 }
