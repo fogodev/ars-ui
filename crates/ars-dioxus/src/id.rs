@@ -65,7 +65,7 @@ mod counter {
 /// # Examples
 ///
 /// ```
-/// use ars_leptos::use_id;
+/// use ars_dioxus::use_id;
 ///
 /// let id1 = use_id("dialog");
 /// let id2 = use_id("dialog");
