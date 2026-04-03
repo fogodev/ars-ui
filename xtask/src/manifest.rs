@@ -1,8 +1,4 @@
 //! Manifest types and parsing for `spec/manifest.toml`.
-#![expect(
-    dead_code,
-    reason = "types and helpers used by upcoming command modules"
-)]
 
 use std::{
     collections::BTreeMap,
@@ -14,77 +10,77 @@ use serde::Deserialize;
 
 /// Parsed `spec/manifest.toml`.
 #[derive(Debug, Deserialize)]
-pub(crate) struct Manifest {
+pub struct Manifest {
     /// Foundation document paths keyed by name.
-    pub(crate) foundation: BTreeMap<String, String>,
+    pub foundation: BTreeMap<String, String>,
     /// Shared type file paths keyed by name.
-    pub(crate) shared: BTreeMap<String, String>,
+    pub shared: BTreeMap<String, String>,
     /// All components keyed by lowercase name.
-    pub(crate) components: BTreeMap<String, Component>,
+    pub components: BTreeMap<String, Component>,
     /// Named review profiles.
-    pub(crate) review_profiles: Option<BTreeMap<String, ReviewProfile>>,
+    pub review_profiles: Option<BTreeMap<String, ReviewProfile>>,
     /// Leptos adapter file paths keyed by component name.
     #[serde(default)]
-    pub(crate) leptos_adapters: BTreeMap<String, String>,
+    pub leptos_adapters: BTreeMap<String, String>,
     /// Dioxus adapter file paths keyed by component name.
     #[serde(default)]
-    pub(crate) dioxus_adapters: BTreeMap<String, String>,
+    pub dioxus_adapters: BTreeMap<String, String>,
 }
 
 /// A single component entry in the manifest.
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct Component {
+pub struct Component {
     /// Relative path to the spec file.
-    pub(crate) path: String,
+    pub path: String,
     /// Category name (e.g., "selection", "overlay").
-    pub(crate) category: String,
+    pub category: String,
     /// Required foundation modules.
-    pub(crate) foundation_deps: Vec<String>,
+    pub foundation_deps: Vec<String>,
     /// Required shared types.
     #[serde(default)]
-    pub(crate) shared_deps: Vec<String>,
+    pub shared_deps: Vec<String>,
     /// Related component names.
     #[serde(default)]
-    pub(crate) related: Vec<String>,
+    pub related: Vec<String>,
     /// Whether this component is internal/unstable.
     #[serde(default)]
-    pub(crate) internal: bool,
+    pub internal: bool,
 }
 
 /// A named review profile.
 #[derive(Debug, Deserialize)]
-pub(crate) struct ReviewProfile {
+pub struct ReviewProfile {
     /// Files always loaded for this profile.
-    pub(crate) files_always: Vec<String>,
+    pub files_always: Vec<String>,
 }
 
 /// Parsed YAML frontmatter from a spec file.
 #[derive(Debug, Default)]
-pub(crate) struct Frontmatter {
+pub struct Frontmatter {
     /// Component name.
-    pub(crate) component: Option<String>,
+    pub component: Option<String>,
     /// Category name.
-    pub(crate) category: Option<String>,
+    pub category: Option<String>,
     /// Foundation dependencies.
-    pub(crate) foundation_deps: Option<Vec<String>>,
+    pub foundation_deps: Option<Vec<String>>,
     /// Shared dependencies.
-    pub(crate) shared_deps: Option<Vec<String>>,
+    pub shared_deps: Option<Vec<String>>,
     /// Related components.
-    pub(crate) related: Option<Vec<String>>,
+    pub related: Option<Vec<String>>,
 }
 
 /// Loaded spec root: directory path plus parsed manifest.
 #[derive(Debug)]
-pub(crate) struct SpecRoot {
+pub struct SpecRoot {
     /// Path to the `spec/` directory.
-    pub(crate) path: PathBuf,
+    pub path: PathBuf,
     /// Parsed manifest.
-    pub(crate) manifest: Manifest,
+    pub manifest: Manifest,
 }
 
 /// Errors from manifest operations.
 #[derive(Debug)]
-pub(crate) enum ManifestError {
+pub enum ManifestError {
     /// Could not find `spec/manifest.toml` in any parent directory.
     NotFound,
     /// IO error reading a file.
@@ -182,7 +178,13 @@ impl std::error::Error for ManifestError {}
 
 impl SpecRoot {
     /// Discover and load the spec root by walking up from `start_dir`.
-    pub(crate) fn discover(start_dir: &Path) -> Result<Self, ManifestError> {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ManifestError::NotFound`] if no `spec/manifest.toml` exists in any
+    /// ancestor, [`ManifestError::Io`] on read failure, or [`ManifestError::Parse`]
+    /// on invalid TOML.
+    pub fn discover(start_dir: &Path) -> Result<Self, ManifestError> {
         let mut dir = start_dir.to_path_buf();
         loop {
             let candidate = dir.join("spec").join("manifest.toml");
@@ -203,7 +205,11 @@ impl SpecRoot {
 }
 
 /// Look up a component key with fuzzy matching (case-insensitive, hyphen/underscore).
-pub(crate) fn find_component_key(manifest: &Manifest, name: &str) -> Result<String, ManifestError> {
+///
+/// # Errors
+///
+/// Returns [`ManifestError::ComponentNotFound`] if no match exists.
+pub fn find_component_key(manifest: &Manifest, name: &str) -> Result<String, ManifestError> {
     let key = name.to_lowercase();
     if manifest.components.contains_key(&key) {
         return Ok(key);
@@ -219,7 +225,11 @@ pub(crate) fn find_component_key(manifest: &Manifest, name: &str) -> Result<Stri
 }
 
 /// Look up a component by name. Returns the canonical key and the component.
-pub(crate) fn find_component<'a>(
+///
+/// # Errors
+///
+/// Returns [`ManifestError::ComponentNotFound`] if no match exists.
+pub fn find_component<'a>(
     manifest: &'a Manifest,
     name: &str,
 ) -> Result<(&'a str, &'a Component), ManifestError> {
@@ -233,17 +243,17 @@ pub(crate) fn find_component<'a>(
 }
 
 /// Resolve a foundation dependency name to its file path.
-pub(crate) fn resolve_foundation<'a>(manifest: &'a Manifest, dep: &str) -> Option<&'a str> {
+pub fn resolve_foundation<'a>(manifest: &'a Manifest, dep: &str) -> Option<&'a str> {
     manifest.foundation.get(dep).map(String::as_str)
 }
 
 /// Generate the category context file path.
-pub(crate) fn category_file(category: &str) -> String {
+pub fn category_file(category: &str) -> String {
     format!("components/{category}/_category.md")
 }
 
 /// Extract YAML frontmatter from spec file content.
-pub(crate) fn extract_frontmatter(content: &str) -> Option<String> {
+pub fn extract_frontmatter(content: &str) -> Option<String> {
     let trimmed = content.trim_start();
     if !trimmed.starts_with("---") {
         return None;
@@ -254,7 +264,7 @@ pub(crate) fn extract_frontmatter(content: &str) -> Option<String> {
 }
 
 /// Extract legacy HTML comment header.
-pub(crate) fn extract_html_comment_header(content: &str) -> Option<String> {
+pub fn extract_html_comment_header(content: &str) -> Option<String> {
     let trimmed = content.trim_start();
     let idx = trimmed.find("<!--")?;
     if idx > 200 {
@@ -266,7 +276,11 @@ pub(crate) fn extract_html_comment_header(content: &str) -> Option<String> {
 }
 
 /// Parse YAML frontmatter string into a [`Frontmatter`].
-pub(crate) fn parse_frontmatter_yaml(yaml_str: &str) -> Result<Frontmatter, ManifestError> {
+///
+/// # Errors
+///
+/// Returns [`ManifestError::FrontmatterError`] on malformed YAML.
+pub fn parse_frontmatter_yaml(yaml_str: &str) -> Result<Frontmatter, ManifestError> {
     let mut fm = Frontmatter::default();
     for line in yaml_str.lines() {
         let line = line.trim();
@@ -290,7 +304,7 @@ pub(crate) fn parse_frontmatter_yaml(yaml_str: &str) -> Result<Frontmatter, Mani
 }
 
 /// Parse a YAML-style list value like `[item1, item2]`.
-pub(crate) fn parse_yaml_list(value: &str) -> Vec<String> {
+pub fn parse_yaml_list(value: &str) -> Vec<String> {
     let trimmed = value.trim();
     if trimmed == "[]" || trimmed.is_empty() {
         return Vec::new();
@@ -303,7 +317,7 @@ pub(crate) fn parse_yaml_list(value: &str) -> Vec<String> {
 }
 
 /// Parse a markdown heading line into level and text.
-pub(crate) fn parse_heading(line: &str) -> Option<(u8, &str)> {
+pub fn parse_heading(line: &str) -> Option<(u8, &str)> {
     let trimmed = line.trim_start();
     if !trimmed.starts_with('#') {
         return None;
