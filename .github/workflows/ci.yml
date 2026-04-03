@@ -30,7 +30,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   check:
     name: Workspace Check
@@ -40,7 +40,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Cargo check
-        run: cargo check --workspace
+        run: cargo check --workspace --all-features
 
   unit:
     name: Unit Tests
@@ -50,7 +50,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Unit test tier
-        run: cargo test -p ars-a11y -p ars-core -p ars-interactions -p ars-forms
+        run: cargo test -p ars-a11y -p ars-core -p ars-interactions -p ars-forms --all-targets --all-features
 
   integration:
     name: Integration Tests
@@ -70,4 +70,4 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Adapter harness tier
-        run: cargo test -p ars-test-harness -p ars-test-harness-leptos -p ars-test-harness-dioxus -p ars-leptos -p ars-dioxus
+        run: cargo test -p ars-test-harness -p ars-test-harness-leptos -p ars-test-harness-dioxus -p ars-leptos -p ars-dioxus --all-targets --all-features

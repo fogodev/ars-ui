@@ -9,17 +9,19 @@ rust-version.workspace = true
 
 [features]
 default = []
-ssr     = ["ars-dom/ssr"]
-hydrate = []
-csr     = []
+ssr     = ["leptos/ssr", "ars-dom/ssr"]
+hydrate = ["leptos/hydrate"]
+csr     = ["leptos/csr"]
 
 [dependencies]
 ars-a11y         = { path = "../ars-a11y" }
+ars-collections  = { path = "../ars-collections" }
 ars-core         = { path = "../ars-core" }
 ars-dom          = { path = "../ars-dom" }
 ars-forms        = { path = "../ars-forms" }
 ars-i18n         = { path = "../ars-i18n" }
 ars-interactions = { path = "../ars-interactions" }
+leptos           = { version = "0.8", default-features = false }
 
 [lints]
 workspace = true
