@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "xtask": {
+      "command": "cargo",
+      "args": ["xmcp"]
+    }
+  }
+}

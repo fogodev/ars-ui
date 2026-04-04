@@ -110,23 +110,34 @@ When reading large files, run `wc -l` first to check the line count. If the file
 lines, use the `offset` and `limit` parameters on the Read tool to read in chunks rather than
 attempting to read the entire file at once.
 
-### Using spec-tool (preferred)
+### Using xtask spec (preferred)
 
-Use `cargo run -p spec-tool` to resolve file sets instead of manually parsing manifest.toml:
+Use `cargo xtask spec` to resolve file sets instead of manually parsing manifest.toml:
 
 ```bash
-# Find all components using a shared type:
-cargo run -p spec-tool -- reverse <shared-type>
-
 # Quick metadata lookup:
-cargo run -p spec-tool -- info <component>
+cargo xtask spec info <component>
 
-# See a file's heading structure (with line numbers via toc):
-cargo run -p spec-tool -- toc <file>
+# Find all components using a shared type:
+cargo xtask spec reverse <shared-type>
+
+# See a file's heading structure (with line numbers):
+cargo xtask spec toc <file>
 
 # Validate frontmatter matches manifest.toml:
-cargo run -p spec-tool -- validate
+cargo xtask spec validate
+
+# Search spec content by keyword/regex (with optional filters):
+cargo xtask spec search <query> [--category <cat>] [--section <sec>] [--tier <tier>]
+
+# Get a compact component summary (states, events, props, accessibility):
+cargo xtask spec digest <component>
+
+# Get full implementation context (component + all deps concatenated):
+cargo xtask spec context <component> [--framework <fw>] [--include-testing]
 ```
+
+The xtask also runs as an MCP server (`cargo xtask mcp`) exposing all spec tools for LLM agents.
 
 ### Reading a component (manual fallback)
 
