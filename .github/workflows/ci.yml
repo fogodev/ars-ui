@@ -22,7 +22,7 @@ jobs:
 
   clippy:
     name: Clippy
-    needs: [fmt]
+    needs: [check]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +37,7 @@ jobs:
 
   check:
     name: Workspace Check
-    needs: [clippy]
+    needs: [fmt]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
