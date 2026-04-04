@@ -2,7 +2,7 @@
   "mcpServers": {
     "xtask": {
       "command": "cargo",
-      "args": ["xtask", "mcp"]
+      "args": ["xmcp"]
     }
   }
 }

@@ -1,2 +1,4 @@
 [alias]
 xtask = "run --package xtask --"
+xmcp  = "xtask mcp"
+xspec = "xtask spec"
