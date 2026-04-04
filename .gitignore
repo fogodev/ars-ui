@@ -1,5 +1,6 @@
 .claude/worktrees/
 .claude/worktrees/*
+.worktrees/
 .agents/*.local*
 
 target/
