@@ -1785,8 +1785,9 @@ impl serde::Serialize for CssProperty {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use alloc::{string::ToString, vec};
+
+    use super::*;
 
     #[test]
     fn aria_attr_display_matches_attribute_name() {

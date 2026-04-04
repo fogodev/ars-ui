@@ -328,8 +328,9 @@ impl<M: Machine> Service<M> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use alloc::vec;
+
+    use super::*;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum ToggleState {
