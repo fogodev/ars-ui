@@ -8,8 +8,10 @@ repository.workspace   = true
 rust-version.workspace = true
 
 [features]
-i18n  = ["dep:ars-i18n"]
-serde = []
+default = ["std"]
+std     = []
+i18n    = ["dep:ars-i18n"]
+serde   = []
 
 [dependencies]
 ars-a11y = { path = "../ars-a11y", default-features = false }
