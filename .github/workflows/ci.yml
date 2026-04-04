@@ -117,7 +117,7 @@ jobs:
           - "-p ars-a11y -p ars-interactions --features ars-a11y/aria-drag-drop-compat,ars-interactions/aria-drag-drop-compat"
           - "-p ars-collections --no-default-features"
           - "-p ars-collections --features i18n"
-          - "-p ars-collections --features std,i18n,serde"
+          - "-p ars-collections --features i18n,serde"
           - "-p ars-collections --features serde"
           - "-p ars-collections --no-default-features --features i18n"
           - "-p ars-forms --no-default-features"
