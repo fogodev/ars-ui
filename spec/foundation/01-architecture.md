@@ -4087,22 +4087,16 @@ impl UserAttrs {
 }
 
 /// Convenience constructor for data attributes.
-pub fn data(name: &'static str) -> HtmlAttr {
+pub const fn data(name: &'static str) -> HtmlAttr {
     HtmlAttr::Data(name)
 }
 
 /// Options for event listener registration.
 /// Used by adapters when wiring typed handler methods to native DOM events.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EventOptions {
     pub passive: bool,
     pub capture: bool,
-}
-
-impl Default for EventOptions {
-    fn default() -> Self {
-        Self { passive: false, capture: false }
-    }
 }
 
 impl From<&str> for AttrValue {

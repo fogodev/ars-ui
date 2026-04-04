@@ -17,3 +17,4 @@ Start with:
 3. [initial-backlog.md](./initial-backlog.md) for the seed epics and first implementation tasks.
 4. The GitHub Project and initial issue backlog are expected to be kept in sync with these docs.
 5. [adapter-contract.md](./adapter-contract.md) for adapter work obligations and spec-sync checklist.
+6. [foundation-gap-audit.md](./foundation-gap-audit.md) for the backlog reset that defers `#24` and promotes the missing foundation contracts into issue-ready follow-on tasks.

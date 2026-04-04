@@ -2,6 +2,8 @@
 
 This backlog is the seed set for the implementation program. It intentionally stops at the first shippable utility slice instead of attempting the whole library at once.
 
+> **Backlog reset note (2026-04-03):** The seed backlog reached the crate-shell milestone, but the remaining open planning card `#24` is premature. Before any utility-slice decomposition resumes, use [foundation-gap-audit.md](./foundation-gap-audit.md) as the canonical reference for the missing middle-layer contracts and the replacement foundation-first task sequence.
+
 ## Epics
 
 ### Epic: Workspace bootstrap
@@ -142,6 +144,8 @@ This backlog is the seed set for the implementation program. It intentionally st
 - Acceptance: adapter/component crates can depend on shared a11y types
 - Spec impact: `No spec change required`
 
+Note: this seed task only covered baseline a11y types. The follow-up `AriaAttribute` bridge onto typed `HtmlAttr`/`AttrMap` and the shared role/state helper layer are now tracked as [#33](https://github.com/fogodev/ars-ui/issues/33) and [#34](https://github.com/fogodev/ars-ui/issues/34), and are documented in [foundation-gap-audit.md](/Users/ericson/Workspace/Rust/ars-ui/docs/implementation/foundation-gap-audit.md).
+
 ### #16: Add baseline `ars-interactions` merge and state primitives
 
 - Points: `3`
@@ -249,3 +253,12 @@ This backlog is the seed set for the implementation program. It intentionally st
 - Tests first: not applicable; verify each card includes tests-first details
 - Acceptance: the first slice is decomposed into component-level or behavior-level cards no larger than `5`
 - Spec impact: `No spec change required`
+
+## Backlog Reset
+
+The original seed tasks correctly established workspace, core, subsystem, harness, and adapter shells. They did **not** fully surface the shared contracts required by the first utility slice. The missing follow-on work is now tracked in [foundation-gap-audit.md](./foundation-gap-audit.md), which:
+
+- explains why `#24` is blocked,
+- identifies the missing shared contracts in `ars-core`, `ars-derive`, `ars-dom`, `ars-forms`, provider/platform wiring, and interaction composition,
+- defines the corrected issue-ready replacement task sequence, and
+- names the next unblocked high-leverage task: typed connect primitives in `ars-core`.

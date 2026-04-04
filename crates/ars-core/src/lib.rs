@@ -20,6 +20,10 @@ extern crate alloc;
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
 use core::fmt::Debug;
 
+mod connect;
+
+pub use connect::{AriaAttr, CssProperty, EventOptions, HtmlAttr, HtmlEvent, data};
+
 /// Map of HTML attribute names to their string values.
 ///
 /// Used by [`ConnectApi::part_attrs`] to produce data-only attributes (ARIA, `data-*`,
