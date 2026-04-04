@@ -1,10 +1,11 @@
 //! Typed connect primitives used by component `connect()` APIs.
 //!
-//! This module defines the typed HTML attribute, DOM event, and CSS property
-//! enums used by the architecture specification. They provide a framework-agnostic
-//! vocabulary for converting machine state into DOM-facing metadata without
-//! relying on raw string literals throughout the codebase.
+//! This module defines the typed HTML attribute, DOM event, CSS property, and
+//! attribute-map contracts used by the architecture specification. They provide
+//! a framework-agnostic vocabulary for converting machine state into DOM-facing
+//! metadata without relying on raw string literals throughout the codebase.
 
+use alloc::{string::String, vec::Vec};
 use core::fmt;
 
 /// Typed `aria-*` attribute names used by [`HtmlAttr::Aria`].
@@ -1416,8 +1417,295 @@ impl fmt::Display for CssProperty {
     }
 }
 
+/// Stringly, boolean, or absent attribute values stored in an [`AttrMap`].
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub enum AttrValue {
+    /// String attribute value.
+    String(String),
+
+    /// Boolean attribute value.
+    Bool(bool),
+
+    /// Attribute should be removed.
+    None,
+}
+
+impl AttrValue {
+    /// Returns the string representation of this value, or `None` for absent values.
+    #[must_use]
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Self::String(value) => Some(value.as_str()),
+            Self::Bool(true) => Some("true"),
+            Self::Bool(false) => Some("false"),
+            Self::None => None,
+        }
+    }
+}
+
+/// HTML attributes whose values are space-separated token lists.
+const SPACE_SEPARATED: &[HtmlAttr] = &[
+    HtmlAttr::Class,
+    HtmlAttr::Rel,
+    HtmlAttr::Aria(AriaAttr::LabelledBy),
+    HtmlAttr::Aria(AriaAttr::DescribedBy),
+    HtmlAttr::Aria(AriaAttr::Owns),
+    HtmlAttr::Aria(AriaAttr::Controls),
+    HtmlAttr::Aria(AriaAttr::FlowTo),
+    HtmlAttr::Aria(AriaAttr::Details),
+];
+
+/// Framework-agnostic attribute map containing only data and inline style values.
+///
+/// Event handlers are not stored in this map. Adapters wire typed handler methods
+/// exposed by component APIs into their framework-native event systems.
+///
+/// This type intentionally stores attrs and styles in sorted `Vec`s instead of a
+/// `HashMap` or `BTreeMap`. Component attr maps are expected to stay small
+/// (typically only a handful to low dozens of entries), so the contiguous layout
+/// and deterministic iteration order of a `Vec` are a better fit than hash-table
+/// or tree-node overhead. Lookups still use `binary_search`, which keeps reads
+/// efficient while avoiding extra allocation and pointer chasing.
+///
+/// When the `serde` feature is enabled, this type implements [`serde::Serialize`]
+/// but intentionally does not implement `Deserialize`. `AttrMap` is a server-side
+/// rendering output structure: adapters turn it into HTML attributes during SSR,
+/// and hydration reads those attributes back from the DOM. The JSON round-trip
+/// hydration path is for machine state snapshots, not for reconstructing an
+/// `AttrMap` value on the client.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct AttrMap {
+    attrs: Vec<(HtmlAttr, AttrValue)>,
+    styles: Vec<(CssProperty, String)>,
+}
+
+/// Destructured parts of an [`AttrMap`], for adapter-side conversion without cloning.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct AttrMapParts {
+    /// Sorted typed HTML attributes.
+    pub attrs: Vec<(HtmlAttr, AttrValue)>,
+    /// Sorted typed CSS properties.
+    pub styles: Vec<(CssProperty, String)>,
+}
+
+impl AttrMap {
+    /// Creates an empty attribute map.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Consumes this map into its raw typed attribute and style collections.
+    #[must_use]
+    pub fn into_parts(self) -> AttrMapParts {
+        AttrMapParts {
+            attrs: self.attrs,
+            styles: self.styles,
+        }
+    }
+
+    /// Returns the sorted attribute entries stored in this map.
+    #[must_use]
+    pub fn attrs(&self) -> &[(HtmlAttr, AttrValue)] {
+        &self.attrs
+    }
+
+    /// Returns the sorted style entries stored in this map.
+    #[must_use]
+    pub fn styles(&self) -> &[(CssProperty, String)] {
+        &self.styles
+    }
+
+    /// Sets an attribute on the map.
+    ///
+    /// For most attributes, later values replace earlier ones. Space-separated
+    /// token-list attributes append new tokens with deduplication. Passing
+    /// [`AttrValue::None`] removes the attribute.
+    pub fn set(&mut self, attr: HtmlAttr, value: impl Into<AttrValue>) -> &mut Self {
+        let value = value.into();
+        let is_space_separated = SPACE_SEPARATED.contains(&attr);
+
+        match self.attrs.binary_search_by(|(key, _)| key.cmp(&attr)) {
+            Ok(index) => {
+                if matches!(value, AttrValue::None) {
+                    self.attrs.remove(index);
+                } else if is_space_separated {
+                    match (&mut self.attrs[index].1, value) {
+                        (AttrValue::String(existing), AttrValue::String(new_value)) => {
+                            append_space_separated(existing, &new_value);
+                        }
+                        (slot, replacement) => *slot = replacement,
+                    }
+                } else {
+                    self.attrs[index].1 = value;
+                }
+            }
+            Err(index) => {
+                if !matches!(value, AttrValue::None) {
+                    self.attrs.insert(index, (attr, value));
+                }
+            }
+        }
+
+        self
+    }
+
+    /// Sets a CSS property on the map, replacing any existing value for the property.
+    pub fn set_style(&mut self, prop: CssProperty, value: impl Into<String>) -> &mut Self {
+        let value = value.into();
+        match self.styles.binary_search_by(|(key, _)| key.cmp(&prop)) {
+            Ok(index) => self.styles[index].1 = value,
+            Err(index) => self.styles.insert(index, (prop, value)),
+        }
+        self
+    }
+
+    /// Convenience method for setting a boolean-valued attribute.
+    pub fn set_bool(&mut self, attr: HtmlAttr, value: bool) -> &mut Self {
+        self.set(attr, AttrValue::Bool(value))
+    }
+
+    /// Returns `true` when the given attribute key is present.
+    #[must_use]
+    pub fn contains(&self, attr: &HtmlAttr) -> bool {
+        self.attrs
+            .binary_search_by(|(key, _)| key.cmp(attr))
+            .is_ok()
+    }
+
+    /// Returns the string representation of the given attribute if present.
+    #[must_use]
+    pub fn get(&self, attr: &HtmlAttr) -> Option<&str> {
+        self.get_value(attr).and_then(AttrValue::as_str)
+    }
+
+    /// Returns the raw typed value of the given attribute if present.
+    #[must_use]
+    pub fn get_value(&self, attr: &HtmlAttr) -> Option<&AttrValue> {
+        self.attrs
+            .binary_search_by(|(key, _)| key.cmp(attr))
+            .ok()
+            .map(|index| &self.attrs[index].1)
+    }
+
+    /// Iterates over the stored attribute entries.
+    pub fn iter_attrs(&self) -> impl Iterator<Item = &(HtmlAttr, AttrValue)> {
+        self.attrs.iter()
+    }
+
+    /// Iterates over the stored attribute keys and values as separate references.
+    pub fn iter(&self) -> impl Iterator<Item = (&HtmlAttr, &AttrValue)> {
+        self.attrs.iter().map(|(key, value)| (key, value))
+    }
+
+    /// Iterates over the stored attribute keys.
+    pub fn keys(&self) -> impl Iterator<Item = &HtmlAttr> {
+        self.attrs.iter().map(|(key, _)| key)
+    }
+
+    /// Iterates over the stored style entries.
+    pub fn iter_styles(&self) -> impl Iterator<Item = &(CssProperty, String)> {
+        self.styles.iter()
+    }
+
+    /// Merges a trusted attribute map into this one.
+    ///
+    /// Attribute precedence is last-write-wins except for space-separated token
+    /// list attributes, which append new tokens with deduplication.
+    pub fn merge(&mut self, other: AttrMap) {
+        for (attr, value) in other.attrs {
+            self.set(attr, value);
+        }
+        for (prop, value) in other.styles {
+            self.set_style(prop, value);
+        }
+    }
+
+    /// Merges user-provided attribute extensions into this map.
+    pub fn merge_user(&mut self, user: UserAttrs) {
+        self.merge(user.0);
+    }
+}
+
+/// User-provided attribute extensions with a structural blocklist enforced at construction time.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct UserAttrs(AttrMap);
+
+/// Attributes that users cannot override via [`UserAttrs`].
+const USER_BLOCKED: &[HtmlAttr] = &[
+    HtmlAttr::Id,
+    HtmlAttr::Role,
+    HtmlAttr::Aria(AriaAttr::Hidden),
+    HtmlAttr::Aria(AriaAttr::Modal),
+    HtmlAttr::TabIndex,
+    HtmlAttr::Aria(AriaAttr::Live),
+];
+
+impl UserAttrs {
+    /// Creates an empty user-attribute container.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets a user-provided attribute unless the key is blocked.
+    pub fn set(&mut self, attr: HtmlAttr, value: impl Into<AttrValue>) -> &mut Self {
+        if USER_BLOCKED.contains(&attr) {
+            return self;
+        }
+        self.0.set(attr, value);
+        self
+    }
+
+    /// Sets a user-provided style value.
+    pub fn set_style(&mut self, prop: CssProperty, value: impl Into<String>) -> &mut Self {
+        self.0.set_style(prop, value);
+        self
+    }
+
+    /// Sets a user-provided boolean attribute unless the key is blocked.
+    pub fn set_bool(&mut self, attr: HtmlAttr, value: bool) -> &mut Self {
+        if USER_BLOCKED.contains(&attr) {
+            return self;
+        }
+        self.0.set_bool(attr, value);
+        self
+    }
+}
+
+/// Controls how dynamic styles from [`AttrMap::styles`] are rendered to the DOM.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub enum StyleStrategy {
+    /// Render styles as inline `style` attributes.
+    #[default]
+    Inline,
+    /// Apply styles at runtime via the CSSOM API.
+    Cssom,
+    /// Emit nonce-backed scoped CSS rules collected into a `<style>` block.
+    Nonce(String),
+}
+
+fn append_space_separated(existing: &mut String, new_value: &str) {
+    for token in new_value.split_whitespace() {
+        if existing.split_whitespace().any(|current| current == token) {
+            continue;
+        }
+
+        if !existing.is_empty() {
+            existing.push(' ');
+        }
+        existing.push_str(token);
+    }
+}
+
 /// Event listener configuration used when adapters bind typed handlers.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct EventOptions {
     /// Whether the listener is passive.
     pub passive: bool,
@@ -1429,6 +1717,70 @@ pub struct EventOptions {
 #[must_use]
 pub const fn data(name: &'static str) -> HtmlAttr {
     HtmlAttr::Data(name)
+}
+
+impl From<&str> for AttrValue {
+    fn from(value: &str) -> Self {
+        Self::String(String::from(value))
+    }
+}
+
+impl From<String> for AttrValue {
+    fn from(value: String) -> Self {
+        Self::String(value)
+    }
+}
+
+impl From<&String> for AttrValue {
+    fn from(value: &String) -> Self {
+        Self::String(value.clone())
+    }
+}
+
+impl From<bool> for AttrValue {
+    fn from(value: bool) -> Self {
+        Self::Bool(value)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for AriaAttr {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for HtmlAttr {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for HtmlEvent {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for CssProperty {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
 }
 
 #[cfg(test)]
@@ -1491,5 +1843,203 @@ mod tests {
     #[test]
     fn data_helper_constructs_data_variant() {
         assert_eq!(data("ars-part"), HtmlAttr::Data("ars-part"));
+    }
+
+    #[test]
+    fn attr_map_set_and_get_store_typed_values() {
+        let mut attrs = AttrMap::new();
+        attrs.set(HtmlAttr::Id, "dialog-root");
+        attrs.set_bool(HtmlAttr::Hidden, true);
+
+        assert!(attrs.contains(&HtmlAttr::Id));
+        assert_eq!(attrs.get(&HtmlAttr::Id), Some("dialog-root"));
+        assert_eq!(attrs.get(&HtmlAttr::Hidden), Some("true"));
+        assert_eq!(
+            attrs.get_value(&HtmlAttr::Hidden),
+            Some(&AttrValue::Bool(true))
+        );
+    }
+
+    #[test]
+    fn attr_map_set_none_removes_existing_value() {
+        let mut attrs = AttrMap::new();
+        attrs.set(HtmlAttr::Title, "before");
+        attrs.set(HtmlAttr::Title, AttrValue::None);
+
+        assert!(!attrs.contains(&HtmlAttr::Title));
+        assert_eq!(attrs.get(&HtmlAttr::Title), None);
+    }
+
+    #[test]
+    fn attr_map_space_separated_values_append_with_dedup() {
+        let mut attrs = AttrMap::new();
+        attrs.set(HtmlAttr::Class, "ars-visually-hidden");
+        attrs.set(HtmlAttr::Class, "ars-touch-none");
+        attrs.set(HtmlAttr::Class, "ars-touch-none");
+        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), "label-a label-b");
+        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), "label-b label-c");
+        attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), "hint");
+        attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), "hint error");
+
+        assert_eq!(
+            attrs.get(&HtmlAttr::Class),
+            Some("ars-visually-hidden ars-touch-none")
+        );
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
+            Some("label-a label-b label-c")
+        );
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
+            Some("hint error")
+        );
+    }
+
+    #[test]
+    fn attr_map_styles_replace_by_property() {
+        let mut attrs = AttrMap::new();
+        attrs.set_style(CssProperty::Width, "10px");
+        attrs.set_style(CssProperty::Width, "12px");
+        attrs.set_style(CssProperty::Height, "20px");
+
+        assert_eq!(
+            attrs.styles(),
+            &[
+                (CssProperty::Width, String::from("12px")),
+                (CssProperty::Height, String::from("20px")),
+            ]
+        );
+    }
+
+    #[test]
+    fn attr_map_merge_uses_typed_semantics() {
+        let mut base = AttrMap::new();
+        base.set(HtmlAttr::Role, "button");
+        base.set(HtmlAttr::Class, "base");
+        base.set_style(CssProperty::Width, "10px");
+
+        let mut overlay = AttrMap::new();
+        overlay.set(HtmlAttr::Role, "switch");
+        overlay.set(HtmlAttr::Class, "overlay");
+        overlay.set_style(CssProperty::Width, "20px");
+
+        base.merge(overlay);
+
+        assert_eq!(base.get(&HtmlAttr::Role), Some("switch"));
+        assert_eq!(base.get(&HtmlAttr::Class), Some("base overlay"));
+        assert_eq!(base.styles(), &[(CssProperty::Width, String::from("20px"))]);
+    }
+
+    #[test]
+    fn user_attrs_reject_blocked_keys() {
+        let mut user = UserAttrs::new();
+        user.set(HtmlAttr::Id, "user-id");
+        user.set(HtmlAttr::Role, "button");
+        user.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
+        user.set(HtmlAttr::Aria(AriaAttr::Modal), "true");
+        user.set_bool(HtmlAttr::TabIndex, true);
+        user.set(HtmlAttr::Aria(AriaAttr::Live), "polite");
+        user.set(HtmlAttr::Title, "allowed");
+        user.set_style(CssProperty::Width, "12px");
+
+        let mut merged = AttrMap::new();
+        merged.merge_user(user);
+
+        assert!(!merged.contains(&HtmlAttr::Id));
+        assert!(!merged.contains(&HtmlAttr::Role));
+        assert!(!merged.contains(&HtmlAttr::Aria(AriaAttr::Hidden)));
+        assert!(!merged.contains(&HtmlAttr::Aria(AriaAttr::Modal)));
+        assert!(!merged.contains(&HtmlAttr::TabIndex));
+        assert!(!merged.contains(&HtmlAttr::Aria(AriaAttr::Live)));
+        assert_eq!(merged.get(&HtmlAttr::Title), Some("allowed"));
+        assert_eq!(
+            merged.styles(),
+            &[(CssProperty::Width, String::from("12px"))]
+        );
+    }
+
+    #[test]
+    fn attr_map_into_parts_exposes_raw_sorted_vectors() {
+        let mut attrs = AttrMap::new();
+        attrs.set(HtmlAttr::Id, "root");
+        attrs.set(HtmlAttr::Class, "alpha");
+        attrs.set_style(CssProperty::Width, "10px");
+
+        let parts = attrs.into_parts();
+        assert_eq!(
+            parts.attrs,
+            vec![
+                (HtmlAttr::Class, AttrValue::String(String::from("alpha"))),
+                (HtmlAttr::Id, AttrValue::String(String::from("root"))),
+            ]
+        );
+        assert_eq!(
+            parts.styles,
+            vec![(CssProperty::Width, String::from("10px"))]
+        );
+    }
+
+    #[test]
+    fn attr_map_iterators_expose_current_entries() {
+        let mut attrs = AttrMap::new();
+        attrs.set(HtmlAttr::Id, "root");
+        attrs.set(HtmlAttr::Title, "tooltip");
+
+        let keys = attrs.keys().copied().collect::<Vec<_>>();
+        let iter_pairs = attrs
+            .iter()
+            .map(|(key, value)| (*key, value.clone()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(keys, vec![HtmlAttr::Id, HtmlAttr::Title]);
+        assert_eq!(
+            iter_pairs,
+            vec![
+                (HtmlAttr::Id, AttrValue::String(String::from("root"))),
+                (HtmlAttr::Title, AttrValue::String(String::from("tooltip"))),
+            ]
+        );
+        assert_eq!(attrs.iter_attrs().count(), 2);
+        assert_eq!(attrs.iter_styles().count(), 0);
+    }
+
+    #[test]
+    fn style_strategy_defaults_to_inline_and_supports_representative_variants() {
+        assert_eq!(StyleStrategy::default(), StyleStrategy::Inline);
+        assert_eq!(StyleStrategy::Cssom, StyleStrategy::Cssom);
+        assert_eq!(
+            StyleStrategy::Nonce(String::from("nonce-123")),
+            StyleStrategy::Nonce(String::from("nonce-123"))
+        );
+    }
+
+    #[test]
+    fn attr_value_as_str_covers_all_variants() {
+        assert_eq!(AttrValue::from("hello").as_str(), Some("hello"));
+        assert_eq!(AttrValue::from(true).as_str(), Some("true"));
+        assert_eq!(AttrValue::from(false).as_str(), Some("false"));
+        assert_eq!(AttrValue::None.as_str(), None);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn attr_map_serializes_for_ssr() {
+        let mut attrs = AttrMap::new();
+        attrs.set(HtmlAttr::Id, "dialog-root");
+        attrs.set(HtmlAttr::Class, "ars-visually-hidden");
+        attrs.set_style(CssProperty::Width, "1px");
+
+        let json = serde_json::to_string(&attrs).expect("AttrMap must serialize");
+        assert!(json.contains("dialog-root"));
+        assert!(json.contains("ars-visually-hidden"));
+        assert!(json.contains("width"));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn style_strategy_serializes_nonce_variant() {
+        let json = serde_json::to_string(&StyleStrategy::Nonce(String::from("nonce-123")))
+            .expect("StyleStrategy must serialize");
+        assert!(json.contains("nonce-123"));
     }
 }

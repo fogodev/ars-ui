@@ -284,7 +284,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use ars_core::{AttrMap, ComponentPart, ConnectApi, TransitionPlan};
+    use ars_core::{AriaAttr, AttrMap, ComponentPart, ConnectApi, HtmlAttr, TransitionPlan};
 
     use super::*;
 
@@ -333,7 +333,7 @@ mod tests {
 
         fn part_attrs(&self, _part: Self::Part) -> AttrMap {
             let mut attrs = AttrMap::new();
-            attrs.insert("aria-pressed".into(), self.is_on.to_string());
+            attrs.set(HtmlAttr::Aria(AriaAttr::Pressed), self.is_on.to_string());
             attrs
         }
     }
