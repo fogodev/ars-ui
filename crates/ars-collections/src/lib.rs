@@ -3,7 +3,7 @@
 //! This crate provides the shared selection state used by components that render
 //! collections of items (e.g. select, menu, listbox, tabs, tree-view).
 
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::std_instead_of_core)]
 
 extern crate alloc;

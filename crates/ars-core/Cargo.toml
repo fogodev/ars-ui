@@ -8,11 +8,18 @@ repository.workspace   = true
 rust-version.workspace = true
 
 [features]
-default = ["std"]
-std     = []
-serde   = []
-ssr     = []
-debug   = []
+default      = ["std"]
+std          = []
+serde        = ["dep:serde"]
+ssr          = []
+debug        = []
+embedded-css = []
+
+[dependencies]
+serde = { version = "1", default-features = false, features = ["alloc", "derive"], optional = true }
+
+[dev-dependencies]
+serde_json = "1"
 
 [lints]
 workspace = true

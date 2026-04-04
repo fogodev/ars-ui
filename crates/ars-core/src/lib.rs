@@ -17,18 +17,16 @@
 
 extern crate alloc;
 
-use alloc::{collections::BTreeMap, string::String, vec::Vec};
+use alloc::vec::Vec;
 use core::fmt::Debug;
 
+pub mod companion_css;
 mod connect;
 
-pub use connect::{AriaAttr, CssProperty, EventOptions, HtmlAttr, HtmlEvent, data};
-
-/// Map of HTML attribute names to their string values.
-///
-/// Used by [`ConnectApi::part_attrs`] to produce data-only attributes (ARIA, `data-*`,
-/// inline styles) for each component part. Does not carry event handlers.
-pub type AttrMap = BTreeMap<String, String>;
+pub use connect::{
+    AriaAttr, AttrMap, AttrMapParts, AttrValue, CssProperty, EventOptions, HtmlAttr, HtmlEvent,
+    StyleStrategy, UserAttrs, data,
+};
 
 /// A named side effect produced by a state transition.
 ///
@@ -330,6 +328,8 @@ impl<M: Machine> Service<M> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use super::*;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -449,5 +449,20 @@ mod tests {
         assert!(!b.is_controlled());
         // Internal was updated to 20 by sync, now reads as uncontrolled
         assert_eq!(b.get(), &20);
+    }
+
+    #[test]
+    fn companion_stylesheet_contains_required_utility_classes() {
+        let css = include_str!("../ars-base.css");
+
+        assert!(css.contains(".ars-visually-hidden"));
+        assert!(css.contains(".ars-sr-input"));
+        assert!(css.contains(".ars-touch-none"));
+    }
+
+    #[cfg(feature = "embedded-css")]
+    #[test]
+    fn embedded_companion_stylesheet_matches_sidecar_file() {
+        assert_eq!(companion_css::ARS_BASE_CSS, include_str!("../ars-base.css"));
     }
 }

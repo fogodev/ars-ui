@@ -61,6 +61,7 @@ std = []                          # Enable std library support
 serde = ["dep:serde"]             # Serialization for state snapshots
 ssr = []                          # Server-side rendering: enables Service::new_hydrated
 debug = ["dep:log"]               # Trace-level logging for state transitions and effects
+embedded-css = []                 # Opt-in embedded ars-base.css constant for asset pipelines
 
 # ars-i18n/Cargo.toml
 [features]
@@ -3775,6 +3776,16 @@ The output of every `*_attrs()` method. Framework-agnostic attribute map contain
 
 Event handlers are **not** stored in `AttrMap`. Instead, each component's `Api` struct exposes typed handler methods (e.g., `on_root_click()`, `on_root_keydown(key, shift)`) that adapters wire to their native event system.
 
+**SSR serialization boundary:** “serializable for SSR” means `AttrMap` can be serialized on the
+server for SSR-oriented output pipelines (for example, HTML rendering helpers, debug snapshots, or
+test fixtures). It is **not** the hydration payload. During hydration, the client reads attributes
+from the rendered DOM, not by deserializing `AttrMap` from JSON. JSON round-trip hydration applies
+to machine state snapshots (see adapter hydration specs), not to the rendered attribute map itself.
+
+When the `serde` feature is enabled, `AttrMap` derives `Serialize` only. This is intentional:
+deserializing `AttrMap` would suggest it participates in the JSON hydration boundary, but the
+client reconstructs DOM-facing attributes from rendered HTML and current machine state instead.
+
 ````rust
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -4162,36 +4173,40 @@ Static, unchanging styles (visually-hidden, screen-reader-only input, touch-acti
 /* Visually hidden but accessible to screen readers.
  * Used by: VisuallyHidden, LiveAnnouncer, visually_hidden_attrs(). */
 .ars-visually-hidden {
-  position: absolute !important;
-  border: 0 !important;
-  width: 1px !important;
-  height: 1px !important;
-  padding: 0 !important;
-  margin: -1px !important;
-  overflow: hidden !important;
-  clip: rect(0, 0, 0, 0) !important;
-  white-space: nowrap !important;
-  word-wrap: normal !important;
+    position: absolute !important;
+    border: 0 !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    word-wrap: normal !important;
 }
 
 /* Screen-reader-only native input (hidden but participates in form submission).
  * Used by: RadioGroup hidden input, Switch hidden input, FileUpload hidden input. */
 .ars-sr-input {
-  position: absolute !important;
-  width: 1px !important;
-  height: 1px !important;
-  overflow: hidden !important;
-  clip: rect(0, 0, 0, 0) !important;
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
 }
 
 /* Suppress browser touch gestures (pan, pinch-zoom) on drag targets.
  * Used by: Slider thumb, Splitter handle, use_move targets. */
 .ars-touch-none {
-  touch-action: none !important;
+    touch-action: none !important;
 }
 ```
 
 **Distribution:** `ars-base.css` is published alongside the `ars-core` crate. Applications MUST include it via a `<link>` element. The file is ~500 bytes uncompressed and contains only the three classes above.
+
+For build systems that prefer programmatic asset collection, `ars-core` may also expose an
+opt-in embedded stylesheet constant behind a dedicated feature flag. The sidecar file remains the
+default delivery path so consumers do not pay binary-size cost unless they explicitly opt in.
 
 **`!important` rationale:** These classes enforce accessibility and interaction invariants that must not be accidentally overridden by application stylesheets. `.ars-visually-hidden` losing `overflow: hidden` would make the element visible; `.ars-touch-none` losing `touch-action: none` would break drag interactions on touch devices.
 
@@ -4800,7 +4815,7 @@ Screen readers only track mutations to `aria-live` regions that existed in the a
 ```html
 <!-- CORRECT: Container exists in SSR HTML -->
 <div aria-live="polite" role="status">
-  <!-- Content added dynamically after hydration -->
+    <!-- Content added dynamically after hydration -->
 </div>
 
 <!-- INCORRECT: Container created by client JS after hydration -->

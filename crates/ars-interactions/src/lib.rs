@@ -113,27 +113,39 @@ impl FocusState {
 #[must_use]
 pub fn merge_attrs(base: &AttrMap, overlay: &AttrMap) -> AttrMap {
     let mut merged = base.clone();
-    for (key, value) in overlay {
-        merged.insert(key.clone(), value.clone());
-    }
+    merged.merge(overlay.clone());
     merged
 }
 
 #[cfg(test)]
 mod tests {
+    use ars_core::{AriaAttr, CssProperty, HtmlAttr};
+
     use super::*;
 
     #[test]
     fn merge_attrs_prefers_overlay_values() {
         let mut base = AttrMap::new();
-        base.insert("role".into(), "button".into());
+        base.set(HtmlAttr::Role, "button");
+        base.set(HtmlAttr::Class, "base");
         let mut overlay = AttrMap::new();
-        overlay.insert("role".into(), "switch".into());
-        overlay.insert("data-state".into(), "on".into());
+        overlay.set(HtmlAttr::Role, "switch");
+        overlay.set(HtmlAttr::Class, "overlay");
+        overlay.set(HtmlAttr::Aria(AriaAttr::DescribedBy), "hint");
+        overlay.set(HtmlAttr::Aria(AriaAttr::DescribedBy), "error");
+        overlay.set_style(CssProperty::Width, "20px");
 
         let merged = merge_attrs(&base, &overlay);
-        assert_eq!(merged.get("role").map(String::as_str), Some("switch"));
-        assert_eq!(merged.get("data-state").map(String::as_str), Some("on"));
+        assert_eq!(merged.get(&HtmlAttr::Role), Some("switch"));
+        assert_eq!(merged.get(&HtmlAttr::Class), Some("base overlay"));
+        assert_eq!(
+            merged.get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
+            Some("hint error")
+        );
+        assert_eq!(
+            merged.styles(),
+            &[(CssProperty::Width, String::from("20px"))]
+        );
     }
 
     #[test]

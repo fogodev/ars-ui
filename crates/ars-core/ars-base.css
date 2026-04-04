@@ -1,0 +1,34 @@
+/* ars-base.css -- companion stylesheet for ars-core
+ * Published alongside the ars-core crate. Include via a <link> element.
+ */
+
+/* Visually hidden but accessible to screen readers.
+ * Used by: VisuallyHidden, LiveAnnouncer, visually_hidden_attrs(). */
+.ars-visually-hidden {
+  position: absolute !important;
+  border: 0 !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  word-wrap: normal !important;
+}
+
+/* Screen-reader-only native input (hidden but participates in form submission).
+ * Used by: RadioGroup hidden input, Switch hidden input, FileUpload hidden input. */
+.ars-sr-input {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+}
+
+/* Suppress browser touch gestures on drag targets.
+ * Used by: Slider thumb, Splitter handle, use_move targets. */
+.ars-touch-none {
+  touch-action: none !important;
+}
