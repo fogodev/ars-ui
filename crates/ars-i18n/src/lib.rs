@@ -50,3 +50,67 @@ impl Locale {
         &self.0
     }
 }
+
+/// A calendar date (year, month, day).
+///
+/// This is a placeholder type that will be backed by ICU4X when the full
+/// internationalization layer is implemented. Components use this in
+/// [`FieldValue::Date`](../ars_forms/enum.FieldValue.html) for date fields.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CalendarDate {
+    _private: (),
+}
+
+impl CalendarDate {
+    /// Returns the date formatted as an ISO 8601 string (`"YYYY-MM-DD"`).
+    ///
+    /// Placeholder implementation — returns an empty string until the full
+    /// ICU4X-backed date type is available.
+    #[must_use]
+    pub fn to_iso8601(&self) -> String {
+        String::new()
+    }
+}
+
+/// A time of day (hours, minutes, seconds).
+///
+/// This is a placeholder type that will be backed by ICU4X when the full
+/// internationalization layer is implemented. Components use this in
+/// [`FieldValue::Time`](../ars_forms/enum.FieldValue.html) for time fields.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Time {
+    _private: (),
+}
+
+impl Time {
+    /// Returns the time formatted as an ISO 8601 string (`"HH:MM:SS"`).
+    ///
+    /// Placeholder implementation — returns an empty string until the full
+    /// ICU4X-backed time type is available.
+    #[must_use]
+    pub fn to_iso8601(&self) -> String {
+        String::new()
+    }
+}
+
+/// A range of two calendar dates (start and end).
+///
+/// This is a placeholder type that will be backed by ICU4X when the full
+/// internationalization layer is implemented. Components use this in
+/// [`FieldValue::DateRange`](../ars_forms/enum.FieldValue.html) for date range fields.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DateRange {
+    _private: (),
+}
+
+impl DateRange {
+    /// Returns the date range formatted as an ISO 8601 interval string
+    /// (`"YYYY-MM-DD/YYYY-MM-DD"`).
+    ///
+    /// Placeholder implementation — returns an empty string until the full
+    /// ICU4X-backed date range type is available.
+    #[must_use]
+    pub fn to_iso8601(&self) -> String {
+        String::new()
+    }
+}
