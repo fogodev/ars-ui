@@ -50,7 +50,7 @@ jobs:
 
   unit:
     name: Unit Tests
-    needs: [check]
+    needs: [check, clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
