@@ -1,0 +1,5 @@
+error: HasId requires a field named `id` of type String
+ --> tests/ui/has_id_on_tuple_struct.rs:4:1
+  |
+4 | struct Props(String);
+  | ^^^^^^^^^^^^^^^^^^^^^

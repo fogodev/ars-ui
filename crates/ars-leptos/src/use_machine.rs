@@ -286,7 +286,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use ars_core::{AriaAttr, AttrMap, ComponentPart, ConnectApi, HtmlAttr, TransitionPlan};
+    use ars_core::{AriaAttr, AttrMap, ComponentPart, ConnectApi, HasId, HtmlAttr, TransitionPlan};
 
     use super::*;
 
@@ -307,14 +307,32 @@ mod tests {
     struct ToggleContext;
 
     #[derive(Clone, Debug, PartialEq, Eq)]
-    struct ToggleProps;
+    struct ToggleProps {
+        id: String,
+    }
+
+    impl HasId for ToggleProps {
+        fn id(&self) -> &str {
+            &self.id
+        }
+
+        fn with_id(self, id: String) -> Self {
+            Self { id }
+        }
+
+        fn set_id(&mut self, id: String) {
+            self.id = id;
+        }
+    }
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
     struct TogglePart;
 
     impl ComponentPart for TogglePart {
-        fn root() -> Self {
-            Self
+        const ROOT: Self = Self;
+
+        fn scope() -> &'static str {
+            "toggle"
         }
 
         fn name(&self) -> &'static str {
@@ -393,7 +411,9 @@ mod tests {
         // Test use_machine within a Leptos reactive Owner.
         let owner = Owner::new();
         owner.with(|| {
-            let machine = use_machine::<ToggleMachine>(ToggleProps);
+            let machine = use_machine::<ToggleMachine>(ToggleProps {
+                id: String::from("toggle"),
+            });
 
             // Initial state should be Off
             assert_eq!(machine.state.get_untracked(), ToggleState::Off);
@@ -407,7 +427,9 @@ mod tests {
     fn use_machine_send_updates_state() {
         let owner = Owner::new();
         owner.with(|| {
-            let machine = use_machine::<ToggleMachine>(ToggleProps);
+            let machine = use_machine::<ToggleMachine>(ToggleProps {
+                id: String::from("toggle"),
+            });
 
             assert_eq!(machine.state.get_untracked(), ToggleState::Off);
 
@@ -423,7 +445,9 @@ mod tests {
     fn with_api_snapshot_reads_current_state() {
         let owner = Owner::new();
         owner.with(|| {
-            let machine = use_machine::<ToggleMachine>(ToggleProps);
+            let machine = use_machine::<ToggleMachine>(ToggleProps {
+                id: String::from("toggle"),
+            });
 
             let is_on = machine.with_api_snapshot(|api| api.is_on);
             assert!(!is_on);
@@ -439,7 +463,9 @@ mod tests {
     fn context_version_increments_on_transition() {
         let owner = Owner::new();
         owner.with(|| {
-            let machine = use_machine::<ToggleMachine>(ToggleProps);
+            let machine = use_machine::<ToggleMachine>(ToggleProps {
+                id: String::from("toggle"),
+            });
 
             assert_eq!(machine.context_version.get_untracked(), 0);
 

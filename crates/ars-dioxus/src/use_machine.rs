@@ -284,7 +284,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use ars_core::{AriaAttr, AttrMap, ComponentPart, ConnectApi, HtmlAttr, TransitionPlan};
+    use ars_core::{AriaAttr, AttrMap, ComponentPart, ConnectApi, HasId, HtmlAttr, TransitionPlan};
 
     use super::*;
 
@@ -305,14 +305,32 @@ mod tests {
     struct ToggleContext;
 
     #[derive(Clone, Debug, PartialEq, Eq)]
-    struct ToggleProps;
+    struct ToggleProps {
+        id: String,
+    }
+
+    impl HasId for ToggleProps {
+        fn id(&self) -> &str {
+            &self.id
+        }
+
+        fn with_id(self, id: String) -> Self {
+            Self { id }
+        }
+
+        fn set_id(&mut self, id: String) {
+            self.id = id;
+        }
+    }
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
     struct TogglePart;
 
     impl ComponentPart for TogglePart {
-        fn root() -> Self {
-            Self
+        const ROOT: Self = Self;
+
+        fn scope() -> &'static str {
+            "toggle"
         }
 
         fn name(&self) -> &'static str {
@@ -389,7 +407,9 @@ mod tests {
     #[test]
     fn use_machine_creates_service_with_initial_state() {
         fn app() -> Element {
-            let machine = use_machine::<ToggleMachine>(ToggleProps);
+            let machine = use_machine::<ToggleMachine>(ToggleProps {
+                id: String::from("toggle"),
+            });
 
             // Initial state should be Off
             assert_eq!(*machine.state.peek(), ToggleState::Off);
@@ -407,7 +427,9 @@ mod tests {
     #[test]
     fn use_machine_send_updates_state() {
         fn app() -> Element {
-            let machine = use_machine::<ToggleMachine>(ToggleProps);
+            let machine = use_machine::<ToggleMachine>(ToggleProps {
+                id: String::from("toggle"),
+            });
 
             assert_eq!(*machine.state.peek(), ToggleState::Off);
 
@@ -427,7 +449,9 @@ mod tests {
     #[test]
     fn with_api_snapshot_reads_current_state() {
         fn app() -> Element {
-            let machine = use_machine::<ToggleMachine>(ToggleProps);
+            let machine = use_machine::<ToggleMachine>(ToggleProps {
+                id: String::from("toggle"),
+            });
 
             let is_on = machine.with_api_snapshot(|api| api.is_on);
             assert!(!is_on);
@@ -447,7 +471,9 @@ mod tests {
     #[test]
     fn context_version_increments_on_transition() {
         fn app() -> Element {
-            let machine = use_machine::<ToggleMachine>(ToggleProps);
+            let machine = use_machine::<ToggleMachine>(ToggleProps {
+                id: String::from("toggle"),
+            });
 
             assert_eq!(*machine.context_version.peek(), 0);
 

@@ -1,0 +1,7 @@
+error: HasId: `id` field must be public
+ --> tests/ui/has_id_private_id.rs:3:10
+  |
+3 | #[derive(HasId)]
+  |          ^^^^^
+  |
+  = note: this error originates in the derive macro `HasId` (in Nightly builds, run with -Z macro-backtrace for more info)

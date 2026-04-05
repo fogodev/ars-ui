@@ -1,0 +1,5 @@
+error: ComponentPart requires a #[scope = "kebab-case-name"] attribute
+ --> tests/ui/component_part_scope_not_string.rs:4:1
+  |
+4 | #[scope = 123]
+  | ^^^^^^^^^^^^^^

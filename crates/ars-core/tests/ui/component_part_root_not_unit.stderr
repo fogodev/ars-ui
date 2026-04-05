@@ -1,0 +1,5 @@
+error: ComponentPart requires `Root` to be a unit variant
+ --> tests/ui/component_part_root_not_unit.rs:6:5
+  |
+6 |     Root(String),
+  |     ^^^^^^^^^^^^

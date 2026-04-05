@@ -1,0 +1,7 @@
+error: ComponentPart requires a #[scope = "kebab-case-name"] attribute
+ --> tests/ui/component_part_missing_scope.rs:3:10
+  |
+3 | #[derive(ComponentPart)]
+  |          ^^^^^^^^^^^^^
+  |
+  = note: this error originates in the derive macro `ComponentPart` (in Nightly builds, run with -Z macro-backtrace for more info)
