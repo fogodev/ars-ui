@@ -5,6 +5,7 @@
 //! platform capability detection.
 
 mod focus;
+pub mod scroll_lock;
 
 pub use focus::{
     FocusScope, FocusedElement, focus_body, focus_element_by_id, focus_first_tabbable,
@@ -14,14 +15,11 @@ pub use focus::{
     document_contains, focus_element, get_first_focusable, get_focusable_elements,
     get_html_element_by_id, get_last_focusable,
 };
-
-/// An opaque token representing an active scroll lock on the document body.
-///
-/// Used by modal and overlay components to prevent background scrolling.
-/// Scroll locks are reference-counted — the body is only unlocked when all
-/// outstanding tokens have been released.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ScrollLockToken;
+pub use scroll_lock::{
+    ScrollLockManager, acquire, depth, is_locked, prevent_scroll, release, restore_scroll,
+};
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+pub use scroll_lock::{needs_ios_workaround, scrollbar_width};
 
 /// Describes the platform capabilities available to the current runtime.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

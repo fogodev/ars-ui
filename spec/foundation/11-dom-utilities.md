@@ -1835,7 +1835,7 @@ impl ScrollLockManager {
 - Overlay `PendingEffect::setup` calls `ScrollLockManager::lock(overlay_id)` as part of the open effect.
 - The cleanup closure returned by `setup` calls `ScrollLockManager::unlock(overlay_id)`.
 - The `ScrollLockManager` instance is stored in a thread-local or adapter-level singleton, shared across all overlay instances.
-- Scroll lock is applied via `requestAnimationFrame` after layout calculation to avoid measuring stale layout dimensions. This is critical for overlays that perform positioning calculations before locking.
+- Scroll lock timing is an adapter-level concern. Overlays that perform positioning calculations before locking SHOULD schedule the `lock()` call via `requestAnimationFrame` to avoid measuring stale layout dimensions. The `acquire()` / `release()` low-level API applies styles synchronously — the adapter decides when to call them.
 
 ### 5.3 Low-Level API (acquire/release with depth counter)
 
@@ -1888,9 +1888,10 @@ static SCROLL_LOCK_SAVED: Mutex<Option<ScrollLockSavedState>> = Mutex::new(None)
 struct ScrollLockSavedState {
     overflow: String,
     padding_right: String,
-    scroll_y: f64,           // iOS only
-    body_top: String,        // iOS only
-    html_overflow: String,   // tiered strategy — <html> overflow
+    scroll_x: f64,              // horizontal scroll position
+    scroll_y: f64,              // vertical scroll position (iOS restore)
+    body_top: String,           // iOS only
+    html_overflow: String,      // tiered strategy — <html> overflow
     overscroll_behavior: String, // tiered strategy — body overscroll-behavior
 }
 
