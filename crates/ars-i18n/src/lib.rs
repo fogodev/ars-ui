@@ -4,6 +4,8 @@
 //! a BCP 47 [`Locale`] wrapper, a [`Direction`] enum for LTR/RTL text flow, and an
 //! [`Orientation`] enum for horizontal/vertical layout axes.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
 extern crate alloc;
 
 use alloc::string::String;
