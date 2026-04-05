@@ -2456,9 +2456,8 @@ Composition solves this by merging all attrs sets together, unioning data attrib
 
 ````rust
 // ars-interactions/src/compose.rs
-// Also re-exported from ars-core::connect
 
-use ars_core::{AttrMap, AttrValue};
+use ars_core::AttrMap;
 
 /// Merge multiple AttrMap sets into a single AttrMap.
 ///

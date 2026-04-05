@@ -1,9 +1,12 @@
 //! Input interaction state types and attribute merging utilities.
 //!
 //! This crate defines the shared interaction states (press, focus) used across
-//! components and provides a helper for merging attribute maps from multiple sources.
+//! components and provides [`compose::merge_attrs`] for merging attribute maps
+//! from multiple interaction sources into a single [`ars_core::AttrMap`].
 
-use ars_core::AttrMap;
+pub mod compose;
+
+pub use compose::merge_attrs;
 
 /// The input modality that initiated an interaction.
 ///
@@ -106,47 +109,9 @@ impl FocusState {
     }
 }
 
-/// Merges two attribute maps, with `overlay` values taking precedence over `base`.
-///
-/// Returns a new [`AttrMap`] containing all entries from both maps. When both maps
-/// contain the same key, the value from `overlay` wins.
-#[must_use]
-pub fn merge_attrs(base: &AttrMap, overlay: &AttrMap) -> AttrMap {
-    let mut merged = base.clone();
-    merged.merge(overlay.clone());
-    merged
-}
-
 #[cfg(test)]
 mod tests {
-    use ars_core::{AriaAttr, CssProperty, HtmlAttr};
-
     use super::*;
-
-    #[test]
-    fn merge_attrs_prefers_overlay_values() {
-        let mut base = AttrMap::new();
-        base.set(HtmlAttr::Role, "button");
-        base.set(HtmlAttr::Class, "base");
-        let mut overlay = AttrMap::new();
-        overlay.set(HtmlAttr::Role, "switch");
-        overlay.set(HtmlAttr::Class, "overlay");
-        overlay.set(HtmlAttr::Aria(AriaAttr::DescribedBy), "hint");
-        overlay.set(HtmlAttr::Aria(AriaAttr::DescribedBy), "error");
-        overlay.set_style(CssProperty::Width, "20px");
-
-        let merged = merge_attrs(&base, &overlay);
-        assert_eq!(merged.get(&HtmlAttr::Role), Some("switch"));
-        assert_eq!(merged.get(&HtmlAttr::Class), Some("base overlay"));
-        assert_eq!(
-            merged.get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
-            Some("hint error")
-        );
-        assert_eq!(
-            merged.styles(),
-            &[(CssProperty::Width, String::from("20px"))]
-        );
-    }
 
     #[test]
     fn press_state_idle_is_not_pressed() {
