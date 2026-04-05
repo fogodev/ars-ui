@@ -1,0 +1,5 @@
+error: ComponentPart can only be derived for enums
+ --> tests/ui/component_part_on_struct.rs:4:1
+  |
+4 | struct Part;
+  | ^^^^^^^^^^^^

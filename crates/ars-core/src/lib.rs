@@ -16,8 +16,9 @@
 #![warn(clippy::std_instead_of_core)]
 
 extern crate alloc;
+extern crate self as ars_core;
 
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use core::fmt::Debug;
 
 pub mod companion_css;
@@ -25,6 +26,21 @@ mod connect;
 pub mod platform;
 pub mod provider;
 
+/// Hidden re-exports used by proc macros to stay hygienic without forcing
+/// downstream crates to import `alloc`.
+///
+/// The derive macros expand in the downstream crate, so using `::alloc::...`
+/// directly would require every consumer to write `extern crate alloc;`, even
+/// in ordinary `std` crates. Routing through `::ars_core::__private` keeps the
+/// generated code portable across `std` and `no_std + alloc` consumers while
+/// preserving a stable macro expansion path.
+#[doc(hidden)]
+pub mod __private {
+    pub use alloc::{string::String, vec::Vec};
+}
+
+#[doc(inline)]
+pub use ars_derive::{ComponentPart, HasId};
 // Re-export `Direction` from ars-i18n for convenience — used by
 // `PlatformEffects::resolved_direction` so consumers don't need a
 // separate `ars-i18n` dependency just for the return type.
@@ -187,18 +203,48 @@ impl<T: Clone + PartialEq + Debug> Bindable<T> {
     }
 }
 
+/// Trait for props types that carry a framework-stable DOM ID.
+///
+/// Adapters use this contract to read and replace component IDs without knowing the
+/// concrete props type. The `#[derive(HasId)]` macro implements this trait for any
+/// struct with a `pub id: String` field.
+pub trait HasId: Sized {
+    /// Returns the current DOM ID.
+    fn id(&self) -> &str;
+
+    /// Returns a copy of `self` with the DOM ID replaced.
+    #[must_use]
+    fn with_id(self, id: String) -> Self;
+
+    /// Updates the DOM ID in place.
+    fn set_id(&mut self, id: String);
+}
+
 /// A named DOM part of a component (e.g. root, trigger, content, label).
 ///
 /// Each component defines an enum of its parts that implements this trait,
 /// typically via `#[derive(ComponentPart)]`. The connect API uses parts to
 /// produce the correct [`AttrMap`] for each element in the component's DOM tree.
 pub trait ComponentPart: Clone + Debug + PartialEq + Eq + core::hash::Hash + 'static {
-    /// Returns the root part of this component.
-    fn root() -> Self;
+    /// The root part of this component.
+    const ROOT: Self;
+
+    /// Returns the scope name used for `data-ars-scope`.
+    fn scope() -> &'static str;
+
     /// Returns the string name of this part (e.g. `"root"`, `"trigger"`).
     fn name(&self) -> &'static str;
+
     /// Returns all parts defined for this component.
     fn all() -> Vec<Self>;
+
+    /// Returns the canonical `data-ars-scope` and `data-ars-part` attrs for this part.
+    fn data_attrs(&self) -> [(HtmlAttr, &'static str); 2] {
+        [
+            (HtmlAttr::Data("ars-scope"), Self::scope()),
+            (HtmlAttr::Data("ars-part"), self.name()),
+        ]
+    }
 }
 
 /// Produces HTML attributes for each component part based on current machine state.
@@ -226,7 +272,7 @@ pub trait Machine {
     /// Internal context accumulated across transitions (e.g. focused index, scroll offset).
     type Context: Clone + Debug;
     /// External configuration passed in by the parent component.
-    type Props: Clone + PartialEq;
+    type Props: Clone + PartialEq + HasId;
     /// The connect API type that produces attributes from current state.
     type Api<'a>: ConnectApi
     where
@@ -357,14 +403,32 @@ mod tests {
     struct ToggleContext;
 
     #[derive(Clone, Debug, PartialEq, Eq)]
-    struct ToggleProps;
+    struct ToggleProps {
+        id: String,
+    }
+
+    impl HasId for ToggleProps {
+        fn id(&self) -> &str {
+            &self.id
+        }
+
+        fn with_id(self, id: String) -> Self {
+            Self { id }
+        }
+
+        fn set_id(&mut self, id: String) {
+            self.id = id;
+        }
+    }
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
     struct TogglePart;
 
     impl ComponentPart for TogglePart {
-        fn root() -> Self {
-            Self
+        const ROOT: Self = Self;
+
+        fn scope() -> &'static str {
+            "toggle"
         }
 
         fn name(&self) -> &'static str {
@@ -427,7 +491,9 @@ mod tests {
 
     #[test]
     fn service_applies_transitions() {
-        let mut service = Service::<ToggleMachine>::new(ToggleProps);
+        let mut service = Service::<ToggleMachine>::new(ToggleProps {
+            id: String::from("toggle"),
+        });
         assert_eq!(service.state(), &ToggleState::Off);
 
         let effects = service.send(ToggleEvent::Toggle);

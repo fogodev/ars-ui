@@ -1,0 +1,5 @@
+error: HasId: `id` field must be of type String
+ --> tests/ui/has_id_wrong_type.rs:5:13
+  |
+5 |     pub id: u64,
+  |             ^^^

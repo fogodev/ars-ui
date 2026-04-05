@@ -16,11 +16,13 @@ debug        = []
 embedded-css = []
 
 [dependencies]
+ars-derive = { path = "../ars-derive" }
 ars-i18n = { path = "../ars-i18n", default-features = false }
 serde    = { version = "1", default-features = false, features = ["alloc", "derive"], optional = true }
 
 [dev-dependencies]
 serde_json = "1"
+trybuild   = "1"
 
 [lints]
 workspace = true

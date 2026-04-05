@@ -1,0 +1,7 @@
+error: HasId can only be derived for structs
+ --> tests/ui/has_id_on_enum.rs:4:1
+  |
+4 | / enum Props {
+5 | |     Root,
+6 | | }
+  | |_^
