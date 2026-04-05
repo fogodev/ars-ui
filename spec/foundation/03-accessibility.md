@@ -1220,7 +1220,7 @@ pub fn set_busy(attrs: &mut AttrMap, busy: bool) {
 pub fn set_invalid(attrs: &mut AttrMap, invalid: AriaInvalid, error_id: Option<&str>) {
     AriaAttribute::Invalid(invalid).apply_to(attrs);
     if let Some(id) = error_id {
-        AriaAttribute::ErrorMessage(AriaIdRef(id.to_string())).apply_to(attrs);
+        AriaAttribute::ErrorMessage(AriaIdRef(String::from(id))).apply_to(attrs);
     } else {
         attrs.set(HtmlAttr::Aria(AriaAttr::ErrorMessage), AttrValue::None);
     }
