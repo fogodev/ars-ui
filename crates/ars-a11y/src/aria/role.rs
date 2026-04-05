@@ -1,6 +1,6 @@
 //! WAI-ARIA 1.2 role system.
 //!
-//! Defines the [`AriaRole`] enum covering all WAI-ARIA 1.2 role definitions
+//! Defines the [`AriaRole`](crate::AriaRole) enum covering all WAI-ARIA 1.2 role definitions
 //! (plus select WAI-ARIA 1.3 draft roles), organised by category: abstract,
 //! window, widget, composite, document structure, live region, and landmark.
 //!

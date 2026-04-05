@@ -18,11 +18,13 @@ pub mod focus;
 #[cfg(feature = "aria-drag-drop-compat")]
 pub use aria::attribute::AriaDropeffect;
 pub use aria::{
+    apply::{apply_aria, apply_role},
     attribute::{
         AriaAttribute, AriaAutocomplete, AriaChecked, AriaCurrent, AriaHasPopup, AriaIdList,
         AriaIdRef, AriaInvalid, AriaLive, AriaOrientation, AriaPressed, AriaRelevant, AriaSort,
     },
     role::AriaRole,
+    state::{set_busy, set_checked, set_disabled, set_expanded, set_invalid, set_selected},
 };
 pub use focus::{FocusScopeBehavior, FocusScopeOptions, FocusStrategy, FocusTarget};
 
