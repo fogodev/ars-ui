@@ -7,6 +7,10 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   fmt:
     name: Formatting
@@ -50,14 +54,14 @@ jobs:
 
   unit:
     name: Unit Tests
-    needs: [check]
+    needs: [check, clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Unit test tier
-        run: cargo test -p ars-a11y -p ars-core -p ars-interactions -p ars-forms --all-targets --all-features
+        run: cargo test -p ars-a11y -p ars-core -p ars-dom -p ars-interactions -p ars-forms --all-targets --all-features
 
   integration:
     name: Integration Tests
