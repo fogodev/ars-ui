@@ -12,7 +12,7 @@ The `ars-forms` crate provides a complete form management system for ars-ui comp
 
 > **When to use each form approach:**
 >
-> - **`FormContext.submit()`** — Simple synchronous forms with client-side validation only.
+> - **`Context.submit()`** — Simple synchronous forms with client-side validation only.
 > - **`form_submit::Machine`** — Standard forms with async validation and server submission.
 > - **`form::Machine` (§14)** — Standard forms rendered as a `<form>` component; simplified 2-state lifecycle with server error integration.
 
@@ -28,25 +28,38 @@ Design goals:
 - **Zero framework coupling**: validation logic is pure Rust, usable without framework dependencies
 - **Controlled or uncontrolled**: works with React Hook Form-style controlled forms or native uncontrolled submission
 
+### 1.1 Module Structure
+
+Types use module-based namespacing (project convention: `module::Type` instead of `PrefixType`):
+
+| Module         | Types                                                                                                                                                                         | Crate path                   |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `field`        | `State`, `Value`, `FileRef`, `Context`, `Descriptors`, `InputAria`, `ValueExt`, `SelectionExt`, `CheckboxExt`                                                                 | `ars_forms::field::*`        |
+| `validation`   | `Error`, `ErrorCode`, `Errors`, `Result`, `ResultExt`, `Validator`, `BoxedValidator`, `Context`, `OwnedContext`, `AsyncValidator`, `BoxedAsyncValidator`, `boxed_validator()` | `ars_forms::validation::*`   |
+| `form`         | `Context`, `Data`, `Mode`, `CrossFieldValidator`, `AnyValidator`                                                                                                              | `ars_forms::form::*`         |
+| `hidden_input` | `Config`, `Value`, `attrs()`, `multi_attrs()`                                                                                                                                 | `ars_forms::hidden_input::*` |
+
+Code examples in this spec use the short (unqualified) names since each section defines types within their module context.
+
 ---
 
 ## 2. Core Types
 
-### 2.1 ValidationError
+### 2.1 Error
 
 ```rust
 /// A single validation failure.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ValidationError {
+pub struct Error {
     /// Human-readable error message.
     pub message: String,
     /// Machine-readable code for programmatic handling.
-    pub code: ValidationErrorCode,
+    pub code: ErrorCode,
 }
 
 /// Semantic codes for validation errors.
 #[derive(Clone, Debug, PartialEq)]
-pub enum ValidationErrorCode {
+pub enum ErrorCode {
     Required,
     MinLength(usize),
     MaxLength(usize),
@@ -119,12 +132,12 @@ match category {
 Adapters MUST provide locale-aware `MessageFn` factories that handle all six CLDR categories. The `other` category is always required as a fallback.
 
 ```rust
-impl ValidationError {
+impl Error {
     /// Creates a "required" validation error with locale-appropriate message.
     pub fn required(messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
         Self {
             message: (messages.required_error)(locale),
-            code: ValidationErrorCode::Required,
+            code: ErrorCode::Required,
         }
     }
 
@@ -132,7 +145,7 @@ impl ValidationError {
     pub fn min_length(min: usize, messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
         Self {
             message: (messages.min_length_error)(min, locale),
-            code: ValidationErrorCode::MinLength(min),
+            code: ErrorCode::MinLength(min),
         }
     }
 
@@ -140,7 +153,7 @@ impl ValidationError {
     pub fn max_length(max: usize, messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
         Self {
             message: (messages.max_length_error)(max, locale),
-            code: ValidationErrorCode::MaxLength(max),
+            code: ErrorCode::MaxLength(max),
         }
     }
 
@@ -151,7 +164,7 @@ impl ValidationError {
             // Note: Pattern string is intentionally omitted from the error code —
             // regex patterns are opaque implementation details not suitable for error codes.
             // The pattern is documented in the validator setup, not the error.
-            code: ValidationErrorCode::Pattern(String::new()),
+            code: ErrorCode::Pattern(String::new()),
         }
     }
 
@@ -159,7 +172,7 @@ impl ValidationError {
     pub fn min(min: f64, messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
         Self {
             message: (messages.min_error)(min, locale),
-            code: ValidationErrorCode::Min(min),
+            code: ErrorCode::Min(min),
         }
     }
 
@@ -167,7 +180,7 @@ impl ValidationError {
     pub fn max(max: f64, messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
         Self {
             message: (messages.max_error)(max, locale),
-            code: ValidationErrorCode::Max(max),
+            code: ErrorCode::Max(max),
         }
     }
 
@@ -175,7 +188,7 @@ impl ValidationError {
     pub fn email(messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
         Self {
             message: (messages.email_error)(locale),
-            code: ValidationErrorCode::Email,
+            code: ErrorCode::Email,
         }
     }
 
@@ -183,7 +196,7 @@ impl ValidationError {
     pub fn step(step: f64, messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
         Self {
             message: (messages.step_error)(step, locale),
-            code: ValidationErrorCode::Step(step),
+            code: ErrorCode::Step(step),
         }
     }
 
@@ -191,21 +204,21 @@ impl ValidationError {
     pub fn url(messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
         Self {
             message: (messages.url_error)(locale),
-            code: ValidationErrorCode::Url,
+            code: ErrorCode::Url,
         }
     }
 
     pub fn custom(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
-            code: ValidationErrorCode::Custom(code.into()),
+            code: ErrorCode::Custom(code.into()),
         }
     }
 
     pub fn server(message: impl Into<String>) -> Self {
         let message = message.into();
         Self {
-            code: ValidationErrorCode::Server(message.clone()),
+            code: ErrorCode::Server(message.clone()),
             message,
         }
     }
@@ -213,18 +226,18 @@ impl ValidationError {
     /// Returns `true` if this error originated from the server or an async validator.
     /// Used by `set_server_errors()` to separate server-sourced errors from client-side ones.
     pub fn is_server(&self) -> bool {
-        matches!(&self.code, ValidationErrorCode::Server(_) | ValidationErrorCode::Async(_))
+        matches!(&self.code, ErrorCode::Server(_) | ErrorCode::Async(_))
     }
 }
 
 /// A collection of validation errors for a single field.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct ValidationErrors(pub Vec<ValidationError>);
+pub struct Errors(pub Vec<Error>);
 
-impl ValidationErrors {
+impl Errors {
     pub fn new() -> Self { Self(Vec::new()) }
 
-    pub fn push(&mut self, error: ValidationError) {
+    pub fn push(&mut self, error: Error) {
         self.0.push(error);
     }
 
@@ -237,69 +250,78 @@ impl ValidationErrors {
     }
 
     /// Check if a specific code is present.
-    pub fn has_code(&self, code: &ValidationErrorCode) -> bool {
+    pub fn has_code(&self, code: &ErrorCode) -> bool {
         self.0.iter().any(|e| &e.code == code)
     }
 }
 ```
 
-### 2.2 ValidationResult
+### 2.2 Result
+
+`Result` is a type alias over Rust's standard `Result`, giving every validation
+outcome the `?` operator, combinators, and idiomatic `Ok(())`/`Err(errors)`
+pattern matching. Domain-specific helpers live on the `ResultExt` extension trait.
 
 ```rust
-#[derive(Clone, Debug, PartialEq)]
-pub enum ValidationResult {
-    Valid,
-    Invalid(ValidationErrors),
+/// The result of validating a field value.
+///
+/// - `Ok(())` — the value passed validation.
+/// - `Err(Errors)` — the value failed with one or more errors.
+pub type Result = core::result::Result<(), Errors>;
+
+/// Extension methods for `Result`.
+pub trait ResultExt {
+    /// Returns the validation errors, if any.
+    fn errors(&self) -> Option<&Errors>;
+
+    /// Merges two validation results. If both are invalid, their errors
+    /// are combined into one `Err`.
+    fn merge(self, other: Result) -> Result;
+
+    /// Returns the first error message, if any.
+    fn first_error_message(&self) -> Option<&str>;
+
+    /// Returns a new `Result` with server-sourced and async errors removed.
+    /// Preserves client-side validation errors. Returns `Ok(())` if no
+    /// errors remain.
+    fn without_server_errors(&self) -> Result;
 }
 
-impl ValidationResult {
-    pub fn is_valid(&self) -> bool {
-        matches!(self, Self::Valid)
+impl ResultExt for Result {
+    fn errors(&self) -> Option<&Errors> {
+        self.as_ref().err()
     }
 
-    pub fn is_invalid(&self) -> bool {
-        matches!(self, Self::Invalid(_))
-    }
-
-    pub fn errors(&self) -> Option<&ValidationErrors> {
-        match self {
-            Self::Invalid(e) => Some(e),
-            Self::Valid => None,
-        }
-    }
-
-    pub fn and(self, other: ValidationResult) -> ValidationResult {
+    fn merge(self, other: Result) -> Result {
         match (self, other) {
-            (ValidationResult::Valid, other) => other,
-            (ValidationResult::Invalid(mut e1), ValidationResult::Invalid(e2)) => {
+            (Ok(()), other) => other,
+            (Err(mut e1), Err(e2)) => {
                 e1.0.extend(e2.0);
-                ValidationResult::Invalid(e1)
+                Err(e1)
             }
-            (invalid, ValidationResult::Valid) => invalid,
+            (err, Ok(())) => err,
         }
     }
 
-    pub fn first_error_message(&self) -> Option<&str> {
+    fn first_error_message(&self) -> Option<&str> {
         self.errors().and_then(|e| e.first_message())
     }
 
-    /// Returns a new `ValidationResult` with server-sourced and async errors removed.
-    /// Preserves client-side validation errors. Returns `Valid` if no errors remain.
-    pub fn without_server_errors(&self) -> ValidationResult {
+    fn without_server_errors(&self) -> Result {
         match self {
-            Self::Valid => Self::Valid,
-            Self::Invalid(errors) => {
-                let filtered: Vec<ValidationError> = errors.0.iter()
+            Ok(()) => Ok(()),
+            Err(errors) => {
+                let filtered: Vec<Error> = errors.0.iter()
                     .filter(|e| !matches!(
                         &e.code,
-                        ValidationErrorCode::Server(_) | ValidationErrorCode::Async(_)
+                        ErrorCode::Server(_) | ErrorCode::Async(_)
                     ))
                     .cloned()
                     .collect();
                 if filtered.is_empty() {
-                    Self::Valid
+                    Ok(())
                 } else {
-                    Self::Invalid(ValidationErrors(filtered))
+                    Err(Errors(filtered))
                 }
             }
         }
@@ -307,17 +329,17 @@ impl ValidationResult {
 }
 ```
 
-### 2.3 FieldState
+### 2.3 State
 
 ````rust
 /// The complete state of a single form field.
 #[derive(Clone, Debug, PartialEq)]
-pub struct FieldState {
+pub struct State {
     /// Initial field value, stored for reset().
-    pub initial_value: FieldValue,
+    pub initial_value: Value,
 
     /// Current field value.
-    pub value: FieldValue,
+    pub value: Value,
 
     /// Whether the user has focused and then blurred this field.
     pub touched: bool,
@@ -326,7 +348,7 @@ pub struct FieldState {
     pub dirty: bool,
 
     /// Current validation result.
-    pub validation: ValidationResult,
+    pub validation: Result,
 
     /// Whether validation is currently running (async validators).
     pub validating: bool,
@@ -364,13 +386,13 @@ pub struct FileRef {
 }
 
 /// The value of a form field.
-// FieldValue intentionally has no Default impl — the correct variant depends
+// Value intentionally has no Default impl — the correct variant depends
 // on the field type (Text vs Number vs Date etc.).
 #[derive(Clone, Debug, PartialEq)]
-pub enum FieldValue {
+pub enum Value {
     Text(String),
     /// Note: `f64` NaN violates PartialEq reflexivity (NaN != NaN). Number fields
-    /// SHOULD reject NaN at the validator level. If NaN reaches FieldValue, dirty
+    /// SHOULD reject NaN at the validator level. If NaN reaches Value, dirty
     /// tracking via PartialEq will incorrectly report the field as always dirty.
     Number(Option<f64>),
     Bool(bool),
@@ -381,45 +403,45 @@ pub enum FieldValue {
     DateRange(Option<ars_i18n::DateRange>),
 }
 
-impl FieldValue {
+impl Value {
     pub fn as_text(&self) -> Option<&str> {
-        match self { FieldValue::Text(s) => Some(s), _ => None }
+        match self { Value::Text(s) => Some(s), _ => None }
     }
 
     pub fn as_number(&self) -> Option<f64> {
-        match self { FieldValue::Number(n) => *n, _ => None }
+        match self { Value::Number(n) => *n, _ => None }
     }
 
     pub fn as_bool(&self) -> Option<bool> {
-        match self { FieldValue::Bool(b) => Some(*b), _ => None }
+        match self { Value::Bool(b) => Some(*b), _ => None }
     }
 
     pub fn to_string_for_validation(&self) -> String {
         match self {
-            FieldValue::Text(s) => s.clone(),
-            FieldValue::Number(Some(n)) => n.to_string(),
-            FieldValue::Number(None) => String::new(),
-            FieldValue::Bool(b) => b.to_string(),
-            FieldValue::MultipleText(v) => v.join(","),
-            FieldValue::File(v) => v.len().to_string(),
-            FieldValue::Date(Some(d)) => d.to_iso8601(),      // "2024-03-15"
-            FieldValue::Date(None) => String::new(),
-            FieldValue::Time(Some(t)) => t.to_iso8601(),      // "14:30:00"
-            FieldValue::Time(None) => String::new(),
-            FieldValue::DateRange(Some(r)) => r.to_iso8601(), // "2024-03-15/2024-03-20"
-            FieldValue::DateRange(None) => String::new(),
+            Value::Text(s) => s.clone(),
+            Value::Number(Some(n)) => n.to_string(),
+            Value::Number(None) => String::new(),
+            Value::Bool(b) => b.to_string(),
+            Value::MultipleText(v) => v.join(","),
+            Value::File(v) => v.len().to_string(),
+            Value::Date(Some(d)) => d.to_iso8601(),      // "2024-03-15"
+            Value::Date(None) => String::new(),
+            Value::Time(Some(t)) => t.to_iso8601(),      // "14:30:00"
+            Value::Time(None) => String::new(),
+            Value::DateRange(Some(r)) => r.to_iso8601(), // "2024-03-15/2024-03-20"
+            Value::DateRange(None) => String::new(),
         }
     }
 }
 
-impl FieldState {
-    pub fn new(initial: FieldValue) -> Self {
+impl State {
+    pub fn new(initial: Value) -> Self {
         Self {
             initial_value: initial.clone(),
             value: initial,
             touched: false,
             dirty: false,
-            validation: ValidationResult::Valid,
+            validation: Ok(()),
             validating: false,
             validation_generation: 0,
         }
@@ -427,12 +449,12 @@ impl FieldState {
 
     /// Whether to show an error (only after the user has interacted).
     pub fn show_error(&self) -> bool {
-        self.touched && self.validation.is_invalid()
+        self.touched && self.validation.is_err()
     }
 
     /// Whether the field is currently invalid.
     pub fn is_invalid(&self) -> bool {
-        self.validation.is_invalid()
+        self.validation.is_err()
     }
 
     /// Get the error message to display.
@@ -464,34 +486,34 @@ use std::fmt;
 /// `Clone` is derived because this struct holds only references. However, cloning
 /// only copies the borrows — it does not extend their lifetimes. If you need an
 /// owned copy that outlives the borrow scope (e.g., for async validation), use
-/// `fn snapshot(&self) -> OwnedValidationContext` instead.
+/// `fn snapshot(&self) -> OwnedContext` instead.
 #[derive(Clone, Debug)]
-pub struct ValidationContext<'a> {
+pub struct Context<'a> {
     /// The name of the field being validated.
     pub field_name: &'a str,
 
     /// All current form values (for cross-field validation).
-    pub form_values: &'a std::collections::BTreeMap<String, FieldValue>,
+    pub form_values: &'a std::collections::BTreeMap<String, Value>,
 
     /// The current locale (for locale-aware messages).
     pub locale: Option<&'a ars_i18n::Locale>,
 }
 
-/// An owned version of `ValidationContext` that can outlive the borrow scope.
-/// Use `ValidationContext::snapshot()` to create one — e.g., for async validation
+/// An owned version of `Context` that can outlive the borrow scope.
+/// Use `Context::snapshot()` to create one — e.g., for async validation
 /// where the future must own its context.
 #[derive(Clone, Debug)]
-pub struct OwnedValidationContext {
+pub struct OwnedContext {
     pub field_name: String,
-    pub form_values: std::collections::BTreeMap<String, FieldValue>,
+    pub form_values: std::collections::BTreeMap<String, Value>,
     pub locale: Option<ars_i18n::Locale>,
 }
 
-impl OwnedValidationContext {
-    /// Convert back to a borrowed `ValidationContext<'_>` for passing to
+impl OwnedContext {
+    /// Convert back to a borrowed `Context<'_>` for passing to
     /// `AsyncValidator::validate_async()` and similar APIs.
-    pub fn as_ref(&self) -> ValidationContext<'_> {
-        ValidationContext {
+    pub fn as_ref(&self) -> Context<'_> {
+        Context {
             field_name: &self.field_name,
             form_values: &self.form_values,
             locale: self.locale.as_ref(),
@@ -499,11 +521,11 @@ impl OwnedValidationContext {
     }
 }
 
-impl<'a> ValidationContext<'a> {
+impl<'a> Context<'a> {
     /// Create an owned snapshot of this context, suitable for sending into
     /// async validation futures that outlive the borrow scope.
-    pub fn snapshot(&self) -> OwnedValidationContext {
-        OwnedValidationContext {
+    pub fn snapshot(&self) -> OwnedContext {
+        OwnedContext {
             field_name: self.field_name.to_owned(),
             form_values: self.form_values.clone(),
             locale: self.locale.cloned(),
@@ -516,12 +538,12 @@ impl<'a> ValidationContext<'a> {
     ///
     /// # Example
     /// ```rust
-    /// let ctx = ValidationContext::standalone("email");
-    /// let result = my_validator.validate(&FieldValue::Text(input), &ctx);
+    /// let ctx = Context::standalone("email");
+    /// let result = my_validator.validate(&Value::Text(input), &ctx);
     /// ```
     pub fn standalone(field_name: &'a str) -> Self {
         use std::sync::LazyLock;
-        static EMPTY_MAP: LazyLock<std::collections::BTreeMap<String, FieldValue>> =
+        static EMPTY_MAP: LazyLock<std::collections::BTreeMap<String, Value>> =
             LazyLock::new(std::collections::BTreeMap::new);
         Self {
             field_name,
@@ -541,12 +563,12 @@ impl<'a> ValidationContext<'a> {
 /// bounds through cfg-gated signatures.
 #[cfg(not(target_arch = "wasm32"))]
 pub trait Validator: Send + Sync {
-    fn validate(&self, value: &FieldValue, ctx: &ValidationContext) -> ValidationResult;
+    fn validate(&self, value: &Value, ctx: &Context) -> Result;
 }
 
 #[cfg(target_arch = "wasm32")]
 pub trait Validator {
-    fn validate(&self, value: &FieldValue, ctx: &ValidationContext) -> ValidationResult;
+    fn validate(&self, value: &Value, ctx: &Context) -> Result;
 }
 
 /// A type-erased synchronous validator.
@@ -586,56 +608,56 @@ pub struct RequiredValidator {
 }
 
 impl Validator for RequiredValidator {
-    fn validate(&self, value: &FieldValue, ctx: &ValidationContext) -> ValidationResult {
+    fn validate(&self, value: &Value, ctx: &Context) -> Result {
         let is_empty = match value {
-            FieldValue::Text(s) => s.trim().is_empty(),
-            FieldValue::Number(None) => true,
-            FieldValue::Number(Some(_)) => false,
-            FieldValue::Bool(false) => true,
-            FieldValue::Bool(true) => false,
-            FieldValue::MultipleText(v) => v.is_empty(),
-            FieldValue::File(v) => v.is_empty(),
-            FieldValue::Date(d) => d.is_none(),
-            FieldValue::Time(t) => t.is_none(),
-            FieldValue::DateRange(r) => r.is_none(),
+            Value::Text(s) => s.trim().is_empty(),
+            Value::Number(None) => true,
+            Value::Number(Some(_)) => false,
+            Value::Bool(false) => true,
+            Value::Bool(true) => false,
+            Value::MultipleText(v) => v.is_empty(),
+            Value::File(v) => v.is_empty(),
+            Value::Date(d) => d.is_none(),
+            Value::Time(t) => t.is_none(),
+            Value::DateRange(r) => r.is_none(),
         };
         if is_empty {
             let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
-            ValidationResult::Invalid(ValidationErrors(vec![
+            Err(Errors(vec![
                 self.message.as_ref()
-                    .map(|m| ValidationError { message: m.clone(), code: ValidationErrorCode::Required })
-                    .unwrap_or_else(|| ValidationError::required(&FormMessages::default(), locale))
+                    .map(|m| Error { message: m.clone(), code: ErrorCode::Required })
+                    .unwrap_or_else(|| Error::required(&FormMessages::default(), locale))
             ]))
         } else {
-            ValidationResult::Valid
+            Ok(())
         }
     }
 }
 
-/// Default locale for built-in validators when no locale is provided via ValidationContext.
+/// Default locale for built-in validators when no locale is provided via Context.
 ///
 /// **Design decision:** Built-in validators (Required, MinLength, MaxLength, Pattern, etc.)
-/// fall back to English ("en") when `ValidationContext.locale` is `None`. This produces
+/// fall back to English ("en") when `Context.locale` is `None`. This produces
 /// correct English validation messages but may produce incorrect pluralization for other
-/// languages. To enable localized validation messages, set `locale` on `FormContext::new()`
-/// or pass a `Locale` to individual `ValidationContext` instances.
+/// languages. To enable localized validation messages, set `locale` on `Context::new()`
+/// or pass a `Locale` to individual `Context` instances.
 static DEFAULT_VALIDATOR_LOCALE: std::sync::LazyLock<ars_i18n::Locale> =
     std::sync::LazyLock::new(|| ars_i18n::Locale::parse("en").expect("valid locale"));
 
 pub struct MinLengthValidator { pub min: usize, pub message: Option<String> }
 
 impl Validator for MinLengthValidator {
-    fn validate(&self, value: &FieldValue, ctx: &ValidationContext) -> ValidationResult {
+    fn validate(&self, value: &Value, ctx: &Context) -> Result {
         let s = value.to_string_for_validation();
         let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
         if s.chars().count() < self.min {
-            ValidationResult::Invalid(ValidationErrors(vec![
+            Err(Errors(vec![
                 self.message.clone()
-                    .map(|m| ValidationError { message: m, code: ValidationErrorCode::MinLength(self.min) })
-                    .unwrap_or_else(|| ValidationError::min_length(self.min, &FormMessages::default(), locale))
+                    .map(|m| Error { message: m, code: ErrorCode::MinLength(self.min) })
+                    .unwrap_or_else(|| Error::min_length(self.min, &FormMessages::default(), locale))
             ]))
         } else {
-            ValidationResult::Valid
+            Ok(())
         }
     }
 }
@@ -643,17 +665,17 @@ impl Validator for MinLengthValidator {
 pub struct MaxLengthValidator { pub max: usize, pub message: Option<String> }
 
 impl Validator for MaxLengthValidator {
-    fn validate(&self, value: &FieldValue, ctx: &ValidationContext) -> ValidationResult {
+    fn validate(&self, value: &Value, ctx: &Context) -> Result {
         let s = value.to_string_for_validation();
         let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
         if s.chars().count() > self.max {
-            ValidationResult::Invalid(ValidationErrors(vec![
+            Err(Errors(vec![
                 self.message.clone()
-                    .map(|m| ValidationError { message: m, code: ValidationErrorCode::MaxLength(self.max) })
-                    .unwrap_or_else(|| ValidationError::max_length(self.max, &FormMessages::default(), locale))
+                    .map(|m| Error { message: m, code: ErrorCode::MaxLength(self.max) })
+                    .unwrap_or_else(|| Error::max_length(self.max, &FormMessages::default(), locale))
             ]))
         } else {
-            ValidationResult::Valid
+            Ok(())
         }
     }
 }
@@ -661,20 +683,20 @@ impl Validator for MaxLengthValidator {
 pub struct MinValidator { pub min: f64, pub message: Option<String> }
 
 impl Validator for MinValidator {
-    fn validate(&self, value: &FieldValue, ctx: &ValidationContext) -> ValidationResult {
+    fn validate(&self, value: &Value, ctx: &Context) -> Result {
         let n = match value.as_number() {
             Some(n) => n,
-            None => return ValidationResult::Valid, // Let RequiredValidator handle None
+            None => return Ok(()), // Let RequiredValidator handle None
         };
         let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
         if n < self.min {
-            ValidationResult::Invalid(ValidationErrors(vec![
+            Err(Errors(vec![
                 self.message.clone()
-                    .map(|m| ValidationError { message: m, code: ValidationErrorCode::Min(self.min) })
-                    .unwrap_or_else(|| ValidationError::min(self.min, &FormMessages::default(), locale))
+                    .map(|m| Error { message: m, code: ErrorCode::Min(self.min) })
+                    .unwrap_or_else(|| Error::min(self.min, &FormMessages::default(), locale))
             ]))
         } else {
-            ValidationResult::Valid
+            Ok(())
         }
     }
 }
@@ -682,20 +704,20 @@ impl Validator for MinValidator {
 pub struct MaxValidator { pub max: f64, pub message: Option<String> }
 
 impl Validator for MaxValidator {
-    fn validate(&self, value: &FieldValue, ctx: &ValidationContext) -> ValidationResult {
+    fn validate(&self, value: &Value, ctx: &Context) -> Result {
         let n = match value.as_number() {
             Some(n) => n,
-            None => return ValidationResult::Valid,
+            None => return Ok(()),
         };
         let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
         if n > self.max {
-            ValidationResult::Invalid(ValidationErrors(vec![
+            Err(Errors(vec![
                 self.message.clone()
-                    .map(|m| ValidationError { message: m, code: ValidationErrorCode::Max(self.max) })
-                    .unwrap_or_else(|| ValidationError::max(self.max, &FormMessages::default(), locale))
+                    .map(|m| Error { message: m, code: ErrorCode::Max(self.max) })
+                    .unwrap_or_else(|| Error::max(self.max, &FormMessages::default(), locale))
             ]))
         } else {
-            ValidationResult::Valid
+            Ok(())
         }
     }
 }
@@ -736,21 +758,21 @@ impl PatternValidator {
 }
 
 impl Validator for PatternValidator {
-    fn validate(&self, value: &FieldValue, ctx: &ValidationContext) -> ValidationResult {
+    fn validate(&self, value: &Value, ctx: &Context) -> Result {
         let s = value.to_string_for_validation();
-        if s.is_empty() { return ValidationResult::Valid; } // Let Required handle
+        if s.is_empty() { return Ok(()); } // Let Required handle
 
         if !self.compiled.is_match(&s) {
             let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
-            ValidationResult::Invalid(ValidationErrors(vec![
+            Err(Errors(vec![
                 self.message.clone()
-                    .map(|m| ValidationError { message: m, code: ValidationErrorCode::Pattern(self.pattern.clone()) })
+                    .map(|m| Error { message: m, code: ErrorCode::Pattern(self.pattern.clone()) })
                     // Do not expose raw regex to users — it is incomprehensible
                     // in any language. Callers should provide a custom `message`.
-                    .unwrap_or_else(|| ValidationError::pattern(&FormMessages::default(), locale))
+                    .unwrap_or_else(|| Error::pattern(&FormMessages::default(), locale))
             ]))
         } else {
-            ValidationResult::Valid
+            Ok(())
         }
     }
 }
@@ -766,9 +788,9 @@ impl Validator for PatternValidator {
 pub struct EmailValidator { pub message: Option<String> }
 
 impl Validator for EmailValidator {
-    fn validate(&self, value: &FieldValue, ctx: &ValidationContext) -> ValidationResult {
+    fn validate(&self, value: &Value, ctx: &Context) -> Result {
         let s = value.to_string_for_validation();
-        if s.is_empty() { return ValidationResult::Valid; }
+        if s.is_empty() { return Ok(()); }
 
         // Simple email validation: must contain @ and have something before and after
         let valid = s.contains('@') && {
@@ -778,13 +800,13 @@ impl Validator for EmailValidator {
 
         if !valid {
             let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
-            ValidationResult::Invalid(ValidationErrors(vec![
+            Err(Errors(vec![
                 self.message.clone()
-                    .map(|m| ValidationError { message: m, code: ValidationErrorCode::Email })
-                    .unwrap_or_else(|| ValidationError::email(&FormMessages::default(), locale))
+                    .map(|m| Error { message: m, code: ErrorCode::Email })
+                    .unwrap_or_else(|| Error::email(&FormMessages::default(), locale))
             ]))
         } else {
-            ValidationResult::Valid
+            Ok(())
         }
     }
 }
@@ -812,22 +834,22 @@ impl StepValidator {
 }
 
 impl Validator for StepValidator {
-    fn validate(&self, value: &FieldValue, ctx: &ValidationContext) -> ValidationResult {
+    fn validate(&self, value: &Value, ctx: &Context) -> Result {
         if let Some(num) = value.as_number() {
             let remainder = ((num - self.step_base) % self.step).abs();
             if remainder > f64::EPSILON && (self.step - remainder) > f64::EPSILON {
                 if let Some(ref msg) = self.message {
-                    return ValidationResult::Invalid(ValidationErrors(vec![
-                        ValidationError::custom("step", msg.clone())
+                    return Err(Errors(vec![
+                        Error::custom("step", msg.clone())
                     ]));
                 }
                 let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
-                return ValidationResult::Invalid(ValidationErrors(vec![
-                    ValidationError::step(self.step, &FormMessages::default(), locale)
+                return Err(Errors(vec![
+                    Error::step(self.step, &FormMessages::default(), locale)
                 ]));
             }
         }
-        ValidationResult::Valid
+        Ok(())
     }
 }
 
@@ -845,21 +867,21 @@ impl UrlValidator {
 }
 
 impl Validator for UrlValidator {
-    fn validate(&self, value: &FieldValue, ctx: &ValidationContext) -> ValidationResult {
+    fn validate(&self, value: &Value, ctx: &Context) -> Result {
         if let Some(s) = value.as_text() {
             if !s.is_empty() && !is_valid_url(s) {
                 if let Some(ref msg) = self.message {
-                    return ValidationResult::Invalid(ValidationErrors(vec![
-                        ValidationError::custom("url", msg.clone())
+                    return Err(Errors(vec![
+                        Error::custom("url", msg.clone())
                     ]));
                 }
                 let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
-                return ValidationResult::Invalid(ValidationErrors(vec![
-                    ValidationError::url(&FormMessages::default(), locale)
+                return Err(Errors(vec![
+                    Error::url(&FormMessages::default(), locale)
                 ]));
             }
         }
-        ValidationResult::Valid
+        Ok(())
     }
 }
 
@@ -877,25 +899,25 @@ fn is_valid_url(s: &str) -> bool {
 /// On non-WASM targets, `F` must also be `Send + Sync` so that
 /// `BoxedValidator = Arc<dyn Validator + Send + Sync>` can wrap it.
 #[cfg(not(target_arch = "wasm32"))]
-pub struct FnValidator<F: Fn(&FieldValue, &ValidationContext) -> ValidationResult + Send + Sync> {
+pub struct FnValidator<F: Fn(&Value, &Context) -> Result + Send + Sync> {
     pub f: F,
 }
 
 #[cfg(target_arch = "wasm32")]
-pub struct FnValidator<F: Fn(&FieldValue, &ValidationContext) -> ValidationResult> {
+pub struct FnValidator<F: Fn(&Value, &Context) -> Result> {
     pub f: F,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(&FieldValue, &ValidationContext) -> ValidationResult + Send + Sync> Validator for FnValidator<F> {
-    fn validate(&self, value: &FieldValue, ctx: &ValidationContext) -> ValidationResult {
+impl<F: Fn(&Value, &Context) -> Result + Send + Sync> Validator for FnValidator<F> {
+    fn validate(&self, value: &Value, ctx: &Context) -> Result {
         (self.f)(value, ctx)
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-impl<F: Fn(&FieldValue, &ValidationContext) -> ValidationResult> Validator for FnValidator<F> {
-    fn validate(&self, value: &FieldValue, ctx: &ValidationContext) -> ValidationResult {
+impl<F: Fn(&Value, &Context) -> Result> Validator for FnValidator<F> {
+    fn validate(&self, value: &Value, ctx: &Context) -> Result {
         (self.f)(value, ctx)
     }
 }
@@ -914,13 +936,13 @@ impl<F: Fn(&FieldValue, &ValidationContext) -> ValidationResult> Validator for F
 /// with the platform-specific `BoxedValidator` bounds.
 
 #[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(&FieldValue, &ValidationContext) -> ValidationResult + Send + Sync + 'static> FnValidator<F> {
+impl<F: Fn(&Value, &Context) -> Result + Send + Sync + 'static> FnValidator<F> {
     pub fn new(f: F) -> Self { Self { f } }
     pub fn boxed(self) -> BoxedValidator { boxed_validator(self) }
 }
 
 #[cfg(target_arch = "wasm32")]
-impl<F: Fn(&FieldValue, &ValidationContext) -> ValidationResult + 'static> FnValidator<F> {
+impl<F: Fn(&Value, &Context) -> Result + 'static> FnValidator<F> {
     pub fn new(f: F) -> Self { Self { f } }
     pub fn boxed(self) -> BoxedValidator { boxed_validator(self) }
 }
@@ -1019,7 +1041,7 @@ impl ValidatorsBuilder {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn custom<F>(self, f: F) -> Self
     where
-        F: Fn(&FieldValue, &ValidationContext) -> ValidationResult + Send + Sync + 'static,
+        F: Fn(&Value, &Context) -> Result + Send + Sync + 'static,
     {
         self.add(FnValidator { f })
     }
@@ -1027,7 +1049,7 @@ impl ValidatorsBuilder {
     #[cfg(target_arch = "wasm32")]
     pub fn custom<F>(self, f: F) -> Self
     where
-        F: Fn(&FieldValue, &ValidationContext) -> ValidationResult + 'static,
+        F: Fn(&Value, &Context) -> Result + 'static,
     {
         self.add(FnValidator { f })
     }
@@ -1052,13 +1074,13 @@ pub struct ChainValidator {
 }
 
 impl Validator for ChainValidator {
-    fn validate(&self, value: &FieldValue, ctx: &ValidationContext) -> ValidationResult {
-        let mut all_errors = ValidationErrors::new();
+    fn validate(&self, value: &Value, ctx: &Context) -> Result {
+        let mut all_errors = Errors::new();
 
         for validator in &self.validators {
             match validator.validate(value, ctx) {
-                ValidationResult::Valid => {}
-                ValidationResult::Invalid(errors) => {
+                Ok(()) => {}
+                Err(errors) => {
                     all_errors.0.extend(errors.0);
                     if self.stop_on_first { break; }
                 }
@@ -1066,9 +1088,9 @@ impl Validator for ChainValidator {
         }
 
         if all_errors.is_empty() {
-            ValidationResult::Valid
+            Ok(())
         } else {
-            ValidationResult::Invalid(all_errors)
+            Err(all_errors)
         }
     }
 }
@@ -1095,18 +1117,18 @@ use ars_i18n::Locale;
 pub trait AsyncValidator: Send + Sync {
     fn validate_async<'a>(
         &'a self,
-        value: &'a FieldValue,
-        ctx: &'a ValidationContext<'a>,
-    ) -> Pin<Box<dyn Future<Output = ValidationResult> + Send + 'a>>;
+        value: &'a Value,
+        ctx: &'a Context<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result> + Send + 'a>>;
 }
 
 #[cfg(target_arch = "wasm32")]
 pub trait AsyncValidator {
     fn validate_async<'a>(
         &'a self,
-        value: &'a FieldValue,
-        ctx: &'a ValidationContext<'a>,
-    ) -> Pin<Box<dyn Future<Output = ValidationResult> + 'a>>;
+        value: &'a Value,
+        ctx: &'a Context<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result> + 'a>>;
 }
 
 /// Wrap a closure as an async validator.
@@ -1117,14 +1139,14 @@ pub struct AsyncFnValidator<F> {
 #[cfg(not(target_arch = "wasm32"))]
 impl<F, Fut> AsyncValidator for AsyncFnValidator<F>
 where
-    F: Fn(String, OwnedValidationContext) -> Fut + Send + Sync,
-    Fut: Future<Output = ValidationResult> + Send + 'static,
+    F: Fn(String, OwnedContext) -> Fut + Send + Sync,
+    Fut: Future<Output = Result> + Send + 'static,
 {
     fn validate_async<'a>(
         &'a self,
-        value: &'a FieldValue,
-        ctx: &'a ValidationContext<'a>,
-    ) -> Pin<Box<dyn Future<Output = ValidationResult> + Send + 'a>> {
+        value: &'a Value,
+        ctx: &'a Context<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result> + Send + 'a>> {
         let text = value.to_string_for_validation();
         let owned_ctx = ctx.snapshot();
         let fut = (self.f)(text, owned_ctx);
@@ -1135,14 +1157,14 @@ where
 #[cfg(target_arch = "wasm32")]
 impl<F, Fut> AsyncValidator for AsyncFnValidator<F>
 where
-    F: Fn(String, OwnedValidationContext) -> Fut,
-    Fut: Future<Output = ValidationResult> + 'static,
+    F: Fn(String, OwnedContext) -> Fut,
+    Fut: Future<Output = Result> + 'static,
 {
     fn validate_async<'a>(
         &'a self,
-        value: &'a FieldValue,
-        ctx: &'a ValidationContext<'a>,
-    ) -> Pin<Box<dyn Future<Output = ValidationResult> + 'a>> {
+        value: &'a Value,
+        ctx: &'a Context<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result> + 'a>> {
         let text = value.to_string_for_validation();
         let owned_ctx = ctx.snapshot();
         let fut = (self.f)(text, owned_ctx);
@@ -1160,9 +1182,9 @@ pub struct DebouncedAsyncValidator {
     pub delay_ms: u32,
     /// Adapter-provided callback that spawns an async future to completion.
     /// On native: wraps `tokio::spawn`; on WASM: wraps `wasm_bindgen_futures::spawn_local`.
-    /// The callback takes ownership of the `OwnedValidationContext` and the future,
-    /// avoiding lifetime issues with borrowed `ValidationContext`.
-    pub spawn_async_validation: Arc<dyn Fn(Arc<dyn AsyncValidator + Send + Sync>, FieldValue, OwnedValidationContext) + Send + Sync>,
+    /// The callback takes ownership of the `OwnedContext` and the future,
+    /// avoiding lifetime issues with borrowed `Context`.
+    pub spawn_async_validation: Arc<dyn Fn(Arc<dyn AsyncValidator + Send + Sync>, Value, OwnedContext) + Send + Sync>,
     /// Handle to the currently pending debounce timer, if any.
     /// Used to cancel the previous timer when new input arrives.
     pending_timer: Option<TimerHandle>,
@@ -1175,7 +1197,7 @@ pub struct DebouncedAsyncValidator {
     /// Adapter-provided callback that spawns an async future to completion.
     /// On WASM: wraps `wasm_bindgen_futures::spawn_local`.
     /// Takes ownership of validator, value, and context to avoid lifetime issues.
-    pub spawn_async_validation: Rc<dyn Fn(Rc<dyn AsyncValidator>, FieldValue, OwnedValidationContext)>,
+    pub spawn_async_validation: Rc<dyn Fn(Rc<dyn AsyncValidator>, Value, OwnedContext)>,
     pending_timer: Option<TimerHandle>,
 }
 
@@ -1188,14 +1210,14 @@ impl DebouncedAsyncValidator {
     /// **Design note:** The `spawn_async_validation` callback receives owned data
     /// (validator, value, context) rather than a pre-built future. This avoids the
     /// lifetime problem where `validate_async` returns `Future + 'a` tied to a
-    /// borrowed `ValidationContext<'a>` — the callback constructs the
-    /// `ValidationContext` from the owned data inside the spawned task, where the
+    /// borrowed `Context<'a>` — the callback constructs the
+    /// `Context` from the owned data inside the spawned task, where the
     /// borrow can live for the task's duration.
     pub fn validate_debounced(
         &mut self,
-        value: &FieldValue,
+        value: &Value,
         name: &str,
-        form_values: &BTreeMap<String, FieldValue>,
+        form_values: &BTreeMap<String, Value>,
         locale: Option<&Locale>,
         spawn_timer: impl FnOnce(u32, Box<dyn FnOnce()>) -> TimerHandle,
     ) {
@@ -1206,7 +1228,7 @@ impl DebouncedAsyncValidator {
         let validator = self.validator.clone();
         let value = value.clone();
         let name = name.to_string();
-        let owned_ctx = OwnedValidationContext {
+        let owned_ctx = OwnedContext {
             field_name: name.clone(),
             form_values: form_values.clone(),
             locale: locale.cloned(),
@@ -1214,7 +1236,7 @@ impl DebouncedAsyncValidator {
         let spawn_async = self.spawn_async_validation.clone();
         self.pending_timer = Some(spawn_timer(self.delay_ms, Box::new(move || {
             // After delay, spawn the async validator. The spawn callback takes
-            // ownership of all data and constructs the ValidationContext internally,
+            // ownership of all data and constructs the Context internally,
             // ensuring the future's lifetime is satisfied.
             spawn_async(validator, value, owned_ctx);
         })));
@@ -1244,8 +1266,8 @@ impl TimerHandle {
     }
 }
 
-/// `OwnedValidationContext` is defined in §3.1 above. The `as_ref()` method
-/// converts it back to a borrowed `ValidationContext<'_>` for passing to
+/// `OwnedContext` is defined in §3.1 above. The `as_ref()` method
+/// converts it back to a borrowed `Context<'_>` for passing to
 /// `AsyncValidator::validate_async()`.
 ```
 
@@ -1253,17 +1275,17 @@ impl TimerHandle {
 
 ## 5. Form Context
 
-> **Design note:** `FormContext` is a plain data structure, not a `Machine` implementor. It holds mutable form state (field registry, validation results, dirty/touched tracking). The `form_submit::Machine` in §8 embeds `FormContext` in its `Context` type and drives the submission lifecycle as a proper state machine. The `form::Machine` in §14 manages its own simplified context; integration with `FormContext` is done at the adapter layer via context propagation. Direct mutation of `FormContext` is valid within Machine `apply` closures.
+> **Design note:** `Context` is a plain data structure, not a `Machine` implementor. It holds mutable form state (field registry, validation results, dirty/touched tracking). The `form_submit::Machine` in §8 embeds `Context` in its `Context` type and drives the submission lifecycle as a proper state machine. The `form::Machine` in §14 manages its own simplified context; integration with `Context` is done at the adapter layer via context propagation. Direct mutation of `Context` is valid within Machine `apply` closures.
 >
 > **Decision matrix — which approach to use:**
 >
-> | Scenario                                       | Use                           | Why                                                                  |
-> | ---------------------------------------------- | ----------------------------- | -------------------------------------------------------------------- |
-> | Full form with validation + async submit       | `form_submit::Machine` (§8)   | Full lifecycle: Idle → Validating → Submitting → Success/Failed      |
-> | Simple form without validation states          | `form::Machine` (§14)         | Lightweight: just collects fields and submits                        |
-> | Programmatic submission from outside a Machine | `FormContext.submit()` (§5.1) | Direct call from adapter hooks when no state machine drives the form |
+> | Scenario                                       | Use                         | Why                                                                  |
+> | ---------------------------------------------- | --------------------------- | -------------------------------------------------------------------- |
+> | Full form with validation + async submit       | `form_submit::Machine` (§8) | Full lifecycle: Idle → Validating → Submitting → Success/Failed      |
+> | Simple form without validation states          | `form::Machine` (§14)       | Lightweight: just collects fields and submits                        |
+> | Programmatic submission from outside a Machine | `Context.submit()` (§5.1)   | Direct call from adapter hooks when no state machine drives the form |
 
-### 5.1 `FormContext`
+### 5.1 `Context`
 
 ````rust
 use std::{collections::BTreeMap, fmt};
@@ -1272,13 +1294,13 @@ use ars_i18n::Locale;
 
 /// The central state for a form.
 #[derive(Clone)]
-pub struct FormContext {
+pub struct Context {
     /// State of each registered field.
     /// Uses `IndexMap` (insertion-ordered) so that "focus first invalid field"
     /// iterates fields in DOM registration order, not alphabetical order.
     /// A `BTreeMap` would sort alphabetically, causing focus to jump to the
     /// wrong field (e.g., "address" before "name" even if "name" appears first in the DOM).
-    pub fields: IndexMap<String, FieldState>,
+    pub fields: IndexMap<String, State>,
 
     /// Whether the form is currently being submitted.
     pub is_submitting: bool,
@@ -1294,7 +1316,7 @@ pub struct FormContext {
     pub locale: Option<Locale>,
 
     /// Validation trigger mode.
-    pub validation_mode: ValidationMode,
+    pub validation_mode: Mode,
 
     /// Registered validators per field.
     // BTreeMap is used intentionally: validators are accessed by field name (keyed lookup),
@@ -1313,9 +1335,9 @@ pub struct FormContext {
     cross_field_registry: BTreeMap<String, Vec<CrossFieldValidator>>,
 }
 
-impl fmt::Debug for FormContext {
+impl fmt::Debug for Context {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("FormContext")
+        f.debug_struct("Context")
             .field("fields", &self.fields)
             .field("is_submitting", &self.is_submitting)
             .field("is_submitted", &self.is_submitted)
@@ -1331,13 +1353,13 @@ impl fmt::Debug for FormContext {
 
 /// When field-level validation is triggered.
 ///
-/// **Note:** Submit-time validation is always performed by `FormContext::submit()`
+/// **Note:** Submit-time validation is always performed by `Context::submit()`
 /// regardless of these settings. There is no `on_submit` flag because skipping
 /// validation at submit time is never valid — `submit()` unconditionally calls
 /// `validate_all()` before dispatching. These flags only control *field-level*
 /// validation timing (blur, change, input).
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
-pub struct ValidationMode {
+pub struct Mode {
     /// Validate on input change.
     pub on_change: bool,
     /// Validate on field blur.
@@ -1348,7 +1370,7 @@ pub struct ValidationMode {
     pub revalidate_on_change: bool,
 }
 
-impl ValidationMode {
+impl Mode {
     /// Validate on blur, re-validate on change if already invalid.
     pub fn on_blur_revalidate() -> Self {
         Self { on_blur: true, revalidate_on_change: true, ..Default::default() }
@@ -1372,13 +1394,13 @@ impl ValidationMode {
 // The `ChainValidator` (§3.3) runs validators in sequence (AND logic — all must
 // pass). For OR logic (at least one must pass), use `AnyValidator`:
 
-/// Passes if ANY inner validator returns `Valid`. Collects errors only if all fail.
+/// Passes if ANY inner validator returns `Ok(())`. Collects errors only if all fail.
 pub struct AnyValidator {
     pub validators: Vec<BoxedValidator>,
 }
 
 impl AnyValidator {
-    /// Build an OR-combination validator: passes if ANY inner validator returns `Valid`.
+    /// Build an OR-combination validator: passes if ANY inner validator returns `Ok(())`.
     pub fn new(validators: Vec<BoxedValidator>) -> Self {
         Self { validators }
     }
@@ -1387,18 +1409,18 @@ impl AnyValidator {
 }
 
 impl Validator for AnyValidator {
-    fn validate(&self, value: &FieldValue, ctx: &ValidationContext) -> ValidationResult {
-        let mut all_errors = ValidationErrors::new();
+    fn validate(&self, value: &Value, ctx: &Context) -> Result {
+        let mut all_errors = Errors::new();
         for v in &self.validators {
             match v.validate(value, ctx) {
-                ValidationResult::Valid => return ValidationResult::Valid,
-                ValidationResult::Invalid(errs) => all_errors.0.extend(errs.0),
+                Ok(()) => return Ok(()),
+                Err(errs) => all_errors.0.extend(errs.0),
             }
         }
         if all_errors.is_empty() {
-            ValidationResult::Valid
+            Ok(())
         } else {
-            ValidationResult::Invalid(all_errors)
+            Err(all_errors)
         }
     }
 }
@@ -1418,7 +1440,7 @@ impl Validator for AnyValidator {
 
 // ### Cross-Field Validation
 //
-// The `ValidationContext` already provides `form_values` for cross-field access.
+// The `Context` already provides `form_values` for cross-field access.
 // For ergonomic cross-field rules, use `CrossFieldValidator`:
 
 /// Validates a field using values from other fields in the form.
@@ -1434,34 +1456,39 @@ impl Validator for AnyValidator {
 ///         let confirm = value.as_text().unwrap_or_default();
 ///         // If password field is missing or non-text, fail validation (mismatch).
 ///         if password.map(|p| p == confirm).unwrap_or(false) {
-///             ValidationResult::Valid
+///             Ok(())
 ///         } else {
-///             ValidationResult::Invalid(ValidationErrors(vec![ValidationError::custom("confirm_match", "Passwords do not match")]))
+///             Err(Errors(vec![Error::custom("confirm_match", "Passwords do not match")]))
 ///         }
 ///     }),
 /// };
 /// ```
+// Type alias avoids clippy::type_complexity on the struct field.
+#[cfg(not(target_arch = "wasm32"))]
+type CrossFieldValidateFn =
+    Arc<dyn Fn(&Value, &Context) -> Result + Send + Sync>;
+#[cfg(target_arch = "wasm32")]
+type CrossFieldValidateFn =
+    Rc<dyn Fn(&Value, &Context) -> Result>;
+
 #[derive(Clone)]
 pub struct CrossFieldValidator {
     /// Names of fields this validator reads from. When any field in this list
-    /// changes (via `on_change`), FormContext automatically re-validates the
+    /// changes (via `on_change`), Context automatically re-validates the
     /// field this validator is registered on. This enables reactive cross-field
     /// validation (e.g., "confirm password" re-validates when "password" changes).
     pub depends_on: Vec<String>,
-    #[cfg(not(target_arch = "wasm32"))]
-    pub validate_fn: Arc<dyn Fn(&FieldValue, &ValidationContext) -> ValidationResult + Send + Sync>,
-    #[cfg(target_arch = "wasm32")]
-    pub validate_fn: Rc<dyn Fn(&FieldValue, &ValidationContext) -> ValidationResult>,
+    pub validate_fn: CrossFieldValidateFn,
 }
 
 impl Validator for CrossFieldValidator {
-    fn validate(&self, value: &FieldValue, ctx: &ValidationContext) -> ValidationResult {
+    fn validate(&self, value: &Value, ctx: &Context) -> Result {
         (self.validate_fn)(value, ctx)
     }
 
 }
 
-// Note: When `FormContext::on_change(field_name)` is called, FormContext checks
+// Note: When `Context::on_change(field_name)` is called, Context checks
 // all registered `CrossFieldValidator` instances on other fields. If any validator's
 // `depends_on` list contains `field_name`, the owning field is re-validated.
 // This reverse-dependency lookup is O(fields × validators) but is acceptable since
@@ -1469,19 +1496,19 @@ impl Validator for CrossFieldValidator {
 
 // ### Server-Side Error Injection
 //
-// `FormContext.server_errors` (already defined) stores externally injected errors.
+// `Context.server_errors` (already defined) stores externally injected errors.
 // The full workflow:
 //
 // 1. Form submits to server.
 // 2. Server returns field-level errors as `BTreeMap<String, Vec<String>>`.
-// 3. Adapter calls `FormContext::set_server_errors(errors)`:
+// 3. Adapter calls `Context::set_server_errors(errors)`:
 
 // Server errors are displayed identically to client-side errors in the UI.
 // When the user modifies a field, `on_change()` clears that field's server
 // error. See the canonical `set_server_errors()` implementation in §5.1.
 
-impl FormContext {
-    pub fn new(mode: ValidationMode) -> Self {
+impl Context {
+    pub fn new(mode: Mode) -> Self {
         Self {
             fields: IndexMap::new(),
             is_submitting: false,
@@ -1501,12 +1528,12 @@ impl FormContext {
     pub fn register(
         &mut self,
         name: impl Into<String>,
-        initial: FieldValue,
+        initial: Value,
         validator: Option<BoxedValidator>,
         async_validator: Option<BoxedAsyncValidator>,
     ) {
         let name = name.into();
-        self.fields.insert(name.clone(), FieldState::new(initial));
+        self.fields.insert(name.clone(), State::new(initial));
         // Remove stale validators before inserting new ones, so re-registration
         // with validator=None properly clears a previously registered validator.
         self.validators.remove(&name);
@@ -1538,7 +1565,7 @@ impl FormContext {
     }
 
     /// Called when a field's value changes.
-    pub fn on_change(&mut self, name: &str, value: FieldValue) {
+    pub fn on_change(&mut self, name: &str, value: Value) {
         // Extract whether we need to validate before dropping the mutable borrow.
         let should_validate = if let Some(field) = self.fields.get_mut(name) {
             field.validation_generation += 1;
@@ -1546,7 +1573,7 @@ impl FormContext {
             field.dirty = true;
 
             let needs_validation = self.validation_mode.on_change
-                || (self.validation_mode.revalidate_on_change && field.validation.is_invalid());
+                || (self.validation_mode.revalidate_on_change && field.validation.is_err());
             needs_validation
         } else {
             return;
@@ -1558,12 +1585,12 @@ impl FormContext {
         // If validation won't re-run (e.g., on_submit mode), clear only server-sourced
         // errors from the field's validation result. Client-side errors from the most
         // recent validate_all() are preserved — they remain visible until the next
-        // submission triggers re-validation. Otherwise validate_field() will set
+        // submission triggers re-validation. Otherwise run_field_validation() will set
         // the correct state.
         if should_validate {
-            // validate_field() handles both the named field's own validators and
-            // cross-field dependency re-validation internally (see validate_field §8.3).
-            self.validate_field(name);
+            // run_field_validation() handles both the named field's own validators and
+            // cross-field dependency re-validation internally.
+            self.run_field_validation(name);
         } else if let Some(field) = self.fields.get_mut(name) {
             // Remove only server-sourced errors; preserve client-side validation errors.
             field.validation = field.validation.without_server_errors();
@@ -1576,7 +1603,7 @@ impl FormContext {
             field.touched = true;
         }
         if self.validation_mode.on_blur {
-            self.validate_field(name);
+            self.run_field_validation(name);
         }
     }
 
@@ -1586,7 +1613,7 @@ impl FormContext {
     /// requires `on_change` (which fires on blur or commit). Adapters using `on_input`
     /// validation mode MUST also call `on_change` on blur to properly update dirty state.
     /// Clears server errors for the field (policy: user modification clears server errors).
-    pub fn on_input(&mut self, name: &str, value: FieldValue) {
+    pub fn on_input(&mut self, name: &str, value: Value) {
         if let Some(field) = self.fields.get_mut(name) {
             field.validation_generation += 1;
             field.value = value;
@@ -1600,7 +1627,7 @@ impl FormContext {
         // and cross-field validators may be expensive (they clone all form values).
         // Cross-field dependencies are re-validated on on_change() (typically blur).
         if self.validation_mode.on_input {
-            self.validate_field(name);
+            self.run_field_validation(name);
         } else if let Some(field) = self.fields.get_mut(name) {
             field.validation = field.validation.without_server_errors();
         }
@@ -1613,21 +1640,42 @@ impl FormContext {
     /// For `revalidate_on_change` mode, this runs on every keystroke. Implementations may
     /// optimize by caching the values map and invalidating on field value changes, or by
     /// checking `validator.needs_form_values()` before building the context.
-    pub fn validate_field(&mut self, name: &str) -> ValidationResult {
+    pub fn validate_field(&mut self, name: &str) -> Result {
+        self.run_field_validation(name);
+        self.fields.get(name).map_or(Ok(()), |f| f.validation.clone())
+    }
+
+    /// Validate all fields. Returns true if the form is valid.
+    pub fn validate_all(&mut self) -> bool {
+        let names: Vec<String> = self.fields.keys().cloned().collect();
+        let mut valid = true;
+        for name in names {
+            self.run_field_validation(&name);
+            if self.fields.get(&name).is_some_and(|f| f.validation.is_err()) {
+                valid = false;
+            }
+        }
+        valid
+    }
+
+    /// Internal: runs validation for a field and stores the result in
+    /// `field.validation`. Does not return the result — callers that need
+    /// the outcome read it from `self.fields` afterward.
+    fn run_field_validation(&mut self, name: &str) {
         let value = match self.fields.get(name) {
             Some(f) => f.value.clone(),
-            None => return ValidationResult::Valid,
+            None => return,
         };
 
-        // Design note: ValidationContext.form_values uses BTreeMap (not IndexMap) because
+        // Design note: Context.form_values uses BTreeMap (not IndexMap) because
         // validators are pure functions that should not depend on field registration order.
         // The per-call allocation cost is acceptable because cross-field validation is rare
         // and the typical form has <20 fields.
-        let all_values: BTreeMap<String, FieldValue> = self.fields.iter()
+        let all_values: BTreeMap<String, Value> = self.fields.iter()
             .map(|(k, v)| (k.clone(), v.value.clone()))
             .collect();
 
-        let ctx = ValidationContext {
+        let ctx = Context {
             field_name: name,
             form_values: &all_values,
             locale: self.locale.as_ref(),
@@ -1636,11 +1684,10 @@ impl FormContext {
         let result = if let Some(validator) = self.validators.get(name) {
             validator.validate(&value, &ctx)
         } else {
-            ValidationResult::Valid
+            Ok(())
         };
 
         // Run cross-field validators that depend on this field.
-        // Iterate the inner Vec<CrossFieldValidator> for each target field.
         for (target_name, validators) in &self.cross_field_registry {
             if target_name != name
                 && validators.iter().any(|cv| cv.depends_on.contains(&name.to_string()))
@@ -1652,7 +1699,9 @@ impl FormContext {
                 let target_result = validators
                     .iter()
                     .filter(|cv| cv.depends_on.contains(&name.to_string()))
-                    .fold(ValidationResult::Valid, |acc, cv| acc.and(cv.validate(&target_value, &ctx)));
+                    .map(|cv| cv.validate(&target_value, &ctx))
+                    .reduce(ResultExt::merge)
+                    .unwrap_or(Ok(()));
                 if let Some(field) = self.fields.get_mut(target_name.as_str()) {
                     field.validation = target_result;
                 }
@@ -1660,22 +1709,8 @@ impl FormContext {
         }
 
         if let Some(field) = self.fields.get_mut(name) {
-            field.validation = result.clone();
+            field.validation = result;
         }
-
-        result
-    }
-
-    /// Validate all fields. Returns true if the form is valid.
-    pub fn validate_all(&mut self) -> bool {
-        let names: Vec<String> = self.fields.keys().cloned().collect();
-        let mut valid = true;
-        for name in names {
-            if self.validate_field(&name).is_invalid() {
-                valid = false;
-            }
-        }
-        valid
     }
 
     /// Inject server-side errors returned from an API call.
@@ -1694,18 +1729,18 @@ impl FormContext {
         for (name, messages) in &errors {
             if let Some(field) = self.fields.get_mut(name) {
                 field.touched = true; // Show errors immediately
-                let server_errs: Vec<ValidationError> = messages.iter()
-                    .map(|m| ValidationError::server(m))
+                let server_errs: Vec<Error> = messages.iter()
+                    .map(|m| Error::server(m))
                     .collect();
                 // Merge: keep existing client-side errors, replace server errors
-                let mut client_errs: Vec<ValidationError> = match &field.validation {
-                    ValidationResult::Invalid(ValidationErrors(errs)) => {
+                let mut client_errs: Vec<Error> = match &field.validation {
+                    Err(Errors(errs)) => {
                         errs.iter().filter(|e| !e.is_server()).cloned().collect()
                     }
                     _ => vec![],
                 };
                 client_errs.extend(server_errs);
-                field.validation = ValidationResult::Invalid(ValidationErrors(client_errs));
+                field.validation = Err(Errors(client_errs));
             }
         }
         self.server_errors = errors;
@@ -1719,7 +1754,7 @@ impl FormContext {
             field.value = field.initial_value.clone();
             field.touched = false;
             field.dirty = false;
-            field.validation = ValidationResult::Valid;
+            field.validation = Ok(());
             field.validating = false;
             field.validation_generation += 1;
         }
@@ -1752,10 +1787,10 @@ impl FormContext {
     ///
     /// **Note:** `collect_form_data()` includes all fields regardless of disabled state.
     /// If disabled fields must be excluded, the caller (typically the adapter layer)
-    /// should filter `FormData.fields` before processing. See §15 for the full contract.
-    pub fn submit<F>(&mut self, handler: F) -> ValidationResult
+    /// should filter `Data.fields` before processing. See §15 for the full contract.
+    pub fn submit<F>(&mut self, handler: F) -> Result
     where
-        F: FnOnce(FormData),
+        F: FnOnce(Data),
     {
         self.is_submitted = true;
         self.touch_all();
@@ -1767,23 +1802,23 @@ impl FormContext {
             let data = self.collect_form_data();
             handler(data);
             self.is_submitting = false;
-            ValidationResult::Valid
+            Ok(())
         } else {
             // Adapter: call first_invalid_field_id() and focus the result (see §9)
-            ValidationResult::Invalid(self.collect_all_errors())
+            Err(self.collect_all_errors())
         }
     }
 
-    fn collect_form_data(&self) -> FormData {
-        FormData {
+    fn collect_form_data(&self) -> Data {
+        Data {
             fields: self.fields.iter()
                 .map(|(k, v)| (k.clone(), v.value.clone()))
                 .collect(),
         }
     }
 
-    fn collect_all_errors(&self) -> ValidationErrors {
-        let mut all = ValidationErrors::new();
+    fn collect_all_errors(&self) -> Errors {
+        let mut all = Errors::new();
         for field in self.fields.values() {
             if let Some(errors) = field.validation.errors() {
                 all.0.extend(errors.0.clone());
@@ -1793,18 +1828,18 @@ impl FormContext {
     }
 
     /// Get field state by name.
-    pub fn field(&self, name: &str) -> Option<&FieldState> {
+    pub fn field(&self, name: &str) -> Option<&State> {
         self.fields.get(name)
     }
 
     /// Get field state mutably.
-    pub fn field_mut(&mut self, name: &str) -> Option<&mut FieldState> {
+    pub fn field_mut(&mut self, name: &str) -> Option<&mut State> {
         self.fields.get_mut(name)
     }
 
     /// Whether the form is currently valid (no fields have errors).
     pub fn is_valid(&self) -> bool {
-        self.fields.values().all(|f| f.validation.is_valid())
+        self.fields.values().all(|f| f.validation.is_ok())
     }
 
     /// Whether any field has been touched.
@@ -1830,7 +1865,7 @@ impl FormContext {
     ///
     /// **Precondition:** The field identified by `name` should already be registered
     /// via `register()`. If the field does not exist, the validator is stored but
-    /// never executed (no `FieldState` to validate against).
+    /// never executed (no `State` to validate against).
     pub fn register_async_validator(&mut self, name: impl Into<String>, validator: BoxedAsyncValidator) {
         let name = name.into();
         debug_assert!(
@@ -1843,16 +1878,16 @@ impl FormContext {
 }
 
 /// Collected form data passed to submit handler.
-/// Uses `IndexMap` to preserve field registration order (matching FormContext.fields).
+/// Uses `IndexMap` to preserve field registration order (matching Context.fields).
 ///
-/// `Default` produces an empty `FormData` with no fields.
+/// `Default` produces an empty `Data` with no fields.
 /// All `get_*` methods return `None` on a default-constructed instance.
 #[derive(Clone, Debug, Default)]
-pub struct FormData {
-    pub fields: IndexMap<String, FieldValue>,
+pub struct Data {
+    pub fields: IndexMap<String, Value>,
 }
 
-impl FormData {
+impl Data {
     pub fn get_text(&self, name: &str) -> Option<&str> {
         self.fields.get(name).and_then(|v| v.as_text())
     }
@@ -1867,15 +1902,15 @@ impl FormData {
 }
 ````
 
-> **Note:** `reset()` restores all fields to their initial values (stored at registration time in `FieldState::initial_value`) and clears metadata (touched, dirty, validation state).
+> **Note:** `reset()` restores all fields to their initial values (stored at registration time in `State::initial_value`) and clears metadata (touched, dirty, validation state).
 >
-> **Serialization:** FormData provides structured field data. Serialization to HTTP formats (JSON, form-urlencoded, multipart) is the consumer's responsibility. The adapter may provide helper methods like `to_json()` or `to_form_urlencoded()`.
+> **Serialization:** Data provides structured field data. Serialization to HTTP formats (JSON, form-urlencoded, multipart) is the consumer's responsibility. The adapter may provide helper methods like `to_json()` or `to_form_urlencoded()`.
 
 ---
 
 ## 6. Field Association (IDs for ARIA)
 
-### 6.1 FieldDescriptors
+### 6.1 Descriptors
 
 Each form field consists of multiple related elements that must be linked via ARIA attributes:
 
@@ -1885,14 +1920,14 @@ Each form field consists of multiple related elements that must be linked via AR
 - `<p id="errorId">` error message
 
 ```rust
-/// NOTE: FieldDescriptors is a lower-level utility for manual ARIA wiring.
-/// When using the Field component (section 13), FieldDescriptors is not needed —
+/// NOTE: Descriptors is a lower-level utility for manual ARIA wiring.
+/// When using the Field component (section 13), Descriptors is not needed —
 /// the Field component handles all ID generation and ARIA linkage internally
 /// via field::Api.
 ///
 /// IDs for all elements of a form field.
 #[derive(Clone, Debug)]
-pub struct FieldDescriptors {
+pub struct Descriptors {
     pub root_id: String,
     pub label_id: String,
     pub input_id: String,
@@ -1900,7 +1935,7 @@ pub struct FieldDescriptors {
     pub error_id: String,
 }
 
-impl FieldDescriptors {
+impl Descriptors {
     /// Generate IDs from a form ID and field name.
     pub fn new(form_id: &str, field_name: &str) -> Self {
         let base = format!("{}-{}", form_id, field_name);
@@ -1915,7 +1950,7 @@ impl FieldDescriptors {
 
     /// Compute aria-describedby for the input element.
     /// Includes description_id always; error_id only when field has an error to show.
-    pub fn aria_describedby(&self, field: &FieldState, has_description: bool) -> Option<String> {
+    pub fn aria_describedby(&self, field: &State, has_description: bool) -> Option<String> {
         let mut ids = Vec::new();
 
         if has_description {
@@ -1945,7 +1980,7 @@ impl FieldDescriptors {
     ///
     /// Ordering: `aria-describedby` lists the description ID first, then the
     /// error ID. `aria-errormessage` contains only the error ID.
-    pub fn input_aria(&self, field: &FieldState, required: bool, has_description: bool) -> InputAria {
+    pub fn input_aria(&self, field: &State, required: bool, has_description: bool) -> InputAria {
         let aria_errormessage = if field.show_error() {
             Some(self.error_id.clone())
         } else {
@@ -1987,17 +2022,19 @@ pub struct InputAria {
 Complex components (Select, DatePicker, etc.) must render a hidden `<input>` to participate in native HTML form submission.
 
 ```rust
+use ars_core::{AttrMap, HtmlAttr};
+
 /// Configuration for a hidden input that submits with native forms.
 #[derive(Clone, Debug)]
-pub struct HiddenInputConfig {
+pub struct Config {
     pub name: String,
-    pub value: HiddenInputValue,
+    pub value: Value,
     pub form_id: Option<String>,  // For cross-form association
     pub disabled: bool,
 }
 
 #[derive(Clone, Debug)]
-pub enum HiddenInputValue {
+pub enum Value {
     /// Single value.
     Single(String),
     /// Multiple values (rendered as multiple hidden inputs with the same name).
@@ -2006,67 +2043,48 @@ pub enum HiddenInputValue {
     None,
 }
 
-/// Generate the HTML attributes for a hidden input.
-///
-/// Components render this as:
-/// `<input type="hidden" name="{name}" value="{value}" />`
-pub fn hidden_input_attrs(config: &HiddenInputConfig) -> Vec<(&'static str, String)> {
-    let mut attrs = vec![
-        ("type", "hidden".to_string()),
-        ("name", config.name.clone()),
-    ];
-
-    match &config.value {
-        HiddenInputValue::Single(v) => {
-            attrs.push(("value", v.clone()));
-        }
-        HiddenInputValue::Multiple(_) => {
-            // Multiple values require multi_hidden_input_attrs() — return empty.
-            debug_assert!(false, "Use multi_hidden_input_attrs for HiddenInputValue::Multiple");
-            return Vec::new();
-        }
-        HiddenInputValue::None => {
-            // No value — omit from form submission by not rendering a hidden input at all.
-            return Vec::new();
-        }
-    }
-
+/// Builds the common attributes shared by single and multi hidden inputs.
+fn base_attrs(config: &Config, value: &str) -> AttrMap {
+    let mut map = AttrMap::new();
+    map.set(HtmlAttr::Type, "hidden");
+    map.set(HtmlAttr::Name, &config.name);
+    map.set(HtmlAttr::Value, value);
     if config.disabled {
-        attrs.push(("disabled", "".to_string()));
+        map.set(HtmlAttr::Disabled, true);
     }
-
     if let Some(ref form_id) = config.form_id {
-        attrs.push(("form", form_id.clone()));
+        map.set(HtmlAttr::Form, form_id);
     }
-
-    attrs
+    map
 }
 
-/// For multi-select: returns one set of attrs per value.
-/// Propagates `form_id` and `disabled` from config, matching `hidden_input_attrs`.
-pub fn multi_hidden_input_attrs(config: &HiddenInputConfig, values: &[String]) -> Vec<Vec<(&'static str, String)>> {
-    values.iter().map(|v| {
-        let mut attrs = vec![
-            ("type", "hidden".to_string()),
-            ("name", config.name.clone()),
-            ("value", v.clone()),
-        ];
-        if config.disabled {
-            // HTML boolean attribute — empty string renders as bare `disabled` per spec
-            attrs.push(("disabled", "".to_string()));
+/// Generate an `AttrMap` for a single hidden input.
+///
+/// Returns `None` for `Value::None` (the element should not be rendered).
+/// Panics in debug mode if called with `Value::Multiple` — use
+/// `multi_attrs()` instead.
+pub fn attrs(config: &Config) -> Option<AttrMap> {
+    match &config.value {
+        Value::Single(v) => Some(base_attrs(config, v)),
+        Value::Multiple(_) => {
+            debug_assert!(false, "Use multi_attrs for Value::Multiple");
+            None
         }
-        if let Some(ref form_id) = config.form_id {
-            attrs.push(("form", form_id.clone()));
-        }
-        attrs
-    }).collect()
+        Value::None => None,
+    }
+}
+
+/// For multi-select: returns one `AttrMap` per value.
+/// Propagates `form_id` and `disabled` from config, matching `attrs`.
+pub fn multi_attrs(config: &Config, values: &[String]) -> Vec<AttrMap> {
+    values.iter().map(|v| base_attrs(config, v)).collect()
 }
 
 // Example usage in Select component:
 // The Select machine context tracks:
-//   hidden_input: HiddenInputConfig
+//   hidden_input: Config
 // The connect() API exposes:
-//   pub fn hidden_input_props(&self) -> HiddenInputConfig
+//   pub fn hidden_input_props(&self) -> Config
 // The Leptos/Dioxus adapter renders:
 //   <input {..hidden_input_props()} />
 ```
@@ -2075,7 +2093,7 @@ pub fn multi_hidden_input_attrs(config: &HiddenInputConfig, values: &[String]) -
 
 Each complex component renders hidden `<input>` elements that participate in
 native HTML `FormData` submission. The `name` attribute is taken from the
-component's `name` prop. When nested inside a `FormContext`, the hidden input
+component's `name` prop. When nested inside a `form::Context`, the hidden input
 is automatically registered.
 
 | Component           | Hidden input `value` format                     | Notes                                                                                                         |
@@ -2088,31 +2106,31 @@ is automatically registered.
 | **ColorPicker**     | Hex string                                      | `<input name="color" value="#ff3366">`                                                                        |
 | **NumberInput**     | Locale-independent number string                | `<input name="qty" value="42.5">`                                                                             |
 
-**FormContext integration**: When a component with a hidden input is registered
-in a `FormContext`, the form's `submit()` method collects all hidden input
+**`form::Context` integration**: When a component with a hidden input is registered
+in a `form::Context`, the form's `submit()` method collects all hidden input
 values via standard `FormData` API. The `name` prop on the component becomes
 the form field name.
 
 ```rust
 // Select multi-value serialization example:
-fn hidden_input_config(ctx: &SelectContext) -> HiddenInputConfig {
+fn hidden_input_config(ctx: &SelectContext) -> Config {
     let name = ctx.name.clone().unwrap_or_default();
     match &ctx.selection_state.selected_keys() {
-        keys if keys.is_empty() => HiddenInputConfig {
+        keys if keys.is_empty() => Config {
             name,
-            value: HiddenInputValue::None,
+            value: Value::None,
             form_id: ctx.form_id.clone(),
             disabled: ctx.disabled,
         },
-        keys if keys.len() == 1 => HiddenInputConfig {
+        keys if keys.len() == 1 => Config {
             name,
-            value: HiddenInputValue::Single(keys[0].to_string()),
+            value: Value::Single(keys[0].to_string()),
             form_id: ctx.form_id.clone(),
             disabled: ctx.disabled,
         },
-        keys => HiddenInputConfig {
+        keys => Config {
             name,
-            value: HiddenInputValue::Multiple(
+            value: Value::Multiple(
                 keys.iter().map(|k| k.to_string()).collect()
             ),
             form_id: ctx.form_id.clone(),
@@ -2126,7 +2144,7 @@ fn hidden_input_config(ctx: &SelectContext) -> HiddenInputConfig {
 
 Components with complex selection state (Select, DatePicker, Combobox) participate in form submission via hidden `<input>` elements:
 
-1. **Update Timing**: The hidden input's `value` MUST be synced synchronously in the same microtask as the state change — not lazily during form submission. This prevents race conditions where a form submission (triggered programmatically or by a fast user interaction) reads stale hidden input values. Concretely: when a Select's `on_selection_change` fires and updates `Context.selected_keys`, the adapter MUST update the hidden `<input>` element's `value` attribute in the same synchronous execution frame, before yielding to the microtask queue. Deferring the sync (e.g., via `requestAnimationFrame` or `queueMicrotask`) creates a window where `FormData` contains the previous value.
+1. **Update Timing**: The hidden input's `value` MUST be synced synchronously in the same microtask as the state change — not lazily during form submission. This prevents race conditions where a form submission (triggered programmatically or by a fast user interaction) reads stale hidden input values. Concretely: when a Select's `on_selection_change` fires and updates `Context.selected_keys`, the adapter MUST update the hidden `<input>` element's `value` attribute in the same synchronous execution frame, before yielding to the microtask queue. Deferring the sync (e.g., via `requestAnimationFrame` or `queueMicrotask`) creates a window where `Data` contains the previous value.
 2. **Open-but-Uncommitted State**: If a Select dropdown is open with a highlighted (but not yet selected) option, the hidden input retains the last committed value. Only an explicit selection (click or Enter) updates the hidden input.
 3. **Form Reset**: On `<form>` `reset` event, complex components restore their hidden input to the `default_value` prop (or empty string if not provided). The component's visual state also resets to match.
 4. **Multiple Values**: For multi-select components, multiple hidden inputs with the same `name` are rendered (one per selected value), following standard HTML form conventions.
@@ -2138,7 +2156,7 @@ in validation logic and conditional rendering:
 
 ```rust
 /// Utility predicates for form field values.
-pub trait FieldValueExt {
+pub trait ValueExt {
     /// Returns `true` if the field has no meaningful value.
     fn is_empty(&self) -> bool;
 }
@@ -2152,44 +2170,44 @@ pub trait FieldValueExt {
 
 /// Trait for types that expose a set of selected keys (e.g., selection::State).
 /// Implemented by the selection module in its own crate.
-pub trait SelectionFormExt {
+pub trait SelectionExt {
     fn is_any_selected(&self) -> bool;
     fn is_all_selected(&self, total_items: usize) -> bool;
 }
 
 /// Trait for tri-state toggle types (e.g., CheckboxState).
 /// Implemented by the checkbox module in its own crate.
-pub trait CheckboxFormExt {
+pub trait CheckboxExt {
     fn is_indeterminate(&self) -> bool;
     fn is_checked_or_indeterminate(&self) -> bool;
 }
 
 // DateField-specific utilities (on Option<CalendarDate> from ars-i18n):
 use ars_i18n::CalendarDate;
-impl FieldValueExt for Option<CalendarDate> {
+impl ValueExt for Option<CalendarDate> {
     fn is_empty(&self) -> bool { self.is_none() }
 }
 
 // NumberInput-specific utilities:
-impl FieldValueExt for Option<f64> {
+impl ValueExt for Option<f64> {
     fn is_empty(&self) -> bool { self.is_none() }
 }
 
-// Primary FieldValue type — delegates to variant-specific emptiness.
-impl FieldValueExt for FieldValue {
+// Primary Value type — delegates to variant-specific emptiness.
+impl ValueExt for Value {
     fn is_empty(&self) -> bool {
         match self {
             // Note: uses raw is_empty() (no trim), unlike RequiredValidator which trims.
             // This is intentional: is_empty() is a raw structural check (e.g., for "clear"
             // button visibility), while RequiredValidator applies semantic trimming.
-            FieldValue::Text(s) => s.is_empty(),
-            FieldValue::Number(n) => n.is_none(),
-            FieldValue::Bool(b) => !b,
-            FieldValue::Date(d) => d.is_none(),
-            FieldValue::Time(t) => t.is_none(),
-            FieldValue::DateRange(r) => r.is_none(),
-            FieldValue::File(f) => f.is_empty(),
-            FieldValue::MultipleText(l) => l.is_empty(),
+            Value::Text(s) => s.is_empty(),
+            Value::Number(n) => n.is_none(),
+            Value::Bool(b) => !b,
+            Value::Date(d) => d.is_none(),
+            Value::Time(t) => t.is_none(),
+            Value::DateRange(r) => r.is_none(),
+            Value::File(f) => f.is_empty(),
+            Value::MultipleText(l) => l.is_empty(),
         }
     }
 }
@@ -2254,12 +2272,12 @@ pub mod form_submit {
         SubmitError(String),
         Reset,
         SetServerErrors(std::collections::BTreeMap<String, Vec<String>>),
-        SetValidationMode(ValidationMode),
+        SetMode(Mode),
     }
 
     #[derive(Clone, Debug)]
     pub struct Context {
-        pub form: FormContext,
+        pub form: Context,
         pub ids: ComponentIds,
         pub submit_error: Option<String>,
         /// Whether synchronous validation passed (used by async-validation effect).
@@ -2280,7 +2298,7 @@ pub mod form_submit {
             (
                 State::Idle,
                 Context {
-                    form: FormContext::new(props.validation_mode),
+                    form: Context::new(props.validation_mode),
                     ids: ComponentIds::from_id(&props.id),
                     submit_error: None,
                     sync_valid: false,
@@ -2295,7 +2313,7 @@ pub mod form_submit {
             props: &Props,
         ) -> Option<TransitionPlan<Self>> {
             match (state, event) {
-                // These methods are provided by FormContext:
+                // These methods are provided by Context:
                 // fn has_async_validators(&self) -> bool
                 // fn collect_async_validators(&self) -> Vec<(String, BoxedAsyncValidator)>
 
@@ -2430,7 +2448,7 @@ pub mod form_submit {
                             ctx.submit_error = None;
                         }))
                 }
-                (_, Event::SetValidationMode(mode)) => {
+                (_, Event::SetMode(mode)) => {
                     let mode = *mode;
                     Some(TransitionPlan::context_only(move |ctx| {
                         ctx.form.validation_mode = mode;
@@ -2449,7 +2467,7 @@ pub mod form_submit {
             // in init() and cached in Context. Changing id at runtime is not supported.
             if old.validation_mode != new.validation_mode {
                 // Update validation mode without resetting form state.
-                vec![Event::SetValidationMode(new.validation_mode)]
+                vec![Event::SetMode(new.validation_mode)]
             } else {
                 vec![]
             }
@@ -2471,7 +2489,7 @@ pub mod form_submit {
     #[derive(Clone, HasId)]
     pub struct Props {
         pub id: String,
-        pub validation_mode: ValidationMode,
+        pub validation_mode: Mode,
         /// Adapter-provided async spawn for running async validators concurrently.
         /// Signature: (validators, send) -> CleanupFn.
         /// Leptos: wraps `spawn_local`; Dioxus: wraps `spawn`.
@@ -2604,7 +2622,7 @@ machine.send(Event::SetServerErrors(server_errors));
 **Lifecycle**: When `SetServerErrors` is received:
 
 1. The form transitions to `State::ValidationFailed` (regardless of current state).
-2. `FormContext::set_server_errors()` injects errors into each named field's `FieldState`, setting `touched = true` so errors display immediately.
+2. `Context::set_server_errors()` injects errors into each named field's `State`, setting `touched = true` so errors display immediately.
 3. The adapter moves focus to the first invalid field (the first field with any validation error, including the newly injected server errors) using §9 focus management.
 4. When the user edits a field that has a server error, the server error for that field is cleared automatically (the field reverts to client-side validation only).
 
@@ -2617,7 +2635,7 @@ let on_submit = move |_| {
         let result = submit_form(form_data).await;
         match result {
             Ok(_) => machine.send(Event::SubmitComplete),
-            Err(ServerValidationError { field_errors }) => {
+            Err(ServerError { field_errors }) => {
                 machine.send(Event::SetServerErrors(field_errors));
             }
             Err(ServerError { message }) => {
@@ -2642,10 +2660,10 @@ When form submission fails validation, focus should be moved to the first invali
 /// `form_submit::Machine` enters `ValidationFailed` state, not while in `Validating`).
 use indexmap::IndexMap;
 
-pub fn first_invalid_field_id(form: &FormContext, field_descriptors: &IndexMap<String, FieldDescriptors>) -> Option<String> {
+pub fn first_invalid_field_id(form: &Context, field_descriptors: &IndexMap<String, Descriptors>) -> Option<String> {
     // Iterate fields in DOM order (which is registration order in our IndexMap)
     form.fields.iter()
-        .find(|(_, state)| state.validation.is_invalid())
+        .find(|(_, state)| state.validation.is_err())
         .and_then(|(name, _)| field_descriptors.get(name))
         .map(|d| d.input_id.clone())
 }
@@ -2666,17 +2684,17 @@ pub fn first_invalid_field_id(form: &FormContext, field_descriptors: &IndexMap<S
 // ars-leptos/src/form.rs
 
 use leptos::prelude::*;
-use ars_forms::{FormContext, ValidationMode, FieldValue, ValidationResult, BoxedValidator, BoxedAsyncValidator};
+use ars_forms::{Context, Mode, Value, Result, BoxedValidator, BoxedAsyncValidator};
 
 /// Leptos hook for form management.
-pub fn use_form(mode: ValidationMode) -> UseFormReturn {
-    let (form, set_form) = signal(FormContext::new(mode));
+pub fn use_form(mode: Mode) -> UseFormReturn {
+    let (form, set_form) = signal(Context::new(mode));
 
-    let register = move |name: &str, initial: FieldValue, validator: Option<BoxedValidator>, async_validator: Option<BoxedAsyncValidator>| {
+    let register = move |name: &str, initial: Value, validator: Option<BoxedValidator>, async_validator: Option<BoxedAsyncValidator>| {
         set_form.update(|f| f.register(name, initial, validator, async_validator));
     };
 
-    let on_change = move |name: &str, value: FieldValue| {
+    let on_change = move |name: &str, value: Value| {
         set_form.update(|f| f.on_change(name, value));
     };
 
@@ -2685,11 +2703,11 @@ pub fn use_form(mode: ValidationMode) -> UseFormReturn {
     };
 
     #[cfg(not(target_arch = "wasm32"))]
-    let submit = move |handler: Box<dyn FnOnce(FormData) + Send>| {
+    let submit = move |handler: Box<dyn FnOnce(Data) + Send>| {
         set_form.update(|f| { f.submit(handler); });
     };
     #[cfg(target_arch = "wasm32")]
-    let submit = move |handler: Box<dyn FnOnce(FormData)>| {
+    let submit = move |handler: Box<dyn FnOnce(Data)>| {
         set_form.update(|f| { f.submit(handler); });
     };
 
@@ -2713,12 +2731,12 @@ pub fn use_form(mode: ValidationMode) -> UseFormReturn {
 /// }
 /// ```
 pub struct UseFormReturn<Reg, Change, Blur, Submit> {
-    pub form: ReadSignal<FormContext>,
-    pub set_form: WriteSignal<FormContext>,
-    pub register: Reg,    // Fn(&str, FieldValue, Option<BoxedValidator>, Option<BoxedAsyncValidator>)
-    pub on_change: Change, // Fn(&str, FieldValue)
+    pub form: ReadSignal<Context>,
+    pub set_form: WriteSignal<Context>,
+    pub register: Reg,    // Fn(&str, Value, Option<BoxedValidator>, Option<BoxedAsyncValidator>)
+    pub on_change: Change, // Fn(&str, Value)
     pub on_blur: Blur,     // Fn(&str)
-    pub submit: Submit,    // Fn(Box<dyn FnOnce(FormData) [+ Send on non-wasm]>)
+    pub submit: Submit,    // Fn(Box<dyn FnOnce(Data) [+ Send on non-wasm]>)
 }
 
 /// A complete Leptos form example using ars-ui components:
@@ -2726,7 +2744,7 @@ pub struct UseFormReturn<Reg, Change, Blur, Submit> {
 /// ```rust
 /// #[component]
 /// fn SignupForm() -> impl IntoView {
-///     let UseFormReturn { form, on_change, on_blur, submit, .. } = use_form(ValidationMode::on_blur_revalidate());
+///     let UseFormReturn { form, on_change, on_blur, submit, .. } = use_form(Mode::on_blur_revalidate());
 ///
 ///     // Register fields with validators
 ///     // (In real usage, components self-register via FormFieldContext)
@@ -2757,10 +2775,10 @@ pub struct UseFormReturn<Reg, Change, Blur, Submit> {
 // ars-dioxus/src/form.rs
 
 use dioxus::prelude::*;
-use ars_forms::{FormContext, ValidationMode};
+use ars_forms::{Context, Mode};
 
-pub fn use_form(mode: ValidationMode) -> Signal<FormContext> {
-    use_signal(|| FormContext::new(mode))
+pub fn use_form(mode: Mode) -> Signal<Context> {
+    use_signal(|| Context::new(mode))
 }
 
 /// Dioxus form example:
@@ -2768,7 +2786,7 @@ pub fn use_form(mode: ValidationMode) -> Signal<FormContext> {
 /// ```rust
 /// #[component]
 /// fn SignupForm() -> Element {
-///     let mut form = use_form(ValidationMode::on_blur_revalidate());
+///     let mut form = use_form(Mode::on_blur_revalidate());
 ///
 ///     let on_submit = move |e: FormEvent| {
 ///         e.prevent_default();
@@ -2799,42 +2817,42 @@ mod tests {
     #[test]
     fn test_required_validator() {
         let v = RequiredValidator { message: None };
-        let ctx = ValidationContext::standalone("test");
+        let ctx = Context::standalone("test");
         let messages = FormMessages::default();
 
-        let empty_value = FieldValue::Text(String::new());
+        let empty_value = Value::Text(String::new());
         let result = v.validate(&empty_value, &ctx);
         assert_eq!(
             result,
-            ValidationResult::Invalid(ValidationErrors(vec![ValidationError::required(&messages, ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE))]))
+            Err(Errors(vec![Error::required(&messages, ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE))]))
         );
 
-        let hello_value = FieldValue::Text("hello".into());
+        let hello_value = Value::Text("hello".into());
         let result = v.validate(&hello_value, &ctx);
-        assert_eq!(result, ValidationResult::Valid);
+        assert_eq!(result, Ok(()));
     }
 
     #[test]
     fn test_min_length_validator() {
         let v = MinLengthValidator { min: 3, message: None };
-        let ctx = ValidationContext::standalone("test");
+        let ctx = Context::standalone("test");
 
-        let short_value = FieldValue::Text("ab".into());
-        assert!(v.validate(&short_value, &ctx).is_invalid());
+        let short_value = Value::Text("ab".into());
+        assert!(v.validate(&short_value, &ctx).is_err());
 
-        let exact_value = FieldValue::Text("abc".into());
-        assert!(v.validate(&exact_value, &ctx).is_valid());
+        let exact_value = Value::Text("abc".into());
+        assert!(v.validate(&exact_value, &ctx).is_ok());
 
-        let long_value = FieldValue::Text("abcd".into());
-        assert!(v.validate(&long_value, &ctx).is_valid());
+        let long_value = Value::Text("abcd".into());
+        assert!(v.validate(&long_value, &ctx).is_ok());
     }
 
     #[test]
     fn test_form_context_on_blur_validation() {
-        let mut form = FormContext::new(ValidationMode::on_blur_revalidate());
+        let mut form = Context::new(Mode::on_blur_revalidate());
         form.register(
             "email",
-            FieldValue::Text(String::new()),
+            Value::Text(String::new()),
             Some(Validators::new().required().email().build_first_fail().boxed()),
             None,
         );
@@ -2849,8 +2867,8 @@ mod tests {
 
     #[test]
     fn test_server_errors() {
-        let mut form = FormContext::new(ValidationMode::on_submit());
-        form.register("email", FieldValue::Text("user@example.com".into()), None, None);
+        let mut form = Context::new(Mode::on_submit());
+        form.register("email", Value::Text("user@example.com".into()), None, None);
 
         form.set_server_errors(
             [("email".to_string(), vec!["Email already in use".to_string()])]
@@ -2866,18 +2884,18 @@ mod tests {
 
     #[test]
     fn test_server_error_cleared_on_change() {
-        let mut form = FormContext::new(ValidationMode::on_change());
-        form.register("email", FieldValue::Text("used@example.com".into()), None, None);
+        let mut form = Context::new(Mode::on_change());
+        form.register("email", Value::Text("used@example.com".into()), None, None);
         form.set_server_errors(
             [("email".to_string(), vec!["Email taken".to_string()])]
                 .into_iter().collect()
         );
 
-        assert!(form.field("email").expect("email field must be registered").validation.is_invalid());
+        assert!(form.field("email").expect("email field must be registered").validation.is_err());
 
         // User changes the value — server error should be cleared
-        form.on_change("email", FieldValue::Text("new@example.com".into()));
-        assert!(form.field("email").expect("email field must be registered").validation.is_valid());
+        form.on_change("email", Value::Text("new@example.com".into()));
+        assert!(form.field("email").expect("email field must be registered").validation.is_ok());
     }
 }
 ```
@@ -2915,7 +2933,7 @@ pub enum State {
 #[derive(Clone, Debug)]
 pub enum Event {
     /// Set validation errors at the fieldset level.
-    SetErrors(Vec<ValidationError>),
+    SetErrors(Vec<Error>),
     /// Clear all fieldset-level validation errors.
     ClearErrors,
     /// Sync disabled state from props change.
@@ -2945,7 +2963,7 @@ pub struct Context {
     /// Layout direction for RTL support.
     pub dir: Option<Direction>,
     /// Fieldset-level validation errors.
-    pub errors: Vec<ValidationError>,
+    pub errors: Vec<Error>,
     // NOTE: `has_error_message` removed — use `!errors.is_empty()` instead.
     /// Whether a Description part is rendered (set by `SetHasDescription` event).
     pub has_description: bool,
@@ -3200,7 +3218,7 @@ impl<'a> Api<'a> {
     }
 
     /// Current fieldset-level validation errors.
-    pub fn errors(&self) -> &[ValidationError] {
+    pub fn errors(&self) -> &[Error] {
         &self.ctx.errors
     }
 
@@ -3241,19 +3259,19 @@ impl<'a> Api<'a> {
 
 > **Note on `aria-invalid` on `<fieldset>`**: Screen readers (NVDA, JAWS, VoiceOver) do not reliably announce `aria-invalid` on `<fieldset>` elements — they only announce it on focusable form controls. Fieldset-level invalidity is communicated via the `ErrorMessage` anatomy part (which uses `role="alert"`) and optionally by appending "contains errors" to the `Legend` text. The `aria-invalid` attribute is NOT set on the fieldset root.
 
-### 12.5 Integration with FormContext
+### 12.5 Integration with Context
 
-When nested inside a `FormContext`, the `Fieldset` registers itself and can receive form-level disabled state. Children of the `Fieldset` see the **merged** disabled state: a child is disabled if either the fieldset OR the individual field is disabled.
+When nested inside a `Context`, the `Fieldset` registers itself and can receive form-level disabled state. Children of the `Fieldset` see the **merged** disabled state: a child is disabled if either the fieldset OR the individual field is disabled.
 
-### 12.6 FieldCtx — Shared Context for Child Fields
+### 12.6 Context — Shared Context for Child Fields
 
-`FieldCtx` is the bridge between a parent group component (`Fieldset`, `CheckboxGroup`, `RadioGroup`) and child `Field` components. The parent provides it via framework context; child `Field` components consume it to inherit disabled/invalid state.
+`Context` is the bridge between a parent group component (`Fieldset`, `CheckboxGroup`, `RadioGroup`) and child `Field` components. The parent provides it via framework context; child `Field` components consume it to inherit disabled/invalid state.
 
 ```rust
 /// Propagated via framework context (Leptos `provide_context`, Dioxus `use_context_provider`)
 /// from Fieldset (or CheckboxGroup, RadioGroup) to child Field components.
-#[derive(Clone, Debug, PartialEq)]
-pub struct FieldCtx {
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Context {
     /// Optional field name inherited from the parent group (e.g., checkbox group name).
     pub name: Option<String>,
     /// Whether the parent group is disabled. Child fields merge this with their own `disabled` prop.
@@ -3263,20 +3281,9 @@ pub struct FieldCtx {
     /// Whether the parent group is read-only. Child fields merge this with their own `readonly` prop.
     pub readonly: bool,
 }
-
-impl Default for FieldCtx {
-    fn default() -> Self {
-        Self {
-            name: None,
-            disabled: false,
-            invalid: false,
-            readonly: false,
-        }
-    }
-}
 ```
 
-**Merge semantics**: When a `Field` detects a parent `FieldCtx`, it merges via logical OR:
+**Merge semantics**: When a `Field` detects a parent `Context`, it merges via logical OR:
 
 - `effective_disabled = field_props.disabled || field_ctx.disabled`
 - `effective_invalid = field_props.invalid || field_ctx.invalid`
@@ -3287,7 +3294,7 @@ The merge happens at the **adapter layer** (not inside the core machine), becaus
 ### 12.7 I18n Considerations
 
 - **RTL**: When `dir` is `Some`, it is emitted on the `<fieldset>` root. `<legend>` text should use Unicode directional isolate characters (`U+2068`/`U+2069`) when content may contain mixed-direction text.
-- **Error messages**: Localizable via `ValidationError`. When error messages contain embedded user input, the interpolated text must be wrapped in Unicode isolates.
+- **Error messages**: Localizable via `Error`. When error messages contain embedded user input, the interpolated text must be wrapped in Unicode isolates.
 
 ---
 
@@ -3326,7 +3333,7 @@ pub enum State {
 #[derive(Clone, Debug)]
 pub enum Event {
     /// Set validation errors to display.
-    SetErrors(Vec<ValidationError>),
+    SetErrors(Vec<Error>),
     /// Clear all validation errors.
     ClearErrors,
     /// Notify that a Description part has mounted/unmounted.
@@ -3341,8 +3348,8 @@ pub enum Event {
     SetRequired(bool),
     /// Sync direction from props change (e.g., LTR↔RTL language switch).
     SetDir(Option<Direction>),
-    /// Sync async-validation state from FormContext.
-    /// Dispatched by adapter when FormFieldState.validating changes.
+    /// Sync async-validation state from Context.
+    /// Dispatched by adapter when FormState.validating changes.
     SetValidating(bool),
 }
 ```
@@ -3362,12 +3369,12 @@ pub struct Context {
     pub invalid: bool,
     /// Whether an async validator is currently running for this field.
     /// Set via `SetValidating` event dispatched by the adapter when
-    /// `FormFieldState.validating` changes in the parent FormContext.
+    /// `FormState.validating` changes in the parent Context.
     pub validating: bool,
     /// Layout direction.
     pub dir: Option<Direction>,
     /// Current validation errors.
-    pub errors: Vec<ValidationError>,
+    pub errors: Vec<Error>,
     /// Whether a Description part is rendered.
     pub has_description: bool,
     /// Component IDs for part identification.
@@ -3378,7 +3385,7 @@ pub struct Context {
 #### 13.2.4 Field Component Props
 
 ```rust
-/// Note: Named `FieldComponentProps` to avoid collision with `FieldState`
+/// Note: Named `FieldComponentProps` to avoid collision with `State`
 /// in §2.3 which tracks per-field form context state.
 #[derive(Clone, Debug, PartialEq, HasId)]
 pub struct Props {
@@ -3590,10 +3597,10 @@ impl<'a> Api<'a> {
     /// Attributes to apply on the child input element.
     /// The child input reads these to get its ARIA wiring.
     ///
-    /// Note: Unlike `FieldDescriptors::input_aria()` which gates `aria-invalid` on
+    /// Note: Unlike `Descriptors::input_aria()` which gates `aria-invalid` on
     /// `show_error()` (touched AND invalid), this method sets `aria-invalid` immediately
-    /// when `self.ctx.invalid` is true. This is intentional: FieldDescriptors is for
-    /// FormContext-managed touch state; field::Api is for prop-driven invalid state
+    /// when `self.ctx.invalid` is true. This is intentional: Descriptors is for
+    /// Context-managed touch state; field::Api is for prop-driven invalid state
     /// where the parent controls display timing.
     pub fn input_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
@@ -3681,14 +3688,14 @@ impl<'a> Api<'a> {
 
 ### 13.4 Integration with Fieldset
 
-When nested inside a `Fieldset`, the `Field` merges its own state with the `Fieldset` context (see §12.6 `FieldCtx`). The merge is performed at the **adapter layer**, not inside the core machine — the core `field::Machine` has no access to framework context.
+When nested inside a `Fieldset`, the `Field` merges its own state with the `Fieldset` context (see §12.6 `Context`). The merge is performed at the **adapter layer**, not inside the core machine — the core `field::Machine` has no access to framework context.
 
 **Adapter-layer merge pattern:**
 
 ```rust
 // Inside the adapter's Field component (Leptos or Dioxus):
-// 1. Attempt to read FieldCtx from the parent Fieldset/CheckboxGroup/RadioGroup.
-let field_ctx: Option<FieldCtx> = /* adapter-specific context read */;
+// 1. Attempt to read Context from the parent Fieldset/CheckboxGroup/RadioGroup.
+let field_ctx: Option<Context> = /* adapter-specific context read */;
 
 // 2. Merge via logical OR — a field is disabled/invalid if either
 //    its own prop OR the parent group says so.
@@ -3700,7 +3707,7 @@ let effective_readonly = props.readonly
     || field_ctx.as_ref().map_or(false, |f| f.readonly);
 
 // 3. Build merged props for the core machine.
-// id, required, dir from props; disabled, invalid, readonly merged from FieldCtx.
+// id, required, dir from props; disabled, invalid, readonly merged from Context.
 let merged_props = field::Props {
     disabled: effective_disabled,
     invalid: effective_invalid,
@@ -3723,13 +3730,13 @@ This keeps the core machine framework-agnostic while allowing each adapter to us
 
 ## 14. Form Component
 
-> **Relationship to form_submit::Machine:** The `form_submit::Machine` (§8) is a lower-level 6-state submission lifecycle machine with explicit validation states, designed for advanced flows (multi-step async validation, complex retry logic). The `form::Machine` (this section) is a standalone high-level component with a simplified 2-state model (Idle, Submitting). They are independent alternatives — **not composed together**. Most consumers should use `form::Machine` via the Form component; use `form_submit::Machine` only when you need fine-grained control over the validation→submission lifecycle. Both machines integrate with `FormContext` via adapter-provided context propagation.
+> **Relationship to form_submit::Machine:** The `form_submit::Machine` (§8) is a lower-level 6-state submission lifecycle machine with explicit validation states, designed for advanced flows (multi-step async validation, complex retry logic). The `form::Machine` (this section) is a standalone high-level component with a simplified 2-state model (Idle, Submitting). They are independent alternatives — **not composed together**. Most consumers should use `form::Machine` via the Form component; use `form_submit::Machine` only when you need fine-grained control over the validation→submission lifecycle. Both machines integrate with `Context` via adapter-provided context propagation.
 >
 > Cross-references: Equivalent to React Aria `Form`.
 
 ### 14.1 Purpose
 
-The `Form` component renders a `<form>` element with pre-wired integration to `FormContext` and the form submission lifecycle. It handles:
+The `Form` component renders a `<form>` element with pre-wired integration to `Context` and the form submission lifecycle. It handles:
 
 - `onSubmit` / `onReset` event binding
 - Validation behavior selection (`Native` vs `Aria`)
@@ -3818,18 +3825,18 @@ pub enum Event {
 
 #### 14.3.3 Form Component Context
 
-> **Authoritative source:** `form::Machine::Context` is the authoritative source for `server_errors` and `is_submitting`. `FormContext` mirrors these values downstream via the adapter effect (§14.6). On divergence, the machine context wins — `FormContext` is a read-only projection for child components that don't have access to the machine.
+> **Authoritative source:** `form::Machine::Context` is the authoritative source for `server_errors` and `is_submitting`. `Context` mirrors these values downstream via the adapter effect (§14.6). On divergence, the machine context wins — `Context` is a read-only projection for child components that don't have access to the machine.
 >
-> **Sync timing:** The adapter MUST synchronize `FormContext` from `form::Machine::Context` synchronously within the same `apply` closure (not in a deferred effect). This ensures child components reading `FormContext` during the same render cycle see consistent values. The pattern is: `apply` updates `machine.context`, then immediately writes `form_context.is_submitting = machine.context.is_submitting` (and similarly for `server_errors`) before the closure returns.
+> **Sync timing:** The adapter MUST synchronize `Context` from `form::Machine::Context` synchronously within the same `apply` closure (not in a deferred effect). This ensures child components reading `Context` during the same render cycle see consistent values. The pattern is: `apply` updates `machine.context`, then immediately writes `form_context.is_submitting = machine.context.is_submitting` (and similarly for `server_errors`) before the closure returns.
 
 ```rust
 #[derive(Clone, Debug, PartialEq)]
 pub struct Context {
     /// How validation errors are displayed.
     pub validation_behavior: ValidationBehavior,
-    /// Whether the form is currently submitting (authoritative; mirrored to FormContext).
+    /// Whether the form is currently submitting (authoritative; mirrored to Context).
     pub is_submitting: bool,
-    /// Server-side validation errors keyed by field name (authoritative; mirrored to FormContext).
+    /// Server-side validation errors keyed by field name (authoritative; mirrored to Context).
     pub server_errors: BTreeMap<String, Vec<String>>,
     /// Status message for the live region (success/error announcements).
     pub status_message: Option<String>,
@@ -3852,7 +3859,7 @@ pub struct Props {
     pub validation_behavior: ValidationBehavior,
     /// Server-side validation errors keyed by field name. When this prop changes,
     /// `on_props_changed` sends `Event::SetServerErrors` to inject the errors into
-    /// the machine context (and from there into `FormContext` for child fields).
+    /// the machine context (and from there into `Context` for child fields).
     /// This is the declarative alternative to sending `Event::SetServerErrors` directly.
     pub validation_errors: BTreeMap<String, Vec<String>>,
     /// The URL to submit the form to. Sets the HTML `action` attribute on `<form>`.
@@ -3942,7 +3949,7 @@ impl ars_core::Machine for Machine {
             // After success, the form also returns to Idle, allowing immediate re-submission
             // (e.g., "save" forms that can be submitted multiple times without page reload).
             //
-            // **Adapter contract:** The adapter MUST call `FormContext::validate_all()` before
+            // **Adapter contract:** The adapter MUST call `Context::validate_all()` before
             // sending `Event::Submit`. If validation fails, the adapter does NOT send Submit —
             // it focuses the first invalid field and announces the error count via StatusRegion.
             // The Submit event indicates that client-side validation has already passed.
@@ -4109,7 +4116,7 @@ impl<'a> Api<'a> {
 Framework adapters must:
 
 1. **Prevent default** on the `submit` event when `validation_behavior == Aria`
-2. **Run validation** on all registered fields in the `FormContext` before calling the user's submit callback
+2. **Run validation** on all registered fields in the `Context` before calling the user's submit callback
 3. **Inject server errors** into the appropriate `Field` components via `Event::SetServerErrors`
 4. **Reset all fields** on `Event::Reset`, clearing values and errors
 5. **Set `novalidate`** attribute on `<form>` when `validation_behavior == Aria`
@@ -4117,7 +4124,7 @@ Framework adapters must:
 7. **Announce results** via the `StatusRegion`: on submit success, post a configurable success message; on submit failure with multiple errors, post "N errors found" before moving focus to the first invalid field
 8. **Exclude disabled fields** from submission data (see §15)
 
-> **Adapter integration:** The adapter syncs `form::Machine.Context.server_errors` with `FormContext.server_errors` via a reactive effect that watches the machine's context and calls `FormContext::set_server_errors()` whenever the machine's server_errors field changes.
+> **Adapter integration:** The adapter syncs `form::Machine.Context.server_errors` with `Context.server_errors` via a reactive effect that watches the machine's context and calls `Context::set_server_errors()` whenever the machine's server_errors field changes.
 
 ### 14.7 I18n — FormMessages
 
@@ -4145,7 +4152,7 @@ pub struct FormMessages {
     /// production apps MUST supply locale-aware messages.
     /// Default: "{count} errors found. Please correct the highlighted fields."
     pub submit_error_count: MessageFn<dyn Fn(usize, &ars_i18n::Locale) -> String + Send + Sync>,
-    /// Validation error message factories (used by `ValidationError` factory methods).
+    /// Validation error message factories (used by `Error` factory methods).
     /// Default: "This field is required"
     pub required_error: MessageFn<dyn Fn(&ars_i18n::Locale) -> String + Send + Sync>,
     /// Default: "Must be at least {min} characters"
@@ -4272,7 +4279,7 @@ fn form_messages_for_locale(locale: &Locale) -> FormMessages {
 1. **Exact locale** — e.g., `pt-BR`
 2. **Language only** — e.g., `pt`
 3. **English (`en`)** — the `Default` impl provides English strings
-4. **Error code only** — if even English is unavailable (should not happen), display the `ValidationErrorCode` variant name as a last resort
+4. **Error code only** — if even English is unavailable (should not happen), display the `ErrorCode` variant name as a last resort
 
 This fallback chain ensures that form error messages are always human-readable regardless of locale coverage gaps.
 
@@ -4280,9 +4287,9 @@ This fallback chain ensures that form error messages are always human-readable r
 
 ## 15. Disabled vs Readonly Contract
 
-1. **Disabled**: element remains in tab order but is inoperable (per APG guidance, `aria-disabled` elements stay focusable so screen reader users can discover them), `aria-disabled="true"` set, no HTML `disabled` attribute (allows tooltip on hover). Adapter-layer code is responsible for excluding disabled fields from submission data. Core `FormContext::collect_form_data()` does not enforce this because disabled status is component-level state (on the component machine's `Context`), not form-level state. Adapters must maintain a `BTreeSet<String>` of disabled field names and filter the resulting `FormData` before passing to the submit handler.
-   > **Adapter pattern for disabled field exclusion:**
-   > The adapter maintains a `BTreeSet<String>` of disabled field names, updated whenever a component's disabled prop changes. During `collect_form_data()`, the adapter filters the resulting `FormData` by removing entries whose names appear in this set.
+1. **Disabled**: element remains in tab order but is inoperable (per APG guidance, `aria-disabled` elements stay focusable so screen reader users can discover them), `aria-disabled="true"` set, no HTML `disabled` attribute (allows tooltip on hover). Adapter-layer code is responsible for excluding disabled fields from submission data. Core `Context::collect_form_data()` does not enforce this because disabled status is component-level state (on the component machine's `Context`), not form-level state. Adapters must maintain a `BTreeSet<String>` of disabled field names and filter the resulting `Data` before passing to the submit handler.
+    > **Adapter pattern for disabled field exclusion:**
+    > The adapter maintains a `BTreeSet<String>` of disabled field names, updated whenever a component's disabled prop changes. During `collect_form_data()`, the adapter filters the resulting `Data` by removing entries whose names appear in this set.
 2. **Readonly**: element remains in tab order, `aria-readonly="true"` set, value visible but not editable. Form submission includes readonly values.
 3. All form components must emit the correct ARIA attribute in their adapter render function — this is verified by snapshot tests.
 

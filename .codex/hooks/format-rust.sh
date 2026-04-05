@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+(set -o pipefail) && set -o pipefail
 
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$repo_root"
