@@ -1,10 +1,6 @@
-// ars-a11y/src/aria/attribute.rs
-//
-// TODO: `attr_name()`, `to_html_attr()`, `apply_to()`, and the `From<AriaAttr>`/
-// `TryFrom<HtmlAttr>`/`From<&AriaAttribute> for AriaAttr` impls are deferred until
-// `HtmlAttr` and `AriaAttr` land.
-
 use alloc::{string::String, vec::Vec};
+
+use ars_core::{AriaAttr, AttrMap, AttrValue, HtmlAttr};
 
 // ── Supporting types ──────────────────────────────────────────────────────────
 
@@ -656,6 +652,177 @@ impl AriaAttribute {
             Self::KeyShortcuts(s) => Some(s.clone()),
         }
     }
+
+    /// Returns the HTML attribute name for this ARIA attribute.
+    ///
+    /// Delegates to [`AriaAttr::as_str()`] via the `From<&AriaAttribute>` conversion,
+    /// keeping attribute name strings in a single source of truth.
+    #[must_use]
+    pub fn attr_name(&self) -> &'static str {
+        AriaAttr::from(self).as_str()
+    }
+
+    /// Returns the [`HtmlAttr`] key for this ARIA attribute.
+    #[must_use]
+    pub fn to_html_attr(&self) -> HtmlAttr {
+        HtmlAttr::Aria(AriaAttr::from(self))
+    }
+
+    /// Apply this attribute to an [`AttrMap`].
+    ///
+    /// String-valued attributes are set directly. Nullable attributes whose
+    /// value is absent (e.g., `Hidden(None)`, `Pressed(None)`) are written as
+    /// [`AttrValue::None`] so the adapter knows to remove the attribute from the DOM.
+    pub fn apply_to(&self, attrs: &mut AttrMap) {
+        let key = self.to_html_attr();
+        match self.to_attr_value() {
+            Some(value) => {
+                attrs.set(key, value);
+            }
+            None => {
+                attrs.set(key, AttrValue::None);
+            }
+        }
+    }
+}
+
+// ── Bridging impls: AriaAttr ↔ AriaAttribute ─────────────────────────────────
+
+/// Converts a discriminant key ([`AriaAttr`]) to an [`AriaAttribute`] with
+/// default/placeholder values. Used by `validate_attr_map()` for
+/// presence-checking — the actual value is not reconstructed.
+impl From<AriaAttr> for AriaAttribute {
+    fn from(attr: AriaAttr) -> Self {
+        match attr {
+            AriaAttr::ActiveDescendant => Self::ActiveDescendant(None),
+            AriaAttr::AutoComplete => Self::AutoComplete(AriaAutocomplete::None),
+            AriaAttr::Checked => Self::Checked(AriaChecked::False),
+            AriaAttr::Controls => Self::Controls(AriaIdList::default()),
+            AriaAttr::Current => Self::Current(AriaCurrent::False),
+            AriaAttr::DescribedBy => Self::DescribedBy(AriaIdList::default()),
+            AriaAttr::Description => Self::Description(String::new()),
+            AriaAttr::Details => Self::Details(AriaIdRef(String::new())),
+            AriaAttr::Disabled => Self::Disabled(false),
+            AriaAttr::FlowTo => Self::FlowTo(AriaIdList::default()),
+            AriaAttr::HasPopup => Self::HasPopup(AriaHasPopup::False),
+            AriaAttr::Hidden => Self::Hidden(Some(true)),
+            AriaAttr::Invalid => Self::Invalid(AriaInvalid::False),
+            AriaAttr::Label => Self::Label(String::new()),
+            AriaAttr::LabelledBy => Self::LabelledBy(AriaIdList::default()),
+            AriaAttr::Level => Self::Level(1),
+            AriaAttr::Live => Self::Live(AriaLive::Off),
+            AriaAttr::Modal => Self::Modal(false),
+            AriaAttr::MultiLine => Self::MultiLine(false),
+            AriaAttr::MultiSelectable => Self::MultiSelectable(false),
+            AriaAttr::Orientation => Self::Orientation(AriaOrientation::Horizontal),
+            AriaAttr::Owns => Self::Owns(AriaIdList::default()),
+            AriaAttr::Placeholder => Self::Placeholder(String::new()),
+            AriaAttr::PosInSet => Self::PosInSet(1),
+            AriaAttr::Pressed => Self::Pressed(Some(AriaPressed::False)),
+            AriaAttr::ReadOnly => Self::ReadOnly(false),
+            AriaAttr::Required => Self::Required(false),
+            AriaAttr::RoleDescription => Self::RoleDescription(String::new()),
+            AriaAttr::Selected => Self::Selected(Some(false)),
+            AriaAttr::SetSize => Self::SetSize(0),
+            AriaAttr::Sort => Self::Sort(AriaSort::None),
+            AriaAttr::ValueMax => Self::ValueMax(0.0),
+            AriaAttr::ValueMin => Self::ValueMin(0.0),
+            AriaAttr::ValueNow => Self::ValueNow(0.0),
+            AriaAttr::ValueText => Self::ValueText(String::new()),
+            AriaAttr::Atomic => Self::Atomic(false),
+            AriaAttr::Busy => Self::Busy(false),
+            AriaAttr::Relevant => Self::Relevant(AriaRelevant::default()),
+            #[cfg(feature = "aria-drag-drop-compat")]
+            AriaAttr::DropEffect => Self::DropEffect(AriaDropeffect::None),
+            #[cfg(feature = "aria-drag-drop-compat")]
+            AriaAttr::Grabbed => Self::Grabbed(None),
+            AriaAttr::ErrorMessage => Self::ErrorMessage(AriaIdRef(String::new())),
+            AriaAttr::Expanded => Self::Expanded(Some(false)),
+            AriaAttr::KeyShortcuts => Self::KeyShortcuts(String::new()),
+            AriaAttr::ColCount => Self::ColCount(-1),
+            AriaAttr::ColIndex => Self::ColIndex(1),
+            AriaAttr::ColSpan => Self::ColSpan(1),
+            AriaAttr::RowCount => Self::RowCount(-1),
+            AriaAttr::RowIndex => Self::RowIndex(1),
+            AriaAttr::RowSpan => Self::RowSpan(1),
+            // All current AriaAttr variants are covered above. This arm is
+            // required because AriaAttr is #[non_exhaustive]. If reached, a
+            // new variant was added to ars-core without updating ars-a11y.
+            _ => unreachable!("unknown AriaAttr variant — update ars-a11y to match"),
+        }
+    }
+}
+
+/// Extracts the [`AriaAttr`] discriminant from an [`HtmlAttr::Aria`] variant.
+/// Returns `Err(original)` if the [`HtmlAttr`] is not an ARIA variant.
+impl TryFrom<HtmlAttr> for AriaAttribute {
+    type Error = HtmlAttr;
+
+    fn try_from(attr: HtmlAttr) -> Result<Self, Self::Error> {
+        match attr {
+            HtmlAttr::Aria(a) => Ok(AriaAttribute::from(a)),
+            other => Err(other),
+        }
+    }
+}
+
+/// Maps a data-carrying [`AriaAttribute`] back to its discriminant key.
+impl From<&AriaAttribute> for AriaAttr {
+    fn from(attr: &AriaAttribute) -> Self {
+        match attr {
+            AriaAttribute::ActiveDescendant(_) => Self::ActiveDescendant,
+            AriaAttribute::AutoComplete(_) => Self::AutoComplete,
+            AriaAttribute::Checked(_) => Self::Checked,
+            AriaAttribute::Controls(_) => Self::Controls,
+            AriaAttribute::Current(_) => Self::Current,
+            AriaAttribute::DescribedBy(_) => Self::DescribedBy,
+            AriaAttribute::Description(_) => Self::Description,
+            AriaAttribute::Details(_) => Self::Details,
+            AriaAttribute::Disabled(_) => Self::Disabled,
+            AriaAttribute::FlowTo(_) => Self::FlowTo,
+            AriaAttribute::HasPopup(_) => Self::HasPopup,
+            AriaAttribute::Hidden(_) => Self::Hidden,
+            AriaAttribute::Invalid(_) => Self::Invalid,
+            AriaAttribute::Label(_) => Self::Label,
+            AriaAttribute::LabelledBy(_) => Self::LabelledBy,
+            AriaAttribute::Level(_) => Self::Level,
+            AriaAttribute::Live(_) => Self::Live,
+            AriaAttribute::Modal(_) => Self::Modal,
+            AriaAttribute::MultiLine(_) => Self::MultiLine,
+            AriaAttribute::MultiSelectable(_) => Self::MultiSelectable,
+            AriaAttribute::Orientation(_) => Self::Orientation,
+            AriaAttribute::Owns(_) => Self::Owns,
+            AriaAttribute::Placeholder(_) => Self::Placeholder,
+            AriaAttribute::PosInSet(_) => Self::PosInSet,
+            AriaAttribute::Pressed(_) => Self::Pressed,
+            AriaAttribute::ReadOnly(_) => Self::ReadOnly,
+            AriaAttribute::Required(_) => Self::Required,
+            AriaAttribute::RoleDescription(_) => Self::RoleDescription,
+            AriaAttribute::Selected(_) => Self::Selected,
+            AriaAttribute::SetSize(_) => Self::SetSize,
+            AriaAttribute::Sort(_) => Self::Sort,
+            AriaAttribute::ValueMax(_) => Self::ValueMax,
+            AriaAttribute::ValueMin(_) => Self::ValueMin,
+            AriaAttribute::ValueNow(_) => Self::ValueNow,
+            AriaAttribute::ValueText(_) => Self::ValueText,
+            AriaAttribute::Atomic(_) => Self::Atomic,
+            AriaAttribute::Busy(_) => Self::Busy,
+            AriaAttribute::Relevant(_) => Self::Relevant,
+            #[cfg(feature = "aria-drag-drop-compat")]
+            AriaAttribute::DropEffect(_) => Self::DropEffect,
+            #[cfg(feature = "aria-drag-drop-compat")]
+            AriaAttribute::Grabbed(_) => Self::Grabbed,
+            AriaAttribute::ErrorMessage(_) => Self::ErrorMessage,
+            AriaAttribute::Expanded(_) => Self::Expanded,
+            AriaAttribute::KeyShortcuts(_) => Self::KeyShortcuts,
+            AriaAttribute::ColCount(_) => Self::ColCount,
+            AriaAttribute::ColIndex(_) => Self::ColIndex,
+            AriaAttribute::ColSpan(_) => Self::ColSpan,
+            AriaAttribute::RowCount(_) => Self::RowCount,
+            AriaAttribute::RowIndex(_) => Self::RowIndex,
+            AriaAttribute::RowSpan(_) => Self::RowSpan,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -699,5 +866,154 @@ mod tests {
     #[test]
     fn aria_checked_mixed() {
         assert_eq!(AriaChecked::Mixed.as_str(), "mixed");
+    }
+
+    // ── Bridge tests ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn attr_name_returns_html_attribute_string() {
+        assert_eq!(AriaAttribute::Disabled(true).attr_name(), "aria-disabled");
+        assert_eq!(
+            AriaAttribute::ActiveDescendant(None).attr_name(),
+            "aria-activedescendant"
+        );
+        assert_eq!(
+            AriaAttribute::LabelledBy(AriaIdList::new()).attr_name(),
+            "aria-labelledby"
+        );
+        assert_eq!(AriaAttribute::ValueNow(0.5).attr_name(), "aria-valuenow");
+        assert_eq!(
+            AriaAttribute::KeyShortcuts(String::new()).attr_name(),
+            "aria-keyshortcuts"
+        );
+    }
+
+    #[test]
+    fn to_html_attr_wraps_in_aria_variant() {
+        use ars_core::{AriaAttr, HtmlAttr};
+        assert_eq!(
+            AriaAttribute::Checked(AriaChecked::True).to_html_attr(),
+            HtmlAttr::Aria(AriaAttr::Checked),
+        );
+        assert_eq!(
+            AriaAttribute::Expanded(Some(true)).to_html_attr(),
+            HtmlAttr::Aria(AriaAttr::Expanded),
+        );
+        assert_eq!(
+            AriaAttribute::ColCount(-1).to_html_attr(),
+            HtmlAttr::Aria(AriaAttr::ColCount),
+        );
+    }
+
+    #[test]
+    fn apply_to_sets_string_value_on_attr_map() {
+        use ars_core::{AriaAttr, AttrMap, HtmlAttr};
+        let mut attrs = AttrMap::new();
+        AriaAttribute::Disabled(true).apply_to(&mut attrs);
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"),);
+    }
+
+    #[test]
+    fn apply_to_removes_nullable_absent_attrs() {
+        use ars_core::{AriaAttr, AttrMap, HtmlAttr};
+        let mut attrs = AttrMap::new();
+        // Pre-set to verify removal
+        attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
+        AriaAttribute::Hidden(None).apply_to(&mut attrs);
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Hidden)));
+    }
+
+    #[test]
+    fn apply_to_pressed_none_removes_attr() {
+        use ars_core::{AriaAttr, AttrMap, HtmlAttr};
+        let mut attrs = AttrMap::new();
+        AriaAttribute::Pressed(None).apply_to(&mut attrs);
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Pressed)));
+    }
+
+    #[test]
+    fn apply_to_selected_none_removes_attr() {
+        use ars_core::{AriaAttr, AttrMap, HtmlAttr};
+        let mut attrs = AttrMap::new();
+        AriaAttribute::Selected(None).apply_to(&mut attrs);
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Selected)));
+    }
+
+    #[test]
+    fn apply_to_label_string() {
+        use ars_core::{AriaAttr, AttrMap, HtmlAttr};
+        let mut attrs = AttrMap::new();
+        AriaAttribute::Label("Close dialog".into()).apply_to(&mut attrs);
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::Label)),
+            Some("Close dialog"),
+        );
+    }
+
+    #[test]
+    fn from_aria_attr_produces_default_values() {
+        use ars_core::AriaAttr;
+        assert_eq!(
+            AriaAttribute::from(AriaAttr::Disabled),
+            AriaAttribute::Disabled(false),
+        );
+        assert_eq!(
+            AriaAttribute::from(AriaAttr::ActiveDescendant),
+            AriaAttribute::ActiveDescendant(None),
+        );
+        assert_eq!(
+            AriaAttribute::from(AriaAttr::Checked),
+            AriaAttribute::Checked(AriaChecked::False),
+        );
+        assert_eq!(
+            AriaAttribute::from(AriaAttr::ColCount),
+            AriaAttribute::ColCount(-1),
+        );
+        assert_eq!(
+            AriaAttribute::from(AriaAttr::Level),
+            AriaAttribute::Level(1),
+        );
+    }
+
+    #[test]
+    fn from_aria_attribute_ref_extracts_discriminant() {
+        use ars_core::AriaAttr;
+        assert_eq!(
+            AriaAttr::from(&AriaAttribute::Disabled(true)),
+            AriaAttr::Disabled,
+        );
+        assert_eq!(
+            AriaAttr::from(&AriaAttribute::Label("hello".into())),
+            AriaAttr::Label,
+        );
+        assert_eq!(
+            AriaAttr::from(&AriaAttribute::RowSpan(3)),
+            AriaAttr::RowSpan,
+        );
+    }
+
+    #[test]
+    fn try_from_html_attr_aria_succeeds() {
+        use ars_core::{AriaAttr, HtmlAttr};
+        let result = AriaAttribute::try_from(HtmlAttr::Aria(AriaAttr::Busy));
+        assert!(result.is_ok());
+        assert_eq!(result.expect("should be Ok"), AriaAttribute::Busy(false));
+    }
+
+    #[test]
+    fn try_from_html_attr_non_aria_fails() {
+        use ars_core::HtmlAttr;
+        let result = AriaAttribute::try_from(HtmlAttr::Class);
+        assert_eq!(result, Err(HtmlAttr::Class));
+    }
+
+    #[test]
+    fn round_trip_discriminant_preserves_identity() {
+        use ars_core::AriaAttr;
+        // AriaAttr → AriaAttribute → AriaAttr round-trip
+        let original = AriaAttr::Orientation;
+        let typed = AriaAttribute::from(original);
+        let back = AriaAttr::from(&typed);
+        assert_eq!(original, back);
     }
 }
