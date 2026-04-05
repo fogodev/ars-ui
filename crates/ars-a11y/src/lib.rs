@@ -12,6 +12,8 @@ extern crate alloc;
 use alloc::{format, string::String};
 
 pub mod aria;
+/// Shared focus management contracts consumed by DOM and adapter layers.
+pub mod focus;
 
 #[cfg(feature = "aria-drag-drop-compat")]
 pub use aria::attribute::AriaDropeffect;
@@ -22,6 +24,7 @@ pub use aria::{
     },
     role::AriaRole,
 };
+pub use focus::{FocusScopeBehavior, FocusScopeOptions, FocusStrategy, FocusTarget};
 
 /// Custom data attribute used to expose machine state on the root DOM element.
 ///

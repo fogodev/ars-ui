@@ -1,7 +1,19 @@
-//! DOM utilities for scroll control and platform feature detection.
+//! DOM utilities for focus management, scroll control, and platform feature detection.
 //!
 //! This crate provides browser-level helpers shared across framework adapters,
-//! including scroll lock management for modal overlays and platform capability detection.
+//! including focus management, scroll lock management for modal overlays, and
+//! platform capability detection.
+
+mod focus;
+
+pub use focus::{
+    FocusScope, FocusedElement, focus_body, focus_element_by_id, focus_first_tabbable,
+};
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+pub use focus::{
+    document_contains, focus_element, get_first_focusable, get_focusable_elements,
+    get_html_element_by_id, get_last_focusable,
+};
 
 /// An opaque token representing an active scroll lock on the document body.
 ///
