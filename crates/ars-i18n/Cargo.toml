@@ -8,7 +8,8 @@ repository.workspace   = true
 rust-version.workspace = true
 
 [features]
-default             = ["gregorian", "icu4x"]
+default             = ["std", "gregorian", "icu4x"]
+std                 = []
 gregorian           = []
 buddhist            = []
 japanese            = []

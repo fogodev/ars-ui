@@ -1517,12 +1517,19 @@ fn use_platform_effects() -> Rc<dyn PlatformEffects> {
 pub struct NullPlatformEffects;
 
 impl PlatformEffects for NullPlatformEffects {
+    #[inline]
     fn focus_element_by_id(&self, _id: &str) {}
+
+    #[inline]
     fn set_timeout(&self, _delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
         callback(); // fire immediately in tests
         TimerHandle::new(0)
     }
+
+    #[inline]
     fn clear_timeout(&self, _handle: TimerHandle) {}
+
+    #[inline]
     fn announce(&self, _message: &str) {}
     // ... remaining methods are no-ops or return sensible defaults
 }
@@ -1535,11 +1542,13 @@ method call so the developer sees exactly which platform operations are silently
 ```rust
 /// Fallback PlatformEffects used when no ArsProvider is in the component tree.
 /// Behaves identically to NullPlatformEffects but emits debug warnings per call.
-/// This is NOT used in tests — only in the `use_platform_effects()` fallback path.
-pub(crate) struct MissingProviderEffects;
+/// This is NOT used in tests — only in the `use_platform_effects()` fallback path
+/// inside adapters.
+pub struct MissingProviderEffects;
 
 impl MissingProviderEffects {
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, feature = "std"))]
+    #[inline]
     fn warn(method: &str) {
         eprintln!(
             "[ars-ui] {method}() called without ArsProvider. \
@@ -1547,22 +1556,30 @@ impl MissingProviderEffects {
         );
     }
 
-    #[cfg(not(debug_assertions))]
+    #[cfg(not(all(debug_assertions, feature = "std")))]
+    #[inline]
     fn warn(_method: &str) {}
 }
 
 impl PlatformEffects for MissingProviderEffects {
+    #[inline]
     fn focus_element_by_id(&self, _id: &str) {
         Self::warn("focus_element_by_id");
     }
+
+    #[inline]
     fn set_timeout(&self, _delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
         Self::warn("set_timeout");
         callback();
         TimerHandle::new(0)
     }
+
+    #[inline]
     fn clear_timeout(&self, _handle: TimerHandle) {
         Self::warn("clear_timeout");
     }
+
+    #[inline]
     fn announce(&self, _message: &str) {
         Self::warn("announce");
     }

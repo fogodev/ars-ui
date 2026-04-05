@@ -22,11 +22,21 @@ use core::fmt::Debug;
 
 pub mod companion_css;
 mod connect;
+pub mod platform;
+pub mod provider;
 
+// Re-export `Direction` from ars-i18n for convenience — used by
+// `PlatformEffects::resolved_direction` so consumers don't need a
+// separate `ars-i18n` dependency just for the return type.
+pub use ars_i18n::Direction;
 pub use connect::{
     AriaAttr, AttrMap, AttrMapParts, AttrValue, CssProperty, EventOptions, HtmlAttr, HtmlEvent,
     StyleStrategy, UserAttrs, data,
 };
+pub use platform::{
+    MissingProviderEffects, NullPlatformEffects, PlatformEffects, Rect, TimerHandle,
+};
+pub use provider::ColorMode;
 
 /// A named side effect produced by a state transition.
 ///
