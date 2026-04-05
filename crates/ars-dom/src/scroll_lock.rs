@@ -561,10 +561,11 @@ fn restore_scroll_state(_saved: ScrollLockSavedState) {
 
 /// Reset global scroll lock state for test isolation.
 ///
-/// Must be called at the start of each test to prevent cross-test interference
-/// from the process-global `AtomicU32` depth counter.
+/// Zeroes the depth counter and clears saved state. On native targets this
+/// touches the process-global `AtomicU32` / `Mutex`, so callers MUST hold
+/// `TEST_SERIAL` to prevent interference from concurrent tests.
 #[cfg(test)]
-pub(crate) fn reset_for_testing() {
+fn reset_global_state() {
     #[cfg(not(target_arch = "wasm32"))]
     {
         SCROLL_LOCK_DEPTH.store(0, Ordering::SeqCst);
@@ -585,6 +586,8 @@ pub(crate) fn reset_for_testing() {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::MutexGuard;
+
     use super::*;
 
     // TODO: DOM-touching helpers (save_current_scroll_state, apply_scroll_lock,
@@ -593,24 +596,46 @@ mod tests {
     // Add wasm-pack + headless browser tests when the test infrastructure
     // supports it (see spec/testing/15-test-harness.md).
 
+    /// Serializes scroll_lock tests so they don't run in parallel.
+    ///
+    /// On native targets the depth counter is a process-global `AtomicU32`.
+    /// Without serialization, concurrent test threads would stomp on each
+    /// other's counter values. Each test must call [`serial_reset()`] which
+    /// acquires this lock and zeroes global state before the test body runs.
+    /// The returned guard holds the lock for the test's lifetime.
+    static TEST_SERIAL: Mutex<()> = Mutex::new(());
+
+    /// Acquire the serialization lock and reset global state.
+    ///
+    /// Returns a [`MutexGuard`] that keeps the lock held until dropped
+    /// (end of the calling test). This ensures no two scroll_lock tests
+    /// touch the global depth counter concurrently.
+    fn serial_reset() -> MutexGuard<'static, ()> {
+        let guard = TEST_SERIAL
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        reset_global_state();
+        guard
+    }
+
     // == Low-level depth counter =============================================
 
     #[test]
     fn depth_starts_at_zero() {
-        reset_for_testing();
+        let _g = serial_reset();
         assert_eq!(depth(), 0);
     }
 
     #[test]
     fn acquire_increments_depth() {
-        reset_for_testing();
+        let _g = serial_reset();
         acquire();
         assert_eq!(depth(), 1);
     }
 
     #[test]
     fn release_decrements_depth() {
-        reset_for_testing();
+        let _g = serial_reset();
         acquire();
         release();
         assert_eq!(depth(), 0);
@@ -618,14 +643,14 @@ mod tests {
 
     #[test]
     fn release_at_zero_saturates() {
-        reset_for_testing();
+        let _g = serial_reset();
         release();
         assert_eq!(depth(), 0, "depth must not underflow");
     }
 
     #[test]
     fn is_locked_reflects_depth() {
-        reset_for_testing();
+        let _g = serial_reset();
         assert!(!is_locked());
         acquire();
         assert!(is_locked());
@@ -635,7 +660,7 @@ mod tests {
 
     #[test]
     fn nested_acquire_release_sequence() {
-        reset_for_testing();
+        let _g = serial_reset();
         acquire();
         assert_eq!(depth(), 1);
         acquire();
@@ -652,7 +677,7 @@ mod tests {
 
     #[test]
     fn depth_returns_current_count() {
-        reset_for_testing();
+        let _g = serial_reset();
         for expected in 1..=5 {
             acquire();
             assert_eq!(depth(), expected);
@@ -667,14 +692,14 @@ mod tests {
 
     #[test]
     fn manager_new_is_unlocked() {
-        reset_for_testing();
+        let _g = serial_reset();
         let mgr = ScrollLockManager::new();
         assert!(!mgr.is_locked());
     }
 
     #[test]
     fn manager_lock_makes_locked() {
-        reset_for_testing();
+        let _g = serial_reset();
         let mut mgr = ScrollLockManager::new();
         mgr.lock("dialog-1");
         assert!(mgr.is_locked());
@@ -682,7 +707,7 @@ mod tests {
 
     #[test]
     fn manager_unlock_makes_unlocked() {
-        reset_for_testing();
+        let _g = serial_reset();
         let mut mgr = ScrollLockManager::new();
         mgr.lock("dialog-1");
         mgr.unlock("dialog-1");
@@ -691,7 +716,7 @@ mod tests {
 
     #[test]
     fn manager_duplicate_lock_ignored() {
-        reset_for_testing();
+        let _g = serial_reset();
         let mut mgr = ScrollLockManager::new();
         mgr.lock("dialog-1");
         mgr.lock("dialog-1"); // duplicate — should be ignored
@@ -703,7 +728,7 @@ mod tests {
 
     #[test]
     fn manager_unlock_unknown_id_ignored() {
-        reset_for_testing();
+        let _g = serial_reset();
         let mut mgr = ScrollLockManager::new();
         mgr.lock("dialog-1");
         mgr.unlock("unknown"); // no-op
@@ -713,7 +738,7 @@ mod tests {
 
     #[test]
     fn manager_multiple_owners() {
-        reset_for_testing();
+        let _g = serial_reset();
         let mut mgr = ScrollLockManager::new();
         mgr.lock("dialog-a");
         mgr.lock("dialog-b");
@@ -725,7 +750,7 @@ mod tests {
 
     #[test]
     fn manager_last_unlock_clears() {
-        reset_for_testing();
+        let _g = serial_reset();
         let mut mgr = ScrollLockManager::new();
         mgr.lock("dialog-a");
         mgr.lock("dialog-b");
@@ -739,7 +764,7 @@ mod tests {
 
     #[test]
     fn manager_lock_unlock_delegates_to_global_depth() {
-        reset_for_testing();
+        let _g = serial_reset();
         let mut mgr = ScrollLockManager::new();
         assert_eq!(depth(), 0);
         mgr.lock("overlay-1");
@@ -756,7 +781,7 @@ mod tests {
 
     #[test]
     fn prevent_scroll_increments_depth() {
-        reset_for_testing();
+        let _g = serial_reset();
         prevent_scroll();
         assert_eq!(depth(), 1);
         assert!(is_locked());
@@ -764,7 +789,7 @@ mod tests {
 
     #[test]
     fn restore_scroll_decrements_depth() {
-        reset_for_testing();
+        let _g = serial_reset();
         prevent_scroll();
         restore_scroll();
         assert_eq!(depth(), 0);
@@ -778,7 +803,7 @@ mod tests {
         // Spec §5.5: "If a consumer closes modals out of order, the depth
         // counter still works correctly — styles are only restored when all
         // modals have closed."
-        reset_for_testing();
+        let _g = serial_reset();
         let mut mgr = ScrollLockManager::new();
         mgr.lock("outer");
         mgr.lock("middle");
@@ -805,7 +830,7 @@ mod tests {
 
     #[test]
     fn relock_after_full_unlock_cycle() {
-        reset_for_testing();
+        let _g = serial_reset();
         // First cycle
         acquire();
         acquire();
@@ -824,7 +849,7 @@ mod tests {
 
     #[test]
     fn manager_relock_same_id_after_unlock() {
-        reset_for_testing();
+        let _g = serial_reset();
         let mut mgr = ScrollLockManager::new();
         mgr.lock("dialog-1");
         mgr.unlock("dialog-1");
@@ -842,7 +867,7 @@ mod tests {
     fn two_managers_share_global_depth() {
         // Production pattern: multiple overlay instances each have their own
         // manager, but they share the process-global depth counter.
-        reset_for_testing();
+        let _g = serial_reset();
         let mut mgr_a = ScrollLockManager::new();
         let mut mgr_b = ScrollLockManager::new();
 
@@ -868,7 +893,7 @@ mod tests {
 
     #[test]
     fn bare_acquire_and_manager_lock_share_depth() {
-        reset_for_testing();
+        let _g = serial_reset();
         let mut mgr = ScrollLockManager::new();
 
         // Bare API locks first
@@ -894,14 +919,14 @@ mod tests {
 
     #[test]
     fn manager_default_is_unlocked() {
-        reset_for_testing();
+        let _g = serial_reset();
         let mgr = ScrollLockManager::default();
         assert!(!mgr.is_locked());
     }
 
     #[test]
     fn manager_debug_format_contains_type_name() {
-        reset_for_testing();
+        let _g = serial_reset();
         let mgr = ScrollLockManager::new();
         let debug = format!("{mgr:?}");
         assert!(debug.contains("ScrollLockManager"));
