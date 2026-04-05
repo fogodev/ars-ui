@@ -596,7 +596,7 @@ mod tests {
     // Add wasm-pack + headless browser tests when the test infrastructure
     // supports it (see spec/testing/15-test-harness.md).
 
-    /// Serializes scroll_lock tests so they don't run in parallel.
+    /// Serializes `scroll_lock` tests so they don't run in parallel.
     ///
     /// On native targets the depth counter is a process-global `AtomicU32`.
     /// Without serialization, concurrent test threads would stomp on each
@@ -608,7 +608,7 @@ mod tests {
     /// Acquire the serialization lock and reset global state.
     ///
     /// Returns a [`MutexGuard`] that keeps the lock held until dropped
-    /// (end of the calling test). This ensures no two scroll_lock tests
+    /// (end of the calling test). This ensures no two `scroll_lock` tests
     /// touch the global depth counter concurrently.
     fn serial_reset() -> MutexGuard<'static, ()> {
         let guard = TEST_SERIAL
