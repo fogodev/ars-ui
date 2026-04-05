@@ -57,7 +57,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Unit test tier
-        run: cargo test -p ars-a11y -p ars-core -p ars-interactions -p ars-forms --all-targets --all-features
+        run: cargo test -p ars-a11y -p ars-core -p ars-dom -p ars-interactions -p ars-forms --all-targets --all-features
 
   integration:
     name: Integration Tests
