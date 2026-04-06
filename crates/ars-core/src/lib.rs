@@ -1031,6 +1031,8 @@ impl<M: Machine> Service<M> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use super::*;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
