@@ -19,5 +19,6 @@
 
 pub mod field;
 pub mod form;
+pub mod form_submit;
 pub mod hidden_input;
 pub mod validation;

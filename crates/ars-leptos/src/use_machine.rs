@@ -80,6 +80,7 @@ where
 impl<M: Machine + 'static> UseMachineReturn<M>
 where
     M::State: Clone + PartialEq + Send + Sync + 'static,
+    M::Event: Send + Sync + 'static,
     M::Context: Clone + Send + Sync + 'static,
     M::Props: Clone + PartialEq + Send + Sync + 'static,
 {
@@ -235,37 +236,26 @@ where
     // 2. Forward the event to Service::send()
     // 3. Update signals if state/context changed
     //
-    // Note: Without SendResult from ars-core, we detect state changes by
-    // comparing before/after, and conservatively bump context_version
-    // whenever a transition was applied (non-empty effects or state change).
     let send: Callback<M::Event> = Callback::new(move |event: M::Event| {
-        let old_state = service.with_value(|s| s.state().clone());
-
-        // StoredValue::update_value returns (), so extract effects via side-channel.
-        let mut effects = Vec::new();
+        // StoredValue::update_value returns (), so extract result via side-channel.
+        let mut state_changed = false;
+        let mut context_changed = false;
         service.update_value(|s| {
-            effects = s.send(event);
+            let result = s.send(event);
+            state_changed = result.state_changed;
+            context_changed = result.context_changed;
+            // TODO: Dispatch result.pending_effects and handle result.cancel_effects
+            // when component implementations need effect lifecycle management.
         });
 
-        let new_state = service.with_value(|s| s.state().clone());
-        let state_changed = new_state != old_state;
-
         if state_changed {
+            let new_state = service.with_value(|s| s.state().clone());
             state_write.set(new_state);
         }
 
-        // Conservative: bump context_version whenever a transition was applied.
-        // A transition was applied if state changed OR effects were produced.
-        // This may over-notify but is always correct. Will be precise once
-        // ars-core returns SendResult with context_changed flag.
-        if state_changed || !effects.is_empty() {
+        if state_changed || context_changed {
             context_version_write.update(|v| *v += 1);
         }
-
-        // TODO: Effects are collected but not dispatched — PendingEffect::run() does
-        // not exist yet in ars-core. Effect lifecycle management will be added
-        // when component implementations need it.
-        drop(effects);
     });
 
     // Clean up effects when the component unmounts.
@@ -286,7 +276,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use ars_core::{AriaAttr, AttrMap, ComponentPart, ConnectApi, HasId, HtmlAttr, TransitionPlan};
+    use ars_core::{AriaAttr, AttrMap, ComponentPart, ConnectApi, HasId, HtmlAttr};
 
     use super::*;
 
@@ -376,10 +366,10 @@ mod tests {
             _event: &Self::Event,
             _context: &Self::Context,
             _props: &Self::Props,
-        ) -> Option<TransitionPlan<Self::State, Self::Event, Self::Context>> {
+        ) -> Option<ars_core::TransitionPlan<Self>> {
             match state {
-                ToggleState::Off => Some(TransitionPlan::new(Some(ToggleState::On))),
-                ToggleState::On => Some(TransitionPlan::new(Some(ToggleState::Off))),
+                ToggleState::Off => Some(ars_core::TransitionPlan::to(ToggleState::On)),
+                ToggleState::On => Some(ars_core::TransitionPlan::to(ToggleState::Off)),
             }
         }
 

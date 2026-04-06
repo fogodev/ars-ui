@@ -570,13 +570,15 @@ pub struct TransitionPlan<M: Machine> {
     /// Mutation to apply to the context after state change.
     /// Uses `FnOnce` — apply is called exactly once, immediately after transition
     /// selection. Using FnOnce enforces single-invocation semantics.
-    pub apply: Option<Box<dyn FnOnce(&mut M::Context)>>,
+    /// `pub(crate)` — construct via `.apply()` / `.context_only()` builder methods.
+    pub(crate) apply: Option<Box<dyn FnOnce(&mut M::Context)>>,
     /// Events to enqueue after this transition completes.
     pub then_send: Vec<M::Event>,
     /// Optional human-readable description of the apply closure's purpose.
     /// Used in debug logging and dev-tools inspection. Not evaluated at runtime.
     /// Example: `Some("increment counter")`.
-    pub apply_description: Option<&'static str>,
+    /// `pub(crate)` — internal diagnostic field, not part of the public API.
+    pub(crate) apply_description: Option<&'static str>,
     /// Side effects for the adapter to set up.
     pub effects: Vec<PendingEffect<M>>,
     /// Named effects to cancel (cleanup runs immediately, no replacement).
