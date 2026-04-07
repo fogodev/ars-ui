@@ -308,39 +308,39 @@ impl PartialEq for SharedFlag {
 
 /// Shared interior-mutable state container.
 ///
-/// Uses `Rc<RefCell<T>>` on wasm (single-threaded) and
-/// `Arc<Mutex<T>>` on native (multi-threaded) targets, mirroring the
+/// Uses `Rc<RefCell<T>>` on wasm and `no_std` targets (single-threaded) and
+/// `Arc<Mutex<T>>` on native + `std` targets (multi-threaded), mirroring the
 /// [`SharedFlag`] and [`Callback`] platform split. Cloning shares the
 /// same underlying state.
 ///
 /// Unlike [`SharedFlag`] (which stores a single `bool`), `SharedState<T>`
 /// stores an arbitrary value, enabling shared mutable state for interaction
 /// result types such as `HoverResult` and `PressResult`.
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(feature = "std")))]
 pub struct SharedState<T>(alloc::rc::Rc<core::cell::RefCell<T>>);
 
 /// Shared interior-mutable state container.
 ///
-/// Uses `Rc<RefCell<T>>` on wasm (single-threaded) and
-/// `Arc<Mutex<T>>` on native (multi-threaded) targets, mirroring the
+/// Uses `Rc<RefCell<T>>` on wasm and `no_std` targets (single-threaded) and
+/// `Arc<Mutex<T>>` on native + `std` targets (multi-threaded), mirroring the
 /// [`SharedFlag`] and [`Callback`] platform split. Cloning shares the
 /// same underlying state.
 ///
 /// Unlike [`SharedFlag`] (which stores a single `bool`), `SharedState<T>`
 /// stores an arbitrary value, enabling shared mutable state for interaction
 /// result types such as `HoverResult` and `PressResult`.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
 pub struct SharedState<T>(alloc::sync::Arc<std::sync::Mutex<T>>);
 
 impl<T> SharedState<T> {
     /// Creates a new shared state with the given initial value.
     #[must_use]
     pub fn new(value: T) -> Self {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(any(target_arch = "wasm32", not(feature = "std")))]
         {
             Self(alloc::rc::Rc::new(core::cell::RefCell::new(value)))
         }
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
         {
             Self(alloc::sync::Arc::new(std::sync::Mutex::new(value)))
         }
@@ -357,11 +357,11 @@ impl<T> SharedState<T> {
 
     /// Replaces the stored value.
     pub fn set(&self, value: T) {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(any(target_arch = "wasm32", not(feature = "std")))]
         {
             *self.0.borrow_mut() = value;
         }
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
         {
             *self.0.lock().expect("SharedState mutex poisoned") = value;
         }
@@ -369,14 +369,14 @@ impl<T> SharedState<T> {
 
     /// Borrows the inner value and applies `f`, returning the result.
     ///
-    /// On wasm this borrows the `RefCell`; on native this locks the `Mutex`.
-    /// The lock/borrow is released when `f` returns.
+    /// On wasm and `no_std` this borrows the `RefCell`; on native + `std`
+    /// this locks the `Mutex`. The lock/borrow is released when `f` returns.
     pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(any(target_arch = "wasm32", not(feature = "std")))]
         {
             f(&self.0.borrow())
         }
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
         {
             let guard = self.0.lock().expect("SharedState mutex poisoned");
             f(&guard)
@@ -384,14 +384,14 @@ impl<T> SharedState<T> {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(feature = "std")))]
 impl<T> Clone for SharedState<T> {
     fn clone(&self) -> Self {
         SharedState(alloc::rc::Rc::clone(&self.0))
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
 impl<T> Clone for SharedState<T> {
     fn clone(&self) -> Self {
         SharedState(alloc::sync::Arc::clone(&self.0))
@@ -400,17 +400,17 @@ impl<T> Clone for SharedState<T> {
 
 impl<T: Debug> Debug for SharedState<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.with(|value| f.debug_tuple("SharedState").field(value).finish())
+        self.with(|value: &T| f.debug_tuple("SharedState").field(value).finish())
     }
 }
 
 impl<T> PartialEq for SharedState<T> {
     fn eq(&self, other: &Self) -> bool {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(any(target_arch = "wasm32", not(feature = "std")))]
         {
             alloc::rc::Rc::ptr_eq(&self.0, &other.0)
         }
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
         {
             alloc::sync::Arc::ptr_eq(&self.0, &other.0)
         }
