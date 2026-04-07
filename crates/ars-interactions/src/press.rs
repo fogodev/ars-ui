@@ -178,9 +178,9 @@ pub enum PressEventType {
 /// A normalized press event, independent of input modality.
 ///
 /// **Clone semantics:** Uses [`SharedFlag`] for propagation control so that
-/// cloned events share the same propagation flag. `SharedFlag` is thread-safe
-/// on native targets (`Arc<AtomicBool>`) and lightweight on wasm
-/// (`Rc<Cell<bool>>`). Calling
+/// cloned events share the same propagation flag. `SharedFlag` uses
+/// [`AtomicBool`](core::sync::atomic::AtomicBool) for the value (zero overhead
+/// on wasm) and [`ArsRc`](ars_core::ArsRc) for shared ownership. Calling
 /// [`continue_propagation()`](Self::continue_propagation) on any clone
 /// affects the original and all other clones.
 #[derive(Clone, Debug)]
@@ -314,6 +314,33 @@ mod tests {
     use ars_core::{AttrValue, HtmlAttr};
 
     use super::*;
+
+    // --- PressState tests ---
+
+    #[test]
+    fn press_state_idle_is_not_pressed() {
+        assert!(!PressState::Idle.is_pressed());
+        assert!(!PressState::Idle.is_pressed_inside());
+    }
+
+    #[test]
+    fn press_state_pressed_inside_is_pressed() {
+        let state = PressState::PressedInside {
+            pointer_type: PointerType::Mouse,
+            origin_x: Some(10.0),
+            origin_y: Some(20.0),
+        };
+        assert!(state.is_pressed());
+        assert!(state.is_pressed_inside());
+    }
+
+    #[test]
+    fn press_state_pressing_is_not_committed() {
+        let state = PressState::Pressing {
+            pointer_type: PointerType::Touch,
+        };
+        assert!(!state.is_pressed());
+    }
 
     // --- PressConfig tests ---
 

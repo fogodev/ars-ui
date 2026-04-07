@@ -1,6 +1,6 @@
 //! Shared focus-management contracts.
 
-use core::cell::Cell;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use ars_core::{AttrMap, AttrValue, HtmlAttr, KeyModifiers, KeyboardKey};
 
@@ -95,9 +95,17 @@ pub enum FocusStrategy {
 /// `FocusRing` is intentionally separate from the shared modality context: it
 /// owns accessibility-specific focus-visible heuristics while consuming the same
 /// normalized event stream adapters feed into modality tracking.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub struct FocusRing {
-    keyboard_modality: Cell<bool>,
+    keyboard_modality: AtomicBool,
+}
+
+impl Clone for FocusRing {
+    fn clone(&self) -> Self {
+        Self {
+            keyboard_modality: AtomicBool::new(self.keyboard_modality.load(Ordering::Relaxed)),
+        }
+    }
 }
 
 impl FocusRing {
@@ -105,13 +113,13 @@ impl FocusRing {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            keyboard_modality: Cell::new(false),
+            keyboard_modality: AtomicBool::new(false),
         }
     }
 
     /// Records a pointer interaction and suppresses keyboard-only focus styling.
     pub fn on_pointer_down(&self) {
-        self.keyboard_modality.set(false);
+        self.keyboard_modality.store(false, Ordering::Relaxed);
     }
 
     /// Records a keyboard interaction that implies intentional focus navigation.
@@ -151,19 +159,19 @@ impl FocusRing {
                 | KeyboardKey::F11
                 | KeyboardKey::F12
         ) {
-            self.keyboard_modality.set(true);
+            self.keyboard_modality.store(true, Ordering::Relaxed);
         }
     }
 
     /// Records a virtual or assistive-technology interaction as focus-visible.
     pub fn on_virtual_input(&self) {
-        self.keyboard_modality.set(true);
+        self.keyboard_modality.store(true, Ordering::Relaxed);
     }
 
     /// Returns whether the next focused element should render the focus ring.
     #[must_use]
     pub fn should_show_focus_ring(&self) -> bool {
-        self.keyboard_modality.get()
+        self.keyboard_modality.load(Ordering::Relaxed)
     }
 
     /// Writes the canonical focus-visible data attribute into an [`AttrMap`].

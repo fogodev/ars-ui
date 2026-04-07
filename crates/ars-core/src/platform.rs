@@ -25,7 +25,11 @@ use ars_i18n::Direction;
 /// - Native adapters provide their own (e.g., AccessKit for accessibility)
 ///
 /// Components resolve this via `use_platform_effects()` inside effect closures.
-pub trait PlatformEffects {
+///
+/// Requires `Send + Sync` so implementations can be wrapped in
+/// [`ArsRc`](crate::ArsRc) and safely shared across threads on native targets.
+/// On wasm (single-threaded), `Send + Sync` is trivially satisfied.
+pub trait PlatformEffects: Send + Sync {
     // -- Focus ---------------------------------------------------------------
 
     /// Focus the element with the given ID. No-op if not found.
@@ -516,6 +520,27 @@ impl PlatformEffects for MissingProviderEffects {
     }
 }
 
+// ── ArsRc<dyn PlatformEffects> constructor ──────────────────────────
+
+impl crate::ArsRc<dyn PlatformEffects> {
+    /// Creates a trait-object `ArsRc` from any [`PlatformEffects`] implementation.
+    ///
+    /// This enables erased construction without requiring nightly `CoerceUnsized`:
+    /// ```ignore
+    /// let effects: ArsRc<dyn PlatformEffects> = ArsRc::from_platform(NullPlatformEffects);
+    /// ```
+    pub fn from_platform(value: impl PlatformEffects + 'static) -> Self {
+        #[cfg(target_arch = "wasm32")]
+        {
+            Self(alloc::rc::Rc::new(value))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self(alloc::sync::Arc::new(value))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::{boxed::Box, rc::Rc};
@@ -697,12 +722,12 @@ mod tests {
         assert!(!platform.document_contains_id("test"));
     }
 
-    /// Verify both implementations can be stored as `Rc<dyn PlatformEffects>`,
+    /// Verify both implementations can be stored as `ArsRc<dyn PlatformEffects>`,
     /// the pattern used by `ArsProvider`.
     #[test]
-    fn implementations_work_as_rc_trait_objects() {
-        let null: Rc<dyn PlatformEffects> = Rc::new(NullPlatformEffects);
-        let missing: Rc<dyn PlatformEffects> = Rc::new(MissingProviderEffects);
+    fn implementations_work_as_ars_rc_trait_objects() {
+        let null = crate::ArsRc::from_platform(NullPlatformEffects);
+        let missing = crate::ArsRc::from_platform(MissingProviderEffects);
 
         null.focus_element_by_id("a");
         missing.focus_element_by_id("b");

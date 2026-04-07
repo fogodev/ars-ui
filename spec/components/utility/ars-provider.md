@@ -56,11 +56,11 @@ pub struct Props {
     /// Platform capabilities for side effects (focus, timers, scroll-lock, positioning).
     /// Adapters provide platform-specific implementations (e.g., `WebPlatformEffects`).
     /// Defaults to `NullPlatformEffects` (no-op) for tests and SSR.
-    pub platform: Option<Rc<dyn PlatformEffects>>,
+    pub platform: Option<ArsRc<dyn PlatformEffects>>,
 
     /// Shared input-modality state for this provider root.
     /// Defaults to `DefaultModalityContext`.
-    pub modality: Option<Rc<dyn ModalityContext>>,
+    pub modality: Option<ArsRc<dyn ModalityContext>>,
 
     /// Calendar/locale data provider for date-time components.
     /// Production uses `Icu4xProvider`; tests use `StubIcuProvider`.
@@ -93,8 +93,8 @@ pub struct ArsContext {
     id_prefix: Option<String>,
     portal_container_id: Option<String>,
     root_node_id: Option<String>,
-    platform: Rc<dyn PlatformEffects>,
-    modality: Rc<dyn ModalityContext>,
+    platform: ArsRc<dyn PlatformEffects>,
+    modality: ArsRc<dyn ModalityContext>,
     icu_provider: Arc<dyn IcuProvider>,
     i18n_registries: Rc<I18nRegistries>,
     style_strategy: StyleStrategy,
@@ -118,9 +118,9 @@ impl ArsContext {
     /// Returns the root node ID for focus/portal scoping, if set.
     pub fn root_node_id(&self) -> Option<&str> { self.root_node_id.as_deref() }
     /// Returns the platform capabilities trait object.
-    pub fn platform(&self) -> Rc<dyn PlatformEffects> { Rc::clone(&self.platform) }
+    pub fn platform(&self) -> ArsRc<dyn PlatformEffects> { ArsRc::clone(&self.platform) }
     /// Returns the provider-scoped modality context.
-    pub fn modality(&self) -> Rc<dyn ModalityContext> { Rc::clone(&self.modality) }
+    pub fn modality(&self) -> ArsRc<dyn ModalityContext> { ArsRc::clone(&self.modality) }
     /// Returns the ICU calendar/locale data provider.
     pub fn icu_provider(&self) -> Arc<dyn IcuProvider> { Arc::clone(&self.icu_provider) }
     /// Returns the i18n translation registries.
@@ -140,8 +140,8 @@ impl Default for ArsContext {
             id_prefix: None,
             portal_container_id: None,
             root_node_id: None,
-            platform: Rc::new(NullPlatformEffects),
-            modality: Rc::new(DefaultModalityContext::new()),
+            platform: ArsRc::new(NullPlatformEffects),
+            modality: ArsRc::new(DefaultModalityContext::new()),
             icu_provider: Arc::new(StubIcuProvider),
             i18n_registries: Rc::new(I18nRegistries::new()),
             style_strategy: StyleStrategy::Inline,

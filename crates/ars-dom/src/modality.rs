@@ -2,17 +2,20 @@
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use std::cell::RefCell;
-use std::{cell::Cell, fmt, rc::Rc};
+use std::{
+    fmt,
+    sync::atomic::{AtomicBool, AtomicU32, Ordering},
+};
 
 use ars_a11y::FocusRing;
-use ars_core::{KeyModifiers, KeyboardKey, ModalityContext, PointerType};
+use ars_core::{ArsRc, KeyModifiers, KeyboardKey, ModalityContext, PointerType};
 
 /// Adapter-facing coordinator that keeps shared modality and focus-visible state in sync.
 pub struct ModalityManager {
-    modality: Rc<dyn ModalityContext>,
+    modality: ArsRc<dyn ModalityContext>,
     focus_ring: FocusRing,
-    listeners_installed: Cell<bool>,
-    listener_refcount: Cell<u32>,
+    listeners_installed: AtomicBool,
+    listener_refcount: AtomicU32,
     #[cfg(all(feature = "web", target_arch = "wasm32"))]
     listeners: RefCell<Option<WasmListenerHandles>>,
 }
@@ -20,12 +23,12 @@ pub struct ModalityManager {
 impl ModalityManager {
     /// Creates a new modality manager for a single provider root.
     #[must_use]
-    pub fn new(modality: Rc<dyn ModalityContext>) -> Self {
+    pub fn new(modality: ArsRc<dyn ModalityContext>) -> Self {
         Self {
             modality,
             focus_ring: FocusRing::new(),
-            listeners_installed: Cell::new(false),
-            listener_refcount: Cell::new(0),
+            listeners_installed: AtomicBool::new(false),
+            listener_refcount: AtomicU32::new(0),
             #[cfg(all(feature = "web", target_arch = "wasm32"))]
             listeners: RefCell::new(None),
         }
@@ -33,8 +36,8 @@ impl ModalityManager {
 
     /// Returns the shared modality context owned by this manager.
     #[must_use]
-    pub fn modality(&self) -> Rc<dyn ModalityContext> {
-        Rc::clone(&self.modality)
+    pub fn modality(&self) -> ArsRc<dyn ModalityContext> {
+        ArsRc::clone(&self.modality)
     }
 
     /// Returns the accessibility focus-ring tracker kept in sync with modality events.
@@ -91,28 +94,27 @@ impl ModalityManager {
 
     #[cfg(any(test, all(feature = "web", target_arch = "wasm32")))]
     fn acquire_listener_consumer(&self) -> bool {
-        self.listener_refcount
-            .set(self.listener_refcount.get().saturating_add(1));
+        self.listener_refcount.fetch_add(1, Ordering::Relaxed);
 
-        let should_install = !self.listeners_installed.get();
+        let should_install = !self.listeners_installed.load(Ordering::Relaxed);
         if should_install {
-            self.listeners_installed.set(true);
+            self.listeners_installed.store(true, Ordering::Relaxed);
         }
         should_install
     }
 
     #[cfg(any(test, all(feature = "web", target_arch = "wasm32")))]
     fn release_listener_consumer(&self) -> bool {
-        let count = self.listener_refcount.get();
+        let count = self.listener_refcount.load(Ordering::Relaxed);
         if count == 0 {
             return false;
         }
 
         let next = count - 1;
-        self.listener_refcount.set(next);
+        self.listener_refcount.store(next, Ordering::Relaxed);
 
         if next == 0 {
-            self.listeners_installed.set(false);
+            self.listeners_installed.store(false, Ordering::Relaxed);
             true
         } else {
             false
@@ -121,7 +123,10 @@ impl ModalityManager {
 
     #[cfg(test)]
     fn listener_state(&self) -> (bool, u32) {
-        (self.listeners_installed.get(), self.listener_refcount.get())
+        (
+            self.listeners_installed.load(Ordering::Relaxed),
+            self.listener_refcount.load(Ordering::Relaxed),
+        )
     }
 }
 
@@ -130,8 +135,14 @@ impl fmt::Debug for ModalityManager {
         f.debug_struct("ModalityManager")
             .field("modality", &"<dyn ModalityContext>")
             .field("focus_ring", &self.focus_ring)
-            .field("listeners_installed", &self.listeners_installed.get())
-            .field("listener_refcount", &self.listener_refcount.get())
+            .field(
+                "listeners_installed",
+                &self.listeners_installed.load(Ordering::Relaxed),
+            )
+            .field(
+                "listener_refcount",
+                &self.listener_refcount.load(Ordering::Relaxed),
+            )
             .finish()
     }
 }
@@ -312,8 +323,8 @@ mod tests {
 
     #[test]
     fn keydown_updates_modality_and_focus_ring() {
-        let modality: Rc<dyn ModalityContext> = Rc::new(DefaultModalityContext::new());
-        let manager = ModalityManager::new(Rc::clone(&modality));
+        let modality = ArsRc::from_modality(DefaultModalityContext::new());
+        let manager = ModalityManager::new(ArsRc::clone(&modality));
 
         manager.on_key_down(KeyboardKey::Tab, KeyModifiers::default());
 
@@ -329,17 +340,17 @@ mod tests {
 
     #[test]
     fn modality_accessor_returns_shared_context() {
-        let modality: Rc<dyn ModalityContext> = Rc::new(DefaultModalityContext::new());
-        let manager = ModalityManager::new(Rc::clone(&modality));
+        let modality = ArsRc::from_modality(DefaultModalityContext::new());
+        let manager = ModalityManager::new(ArsRc::clone(&modality));
 
         let owned = manager.modality();
-        assert!(Rc::ptr_eq(&owned, &modality));
+        assert_eq!(owned, modality);
     }
 
     #[test]
     fn pointerdown_updates_modality_and_clears_focus_ring() {
-        let modality: Rc<dyn ModalityContext> = Rc::new(DefaultModalityContext::new());
-        let manager = ModalityManager::new(Rc::clone(&modality));
+        let modality = ArsRc::from_modality(DefaultModalityContext::new());
+        let manager = ModalityManager::new(ArsRc::clone(&modality));
 
         manager.on_key_down(KeyboardKey::Enter, KeyModifiers::default());
         manager.on_pointer_down(PointerType::Touch);
@@ -351,8 +362,8 @@ mod tests {
 
     #[test]
     fn pen_pointerdown_counts_as_pointer_interaction() {
-        let modality: Rc<dyn ModalityContext> = Rc::new(DefaultModalityContext::new());
-        let manager = ModalityManager::new(Rc::clone(&modality));
+        let modality = ArsRc::from_modality(DefaultModalityContext::new());
+        let manager = ModalityManager::new(ArsRc::clone(&modality));
 
         manager.on_pointer_down(PointerType::Pen);
 
@@ -363,7 +374,7 @@ mod tests {
 
     #[test]
     fn virtual_input_updates_both_trackers() {
-        let modality: Rc<dyn ModalityContext> = Rc::new(DefaultModalityContext::new());
+        let modality = ArsRc::from_modality(DefaultModalityContext::new());
         let manager = ModalityManager::new(modality);
 
         manager.on_virtual_input();
@@ -380,7 +391,7 @@ mod tests {
 
     #[test]
     fn listener_refcount_transitions_are_stable() {
-        let manager = ModalityManager::new(Rc::new(DefaultModalityContext::new()));
+        let manager = ModalityManager::new(ArsRc::from_modality(DefaultModalityContext::new()));
 
         assert_eq!(manager.listener_state(), (false, 0));
 
@@ -402,7 +413,7 @@ mod tests {
 
     #[test]
     fn host_listener_api_is_safe_to_call() {
-        let manager = ModalityManager::new(Rc::new(DefaultModalityContext::new()));
+        let manager = ModalityManager::new(ArsRc::from_modality(DefaultModalityContext::new()));
         manager.ensure_listeners();
         manager.remove_listeners();
     }
