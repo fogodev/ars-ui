@@ -5,7 +5,7 @@
 //! modality as instance-scoped state so each provider root, window, or scene
 //! can track its own last input modality independently.
 
-use core::cell::Cell;
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 /// The input modality that initiated an interaction.
 ///
@@ -949,7 +949,11 @@ impl ModalitySnapshot {
 }
 
 /// Shared, instance-scoped modality contract.
-pub trait ModalityContext {
+///
+/// Requires `Send + Sync` so implementations can be wrapped in
+/// [`ArsRc`](crate::ArsRc) and safely shared across threads on native targets.
+/// On wasm (single-threaded), `Send + Sync` is trivially satisfied.
+pub trait ModalityContext: Send + Sync {
     /// Returns a copy of the current modality snapshot.
     fn snapshot(&self) -> ModalitySnapshot;
 
@@ -985,9 +989,15 @@ pub trait ModalityContext {
 }
 
 /// Default interior-mutable modality context implementation.
-#[derive(Debug, Default)]
+///
+/// Uses [`AtomicU8`] and [`AtomicBool`] for lock-free interior mutability.
+/// On wasm (single-threaded), atomic operations compile to plain memory
+/// reads/writes with zero overhead.
 pub struct DefaultModalityContext {
-    snapshot: Cell<ModalitySnapshot>,
+    /// Encoded `Option<PointerType>`: 0=None, 1=Mouse, 2=Touch, 3=Pen,
+    /// 4=Keyboard, 5=Virtual.
+    last_pointer_type: AtomicU8,
+    global_press_active: AtomicBool,
 }
 
 impl DefaultModalityContext {
@@ -995,45 +1005,84 @@ impl DefaultModalityContext {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            snapshot: Cell::new(ModalitySnapshot {
-                last_pointer_type: None,
-                global_press_active: false,
-            }),
+            last_pointer_type: AtomicU8::new(0),
+            global_press_active: AtomicBool::new(false),
         }
+    }
+}
+
+impl Default for DefaultModalityContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl core::fmt::Debug for DefaultModalityContext {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("DefaultModalityContext")
+            .field("snapshot", &self.snapshot())
+            .finish()
+    }
+}
+
+/// Encode `Option<PointerType>` as a `u8` for atomic storage.
+const fn pointer_type_to_u8(pt: Option<PointerType>) -> u8 {
+    match pt {
+        None => 0,
+        Some(PointerType::Mouse) => 1,
+        Some(PointerType::Touch) => 2,
+        Some(PointerType::Pen) => 3,
+        Some(PointerType::Keyboard) => 4,
+        Some(PointerType::Virtual) => 5,
+    }
+}
+
+/// Decode a `u8` back to `Option<PointerType>`.
+const fn u8_to_pointer_type(v: u8) -> Option<PointerType> {
+    match v {
+        1 => Some(PointerType::Mouse),
+        2 => Some(PointerType::Touch),
+        3 => Some(PointerType::Pen),
+        4 => Some(PointerType::Keyboard),
+        5 => Some(PointerType::Virtual),
+        _ => None,
     }
 }
 
 impl ModalityContext for DefaultModalityContext {
     fn snapshot(&self) -> ModalitySnapshot {
-        self.snapshot.get()
+        ModalitySnapshot {
+            last_pointer_type: u8_to_pointer_type(self.last_pointer_type.load(Ordering::Relaxed)),
+            global_press_active: self.global_press_active.load(Ordering::Relaxed),
+        }
     }
 
     fn on_key_down(&self, _key: KeyboardKey, _modifiers: KeyModifiers) {
-        let mut snapshot = self.snapshot.get();
-        snapshot.last_pointer_type = Some(PointerType::Keyboard);
-        self.snapshot.set(snapshot);
+        self.last_pointer_type.store(
+            pointer_type_to_u8(Some(PointerType::Keyboard)),
+            Ordering::Relaxed,
+        );
     }
 
     fn on_pointer_down(&self, pointer_type: PointerType) {
-        let mut snapshot = self.snapshot.get();
-        snapshot.last_pointer_type = Some(pointer_type);
-        self.snapshot.set(snapshot);
+        self.last_pointer_type
+            .store(pointer_type_to_u8(Some(pointer_type)), Ordering::Relaxed);
     }
 
     fn on_virtual_input(&self) {
-        let mut snapshot = self.snapshot.get();
-        snapshot.last_pointer_type = Some(PointerType::Virtual);
-        self.snapshot.set(snapshot);
+        self.last_pointer_type.store(
+            pointer_type_to_u8(Some(PointerType::Virtual)),
+            Ordering::Relaxed,
+        );
     }
 
     fn set_global_press_active(&self, active: bool) {
-        let mut snapshot = self.snapshot.get();
-        snapshot.global_press_active = active;
-        self.snapshot.set(snapshot);
+        self.global_press_active.store(active, Ordering::Relaxed);
     }
 
     fn clear(&self) {
-        self.snapshot.set(ModalitySnapshot::default());
+        self.last_pointer_type.store(0, Ordering::Relaxed);
+        self.global_press_active.store(false, Ordering::Relaxed);
     }
 }
 
@@ -1055,6 +1104,27 @@ impl ModalityContext for NullModalityContext {
     fn set_global_press_active(&self, _active: bool) {}
 
     fn clear(&self) {}
+}
+
+// ── ArsRc<dyn ModalityContext> constructor ──────────────────────────
+
+impl crate::ArsRc<dyn ModalityContext> {
+    /// Creates a trait-object `ArsRc` from any [`ModalityContext`] implementation.
+    ///
+    /// This enables erased construction without requiring nightly `CoerceUnsized`:
+    /// ```ignore
+    /// let ctx: ArsRc<dyn ModalityContext> = ArsRc::from_modality(DefaultModalityContext::new());
+    /// ```
+    pub fn from_modality(value: impl ModalityContext + 'static) -> Self {
+        #[cfg(target_arch = "wasm32")]
+        {
+            Self(alloc::rc::Rc::new(value))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self(alloc::sync::Arc::new(value))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1460,7 +1530,34 @@ mod tests {
         context.on_pointer_down(PointerType::Mouse);
         context.on_virtual_input();
         context.set_global_press_active(true);
+        context.clear();
 
         assert_eq!(context.snapshot(), ModalitySnapshot::default());
+    }
+
+    #[test]
+    fn default_modality_context_default_trait() {
+        let context = DefaultModalityContext::default();
+        assert_eq!(context.snapshot(), ModalitySnapshot::default());
+    }
+
+    #[test]
+    fn default_modality_context_debug_output() {
+        #[cfg(not(feature = "std"))]
+        use alloc::format;
+
+        let context = DefaultModalityContext::new();
+        let debug = format!("{context:?}");
+        assert!(debug.contains("DefaultModalityContext"));
+        assert!(debug.contains("snapshot"));
+    }
+
+    #[test]
+    fn pointer_type_encoding_covers_none() {
+        // Exercises the None → 0 path in pointer_type_to_u8 via clear()
+        let context = DefaultModalityContext::new();
+        context.on_pointer_down(PointerType::Mouse);
+        context.clear();
+        assert_eq!(context.last_pointer_type(), None);
     }
 }

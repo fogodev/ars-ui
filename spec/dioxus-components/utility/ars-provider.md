@@ -34,7 +34,7 @@ pub struct ArsProviderProps {
     #[props(optional)]
     pub root_node_id: Option<String>,
     #[props(optional)]
-    pub platform: Option<Rc<dyn PlatformEffects>>,
+    pub platform: Option<ArsRc<dyn PlatformEffects>>,
     #[props(optional)]
     pub icu_provider: Option<Arc<dyn IcuProvider>>,
     #[props(optional)]
@@ -220,7 +220,7 @@ pub struct ArsProviderSketchProps {
     #[props(optional)]
     pub root_node_id: Option<String>,
     #[props(optional)]
-    pub platform: Option<Rc<dyn PlatformEffects>>,
+    pub platform: Option<ArsRc<dyn PlatformEffects>>,
     #[props(optional)]
     pub icu_provider: Option<Arc<dyn IcuProvider>>,
     #[props(optional)]

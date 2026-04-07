@@ -12,6 +12,7 @@
 //! - [`Bindable`] — controlled/uncontrolled value pattern for two-way binding
 //! - [`TransitionPlan`] — declarative transition result with closures, effects, and follow-ups
 //! - [`PendingEffect`] — named side effect with setup closure and cleanup lifecycle
+//! - [`ArsRc`] — platform-conditional shared pointer (`Rc` on wasm, `Arc` on native)
 //! - [`Callback`] — shared callback wrapper (`Rc` on wasm, `Arc` on native)
 //! - [`SharedState`] — shared interior-mutable state (`Rc<RefCell>` on wasm, `Arc<Mutex>` on native)
 //! - [`WeakSend`] — weak event sender for safe effect cleanup
@@ -26,54 +27,66 @@ extern crate self as ars_core;
 use alloc::{boxed::Box, collections::VecDeque, string::String, vec::Vec};
 use core::fmt::{self, Debug};
 
+mod callback;
 pub mod companion_css;
 mod connect;
 pub mod modality;
 pub mod platform;
 pub mod provider;
+mod shared_flag;
+mod shared_ptr;
+mod shared_state;
+mod weak_send;
 
 /// Hidden re-exports used by proc macros to stay hygienic without forcing
 /// downstream crates to import `alloc`.
-///
-/// The derive macros expand in the downstream crate, so using `::alloc::...`
-/// directly would require every consumer to write `extern crate alloc;`, even
-/// in ordinary `std` crates. Routing through `::ars_core::__private` keeps the
-/// generated code portable across `std` and `no_std + alloc` consumers while
-/// preserving a stable macro expansion path.
 #[doc(hidden)]
 pub mod __private {
     pub use alloc::{string::String, vec::Vec};
 }
 
+// ── Derive macros ───────────────────────────────────────────────────
+
 #[doc(inline)]
 pub use ars_derive::{ComponentPart, HasId};
-// Re-export `Direction` from ars-i18n for convenience — used by
-// `PlatformEffects::resolved_direction` so consumers don't need a
-// separate `ars-i18n` dependency just for the return type.
+// ── External re-exports ─────────────────────────────────────────────
 pub use ars_i18n::Direction;
+// ── Platform-conditional smart pointers (extracted modules) ─────────
+pub use callback::{Callback, callback};
+// ── DOM attribute / connect primitives ──────────────────────────────
 pub use connect::{
     AriaAttr, AttrMap, AttrMapParts, AttrValue, CssProperty, EventOptions, HtmlAttr, HtmlEvent,
     StyleStrategy, UserAttrs, data,
 };
+// ── Modality ────────────────────────────────────────────────────────
 pub use modality::{
     DefaultModalityContext, KeyModifiers, KeyboardKey, ModalityContext, ModalitySnapshot,
     NullModalityContext, PointerType,
 };
+// ── Platform effects ────────────────────────────────────────────────
 pub use platform::{
     MissingProviderEffects, NullPlatformEffects, PlatformEffects, Rect, TimerHandle,
 };
+// ── Provider ────────────────────────────────────────────────────────
 pub use provider::{ArsContext, ColorMode};
+pub use shared_flag::SharedFlag;
+pub use shared_ptr::ArsRc;
+pub use shared_state::SharedState;
+pub use weak_send::{StrongSend, WeakSend};
+
+// ════════════════════════════════════════════════════════════════════
+// Inline types — kept in lib.rs because the derive macros expand to
+// `::ars_core::HasId` and `::ars_core::ComponentPart` which must
+// resolve to the *trait* at crate root (Rust disambiguates derive
+// macros from traits by usage context only when both are defined in
+// the same scope).
+// ════════════════════════════════════════════════════════════════════
 
 // ────────────────────────────────────────────────────────────────────
-// Callback, WeakSend, and effect cleanup types
+// Effect cleanup
 // ────────────────────────────────────────────────────────────────────
 
 /// Type alias for the cleanup function returned by effect setup.
-///
-/// Two allocations: the outer `Box` erases the closure's concrete type for
-/// storage in a heterogeneous effect-cleanup list; the inner `dyn FnOnce()`
-/// allows each effect to capture arbitrary owned state for teardown (event
-/// listener handles, observer references, timer IDs, etc.).
 pub type CleanupFn = Box<dyn FnOnce()>;
 
 /// No-op cleanup for effects that don't need teardown.
@@ -83,452 +96,6 @@ pub fn no_cleanup() -> CleanupFn {
     Box::new(|| {})
 }
 
-/// Shared callback wrapper for event handler closures in Props structs.
-///
-/// Clones the smart pointer, NOT the closure itself. Uses `Rc` on wasm
-/// (single-threaded) and `Arc` on native (multi-threaded) targets. This is
-/// distinct from `CleanupFn` (used for effect cleanup).
-///
-/// Supports an optional return type via `Callback<dyn Fn(Args) -> Out>`.
-/// When the return type is `()` (the default), write `Callback<dyn Fn(Args)>`
-/// as shorthand.
-#[cfg(target_arch = "wasm32")]
-pub struct Callback<T: ?Sized>(pub(crate) alloc::rc::Rc<T>);
-
-/// Shared callback wrapper for event handler closures in Props structs.
-///
-/// Clones the smart pointer, NOT the closure itself. Uses `Rc` on wasm
-/// (single-threaded) and `Arc` on native (multi-threaded) targets. This is
-/// distinct from `CleanupFn` (used for effect cleanup).
-///
-/// Supports an optional return type via `Callback<dyn Fn(Args) -> Out>`.
-/// When the return type is `()` (the default), write `Callback<dyn Fn(Args)>`
-/// as shorthand.
-#[cfg(not(target_arch = "wasm32"))]
-pub struct Callback<T: ?Sized>(pub(crate) alloc::sync::Arc<T>);
-
-#[cfg(target_arch = "wasm32")]
-impl<T: ?Sized> Clone for Callback<T> {
-    fn clone(&self) -> Self {
-        Callback(alloc::rc::Rc::clone(&self.0))
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl<T: ?Sized> Clone for Callback<T> {
-    fn clone(&self) -> Self {
-        Callback(alloc::sync::Arc::clone(&self.0))
-    }
-}
-
-impl<T: ?Sized> Debug for Callback<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Callback(..)")
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-impl<T: ?Sized> PartialEq for Callback<T> {
-    fn eq(&self, other: &Self) -> bool {
-        alloc::rc::Rc::ptr_eq(&self.0, &other.0)
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl<T: ?Sized> PartialEq for Callback<T> {
-    fn eq(&self, other: &Self) -> bool {
-        alloc::sync::Arc::ptr_eq(&self.0, &other.0)
-    }
-}
-
-impl<T: ?Sized> core::ops::Deref for Callback<T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        &self.0
-    }
-}
-
-impl<T: ?Sized> AsRef<T> for Callback<T> {
-    fn as_ref(&self) -> &T {
-        &self.0
-    }
-}
-
-/// Constructor for `Callback<dyn Fn(Args) -> Out>`.
-#[cfg(target_arch = "wasm32")]
-impl<Args: 'static, Out: 'static> Callback<dyn Fn(Args) -> Out> {
-    /// Creates a new callback wrapping the given closure.
-    pub fn new(f: impl Fn(Args) -> Out + 'static) -> Self {
-        Self(alloc::rc::Rc::new(f))
-    }
-}
-
-/// Constructor for `Callback<dyn Fn(Args) -> Out>`.
-#[cfg(not(target_arch = "wasm32"))]
-impl<Args: 'static, Out: 'static> Callback<dyn Fn(Args) -> Out> {
-    /// Creates a new callback wrapping the given closure.
-    pub fn new(f: impl Fn(Args) -> Out + Send + Sync + 'static) -> Self {
-        Self(alloc::sync::Arc::new(f))
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-impl<F: Fn(Args) -> Out + 'static, Args: 'static, Out: 'static> From<F>
-    for Callback<dyn Fn(Args) -> Out>
-{
-    fn from(f: F) -> Self {
-        Callback(alloc::rc::Rc::new(f))
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(Args) -> Out + Send + Sync + 'static, Args: 'static, Out: 'static> From<F>
-    for Callback<dyn Fn(Args) -> Out>
-{
-    fn from(f: F) -> Self {
-        Callback(alloc::sync::Arc::new(f))
-    }
-}
-
-/// Ergonomic constructor for [`Callback`] with better type inference.
-///
-/// The compiler can infer `Args` from the closure signature without
-/// requiring turbofish syntax.
-#[cfg(target_arch = "wasm32")]
-pub fn callback<Args: 'static, Out: 'static>(
-    f: impl Fn(Args) -> Out + 'static,
-) -> Callback<dyn Fn(Args) -> Out> {
-    Callback::new(f)
-}
-
-/// Ergonomic constructor for [`Callback`] with better type inference.
-///
-/// The compiler can infer `Args` from the closure signature without
-/// requiring turbofish syntax.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn callback<Args: 'static, Out: 'static>(
-    f: impl Fn(Args) -> Out + Send + Sync + 'static,
-) -> Callback<dyn Fn(Args) -> Out> {
-    Callback::new(f)
-}
-
-/// Shared boolean flag for cross-interaction state coordination.
-///
-/// Uses `Rc<Cell<bool>>` on wasm (single-threaded) and
-/// `Arc<AtomicBool>` on native (multi-threaded) targets, mirroring the
-/// [`Callback`] platform split. Cloning shares the same underlying flag.
-///
-/// Primary uses:
-/// - `PressConfig::long_press_cancel_flag` — `LongPress` sets, `Press` reads
-/// - `PressEvent::continue_propagation` — shared across cloned events
-#[cfg(target_arch = "wasm32")]
-#[derive(Clone)]
-pub struct SharedFlag(alloc::rc::Rc<core::cell::Cell<bool>>);
-
-/// Shared boolean flag for cross-interaction state coordination.
-///
-/// Uses `Rc<Cell<bool>>` on wasm (single-threaded) and
-/// `Arc<AtomicBool>` on native (multi-threaded) targets, mirroring the
-/// [`Callback`] platform split. Cloning shares the same underlying flag.
-///
-/// Primary uses:
-/// - `PressConfig::long_press_cancel_flag` — `LongPress` sets, `Press` reads
-/// - `PressEvent::continue_propagation` — shared across cloned events
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Clone)]
-pub struct SharedFlag(alloc::sync::Arc<core::sync::atomic::AtomicBool>);
-
-impl SharedFlag {
-    /// Creates a new shared flag with the given initial value.
-    #[must_use]
-    pub fn new(value: bool) -> Self {
-        #[cfg(target_arch = "wasm32")]
-        {
-            Self(alloc::rc::Rc::new(core::cell::Cell::new(value)))
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            Self(alloc::sync::Arc::new(core::sync::atomic::AtomicBool::new(
-                value,
-            )))
-        }
-    }
-
-    /// Reads the current flag value.
-    #[must_use]
-    pub fn get(&self) -> bool {
-        #[cfg(target_arch = "wasm32")]
-        {
-            self.0.get()
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.0.load(core::sync::atomic::Ordering::Acquire)
-        }
-    }
-
-    /// Sets the flag value.
-    pub fn set(&self, value: bool) {
-        #[cfg(target_arch = "wasm32")]
-        {
-            self.0.set(value);
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.0.store(value, core::sync::atomic::Ordering::Release);
-        }
-    }
-}
-
-impl Default for SharedFlag {
-    fn default() -> Self {
-        Self::new(false)
-    }
-}
-
-impl Debug for SharedFlag {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("SharedFlag").field(&self.get()).finish()
-    }
-}
-
-impl PartialEq for SharedFlag {
-    fn eq(&self, other: &Self) -> bool {
-        #[cfg(target_arch = "wasm32")]
-        {
-            alloc::rc::Rc::ptr_eq(&self.0, &other.0)
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            alloc::sync::Arc::ptr_eq(&self.0, &other.0)
-        }
-    }
-}
-
-/// Shared interior-mutable state container.
-///
-/// Uses `Rc<RefCell<T>>` on wasm and `no_std` targets (single-threaded) and
-/// `Arc<Mutex<T>>` on native + `std` targets (multi-threaded), mirroring the
-/// [`SharedFlag`] and [`Callback`] platform split. Cloning shares the
-/// same underlying state.
-///
-/// Unlike [`SharedFlag`] (which stores a single `bool`), `SharedState<T>`
-/// stores an arbitrary value, enabling shared mutable state for interaction
-/// result types such as `HoverResult` and `PressResult`.
-#[cfg(any(target_arch = "wasm32", not(feature = "std")))]
-pub struct SharedState<T>(alloc::rc::Rc<core::cell::RefCell<T>>);
-
-/// Shared interior-mutable state container.
-///
-/// Uses `Rc<RefCell<T>>` on wasm and `no_std` targets (single-threaded) and
-/// `Arc<Mutex<T>>` on native + `std` targets (multi-threaded), mirroring the
-/// [`SharedFlag`] and [`Callback`] platform split. Cloning shares the
-/// same underlying state.
-///
-/// Unlike [`SharedFlag`] (which stores a single `bool`), `SharedState<T>`
-/// stores an arbitrary value, enabling shared mutable state for interaction
-/// result types such as `HoverResult` and `PressResult`.
-#[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
-pub struct SharedState<T>(alloc::sync::Arc<std::sync::Mutex<T>>);
-
-impl<T> SharedState<T> {
-    /// Creates a new shared state with the given initial value.
-    #[must_use]
-    pub fn new(value: T) -> Self {
-        #[cfg(any(target_arch = "wasm32", not(feature = "std")))]
-        {
-            Self(alloc::rc::Rc::new(core::cell::RefCell::new(value)))
-        }
-        #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
-        {
-            Self(alloc::sync::Arc::new(std::sync::Mutex::new(value)))
-        }
-    }
-
-    /// Reads the current value by cloning it.
-    #[must_use]
-    pub fn get(&self) -> T
-    where
-        T: Clone,
-    {
-        self.with(Clone::clone)
-    }
-
-    /// Replaces the stored value.
-    pub fn set(&self, value: T) {
-        #[cfg(any(target_arch = "wasm32", not(feature = "std")))]
-        {
-            *self.0.borrow_mut() = value;
-        }
-        #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
-        {
-            *self.0.lock().expect("SharedState mutex poisoned") = value;
-        }
-    }
-
-    /// Borrows the inner value and applies `f`, returning the result.
-    ///
-    /// On wasm and `no_std` this borrows the `RefCell`; on native + `std`
-    /// this locks the `Mutex`. The lock/borrow is released when `f` returns.
-    pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R {
-        #[cfg(any(target_arch = "wasm32", not(feature = "std")))]
-        {
-            f(&self.0.borrow())
-        }
-        #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
-        {
-            let guard = self.0.lock().expect("SharedState mutex poisoned");
-            f(&guard)
-        }
-    }
-}
-
-#[cfg(any(target_arch = "wasm32", not(feature = "std")))]
-impl<T> Clone for SharedState<T> {
-    fn clone(&self) -> Self {
-        SharedState(alloc::rc::Rc::clone(&self.0))
-    }
-}
-
-#[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
-impl<T> Clone for SharedState<T> {
-    fn clone(&self) -> Self {
-        SharedState(alloc::sync::Arc::clone(&self.0))
-    }
-}
-
-impl<T: Debug> Debug for SharedState<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.with(|value: &T| f.debug_tuple("SharedState").field(value).finish())
-    }
-}
-
-impl<T> PartialEq for SharedState<T> {
-    fn eq(&self, other: &Self) -> bool {
-        #[cfg(any(target_arch = "wasm32", not(feature = "std")))]
-        {
-            alloc::rc::Rc::ptr_eq(&self.0, &other.0)
-        }
-        #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
-        {
-            alloc::sync::Arc::ptr_eq(&self.0, &other.0)
-        }
-    }
-}
-
-impl<T: Default> Default for SharedState<T> {
-    fn default() -> Self {
-        Self::new(T::default())
-    }
-}
-
-/// Weak event sender for safe effect cleanup.
-///
-/// `WeakSend<T>` wraps a weak reference to the send function so that
-/// long-lived effects (timers, observers) do not prevent the component
-/// from being garbage collected. Use [`call_if_alive`](WeakSend::call_if_alive)
-/// to dispatch events — it is a no-op if the component has been unmounted.
-#[cfg(target_arch = "wasm32")]
-pub struct WeakSend<T>(alloc::rc::Weak<dyn Fn(T)>);
-
-/// Weak event sender for safe effect cleanup.
-///
-/// `WeakSend<T>` wraps a weak reference to the send function so that
-/// long-lived effects (timers, observers) do not prevent the component
-/// from being garbage collected. Use [`call_if_alive`](WeakSend::call_if_alive)
-/// to dispatch events — it is a no-op if the component has been unmounted.
-#[cfg(not(target_arch = "wasm32"))]
-pub struct WeakSend<T>(alloc::sync::Weak<dyn Fn(T) + Send + Sync>);
-
-impl<T> WeakSend<T> {
-    /// Attempt to send an event if the component is still alive.
-    ///
-    /// Returns silently if the strong reference has been dropped.
-    pub fn call_if_alive(&self, value: T) {
-        if let Some(f) = self.0.upgrade() {
-            f(value);
-        }
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-impl<T> Clone for WeakSend<T> {
-    fn clone(&self) -> Self {
-        WeakSend(alloc::rc::Weak::clone(&self.0))
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl<T> Clone for WeakSend<T> {
-    fn clone(&self) -> Self {
-        WeakSend(alloc::sync::Weak::clone(&self.0))
-    }
-}
-
-impl<T> Debug for WeakSend<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("WeakSend(..)")
-    }
-}
-
-/// Convenience constructors for [`WeakSend`] on wasm targets.
-#[cfg(target_arch = "wasm32")]
-impl<T: 'static> WeakSend<T> {
-    /// Create a `WeakSend` by downgrading the given `Rc`.
-    pub fn from_rc(rc: &alloc::rc::Rc<dyn Fn(T)>) -> Self {
-        WeakSend(alloc::rc::Rc::downgrade(rc))
-    }
-
-    /// Alias for [`from_rc`](Self::from_rc) — more discoverable name.
-    pub fn downgrade(rc: &alloc::rc::Rc<dyn Fn(T)>) -> Self {
-        Self::from_rc(rc)
-    }
-}
-
-/// Convenience constructors for [`WeakSend`] on native targets.
-#[cfg(not(target_arch = "wasm32"))]
-impl<T: 'static> WeakSend<T> {
-    /// Create a `WeakSend` by downgrading the given `Arc`.
-    pub fn from_arc(arc: &alloc::sync::Arc<dyn Fn(T) + Send + Sync>) -> Self {
-        WeakSend(alloc::sync::Arc::downgrade(arc))
-    }
-
-    /// Alias for [`from_arc`](Self::from_arc) — more discoverable name.
-    pub fn downgrade(arc: &alloc::sync::Arc<dyn Fn(T) + Send + Sync>) -> Self {
-        Self::from_arc(arc)
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-impl<T: 'static> From<&alloc::rc::Rc<dyn Fn(T)>> for WeakSend<T> {
-    fn from(rc: &alloc::rc::Rc<dyn Fn(T)>) -> Self {
-        WeakSend(alloc::rc::Rc::downgrade(rc))
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl<T: 'static> From<&alloc::sync::Arc<dyn Fn(T) + Send + Sync>> for WeakSend<T> {
-    fn from(arc: &alloc::sync::Arc<dyn Fn(T) + Send + Sync>) -> Self {
-        WeakSend(alloc::sync::Arc::downgrade(arc))
-    }
-}
-
-/// The strong send handle passed to effect setup closures.
-///
-/// Adapters hold the strong `Rc`/`Arc` and pass it to
-/// [`PendingEffect::run`]. The setup closure downgrades to
-/// [`WeakSend`] internally.
-#[doc(hidden)]
-#[cfg(target_arch = "wasm32")]
-pub type StrongSend<E> = alloc::rc::Rc<dyn Fn(E)>;
-
-/// The strong send handle passed to effect setup closures.
-#[doc(hidden)]
-#[cfg(not(target_arch = "wasm32"))]
-pub type StrongSend<E> = alloc::sync::Arc<dyn Fn(E) + Send + Sync>;
-
-// ────────────────────────────────────────────────────────────────────
 // PendingEffect
 // ────────────────────────────────────────────────────────────────────
 
@@ -562,7 +129,7 @@ pub struct PendingEffect<M: Machine> {
 }
 
 impl<M: Machine> PendingEffect<M> {
-    /// Creates a new pending effect from a name and user-authored setup closure.
+    /// Creates a new pending effect with a weak-send setup closure.
     ///
     /// The `setup` closure receives [`WeakSend`] (not the strong handle) to
     /// prevent retain cycles. `PendingEffect::new` bridges the strong→weak
@@ -1631,143 +1198,8 @@ mod tests {
     }
 
     #[test]
-    fn callback_clone_and_invoke() {
-        let cb = callback(|x: u32| x * 2);
-        let cb2 = cb.clone();
-        assert_eq!(cb(3), 6);
-        assert_eq!(cb2(4), 8);
-    }
-
-    #[test]
-    fn callback_pointer_equality() {
-        let cb = callback(|_: ()| {});
-        let cb2 = cb.clone();
-        assert_eq!(cb, cb2);
-
-        let cb3 = callback(|_: ()| {});
-        assert_ne!(cb, cb3);
-    }
-
-    #[test]
     fn no_cleanup_is_callable() {
         let cleanup = no_cleanup();
-        cleanup(); // should not panic
-    }
-
-    // --- SharedFlag tests ---
-
-    #[test]
-    fn shared_flag_new_stores_initial_value() {
-        let flag_false = SharedFlag::new(false);
-        assert!(!flag_false.get());
-
-        let flag_true = SharedFlag::new(true);
-        assert!(flag_true.get());
-    }
-
-    #[test]
-    fn shared_flag_default_is_false() {
-        let flag = SharedFlag::default();
-        assert!(!flag.get());
-    }
-
-    #[test]
-    fn shared_flag_set_updates_value() {
-        let flag = SharedFlag::new(false);
-        flag.set(true);
-        assert!(flag.get());
-        flag.set(false);
-        assert!(!flag.get());
-    }
-
-    #[test]
-    fn shared_flag_clone_shares_state() {
-        let flag1 = SharedFlag::new(false);
-        let flag2 = flag1.clone();
-
-        flag2.set(true);
-        assert!(flag1.get());
-        assert!(flag2.get());
-
-        flag1.set(false);
-        assert!(!flag2.get());
-    }
-
-    #[test]
-    fn shared_flag_debug_shows_value() {
-        let flag = SharedFlag::new(true);
-        let debug = alloc::format!("{flag:?}");
-        assert_eq!(debug, "SharedFlag(true)");
-
-        flag.set(false);
-        let debug = alloc::format!("{flag:?}");
-        assert_eq!(debug, "SharedFlag(false)");
-    }
-
-    #[test]
-    fn shared_flag_partial_eq_by_pointer_identity() {
-        let flag1 = SharedFlag::new(false);
-        let flag2 = flag1.clone();
-        let flag3 = SharedFlag::new(false);
-
-        // Same allocation
-        assert_eq!(flag1, flag2);
-        // Different allocation (same value but different pointer)
-        assert_ne!(flag1, flag3);
-    }
-
-    // --- SharedState tests ---
-
-    #[test]
-    fn shared_state_new_and_get() {
-        let state = SharedState::new(42u32);
-        assert_eq!(state.get(), 42);
-    }
-
-    #[test]
-    fn shared_state_set_updates_value() {
-        let state = SharedState::new(1u32);
-        state.set(99);
-        assert_eq!(state.get(), 99);
-    }
-
-    #[test]
-    fn shared_state_with_reads_value() {
-        let state = SharedState::new(String::from("hello"));
-        let len = state.with(String::len);
-        assert_eq!(len, 5);
-    }
-
-    #[test]
-    fn shared_state_clone_shares_state() {
-        let state1 = SharedState::new(10u32);
-        let state2 = state1.clone();
-        state2.set(20);
-        assert_eq!(state1.get(), 20);
-    }
-
-    #[test]
-    fn shared_state_debug_shows_inner_value() {
-        let state = SharedState::new(42u32);
-        let debug = alloc::format!("{state:?}");
-        assert_eq!(debug, "SharedState(42)");
-    }
-
-    #[test]
-    fn shared_state_default() {
-        let state: SharedState<u32> = SharedState::default();
-        assert_eq!(state.get(), 0);
-    }
-
-    #[test]
-    fn shared_state_partial_eq_by_pointer_identity() {
-        let state1 = SharedState::new(42u32);
-        let state2 = state1.clone();
-        let state3 = SharedState::new(42u32);
-
-        // Same allocation
-        assert_eq!(state1, state2);
-        // Different allocation (same value but different pointer)
-        assert_ne!(state1, state3);
+        cleanup();
     }
 }

@@ -1517,12 +1517,12 @@ impl TimerHandle {
 /// platform capabilities, i18n, and style strategy.
 /// Falls back to `NullPlatformEffects` with debug-mode warnings if no
 /// ArsProvider is found.
-fn use_platform_effects() -> Rc<dyn PlatformEffects> {
+fn use_platform_effects() -> ArsRc<dyn PlatformEffects> {
     use_context::<ArsContext>()
         .map(|ctx| ctx.platform())
         .unwrap_or_else(|| {
             warn_missing_provider("use_platform_effects");
-            Rc::new(MissingProviderEffects)
+            ArsRc::new(MissingProviderEffects)
         })
 }
 ```
@@ -4658,8 +4658,8 @@ pub enum ColorMode {
 | `id_prefix`           | `Option<String>`                            | Optional prefix prepended to all generated IDs (for micro-frontend isolation). |
 | `portal_container_id` | `Option<String>`                            | ID of the container element for portal mounts. `None` means platform default.  |
 | `root_node_id`        | `Option<String>`                            | ID of the root node for focus scope and portal queries. `None` means default.  |
-| `platform`            | `Rc<dyn PlatformEffects>`                   | Platform capabilities for side effects. Defaults to `NullPlatformEffects`.     |
-| `modality`            | `Rc<dyn ModalityContext>`                   | Shared input-modality state for the current provider root.                     |
+| `platform`            | `ArsRc<dyn PlatformEffects>`                | Platform capabilities for side effects. Defaults to `NullPlatformEffects`.     |
+| `modality`            | `ArsRc<dyn ModalityContext>`                | Shared input-modality state for the current provider root.                     |
 | `icu_provider`        | `Arc<dyn IcuProvider>`                      | Calendar/locale data for date-time components. Defaults to `StubIcuProvider`.  |
 | `i18n_registries`     | `Rc<I18nRegistries>`                        | Per-component translation registries. Defaults to empty (English fallbacks).   |
 | `style_strategy`      | `StyleStrategy`                             | CSS style injection strategy. Defaults to `StyleStrategy::Inline`.             |

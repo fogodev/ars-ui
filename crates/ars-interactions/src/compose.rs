@@ -33,7 +33,7 @@ use ars_core::AttrMap;
 /// let button_attrs = merge_attrs([
 ///     press.current_attrs(&press_config),
 ///     hover.current_attrs(),
-///     focus.current_attrs(),
+///     focus.current_attrs(&focus_config),
 /// ]);
 /// ```
 #[must_use]
@@ -69,7 +69,7 @@ where
 /// let attrs = merge_attrs!(
 ///     press.current_attrs(&press_config),
 ///     hover.current_attrs(),
-///     focus.current_attrs(),
+///     focus.current_attrs(&focus_config),
 /// );
 /// ```
 #[macro_export]

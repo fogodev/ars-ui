@@ -2179,7 +2179,7 @@ pub struct ArsContext {
     pub id_prefix: Signal<Option<String>>,
     pub portal_container_id: Signal<Option<String>>,
     pub root_node_id: Signal<Option<String>>,
-    pub platform: Rc<dyn PlatformEffects>,
+    pub platform: ArsRc<dyn PlatformEffects>,
     pub icu_provider: Arc<dyn IcuProvider>,
     pub i18n_registries: Rc<I18nRegistries>,
     pub style_strategy: StyleStrategy,

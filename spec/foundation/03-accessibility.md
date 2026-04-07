@@ -1607,13 +1607,13 @@ See `FocusStrategy` definition above in §3.2.
 /// and is the CSS hook for styling focus rings.
 pub struct FocusRing {
     /// True when the most recent interaction was via keyboard.
-    keyboard_modality: Cell<bool>,
+    keyboard_modality: AtomicBool,
 }
 
 impl FocusRing {
     /// Process a `pointerdown` event — suppresses keyboard modality.
     pub fn on_pointer_down(&self) {
-        self.keyboard_modality.set(false);
+        self.keyboard_modality.store(false, Ordering::Relaxed);
     }
 
     /// Process a `keydown` event — activates keyboard modality.
@@ -1654,19 +1654,19 @@ impl FocusRing {
             return;
         }
         if NAV_KEYS.contains(&key) {
-            self.keyboard_modality.set(true);
+            self.keyboard_modality.store(true, Ordering::Relaxed);
         }
     }
 
     /// Process a virtual interaction source (for example assistive-technology navigation).
     pub fn on_virtual_input(&self) {
-        self.keyboard_modality.set(true);
+        self.keyboard_modality.store(true, Ordering::Relaxed);
     }
 
     /// Returns true if the focus ring should be shown for the element
     /// that just received focus.
     pub fn should_show_focus_ring(&self) -> bool {
-        self.keyboard_modality.get()
+        self.keyboard_modality.load(Ordering::Relaxed)
     }
 
     /// Emit the `data-ars-focus-visible` attribute into AttrMap based on current state.
@@ -1675,7 +1675,7 @@ impl FocusRing {
     /// instead. Direct use of this method is reserved for rare cases where the
     /// `ars-interactions` layer is bypassed. See `05-interactions.md` §4 normative statement.
     pub fn apply_focus_attrs(&self, attrs: &mut AttrMap, is_focused: bool) {
-        if is_focused && self.keyboard_modality.get() {
+        if is_focused && self.keyboard_modality.load(Ordering::Relaxed) {
             attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
         } else {
             attrs.set(HtmlAttr::Data("ars-focus-visible"), AttrValue::None);
@@ -3640,8 +3640,8 @@ pub struct SimulatedKeyEvent {
     pub ctrl: bool,
     pub meta: bool,
     pub alt: bool,
-    pub default_prevented: core::cell::Cell<bool>,
-    pub propagation_stopped: core::cell::Cell<bool>,
+    pub default_prevented: AtomicBool,
+    pub propagation_stopped: AtomicBool,
 }
 
 impl SimulatedKeyEvent {
@@ -3649,8 +3649,8 @@ impl SimulatedKeyEvent {
         Self {
             key,
             shift: false, ctrl: false, meta: false, alt: false,
-            default_prevented: core::cell::Cell::new(false),
-            propagation_stopped: core::cell::Cell::new(false),
+            default_prevented: AtomicBool::new(false),
+            propagation_stopped: AtomicBool::new(false),
         }
     }
 
@@ -3662,8 +3662,8 @@ impl SimulatedKeyEvent {
 
 impl crate::DomEvent for SimulatedKeyEvent {
     fn event_type(&self) -> &str { "keydown" }
-    fn prevent_default(&self) { self.default_prevented.set(true); }
-    fn stop_propagation(&self) { self.propagation_stopped.set(true); }
+    fn prevent_default(&self) { self.default_prevented.store(true, Ordering::Relaxed); }
+    fn stop_propagation(&self) { self.propagation_stopped.store(true, Ordering::Relaxed); }
     fn key(&self) -> Option<&str> { Some(self.key) }
     fn shift_key(&self) -> bool { self.shift }
     fn ctrl_key(&self) -> bool { self.ctrl }
