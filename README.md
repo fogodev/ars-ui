@@ -1,5 +1,6 @@
 # ars-ui
 
+[![CI](https://github.com/fogodev/ars-ui/actions/workflows/ci.yml/badge.svg)](https://github.com/fogodev/ars-ui/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/github/fogodev/ars-ui/graph/badge.svg?token=OE69AOOYHK)](https://codecov.io/github/fogodev/ars-ui)
 
 A Rust-native, framework-agnostic UI component library built on state machines. Production-grade, accessible, and internationalized from the ground up.
