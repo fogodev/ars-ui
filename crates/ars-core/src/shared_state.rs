@@ -144,6 +144,9 @@ mod tests {
 
     #[test]
     fn shared_state_with_reads_value() {
+        #[cfg(not(feature = "std"))]
+        use alloc::string::String;
+
         let state = SharedState::new(String::from("hello"));
         let len = state.with(String::len);
         assert_eq!(len, 5);

@@ -1543,6 +1543,9 @@ mod tests {
 
     #[test]
     fn default_modality_context_debug_output() {
+        #[cfg(not(feature = "std"))]
+        use alloc::format;
+
         let context = DefaultModalityContext::new();
         let debug = format!("{context:?}");
         assert!(debug.contains("DefaultModalityContext"));
