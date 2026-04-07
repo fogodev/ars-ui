@@ -671,10 +671,10 @@ When ars-ui components are used inside Shadow DOM (e.g., web components wrapping
 /// Returns an AttrMap (data attributes only) plus typed handler methods that,
 /// when applied to an element, implement full press handling.
 pub fn use_press(config: PressConfig) -> PressResult {
-    let state = Rc::new(RefCell::new(PressState::Idle));
-    let is_disabled = config.disabled;
+    let state = SharedState::new(PressState::Idle);
+    let _is_disabled = config.disabled;
 
-    let pressed = state.borrow().is_pressed_inside();
+    let pressed = state.with(|s| s.is_pressed_inside());
 
     // Event handlers are registered as typed methods on the component's Api struct:
     //   pointerdown  → Idle ──→ PressedInside (captures pointer)
@@ -686,7 +686,7 @@ pub fn use_press(config: PressConfig) -> PressResult {
     //   keyup(Enter|Space)   → PressedInside ──→ Idle (fires on_press, fires on_press_up)
     //   touch/pointercancel  → PressedInside|PressedOutside ──→ Idle (fires on_press_up)
 
-    PressResult { state: state.clone(), pressed }
+    PressResult { state, pressed }
 }
 
 ///
@@ -703,9 +703,12 @@ pub fn use_press(config: PressConfig) -> PressResult {
 /// Alternatively, integrate press state into the component machine's `Context`:
 /// the machine derives `data-ars-pressed` from its own context state, ensuring
 /// reactivity through the normal state machine update cycle.
+/// **Note:** `PressResult` will migrate from `Rc<RefCell<PressState>>` to
+/// `SharedState<PressState>` for cross-platform compatibility. See `HoverResult`
+/// (§3.5) for the target pattern.
 pub struct PressResult {
     /// Internal state handle — use `current_attrs()` to produce a live AttrMap.
-    state: Rc<RefCell<PressState>>,
+    state: SharedState<PressState>,
 
     /// Whether the element is currently being pressed (reactive signal in adapter).
     pub pressed: bool,
@@ -716,11 +719,12 @@ impl PressResult {
     /// Call this inside `connect()` — not once at init time — to ensure
     /// the returned attributes are always up to date.
     pub fn current_attrs(&self, config: &PressConfig) -> AttrMap {
-        let state = self.state.borrow();
         let mut attrs = AttrMap::new();
-        if state.is_pressed_inside() {
-            attrs.set_bool(HtmlAttr::Data("ars-pressed"), true);
-        }
+        self.state.with(|state| {
+            if state.is_pressed_inside() {
+                attrs.set_bool(HtmlAttr::Data("ars-pressed"), true);
+            }
+        });
         if PressState::is_disabled(config) {
             attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
             // Disabled elements use aria-disabled="true" instead of HTML disabled
@@ -803,28 +807,32 @@ Hover state represents a pointer being positioned over an element without activa
 ```rust
 // ars-interactions/src/hover.rs
 
-use std::{cell::RefCell, rc::Rc};
-use crate::PointerType;
-use ars_core::AttrMap;
+use ars_core::{AttrMap, Callback, HtmlAttr, ModalityContext, SharedState};
 
-/// Configuration for hover interaction.
-// Manual Debug impl omitted for brevity — prints closures as "<closure>"
-#[derive(Clone, Default)]
+use crate::PointerType;
+
+/// Configuration for hover interaction behavior.
+///
+/// Controls how the hover interaction responds to pointer enter/leave events.
+/// Callbacks use [`Callback`] for automatic platform-appropriate pointer type
+/// (`Rc` on wasm, `Arc` on native) and built-in `Clone`, `Debug`, and
+/// `PartialEq` (by pointer identity).
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct HoverConfig {
     /// Whether the element is disabled. Disabled elements receive no hover events.
     pub disabled: bool,
 
     /// Called when the pointer enters the element.
-    pub on_hover_start: Option<Rc<dyn Fn(HoverEvent)>>,
+    pub on_hover_start: Option<Callback<dyn Fn(HoverEvent)>>,
 
     /// Called when the pointer leaves the element.
-    pub on_hover_end: Option<Rc<dyn Fn(HoverEvent)>>,
+    pub on_hover_end: Option<Callback<dyn Fn(HoverEvent)>>,
 
     /// Called whenever hover state changes.
-    pub on_hover_change: Option<Rc<dyn Fn(bool)>>,
+    pub on_hover_change: Option<Callback<dyn Fn(bool)>>,
 }
 
-/// A normalized hover event. Only ever produced for Mouse and Pen pointer types;
+/// A normalized hover event. Only produced for Mouse and Pen pointer types;
 /// touch and keyboard do not produce hover events.
 #[derive(Clone, Debug)]
 pub struct HoverEvent {
@@ -835,9 +843,12 @@ pub struct HoverEvent {
     pub event_type: HoverEventType,
 }
 
+/// The kind of hover event being dispatched.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HoverEventType {
+    /// The pointer entered the element.
     HoverStart,
+    /// The pointer left the element.
     HoverEnd,
 }
 ```
@@ -864,13 +875,16 @@ Transitions:
 ```
 
 ```rust
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum HoverState {
+    #[default]
     NotHovered,
     Hovered,
 }
 
 impl HoverState {
+    /// Returns `true` when the pointer is over the element.
+    #[must_use]
     pub fn is_hovered(&self) -> bool {
         matches!(self, HoverState::Hovered)
     }
@@ -939,36 +953,55 @@ fn had_pointer_interaction(modality: &dyn ModalityContext) -> bool {
 ### 3.5 Output Props
 
 ```rust
+/// Creates a hover interaction state machine with the given configuration.
+///
+/// Returns a [`HoverResult`] holding the initial `NotHovered` state. Event
+/// handlers are registered as typed methods on the component's `Api` struct
+/// by the framework adapter — this factory only creates the core state container.
+#[must_use]
 pub fn use_hover(config: HoverConfig) -> HoverResult {
-    let state = Rc::new(RefCell::new(HoverState::NotHovered));
-    let is_disabled = config.disabled;
+    let state = SharedState::new(HoverState::NotHovered);
+    let _is_disabled = config.disabled;
 
-    let hovered = *state.borrow() == HoverState::Hovered;
+    let hovered = state.get().is_hovered();
 
     // Event handlers are registered as typed methods on the component's Api struct:
     //   pointerenter → NotHovered ──→ Hovered (mouse/pen only; ignores touch)
     //   pointerleave → Hovered ──→ NotHovered
-    // Shared modality tracking: if config.modality.is_global_press_active()
+    // Shared modality tracking: if modality.is_global_press_active()
     // becomes true while Hovered,
     //   immediately transition to NotHovered (prevents stale hover on mobile).
 
     HoverResult { hovered, state }
 }
 
+/// The output of [`use_hover`], providing live attribute generation and state access.
+///
+/// `HoverResult` attrs are **reactive, not one-shot snapshots**. Use
+/// [`current_attrs()`](Self::current_attrs) inside the component's `connect()`
+/// method to ensure attributes reflect the current state at DOM reconciliation.
+#[derive(Debug)]
 pub struct HoverResult {
-    /// Whether the element is currently hovered.
+    /// Whether the element is currently hovered (reactive signal in adapter).
     pub hovered: bool,
-    state: Rc<RefCell<HoverState>>,
+    /// Internal state handle — use [`current_attrs()`](Self::current_attrs) to
+    /// produce a live `AttrMap`.
+    state: SharedState<HoverState>,
 }
 
 impl HoverResult {
-    /// Returns the current data attributes for the hover interaction.
-    /// Frameworks must call this each render to get up-to-date attrs.
+    /// Produce a fresh [`AttrMap`] reflecting the current hover state.
+    ///
+    /// Call this inside `connect()` — not once at init time — to ensure
+    /// the returned attributes are always up to date.
+    #[must_use]
     pub fn current_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
-        if *self.state.borrow() == HoverState::Hovered {
-            attrs.set_bool(HtmlAttr::Data("ars-hovered"), true);
-        }
+        self.state.with(|s| {
+            if s.is_hovered() {
+                attrs.set_bool(HtmlAttr::Data("ars-hovered"), true);
+            }
+        });
         attrs
     }
 }

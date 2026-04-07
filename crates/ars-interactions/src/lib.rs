@@ -6,14 +6,16 @@
 
 pub mod compose;
 pub mod direction;
+pub mod hover;
 pub mod press;
 
 pub use ars_core::{
     Callback, DefaultModalityContext, KeyModifiers, KeyboardKey, ModalityContext, ModalitySnapshot,
-    NullModalityContext, PointerType, SharedFlag,
+    NullModalityContext, PointerType, SharedFlag, SharedState,
 };
 pub use compose::merge_attrs;
 pub use direction::{LogicalDirection, resolve_arrow_key};
+pub use hover::{HoverConfig, HoverEvent, HoverEventType, HoverResult, HoverState, use_hover};
 pub use press::{PressConfig, PressEvent, PressEventType, PressResult, PressState, use_press};
 
 /// The focus state of a focusable element.
