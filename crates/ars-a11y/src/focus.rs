@@ -280,35 +280,80 @@ mod tests {
     }
 
     #[test]
-    fn focus_ring_tracks_keyboard_navigation_keys() {
+    fn focus_ring_pointer_down_clears_focus_visible_state() {
         let ring = FocusRing::new();
         ring.on_key_down(KeyboardKey::Tab, KeyModifiers::default());
         assert!(ring.should_show_focus_ring());
 
         ring.on_pointer_down();
         assert!(!ring.should_show_focus_ring());
+    }
+
+    #[test]
+    fn focus_ring_only_activates_for_navigation_and_function_keys() {
+        let ring = FocusRing::new();
+
+        ring.on_key_down(KeyboardKey::Tab, KeyModifiers::default());
+        assert!(ring.should_show_focus_ring());
+
+        ring.on_pointer_down();
+        assert!(!ring.should_show_focus_ring());
+
+        ring.on_key_down(KeyboardKey::F12, KeyModifiers::default());
+        assert!(ring.should_show_focus_ring());
+
+        ring.on_pointer_down();
+        assert!(!ring.should_show_focus_ring());
+
+        ring.on_key_down(KeyboardKey::Shift, KeyModifiers::default());
+        assert!(!ring.should_show_focus_ring());
+
+        ring.on_key_down(KeyboardKey::Copy, KeyModifiers::default());
+        assert!(!ring.should_show_focus_ring());
+    }
+
+    #[test]
+    fn focus_ring_ignores_ctrl_meta_and_alt_key_chords() {
+        let ring = FocusRing::new();
 
         ring.on_key_down(
             KeyboardKey::ArrowRight,
             KeyModifiers {
-                shift: false,
                 ctrl: true,
-                alt: false,
-                meta: false,
+                ..KeyModifiers::default()
+            },
+        );
+        assert!(!ring.should_show_focus_ring());
+
+        ring.on_key_down(
+            KeyboardKey::Tab,
+            KeyModifiers {
+                meta: true,
+                ..KeyModifiers::default()
+            },
+        );
+        assert!(!ring.should_show_focus_ring());
+
+        ring.on_key_down(
+            KeyboardKey::Enter,
+            KeyModifiers {
+                alt: true,
+                ..KeyModifiers::default()
             },
         );
         assert!(!ring.should_show_focus_ring());
     }
 
     #[test]
-    fn focus_ring_virtual_input_is_visible() {
+    fn focus_ring_virtual_input_marks_focus_visible() {
         let ring = FocusRing::new();
+
         ring.on_virtual_input();
         assert!(ring.should_show_focus_ring());
     }
 
     #[test]
-    fn apply_focus_attrs_writes_and_clears_attribute() {
+    fn apply_focus_attrs_writes_and_clears_attribute_for_visible_focus() {
         let ring = FocusRing::new();
         let mut attrs = AttrMap::new();
 
@@ -324,6 +369,23 @@ mod tests {
         );
 
         ring.apply_focus_attrs(&mut attrs, false);
+        assert_eq!(attrs.get_value(&HtmlAttr::Data("ars-focus-visible")), None);
+    }
+
+    #[test]
+    fn apply_focus_attrs_uses_virtual_input_state() {
+        let ring = FocusRing::new();
+        let mut attrs = AttrMap::new();
+
+        ring.on_virtual_input();
+        ring.apply_focus_attrs(&mut attrs, true);
+        assert_eq!(
+            attrs.get_value(&HtmlAttr::Data("ars-focus-visible")),
+            Some(&AttrValue::Bool(true))
+        );
+
+        ring.on_pointer_down();
+        ring.apply_focus_attrs(&mut attrs, true);
         assert_eq!(attrs.get_value(&HtmlAttr::Data("ars-focus-visible")), None);
     }
 }

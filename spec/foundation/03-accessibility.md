@@ -1630,20 +1630,6 @@ impl FocusRing {
     /// `modifiers` is the raw `ars_core::KeyModifiers` snapshot from the same
     /// event delivered to `ModalityContext`.
     pub fn on_key_down(&self, key: KeyboardKey, modifiers: KeyModifiers) {
-        // Keys that indicate keyboard navigation intent.
-        // F1-F12 are included because they indicate keyboard-driven interaction.
-        // If browser-level F-key handling (e.g., F5=refresh) is undesirable,
-        // the adapter can filter them before invoking FocusRing.
-        const NAV_KEYS: &[KeyboardKey] = &[
-            KeyboardKey::Tab, KeyboardKey::ArrowUp, KeyboardKey::ArrowDown,
-            KeyboardKey::ArrowLeft, KeyboardKey::ArrowRight,
-            KeyboardKey::Home, KeyboardKey::End, KeyboardKey::PageUp,
-            KeyboardKey::PageDown, KeyboardKey::Enter, KeyboardKey::Space,
-            KeyboardKey::Escape, KeyboardKey::F1, KeyboardKey::F2,
-            KeyboardKey::F3, KeyboardKey::F4, KeyboardKey::F5, KeyboardKey::F6,
-            KeyboardKey::F7, KeyboardKey::F8, KeyboardKey::F9, KeyboardKey::F10,
-            KeyboardKey::F11, KeyboardKey::F12,
-        ];
         // Skip modified combos (e.g., Ctrl+Tab = browser tab switch).
         // The adapter also pre-filters platform-consumed combos, but this
         // guard ensures FocusRing remains correct even without adapter filtering.
@@ -1653,7 +1639,33 @@ impl FocusRing {
             // navigation and should not trigger keyboard modality.
             return;
         }
-        if NAV_KEYS.contains(&key) {
+        if matches!(
+            key,
+            KeyboardKey::Tab
+                | KeyboardKey::ArrowUp
+                | KeyboardKey::ArrowDown
+                | KeyboardKey::ArrowLeft
+                | KeyboardKey::ArrowRight
+                | KeyboardKey::Home
+                | KeyboardKey::End
+                | KeyboardKey::PageUp
+                | KeyboardKey::PageDown
+                | KeyboardKey::Enter
+                | KeyboardKey::Space
+                | KeyboardKey::Escape
+                | KeyboardKey::F1
+                | KeyboardKey::F2
+                | KeyboardKey::F3
+                | KeyboardKey::F4
+                | KeyboardKey::F5
+                | KeyboardKey::F6
+                | KeyboardKey::F7
+                | KeyboardKey::F8
+                | KeyboardKey::F9
+                | KeyboardKey::F10
+                | KeyboardKey::F11
+                | KeyboardKey::F12
+        ) {
             self.keyboard_modality.store(true, Ordering::Relaxed);
         }
     }
