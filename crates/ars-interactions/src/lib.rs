@@ -6,65 +6,15 @@
 
 pub mod compose;
 pub mod direction;
+pub mod press;
 
 pub use ars_core::{
-    DefaultModalityContext, KeyModifiers, KeyboardKey, ModalityContext, ModalitySnapshot,
-    NullModalityContext, PointerType,
+    Callback, DefaultModalityContext, KeyModifiers, KeyboardKey, ModalityContext, ModalitySnapshot,
+    NullModalityContext, PointerType, SharedFlag,
 };
 pub use compose::merge_attrs;
 pub use direction::{LogicalDirection, resolve_arrow_key};
-
-/// The current state of the press state machine.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub enum PressState {
-    /// No active press.
-    #[default]
-    Idle,
-
-    /// Press has begun; position relative to element not yet resolved.
-    /// Transient zero-duration state; resolves within same event tick to
-    /// `PressedInside` or `PressedOutside`.
-    Pressing {
-        /// The pointer modality that initiated the press.
-        pointer_type: PointerType,
-    },
-
-    /// Press is active and the pointer is within the element bounds.
-    PressedInside {
-        /// The pointer modality that initiated the press.
-        pointer_type: PointerType,
-        /// The x-coordinate where the press originated, if available.
-        origin_x: Option<f64>,
-        /// The y-coordinate where the press originated, if available.
-        origin_y: Option<f64>,
-    },
-
-    /// Press is active but the pointer has moved outside the element bounds.
-    PressedOutside {
-        /// The pointer modality that initiated the press.
-        pointer_type: PointerType,
-    },
-}
-
-impl PressState {
-    /// Returns `true` when the element is in a committed pressed state.
-    ///
-    /// The transient `Pressing` state (which resolves within the same event tick
-    /// before any render) returns `false` to prevent `data-ars-pressed` from flashing.
-    #[must_use]
-    pub fn is_pressed(&self) -> bool {
-        matches!(
-            self,
-            PressState::PressedInside { .. } | PressState::PressedOutside { .. }
-        )
-    }
-
-    /// Returns `true` when pressed and the pointer is within element bounds.
-    #[must_use]
-    pub fn is_pressed_inside(&self) -> bool {
-        matches!(self, PressState::PressedInside { .. })
-    }
-}
+pub use press::{PressConfig, PressEvent, PressEventType, PressResult, PressState, use_press};
 
 /// The focus state of a focusable element.
 ///

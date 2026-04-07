@@ -96,7 +96,7 @@ The adapter does not publish or consume framework context. The composing overlay
 | `will-change` style           | animation setup phase                                              | presence instance + node | animation completes or component cleanup                 | remove `will-change` from element style        | frees GPU memory after animation                             |
 
 - All cleanup is synchronous during the framework's dispose lifecycle (`on_cleanup`).
-- The `completed` guard (`Rc<Cell<bool>>`) prevents any pending listener from firing after cleanup runs.
+- The `completed` guard (`SharedFlag`) prevents any pending listener from firing after cleanup runs.
 
 ## 9. Ref and Node Contract
 
@@ -108,7 +108,7 @@ The adapter does not publish or consume framework context. The composing overlay
 ## 10. State Machine Boundary Rules
 
 - machine-owned state: `State` (Unmounted/Mounting/Mounted/UnmountPending), `Context` (present, mounted, unmounting, node_id).
-- adapter-local derived bookkeeping: animation listener handles, timeout handles, `completed` guard flag, `Rc<Cell<bool>>` animation/transition done flags, `performance.now()` timestamps for visibility pausing, cached `getComputedStyle()` results.
+- adapter-local derived bookkeeping: animation listener handles, timeout handles, `completed` guard flag, `SharedFlag` animation/transition done flags, `performance.now()` timestamps for visibility pausing, cached `getComputedStyle()` results.
 - forbidden local mirrors: do not keep a local `is_open` or `is_animating` boolean that can diverge from the machine's `Context.mounted` and `Context.unmounting`.
 - allowed snapshot-read contexts: inside `requestAnimationFrame` callbacks, animation event listeners, timeout handlers, and `on_cleanup` — all reading current machine state via the `send` closure or context signals.
 
@@ -324,7 +324,7 @@ pub fn use_presence(props: presence::Props) -> PresenceHandle {
     //      - 5000ms fallback timeout
     //      - visibilitychange pause/resume
     //      - will-change setup/teardown
-    //      - completed guard (Rc<Cell<bool>>)
+    //      - completed guard (SharedFlag)
 
     // 4. Cleanup: synchronous in on_cleanup.
     on_cleanup(move || {

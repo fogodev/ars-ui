@@ -191,7 +191,7 @@ When a component is being removed from the DOM while an animation is still in pr
 
 2. **Cancel pending animations immediately**: When the component is being removed from the DOM, do NOT wait for `animationend` or `transitionend` events. Use `animation.cancel()` (Web Animations API) or remove the animation class synchronously to halt running animations.
 
-3. **Prevent callbacks on detached nodes**: If `animationend` or `transitionend` fires after the element has been removed from the DOM (detectable via `!document.contains(node)`), the callback MUST be a no-op. The `completed` guard (`Rc<Cell<bool>>`) in the `"listen-animation-end"` effect serves this purpose — set it to `true` during cleanup.
+3. **Prevent callbacks on detached nodes**: If `animationend` or `transitionend` fires after the element has been removed from the DOM (detectable via `!document.contains(node)`), the callback MUST be a no-op. The `completed` guard (`SharedFlag`) in the `"listen-animation-end"` effect serves this purpose — set it to `true` during cleanup.
 
 4. **State access guard**: Animation callbacks that access component state (context, props, signals) MUST verify the component is still alive before reading or writing state. In Rust frameworks, this means checking that `Rc`/`Arc` references have not been dropped (e.g., `Weak::upgrade()` returns `Some`).
 
@@ -454,7 +454,7 @@ impl ars_core::Machine for Machine {
 >
 > **Mounting state for lazy content:** The `Mounting` state allows lazy content (e.g., suspended components) to resolve before entry animations begin. When `lazy_mount=true`, the `(Unmounted, Mount)` transition goes to `Mounting` instead of `Mounted`. The element is inserted into the DOM but `data-ars-state="open"` is NOT set yet — no entry animation runs. The adapter MUST dispatch `ContentReady` after lazy content has settled, which transitions to `Mounted` and triggers the entry animation. When `lazy_mount=false`, the `Mounting` state is bypassed entirely (`Unmounted` → `Mounted` directly). If `Unmount` is received while in `Mounting`, the machine transitions directly to `Unmounted` without any exit animation.
 >
-> **Dual animation/transition support:** The effect listens for BOTH `animationend` AND `transitionend` events. When both an animation and a transition are active, the effect waits for BOTH to complete before sending `AnimationEnd`. Two `Rc<Cell<bool>>` flags (`anim_done`, `trans_done`) track completion; each is pre-set to `true` if that type is not active. Each listener sets its flag and checks the other before firing `AnimationEnd`. If only `transition-property` is detected (no `animation-name`), only `transitionend` is attached, and vice versa. If neither is detected, `AnimationEnd` fires immediately.
+> **Dual animation/transition support:** The effect listens for BOTH `animationend` AND `transitionend` events. When both an animation and a transition are active, the effect waits for BOTH to complete before sending `AnimationEnd`. Two `SharedFlag` instances (`anim_done`, `trans_done`) track completion; each is pre-set to `true` if that type is not active. Each listener sets its flag and checks the other before firing `AnimationEnd`. If only `transition-property` is detected (no `animation-name`), only `transitionend` is attached, and vice versa. If neither is detected, `AnimationEnd` fires immediately.
 >
 > **Transition completion detection.** When `transition-property:all` is set, the browser fires
 > one `transitionend` event per animated property, making event counting unreliable.
