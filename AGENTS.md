@@ -47,6 +47,34 @@ Default delivery rules:
 - **Derive documentation from the spec.** Doc comments should describe the _purpose and semantics_ of the item as defined in the corresponding `spec/` files, not just restate the type signature.
 - **Use `#[inline]` selectively, not mechanically.** Do **not** add Clippy's `missing_inline_in_public_items` lint at the workspace level, and do not treat public visibility alone as a reason to mark an item `#[inline]`. Use `#[inline]` for thin cross-crate wrappers, trivial accessors, and hot-path no-op shims where the call overhead is plausibly meaningful. Avoid blanket `#[inline]` on all public APIs — it increases code size, adds compile-time cost, and turns `#[inline]` into noise instead of a deliberate performance signal.
 
+### Code Coverage
+
+The workspace uses `cargo-llvm-cov` for code coverage with per-crate threshold enforcement. CI runs coverage on every PR (see `.github/workflows/ci.yml`).
+
+**Local coverage commands:**
+
+```bash
+# Per-crate coverage with inline annotated source (most useful during development)
+cargo llvm-cov test -p ars-interactions --text -- hover
+
+# Per-crate summary only
+cargo llvm-cov test -p ars-interactions -- hover
+
+# Full workspace coverage (matches CI, excludes adapter/derive/xtask crates)
+cargo llvm-cov --workspace \
+  --exclude ars-leptos --exclude ars-dioxus \
+  --exclude ars-test-harness-leptos --exclude ars-test-harness-dioxus \
+  --exclude ars-derive --exclude xtask \
+  --lcov --output-path lcov.info
+
+# Check all crates against spec-defined thresholds
+cargo xtask coverage check-all --file lcov.info
+```
+
+The `--text` flag produces line-by-line annotated source showing hit counts and `^0` markers on uncovered branches — use this to identify gaps after writing tests. Uncovered no-op callback closures in tests (e.g., `|_| {}`) are expected and not a gap.
+
+CI excludes adapter crates (tested via wasm-pack, can't produce lcov), `ars-derive` (proc-macro, runs in compiler), and `xtask` (build tooling). See `spec/testing/14-ci.md` §2 for rationale.
+
 ### Adapter Prelude Convention
 
 Both `ars-leptos` and `ars-dioxus` expose a `prelude` module targeting **end users** — application developers who consume the ready-made components. `use ars_leptos::prelude::*` (or `use ars_dioxus::prelude::*`) should give them everything they need.

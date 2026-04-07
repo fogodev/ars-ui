@@ -268,6 +268,22 @@ This pattern surfaces platform incompatibilities at compile time on any target, 
 
 > **Design note:** The `cfg`-gated `Callback<T>` type (§1.4.1, "Thread Safety for Desktop Adapters") already switches between `Rc`-based and `Arc`-based implementations. The compile-time assertion above verifies that the concrete `Callback` type used by a given adapter satisfies the bounds required by its target platform.
 
+**`SharedState<T>` — interior-mutable shared state:**
+
+`SharedState<T>` extends the same `cfg`-gated pattern to interior-mutable state containers (interaction result state, live reactive values). On WASM it wraps `Rc<RefCell<T>>`, on native it wraps `Arc<Mutex<T>>`. Key API:
+
+```rust
+use ars_core::SharedState;
+
+let state = SharedState::new(HoverState::NotHovered);
+let current = state.get();                 // T: Clone — borrow/lock, clone, release
+state.set(HoverState::Hovered);            // replace inner value
+state.with(|s| s.is_hovered());            // borrow/lock, call closure, release
+let clone = state.clone();                 // shares same allocation
+```
+
+Use `SharedState<T>` instead of bare `Rc<RefCell<T>>` in all interaction result types to ensure cross-platform compatibility. `SharedFlag` remains the specialized choice for single-boolean coordination flags.
+
 ## 2. State Machine Core (`ars-core`)
 
 ### 2.1 The Machine Trait
