@@ -212,6 +212,99 @@ pub fn callback<Args: 'static, Out: 'static>(
     Callback::new(f)
 }
 
+/// Shared boolean flag for cross-interaction state coordination.
+///
+/// Uses `Rc<Cell<bool>>` on wasm (single-threaded) and
+/// `Arc<AtomicBool>` on native (multi-threaded) targets, mirroring the
+/// [`Callback`] platform split. Cloning shares the same underlying flag.
+///
+/// Primary uses:
+/// - `PressConfig::long_press_cancel_flag` — `LongPress` sets, `Press` reads
+/// - `PressEvent::continue_propagation` — shared across cloned events
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone)]
+pub struct SharedFlag(alloc::rc::Rc<core::cell::Cell<bool>>);
+
+/// Shared boolean flag for cross-interaction state coordination.
+///
+/// Uses `Rc<Cell<bool>>` on wasm (single-threaded) and
+/// `Arc<AtomicBool>` on native (multi-threaded) targets, mirroring the
+/// [`Callback`] platform split. Cloning shares the same underlying flag.
+///
+/// Primary uses:
+/// - `PressConfig::long_press_cancel_flag` — `LongPress` sets, `Press` reads
+/// - `PressEvent::continue_propagation` — shared across cloned events
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
+pub struct SharedFlag(alloc::sync::Arc<core::sync::atomic::AtomicBool>);
+
+impl SharedFlag {
+    /// Creates a new shared flag with the given initial value.
+    #[must_use]
+    pub fn new(value: bool) -> Self {
+        #[cfg(target_arch = "wasm32")]
+        {
+            Self(alloc::rc::Rc::new(core::cell::Cell::new(value)))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self(alloc::sync::Arc::new(core::sync::atomic::AtomicBool::new(
+                value,
+            )))
+        }
+    }
+
+    /// Reads the current flag value.
+    #[must_use]
+    pub fn get(&self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.0.get()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.0.load(core::sync::atomic::Ordering::Acquire)
+        }
+    }
+
+    /// Sets the flag value.
+    pub fn set(&self, value: bool) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.0.set(value);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.0.store(value, core::sync::atomic::Ordering::Release);
+        }
+    }
+}
+
+impl Default for SharedFlag {
+    fn default() -> Self {
+        Self::new(false)
+    }
+}
+
+impl Debug for SharedFlag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("SharedFlag").field(&self.get()).finish()
+    }
+}
+
+impl PartialEq for SharedFlag {
+    fn eq(&self, other: &Self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            alloc::rc::Rc::ptr_eq(&self.0, &other.0)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            alloc::sync::Arc::ptr_eq(&self.0, &other.0)
+        }
+    }
+}
+
 /// Weak event sender for safe effect cleanup.
 ///
 /// `WeakSend<T>` wraps a weak reference to the send function so that
@@ -1441,5 +1534,67 @@ mod tests {
     fn no_cleanup_is_callable() {
         let cleanup = no_cleanup();
         cleanup(); // should not panic
+    }
+
+    // --- SharedFlag tests ---
+
+    #[test]
+    fn shared_flag_new_stores_initial_value() {
+        let flag_false = SharedFlag::new(false);
+        assert!(!flag_false.get());
+
+        let flag_true = SharedFlag::new(true);
+        assert!(flag_true.get());
+    }
+
+    #[test]
+    fn shared_flag_default_is_false() {
+        let flag = SharedFlag::default();
+        assert!(!flag.get());
+    }
+
+    #[test]
+    fn shared_flag_set_updates_value() {
+        let flag = SharedFlag::new(false);
+        flag.set(true);
+        assert!(flag.get());
+        flag.set(false);
+        assert!(!flag.get());
+    }
+
+    #[test]
+    fn shared_flag_clone_shares_state() {
+        let flag1 = SharedFlag::new(false);
+        let flag2 = flag1.clone();
+
+        flag2.set(true);
+        assert!(flag1.get());
+        assert!(flag2.get());
+
+        flag1.set(false);
+        assert!(!flag2.get());
+    }
+
+    #[test]
+    fn shared_flag_debug_shows_value() {
+        let flag = SharedFlag::new(true);
+        let debug = alloc::format!("{flag:?}");
+        assert_eq!(debug, "SharedFlag(true)");
+
+        flag.set(false);
+        let debug = alloc::format!("{flag:?}");
+        assert_eq!(debug, "SharedFlag(false)");
+    }
+
+    #[test]
+    fn shared_flag_partial_eq_by_pointer_identity() {
+        let flag1 = SharedFlag::new(false);
+        let flag2 = flag1.clone();
+        let flag3 = SharedFlag::new(false);
+
+        // Same allocation
+        assert_eq!(flag1, flag2);
+        // Different allocation (same value but different pointer)
+        assert_ne!(flag1, flag3);
     }
 }

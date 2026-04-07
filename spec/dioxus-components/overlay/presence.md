@@ -97,7 +97,7 @@ The adapter does not publish or consume framework context via `use_context_provi
 | `will-change` style           | animation setup phase                                              | presence instance + node | animation completes or component cleanup                 | remove `will-change` from element style        | web-only; frees GPU memory after animation                             |
 
 - All cleanup is synchronous during the framework's dispose lifecycle (`use_drop`).
-- The `completed` guard (`Rc<Cell<bool>>`) prevents any pending listener from firing after cleanup runs.
+- The `completed` guard (`SharedFlag`) prevents any pending listener from firing after cleanup runs.
 
 ## 9. Ref and Node Contract
 
@@ -336,7 +336,7 @@ pub fn use_presence(props: presence::Props) -> PresenceHandle {
     //      - 5000ms fallback timeout (all targets)
     //      - visibilitychange pause/resume (web)
     //      - will-change setup/teardown (web)
-    //      - completed guard (Rc<Cell<bool>>)
+    //      - completed guard (SharedFlag)
     //      - immediate completion on Desktop/Mobile if CSS animations unavailable
 
     // 4. Cleanup: synchronous in use_drop.

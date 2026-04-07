@@ -123,15 +123,16 @@ Press is the fundamental activation interaction: the user intends to activate so
 ```rust
 // ars-interactions/src/press.rs
 
-// `ars-interactions` is a `std` crate (not `no_std`), so import Rc from `std`
-// rather than `alloc` to avoid confusion about the crate's std dependency.
-use std::{cell::{Cell, RefCell}, rc::Rc, time::Duration};
+use std::time::Duration;
+use ars_core::{AttrMap, Callback, SharedFlag};
 use crate::PointerType;
-use ars_core::AttrMap;
 
 /// Configuration for press interaction behavior.
-// Manual Debug impl omitted for brevity — prints closures as "<closure>"
-#[derive(Clone)]
+///
+/// Callbacks use [`Callback`] (not raw `Rc`/`Arc`) for automatic
+/// platform-appropriate pointer type and built-in `Clone`, `Debug`,
+/// and `PartialEq` (by pointer identity).
+#[derive(Clone, Debug, PartialEq)]
 pub struct PressConfig {
     /// Whether the element is disabled. Disabled elements receive no press events.
     pub disabled: bool,
@@ -152,24 +153,24 @@ pub struct PressConfig {
     pub scroll_threshold_px: u16,
 
     /// Called when the element is pressed (pointer down AND within element).
-    pub on_press_start: Option<Rc<dyn Fn(PressEvent)>>,
+    pub on_press_start: Option<Callback<dyn Fn(PressEvent)>>,
 
     /// Called when press ends (pointer up, key up, or cancellation).
-    pub on_press_end: Option<Rc<dyn Fn(PressEvent)>>,
+    pub on_press_end: Option<Callback<dyn Fn(PressEvent)>>,
 
     /// Called on activation: pointer released inside the element, or Enter/Space
     /// released after having been pressed on this element.
-    pub on_press: Option<Rc<dyn Fn(PressEvent)>>,
+    pub on_press: Option<Callback<dyn Fn(PressEvent)>>,
 
     /// Called when the pointer's inside/outside state changes while a press is active.
     /// `true` = pointer re-entered the element; `false` = pointer exited.
-    pub on_press_change: Option<Rc<dyn Fn(bool)>>,
+    pub on_press_change: Option<Callback<dyn Fn(bool)>>,
 
     /// Fired when a press is released (pointer up / key up / touch end),
     /// regardless of whether the release was inside or outside the element.
     /// Distinct from `on_press_end` (fires on any press conclusion) and `on_press`
     /// (fires only for activations inside the element).
-    pub on_press_up: Option<Rc<dyn Fn(PressEvent)>>,
+    pub on_press_up: Option<Callback<dyn Fn(PressEvent)>>,
 
     /// Maximum duration to hold pointer capture before automatically releasing.
     /// Prevents stuck capture states caused by missed `pointerup` events (e.g.,
@@ -190,7 +191,7 @@ pub struct PressConfig {
     /// When set, the press handler checks this flag on `pointerup`. If `true`,
     /// the press activation (`on_press`) is suppressed because a long-press
     /// already fired. See §8.7 Cross-Interaction Cancellation Protocol.
-    pub long_press_cancel_flag: Option<Rc<Cell<bool>>>,
+    pub long_press_cancel_flag: Option<SharedFlag>,
 }
 
 impl Default for PressConfig {
@@ -243,9 +244,13 @@ Adapters MUST filter pointer events to process only the primary pointer, ignorin
 ```rust
 /// A normalized press event, independent of input modality.
 ///
-/// **Clone semantics:** Uses `Rc<Cell<bool>>` for propagation control so that
+/// **Clone semantics:** Uses [`SharedFlag`] for propagation control so that
 /// cloned events share the same propagation flag. Calling `continue_propagation()`
-/// on any clone affects the original and all other clones.
+/// on any clone affects the original and all other clones. `SharedFlag` is
+/// thread-safe on native targets (`Arc<AtomicBool>`) and lightweight on wasm
+/// (`Rc<Cell<bool>>`).
+/// Calling [`continue_propagation()`](Self::continue_propagation) on any
+/// clone affects the original and all other clones.
 #[derive(Clone, Debug)]
 pub struct PressEvent {
     /// How the press was initiated.
@@ -268,12 +273,13 @@ pub struct PressEvent {
     pub is_within_element: bool,
 
     /// When called, prevents the event handler from stopping propagation.
-    /// By default, press events stop propagation. Call this to allow
-    /// parent handlers to also receive the event.
+    /// By default, press events stop propagation. Call
+    /// [`continue_propagation()`](Self::continue_propagation) to allow parent
+    /// handlers to also receive the event.
     ///
-    /// Uses `Rc<Cell<bool>>` so cloned events share propagation state.
-    /// (A bare `Cell<bool>` would create independent copies on clone.)
-    pub continue_propagation: Rc<Cell<bool>>,
+    /// Uses [`SharedFlag`] so cloned events share propagation state across
+    /// threads on native targets.
+    pub continue_propagation: SharedFlag,
 }
 
 impl PressEvent {
@@ -288,7 +294,7 @@ impl PressEvent {
     }
 
     /// Creates a child event sharing propagation state with the parent.
-    /// The child event's `continue_propagation` points to the same Cell.
+    /// The child event's `continue_propagation` points to the same flag.
     pub fn create_child_event(&self) -> PressEvent {
         PressEvent {
             pointer_type: self.pointer_type,
@@ -297,34 +303,27 @@ impl PressEvent {
             client_y: self.client_y,
             modifiers: self.modifiers,
             is_within_element: self.is_within_element,
-            continue_propagation: Rc::clone(&self.continue_propagation),
+            continue_propagation: self.continue_propagation.clone(),
         }
     }
 }
 ```
 
-> **Safe Usage — `Rc<Cell<bool>>` Cycle Risk**
+> **Safe Usage — `SharedFlag` Cycle Risk**
 >
-> `PressEvent` uses `Rc<Cell<bool>>` for shared propagation state across cloned events.
+> `PressEvent` uses `SharedFlag` for shared propagation state across cloned events.
 > Event handlers MUST NOT capture `continue_propagation` in long-lived closures or
 > cleanup functions, as this creates reference cycles that prevent deallocation.
 > Extract the boolean value immediately:
 >
 > ```rust
 > let should_propagate = event.continue_propagation.get();
-> // Use should_propagate from here — do not hold the Rc.
+> // Use should_propagate from here — do not hold the SharedFlag.
 > ```
 >
-> For multi-threaded contexts (desktop adapters using Dioxus Desktop), consider
-> replacing `Rc<Cell<bool>>` with `Arc<AtomicBool>` behind a feature flag:
->
-> ```rust
-> #[cfg(feature = "threadsafe")]
-> pub continue_propagation: Arc<AtomicBool>,
->
-> #[cfg(not(feature = "threadsafe"))]
-> pub continue_propagation: Rc<Cell<bool>>,
-> ```
+> `SharedFlag` already handles the wasm/native split internally
+> (`Rc<Cell<bool>>` on wasm32, `Arc<AtomicBool>` on native). No manual
+> `cfg` switching is needed.
 
 ```rust
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -437,7 +436,7 @@ Transitions:
 
 ```rust
 /// The current state of the press state machine.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PressState {
     /// No active press.
     Idle,
@@ -2703,7 +2702,7 @@ When multiple interactions are composed on the same element, some interactions m
 
 **Cancellation contract:**
 
-1. **Shared cancellation flag:** When Press and LongPress are both connected to the same element, they share a `long_press_fired: Rc<Cell<bool>>` flag. This flag is created by the composition layer and passed to both interaction configs.
+1. **Shared cancellation flag:** When Press and LongPress are both connected to the same element, they share a `long_press_fired: SharedFlag` flag. This flag is created by the composition layer and passed to both interaction configs.
 
 2. **LongPress sets the flag:** When the long-press timer fires (transition from `Timing` to `LongPressed`), LongPress sets `long_press_fired = true`.
 
