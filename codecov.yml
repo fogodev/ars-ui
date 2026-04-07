@@ -1,0 +1,24 @@
+coverage:
+  status:
+    project:
+      default:
+        # Block merge if overall coverage decreases.
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        # New/changed lines should be well-covered.
+        target: 80%
+
+comment:
+  layout: "reach, diff, flags"
+  behavior: default
+  require_changes: true
+
+ignore:
+  - "xtask/**"
+  - "crates/ars-test-harness/**"
+  - "crates/ars-test-harness-leptos/**"
+  - "crates/ars-test-harness-dioxus/**"
+  - "crates/ars-derive/**"
+  - "spec/**"
