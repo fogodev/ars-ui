@@ -459,16 +459,20 @@ This mirrors how React Aria resolves calendar data through its `I18nProvider` an
 
 ```rust
 /// Text and layout direction.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Direction {
+    /// Left-to-right text direction (default for most Latin-script locales).
     #[default]
     Ltr,
+    /// Right-to-left text direction (used by Arabic, Hebrew, and related scripts).
     Rtl,
+    /// Automatic direction detection (resolved by the platform adapter before use).
     Auto,
 }
 
 impl Direction {
     /// CSS `direction` value.
+    #[must_use]
     pub fn as_css(&self) -> &'static str {
         match self {
             Direction::Ltr => "ltr",
@@ -478,10 +482,13 @@ impl Direction {
     }
 
     /// HTML `dir` attribute value.
+    #[must_use]
     pub fn as_html_attr(&self) -> &'static str {
         self.as_css()
     }
 
+    /// Returns `true` if this direction is right-to-left.
+    #[must_use]
     pub fn is_rtl(&self) -> bool {
         *self == Direction::Rtl
     }
@@ -489,6 +496,7 @@ impl Direction {
     /// Flip a side for RTL.
     ///
     /// In RTL, "start" maps to right, "end" maps to left.
+    #[must_use]
     pub fn inline_start_is_right(&self) -> bool {
         self.is_rtl()
     }
@@ -594,15 +602,15 @@ When truncating text that contains mixed scripts (e.g., Arabic text with embedde
 
 5. **CSS-Based Truncation in RTL Contexts**: When truncation is handled via CSS (e.g., single-line labels in constrained layouts), adapters MUST emit the following CSS properties when the text direction is RTL and truncation is enabled:
 
-   ```css
-   /* Applied to the container element */
-   direction: rtl;
-   text-overflow: ellipsis;
-   overflow: hidden;
-   white-space: nowrap;
-   ```
+    ```css
+    /* Applied to the container element */
+    direction: rtl;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+    ```
 
-   This ensures the browser's native text truncation places the ellipsis on the correct (visually left) side for RTL text. For mixed-script content (e.g., an Arabic label containing an English brand name), the `direction: rtl` on the container combined with `text-overflow: ellipsis` handles the common case. For fine-grained control over mixed-direction truncation, use the programmatic approach (items 1-4 above) instead of CSS truncation.
+    This ensures the browser's native text truncation places the ellipsis on the correct (visually left) side for RTL text. For mixed-script content (e.g., an Arabic label containing an English brand name), the `direction: rtl` on the container combined with `text-overflow: ellipsis` handles the common case. For fine-grained control over mixed-direction truncation, use the programmatic approach (items 1-4 above) instead of CSS truncation.
 
 #### 3.2.2 Grapheme-Safe BiDi Isolation
 

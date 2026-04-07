@@ -10,7 +10,7 @@ extern crate alloc;
 
 use alloc::string::String;
 
-/// The text flow direction of a locale.
+/// Text and layout direction.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Direction {
     /// Left-to-right text direction (default for most Latin-script locales).
@@ -18,6 +18,40 @@ pub enum Direction {
     Ltr,
     /// Right-to-left text direction (used by Arabic, Hebrew, and related scripts).
     Rtl,
+    /// Automatic direction detection (resolved by the platform adapter before use).
+    Auto,
+}
+
+impl Direction {
+    /// CSS `direction` value.
+    #[must_use]
+    pub fn as_css(&self) -> &'static str {
+        match self {
+            Direction::Ltr => "ltr",
+            Direction::Rtl => "rtl",
+            Direction::Auto => "auto",
+        }
+    }
+
+    /// HTML `dir` attribute value.
+    #[must_use]
+    pub fn as_html_attr(&self) -> &'static str {
+        self.as_css()
+    }
+
+    /// Returns `true` if this direction is right-to-left.
+    #[must_use]
+    pub fn is_rtl(&self) -> bool {
+        *self == Direction::Rtl
+    }
+
+    /// Flip a side for RTL.
+    ///
+    /// In RTL, "start" maps to right, "end" maps to left.
+    #[must_use]
+    pub fn inline_start_is_right(&self) -> bool {
+        self.is_rtl()
+    }
 }
 
 /// The layout axis for components that arrange children along a single direction.
@@ -112,5 +146,43 @@ impl DateRange {
     #[must_use]
     pub fn to_iso8601(&self) -> String {
         String::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn direction_default_is_ltr() {
+        assert_eq!(Direction::default(), Direction::Ltr);
+    }
+
+    #[test]
+    fn direction_as_css_values() {
+        assert_eq!(Direction::Ltr.as_css(), "ltr");
+        assert_eq!(Direction::Rtl.as_css(), "rtl");
+        assert_eq!(Direction::Auto.as_css(), "auto");
+    }
+
+    #[test]
+    fn direction_as_html_attr_matches_css() {
+        assert_eq!(Direction::Ltr.as_html_attr(), "ltr");
+        assert_eq!(Direction::Rtl.as_html_attr(), "rtl");
+        assert_eq!(Direction::Auto.as_html_attr(), "auto");
+    }
+
+    #[test]
+    fn direction_is_rtl() {
+        assert!(!Direction::Ltr.is_rtl());
+        assert!(Direction::Rtl.is_rtl());
+        assert!(!Direction::Auto.is_rtl());
+    }
+
+    #[test]
+    fn direction_inline_start_is_right() {
+        assert!(!Direction::Ltr.inline_start_is_right());
+        assert!(Direction::Rtl.inline_start_is_right());
+        assert!(!Direction::Auto.inline_start_is_right());
     }
 }

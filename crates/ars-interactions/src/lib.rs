@@ -5,12 +5,14 @@
 //! from multiple interaction sources into a single [`ars_core::AttrMap`].
 
 pub mod compose;
+pub mod direction;
 
 pub use ars_core::{
     DefaultModalityContext, KeyModifiers, KeyboardKey, ModalityContext, ModalitySnapshot,
     NullModalityContext, PointerType,
 };
 pub use compose::merge_attrs;
+pub use direction::{LogicalDirection, resolve_arrow_key};
 
 /// The current state of the press state machine.
 #[derive(Clone, Debug, Default, PartialEq)]
