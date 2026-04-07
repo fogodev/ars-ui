@@ -40,16 +40,16 @@ The project needs a fully stable foundation before component work starts. Compon
 
 **Goal:** Enable Button, VisuallyHidden, and Separator — the simplest components.
 
-**Parallelism:** #55, #56, #57, and #61 can all run in parallel. #58, #59, and #60 depend on #57.
+**Parallelism:** #55, #56, and #61 can all run in parallel. The original `#57` thread-local modality task is superseded by #90. #58, #59, and #60 depend on #90.
 
 | GitHub                                             | Title                                                                                      | Points | Epic | Deps |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------ | ---- | ---- |
 | [#55](https://github.com/fogodev/ars-ui/issues/55) | Implement `attr_map_to_leptos` and `use_style_strategy` in ars-leptos                      | 3      | #8   | —    |
 | [#56](https://github.com/fogodev/ars-ui/issues/56) | Implement `attr_map_to_dioxus`, `intern_attr_name`, and `use_style_strategy` in ars-dioxus | 3      | #9   | —    |
-| [#57](https://github.com/fogodev/ars-ui/issues/57) | Implement global input modality tracking in ars-interactions                               | 2      | #4   | —    |
-| [#58](https://github.com/fogodev/ars-ui/issues/58) | Implement Press interaction state machine in ars-interactions                              | 5      | #4   | #57  |
-| [#59](https://github.com/fogodev/ars-ui/issues/59) | Implement Hover interaction state machine in ars-interactions                              | 2      | #4   | #57  |
-| [#60](https://github.com/fogodev/ars-ui/issues/60) | Implement Focus and FocusWithin interactions in ars-interactions                           | 3      | #4   | #57  |
+| [#57](https://github.com/fogodev/ars-ui/issues/57) | Superseded thread-local modality task in ars-interactions                                  | 2      | #4   | —    |
+| [#58](https://github.com/fogodev/ars-ui/issues/58) | Implement Press interaction state machine in ars-interactions                              | 5      | #4   | #90  |
+| [#59](https://github.com/fogodev/ars-ui/issues/59) | Implement Hover interaction state machine in ars-interactions                              | 2      | #4   | #90  |
+| [#60](https://github.com/fogodev/ars-ui/issues/60) | Implement Focus and FocusWithin interactions in ars-interactions                           | 3      | #4   | #90  |
 | [#61](https://github.com/fogodev/ars-ui/issues/61) | Implement LogicalDirection and resolve_arrow_key in ars-interactions                       | 1      | #4   | —    |
 
 **Total:** 19 points
@@ -111,7 +111,7 @@ The project needs a fully stable foundation before component work starts. Compon
   - `dioxus_attrs!` macro.
 - Spec impact: `No spec change required`.
 
-#### W1-3: Implement global input modality tracking in ars-interactions
+#### W1-3: Superseded thread-local modality task in ars-interactions
 
 - Points: `2`
 - Layer: `Subsystem`
@@ -119,23 +119,15 @@ The project needs a fully stable foundation before component work starts. Compon
 - Test tier: `Unit`
 - Depends on: none
 - Spec refs:
-  - `spec/foundation/05-interactions.md` §4.4 "Focus Visible Detection: Global Modality Tracking" (L1135)
+  - `spec/foundation/05-interactions.md` §4.4 "Focus Visible Detection: Shared Modality Tracking" (L1135)
   - `spec/foundation/05-interactions.md` §3.4 "Integration with Press" (L881)
-- Goal: implement the thread-local state tracking infrastructure required by all interaction primitives.
-- Files to create/modify: `crates/ars-interactions/src/modality.rs` (new), wire into `crates/ars-interactions/src/lib.rs`
-- Tests to add first:
-  - Unit tests for `set_last_pointer_type()` / `last_pointer_type()` round-trip.
-  - Unit tests for `had_pointer_interaction()` returning true after pointer event, false after keyboard.
-  - Unit tests for `set_global_press_active()` / `is_global_press_active()` flag.
-  - Unit tests for `ensure_modality_listeners()` / `remove_modality_listeners()` ref-counting (count increments/decrements correctly, hits zero on last remove).
+- Goal: historical only. The old thread-local design is superseded by #90 and should not be implemented independently.
+- Files to create/modify: none
+- Tests to add first: none
 - Acceptance criteria:
-  - Thread-local statics: `LAST_POINTER_TYPE`, `GLOBAL_PRESS_ACTIVE`, `MODALITY_LISTENERS_INSTALLED`, `MODALITY_LISTENER_REFCOUNT`.
-  - `ensure_modality_listeners()` with ref-counted install and Web Worker guard (`js_sys::Reflect::has`).
-  - `remove_modality_listeners()` with ref-counted cleanup.
-  - `had_pointer_interaction() -> bool`, `last_pointer_type() -> Option<PointerType>`, `set_last_pointer_type(PointerType)`.
-  - `set_global_press_active(bool)` and `is_global_press_active() -> bool`.
-  - Web APIs gated behind `#[cfg(target_arch = "wasm32")]`.
-- Spec impact: `No spec change required`.
+  - This task remains unimplemented.
+  - All modality work is redirected to #90.
+- Spec impact: `No separate spec work; see #90`.
 
 #### W1-4: Implement Press interaction state machine in ars-interactions
 
@@ -143,7 +135,7 @@ The project needs a fully stable foundation before component work starts. Compon
 - Layer: `Subsystem`
 - Framework: `None`
 - Test tier: `Unit`
-- Depends on: #57
+- Depends on: #90
 - Spec refs:
   - `spec/foundation/05-interactions.md` §2 "Press Interaction" (L115)
   - `spec/foundation/05-interactions.md` §2.2 "Types" (L121)
@@ -156,7 +148,7 @@ The project needs a fully stable foundation before component work starts. Compon
   - Unit tests for disabled config suppressing all transitions.
   - Unit tests for touch scroll cancellation via `scroll_threshold_px`.
   - Unit tests for `current_attrs()` producing `data-ars-pressed` and `data-ars-disabled`.
-  - Unit tests for `GLOBAL_PRESS_ACTIVE` integration (set on press start, cleared on press end).
+  - Unit tests for shared modality `global_press_active` integration (set on press start, cleared on press end).
 - Acceptance criteria:
   - `PressConfig` with all fields per spec §2.2: `disabled`, `prevent_text_selection`, `allow_press_on_exit`, `scroll_threshold_px`, `on_press_start/end/press/change/up`, `pointer_capture_timeout`, `long_press_cancel_flag`.
   - `PressEvent` with `pointer_type`, `event_type`, `client_x/y`, `modifiers: KeyModifiers`, `is_within_element`, `continue_propagation: Rc<Cell<bool>>`.
@@ -172,7 +164,7 @@ The project needs a fully stable foundation before component work starts. Compon
 - Layer: `Subsystem`
 - Framework: `None`
 - Test tier: `Unit`
-- Depends on: #57
+- Depends on: #90
 - Spec refs:
   - `spec/foundation/05-interactions.md` §3 "Hover Interaction" (L796)
   - `spec/foundation/05-interactions.md` §3.2 "Types" (L802)
@@ -184,7 +176,7 @@ The project needs a fully stable foundation before component work starts. Compon
 - Tests to add first:
   - Unit tests for NotHovered → Hovered on mouse/pen enter, Hovered → NotHovered on leave.
   - Unit tests for touch and keyboard events being ignored.
-  - Unit tests for hover suppression when `GLOBAL_PRESS_ACTIVE` is true.
+  - Unit tests for hover suppression when shared modality `global_press_active` is true.
   - Unit tests for disabled config suppressing transitions.
   - Unit tests for `current_attrs()` producing `data-ars-hovered`.
 - Acceptance criteria:
@@ -202,7 +194,7 @@ The project needs a fully stable foundation before component work starts. Compon
 - Layer: `Subsystem`
 - Framework: `None`
 - Test tier: `Unit`
-- Depends on: #57
+- Depends on: #90
 - Spec refs:
   - `spec/foundation/05-interactions.md` §4 "Focus Interaction" (L995)
   - `spec/foundation/05-interactions.md` §4.2 "Types" (L1011)
@@ -489,18 +481,21 @@ The project needs a fully stable foundation before component work starts. Compon
 
 **Depends on:** Wave 2 complete.
 
-**Parallelism:** All Wave 3 tasks can run in parallel.
+**Parallelism:** #70, #71, #73, #74, #75, #88, and #90 can run in parallel. #89 depends on #90. #72 depends on #90 and #89.
 
-| GitHub                                             | Title                                                                | Points | Epic | Deps     |
-| -------------------------------------------------- | -------------------------------------------------------------------- | ------ | ---- | -------- |
-| [#70](https://github.com/fogodev/ars-ui/issues/70) | Implement type-ahead / type-select state machine in ars-collections  | 3      | #53  | #63      |
-| [#71](https://github.com/fogodev/ars-ui/issues/71) | Implement CollectionBuilder in ars-collections                       | 3      | #53  | #62, #63 |
-| [#72](https://github.com/fogodev/ars-ui/issues/72) | Implement ModalityManager for overlay stacking in ars-dom            | 3      | #6   | #69      |
-| [#73](https://github.com/fogodev/ars-ui/issues/73) | Implement LiveAnnouncer for screen reader announcements              | 3      | #3   | —        |
-| [#74](https://github.com/fogodev/ars-ui/issues/74) | Implement scroll_into_view_if_needed with Safari fallback in ars-dom | 3      | #6   | —        |
-| [#75](https://github.com/fogodev/ars-ui/issues/75) | Replace ars-i18n Locale stub with ICU4X-backed implementation        | 5      | #54  | —        |
+| GitHub                                             | Title                                                                       | Points | Epic | Deps     |
+| -------------------------------------------------- | --------------------------------------------------------------------------- | ------ | ---- | -------- |
+| [#70](https://github.com/fogodev/ars-ui/issues/70) | Implement type-ahead / type-select state machine in ars-collections         | 3      | #53  | #63      |
+| [#71](https://github.com/fogodev/ars-ui/issues/71) | Implement CollectionBuilder in ars-collections                              | 3      | #53  | #62, #63 |
+| [#90](https://github.com/fogodev/ars-ui/issues/90) | Introduce shared ModalityContext in ars-core and migrate modality contracts | 5      | #4   | —        |
+| [#89](https://github.com/fogodev/ars-ui/issues/89) | Integrate FocusRing with shared modality event stream in ars-a11y           | 2      | #3   | #90      |
+| [#72](https://github.com/fogodev/ars-ui/issues/72) | Implement web ModalityManager listener ownership in ars-dom                 | 2      | #6   | #90, #89 |
+| [#88](https://github.com/fogodev/ars-ui/issues/88) | Implement overlay stack registry for nested overlay dismissal in ars-dom    | 3      | #6   | #68, #69 |
+| [#73](https://github.com/fogodev/ars-ui/issues/73) | Implement LiveAnnouncer for screen reader announcements                     | 3      | #3   | —        |
+| [#74](https://github.com/fogodev/ars-ui/issues/74) | Implement scroll_into_view_if_needed with Safari fallback in ars-dom        | 3      | #6   | —        |
+| [#75](https://github.com/fogodev/ars-ui/issues/75) | Replace ars-i18n Locale stub with ICU4X-backed implementation               | 5      | #54  | —        |
 
-**Total:** 20 points
+**Total:** 29 points
 
 ---
 
@@ -555,28 +550,105 @@ The project needs a fully stable foundation before component work starts. Compon
   - Level tracking for nested sections.
 - Spec impact: `No spec change required`.
 
-#### W3-3: Implement ModalityManager for overlay stacking in ars-dom
+#### W3-3core: Introduce shared ModalityContext in ars-core and migrate modality contracts
+
+- Points: `5`
+- Layer: `Core`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: none
+- Spec refs:
+  - `spec/foundation/01-architecture.md` §2.2.7 "PlatformEffects Trait" and §6.4 "ArsProvider"
+  - `spec/foundation/05-interactions.md` §3.4 "Integration with Press"
+  - `spec/foundation/05-interactions.md` §4.4 "Focus Visible Detection: Shared Modality Tracking"
+- Goal: replace the old `ars-interactions` thread-local design with the shared provider-scoped `ModalityContext` contract in `ars-core`.
+- Files to create/modify: `crates/ars-core/src/modality.rs` (new), `crates/ars-core/src/lib.rs`, `crates/ars-core/src/provider.rs`, `crates/ars-interactions/src/lib.rs`, `crates/ars-interactions/Cargo.toml`
+- Tests to add first:
+  - Unit tests for `DefaultModalityContext` startup state and per-instance isolation.
+  - Unit tests for keyboard, pointer, and virtual modality updates.
+  - Unit tests for `set_global_press_active()` / `is_global_press_active()` semantics.
+  - Unit tests for `FocusState::is_focus_visible()` consulting injected modality instead of ambient globals.
+- Acceptance criteria:
+  - `ars-core` exposes `PointerType`, `KeyModifiers`, `KeyboardKey`, `ModalitySnapshot`, `ModalityContext`, `DefaultModalityContext`, and `NullModalityContext`.
+  - Modality state is instance-scoped and provider-friendly, not thread-local.
+  - `ArsContext` exposes a shared `Rc<dyn ModalityContext>` alongside `PlatformEffects`.
+  - `ars-interactions` re-exports the shared modality types and no longer owns DOM listener installation.
+- Spec impact: `Update architecture/interactions/provider specs in the same task`.
+
+#### W3-3a: Integrate FocusRing with shared modality event stream in ars-a11y
+
+- Points: `2`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: #90
+- Spec refs:
+  - `spec/foundation/03-accessibility.md` §3.4 "FocusRing" (L1591)
+  - `spec/foundation/05-interactions.md` §4.4 "Focus Visible Detection: Shared Modality Tracking" (L1135)
+- Goal: align `FocusRing` with the shared modality event stream without making it responsible for platform listener ownership.
+- Files to create/modify: `crates/ars-a11y/src/focus.rs`, `crates/ars-a11y/src/lib.rs`
+- Tests to add first:
+  - Unit tests for `on_pointer_down()` clearing keyboard modality.
+  - Unit tests for `on_key_down()` enabling keyboard modality only for navigation keys.
+  - Unit tests for ctrl/meta/alt-modified key chords being ignored.
+  - Unit tests for `on_virtual_input()` and `apply_focus_attrs()` semantics.
+- Acceptance criteria:
+  - `FocusRing` consumes the same normalized key/pointer/virtual events as `ModalityContext`.
+  - `FocusRing` remains separate from `PlatformEffects` and DOM listener installation.
+  - `should_show_focus_ring()` and `apply_focus_attrs()` match the updated spec contract.
+- Spec impact: `Keep accessibility spec aligned with the shared-modality architecture`.
+
+#### W3-3b: Implement web ModalityManager listener ownership in ars-dom
+
+- Points: `2`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: #90, #89
+- Spec refs:
+  - `spec/foundation/11-dom-utilities.md` §8 "Modality Manager" (L2531)
+  - `spec/foundation/05-interactions.md` §4.4 "Focus Visible Detection: Shared Modality Tracking" (L1135)
+  - `spec/foundation/03-accessibility.md` §3.4 "FocusRing" (L1591)
+- Goal: implement the browser listener layer that keeps `ModalityContext` and `FocusRing` synchronized through a single adapter-facing API.
+- Files to create/modify: `crates/ars-dom/src/modality.rs` (new), `crates/ars-dom/src/lib.rs` (wire new module), `crates/ars-dom/Cargo.toml`
+- Tests to add first:
+  - Unit tests for `on_key_down()` updating both `ModalityContext` and `FocusRing`.
+  - Unit tests for `on_pointer_down()` updating both trackers atomically.
+  - Unit tests for `on_virtual_input()` semantics.
+  - Unit tests for refcounted listener install/remove transitions and host-build safety.
+- Acceptance criteria:
+  - `ModalityManager` holds `Rc<dyn ModalityContext>` plus `FocusRing`.
+  - `on_key_down(key, modifiers)`, `on_pointer_down(pointer_type)`, and `on_virtual_input()` fan out to both consumers.
+  - `ensure_listeners()` / `remove_listeners()` own browser listener installation and cleanup.
+  - Browser listener lifecycle is refcounted, document-guarded, and no-op outside web DOM environments.
+  - `focus_ring(&self) -> &FocusRing`.
+  - Adapter-facing API matches the spec and replaces direct tracker updates.
+- Spec impact: `No spec change required beyond the shared-modality migration`.
+
+#### W3-3c: Implement overlay stack registry for nested overlay dismissal in ars-dom
 
 - Points: `3`
 - Layer: `Subsystem`
 - Framework: `None`
 - Test tier: `Unit`
-- Depends on: #69
+- Depends on: #68, #69
 - Spec refs:
-  - `spec/foundation/11-dom-utilities.md` §8 "Modality Manager" (L2531)
-- Goal: track the overlay stack for modal/non-modal overlays.
-- Files to create/modify: `crates/ars-dom/src/modality.rs` (new)
+  - `spec/foundation/05-interactions.md` §12.8 "Nested Overlay Handling" (L4105)
+  - `spec/foundation/11-dom-utilities.md` §6.3 "Usage Pattern" (L2331)
+  - `spec/foundation/11-dom-utilities.md` §6.3.1 "Z-Index Ranges and Adapter Scope" (L2355)
+- Goal: implement the overlay stack registry used to determine topmost overlay ordering and nested overlay dismissal behavior.
+- Files to create/modify: `crates/ars-dom/src/overlay_stack.rs` (new), `crates/ars-dom/src/lib.rs` (wire new module)
 - Tests to add first:
   - Unit tests for push/pop overlay stack operations.
   - Unit tests for modal vs non-modal distinction.
-  - Unit tests for `is_top_modal()` check.
-  - Unit tests for LIFO dismiss ordering.
-  - Unit tests for nested modal scenarios.
+  - Unit tests for topmost overlay detection.
+  - Unit tests for LIFO close ordering.
+  - Unit tests for nested overlay scenarios where child overlays suppress parent dismissal.
 - Acceptance criteria:
-  - Overlay stack tracking (push/pop).
-  - Modal vs non-modal distinction.
-  - `is_top_modal()` check.
-  - LIFO dismiss ordering.
+  - Global overlay stack registration and deregistration API.
+  - Modal vs non-modal overlay metadata.
+  - Topmost overlay lookup for outside-interaction and Escape-key dismissal.
+  - Nested overlay ordering consistent with monotonic z-index allocation.
 - Spec impact: `No spec change required`.
 
 #### W3-4: Implement LiveAnnouncer for screen reader announcements
@@ -900,7 +972,8 @@ Wave 1 (19 pts)
   #55 (leptos attrs, 3)  ──────────────────────────────────┐
   #56 (dioxus attrs, 3)  ──────────────────────────────────┤
   #61 (arrow keys, 1)    ──────────────────────────────────┤
-  #57 (modality, 2)                                        │
+  #57 (superseded, 2)                                      │
+  #90 (shared modality, 5)  ───────────────────────────────┤
     ├─→ #58 (press, 5)   ──────────────────────────────────┤
     ├─→ #59 (hover, 2)   ──────────────────────────────────┤
     └─→ #60 (focus, 3)   ──────────────────────────────────┤
@@ -916,10 +989,12 @@ Wave 2 (29 pts)                              ┌─── Wave 1 complete
     └─→ #69 (portal/inert, 3)
                             │
                             ▼
-Wave 3 (20 pts)            ┌─── Wave 2 complete
+Wave 3 (25 pts)            ┌─── Wave 2 complete
   #70 (type-ahead, 3)      │
   #71 (builder, 3)         │
-  #72 (modality mgr, 3)    │
+  #89 (focus ring, 3)      │
+  #72 (modality mgr, 2)    │
+  #88 (overlay stack, 3)   │
   #73 (announcer, 3)       │
   #74 (scroll view, 3)     │
   #75 (ICU4X locale, 5)    │
@@ -944,15 +1019,15 @@ Wave 4 (50 pts)            ┌─── Wave 3 complete
 
 ## Epic Mapping
 
-| Epic           | Issue | Tasks covered                               |
-| -------------- | ----- | ------------------------------------------- |
-| Interactions   | #4    | #57, #58, #59, #60, #61, #65, #76, #77, #78 |
-| DOM utilities  | #6    | #66, #67, #68, #69, #72, #74, #85           |
-| Leptos adapter | #8    | #55                                         |
-| Dioxus adapter | #9    | #56                                         |
-| A11y           | #3    | #73                                         |
-| Collections    | #53   | #62, #63, #64, #70, #71, #81, #82, #83, #84 |
-| I18n           | #54   | #75, #79, #80                               |
+| Epic           | Issue | Tasks covered                                    |
+| -------------- | ----- | ------------------------------------------------ |
+| Interactions   | #4    | #57, #58, #59, #60, #61, #65, #76, #77, #78, #90 |
+| DOM utilities  | #6    | #66, #67, #68, #69, #72, #74, #85, #88           |
+| Leptos adapter | #8    | #55                                              |
+| Dioxus adapter | #9    | #56                                              |
+| A11y           | #3    | #73, #89                                         |
+| Collections    | #53   | #62, #63, #64, #70, #71, #81, #82, #83, #84      |
+| I18n           | #54   | #75, #79, #80                                    |
 
 ## Post-Foundation Plan
 
@@ -969,6 +1044,6 @@ After all four waves are complete:
 | --------- | ------ | ------- | -------------------------------------------------------- |
 | Wave 1    | 7      | 19      | Button, VisuallyHidden, Separator                        |
 | Wave 2    | 8      | 29      | Select, Combobox, Menu, Listbox, Dialog, Popover         |
-| Wave 3    | 6      | 20      | Tooltip, DatePicker prerequisites, accessibility         |
+| Wave 3    | 8      | 25      | Tooltip, DatePicker prerequisites, accessibility         |
 | Wave 4    | 10     | 50      | All remaining components (Slider, TreeView, Table, etc.) |
-| **Total** | **31** | **118** | **Complete foundation for all 112 components**           |
+| **Total** | **33** | **123** | **Complete foundation for all 112 components**           |

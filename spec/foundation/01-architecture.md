@@ -1356,6 +1356,8 @@ impl<M: Machine> PendingEffect<M> {
 
 Effect closures must be **platform-agnostic** — they MUST NOT call DOM APIs (`web_sys`, `ars_dom`) directly. Instead, all platform-specific operations (focus, timers, announcements, positioning, scroll lock) go through the `PlatformEffects` trait, resolved from the adapter's framework context.
 
+Ambient input modality tracking is a separate concern. It does **not** belong on `PlatformEffects` because it is shared provider state rather than a machine-triggered side-effect surface. The shared `ModalityContext` lives in `ars-core`, is injected through `ArsProvider`, and is fed by platform-specific listener implementations such as `ars-dom::ModalityManager`.
+
 ```rust
 // ars-core/src/platform.rs
 
@@ -4607,13 +4609,13 @@ Child component (e.g., Trigger):
 ### 6.4 ArsProvider
 
 `ArsProvider` is the **single root provider** for the ars-ui library. It supplies shared
-configuration, platform capabilities, i18n resources, and style strategy to all descendant
+configuration, platform capabilities, provider-scoped modality state, i18n resources, and style strategy to all descendant
 components. It MUST be rendered at (or near) the application root.
 
 `ArsProvider` subsumes the formerly separate `LocaleProvider`, `PlatformEffectsProvider`,
 `IcuProvider`, `I18nProvider`, and `ArsStyleProvider`. Components access configuration
 via `ArsContext` fields and convenience hooks (e.g., `use_locale()`,
-`use_platform_effects()`, `use_style_strategy()`).
+`use_platform_effects()`, `use_modality_context()`, `use_style_strategy()`).
 
 #### 6.4.1 ColorMode
 
@@ -4641,6 +4643,7 @@ pub enum ColorMode {
 | `portal_container_id` | `Option<String>`                            | ID of the container element for portal mounts. `None` means platform default.  |
 | `root_node_id`        | `Option<String>`                            | ID of the root node for focus scope and portal queries. `None` means default.  |
 | `platform`            | `Rc<dyn PlatformEffects>`                   | Platform capabilities for side effects. Defaults to `NullPlatformEffects`.     |
+| `modality`            | `Rc<dyn ModalityContext>`                   | Shared input-modality state for the current provider root.                     |
 | `icu_provider`        | `Arc<dyn IcuProvider>`                      | Calendar/locale data for date-time components. Defaults to `StubIcuProvider`.  |
 | `i18n_registries`     | `Rc<I18nRegistries>`                        | Per-component translation registries. Defaults to empty (English fallbacks).   |
 | `style_strategy`      | `StyleStrategy`                             | CSS style injection strategy. Defaults to `StyleStrategy::Inline`.             |
@@ -4650,6 +4653,7 @@ hooks read from `ArsContext` with fallback defaults:
 
 - `use_locale()` — locale, falls back to `en-US`
 - `use_platform_effects()` — platform capabilities
+- `use_modality_context()` — shared input-modality state
 - `use_icu_provider()` — calendar/locale data
 - `use_style_strategy()` — CSS style strategy, falls back to `Inline`
 - `resolve_messages::<M>()` — translation registries

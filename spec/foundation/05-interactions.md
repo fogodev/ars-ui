@@ -59,7 +59,7 @@ Composition works at two levels:
 
 **Level 1 — Attrs merging**: Each interaction's `connect` function returns an `AttrMap` set plus typed handler methods. The `merge_attrs` utility (§8) combines multiple `AttrMap` sets onto a single element, unioning data attributes and styles without collision. Event handlers are composed separately via typed methods on per-component `Api` structs.
 
-**Level 2 — Interaction awareness**: Interactions are designed to be mutually aware. For example, `hover` suppresses hover state while a `press` is active (because touch devices fire both `pointerdown` and `mouseover`). `focus_visible` tracks the last pointer type globally to decide whether focus rings should appear. These cross-cutting concerns are handled via shared thread-local state in `ars-interactions`, not by the component author.
+**Level 2 — Interaction awareness**: Interactions are designed to be mutually aware. For example, `hover` suppresses hover state while a `press` is active (because touch devices fire both `pointerdown` and `mouseover`). `focus_visible` consults the shared `ModalityContext` to decide whether focus rings should appear. These cross-cutting concerns are handled via provider-scoped shared state, not by the component author.
 
 ```text
 Button element
@@ -563,27 +563,27 @@ When ars-ui components are used inside Shadow DOM (e.g., web components wrapping
 > ```js
 > // Complete requestIdleCallback polyfill using MessageChannel + requestAnimationFrame fallback.
 > const scheduleIdle = (() => {
->   if (typeof window.requestIdleCallback === "function") {
->     return (fn) => window.requestIdleCallback(fn);
->   }
->   // MessageChannel-based polyfill: posts a message that fires as a macrotask, bypassing the >= 4ms clamping of setTimeout(fn, 0).
->   const channel = new MessageChannel();
->   const queue = [];
->   channel.port1.onmessage = () => {
->     const fn = queue.shift();
->     if (fn) fn({ timeRemaining: () => 0, didTimeout: false });
->   };
->   return (fn) => {
->     queue.push(fn);
->     channel.port2.postMessage(null);
->   };
+>     if (typeof window.requestIdleCallback === "function") {
+>         return (fn) => window.requestIdleCallback(fn);
+>     }
+>     // MessageChannel-based polyfill: posts a message that fires as a macrotask, bypassing the >= 4ms clamping of setTimeout(fn, 0).
+>     const channel = new MessageChannel();
+>     const queue = [];
+>     channel.port1.onmessage = () => {
+>         const fn = queue.shift();
+>         if (fn) fn({ timeRemaining: () => 0, didTimeout: false });
+>     };
+>     return (fn) => {
+>         queue.push(fn);
+>         channel.port2.postMessage(null);
+>     };
 > })();
 >
 > // Cancel polyfill (no-op for MessageChannel variant — the polyfill does not return a cancellable handle.)
 > const cancelIdle =
->   typeof window.cancelIdleCallback === "function"
->     ? (id) => window.cancelIdleCallback(id)
->     : () => {};
+>     typeof window.cancelIdleCallback === "function"
+>         ? (id) => window.cancelIdleCallback(id)
+>         : () => {};
 > ```
 >
 > **Browser Quirk:** `ResizeObserver` can fire a "ResizeObserver loop limit exceeded" error when an observation callback triggers layout changes that in turn trigger additional observations. This is benign in most cases and does not indicate a real error. Adapters should suppress this at the application root: `window.addEventListener('error', (e) => { if (e.message?.includes('ResizeObserver')) e.stopPropagation(); });`. Components using `ResizeObserver` (e.g., positioning engine, overflow detection) should also guard against infinite loops by deferring layout-triggering updates with `requestAnimationFrame`. Components using `ResizeObserver` that trigger layout changes in the callback MUST defer those changes with `requestAnimationFrame` to break the observation→layout→observation loop.
@@ -657,10 +657,10 @@ When ars-ui components are used inside Shadow DOM (e.g., web components wrapping
 >
 > ```js
 > requestAnimationFrame(() => {
->   requestAnimationFrame(() => {
->     const duration = getComputedStyle(el).animationDuration;
->     // Now safe to read
->   });
+>     requestAnimationFrame(() => {
+>         const duration = getComputedStyle(el).animationDuration;
+>         // Now safe to read
+>     });
 > });
 > ```
 >
@@ -880,26 +880,20 @@ impl HoverState {
 
 ### 3.4 Integration with Press
 
-`ars-interactions` maintains thread-local state tracking whether any press interaction is currently active globally (any element on the page). When `HoverState` is `Hovered` and a global press begins — for example, from touch, which fires `pointerover` on iOS before `pointerdown` — the hover interaction immediately transitions to `NotHovered`. This prevents stale hover highlights on mobile.
+`ars-interactions` reads shared instance-scoped modality state from `ars-core::ModalityContext`. When `HoverState` is `Hovered` and a global press begins — for example, from touch, which fires `pointerover` on iOS before `pointerdown` — the hover interaction immediately transitions to `NotHovered`. This prevents stale hover highlights on mobile while keeping the state isolated to a single provider root instead of a process-global singleton.
 
 ```rust
-// Module-level (thread_local) press tracking:
-thread_local! {
-    static GLOBAL_PRESS_ACTIVE: Cell<bool> = Cell::new(false);
-    static LAST_POINTER_TYPE: Cell<PointerType> = Cell::new(PointerType::Mouse);
-    static MODALITY_LISTENERS_INSTALLED: Cell<bool> = Cell::new(false);
-    /// Reference count for modality listener consumers. When this reaches 0,
-    /// `remove_modality_listeners()` detaches all document-level event handlers.
-    static MODALITY_LISTENER_REFCOUNT: Cell<u32> = Cell::new(0);
+use ars_core::ModalityContext;
+
+/// Hover integration reads the shared modality snapshot instead of a thread-local.
+fn should_clear_hover(modality: &dyn ModalityContext) -> bool {
+    modality.is_global_press_active()
 }
 
-/// Returns `true` if the most recent pointer interaction was a mouse, touch, or pen
-/// (as opposed to keyboard). Used by `FocusState::is_focus_visible()` to suppress
-/// the focus ring after pointer-initiated programmatic `.focus()` calls.
-fn had_pointer_interaction() -> bool {
-    LAST_POINTER_TYPE.with(|pt| {
-        matches!(pt.get(), PointerType::Mouse | PointerType::Touch | PointerType::Pen)
-    })
+/// Programmatic focus uses the same shared modality context to decide whether
+/// a preceding interaction came from a pointer device.
+fn had_pointer_interaction(modality: &dyn ModalityContext) -> bool {
+    modality.had_pointer_interaction()
 }
 ```
 
@@ -955,7 +949,8 @@ pub fn use_hover(config: HoverConfig) -> HoverResult {
     // Event handlers are registered as typed methods on the component's Api struct:
     //   pointerenter → NotHovered ──→ Hovered (mouse/pen only; ignores touch)
     //   pointerleave → Hovered ──→ NotHovered
-    // Global press tracking: if GLOBAL_PRESS_ACTIVE becomes true while Hovered,
+    // Shared modality tracking: if config.modality.is_global_press_active()
+    // becomes true while Hovered,
     //   immediately transition to NotHovered (prevents stale hover on mobile).
 
     HoverResult { hovered, state }
@@ -994,9 +989,7 @@ Data attributes:
 
 ## 4. Focus Interaction
 
-> **Cross-ref: FocusRing (ars-a11y §3.4):** FocusState builds on the `FocusRing` modality tracker defined in `ars-a11y` (`03-accessibility.md` §3.4). FocusRing detects whether the last input was pointer or keyboard; FocusState uses that to determine the focus-visible CSS class. See also §4.4 below for adapter wiring that keeps both trackers in sync.
->
-> **Modality contract:** `FocusRing` (ars-a11y) and `FocusState` (ars-interactions) both read from the same shared thread-local state (`LAST_POINTER_TYPE`). `FocusState`'s `had_pointer_interaction()` reads this thread-local directly — it does not delegate to `FocusRing`. The adapter MUST sync both trackers from the same event listener, ensuring the shared thread-local is the single source of truth.
+> **Cross-ref: FocusRing (ars-a11y §3.4):** `FocusState` consumes the shared `ars_core::ModalityContext` while `FocusRing` consumes the same normalized event stream for accessibility-specific focus-visible heuristics. See also §4.4 below for adapter wiring that keeps both consumers synchronized through `ars-dom::ModalityManager`.
 >
 > **Normative:** `FocusState` (ars-interactions) is the consumer-facing API. Components MUST use `FocusResult.current_attrs()` for focus-visible rendering. Components MUST NOT also call `FocusRing.apply_focus_attrs()` on the same element — doing so would produce duplicate or conflicting `data-ars-focus-visible` attributes. `FocusRing` is the low-level tracker used internally by `FocusState`; direct use is reserved for rare cases where the ars-interactions layer is bypassed.
 >
@@ -1014,15 +1007,18 @@ Focus interaction provides normalized `focus` and `blur` events and, critically,
 // ars-interactions/src/focus.rs
 
 use std::{cell::RefCell, rc::Rc};
-use ars_core::AttrMap;
+use ars_core::{AttrMap, DefaultModalityContext, ModalityContext};
 use crate::PointerType;
 
 /// Configuration for focus interaction on a single element.
 // Manual Debug impl omitted for brevity — prints closures as "<closure>"
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct FocusConfig {
     /// Whether the element is disabled.
     pub disabled: bool,
+
+    /// Shared modality context for the current provider root.
+    pub modality: Rc<dyn ModalityContext>,
 
     /// Called when the element receives focus.
     pub on_focus: Option<Rc<dyn Fn(FocusEvent)>>,
@@ -1036,10 +1032,13 @@ pub struct FocusConfig {
 
 /// Configuration for focus-within tracking on a container element.
 // Manual Debug impl omitted for brevity — prints closures as "<closure>"
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct FocusWithinConfig {
     /// Whether the container is disabled.
     pub disabled: bool,
+
+    /// Shared modality context for the current provider root.
+    pub modality: Rc<dyn ModalityContext>,
 
     /// Called when focus enters the container (any descendant focused).
     pub on_focus_within: Option<Rc<dyn Fn(FocusEvent)>>,
@@ -1049,6 +1048,30 @@ pub struct FocusWithinConfig {
 
     /// Called when focus-within-visible state changes.
     pub on_focus_within_visible_change: Option<Rc<dyn Fn(bool)>>,
+}
+
+impl Default for FocusConfig {
+    fn default() -> Self {
+        Self {
+            disabled: false,
+            modality: Rc::new(DefaultModalityContext::new()),
+            on_focus: None,
+            on_blur: None,
+            on_focus_visible_change: None,
+        }
+    }
+}
+
+impl Default for FocusWithinConfig {
+    fn default() -> Self {
+        Self {
+            disabled: false,
+            modality: Rc::new(DefaultModalityContext::new()),
+            on_focus_within: None,
+            on_blur_within: None,
+            on_focus_within_visible_change: None,
+        }
+    }
 }
 
 /// A normalized focus event.
@@ -1101,13 +1124,13 @@ impl FocusState {
     /// Keyboard focus always shows the ring. Programmatic focus only shows
     /// the ring when there was no preceding pointer interaction (i.e., the
     /// document's modality was keyboard before the `.focus()` call).
-    pub fn is_focus_visible(&self) -> bool {
+    pub fn is_focus_visible(&self, modality: &dyn ModalityContext) -> bool {
         match self {
             FocusState::FocusedByKeyboard => true,
-            // Programmatic focus defers to the global modality tracker:
+            // Programmatic focus defers to the shared modality context:
             // show the ring only if the user was NOT using a pointer device
             // immediately before the programmatic `.focus()` call.
-            FocusState::FocusedProgrammatic => !had_pointer_interaction(),
+            FocusState::FocusedProgrammatic => !modality.had_pointer_interaction(),
             _ => false,
         }
     }
@@ -1132,104 +1155,79 @@ Transitions:
     ─[Blur]────────────────────────────→ Unfocused
 ```
 
-### 4.4 Focus Visible Detection: Global Modality Tracking
+### 4.4 Focus Visible Detection: Shared Modality Tracking
 
-The key to `focus-visible` is tracking the most recent input modality at the document level. `ars-interactions` installs a single set of document-level listeners when first used:
+The key to `focus-visible` is tracking the most recent input modality for the active provider root. `ars-core` owns the instance-scoped modality state and `ars-dom` owns the browser listener lifecycle:
 
 ```rust
-/// Installs global modality tracking on the document.
-/// Safe to call multiple times; installs only once per page.
-///
-/// **Web Worker safety:** Thread-local modality tracking is a
-/// no-op in Web Worker contexts, which lack a `document` object. The guard
-/// below ensures no DOM API calls are attempted in worker threads.
-pub fn ensure_modality_listeners() {
-    // Guard: Web Workers have no `document`. Bail out early.
-    // `js_sys::global()` returns the global scope (Window, Worker, etc.).
-    // Design decision: Reflect::has can fail in exotic global scopes (e.g., Service Workers).
-    // Returns false = treat as "no document" = bail early. This is correct behavior since
-    // modality tracking is only meaningful in a browsing context with a document.
-    if !js_sys::Reflect::has(&js_sys::global(), &"document".into()).unwrap_or(false) {
-        return;
-    }
+use std::rc::Rc;
+use ars_a11y::FocusRing;
+use ars_core::{KeyboardKey, KeyModifiers, ModalityContext, PointerType};
 
-    // Increment reference count for every caller (cleanup tracking)
-    MODALITY_LISTENER_REFCOUNT.with(|rc| rc.set(rc.get() + 1));
-
-    MODALITY_LISTENERS_INSTALLED.with(|installed| {
-        if !installed.get() {
-            installed.set(true);
-
-            // On keydown: switch to keyboard modality
-            // On pointerdown/mousedown/touchstart: switch to pointer modality
-            // On focus (capture): read current modality when element focuses
-            //
-            // Tracks via LAST_POINTER_TYPE thread_local:
-            //   Keyboard events → PointerType::Keyboard
-            //   Mouse events → PointerType::Mouse
-            //   Touch events → PointerType::Touch
-            //   Pen events → PointerType::Pen
-        }
-    });
+pub struct ModalityManager {
+    modality: Rc<dyn ModalityContext>,
+    focus_ring: FocusRing,
 }
 
-/// Removes global modality listeners when no consumers remain.
-/// Uses reference counting: each `ensure_modality_listeners()` call increments
-/// the count, and each `remove_modality_listeners()` call decrements it.
-/// Listeners are only detached when the count reaches zero.
-///
-/// Call this in component/interaction cleanup (e.g., `on_cleanup`, `Drop` impl)
-/// to avoid leaked document-level listeners in SPA route transitions.
-pub fn remove_modality_listeners() {
-    // Design decision: Reflect::has can fail in exotic global scopes (e.g., Service Workers).
-    // Returns false = treat as "no document" = bail early. This is correct behavior since
-    // modality tracking is only meaningful in a browsing context with a document.
-    if !js_sys::Reflect::has(&js_sys::global(), &"document".into()).unwrap_or(false) {
-        return;
+impl ModalityManager {
+    /// Safe to call multiple times; attaches one listener set per manager instance.
+    pub fn ensure_listeners(&self) {
+        // Browser-only implementation in ars-dom:
+        // - no-op when no Window/Document is available
+        // - installs keydown, pointerdown, mousedown, touchstart, and focus(capture)
+        // - uses refcounted install/remove semantics
     }
 
-    MODALITY_LISTENER_REFCOUNT.with(|rc| {
-        let count = rc.get();
-        if count > 0 {
-            rc.set(count - 1);
-            if count == 1 {
-                // Last consumer — remove document-level listeners
-                MODALITY_LISTENERS_INSTALLED.with(|installed| {
-                    installed.set(false);
-                });
-                // Remove keydown, pointerdown, mousedown, touchstart,
-                // and focus (capture) listeners from document.
-            }
-        }
-    });
+    pub fn on_key_down(&self, key: KeyboardKey, modifiers: KeyModifiers) {
+        self.modality.on_key_down(key, modifiers);
+        self.focus_ring.on_key_down(key, modifiers);
+    }
+
+    pub fn on_pointer_down(&self, pointer_type: PointerType) {
+        self.modality.on_pointer_down(pointer_type);
+        self.focus_ring.on_pointer_down();
+    }
+
+    pub fn on_virtual_input(&self) {
+        self.modality.on_virtual_input();
+        self.focus_ring.on_virtual_input();
+    }
 }
 ```
 
-> **Modality tracking:** `LAST_POINTER_TYPE` is the modality tracker for `FocusState` in `ars-interactions`. `FocusRing` (from `03-accessibility.md` §3.4) tracks modality independently via its own `on_pointer_down()`/`on_key_down()` methods. To prevent the adapter from accidentally updating only one tracker, `ars-dom` provides `ModalityManager` (`11-dom-utilities.md` §8) which fans out to both atomically. Adapters MUST use `ModalityManager` instead of calling the trackers independently.
+> **Modality tracking:** `ars_core::ModalityContext` is the canonical source of truth for `FocusState` and other interaction consumers. `FocusRing` consumes the same event stream but remains a separate accessibility heuristic. Adapters MUST use `ars-dom::ModalityManager` instead of updating the context and focus ring independently.
 >
 > **Adapter wiring example** — use `ModalityManager` from `ars-dom`:
 >
 > ```rust
-> // Inside ensure_modality_listeners(), after installing the document-level listener:
-> // `modality` is the ModalityManager held in the adapter's state.
+> // `manager` is the ModalityManager held in the adapter's state.
 > //
 > // document.add_event_listener("keydown", move |e: KeyboardEvent| {
 > //     let key = KeyboardKey::from_key_str(&e.key());
-> //     let modifiers = KeyModifiers::from_keyboard_event(&e);
-> //     modality.on_key_down(key, modifiers);
+> //     let modifiers = KeyModifiers {
+> //         shift: e.shift_key(),
+> //         ctrl: e.ctrl_key(),
+> //         alt: e.alt_key(),
+> //         meta: e.meta_key(),
+> //     };
+> //     manager.on_key_down(key, modifiers);
 > // });
 > //
 > // document.add_event_listener("pointerdown", move |e: PointerEvent| {
-> //     let pointer_type = PointerType::from_web(e.pointer_type());
-> //     modality.on_pointer_down(pointer_type);
+> //     let pointer_type = match e.pointer_type().as_str() {
+> //         "touch" => PointerType::Touch,
+> //         "pen" => PointerType::Pen,
+> //         _ => PointerType::Mouse,
+> //     };
+> //     manager.on_pointer_down(pointer_type);
 > // });
 > ```
 
-When a `focus` event fires on an element, `ars-interactions` reads `LAST_POINTER_TYPE`:
+When a `focus` event fires on an element, `ars-interactions` reads `config.modality.last_pointer_type()`:
 
 - If the last interaction was `Keyboard` → state becomes `FocusedByKeyboard`, `data-ars-focus-visible` is set.
 - If the last interaction was `Mouse`, `Touch`, or `Pen` → state becomes `FocusedByPointer`, no `data-ars-focus-visible`.
-- If no prior interaction (programmatic focus) → state becomes `FocusedProgrammatic`, defers to the document's existing modality.
+- If no prior interaction (programmatic focus) → state becomes `FocusedProgrammatic`, defers to the shared modality context.
 
 ### 4.5 Output Props
 
@@ -1238,13 +1236,13 @@ pub fn use_focus(config: FocusConfig) -> FocusResult {
     let state = Rc::new(RefCell::new(FocusState::Unfocused));
 
     let focused = state.borrow().is_focused();
-    let focus_visible = state.borrow().is_focus_visible();
+    let focus_visible = state.borrow().is_focus_visible(config.modality.as_ref());
 
     // Event handlers are registered as typed methods on the component's Api struct:
-    //   focus → reads LAST_POINTER_TYPE to determine modality:
+    //   focus → reads config.modality.last_pointer_type() to determine modality:
     //           Keyboard → FocusedByKeyboard (sets data-ars-focus-visible)
     //           Mouse/Touch/Pen → FocusedByPointer (no focus-visible)
-    //           Programmatic → FocusedProgrammatic (defers to document modality)
+    //           Programmatic → FocusedProgrammatic (defers to shared modality context)
     //   blur  → any focused state ──→ Unfocused
 
     FocusResult { focused, focus_visible, state }
@@ -1279,7 +1277,7 @@ pub fn use_focus_within(config: FocusWithinConfig) -> FocusWithinResult {
     let is_focus_within_visible = *visible.borrow();
 
     // Event handlers are registered as typed methods on the component's Api struct:
-    //   focusin  → set focus_within = true; check LAST_POINTER_TYPE for visibility
+    //   focusin  → set focus_within = true; check config.modality for visibility
     //   focusout → if related_target is outside container, set focus_within = false
     //
     // IMPORTANT — null relatedTarget handling:
@@ -2362,22 +2360,22 @@ Adapter implementations MUST wrap drag effect setup in a try-catch and release p
 ```javascript
 // Adapter pseudocode for pointer-capture-safe drag:
 try {
-  element.setPointerCapture(pointerId);
-  // ... drag processing ...
+    element.setPointerCapture(pointerId);
+    // ... drag processing ...
 } catch (e) {
-  // Ensure pointer capture is released even on error
-  try {
-    element.releasePointerCapture(pointerId);
-  } catch (_) {
-    // releasePointerCapture throws if pointerId was never captured;
-    // this is expected when setPointerCapture itself failed.
-  }
-  console.warn(
-    "ars-interactions: pointer capture released due to error during drag:",
-    e,
-  );
-  // Transition drag state machine back to Idle
-  transition(DragState::Idle);
+    // Ensure pointer capture is released even on error
+    try {
+        element.releasePointerCapture(pointerId);
+    } catch (_) {
+        // releasePointerCapture throws if pointerId was never captured;
+        // this is expected when setPointerCapture itself failed.
+    }
+    console.warn(
+        "ars-interactions: pointer capture released due to error during drag:",
+        e,
+    );
+    // Transition drag state machine back to Idle
+    transition(DragState::Idle);
 }
 ```
 
@@ -2397,16 +2395,16 @@ CSS example for a reorderable list:
 
 ```css
 [data-ars-part="list-item"][data-ars-drop-position="before"]::before {
-  content: "";
-  display: block;
-  height: 2px;
-  background: var(--ars-accent);
+    content: "";
+    display: block;
+    height: 2px;
+    background: var(--ars-accent);
 }
 [data-ars-part="list-item"][data-ars-drop-position="after"]::after {
-  content: "";
-  display: block;
-  height: 2px;
-  background: var(--ars-accent);
+    content: "";
+    display: block;
+    height: 2px;
+    background: var(--ars-accent);
 }
 ```
 
@@ -2783,40 +2781,40 @@ The companion stylesheet (`ars-interactions.css`) MUST include a forced-colors b
 
 ```css
 @media (forced-colors: active) {
-  /* Focus indicators: use transparent outline that becomes visible in forced-colors */
-  [data-ars-focus-visible] {
-    outline: 3px solid Highlight;
-    outline-offset: 2px;
-  }
+    /* Focus indicators: use transparent outline that becomes visible in forced-colors */
+    [data-ars-focus-visible] {
+        outline: 3px solid Highlight;
+        outline-offset: 2px;
+    }
 
-  /* Pressed state: use ButtonText border */
-  [data-ars-pressed] {
-    outline: 3px solid ButtonText;
-  }
+    /* Pressed state: use ButtonText border */
+    [data-ars-pressed] {
+        outline: 3px solid ButtonText;
+    }
 
-  /* Combined focus + pressed: focus ring takes precedence */
-  [data-ars-focus-visible][data-ars-pressed] {
-    outline: 3px solid Highlight;
-    outline-offset: 2px;
-  }
+    /* Combined focus + pressed: focus ring takes precedence */
+    [data-ars-focus-visible][data-ars-pressed] {
+        outline: 3px solid Highlight;
+        outline-offset: 2px;
+    }
 
-  /* Disabled elements */
-  [data-ars-disabled] {
-    color: GrayText;
-    border-color: GrayText;
-  }
+    /* Disabled elements */
+    [data-ars-disabled] {
+        color: GrayText;
+        border-color: GrayText;
+    }
 
-  /* Drag preview */
-  [data-ars-dragging] {
-    outline: 2px solid Highlight;
-  }
+    /* Drag preview */
+    [data-ars-dragging] {
+        outline: 2px solid Highlight;
+    }
 
-  /* Selected items */
-  [data-ars-state~="selected"] {
-    outline: 2px solid Highlight;
-    color: HighlightText;
-    background-color: Highlight;
-  }
+    /* Selected items */
+    [data-ars-state~="selected"] {
+        outline: 2px solid Highlight;
+        color: HighlightText;
+        background-color: Highlight;
+    }
 }
 ```
 
@@ -2872,16 +2870,16 @@ In addition to `forced-colors`, the `prefers-contrast` media query detects user 
 ```css
 /* High contrast preference (not necessarily forced-colors) */
 @media (prefers-contrast: more) {
-  :root {
-    --ars-focus-ring-width: 3px;
-    --ars-border-width: 2px;
-    --ars-focus-ring-offset: 3px;
-  }
+    :root {
+        --ars-focus-ring-width: 3px;
+        --ars-border-width: 2px;
+        --ars-focus-ring-offset: 3px;
+    }
 }
 
 /* Custom contrast preference (forced-colors active) */
 @media (prefers-contrast: custom) {
-  /* Same as forced-colors — system colors in use */
+    /* Same as forced-colors — system colors in use */
 }
 ```
 

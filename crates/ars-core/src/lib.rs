@@ -27,6 +27,7 @@ use core::fmt::{self, Debug};
 
 pub mod companion_css;
 mod connect;
+pub mod modality;
 pub mod platform;
 pub mod provider;
 
@@ -53,10 +54,14 @@ pub use connect::{
     AriaAttr, AttrMap, AttrMapParts, AttrValue, CssProperty, EventOptions, HtmlAttr, HtmlEvent,
     StyleStrategy, UserAttrs, data,
 };
+pub use modality::{
+    DefaultModalityContext, KeyModifiers, KeyboardKey, ModalityContext, ModalitySnapshot,
+    NullModalityContext, PointerType,
+};
 pub use platform::{
     MissingProviderEffects, NullPlatformEffects, PlatformEffects, Rect, TimerHandle,
 };
-pub use provider::ColorMode;
+pub use provider::{ArsContext, ColorMode};
 
 // ────────────────────────────────────────────────────────────────────
 // Callback, WeakSend, and effect cleanup types

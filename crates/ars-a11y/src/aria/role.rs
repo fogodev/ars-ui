@@ -493,13 +493,130 @@ mod tests {
     use super::*;
 
     #[test]
+    fn abstract_roles_report_expected_names_and_no_dom_value() {
+        let cases = [
+            (AriaRole::Command, "Command"),
+            (AriaRole::Composite, "Composite"),
+            (AriaRole::Input, "Input"),
+            (AriaRole::Landmark, "Landmark"),
+            (AriaRole::Range, "Range"),
+            (AriaRole::RoleType, "RoleType"),
+            (AriaRole::Section, "Section"),
+            (AriaRole::SectionHead, "SectionHead"),
+            (AriaRole::Select, "Select"),
+            (AriaRole::Structure, "Structure"),
+            (AriaRole::Widget, "Widget"),
+            (AriaRole::Window, "Window"),
+        ];
+
+        for (role, name) in cases {
+            assert_eq!(role.to_attr_value(), None);
+            assert!(role.is_abstract());
+            assert_eq!(role.name(), name);
+        }
+    }
+
+    #[test]
     fn abstract_role_returns_none() {
         assert!(AriaRole::Command.to_attr_value().is_none());
     }
 
     #[test]
-    fn concrete_role_returns_value() {
-        assert_eq!(AriaRole::Button.to_attr_value().unwrap(), "button");
+    fn concrete_roles_round_trip_to_dom_names() {
+        let cases = [
+            (AriaRole::Alertdialog, "alertdialog"),
+            (AriaRole::Dialog, "dialog"),
+            (AriaRole::Button, "button"),
+            (AriaRole::Checkbox, "checkbox"),
+            (AriaRole::Gridcell, "gridcell"),
+            (AriaRole::Link, "link"),
+            (AriaRole::Menuitem, "menuitem"),
+            (AriaRole::Menuitemcheckbox, "menuitemcheckbox"),
+            (AriaRole::Menuitemradio, "menuitemradio"),
+            (AriaRole::Option, "option"),
+            (AriaRole::Progressbar, "progressbar"),
+            (AriaRole::Radio, "radio"),
+            (AriaRole::Scrollbar, "scrollbar"),
+            (AriaRole::Searchbox, "searchbox"),
+            (AriaRole::Separator, "separator"),
+            (AriaRole::Slider, "slider"),
+            (AriaRole::Spinbutton, "spinbutton"),
+            (AriaRole::Switch, "switch"),
+            (AriaRole::Tab, "tab"),
+            (AriaRole::Tabpanel, "tabpanel"),
+            (AriaRole::Textbox, "textbox"),
+            (AriaRole::Treeitem, "treeitem"),
+            (AriaRole::Combobox, "combobox"),
+            (AriaRole::Grid, "grid"),
+            (AriaRole::Listbox, "listbox"),
+            (AriaRole::Menu, "menu"),
+            (AriaRole::Menubar, "menubar"),
+            (AriaRole::Radiogroup, "radiogroup"),
+            (AriaRole::Tablist, "tablist"),
+            (AriaRole::Tree, "tree"),
+            (AriaRole::Treegrid, "treegrid"),
+            (AriaRole::Application, "application"),
+            (AriaRole::Article, "article"),
+            (AriaRole::BlockQuote, "blockquote"),
+            (AriaRole::Caption, "caption"),
+            (AriaRole::Cell, "cell"),
+            (AriaRole::Code, "code"),
+            (AriaRole::Columnheader, "columnheader"),
+            (AriaRole::Comment, "comment"),
+            (AriaRole::Definition, "definition"),
+            (AriaRole::Deletion, "deletion"),
+            (AriaRole::Directory, "directory"),
+            (AriaRole::Document, "document"),
+            (AriaRole::Emphasis, "emphasis"),
+            (AriaRole::Feed, "feed"),
+            (AriaRole::Figure, "figure"),
+            (AriaRole::Generic, "generic"),
+            (AriaRole::Group, "group"),
+            (AriaRole::Heading, "heading"),
+            (AriaRole::Img, "img"),
+            (AriaRole::Insertion, "insertion"),
+            (AriaRole::List, "list"),
+            (AriaRole::Listitem, "listitem"),
+            (AriaRole::Mark, "mark"),
+            (AriaRole::Math, "math"),
+            (AriaRole::Meter, "meter"),
+            (AriaRole::None, "none"),
+            (AriaRole::Note, "note"),
+            (AriaRole::Paragraph, "paragraph"),
+            (AriaRole::Presentation, "presentation"),
+            (AriaRole::Row, "row"),
+            (AriaRole::Rowgroup, "rowgroup"),
+            (AriaRole::Rowheader, "rowheader"),
+            (AriaRole::Strong, "strong"),
+            (AriaRole::Subscript, "subscript"),
+            (AriaRole::Suggestion, "suggestion"),
+            (AriaRole::Superscript, "superscript"),
+            (AriaRole::Table, "table"),
+            (AriaRole::Term, "term"),
+            (AriaRole::Time, "time"),
+            (AriaRole::Toolbar, "toolbar"),
+            (AriaRole::Tooltip, "tooltip"),
+            (AriaRole::Alert, "alert"),
+            (AriaRole::Log, "log"),
+            (AriaRole::Marquee, "marquee"),
+            (AriaRole::Status, "status"),
+            (AriaRole::Timer, "timer"),
+            (AriaRole::Banner, "banner"),
+            (AriaRole::Complementary, "complementary"),
+            (AriaRole::Contentinfo, "contentinfo"),
+            (AriaRole::Form, "form"),
+            (AriaRole::Main, "main"),
+            (AriaRole::Navigation, "navigation"),
+            (AriaRole::Region, "region"),
+            (AriaRole::Search, "search"),
+            (AriaRole::StructuralSeparator, "separator"),
+        ];
+
+        for (role, value) in cases {
+            assert_eq!(role.to_attr_value(), Some(value));
+            assert!(!role.is_abstract());
+            assert_eq!(role.name(), value);
+        }
     }
 
     #[test]
@@ -526,5 +643,40 @@ mod tests {
         let required = AriaRole::List.required_owned_elements();
         assert_eq!(required.len(), 1);
         assert_eq!(required[0], &[AriaRole::Listitem]);
+    }
+
+    #[test]
+    fn required_owned_elements_cover_composite_patterns() {
+        assert_eq!(
+            AriaRole::Grid.required_owned_elements(),
+            &[&[AriaRole::Row], &[AriaRole::Rowgroup]]
+        );
+        assert_eq!(
+            AriaRole::Listbox.required_owned_elements(),
+            &[&[AriaRole::Option], &[AriaRole::Group]]
+        );
+        assert_eq!(
+            AriaRole::Menu.required_owned_elements(),
+            &[
+                &[AriaRole::Menuitem],
+                &[AriaRole::Menuitemcheckbox],
+                &[AriaRole::Menuitemradio],
+                &[AriaRole::Group],
+            ]
+        );
+        assert_eq!(
+            AriaRole::Row.required_owned_elements(),
+            &[
+                &[AriaRole::Cell],
+                &[AriaRole::Columnheader],
+                &[AriaRole::Gridcell],
+                &[AriaRole::Rowheader],
+            ]
+        );
+        assert_eq!(
+            AriaRole::Tree.required_owned_elements(),
+            &[&[AriaRole::Treeitem], &[AriaRole::Group]]
+        );
+        assert!(AriaRole::Button.required_owned_elements().is_empty());
     }
 }

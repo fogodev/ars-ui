@@ -22,11 +22,17 @@ web-sys          = { version = "0.3", optional = true, features = [
     "CssStyleDeclaration",
     "Document",
     "Element",
+    "EventTarget",
+    "FocusEvent",
     "FocusOptions",
     "HtmlElement",
+    "KeyboardEvent",
+    "MouseEvent",
     "Navigator",
     "Node",
     "NodeList",
+    "PointerEvent",
+    "TouchEvent",
     "Window",
 ] }
 

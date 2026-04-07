@@ -28,11 +28,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 // Global state
 // ---------------------------------------------------------------------------
 
-/// Process-global scroll lock depth counter (WASM — single-threaded).
+// Process-global scroll lock depth counter (WASM — single-threaded).
 #[cfg(target_arch = "wasm32")]
 thread_local! {
-    static SCROLL_LOCK_DEPTH: Cell<u32> = Cell::new(0);
-    static SCROLL_LOCK_SAVED: RefCell<Option<ScrollLockSavedState>> = RefCell::new(None);
+    static SCROLL_LOCK_DEPTH: Cell<u32> = const { Cell::new(0) };
+    static SCROLL_LOCK_SAVED: RefCell<Option<ScrollLockSavedState>> = const { RefCell::new(None) };
 }
 
 /// Process-global scroll lock depth counter (native — multi-threaded).
@@ -58,9 +58,12 @@ static SCROLL_LOCK_SAVED: Mutex<Option<ScrollLockSavedState>> = Mutex::new(None)
 /// All fields are read on `wasm32` targets inside [`restore_scroll_state`].
 /// On native/test targets the struct is created but never destructured
 /// (restore is a no-op), so the fields appear unused to the compiler.
-#[expect(
-    dead_code,
-    reason = "fields read only on wasm32; struct kept for platform parity"
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    expect(
+        dead_code,
+        reason = "fields read only on wasm32; struct kept for platform parity"
+    )
 )]
 struct ScrollLockSavedState {
     /// Original `overflow` style on the body element.
@@ -166,7 +169,7 @@ pub fn release() {
         if prev == 1 {
             SCROLL_LOCK_SAVED.with(|s| {
                 if let Some(saved) = s.borrow_mut().take() {
-                    restore_scroll_state(saved);
+                    restore_scroll_state(&saved);
                 }
             });
         }
@@ -194,7 +197,7 @@ pub fn depth() -> u32 {
 /// Returns the current nesting depth of active scroll locks.
 #[cfg(target_arch = "wasm32")]
 pub fn depth() -> u32 {
-    SCROLL_LOCK_DEPTH.with(|d| d.get())
+    SCROLL_LOCK_DEPTH.with(Cell::get)
 }
 
 // ---------------------------------------------------------------------------
@@ -321,21 +324,17 @@ impl Default for ScrollLockManager {
 fn save_current_scroll_state() -> ScrollLockSavedState {
     use wasm_bindgen::JsCast;
 
-    let window = match web_sys::window() {
-        Some(w) => w,
-        None => return ScrollLockSavedState::default(),
+    let Some(window) = web_sys::window() else {
+        return ScrollLockSavedState::default();
     };
-    let document = match window.document() {
-        Some(d) => d,
-        None => return ScrollLockSavedState::default(),
+    let Some(document) = window.document() else {
+        return ScrollLockSavedState::default();
     };
-    let body = match document.body() {
-        Some(b) => b,
-        None => return ScrollLockSavedState::default(),
+    let Some(body) = document.body() else {
+        return ScrollLockSavedState::default();
     };
-    let doc_el = match document.document_element() {
-        Some(el) => el,
-        None => return ScrollLockSavedState::default(),
+    let Some(doc_el) = document.document_element() else {
+        return ScrollLockSavedState::default();
     };
 
     let body_style = body.style();
@@ -371,21 +370,17 @@ fn save_current_scroll_state() -> ScrollLockSavedState {
 fn apply_scroll_lock() {
     use wasm_bindgen::JsCast;
 
-    let window = match web_sys::window() {
-        Some(w) => w,
-        None => return,
+    let Some(window) = web_sys::window() else {
+        return;
     };
-    let document = match window.document() {
-        Some(d) => d,
-        None => return,
+    let Some(document) = window.document() else {
+        return;
     };
-    let body = match document.body() {
-        Some(b) => b,
-        None => return,
+    let Some(body) = document.body() else {
+        return;
     };
-    let doc_el = match document.document_element() {
-        Some(el) => el,
-        None => return,
+    let Some(doc_el) = document.document_element() else {
+        return;
     };
 
     let body_style = body.style();
@@ -393,18 +388,18 @@ fn apply_scroll_lock() {
     if needs_ios_workaround() {
         // Tier 2 — iOS Safari fallback: position:fixed on <body>
         let scroll_y = window.scroll_y().unwrap_or(0.0);
-        let _ = body_style.set_property("position", "fixed");
-        let _ = body_style.set_property("top", &format!("-{scroll_y}px"));
-        let _ = body_style.set_property("width", "100%");
-        let _ = body_style.set_property("overflow", "hidden");
+        drop(body_style.set_property("position", "fixed"));
+        drop(body_style.set_property("top", &format!("-{scroll_y}px")));
+        drop(body_style.set_property("width", "100%"));
+        drop(body_style.set_property("overflow", "hidden"));
     } else {
         // Tier 1 — Modern browsers: overflow:clip on <html> + overscroll-behavior:contain on <body>
         let doc_el_html: &web_sys::HtmlElement = match doc_el.dyn_ref() {
             Some(el) => el,
             None => return,
         };
-        let _ = doc_el_html.style().set_property("overflow", "clip");
-        let _ = body_style.set_property("overscroll-behavior", "contain");
+        drop(doc_el_html.style().set_property("overflow", "clip"));
+        drop(body_style.set_property("overscroll-behavior", "contain"));
     }
 
     // Scrollbar width compensation
@@ -412,34 +407,30 @@ fn apply_scroll_lock() {
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn restore_scroll_state(saved: ScrollLockSavedState) {
+fn restore_scroll_state(saved: &ScrollLockSavedState) {
     use wasm_bindgen::JsCast;
 
-    let window = match web_sys::window() {
-        Some(w) => w,
-        None => return,
+    let Some(window) = web_sys::window() else {
+        return;
     };
-    let document = match window.document() {
-        Some(d) => d,
-        None => return,
+    let Some(document) = window.document() else {
+        return;
     };
-    let body = match document.body() {
-        Some(b) => b,
-        None => return,
+    let Some(body) = document.body() else {
+        return;
     };
-    let doc_el = match document.document_element() {
-        Some(el) => el,
-        None => return,
+    let Some(doc_el) = document.document_element() else {
+        return;
     };
 
     let body_style = body.style();
 
     if needs_ios_workaround() {
         // Restore iOS fixed-position overrides
-        let _ = body_style.remove_property("position");
-        let _ = body_style.remove_property("width");
-        let _ = body_style.set_property("top", &saved.body_top);
-        let _ = body_style.set_property("overflow", &saved.overflow);
+        drop(body_style.remove_property("position"));
+        drop(body_style.remove_property("width"));
+        drop(body_style.set_property("top", &saved.body_top));
+        drop(body_style.set_property("overflow", &saved.overflow));
         // Restore scroll position after removing fixed positioning
         window.scroll_to_with_x_and_y(saved.scroll_x, saved.scroll_y);
     } else {
@@ -448,19 +439,21 @@ fn restore_scroll_state(saved: ScrollLockSavedState) {
             Some(el) => el,
             None => return,
         };
-        let _ = doc_el_html
-            .style()
-            .set_property("overflow", &saved.html_overflow);
-        let _ = body_style.set_property("overscroll-behavior", &saved.overscroll_behavior);
+        drop(
+            doc_el_html
+                .style()
+                .set_property("overflow", &saved.html_overflow),
+        );
+        drop(body_style.set_property("overscroll-behavior", &saved.overscroll_behavior));
     }
 
     // Remove scrollbar compensation
-    let _ = body_style.set_property("padding-right", &saved.padding_right);
+    drop(body_style.set_property("padding-right", &saved.padding_right));
 }
 
 /// Detect whether the iOS scroll lock workaround is needed.
 ///
-/// Returns `true` on iOS Safari and iOS WebView.
+/// Returns `true` on iOS Safari and iOS `WebView`.
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub fn needs_ios_workaround() -> bool {
     web_sys::window()
@@ -494,17 +487,14 @@ pub fn needs_ios_workaround() -> bool {
 /// This measurement is performed live and accounts for zoom level.
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub fn scrollbar_width() -> f64 {
-    let window = match web_sys::window() {
-        Some(w) => w,
-        None => return 0.0,
+    let Some(window) = web_sys::window() else {
+        return 0.0;
     };
-    let document = match window.document() {
-        Some(d) => d,
-        None => return 0.0,
+    let Some(document) = window.document() else {
+        return 0.0;
     };
-    let doc_el = match document.document_element() {
-        Some(el) => el,
-        None => return 0.0,
+    let Some(doc_el) = document.document_element() else {
+        return 0.0;
     };
     // inner_width includes scrollbar; client_width excludes it
     let inner = window
@@ -512,7 +502,7 @@ pub fn scrollbar_width() -> f64 {
         .ok()
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
-    let client = doc_el.client_width() as f64;
+    let client = f64::from(doc_el.client_width());
     (inner - client).max(0.0)
 }
 
@@ -529,9 +519,10 @@ fn apply_scrollbar_compensation() {
             .and_then(|w| w.document())
             .and_then(|d| d.body())
         {
-            let _ = body
-                .style()
-                .set_property("padding-right", &format!("{width}px"));
+            drop(
+                body.style()
+                    .set_property("padding-right", &format!("{width}px")),
+            );
         }
     }
 }

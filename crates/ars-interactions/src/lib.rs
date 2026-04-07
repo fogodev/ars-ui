@@ -6,25 +6,11 @@
 
 pub mod compose;
 
+pub use ars_core::{
+    DefaultModalityContext, KeyModifiers, KeyboardKey, ModalityContext, ModalitySnapshot,
+    NullModalityContext, PointerType,
+};
 pub use compose::merge_attrs;
-
-/// The input modality that initiated an interaction.
-///
-/// Matches the values exposed by the Pointer Events API, extended with
-/// virtual activation from screen readers and scripted events.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum PointerType {
-    /// Physical mouse or trackpad.
-    Mouse,
-    /// Finger on a touchscreen.
-    Touch,
-    /// Stylus or digital pen.
-    Pen,
-    /// Keyboard (Enter, Space, or arrow key).
-    Keyboard,
-    /// Programmatic / screen reader virtual cursor activation.
-    Virtual,
-}
 
 /// The current state of the press state machine.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -107,6 +93,16 @@ impl FocusState {
     pub fn is_focused(&self) -> bool {
         !matches!(self, FocusState::Unfocused)
     }
+
+    /// Returns whether the current focus state should render a visible indicator.
+    #[must_use]
+    pub fn is_focus_visible(&self, modality: &dyn ModalityContext) -> bool {
+        match self {
+            Self::FocusedByKeyboard => true,
+            Self::FocusedProgrammatic => !modality.had_pointer_interaction(),
+            Self::FocusedByPointer | Self::Unfocused => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -153,5 +149,28 @@ mod tests {
         assert!(FocusState::FocusedByPointer.is_focused());
         assert!(FocusState::FocusedByKeyboard.is_focused());
         assert!(FocusState::FocusedProgrammatic.is_focused());
+    }
+
+    #[test]
+    fn focus_state_programmatic_visibility_uses_injected_modality() {
+        let modality = DefaultModalityContext::new();
+
+        assert!(FocusState::FocusedProgrammatic.is_focus_visible(&modality));
+
+        modality.on_pointer_down(PointerType::Mouse);
+        assert!(!FocusState::FocusedProgrammatic.is_focus_visible(&modality));
+
+        modality.on_key_down(KeyboardKey::Tab, KeyModifiers::default());
+        assert!(FocusState::FocusedProgrammatic.is_focus_visible(&modality));
+    }
+
+    #[test]
+    fn focus_state_keyboard_visibility_is_always_true() {
+        let modality = DefaultModalityContext::new();
+        modality.on_pointer_down(PointerType::Mouse);
+
+        assert!(FocusState::FocusedByKeyboard.is_focus_visible(&modality));
+        assert!(!FocusState::FocusedByPointer.is_focus_visible(&modality));
+        assert!(!FocusState::Unfocused.is_focus_visible(&modality));
     }
 }
