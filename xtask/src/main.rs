@@ -1,6 +1,6 @@
 //! ars-ui workspace task runner.
 
-use std::process;
+use std::{path::PathBuf, process};
 
 use clap::{Parser, Subcommand};
 
@@ -21,6 +21,36 @@ enum Command {
     Spec {
         #[command(subcommand)]
         cmd: SpecCommand,
+    },
+    /// Code coverage threshold enforcement.
+    Coverage {
+        #[command(subcommand)]
+        cmd: CoverageCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum CoverageCommand {
+    /// Check a single crate's coverage against thresholds.
+    Check {
+        /// Path to lcov.info file.
+        #[arg(long)]
+        file: PathBuf,
+        /// Crate name (e.g., "ars-core").
+        #[arg(long)]
+        package: String,
+        /// Minimum line coverage percentage (0–100).
+        #[arg(long)]
+        min: f64,
+        /// Minimum branch coverage percentage (0–100).
+        #[arg(long)]
+        branch_min: f64,
+    },
+    /// Check all crates against spec-defined thresholds.
+    CheckAll {
+        /// Path to lcov.info file.
+        #[arg(long)]
+        file: PathBuf,
     },
 }
 
@@ -121,6 +151,30 @@ fn main() {
                 process::exit(1);
             });
             return;
+        }
+        Command::Coverage { cmd } => {
+            let result = match cmd {
+                CoverageCommand::Check {
+                    file,
+                    package,
+                    min,
+                    branch_min,
+                } => xtask::coverage::check(&file, &package, min, branch_min),
+                CoverageCommand::CheckAll { file } => {
+                    let thresholds = xtask::coverage::default_thresholds();
+                    xtask::coverage::check_all(&file, &thresholds)
+                }
+            };
+            match result {
+                Ok(output) => {
+                    print!("{output}");
+                    return;
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    process::exit(1);
+                }
+            }
         }
         Command::Spec { cmd } => match cmd {
             SpecCommand::Info { component } => xtask::spec::info::execute(&root, &component),

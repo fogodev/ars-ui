@@ -87,6 +87,46 @@ jobs:
       - name: Adapter harness tier
         run: cargo test -p ars-test-harness -p ars-test-harness-leptos -p ars-test-harness-dioxus -p ars-leptos -p ars-dioxus --all-targets --all-features
 
+  coverage:
+    name: Coverage
+    needs: [unit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-llvm-cov --locked
+      - name: Generate coverage (lcov)
+        # Exclusions:
+        # - ars-leptos/ars-dioxus: tested via wasm-pack which can't produce lcov;
+        #   coverage is aspirational until WASM instrumentation tooling matures.
+        # - ars-test-harness-*: test infrastructure, not application code; also
+        #   pulls in adapter deps that require system libraries (libgtk, etc.).
+        # - ars-derive: proc-macro crate; runs in the compiler process, not the
+        #   test binary, so cargo-llvm-cov cannot instrument it.
+        # - xtask: build tooling, not shipped code.
+        # See spec/testing/14-ci.md §2 and spec/testing/13-policies.md §4.
+        run: |
+          cargo llvm-cov --workspace \
+            --exclude ars-leptos \
+            --exclude ars-dioxus \
+            --exclude ars-test-harness-leptos \
+            --exclude ars-test-harness-dioxus \
+            --exclude ars-derive \
+            --exclude xtask \
+            --lcov --output-path lcov.info
+      - name: Per-crate threshold checks
+        run: cargo xtask coverage check-all --file lcov.info
+      - name: Upload to Codecov
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          files: lcov.info
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
   feature-flags:
     name: Feature Flag Matrix
     needs: [adapter]
