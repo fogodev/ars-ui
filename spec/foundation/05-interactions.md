@@ -2427,12 +2427,24 @@ pub enum LogicalDirection {
 }
 
 /// Resolve a physical arrow key to a logical direction based on text direction.
-/// Returns None for non-horizontal arrow keys (ArrowUp, ArrowDown).
+///
+/// Returns `None` for non-horizontal arrow keys (`ArrowUp`, `ArrowDown`) and
+/// any other key that is not `ArrowLeft` or `ArrowRight`.
+///
+/// # Panics
+///
+/// Debug-asserts that `direction` is not [`Direction::Auto`]. Callers must
+/// resolve `Auto` to a concrete `Ltr` or `Rtl` before calling this function.
 pub fn resolve_arrow_key(key: KeyboardKey, direction: Direction) -> Option<LogicalDirection> {
-    debug_assert!(direction != Direction::Auto, "resolve_arrow_key requires a resolved direction");
+    debug_assert!(
+        direction != Direction::Auto,
+        "resolve_arrow_key requires a resolved direction"
+    );
     match (key, direction) {
-        (KeyboardKey::ArrowRight, Direction::Ltr) | (KeyboardKey::ArrowLeft, Direction::Rtl) => Some(LogicalDirection::Forward),
-        (KeyboardKey::ArrowLeft, Direction::Ltr) | (KeyboardKey::ArrowRight, Direction::Rtl) => Some(LogicalDirection::Backward),
+        (KeyboardKey::ArrowRight, Direction::Ltr)
+        | (KeyboardKey::ArrowLeft, Direction::Rtl) => Some(LogicalDirection::Forward),
+        (KeyboardKey::ArrowLeft, Direction::Ltr)
+        | (KeyboardKey::ArrowRight, Direction::Rtl) => Some(LogicalDirection::Backward),
         _ => None,
     }
 }
