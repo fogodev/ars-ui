@@ -128,10 +128,10 @@ For each component, execute the following checklist against each screen reader i
 6. **Live region**: Are dynamic content changes announced via `aria-live`?
 7. **Error messages**: Are form errors announced immediately on occurrence?
 8. **Forced colors (WHCM)**: Test on Windows High Contrast Mode:
-   - Focus indicators maintain ≥ 3:1 contrast ratio (use `Highlight` or `ButtonText` system colors).
-   - `data-ars-*` attributes do not hide content — verify `::before`/`::after` state indicators remain visible.
-   - Custom icons with `fill: currentColor` or `forced-color-adjust: auto` inherit system palette correctly.
-   - Component states (selected, checked, disabled, pressed) are distinguishable without author-defined colors.
+    - Focus indicators maintain ≥ 3:1 contrast ratio (use `Highlight` or `ButtonText` system colors).
+    - `data-ars-*` attributes do not hide content — verify `::before`/`::after` state indicators remain visible.
+    - Custom icons with `fill: currentColor` or `forced-color-adjust: auto` inherit system palette correctly.
+    - Component states (selected, checked, disabled, pressed) are distinguishable without author-defined colors.
 
 ---
 
@@ -1597,22 +1597,23 @@ See `FocusStrategy` definition above in §3.2.
 
 /// Tracks whether the most recent interaction was keyboard-driven.
 ///
-/// `FocusRing` is a shared singleton that listens to `pointerdown` and `keydown`
-/// events on the document. After a `keydown`, subsequent `:focus` events are
-/// considered keyboard-initiated and should show the focus ring. After a
-/// `pointerdown`, focus is mouse/touch-initiated and the ring is suppressed.
+/// `FocusRing` is an accessibility-specific heuristic that consumes the same
+/// normalized modality event stream as `ars_core::ModalityContext`. Adapters
+/// typically feed it through `ars-dom::ModalityManager` so focus-visible state
+/// stays aligned with interaction modality without coupling it to
+/// `PlatformEffects`.
 ///
 /// The `data-ars-focus-visible` attribute on focused elements reflects this state
 /// and is the CSS hook for styling focus rings.
 pub struct FocusRing {
     /// True when the most recent interaction was via keyboard.
-    keyboard_modality: bool,
+    keyboard_modality: Cell<bool>,
 }
 
 impl FocusRing {
     /// Process a `pointerdown` event — suppresses keyboard modality.
-    pub fn on_pointer_down(&mut self) {
-        self.keyboard_modality = false;
+    pub fn on_pointer_down(&self) {
+        self.keyboard_modality.set(false);
     }
 
     /// Process a `keydown` event — activates keyboard modality.
@@ -1626,11 +1627,9 @@ impl FocusRing {
     /// The `modifiers` parameter allows filtering out modified key combos
     /// (e.g., Ctrl+Tab switches browser tabs and should not trigger keyboard modality).
     /// Adapters filter platform-consumed combos before calling this method.
-    /// `modifiers` is `ars_a11y::KeyModifiers` (with unified `action` field).
-    /// The adapter MUST convert from raw DOM modifiers using:
-    ///   `ars_a11y::KeyModifiers::from((ars_interactions::KeyModifiers, Platform))`
-    /// before calling this method. See `05-interactions.md` §2.2 for the conversion impl.
-    pub fn on_key_down(&mut self, key: KeyboardKey, modifiers: KeyModifiers) {
+    /// `modifiers` is the raw `ars_core::KeyModifiers` snapshot from the same
+    /// event delivered to `ModalityContext`.
+    pub fn on_key_down(&self, key: KeyboardKey, modifiers: KeyModifiers) {
         // Keys that indicate keyboard navigation intent.
         // F1-F12 are included because they indicate keyboard-driven interaction.
         // If browser-level F-key handling (e.g., F5=refresh) is undesirable,
@@ -1648,21 +1647,26 @@ impl FocusRing {
         // Skip modified combos (e.g., Ctrl+Tab = browser tab switch).
         // The adapter also pre-filters platform-consumed combos, but this
         // guard ensures FocusRing remains correct even without adapter filtering.
-        if modifiers.action || modifiers.alt {
-            // Skip action-modified combos (Ctrl+Tab, Cmd+Tab) and alt-modified
+        if modifiers.ctrl || modifiers.meta || modifiers.alt {
+            // Skip ctrl/meta-modified combos (Ctrl+Tab, Cmd+Tab) and alt-modified
             // combos (Alt+Tab = OS window switch). These are not user keyboard
             // navigation and should not trigger keyboard modality.
             return;
         }
         if NAV_KEYS.contains(&key) {
-            self.keyboard_modality = true;
+            self.keyboard_modality.set(true);
         }
+    }
+
+    /// Process a virtual interaction source (for example assistive-technology navigation).
+    pub fn on_virtual_input(&self) {
+        self.keyboard_modality.set(true);
     }
 
     /// Returns true if the focus ring should be shown for the element
     /// that just received focus.
     pub fn should_show_focus_ring(&self) -> bool {
-        self.keyboard_modality
+        self.keyboard_modality.get()
     }
 
     /// Emit the `data-ars-focus-visible` attribute into AttrMap based on current state.
@@ -1671,7 +1675,7 @@ impl FocusRing {
     /// instead. Direct use of this method is reserved for rare cases where the
     /// `ars-interactions` layer is bypassed. See `05-interactions.md` §4 normative statement.
     pub fn apply_focus_attrs(&self, attrs: &mut AttrMap, is_focused: bool) {
-        if is_focused && self.keyboard_modality {
+        if is_focused && self.keyboard_modality.get() {
             attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
         } else {
             attrs.set(HtmlAttr::Data("ars-focus-visible"), AttrValue::None);
@@ -1735,7 +1739,7 @@ impl FocusRing {
 pub struct FocusRingCssDoc;
 ````
 
-> **Interaction layer:** FocusRing in `ars-a11y` provides the low-level input-modality tracker. The `FocusState` enum in `ars-interactions` (`05-interactions.md` §4) consumes this to drive the `use_focus` hook's focus-visible logic.
+> **Interaction layer:** FocusRing in `ars-a11y` provides the accessibility-focused `focus-visible` heuristic. The `FocusState` enum in `ars-interactions` (`05-interactions.md` §4) reads the shared `ModalityContext`, while adapters feed both through the same `ars-dom::ModalityManager` event stream.
 
 ### 3.5 FocusZone
 
@@ -2034,9 +2038,9 @@ All text input components (TextField, Textarea, Combobox, TagsInput, SearchInput
 
 1. Track `is_composing: bool` in component Context, set to `true` on `compositionstart` and `false` on `compositionend`.
 2. During composition (`is_composing == true`), suppress:
-   - Enter-based actions (tag addition, item selection, form submission)
-   - Filtering/search triggers (Combobox should not filter on intermediate composition text)
-   - Custom keyboard handlers that would interfere with composition
+    - Enter-based actions (tag addition, item selection, form submission)
+    - Filtering/search triggers (Combobox should not filter on intermediate composition text)
+    - Custom keyboard handlers that would interfere with composition
 3. Only process the final committed text on `compositionend`.
 4. When the browser reports `key` as `"Process"` (i.e., `key == KeyboardKey::Process` — Chrome fires this before `compositionstart`), treat as composition-in-progress regardless of the `isComposing` flag value.
 5. **Firefox late-fire workaround:** Firefox fires `compositionend` _after_ `keydown` for Enter, so `is_composing` is still `true` when the Enter `keydown` arrives. The adapter layer MUST schedule a microtask (e.g., `queueMicrotask` / `Promise::resolve().then(...)`) from the Enter `keydown` handler and only process the Enter action in that microtask — by then `compositionend` will have fired and `is_composing` will be `false`. If `is_composing` is still `true` at microtask time, discard the Enter.
@@ -3080,21 +3084,21 @@ Windows High Contrast Mode (WHCM) and CSS `forced-colors` media feature apply a 
 
 /* Ensure focus rings appear in forced-colors mode */
 @media (forced-colors: active) {
-  [data-ars-focus-visible] {
-    outline: 3px solid Highlight;
-    outline-offset: 2px;
-    forced-color-adjust: none;
-  }
+    [data-ars-focus-visible] {
+        outline: 3px solid Highlight;
+        outline-offset: 2px;
+        forced-color-adjust: none;
+    }
 
-  /* Ensure data-attribute-conveyed states remain visible */
-  [data-ars-state~="selected"]::before {
-    content: "✓ ";
-    forced-color-adjust: auto;
-  }
+    /* Ensure data-attribute-conveyed states remain visible */
+    [data-ars-state~="selected"]::before {
+        content: "✓ ";
+        forced-color-adjust: auto;
+    }
 
-  [data-ars-disabled] {
-    color: GrayText;
-  }
+    [data-ars-disabled] {
+        color: GrayText;
+    }
 }
 ```
 
@@ -3152,10 +3156,10 @@ pub fn resolve_opaque_backdrop(override_: Option<bool>) -> bool {
 ```css
 /* CSS pattern for reduced-transparency support */
 @media (prefers-reduced-transparency: reduce) {
-  [data-ars-scope="dialog"] [data-ars-part="backdrop"] {
-    background: rgb(0, 0, 0); /* opaque fallback */
-    backdrop-filter: none; /* remove blur */
-  }
+    [data-ars-scope="dialog"] [data-ars-part="backdrop"] {
+        background: rgb(0, 0, 0); /* opaque fallback */
+        backdrop-filter: none; /* remove blur */
+    }
 }
 ```
 
@@ -3173,24 +3177,24 @@ Recommended defaults (applied via user CSS, documented here for design system au
 ```css
 /* Default focus ring: 3px solid outline with 2px offset (per §3.4 FocusRingCssDoc) */
 [data-ars-focus-visible] {
-  outline: 3px solid #0070f3; /* Must be ≥ 3:1 contrast against background */
-  outline-offset: 2px;
+    outline: 3px solid #0070f3; /* Must be ≥ 3:1 contrast against background */
+    outline-offset: 2px;
 }
 
 /* For dark backgrounds, use a white ring with a dark shadow.
    box-shadow provides contrast halo on normal displays;
    it is stripped in forced-colors mode where outline alone is visible. */
 .dark [data-ars-focus-visible] {
-  outline: 3px solid #ffffff;
-  box-shadow: 0 0 0 4px #000000;
+    outline: 3px solid #ffffff;
+    box-shadow: 0 0 0 4px #000000;
 }
 
 @media (forced-colors: active) {
-  .dark [data-ars-focus-visible] {
-    outline: 3px solid Highlight;
-    outline-offset: 2px;
-    box-shadow: none;
-  }
+    .dark [data-ars-focus-visible] {
+        outline: 3px solid Highlight;
+        outline-offset: 2px;
+        box-shadow: none;
+    }
 }
 ```
 
@@ -3386,12 +3390,12 @@ When `ScrollLock` is active (typically from an open modal Dialog), the `<body>` 
 
 ```css
 @media print {
-  html,
-  body {
-    overflow: visible !important;
-    padding-right: 0 !important;
-    height: auto !important;
-  }
+    html,
+    body {
+        overflow: visible !important;
+        padding-right: 0 !important;
+        height: auto !important;
+    }
 }
 ```
 
@@ -3411,39 +3415,39 @@ The `ars-ui` project should ship a `print.css` file (or `@media print` block wit
 
 ```css
 @media print {
-  /* Hide overlays and backdrops */
-  [data-ars-scope="dialog"]:not([role="alertdialog"]),
-  [data-ars-scope="drawer"],
-  [data-ars-scope="popover"],
-  [data-ars-scope="tooltip"],
-  [data-ars-scope="toast"],
-  [data-ars-backdrop] {
-    display: none !important;
-  }
+    /* Hide overlays and backdrops */
+    [data-ars-scope="dialog"]:not([role="alertdialog"]),
+    [data-ars-scope="drawer"],
+    [data-ars-scope="popover"],
+    [data-ars-scope="tooltip"],
+    [data-ars-scope="toast"],
+    [data-ars-backdrop] {
+        display: none !important;
+    }
 
-  /* Remove scroll lock side-effects */
-  html,
-  body {
-    overflow: visible !important;
-    padding-right: 0 !important;
-    height: auto !important;
-  }
+    /* Remove scroll lock side-effects */
+    html,
+    body {
+        overflow: visible !important;
+        padding-right: 0 !important;
+        height: auto !important;
+    }
 
-  /* Hide portal root (content should be inlined for print) */
-  #ars-portal-root {
-    display: none !important;
-  }
+    /* Hide portal root (content should be inlined for print) */
+    #ars-portal-root {
+        display: none !important;
+    }
 
-  /* Suppress focus indicators */
-  [data-ars-focus-visible] {
-    outline: none !important;
-    box-shadow: none !important;
-  }
+    /* Suppress focus indicators */
+    [data-ars-focus-visible] {
+        outline: none !important;
+        box-shadow: none !important;
+    }
 
-  /* Suppress loading spinners / skeleton screens */
-  [data-ars-state="loading"] {
-    visibility: hidden;
-  }
+    /* Suppress loading spinners / skeleton screens */
+    [data-ars-state="loading"] {
+        visibility: hidden;
+    }
 }
 ```
 

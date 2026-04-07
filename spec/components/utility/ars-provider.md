@@ -6,12 +6,12 @@ foundation_deps: [architecture, accessibility]
 shared_deps: []
 related: []
 references:
-  ark-ui: Environment
+    ark-ui: Environment
 ---
 
 # ArsProvider
 
-`ArsProvider` is the **single root provider** for the ars-ui library. It supplies shared configuration, platform capabilities, i18n resources, and style strategy to all descendant components. It MUST be rendered at (or near) the application root.
+`ArsProvider` is the **single root provider** for the ars-ui library. It supplies shared configuration, platform capabilities, provider-scoped modality state, i18n resources, and style strategy to all descendant components. It MUST be rendered at (or near) the application root.
 
 `ArsProvider` subsumes the formerly separate `LocaleProvider`, `PlatformEffectsProvider`, `IcuProvider`, `I18nProvider`, and `ArsStyleProvider`.
 
@@ -58,6 +58,10 @@ pub struct Props {
     /// Defaults to `NullPlatformEffects` (no-op) for tests and SSR.
     pub platform: Option<Rc<dyn PlatformEffects>>,
 
+    /// Shared input-modality state for this provider root.
+    /// Defaults to `DefaultModalityContext`.
+    pub modality: Option<Rc<dyn ModalityContext>>,
+
     /// Calendar/locale data provider for date-time components.
     /// Production uses `Icu4xProvider`; tests use `StubIcuProvider`.
     /// Defaults to `StubIcuProvider` (English-only).
@@ -90,6 +94,7 @@ pub struct ArsContext {
     portal_container_id: Option<String>,
     root_node_id: Option<String>,
     platform: Rc<dyn PlatformEffects>,
+    modality: Rc<dyn ModalityContext>,
     icu_provider: Arc<dyn IcuProvider>,
     i18n_registries: Rc<I18nRegistries>,
     style_strategy: StyleStrategy,
@@ -114,6 +119,8 @@ impl ArsContext {
     pub fn root_node_id(&self) -> Option<&str> { self.root_node_id.as_deref() }
     /// Returns the platform capabilities trait object.
     pub fn platform(&self) -> Rc<dyn PlatformEffects> { Rc::clone(&self.platform) }
+    /// Returns the provider-scoped modality context.
+    pub fn modality(&self) -> Rc<dyn ModalityContext> { Rc::clone(&self.modality) }
     /// Returns the ICU calendar/locale data provider.
     pub fn icu_provider(&self) -> Arc<dyn IcuProvider> { Arc::clone(&self.icu_provider) }
     /// Returns the i18n translation registries.
@@ -134,6 +141,7 @@ impl Default for ArsContext {
             portal_container_id: None,
             root_node_id: None,
             platform: Rc::new(NullPlatformEffects),
+            modality: Rc::new(DefaultModalityContext::new()),
             icu_provider: Arc::new(StubIcuProvider),
             i18n_registries: Rc::new(I18nRegistries::new()),
             style_strategy: StyleStrategy::Inline,
@@ -156,6 +164,7 @@ Convenience hooks read from `ArsContext` with fallback defaults:
 
 - `use_locale()` — locale, falls back to `en-US`
 - `use_platform_effects()` — platform capabilities
+- `use_modality_context()` — provider-scoped input-modality state
 - `use_icu_provider()` — calendar/locale data
 - `use_style_strategy()` — CSS style strategy, falls back to `Inline`
 - `resolve_messages::<M>()` — translation registries
@@ -189,6 +198,7 @@ ArsProvider
 | Form field components    | `disabled`, `read_only` — cascade to descendant interactive components                             |
 | Theme-aware components   | `color_mode` — for conditional rendering based on active color mode                                |
 | All effect closures      | `platform` — via `use_platform_effects()` for focus, timers, scroll-lock, positioning, DOM queries |
+| Focus / Hover / Press    | `modality` — via `use_modality_context()` for shared modality and global press state               |
 | Date-time components     | `icu_provider` — via `use_icu_provider()` for calendar data (weekday names, month names, etc.)     |
 | All stateful components  | `i18n_registries` — via `resolve_messages::<M>()` for per-component translation lookups            |
 | All rendered components  | `style_strategy` — via `use_style_strategy()` for CSS injection method                             |

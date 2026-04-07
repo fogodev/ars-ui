@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility]
 shared_deps: []
 related: []
 references:
-  react-aria: FocusScope
+    react-aria: FocusScope
 ---
 
 # FocusScope
@@ -292,11 +292,10 @@ impl ars_core::Machine for Machine {
         }
     }
 
-    // **FocusCause coordination:** `platform.focus_element_by_id()` MUST call
-    // `set_last_focus_cause(FocusCause::Programmatic)` before invoking the
-    // element's `.focus()` method. This ensures that FocusRing correctly
-    // evaluates `data-ars-focus-visible` — programmatic focus should NOT show
-    // a focus ring unless the prior interaction was keyboard-initiated.
+    // **Modality coordination:** programmatic focus restoration MUST preserve the
+    // shared `ModalityContext` state rather than forcing pointer modality.
+    // This ensures `data-ars-focus-visible` remains correct — programmatic focus
+    // should only show a focus ring when the prior interaction was not pointer-driven.
 
     fn connect<'a>(
         state: &'a State,
@@ -596,12 +595,12 @@ When a component uses both FocusScope (trapping focus) and Dismissable (providin
 
 ```html
 <div data-ars-scope="dialog">
-  <!-- FocusScope container -->
-  <DismissButton />
-  <!-- Inside trap — reachable -->
-  <div data-ars-part="content">...</div>
-  <DismissButton />
-  <!-- Inside trap — reachable -->
+    <!-- FocusScope container -->
+    <DismissButton />
+    <!-- Inside trap — reachable -->
+    <div data-ars-part="content">...</div>
+    <DismissButton />
+    <!-- Inside trap — reachable -->
 </div>
 ```
 
@@ -611,7 +610,7 @@ When a component uses both FocusScope (trapping focus) and Dismissable (providin
 <DismissButton />
 <!-- Outside trap — unreachable! -->
 <div data-ars-scope="dialog">
-  <div data-ars-part="content">...</div>
+    <div data-ars-part="content">...</div>
 </div>
 ```
 

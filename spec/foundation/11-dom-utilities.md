@@ -472,60 +472,60 @@ On mobile browsers, the virtual keyboard reduces the visible area without changi
 
 1. **`auto_update()` MUST subscribe to `visualViewport` events** when `window.visualViewport` is available:
 
-   ```rust
-   // In ars-dom auto_update implementation:
-   if let Some(vv) = window.visual_viewport() {
-       // Subscribe to resize (keyboard open/close) and scroll (keyboard pan)
-       vv.add_event_listener_with_callback("resize", reposition_callback.as_ref().unchecked_ref())
-           .expect("addEventListener on VisualViewport");
-       vv.add_event_listener_with_callback("scroll", reposition_callback.as_ref().unchecked_ref())
-           .expect("addEventListener on VisualViewport");
-       // Cleanup must remove both listeners
-   }
-   ```
+    ```rust
+    // In ars-dom auto_update implementation:
+    if let Some(vv) = window.visual_viewport() {
+        // Subscribe to resize (keyboard open/close) and scroll (keyboard pan)
+        vv.add_event_listener_with_callback("resize", reposition_callback.as_ref().unchecked_ref())
+            .expect("addEventListener on VisualViewport");
+        vv.add_event_listener_with_callback("scroll", reposition_callback.as_ref().unchecked_ref())
+            .expect("addEventListener on VisualViewport");
+        // Cleanup must remove both listeners
+    }
+    ```
 
 2. **Boundary height MUST use `visualViewport.height`** when `Boundary::Viewport` is active and the visual viewport API is available. Fallback to `window.innerHeight` when unavailable:
 
-   ```rust
-   fn viewport_width(window: &web_sys::Window) -> f64 {
-       let width = window.visual_viewport()
-           .map(|vv| vv.width())
-           .unwrap_or_else(|| {
-               window.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(0.0)
-           });
-       #[cfg(debug_assertions)]
-       if width == 0.0 {
-           web_sys::console::warn_1(
-               &"ars-dom: viewport_width() returned 0 — window may not be fully initialized".into(),
-           );
-       }
-       width
-   }
+    ```rust
+    fn viewport_width(window: &web_sys::Window) -> f64 {
+        let width = window.visual_viewport()
+            .map(|vv| vv.width())
+            .unwrap_or_else(|| {
+                window.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(0.0)
+            });
+        #[cfg(debug_assertions)]
+        if width == 0.0 {
+            web_sys::console::warn_1(
+                &"ars-dom: viewport_width() returned 0 — window may not be fully initialized".into(),
+            );
+        }
+        width
+    }
 
-   fn viewport_height(window: &web_sys::Window) -> f64 {
-       let height = window.visual_viewport()
-           .map(|vv| vv.height())
-           .unwrap_or_else(|| {
-               window.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(0.0)
-           });
-       #[cfg(debug_assertions)]
-       if height == 0.0 {
-           web_sys::console::warn_1(
-               &"ars-dom: viewport_height() returned 0 — window may not be fully initialized".into(),
-           );
-       }
-       height
-   }
-   ```
+    fn viewport_height(window: &web_sys::Window) -> f64 {
+        let height = window.visual_viewport()
+            .map(|vv| vv.height())
+            .unwrap_or_else(|| {
+                window.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(0.0)
+            });
+        #[cfg(debug_assertions)]
+        if height == 0.0 {
+            web_sys::console::warn_1(
+                &"ars-dom: viewport_height() returned 0 — window may not be fully initialized".into(),
+            );
+        }
+        height
+    }
+    ```
 
 3. **`keyboard_aware` positioning option**: Add to `PositioningOptions`:
 
-   ```rust
-   /// When true, reposition floating elements in response to virtual keyboard
-   /// open/close events (visualViewport resize). Default: false.
-   /// Enable for floating elements that contain or are triggered by input fields.
-   pub keyboard_aware: bool, // default: false
-   ```
+    ```rust
+    /// When true, reposition floating elements in response to virtual keyboard
+    /// open/close events (visualViewport resize). Default: false.
+    /// Enable for floating elements that contain or are triggered by input fields.
+    pub keyboard_aware: bool, // default: false
+    ```
 
 4. **Scroll lock adjustment**: Dialog scroll lock (see `components/overlay/dialog.md`) MUST account for `visualViewport.offsetTop` when computing the scroll position to preserve. On iOS Safari, `visualViewport.offsetTop` reflects the amount the page has been scrolled to accommodate the keyboard.
 
@@ -1043,20 +1043,20 @@ All positioning calculations use a consistent coordinate system. This section do
 
 - **`position: absolute` positioning (non-portal).** When the floating element uses `Strategy::Absolute` (e.g., it is not portaled and lives inside a positioned ancestor), subtract the offset parent's `getBoundingClientRect()` from the client-space coordinates to produce values relative to the offset parent:
 
-  ```rust
-  let offset_parent_rect = offset_parent.get_bounding_client_rect();
-  let local_x = client_x - offset_parent_rect.x();
-  let local_y = client_y - offset_parent_rect.y();
-  // Apply: element.style.left = local_x; element.style.top = local_y;
-  ```
+    ```rust
+    let offset_parent_rect = offset_parent.get_bounding_client_rect();
+    let local_x = client_x - offset_parent_rect.x();
+    let local_y = client_y - offset_parent_rect.y();
+    // Apply: element.style.left = local_x; element.style.top = local_y;
+    ```
 
 - **Recalculation triggers.** Recalculate the floating element's position on:
-  1. **Scroll events** — any ancestor scroll container between the anchor and the boundary.
-  2. **Resize events** — `window` resize and `ResizeObserver` on both the reference (anchor) and floating elements.
-  3. **`requestAnimationFrame`** — for smooth updates during CSS animations or transitions that change the anchor's geometry.
-  4. **Layout mutations** — when the anchor or floating element's size changes (detected via `ResizeObserver`).
+    1. **Scroll events** — any ancestor scroll container between the anchor and the boundary.
+    2. **Resize events** — `window` resize and `ResizeObserver` on both the reference (anchor) and floating elements.
+    3. **`requestAnimationFrame`** — for smooth updates during CSS animations or transitions that change the anchor's geometry.
+    4. **Layout mutations** — when the anchor or floating element's size changes (detected via `ResizeObserver`).
 
-  The adapter SHOULD debounce scroll/resize recalculations using `requestAnimationFrame` to avoid layout thrashing. At most one position update per animation frame.
+    The adapter SHOULD debounce scroll/resize recalculations using `requestAnimationFrame` to avoid layout thrashing. At most one position update per animation frame.
 
 #### 2.8.1 CSS Transform Ancestor Detection
 
@@ -2157,27 +2157,27 @@ This section provides the complete, authoritative specification for scroll lock 
 
 2. **Apply lock styles (tiered strategy):**
 
-   **Tier 1 — Modern browsers:** Apply to both `<html>` and `<body>`:
+    **Tier 1 — Modern browsers:** Apply to both `<html>` and `<body>`:
 
-   ```css
-   /* <html> */
-   overflow: clip;
-   /* <body> */
-   overscroll-behavior: contain;
-   ```
+    ```css
+    /* <html> */
+    overflow: clip;
+    /* <body> */
+    overscroll-behavior: contain;
+    ```
 
-   `overflow: clip` prevents scrolling without creating a new formatting context (unlike `overflow: hidden`). No scroll position jump. No impact on fixed-position children.
+    `overflow: clip` prevents scrolling without creating a new formatting context (unlike `overflow: hidden`). No scroll position jump. No impact on fixed-position children.
 
-   **Tier 2 — iOS Safari fallback** (when `overflow: clip` is not supported, Safari < 16): Apply to `<body>`:
+    **Tier 2 — iOS Safari fallback** (when `overflow: clip` is not supported, Safari < 16): Apply to `<body>`:
 
-   ```css
-   position: fixed;
-   top: -{savedScrollY}px;
-   width: 100%;
-   overflow: hidden;
-   ```
+    ```css
+    position: fixed;
+    top: -{savedScrollY}px;
+    width: 100%;
+    overflow: hidden;
+    ```
 
-   Setting `position: fixed` on `<body>` removes it from the scroll flow. The `top: -{savedScrollY}px` offset maintains the visual position so the page does not jump to the top. Note: this temporarily breaks other fixed-position elements (see §5.6).
+    Setting `position: fixed` on `<body>` removes it from the scroll flow. The `top: -{savedScrollY}px` offset maintains the visual position so the page does not jump to the top. Note: this temporarily breaks other fixed-position elements (see §5.6).
 
 3. **Scrollbar compensation.** Measure scrollbar width and apply `padding-right` (or `padding-left` in RTL) to prevent layout shift (see §5.7).
 
@@ -2530,40 +2530,52 @@ Usage flow for a modal dialog:
 
 ## 8. Modality Manager
 
-`ars-dom` is the convergence point for `ars-a11y` (FocusRing) and `ars-interactions` (LAST_POINTER_TYPE). To prevent the adapter from accidentally updating only one modality tracker, `ars-dom` provides a single entry point that fans out to both atomically.
+`ars-dom` is the web binding layer for the shared core modality contract. It owns the browser listener lifecycle and fans normalized events out to both `ars_core::ModalityContext` and `ars-a11y::FocusRing` so adapters cannot accidentally update only one side.
 
 ```rust
 // ars-dom/src/modality.rs
 
+use std::rc::Rc;
 use ars_a11y::FocusRing;
-use ars_interactions::{PointerType, KeyboardKey, KeyModifiers};
+use ars_core::{KeyboardKey, KeyModifiers, ModalityContext, PointerType};
 
-/// Unified modality update — ensures ars-a11y and ars-interactions
-/// stay in sync. Adapters MUST call these methods instead of updating
-/// `LAST_POINTER_TYPE` or `FocusRing` independently.
+/// Unified modality update — ensures accessibility and interaction consumers
+/// stay in sync. Adapters MUST call these methods instead of updating the
+/// shared modality context or `FocusRing` independently.
 pub struct ModalityManager {
+    modality: Rc<dyn ModalityContext>,
     focus_ring: FocusRing,
 }
 
 impl ModalityManager {
-    pub fn new() -> Self {
-        Self { focus_ring: FocusRing::new() }
+    pub fn new(modality: Rc<dyn ModalityContext>) -> Self {
+        Self { modality, focus_ring: FocusRing::new() }
     }
 
     /// Call on keydown events. Updates both modality trackers atomically.
-    pub fn on_key_down(&mut self, key: KeyboardKey, modifiers: KeyModifiers) {
-        // 1. ars-interactions: switch to keyboard modality
-        ars_interactions::set_last_pointer_type(PointerType::Keyboard);
-        // 2. ars-a11y: update FocusRing (only nav keys flip keyboard_modality)
+    pub fn on_key_down(&self, key: KeyboardKey, modifiers: KeyModifiers) {
+        self.modality.on_key_down(key, modifiers);
         self.focus_ring.on_key_down(key, modifiers);
     }
 
     /// Call on pointerdown/mousedown/touchstart events.
-    pub fn on_pointer_down(&mut self, pointer_type: PointerType) {
-        // 1. ars-interactions: switch to pointer modality
-        ars_interactions::set_last_pointer_type(pointer_type);
-        // 2. ars-a11y: clear keyboard modality
+    pub fn on_pointer_down(&self, pointer_type: PointerType) {
+        self.modality.on_pointer_down(pointer_type);
         self.focus_ring.on_pointer_down();
+    }
+
+    /// Call on virtual or assistive-technology interactions.
+    pub fn on_virtual_input(&self) {
+        self.modality.on_virtual_input();
+        self.focus_ring.on_virtual_input();
+    }
+
+    /// Install the browser event listeners owned by this manager.
+    pub fn ensure_listeners(&self) {
+        // Browser-only implementation:
+        // - no-op without a document
+        // - attaches keydown, pointerdown, mousedown, touchstart, and focus(capture)
+        // - uses refcounted install/remove semantics
     }
 
     /// Delegate to the inner `FocusRing` for focus-visible checks.
@@ -2573,9 +2585,7 @@ impl ModalityManager {
 }
 ```
 
-> **Note:** `ensure_modality_listeners()` in `ars-interactions` (see `05-interactions.md` §4.4)
-> installs the document-level DOM listeners. The adapter's listener closures should call
-> `ModalityManager::on_key_down()` / `on_pointer_down()` instead of touching the trackers directly.
+> **Note:** `ars-interactions` no longer owns document-level listeners. The adapter's listener closures should call `ModalityManager::on_key_down()` / `on_pointer_down()` / `on_virtual_input()` instead of touching the shared modality context or `FocusRing` directly.
 
 ---
 

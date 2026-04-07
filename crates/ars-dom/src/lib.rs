@@ -5,6 +5,7 @@
 //! platform capability detection.
 
 mod focus;
+pub mod modality;
 pub mod scroll_lock;
 
 pub use focus::{
@@ -15,6 +16,7 @@ pub use focus::{
     document_contains, focus_element, get_first_focusable, get_focusable_elements,
     get_html_element_by_id, get_last_focusable,
 };
+pub use modality::ModalityManager;
 pub use scroll_lock::{
     ScrollLockManager, acquire, depth, is_locked, prevent_scroll, release, restore_scroll,
 };

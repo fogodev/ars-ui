@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility]
 shared_deps: []
 related: []
 references:
-  react-aria: FocusRing
+    react-aria: FocusRing
 ---
 
 # FocusRing
@@ -126,97 +126,49 @@ FocusRing
 
 > **CSS Selector Performance Note:** The `:has()` pseudo-class (relative selector) has significant performance cost in older Chrome versions (< 105) and can cause style recalculation bottlenecks when used in high-frequency selectors. Prefer attribute selectors like `[data-ars-focus-visible]` over patterns like `:has(:focus-visible)` for focus ring styling. Attribute selectors are O(1) in selector matching, while `:has()` requires ancestor/descendant traversal. The `data-ars-*` attribute system is specifically designed to avoid the need for `:has()` in component styling.
 
-## 4. Global Pointer Tracking
+## 4. Shared Modality Tracking
 
-FocusRing depends on a global module-level pointer tracking effect maintained by `ars-dom`:
+FocusRing no longer depends on a process-global singleton. It consumes the same provider-scoped modality event stream used by `ars_core::ModalityContext`, typically via `ars-dom::ModalityManager`:
 
 ```rust
-// ars-dom/src/focus_visible.rs
+// ars-dom/src/modality.rs
 
-use std::cell::Cell;
+use std::rc::Rc;
+use ars_a11y::FocusRing;
+use ars_core::{KeyboardKey, KeyModifiers, ModalityContext, PointerType};
 
-/// Describes why an element received focus. Replaces the previous boolean
-/// `had_pointer_interaction` flag with a richer enum that distinguishes
-/// keyboard, pointer, and programmatic focus sources.
-#[derive(Clone, Debug, PartialEq)]
-pub enum FocusCause {
-    /// Focus was triggered by keyboard navigation (Tab, Shift+Tab, arrow keys).
-    Keyboard,
-    /// Focus was triggered by pointer interaction (mouse click, touch).
-    Pointer,
-    /// Focus was moved programmatically (e.g., dialog open, focus trap).
-    Programmatic,
+pub struct ModalityManager {
+    modality: Rc<dyn ModalityContext>,
+    focus_ring: FocusRing,
 }
 
-thread_local! {
-    /// Tracks the cause of the most recent focus event.
-    static LAST_FOCUS_CAUSE: Cell<Option<FocusCause>> = Cell::new(None);
-}
+impl ModalityManager {
+    pub fn on_key_down(&self, key: KeyboardKey, modifiers: KeyModifiers) {
+        self.modality.on_key_down(key, modifiers);
+        self.focus_ring.on_key_down(key, modifiers);
+    }
 
-/// Call once at application startup to install the global listeners.
-/// (Called automatically by the ars-leptos / ars-dioxus mount function.)
-///
-/// **Initialization:** `install_focus_visible_tracker()` from `ars-dom` must
-/// be called once at app startup. This is automatically handled by the
-/// `ars-leptos` and `ars-dioxus` mount functions. If using a custom setup,
-/// call it manually before any FocusRing-enabled components mount.
-pub fn install_focus_visible_tracker() {
-    // Install `pointerdown` listener on `window` that sets LAST_FOCUS_CAUSE = Some(Pointer).
-    // Install `keydown` listener on `window` (for Tab, Shift+Tab, arrow keys)
-    //   that sets LAST_FOCUS_CAUSE = Some(Keyboard).
-    // Programmatic focus is detected when neither pointer nor keyboard preceded
-    //   the focus event — the adapter sets LAST_FOCUS_CAUSE = Some(Programmatic)
-    //   when calling element.focus() directly.
+    pub fn on_pointer_down(&self, pointer_type: PointerType) {
+        self.modality.on_pointer_down(pointer_type);
+        self.focus_ring.on_pointer_down();
+    }
+
+    pub fn on_virtual_input(&self) {
+        self.modality.on_virtual_input();
+        self.focus_ring.on_virtual_input();
+    }
 }
 ```
 
-**Cleanup and idempotency:** The function MUST be idempotent — calling it multiple times must not accumulate duplicate listeners. Use a module-level guard:
+Browser listener installation is also owned by `ars-dom`, not by `FocusRing` itself. The web implementation exposes ref-counted `ensure_listeners()` / `remove_listeners()` methods on `ModalityManager` so adapters can install document listeners without creating duplicate registrations.
+
+Individual component focus handlers consult the shared modality context to determine the focus source:
 
 ```rust
-thread_local! {
-    static TRACKER_INSTALLED: Cell<bool> = Cell::new(false);
-}
-
-pub fn install_focus_visible_tracker() {
-    TRACKER_INSTALLED.with(|installed| {
-        if installed.get() { return; }
-        installed.set(true);
-        // ... attach listeners ...
-    });
-}
-```
-
-For Dioxus Desktop hot-reload scenarios, the guard prevents listener accumulation across webview recreations. If full cleanup is needed, the function MAY return a cleanup handle that removes the listeners and resets the guard.
-
-```rust
-/// Returns the cause of the most recent focus event.
-pub fn last_focus_cause() -> Option<FocusCause> {
-    LAST_FOCUS_CAUSE.with(|v| v.get())
-}
-
-/// Whether focus should show a visible focus ring.
-/// Only keyboard-initiated focus triggers the focus ring.
-/// When `is_text_input` is true, `data-ars-focus-visible` is set whenever the
-/// element is focused, regardless of the `FocusCause`. This matches the
-/// convention that text inputs always display a visible focus indicator.
-pub fn is_focus_visible() -> bool {
-    matches!(last_focus_cause(), Some(FocusCause::Keyboard))
-}
-
-/// Legacy compatibility wrapper.
-pub fn had_pointer_interaction() -> bool {
-    matches!(last_focus_cause(), Some(FocusCause::Pointer))
-}
-```
-
-Individual component focus handlers call `last_focus_cause()` to determine the focus source:
-
-```rust
-// Inside any component's focus handler (now a typed method on the Api struct):
-// The adapter calls last_focus_cause() and sends the appropriate event.
+// Inside any component's focus handler:
 // fn on_focus(&self) {
-//     let cause = last_focus_cause().unwrap_or(FocusCause::Programmatic);
-//     let is_keyboard = matches!(cause, FocusCause::Keyboard);
+//     let last_pointer_type = config.modality.last_pointer_type();
+//     let is_keyboard = matches!(last_pointer_type, Some(PointerType::Keyboard));
 //     (self.send)(Event::Focus { is_keyboard });
 // }
 ```
@@ -227,13 +179,13 @@ Individual component focus handlers call `last_focus_cause()` to determine the f
 /* Show visible focus ring only for keyboard navigation */
 [data-ars-focus-visible]:focus,
 [data-ars-focus-visible]:focus-within {
-  outline: 2px solid var(--ars-color-focus);
-  outline-offset: 2px;
+    outline: 2px solid var(--ars-color-focus);
+    outline-offset: 2px;
 }
 
 /* Suppress focus ring for pointer navigation */
 :focus:not([data-ars-focus-visible]) {
-  outline: none;
+    outline: none;
 }
 ```
 

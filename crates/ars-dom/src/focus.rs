@@ -724,6 +724,74 @@ mod tests {
     use super::*;
 
     #[test]
+    fn focus_scope_new_starts_inactive_with_expected_fields() {
+        let scope = FocusScope::new("dialog-root", FocusScopeOptions::default());
+
+        assert_eq!(scope.container_id, "dialog-root");
+        assert_eq!(scope.options, FocusScopeOptions::default());
+        assert_eq!(scope.previously_focused, None);
+        assert!(!scope.active);
+    }
+
+    #[test]
+    fn focus_scope_activate_and_deactivate_are_safe_on_host() {
+        let mut scope = FocusScope::new("dialog-root", FocusScopeOptions::default());
+
+        scope.activate(FocusTarget::First);
+        assert!(scope.active);
+        assert_eq!(scope.previously_focused, None);
+        assert!(scope.is_active());
+
+        scope.deactivate();
+        assert!(!scope.active);
+        assert_eq!(scope.previously_focused, None);
+        assert!(!scope.is_active());
+    }
+
+    #[test]
+    fn focus_scope_focus_helpers_are_host_safe() {
+        let scope = FocusScope::new("dialog-root", FocusScopeOptions::default());
+
+        scope.focus_first(FocusTarget::First);
+        scope.focus_first(FocusTarget::Last);
+        scope.focus_first(FocusTarget::AutofocusMarked);
+        scope.focus_first(FocusTarget::PreviouslyActive);
+        scope.focus_last();
+
+        assert!(!scope.contains_element("child"));
+    }
+
+    #[test]
+    fn host_focus_query_helpers_return_safe_defaults() {
+        let focused = FocusedElement(String::from("field"));
+
+        assert_eq!(active_element_id(), None);
+        assert_eq!(get_currently_focused(), None);
+        assert!(!is_element_in_dom(&focused));
+        assert!(!document_contains_id_impl("field"));
+        assert_eq!(active_element_id_impl(), None);
+        assert_eq!(current_tabbable_index("dialog-root"), None);
+        assert_eq!(tabbable_count("dialog-root"), 0);
+        assert!(!focus_autofocus_marked("dialog-root"));
+        assert!(!focus_element_by_id_impl("field"));
+        assert!(!focus_first_tabbable_impl("dialog-root"));
+        assert!(!focus_last_tabbable_impl("dialog-root"));
+        assert!(!contains_element_by_id("dialog-root", "field"));
+    }
+
+    #[test]
+    fn host_focus_side_effect_helpers_are_safe_to_call() {
+        focus_focused_element(&FocusedElement(String::from("field")));
+        focus_container_parent("dialog-root");
+        focus_container("dialog-root");
+        focus_body_impl();
+        focus_element_by_id("field");
+        focus_first_tabbable("dialog-root");
+        focus_last_tabbable("dialog-root");
+        focus_body();
+    }
+
+    #[test]
     fn restore_target_prefers_previous_then_parent_then_body() {
         assert_eq!(
             resolve_restore_target(true, true),
@@ -789,6 +857,14 @@ mod tests {
     }
 
     #[test]
+    fn tab_navigation_shift_with_non_boundary_keeps_browser_default() {
+        assert_eq!(
+            resolve_tab_navigation(true, true, 4, Some(2), true),
+            TabNavigationAction::AllowBrowserDefault
+        );
+    }
+
+    #[test]
     fn tabbable_selector_keeps_focusable_ordering_contract() {
         assert!(TABBABLE_SELECTOR.contains("button:not([disabled])"));
         assert!(TABBABLE_SELECTOR.contains("[tabindex]:not([tabindex='-1'])"));
@@ -808,5 +884,10 @@ mod tests {
             get_previously_active_element("dialog-b"),
             Some(FocusedElement(String::from("input-b")))
         );
+    }
+
+    #[test]
+    fn previously_active_lookup_returns_none_for_unknown_scope() {
+        assert_eq!(get_previously_active_element("missing-scope"), None);
     }
 }
