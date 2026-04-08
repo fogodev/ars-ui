@@ -10,11 +10,15 @@
 //! - [`EphemeralRef`] — borrow wrapper preventing signal storage of borrowed APIs
 //! - [`use_id`] — hydration-safe deterministic ID generation
 
+mod attrs;
 mod ephemeral;
 mod id;
 pub mod prelude;
 mod use_machine;
 
+#[cfg(not(feature = "ssr"))]
+pub use attrs::apply_styles_cssom;
+pub use attrs::{LeptosAttrResult, attr_map_to_leptos, use_style_strategy};
 pub use ephemeral::EphemeralRef;
 #[cfg(feature = "ssr")]
 pub use id::reset_id_counter;

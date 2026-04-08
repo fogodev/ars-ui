@@ -801,7 +801,7 @@ use ars_core::StyleStrategy;
 /// Returns `StyleStrategy::Inline` if no `ArsProvider` is present.
 pub fn use_style_strategy() -> StyleStrategy {
     use_context::<ArsContext>()
-        .map(|ctx| ctx.style_strategy.clone())
+        .map(|ctx| ctx.style_strategy().clone())
         .unwrap_or_else(|| {
             warn_missing_provider("use_style_strategy");
             StyleStrategy::default()
@@ -1727,7 +1727,14 @@ pub struct ArsContext {
     pub icu_provider: Arc<dyn IcuProvider>,
     pub i18n_registries: Rc<I18nRegistries>,
     /// Non-reactive style strategy — set once at provider mount time.
-    pub style_strategy: StyleStrategy,
+    style_strategy: StyleStrategy,
+}
+
+impl ArsContext {
+    /// Returns the active CSS style injection strategy.
+    pub fn style_strategy(&self) -> &StyleStrategy {
+        &self.style_strategy
+    }
 }
 ```
 
