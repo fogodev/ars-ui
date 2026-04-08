@@ -6,6 +6,7 @@
 
 mod focus;
 pub mod modality;
+pub mod positioning;
 mod scroll;
 pub mod scroll_lock;
 
@@ -18,6 +19,10 @@ pub use focus::{
     get_html_element_by_id, get_last_focusable,
 };
 pub use modality::ModalityManager;
+pub use positioning::{
+    Alignment, Axis, Boundary, Offset, Overflow, Placement, PositioningOptions, PositioningResult,
+    Rect, Side, Strategy,
+};
 pub use scroll::{ScrollIntoViewOptions, ScrollLogicalPosition, supports_scroll_into_view_options};
 #[cfg(feature = "web")]
 pub use scroll::{nearest_scrollable_ancestor, scroll_into_view_if_needed, scrollable_ancestors};

@@ -115,16 +115,16 @@ impl Placement {
     /// Auto variants default to Axis::Vertical; the engine resolves the actual axis.
     pub fn main_axis(&self) -> Axis {
         match self {
-            Placement::Top | Placement::TopStart | Placement::TopEnd
-            | Placement::Bottom | Placement::BottomStart | Placement::BottomEnd => Axis::Vertical,
+            // Physical horizontal + logical inline-start/end variants.
             Placement::Left | Placement::LeftStart | Placement::LeftEnd
-            | Placement::Right | Placement::RightStart | Placement::RightEnd => Axis::Horizontal,
-            // Logical variants resolve to the horizontal (inline) axis.
-            Placement::Start | Placement::End
+            | Placement::Right | Placement::RightStart | Placement::RightEnd
+            | Placement::Start | Placement::End
             | Placement::StartTop | Placement::StartBottom
             | Placement::EndTop | Placement::EndBottom => Axis::Horizontal,
-            // Auto variants: default to Vertical; the engine resolves the actual axis.
-            Placement::Auto | Placement::AutoStart | Placement::AutoEnd => Axis::Vertical,
+            // Physical vertical + auto variants (auto defaults to vertical).
+            Placement::Top | Placement::TopStart | Placement::TopEnd
+            | Placement::Bottom | Placement::BottomStart | Placement::BottomEnd
+            | Placement::Auto | Placement::AutoStart | Placement::AutoEnd => Axis::Vertical,
         }
     }
 
@@ -142,18 +142,18 @@ impl Placement {
             "resolve_logical requires a resolved direction (Ltr or Rtl), not Auto"
         );
         match (self, dir) {
-            (Placement::Start, Direction::Ltr)       => Placement::Left,
-            (Placement::Start, Direction::Rtl)       => Placement::Right,
-            (Placement::End, Direction::Ltr)         => Placement::Right,
-            (Placement::End, Direction::Rtl)         => Placement::Left,
-            (Placement::StartTop, Direction::Ltr)    => Placement::LeftStart,
-            (Placement::StartTop, Direction::Rtl)    => Placement::RightStart,
-            (Placement::StartBottom, Direction::Ltr) => Placement::LeftEnd,
-            (Placement::StartBottom, Direction::Rtl) => Placement::RightEnd,
-            (Placement::EndTop, Direction::Ltr)      => Placement::RightStart,
-            (Placement::EndTop, Direction::Rtl)      => Placement::LeftStart,
-            (Placement::EndBottom, Direction::Ltr)   => Placement::RightEnd,
-            (Placement::EndBottom, Direction::Rtl)    => Placement::LeftEnd,
+            (Placement::Start, Direction::Ltr)
+            | (Placement::End, Direction::Rtl) => Placement::Left,
+            (Placement::Start, Direction::Rtl)
+            | (Placement::End, Direction::Ltr) => Placement::Right,
+            (Placement::StartTop, Direction::Ltr)
+            | (Placement::EndTop, Direction::Rtl) => Placement::LeftStart,
+            (Placement::StartTop, Direction::Rtl)
+            | (Placement::EndTop, Direction::Ltr) => Placement::RightStart,
+            (Placement::StartBottom, Direction::Ltr)
+            | (Placement::EndBottom, Direction::Rtl) => Placement::LeftEnd,
+            (Placement::StartBottom, Direction::Rtl)
+            | (Placement::EndBottom, Direction::Ltr) => Placement::RightEnd,
             (other, _) => *other,
         }
     }
@@ -164,10 +164,10 @@ impl Placement {
     pub fn side(&self) -> Side {
         match self {
             Placement::Top | Placement::TopStart | Placement::TopEnd => Side::Top,
-            Placement::Bottom | Placement::BottomStart | Placement::BottomEnd => Side::Bottom,
             Placement::Left | Placement::LeftStart | Placement::LeftEnd => Side::Left,
             Placement::Right | Placement::RightStart | Placement::RightEnd => Side::Right,
-            _ => Side::Bottom, // Auto/Logical — resolve first
+            // Bottom variants + Auto/Logical fallback to Side::Bottom.
+            _ => Side::Bottom,
         }
     }
 
@@ -376,9 +376,10 @@ pub enum Strategy {
 /// WASM, `Arc<dyn Any>` on native) defined in `ars-dom/src/types.rs`.
 /// See `shared/layout-shared-types.md` §1 for the full definition. Wrap in
 /// `DomElementRef` for access to the underlying `web_sys::Element`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum Boundary {
     /// Use the viewport as the overflow boundary (default).
+    #[default]
     Viewport,
     /// Use a specific element's bounding rect as the overflow boundary.
     Element(ElementRef),
@@ -394,12 +395,6 @@ impl PartialEq for Boundary {
             (Self::Element(a), Self::Element(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }
-    }
-}
-
-impl Default for Boundary {
-    fn default() -> Self {
-        Boundary::Viewport
     }
 }
 
