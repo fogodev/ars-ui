@@ -41,7 +41,7 @@ impl SectionFilter {
     }
 
     /// Heading text patterns that indicate this section.
-    fn heading_patterns(&self) -> &[&str] {
+    const fn heading_patterns(&self) -> &[&str] {
         match self {
             Self::States => &["State Machine", "API"],
             Self::Events => &["Events"],

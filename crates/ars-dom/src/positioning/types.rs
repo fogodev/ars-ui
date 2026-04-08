@@ -129,7 +129,7 @@ impl Placement {
     /// Handles both resolved and logical variants. Logical Start/End are swapped.
     /// Auto returns Auto (identity).
     #[must_use]
-    pub fn opposite(&self) -> Placement {
+    pub const fn opposite(&self) -> Placement {
         match self {
             Placement::Bottom => Placement::Top,
             Placement::BottomStart => Placement::TopStart,
@@ -157,7 +157,7 @@ impl Placement {
     /// Returns the main axis for this placement (Horizontal or Vertical).
     /// Auto variants default to `Axis::Vertical`; the engine resolves the actual axis.
     #[must_use]
-    pub fn main_axis(&self) -> Axis {
+    pub const fn main_axis(&self) -> Axis {
         match self {
             // Physical horizontal + logical inline-start/end variants.
             Placement::Left
@@ -227,7 +227,7 @@ impl Placement {
     /// [`resolve_logical()`](Self::resolve_logical) — calling `side()` on them
     /// returns `Side::Bottom` as fallback.
     #[must_use]
-    pub fn side(&self) -> Side {
+    pub const fn side(&self) -> Side {
         match self {
             Placement::Top | Placement::TopStart | Placement::TopEnd => Side::Top,
             Placement::Left | Placement::LeftStart | Placement::LeftEnd => Side::Left,
@@ -240,7 +240,7 @@ impl Placement {
     /// The cross-axis alignment (`Start`, `Center`, `End`).
     /// Returns `Alignment::Center` for unaligned placements (Top, Bottom, Left, Right).
     #[must_use]
-    pub fn alignment(&self) -> Alignment {
+    pub const fn alignment(&self) -> Alignment {
         match self {
             Self::TopStart
             | Self::BottomStart
@@ -263,14 +263,14 @@ impl Placement {
     /// Extract the side and alignment as a tuple.
     /// Auto/Logical variants return `(Side::Bottom, alignment)` — resolve first.
     #[must_use]
-    pub fn side_and_alignment(&self) -> (Side, Alignment) {
+    pub const fn side_and_alignment(&self) -> (Side, Alignment) {
         (self.side(), self.alignment())
     }
 
     /// Return a new `Placement` with the same alignment but a different side.
     /// Only works on resolved (physical) placements.
     #[must_use]
-    pub fn with_side(&self, new_side: Side) -> Placement {
+    pub const fn with_side(&self, new_side: Side) -> Placement {
         let alignment = self.alignment();
         match (new_side, alignment) {
             (Side::Top, Alignment::Start) => Self::TopStart,

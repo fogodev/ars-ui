@@ -461,7 +461,7 @@ impl AriaRole {
     /// `&[&["row"], &["rowgroup", "row"]]` would mean either direct `row`
     /// children OR `rowgroup` elements that themselves contain `row`.
     #[must_use]
-    pub fn required_owned_elements(self) -> &'static [&'static [AriaRole]] {
+    pub const fn required_owned_elements(self) -> &'static [&'static [AriaRole]] {
         match self {
             Self::Feed => &[&[Self::Article]],
             Self::Grid | Self::Table | Self::Treegrid => &[&[Self::Row], &[Self::Rowgroup]],

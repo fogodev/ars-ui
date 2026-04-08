@@ -13,7 +13,7 @@ members = [
     "crates/ars-test-harness",
     "crates/ars-test-harness-dioxus",
     "crates/ars-test-harness-leptos",
-    "xtask",
+    "xtask"
 ]
 resolver = "3"
 
@@ -65,9 +65,10 @@ missing_errors_doc       = "warn"
 return_self_not_must_use = "warn"
 
 # Restriction picks
-allow_attributes = "warn"
-clone_on_ref_ptr = "warn"
+allow_attributes     = "warn"
+clone_on_ref_ptr     = "warn"
+missing_const_for_fn = "warn"
 
 [profile.release]
-lto = true
+lto           = true
 codegen-units = 1

@@ -379,7 +379,7 @@ impl<T: Clone + PartialEq + Debug> Bindable<T> {
     /// There is no external controlled value; [`get`](Self::get) returns the
     /// internal value which can be updated via [`set`](Self::set).
     #[must_use]
-    pub fn uncontrolled(default: T) -> Self {
+    pub const fn uncontrolled(default: T) -> Self {
         Self {
             controlled: None,
             internal: default,
@@ -396,7 +396,7 @@ impl<T: Clone + PartialEq + Debug> Bindable<T> {
 
     /// Returns `true` if this value is controlled by the parent.
     #[must_use]
-    pub fn is_controlled(&self) -> bool {
+    pub const fn is_controlled(&self) -> bool {
         self.controlled.is_some()
     }
 
@@ -423,7 +423,7 @@ impl<T: Clone + PartialEq + Debug> Bindable<T> {
     /// Use for in-place mutations on collection types to avoid cloning.
     /// **Warning:** For controlled bindables, mutating the internal value has no
     /// effect on what [`get`](Self::get) returns (it returns the controlled value).
-    pub fn get_mut_owned(&mut self) -> &mut T {
+    pub const fn get_mut_owned(&mut self) -> &mut T {
         &mut self.internal
     }
 }
@@ -635,29 +635,29 @@ impl<M: Machine> Service<M> {
 
     /// Returns a reference to the current machine state.
     #[must_use]
-    pub fn state(&self) -> &M::State {
+    pub const fn state(&self) -> &M::State {
         &self.state
     }
 
     /// Returns a reference to the current machine context.
     #[must_use]
-    pub fn context(&self) -> &M::Context {
+    pub const fn context(&self) -> &M::Context {
         &self.context
     }
 
     /// Returns a mutable reference to the current machine context.
-    pub fn context_mut(&mut self) -> &mut M::Context {
+    pub const fn context_mut(&mut self) -> &mut M::Context {
         &mut self.context
     }
 
     /// Returns a reference to the current props.
     #[must_use]
-    pub fn props(&self) -> &M::Props {
+    pub const fn props(&self) -> &M::Props {
         &self.props
     }
 
     /// Returns a mutable reference to the current props.
-    pub fn props_mut(&mut self) -> &mut M::Props {
+    pub const fn props_mut(&mut self) -> &mut M::Props {
         &mut self.props
     }
 
@@ -784,7 +784,7 @@ impl<M: Machine> Service<M> {
 
     /// Returns `true` after [`unmount`](Self::unmount) has been called.
     #[must_use]
-    pub fn is_unmounted(&self) -> bool {
+    pub const fn is_unmounted(&self) -> bool {
         self.unmounted
     }
 

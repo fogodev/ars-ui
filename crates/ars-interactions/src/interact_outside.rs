@@ -77,7 +77,7 @@ pub enum InteractOutsideEvent {
 /// Returns whether outside-interaction detection should currently be active.
 #[cfg(test)]
 #[must_use]
-fn detection_is_active(
+const fn detection_is_active(
     config: &InteractOutsideConfig,
     standalone: &InteractOutsideStandalone,
 ) -> bool {

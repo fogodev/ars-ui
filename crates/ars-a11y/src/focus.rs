@@ -28,7 +28,7 @@ impl Default for FocusScopeOptions {
 impl FocusScopeOptions {
     /// Returns the preset used by modal overlays.
     #[must_use]
-    pub fn modal() -> Self {
+    pub const fn modal() -> Self {
         Self {
             contain: true,
             restore_focus: true,
@@ -38,7 +38,7 @@ impl FocusScopeOptions {
 
     /// Returns the preset used by non-modal overlays.
     #[must_use]
-    pub fn overlay() -> Self {
+    pub const fn overlay() -> Self {
         Self {
             contain: false,
             restore_focus: true,
@@ -48,7 +48,7 @@ impl FocusScopeOptions {
 
     /// Returns the preset used by inline regions that do not manage focus lifecycle.
     #[must_use]
-    pub fn inline() -> Self {
+    pub const fn inline() -> Self {
         Self {
             contain: false,
             restore_focus: false,

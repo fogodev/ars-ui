@@ -49,7 +49,7 @@ pub struct TestHarness {
 impl TestHarness {
     /// Creates a test harness configured with the given locale.
     #[must_use]
-    pub fn with_locale(locale: Locale) -> Self {
+    pub const fn with_locale(locale: Locale) -> Self {
         Self {
             locale: Some(locale),
         }
@@ -57,7 +57,7 @@ impl TestHarness {
 
     /// Returns the configured locale, if any.
     #[must_use]
-    pub fn locale(&self) -> Option<&Locale> {
+    pub const fn locale(&self) -> Option<&Locale> {
         self.locale.as_ref()
     }
 }

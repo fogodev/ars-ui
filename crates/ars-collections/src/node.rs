@@ -2,7 +2,7 @@
 
 use alloc::string::String;
 
-use crate::key::Key;
+use crate::{collection::CollectionItem, key::Key};
 
 /// The structural role of a node within a collection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,8 +75,33 @@ impl<T> Node<T> {
     /// Returns `true` if this node represents a structural boundary
     /// (Section, Header, or Separator) that is never selectable.
     #[must_use]
-    pub fn is_structural(&self) -> bool {
+    pub const fn is_structural(&self) -> bool {
         !matches!(self.node_type, NodeType::Item)
+    }
+
+    /// Construct an `Item` node from a [`CollectionItem`] value.
+    ///
+    /// Sets `node_type` to [`NodeType::Item`], `level` to `0`,
+    /// `has_children` to `false`, `is_expanded` to `None`, and
+    /// `parent_key` to `None`. The `text_value` is derived from
+    /// [`CollectionItem::text_value`].
+    #[must_use]
+    pub fn item(key: Key, index: usize, value: T) -> Self
+    where
+        T: CollectionItem,
+    {
+        let text_value = value.text_value().into();
+        Self {
+            key,
+            node_type: NodeType::Item,
+            value: Some(value),
+            text_value,
+            level: 0,
+            has_children: false,
+            is_expanded: None,
+            parent_key: None,
+            index,
+        }
     }
 
     /// Compare two nodes by structural identity only: `key`, `node_type`,

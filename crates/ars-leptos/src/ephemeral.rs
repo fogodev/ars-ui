@@ -48,7 +48,7 @@ impl<'a, T> EphemeralRef<'a, T> {
     ///
     /// Only callable within `with_api_ephemeral()` closures where the borrow
     /// lifetime `'a` is tied to the `Service` access scope.
-    pub fn new(value: T) -> Self {
+    pub const fn new(value: T) -> Self {
         Self {
             value,
             _marker: PhantomData,
@@ -56,7 +56,7 @@ impl<'a, T> EphemeralRef<'a, T> {
     }
 
     /// Returns a shared reference to the inner value.
-    pub fn get(&self) -> &T {
+    pub const fn get(&self) -> &T {
         &self.value
     }
 }

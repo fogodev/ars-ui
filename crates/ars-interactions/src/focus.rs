@@ -45,7 +45,7 @@ pub enum FocusState {
 impl FocusState {
     /// Returns `true` if the element currently has focus regardless of modality.
     #[must_use]
-    pub fn is_focused(&self) -> bool {
+    pub const fn is_focused(&self) -> bool {
         !matches!(self, FocusState::Unfocused)
     }
 
