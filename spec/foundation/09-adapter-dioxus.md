@@ -599,6 +599,7 @@ Dioxus uses attribute builders in `rsx!`, not a HashMap. The conversion strategy
 use std::collections::HashSet;
 use std::sync::{LazyLock, Mutex};
 use dioxus::prelude::*;
+use dioxus_core::AttributeValue;
 use ars_core::{AttrMap, HtmlAttr, AttrValue, CssProperty, StyleStrategy};
 
 /// Intern pool for attribute name strings.
@@ -614,7 +615,7 @@ static ATTR_NAMES: LazyLock<Mutex<HashSet<&'static str>>> =
 ///
 /// Static variants (Class, Id, Role, etc.) return compile-time string slices.
 /// `Data(name)` variants intern `"data-{name}"` via a global pool.
-fn intern_attr_name(attr: &HtmlAttr) -> &'static str {
+pub fn intern_attr_name(attr: &HtmlAttr) -> &'static str {
     // Fast path: if HtmlAttr has a known static name, return it directly.
     if let Some(name) = attr.static_name() {
         return name;
@@ -709,7 +710,10 @@ pub fn attr_map_to_dioxus(
 pub fn apply_styles_cssom(el: &web_sys::HtmlElement, styles: &[(CssProperty, String)]) {
     let style = el.style();
     for (prop, val) in styles {
-        let _ = style.set_property(&prop.to_string(), val);
+        if let Err(e) = style.set_property(&prop.to_string(), val) {
+            #[cfg(debug_assertions)]
+            web_sys::console::warn_1(&e);
+        }
     }
 }
 
@@ -822,7 +826,7 @@ use ars_core::StyleStrategy;
 /// Returns `StyleStrategy::Inline` (the default) if no `ArsProvider` is present.
 pub fn use_style_strategy() -> StyleStrategy {
     try_use_context::<ArsContext>()
-        .map(|ctx| ctx.style_strategy.clone())
+        .map(|ctx| ctx.style_strategy().clone())
         .unwrap_or_else(|| {
             warn_missing_provider("use_style_strategy");
             StyleStrategy::default()
@@ -871,7 +875,7 @@ pub fn ArsNonceStyle(nonce: String) -> Element {
 /// Append a CSS rule to the nonce collector.
 /// Called internally by components when `StyleStrategy::Nonce` is active.
 pub fn append_nonce_css(css: String) {
-    if let Some(ctx) = try_use_context::<ArsNonceCssCtx>() {
+    if let Some(mut ctx) = try_use_context::<ArsNonceCssCtx>() {
         ctx.rules.write().push(css);
     }
 }

@@ -10,11 +10,18 @@
 //! - [`EphemeralRef`] — borrow wrapper preventing signal storage of borrowed APIs
 //! - [`use_id`] — hydration-safe deterministic ID generation
 
+mod attrs;
 mod ephemeral;
 mod id;
 pub mod prelude;
 mod use_machine;
 
+#[cfg(feature = "web")]
+pub use attrs::apply_styles_cssom;
+pub use attrs::{
+    ArsNonceCssCtx, ArsNonceStyle, DioxusAttrResult, append_nonce_css, attr_map_to_dioxus,
+    intern_attr_name, use_style_strategy,
+};
 pub use ephemeral::EphemeralRef;
 #[cfg(feature = "ssr")]
 pub use id::reset_id_counter;

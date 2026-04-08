@@ -9,7 +9,7 @@ rust-version.workspace = true
 
 [features]
 default     = []
-web         = ["dioxus/web", "dep:ars-dom", "ars-dom/web"]
+web         = ["dioxus/web", "dep:ars-dom", "ars-dom/web", "dep:web-sys"]
 desktop     = ["dioxus/desktop"]
 desktop-dom = ["desktop", "dep:ars-dom"]
 mobile      = ["dioxus/mobile"]
@@ -23,7 +23,17 @@ ars-dom          = { path = "../ars-dom", optional = true, default-features = fa
 ars-forms        = { path = "../ars-forms" }
 ars-i18n         = { path = "../ars-i18n" }
 ars-interactions = { path = "../ars-interactions" }
-dioxus           = { version = "0.7", default-features = false, features = ["macro", "signals", "hooks", "html"] }
+
+[dependencies.dioxus]
+version          = "0.7"
+default-features = false
+features         = ["macro", "signals", "hooks", "html"]
+
+
+[dependencies.web-sys]
+version  = "0.3"
+optional = true
+features = ["console", "HtmlElement", "CssStyleDeclaration"]
 
 [lints]
 workspace = true
