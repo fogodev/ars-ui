@@ -4572,7 +4572,7 @@ See `11-dom-utilities.md` for all details:
 
 - **Positioning Engine** (§2) — `compute_position()`, `auto_update()`, all positioning types
 - **Focus Utilities** (§3) — `get_focusable_elements()`, `focus_element()`, `FocusScope`
-- **Scroll Management** (§4) — `scroll_into_view()`, `nearest_scrollable_ancestor()`
+- **Scroll Management** (§4) — `scroll_into_view_if_needed()`, `nearest_scrollable_ancestor()`
 - **Scroll Locking** (§5) — `ScrollLockManager`, `prevent_scroll()`/`restore_scroll()`
 - **Z-Index Management** (§6) — `next_z_index()`, `ZIndexAllocator`
 - **Portal Root** (§7) — `get_or_create_portal_root()`, `set_background_inert()`

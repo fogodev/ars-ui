@@ -771,13 +771,17 @@ async fn suspense_boundary_shows_fallback_then_content() {
 
 ## 8. SSR Smoke Tests for ars-dom Utilities
 
-Per [11-dom-utilities.md](../foundation/11-dom-utilities.md), all DOM utility functions are gated with `#[cfg(not(feature = "ssr"))]`. Under the `ssr` feature, these functions must return safe defaults without attempting DOM access.
+Per [11-dom-utilities.md](../foundation/11-dom-utilities.md), `ars-dom` has two surfaces:
+
+- raw DOM-typed APIs, which are `web`-only and are not available under pure `ssr` builds
+- cross-build utilities, which remain available under `ssr` and must return safe defaults without attempting DOM access
+
+The smoke tests in this section cover only the cross-build `ssr` surface.
 
 ```rust
 #[cfg(feature = "ssr")]
 mod ssr_dom_smoke_tests {
     use ars_dom::positioning::{compute_position, PositioningOptions, Rect};
-    use ars_dom::focus::get_focusable_elements;
     use ars_dom::scroll::ScrollLockManager;
 
     #[test]
@@ -802,12 +806,8 @@ mod ssr_dom_smoke_tests {
         manager.unlock("test-component");
     }
 
-    #[test]
-    fn get_focusable_elements_returns_empty_under_ssr() {
-        // get_focusable_elements is cfg-gated out under SSR (no DOM access).
-        // Verify the SSR stub returns an empty Vec.
-        let elements = get_focusable_elements(&web_sys::HtmlElement::new().expect("SSR stub"));
-        assert!(elements.is_empty(), "SSR stub must return empty Vec");
-    }
+    // Raw DOM-typed helpers such as `get_focusable_elements`,
+    // `scroll_into_view_if_needed`, and `nearest_scrollable_ancestor`
+    // are part of the `web` surface and are intentionally not exercised here.
 }
 ```

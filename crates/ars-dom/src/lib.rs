@@ -6,6 +6,7 @@
 
 mod focus;
 pub mod modality;
+mod scroll;
 pub mod scroll_lock;
 
 pub use focus::{
@@ -17,6 +18,9 @@ pub use focus::{
     get_html_element_by_id, get_last_focusable,
 };
 pub use modality::ModalityManager;
+pub use scroll::{ScrollIntoViewOptions, ScrollLogicalPosition, supports_scroll_into_view_options};
+#[cfg(feature = "web")]
+pub use scroll::{nearest_scrollable_ancestor, scroll_into_view_if_needed, scrollable_ancestors};
 pub use scroll_lock::{
     ScrollLockManager, acquire, depth, is_locked, prevent_scroll, release, restore_scroll,
 };

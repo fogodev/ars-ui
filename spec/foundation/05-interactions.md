@@ -612,7 +612,7 @@ When ars-ui components are used inside Shadow DOM (e.g., web components wrapping
 >
 > /// Scroll an element into its nearest scrollable ancestor's viewport.
 > /// Handles Safari <15.4 fallback, horizontal scrolling, and nested containers.
-> pub fn scroll_into_view_if_needed(element: &HtmlElement, options: ScrollIntoViewOptions) {
+> pub fn scroll_into_view_if_needed(element: &Element, options: ScrollIntoViewOptions) {
 >     if supports_scroll_into_view_options() {
 >         element.scroll_into_view_with_scroll_into_view_options(&options);
 >     } else {
