@@ -2,8 +2,9 @@
 //!
 //! [`ValueExt`] provides an `is_empty()` method for [`Value`] and
 //! related types. [`SelectionExt`] and [`CheckboxExt`] are trait
-//! definitions for component-specific emptiness semantics — their
-//! implementations live in the respective component crates.
+//! definitions for component-specific emptiness semantics.
+
+use ars_collections::selection::{Set as SelectionSet, State as SelectionState};
 
 use super::value::Value;
 
@@ -15,8 +16,9 @@ pub trait ValueExt {
 
 /// Trait for types that expose a set of selected keys (e.g., `selection::State`).
 ///
-/// Implemented by the selection module in its own crate to avoid a dependency
-/// cycle where ars-forms would import concrete types from component crates.
+/// `ars-forms` implements this trait for shared foundation types such as
+/// [`ars_collections::selection::State`] so form components can reason about
+/// collection-backed values without redefining selection semantics locally.
 pub trait SelectionExt {
     /// Returns `true` if at least one key is selected.
     fn is_any_selected(&self) -> bool;
@@ -50,6 +52,21 @@ impl ValueExt for Value {
             Value::DateRange(r) => r.is_none(),
             Value::File(f) => f.is_empty(),
             Value::MultipleText(l) => l.is_empty(),
+        }
+    }
+}
+
+impl SelectionExt for SelectionState {
+    fn is_any_selected(&self) -> bool {
+        !self.selected_keys.is_empty()
+    }
+
+    fn is_all_selected(&self, total_items: usize) -> bool {
+        match &self.selected_keys {
+            SelectionSet::All => true,
+            SelectionSet::Single(_) => total_items == 1,
+            SelectionSet::Multiple(keys) => keys.len() == total_items,
+            _ => false,
         }
     }
 }
@@ -113,6 +130,21 @@ mod tests {
     }
 
     #[test]
+    fn date_none_empty() {
+        assert!(Value::Date(None).is_empty());
+    }
+
+    #[test]
+    fn time_none_empty() {
+        assert!(Value::Time(None).is_empty());
+    }
+
+    #[test]
+    fn date_range_none_empty() {
+        assert!(Value::DateRange(None).is_empty());
+    }
+
+    #[test]
     fn calendar_date_none_empty() {
         let date: Option<ars_i18n::CalendarDate> = None;
         assert!(date.is_empty());
@@ -128,5 +160,58 @@ mod tests {
     fn option_f64_some_not_empty() {
         let n: Option<f64> = Some(42.0);
         assert!(!n.is_empty());
+    }
+
+    #[test]
+    fn selection_state_is_any_selected_for_single() {
+        let state = SelectionState {
+            selected_keys: SelectionSet::Single(ars_collections::Key::int(1)),
+            ..SelectionState::default()
+        };
+        assert!(state.is_any_selected());
+    }
+
+    #[test]
+    fn selection_state_is_any_selected_false_for_empty() {
+        assert!(!SelectionState::default().is_any_selected());
+    }
+
+    #[test]
+    fn selection_state_is_all_selected_true_for_all_variant() {
+        let state = SelectionState {
+            selected_keys: SelectionSet::All,
+            ..SelectionState::default()
+        };
+        assert!(state.is_all_selected(5));
+    }
+
+    #[test]
+    fn selection_state_single_is_all_selected_only_for_single_item_collections() {
+        let state = SelectionState {
+            selected_keys: SelectionSet::Single(ars_collections::Key::int(1)),
+            ..SelectionState::default()
+        };
+
+        assert!(state.is_all_selected(1));
+        assert!(!state.is_all_selected(2));
+    }
+
+    #[test]
+    fn selection_state_is_all_selected_counts_materialized_keys() {
+        let state = SelectionState {
+            selected_keys: SelectionSet::Multiple(
+                [
+                    ars_collections::Key::int(1),
+                    ars_collections::Key::int(2),
+                    ars_collections::Key::int(3),
+                ]
+                .into_iter()
+                .collect(),
+            ),
+            ..SelectionState::default()
+        };
+
+        assert!(state.is_all_selected(3));
+        assert!(!state.is_all_selected(4));
     }
 }

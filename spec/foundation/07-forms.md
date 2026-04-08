@@ -2161,15 +2161,13 @@ pub trait ValueExt {
     fn is_empty(&self) -> bool;
 }
 
-// NOTE: Extension traits for selection::State and CheckboxState are defined in
-// their respective component modules (shared/selection-patterns.md and
-// components/input/checkbox.md) to avoid a dependency cycle where ars-forms
-// would import concrete types from component crates.
-//
-// ars-forms only defines abstract trait bounds that components can satisfy:
+// NOTE: Checkbox-specific extension impls still live with the checkbox types.
+// `SelectionExt` remains defined in ars-forms, but ars-forms may implement it
+// for shared foundation selection types via an `ars-collections` dependency.
 
 /// Trait for types that expose a set of selected keys (e.g., selection::State).
-/// Implemented by the selection module in its own crate.
+/// Implemented in ars-forms for shared selection types such as
+/// `ars_collections::selection::State`.
 pub trait SelectionExt {
     fn is_any_selected(&self) -> bool;
     fn is_all_selected(&self, total_items: usize) -> bool;

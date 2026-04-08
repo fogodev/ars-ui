@@ -12,10 +12,11 @@ default = []
 serde   = []
 
 [dependencies]
-ars-a11y = { path = "../ars-a11y" }
-ars-core = { path = "../ars-core" }
-ars-i18n = { path = "../ars-i18n" }
-indexmap = "2"
+ars-a11y        = { path = "../ars-a11y" }
+ars-collections = { path = "../ars-collections" }
+ars-core        = { path = "../ars-core" }
+ars-i18n        = { path = "../ars-i18n" }
+indexmap        = "2"
 
 [lints]
 workspace = true
