@@ -2,7 +2,7 @@
 
 use std::{fmt::Write, fs, path::Path};
 
-use crate::manifest::{self, ManifestError, SpecRoot};
+use crate::manifest::{self, Error, SpecRoot};
 
 /// Return the full implementation context for a component.
 ///
@@ -17,7 +17,7 @@ pub fn execute(
     component: &str,
     framework: Option<&str>,
     include_testing: bool,
-) -> Result<String, ManifestError> {
+) -> Result<String, Error> {
     let (key, comp) = manifest::find_component(&root.manifest, component)?;
     let m = &root.manifest;
     let mut out = String::new();
@@ -47,7 +47,7 @@ pub fn execute(
         let adapters = match fw {
             "leptos" => &m.leptos_adapters,
             "dioxus" => &m.dioxus_adapters,
-            _ => return Err(ManifestError::UnknownFramework(fw.to_string())),
+            _ => return Err(Error::UnknownFramework(fw.to_string())),
         };
         if let Some(path) = adapters.get(key) {
             append_file(&root.path, path, &mut out);

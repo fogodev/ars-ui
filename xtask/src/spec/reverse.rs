@@ -2,17 +2,17 @@
 
 use std::fmt::Write;
 
-use crate::manifest::{ManifestError, SpecRoot};
+use crate::manifest::{Error, SpecRoot};
 
 /// Return components that depend on a shared type.
 ///
 /// # Errors
 ///
 /// Returns [`ManifestError::SharedTypeNotFound`] if the shared type is not in the manifest.
-pub fn execute(root: &SpecRoot, shared_type: &str) -> Result<String, ManifestError> {
+pub fn execute(root: &SpecRoot, shared_type: &str) -> Result<String, Error> {
     let m = &root.manifest;
     if !m.shared.contains_key(shared_type) {
-        return Err(ManifestError::SharedTypeNotFound {
+        return Err(Error::SharedTypeNotFound {
             name: shared_type.to_string(),
             available: m.shared.keys().cloned().collect(),
         });

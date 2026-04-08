@@ -2,14 +2,14 @@
 
 use std::fmt::Write;
 
-use crate::manifest::{self, ManifestError, SpecRoot};
+use crate::manifest::{self, Error, SpecRoot};
 
 /// Return all components in a category with metadata.
 ///
 /// # Errors
 ///
 /// Returns [`ManifestError::CategoryNotFound`] if no components match the category.
-pub fn execute(root: &SpecRoot, name: &str) -> Result<String, ManifestError> {
+pub fn execute(root: &SpecRoot, name: &str) -> Result<String, Error> {
     let m = &root.manifest;
     let components: Vec<_> = m
         .components
@@ -20,7 +20,7 @@ pub fn execute(root: &SpecRoot, name: &str) -> Result<String, ManifestError> {
         let mut cats: Vec<&str> = m.components.values().map(|c| c.category.as_str()).collect();
         cats.sort();
         cats.dedup();
-        return Err(ManifestError::CategoryNotFound {
+        return Err(Error::CategoryNotFound {
             name: name.to_string(),
             available: cats.into_iter().map(String::from).collect(),
         });

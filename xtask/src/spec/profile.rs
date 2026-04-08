@@ -2,19 +2,19 @@
 
 use std::fmt::Write;
 
-use crate::manifest::{ManifestError, SpecRoot};
+use crate::manifest::{Error, SpecRoot};
 
 /// Return files in a named review profile.
 ///
 /// # Errors
 ///
 /// Returns [`ManifestError::ProfileNotFound`] if the profile name does not exist.
-pub fn execute(root: &SpecRoot, name: &str) -> Result<String, ManifestError> {
+pub fn execute(root: &SpecRoot, name: &str) -> Result<String, Error> {
     let profiles =
         root.manifest
             .review_profiles
             .as_ref()
-            .ok_or_else(|| ManifestError::ProfileNotFound {
+            .ok_or_else(|| Error::ProfileNotFound {
                 name: name.to_string(),
                 available: vec![],
             })?;
@@ -22,7 +22,7 @@ pub fn execute(root: &SpecRoot, name: &str) -> Result<String, ManifestError> {
         .get(name)
         .or_else(|| profiles.get(&name.replace('-', "_")))
         .or_else(|| profiles.get(&name.replace('_', "-")))
-        .ok_or_else(|| ManifestError::ProfileNotFound {
+        .ok_or_else(|| Error::ProfileNotFound {
             name: name.to_string(),
             available: profiles.keys().cloned().collect(),
         })?;

@@ -2,14 +2,14 @@
 
 use std::{fmt::Write, fs};
 
-use crate::manifest::{self, ManifestError, SpecRoot};
+use crate::manifest::{self, Error, SpecRoot};
 
 /// Validate all spec file frontmatter against manifest entries.
 ///
 /// # Errors
 ///
 /// Returns [`ManifestError::Io`] if a spec file cannot be read.
-pub fn execute(root: &SpecRoot) -> Result<String, ManifestError> {
+pub fn execute(root: &SpecRoot) -> Result<String, Error> {
     let m = &root.manifest;
     let mut errors: Vec<String> = Vec::new();
     let mut checked = 0u32;
