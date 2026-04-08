@@ -139,13 +139,13 @@ impl fmt::Display for Key {
 #[cfg(test)]
 mod tests {
     use alloc::{collections::BTreeSet, format, string::ToString, vec, vec::Vec};
-    use core::hash::{Hash, Hasher};
-    use std::hash::DefaultHasher;
 
     use super::*;
 
+    #[cfg(feature = "std")]
     fn hash_of(key: &Key) -> u64 {
-        let mut hasher = DefaultHasher::new();
+        use core::hash::{Hash, Hasher};
+        let mut hasher = std::hash::DefaultHasher::new();
         key.hash(&mut hasher);
         hasher.finish()
     }
@@ -240,6 +240,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn key_hash_eq() {
         let a = Key::str("same");
         let b = Key::str("same");
