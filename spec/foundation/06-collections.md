@@ -157,11 +157,13 @@ impl Ord for Key {
 
 impl Key {
     /// Construct a string key.
+    #[must_use]
     pub fn str(s: impl Into<String>) -> Self {
         Key::String(s.into())
     }
 
     /// Construct an integer key.
+    #[must_use]
     pub fn int(n: u64) -> Self {
         Key::Int(n)
     }
@@ -170,6 +172,7 @@ impl Key {
     ///
     /// Alias for `Key::Int`. Exists to make the ordering behavior explicit:
     /// database ID keys sort before string keys in `BTreeSet<Key>`.
+    #[must_use]
     pub fn from_database_id(n: u64) -> Self {
         Key::Int(n)
     }
@@ -188,7 +191,7 @@ impl From<u64> for Key {
 }
 
 impl From<u32> for Key {
-    fn from(n: u32) -> Self { Key::Int(n as u64) }
+    fn from(n: u32) -> Self { Key::Int(u64::from(n)) }
 }
 
 impl From<usize> for Key {
@@ -203,7 +206,7 @@ impl core::fmt::Display for Key {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Key::String(s) => f.write_str(s),
-            Key::Int(n)    => write!(f, "{}", n),
+            Key::Int(n)    => write!(f, "{n}"),
         }
     }
 }
@@ -288,17 +291,20 @@ pub struct Node<T> {
 impl<T> Node<T> {
     /// Returns `true` if this node can receive focus during keyboard navigation.
     /// Items are focusable; Sections, Headers, and Separators are not.
+    #[must_use]
     pub fn is_focusable(&self) -> bool {
         self.node_type == NodeType::Item
     }
 
     /// Returns `true` if this node represents a structural boundary
     /// (Section, Header, or Separator) that is never selectable.
+    #[must_use]
     pub fn is_structural(&self) -> bool {
         !matches!(self.node_type, NodeType::Item)
     }
 
     /// Construct an `Item` node from a `CollectionItem` value.
+    #[must_use]
     pub fn item(key: Key, index: usize, item: T) -> Self
     where
         T: CollectionItem,
@@ -337,6 +343,7 @@ impl<T> Node<T> {
     /// `T: PartialEq`. Used by the collection diffing algorithm to detect
     /// structural changes (additions, removals, reordering) without
     /// inspecting payloads.
+    #[must_use]
     pub fn structural_eq(&self, other: &Self) -> bool {
         self.key == other.key
             && self.node_type == other.node_type
