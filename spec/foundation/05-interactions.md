@@ -4013,12 +4013,14 @@ Currently each overlay component re-implements this logic independently. `Intera
 ```rust
 // ars-interactions/src/interact_outside.rs
 
+use ars_core::{Callback, PointerType};
+
 /// Standalone interaction primitive for detecting clicks/interactions outside a target element.
 /// Used independently of DismissableLayer for custom components.
 ///
 /// Configuration:
-/// - `target_ref`: The element to monitor for outside interactions
-/// - `owner_ids`: Additional element IDs considered "inside" (e.g., portal content)
+/// - `target_id`: The element to monitor for outside interactions
+/// - `portal_owner_ids`: Additional portal-owner IDs considered "inside"
 /// - `on_interact_outside`: Callback when interaction outside is detected
 /// - `enabled`: Whether detection is active
 /// - `pointer_gracing`: Grace period (ms) after pointer leaves before triggering (for submenus)
@@ -4027,8 +4029,10 @@ pub struct InteractOutsideStandalone {
     /// Uses a String ID (not ElementRef) because InteractOutside is in
     /// ars-interactions, which is below ars-dom in the dependency graph.
     pub target_id: String,
-    pub owner_ids: Vec<String>,
-    pub on_interact_outside: Option<Rc<dyn Fn(InteractOutsideEvent)>>,
+    /// Portal-owner IDs corresponding to `data-ars-portal-owner` markers that
+    /// should be treated as inside this interaction boundary.
+    pub portal_owner_ids: Vec<String>,
+    pub on_interact_outside: Option<Callback<dyn Fn(InteractOutsideEvent)>>,
     pub enabled: bool,
     pub pointer_gracing: Option<u32>,
 }
@@ -4064,7 +4068,7 @@ The adapter implements outside detection by:
 
 ### 12.4 Edge Cases
 
-- **Portaled content**: When content is rendered in a `Portal` (e.g., a dropdown menu), the adapter must consider portal children as "inside" the interaction boundary. This is achieved by maintaining a set of related element references.
+- **Portaled content**: When content is rendered in a `Portal` (e.g., a dropdown menu), the adapter must consider portal children as "inside" the interaction boundary. This is achieved by maintaining the relevant portal-owner IDs and matching them against `data-ars-portal-owner`.
 - **Nested overlays**: If a click occurs inside a child overlay (e.g., a tooltip inside a popover), it should NOT trigger an outside interaction on the parent. The overlay stacking context must be consulted.
 
 > **Portal-aware outside detection.** Since portal content is DOM-detached from the component
@@ -4143,7 +4147,7 @@ Portal-rendered content is DOM-detached from the component tree. The detection a
 2. Check `element.contains(resolved)` for direct DOM containment.
 3. If not contained, walk up from the resolved element checking for `[data-ars-portal-owner="COMPONENT_ID"]` attributes.
 4. Any element with a matching `data-ars-portal-owner` is considered "inside" the interaction boundary.
-5. The `owner_ids` field in `InteractOutsideStandalone` allows additional element IDs to be registered as "inside" for custom portal-like patterns.
+5. The `portal_owner_ids` field in `InteractOutsideStandalone` stores those portal-owner IDs. It does not store arbitrary DOM element IDs; direct DOM containment remains the responsibility of step 2.
 
 ### 12.8 Nested Overlay Handling
 

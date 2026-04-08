@@ -370,10 +370,10 @@ The project needs a fully stable foundation before component work starts. Compon
   - Unit tests for portal-aware detection design using `data-ars-portal-owner`.
 - Acceptance criteria:
   - `InteractOutsideConfig` with `disabled`, `detect_focus`.
-  - `InteractOutsideStandalone` with `target_id`, `owner_ids`, `on_interact_outside`, `enabled`, `pointer_gracing`.
+  - `InteractOutsideStandalone` with `target_id`, `portal_owner_ids`, `on_interact_outside`, `enabled`, `pointer_gracing`.
   - `InteractOutsideEvent` enum with `PointerOutside`, `FocusOutside`, `EscapeKey`.
   - Portal-aware detection design.
-- Spec impact: `No spec change required`.
+- Spec impact: clarify that portal-aware boundary registration uses portal-owner IDs rather than arbitrary element IDs.
 
 #### W2-5: Implement positioning engine types in ars-dom
 
@@ -1019,15 +1019,16 @@ Wave 4 (50 pts)            ┌─── Wave 3 complete
 
 ## Epic Mapping
 
-| Epic           | Issue | Tasks covered                                    |
-| -------------- | ----- | ------------------------------------------------ |
-| Interactions   | #4    | #57, #58, #59, #60, #61, #65, #76, #77, #78, #90 |
-| DOM utilities  | #6    | #66, #67, #68, #69, #72, #74, #85, #88           |
-| Leptos adapter | #8    | #55                                              |
-| Dioxus adapter | #9    | #56                                              |
-| A11y           | #3    | #73, #89                                         |
-| Collections    | #53   | #62, #63, #64, #70, #71, #81, #82, #83, #84      |
-| I18n           | #54   | #75, #79, #80                                    |
+| Epic                | Issue | Tasks covered                                    |
+| ------------------- | ----- | ------------------------------------------------ |
+| Interactions        | #4    | #57, #58, #59, #60, #61, #65, #76, #77, #78, #90 |
+| DOM utilities       | #6    | #66, #67, #68, #69, #72, #74, #85, #88           |
+| Leptos adapter      | #8    | #55, #105                                        |
+| Dioxus adapter      | #9    | #56, #106                                        |
+| A11y                | #3    | #73, #89                                         |
+| Collections         | #53   | #62, #63, #64, #70, #71, #81, #82, #83, #84      |
+| I18n                | #54   | #75, #79, #80                                    |
+| First utility slice | #10   | #104                                             |
 
 ## Post-Foundation Plan
 
@@ -1037,6 +1038,114 @@ After all four waves are complete:
 2. Decompose the first utility slice (Button, VisuallyHidden, Separator, FocusScope, Toggle, Field, Form) into agent-ready component tasks.
 3. Component work can proceed in parallel across both adapters without foundation merge conflicts.
 4. Each component task references the now-stable foundation APIs by crate path and spec section.
+
+### Targeted Follow-On: Full Outside-Interaction Delivery
+
+These cards intentionally carve out the remaining work needed to turn the foundation-level
+`InteractOutside` substrate into a full shared `Dismissable` primitive before the broader
+utility-slice decomposition resumes. They are narrowly scoped to the outside-interaction
+pipeline and do not reopen the full `#24` planning thread.
+
+| GitHub                                               | Title                                                                         | Points | Epic | Deps                |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------- | ------ | ---- | ------------------- |
+| [#104](https://github.com/fogodev/ars-ui/issues/104) | Implement Dismissable core props and dismiss-button attrs in ars-interactions | 3      | #10  | #65                 |
+| [#105](https://github.com/fogodev/ars-ui/issues/105) | Implement use_dismissable and DismissableRegion in ars-leptos                 | 5      | #8   | #65, #69, #88, #104 |
+| [#106](https://github.com/fogodev/ars-ui/issues/106) | Implement use_dismissable and DismissableRegion in ars-dioxus                 | 5      | #9   | #65, #69, #88, #104 |
+
+#### PF-IO-1: Implement Dismissable core props and dismiss-button attrs in ars-interactions
+
+- Points: `3`
+- Layer: `Component`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: #65
+- Spec refs:
+  - `spec/components/utility/dismissable.md` §1 "API"
+  - `spec/components/utility/dismissable.md` §4 "Internationalization"
+  - `spec/components/utility/dismissable.md` §5 "Behavior"
+  - `spec/foundation/05-interactions.md` §12 "InteractOutside Interaction"
+  - `spec/foundation/04-internationalization.md` §7 "Messages"
+- Goal: implement the shared `Dismissable` contract so both adapters consume the same props, messages, parts, and dismiss-button attr helper.
+- Files to create/modify: `crates/ars-interactions/src/dismissable.rs` (new), `crates/ars-interactions/src/lib.rs` (wire new module)
+- Tests to add first:
+  - Unit tests for `dismissable::Props` defaults and debug output.
+  - Unit tests for callback-bearing `Props` clone/partial-eq pointer identity semantics.
+  - Unit tests for `dismissable::Messages` default close label.
+  - Unit tests for `dismissable::dismiss_button_attrs()` producing scope/part data attrs, native button semantics, visually-hidden marker, and localized `aria-label`.
+  - Unit tests for `exclude_ids` and `disable_outside_pointer_events` config preservation.
+- Acceptance criteria:
+  - `dismissable::Props` with `on_interact_outside`, `on_escape_key_down`, `on_dismiss`, `disable_outside_pointer_events`, `exclude_ids`, `messages`, and `locale`.
+  - `dismissable::Messages` with default English close label following the shared `MessageFn` pattern.
+  - `dismissable::Part` with `Root` and `DismissButton`.
+  - `dismiss_button_attrs(&Props) -> AttrMap` matching the spec.
+  - No document listeners or framework-specific containment logic in this task.
+- Spec impact: `No spec change required`.
+
+#### PF-IO-2: Implement use_dismissable and DismissableRegion in ars-leptos
+
+- Points: `5`
+- Layer: `Adapter`
+- Framework: `Leptos`
+- Test tier: `Adapter`
+- Depends on: #65, #69, #88, #104
+- Spec refs:
+  - `spec/leptos-components/utility/dismissable.md`
+  - `spec/components/utility/dismissable.md`
+  - `spec/foundation/05-interactions.md` §12 "InteractOutside Interaction"
+  - `spec/testing/10-keyboard-focus.md` §13.2 "InteractOutside Tests"
+  - `docs/implementation/adapter-contract.md`
+- Goal: implement the Leptos adapter-owned `Dismissable` hook and region wrapper with client-only listeners, portal-aware containment, and topmost-overlay dismissal behavior.
+- Files to create/modify: `crates/ars-leptos/src/dismissable.rs` (new), `crates/ars-leptos/src/lib.rs` (wire new module)
+- Tests to add first:
+  - Adapter tests for outside `pointerdown` calling `on_interact_outside` then `on_dismiss`.
+  - Adapter tests for outside `focusin` calling `on_interact_outside` then `on_dismiss`.
+  - Adapter tests for Escape dismissal firing `on_escape_key_down` then `on_dismiss`.
+  - Adapter tests for `exclude_ids` and additional inside boundaries suppressing dismissal.
+  - Adapter tests for portal-aware containment using `data-ars-portal-owner`.
+  - Adapter tests for topmost-overlay-only dismissal using the overlay stack.
+  - Adapter tests for SSR safety and cleanup removing listeners / pending retries.
+  - Adapter tests for both dismiss buttons invoking dismiss behavior.
+- Acceptance criteria:
+  - `use_dismissable(root_ref, props, inside_boundaries) -> DismissableHandle` implemented per spec.
+  - `DismissableRegion` renders both native dismiss buttons around consumer content.
+  - Client-only `pointerdown`, `focusin`, and Escape listeners with proper cleanup.
+  - Portal-aware containment and overlay-stack-aware topmost dismissal behavior.
+  - `disable_outside_pointer_events` behavior supported without breaking keyboard dismissal.
+  - Adapter behavior and cleanup ordering match the spec and adapter contract.
+- Spec impact: `No spec change required`.
+
+#### PF-IO-3: Implement use_dismissable and DismissableRegion in ars-dioxus
+
+- Points: `5`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Adapter`
+- Depends on: #65, #69, #88, #104
+- Spec refs:
+  - `spec/dioxus-components/utility/dismissable.md`
+  - `spec/components/utility/dismissable.md`
+  - `spec/foundation/05-interactions.md` §12 "InteractOutside Interaction"
+  - `spec/testing/10-keyboard-focus.md` §13.2 "InteractOutside Tests"
+  - `docs/implementation/adapter-contract.md`
+- Goal: implement the Dioxus adapter-owned `Dismissable` hook and region wrapper with client-only listeners, portal-aware containment, and topmost-overlay dismissal behavior across Dioxus targets.
+- Files to create/modify: `crates/ars-dioxus/src/dismissable.rs` (new), `crates/ars-dioxus/src/lib.rs` (wire new module)
+- Tests to add first:
+  - Adapter tests for outside `pointerdown` calling `on_interact_outside` then `on_dismiss`.
+  - Adapter tests for outside `focusin` calling `on_interact_outside` then `on_dismiss`.
+  - Adapter tests for Escape dismissal firing `on_escape_key_down` then `on_dismiss`.
+  - Adapter tests for `exclude_ids` and additional inside boundaries suppressing dismissal.
+  - Adapter tests for portal-aware containment using `data-ars-portal-owner`.
+  - Adapter tests for topmost-overlay-only dismissal using the overlay stack.
+  - Adapter tests for web/Desktop-safe cleanup removing listeners / pending retries.
+  - Adapter tests for both dismiss buttons invoking dismiss behavior.
+- Acceptance criteria:
+  - `use_dismissable(root_id, props, inside_boundaries) -> DismissableHandle` implemented per spec.
+  - `DismissableRegion` renders both native dismiss buttons around consumer content.
+  - Client-only `pointerdown`, `focusin`, and Escape listeners with proper cleanup.
+  - Portal-aware containment and overlay-stack-aware topmost dismissal behavior.
+  - `disable_outside_pointer_events` behavior supported without breaking keyboard dismissal.
+  - Dioxus Web/Desktop behavior and cleanup ordering match the spec and adapter contract.
+- Spec impact: `No spec change required`.
 
 ## Summary
 

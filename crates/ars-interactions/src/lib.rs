@@ -8,6 +8,7 @@ pub mod compose;
 pub mod direction;
 pub mod focus;
 pub mod hover;
+pub mod interact_outside;
 pub mod press;
 
 pub use ars_core::{
@@ -21,4 +22,7 @@ pub use focus::{
     FocusWithinResult, use_focus, use_focus_within,
 };
 pub use hover::{HoverConfig, HoverEvent, HoverEventType, HoverResult, HoverState, use_hover};
+pub use interact_outside::{
+    InteractOutsideConfig, InteractOutsideEvent, InteractOutsideStandalone,
+};
 pub use press::{PressConfig, PressEvent, PressEventType, PressResult, PressState, use_press};
