@@ -13,7 +13,8 @@
 //! - [`CollectionItem`] — trait for items stored in collections.
 //! - [`CollectionBuilder`] — fluent builder for constructing collections.
 //! - [`StaticCollection`] — in-memory `Collection` implementation.
-//! - [`Selection`] — set of currently selected items.
+//! - [`selection`] — selection enums and state for collection-based components.
+//! - [`navigation`] — disabled-aware navigation helpers for collection widgets.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::std_instead_of_core)]
@@ -26,32 +27,18 @@ pub mod builder;
 pub mod collection;
 /// Stable node identifiers for collections.
 pub mod key;
+/// Disabled-aware navigation helpers for collection widgets.
+pub mod navigation;
 /// Node types and structural metadata for collection items.
 pub mod node;
+/// Selection enums and state for collection-based components.
+pub mod selection;
 /// In-memory collection backed by `Vec` and `IndexMap`.
 pub mod static_collection;
-
-use alloc::vec::Vec;
 
 pub use builder::CollectionBuilder;
 pub use collection::{Collection, CollectionItem};
 pub use key::Key;
 pub use node::{Node, NodeType};
+pub use selection::DisabledBehavior;
 pub use static_collection::StaticCollection;
-
-/// A set of currently selected items in a collection component.
-///
-/// Tracks which items are selected, supporting single and multiple selection modes.
-/// The item type `T` is typically a [`Key`](ars_core) identifying the selected items.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Selection<T> {
-    items: Vec<T>,
-}
-
-impl<T> Selection<T> {
-    /// Returns a slice of the currently selected items.
-    #[must_use]
-    pub fn items(&self) -> &[T] {
-        &self.items
-    }
-}

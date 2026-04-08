@@ -2367,7 +2367,8 @@ impl State {
                             s.insert(k.clone());
                             s
                         }
-                        _ => BTreeSet::new(),
+                        selection::Set::All => return self.clone(),
+                        selection::Set::Empty => BTreeSet::new(),
                     };
                     s.insert(key.clone());
                     selection::Set::Multiple(s)
@@ -2455,6 +2456,7 @@ impl State {
         Self {
             selected_keys: selection::Set::Empty,
             anchor_key: None,
+            selection_mode_active: false,
             ..self.clone()
         }
     }
