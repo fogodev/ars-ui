@@ -70,6 +70,9 @@ pub fn next_z_index() -> u32 {
     NEXT_Z_INDEX.with(|z| {
         let val = z.get();
         if val >= Z_INDEX_CEILING {
+            // Returning Z_INDEX_BASE here and storing BASE + 1 keeps the
+            // sequence monotonic from the caller's perspective after wrap:
+            // this call receives the fresh base and the next call advances.
             // Reset to base — existing overlays at high z-indexes will still
             // render above normal content; new overlays start fresh.
             #[cfg(debug_assertions)]

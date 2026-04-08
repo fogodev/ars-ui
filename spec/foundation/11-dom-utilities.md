@@ -324,6 +324,10 @@ pub struct PositioningOptions {
     /// When enabled, the `flip` option is ignored (auto placement already considers
     /// all placements). The `shift` step still applies after auto placement.
     /// This is the most expensive positioning mode — use sparingly.
+    ///
+    /// `auto_placement: true` is the broad "consider all 12 physical placements"
+    /// mode. Separately, `placement: Auto | AutoStart | AutoEnd` enables the
+    /// narrower 4-candidate auto modes even when `auto_placement` is `false`.
     pub auto_placement: bool,
 }
 
@@ -651,6 +655,13 @@ let viewport_rect = Rect {
 > Feature-detect with `if window.visual_viewport.is_some()` and fall back to
 > `innerWidth`/`innerHeight` when the API is absent (e.g., older WebViews).
 
+Before overflow, shift, or max-size calculations, resolve the effective
+clipping boundary from `options.boundary` and apply `boundary_padding` by
+insetting that rect equally on all four sides. Inset means moving the origin
+inward by `boundary_padding` on both axes and subtracting `2 * boundary_padding`
+from width and height. Clamp the resulting width/height at zero if padding is
+larger than the boundary itself.
+
 #### 2.3.3 Step 2: Compute Initial Position
 
 Based on the requested `placement`, compute the initial `(x, y)` so the floating element sits at the correct side and alignment of the anchor.
@@ -684,25 +695,29 @@ if main_axis is Horizontal:
     y += offset.cross_axis
 ```
 
+`main_axis` is always interpreted as "push away from the anchor on the chosen
+side". `cross_axis` is always interpreted as "slide along the aligned edge".
+The sign flip simply converts those logical directions into viewport-space `x`
+and `y` deltas.
+
 #### 2.3.5 Step 4: Flip (if enabled)
 
-Check whether the floating element overflows the boundary on the main axis. If so, try the opposite placement.
+Check whether the floating element overflows the boundary on the main axis. If so, evaluate fallback placements and keep the candidate with the lowest total overflow.
 
 ```text
 if options.flip:
     overflow_main = compute_overflow(x, y, floating, boundary, placement)
     if overflow_main > 0:
-        opposite = placement.opposite()
-        (x2, y2) = compute_initial_position(anchor, floating, opposite)
-        apply_offset(x2, y2, opposite)
-        overflow_opposite = compute_overflow(x2, y2, floating, boundary, opposite)
-        if overflow_opposite < overflow_main:
-            (x, y) = (x2, y2)
-            actual_placement = opposite
-        // else: keep original placement (lesser overflow)
+        candidates = options.fallback_placements
+        candidates += [placement.opposite()]  // always include direct opposite as final fallback
+        evaluate each candidate in order
+        choose the candidate with the lowest total overflow
+        if best_candidate improves on the current placement:
+            (x, y) = best_candidate_coords
+            actual_placement = best_candidate
 ```
 
-> **NOTE:** The default flip algorithm only tries the direct opposite placement. For cross-axis placements (e.g., Left/Right when Bottom/Top both overflow), specify `fallback_placements: Vec<Placement>` in `PositioningOptions`.
+> **NOTE:** Explicit `fallback_placements` are tried first and preserve caller preference order, but the engine still appends the direct opposite placement as a final recovery candidate if it was not already present. This ensures the basic opposite-side fallback remains available even when custom fallbacks are configured.
 
 #### 2.3.6 Step 5: Shift (if enabled)
 
@@ -718,13 +733,17 @@ if options.shift:
         y = clamp(y, boundary.y, boundary.bottom - floating.height)
 ```
 
+Shift never changes the main-axis coordinate. A `Top` placement that moves
+vertically would no longer be on the top side of the anchor; the same applies
+to `Left`/`Right` placements on the horizontal axis.
+
 #### 2.3.7 Step 6: Arrow
 
 If arrow padding is configured (`arrow_padding > 0`), compute the arrow's position along the cross axis of the floating element. The arrow is clamped so that it never extends beyond the floating element's edges minus the arrow padding. The arrow position is expressed as `(arrow_x, arrow_y)` where the axis perpendicular to the placement side receives the computed value and the other axis is `None`.
 
 #### 2.3.8 Step 7: Auto Max Size
 
-If `auto_max_size` is enabled, compute `max_width` and `max_height` constraints so the floating element does not exceed the available space within the boundary. The available space is measured from the floating element's current position to the boundary edge on the placement side.
+If `auto_max_size` is enabled, compute `max_width` and `max_height` constraints so the floating element does not exceed the available space within the boundary. The available space on the main axis is measured from the floating element's current position to the boundary edge on the placement side. On the cross axis, use the full clipped boundary extent so the floating element may still span the boundary's available width or height after placement.
 
 #### 2.3.9 Step 8: Return
 
@@ -777,12 +796,13 @@ pub fn compute_position(
             let mut best_y = y;
             let mut best_placement = placement;
 
-            // Build candidate list: explicit fallbacks, or direct opposite as default
-            let candidates: Vec<Placement> = if !options.fallback_placements.is_empty() {
-                options.fallback_placements.clone()
-            } else {
-                vec![flip_placement(placement)]
-            };
+            // Build candidate list: explicit fallbacks first, then the direct opposite
+            // as a final recovery candidate if it is not already present.
+            let mut candidates = options.fallback_placements.clone();
+            let opposite = flip_placement(placement);
+            if !candidates.contains(&opposite) {
+                candidates.push(opposite);
+            }
 
             for candidate in &candidates {
                 let (cx, cy) = compute_coords(anchor, floating, *candidate);
@@ -908,6 +928,10 @@ fn compute_arrow_position(
 
 /// Compute maximum width/height so the floating element does not exceed
 /// available space in the viewport for the given placement.
+///
+/// The main-axis dimension is constrained by the space remaining on the chosen
+/// side of the placement. The cross-axis dimension uses the full clipped
+/// boundary extent.
 fn compute_max_size(
     x: f64, y: f64, viewport: &Rect, placement: Placement,
 ) -> (Option<f64>, Option<f64>) { /* ... */ }
@@ -948,6 +972,16 @@ fn flip_placement(placement: Placement) -> Placement {
     placement.opposite()
 }
 ```
+
+`compute_coords()` is easiest to read as two independent decisions:
+
+- choose the cross-axis coordinate from the requested alignment (`Start`,
+  `Center`, `End`)
+- choose the main-axis coordinate from the requested side (`Top`, `Bottom`,
+  `Left`, `Right`)
+
+`overlap` mode keeps the same alignment math but swaps the main-axis coordinate
+so the floating rect shares the anchor edge instead of sitting fully outside it.
 
 ### 2.6 Virtual Elements
 
@@ -1025,6 +1059,16 @@ let placement = if options.auto_placement {
 ```
 
 When `auto_placement` is `true`, the `flip` option is ignored (auto placement already considers all placements). The `shift` step still applies after auto placement to handle cross-axis overflow.
+
+When `placement` itself is `Auto`, `AutoStart`, or `AutoEnd`, the engine also
+enters auto-placement mode even if `auto_placement` is `false`:
+
+- `Auto` evaluates the 4 centered sides (`Top`, `Bottom`, `Left`, `Right`)
+- `AutoStart` evaluates the 4 `*Start` placements
+- `AutoEnd` evaluates the 4 `*End` placements
+
+If `auto_placement` is `true`, it overrides these narrower modes and evaluates
+all 12 physical placements.
 
 ### 2.8 Coordinate System
 
@@ -1677,6 +1721,12 @@ fn nearest_scrollable_ancestor(element: &web_sys::Element) -> Option<web_sys::El
 }
 ```
 
+`Nearest` is intentionally asymmetric: it preserves the current scroll position
+when the element is already fully visible, and otherwise moves only by the
+minimum delta required to reveal the clipped edge. `Center` instead compares the
+element midpoint to the container midpoint and converts that midpoint delta back
+into a scroll offset.
+
 ### 4.2 Scrollable Ancestor Detection
 
 `auto_update()` MUST attach `scroll` event listeners (with `{ passive: true, capture: true }`) on all scrollable ancestors of the anchor element, not just the nearest one. Use the `scrollable_ancestors()` utility to collect the full ancestor chain:
@@ -1709,6 +1759,10 @@ pub fn scrollable_ancestors(element: &Element) -> Vec<Element> {
     ancestors
 }
 ```
+
+Both checks are required. An element with `overflow: auto` but no extra content
+does not need a scroll listener, and an element with overflowing content but
+`overflow: visible` will not trap scrolling on that axis.
 
 In `auto_update()`, iterate the result and attach scroll listeners:
 
@@ -2124,6 +2178,10 @@ fn remove_scrollbar_compensation() {
 > a temporary `<div>` with `overflow:scroll`, measure `offsetWidth - clientWidth`, then remove.
 > Cache the result per session.
 >
+> The `.max(0.0)` clamp is deliberate. Overlay-scrollbar platforms often report
+> identical inner/client widths, and rounding differences should never produce a
+> negative compensation width.
+>
 > **RTL scroll compensation.** In right-to-left layouts, the vertical scrollbar appears on the left side of the viewport. When applying scrollbar width compensation, implementations MUST check the document direction via `document.dir` or `getComputedStyle(document.documentElement).direction`. In RTL mode, apply the compensation to `padding-left` instead of `padding-right`. The same applies to fixed-position element compensation — adjust the `left` property rather than `right`.
 
 ### 5.8 Components That Use Scroll Lock
@@ -2262,6 +2320,8 @@ pub fn next_z_index() -> u32 {
     NEXT_Z_INDEX.with(|z| {
         let val = z.get();
         if val >= Z_INDEX_CEILING {
+            // Return the fresh base now, but store BASE + 1 so the following
+            // allocation continues from the new sequence without repeating BASE.
             // Reset to base — existing overlays at high z-indexes will still
             // render above normal content; new overlays start fresh.
             #[cfg(debug_assertions)]
@@ -2414,6 +2474,11 @@ pub fn supports_top_layer() -> bool {
     })
 }
 ```
+
+This wrap behavior is intentionally one-step ahead: the call that detects the
+ceiling returns `Z_INDEX_BASE`, and the counter stores `Z_INDEX_BASE + 1` for
+the next allocation. That preserves the usual "return current, then advance"
+contract even across the wrap boundary.
 
 ### 6.6 CSS Containment Interaction
 

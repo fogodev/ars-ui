@@ -503,6 +503,8 @@ pub fn scrollbar_width() -> f64 {
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
     let client = f64::from(doc_el.client_width());
+    // Overlay-scrollbar platforms report the same value for both measurements,
+    // so clamp at zero instead of producing a negative compensation width.
     (inner - client).max(0.0)
 }
 
