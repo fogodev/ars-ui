@@ -1,14 +1,30 @@
 //! Collection and selection abstractions for list-based components.
 //!
-//! This crate provides the shared selection state used by components that render
-//! collections of items (e.g. select, menu, listbox, tabs, tree-view).
+//! This crate provides the core collection data types and selection state used
+//! by components that render collections of items (e.g. select, menu, listbox,
+//! tabs, tree-view).
+//!
+//! # Core types
+//!
+//! - [`Key`] — stable node identifier (string or integer).
+//! - [`NodeType`] — structural role of a node (item, section, header, separator).
+//! - [`Node`] — a single node wrapping user data with structural metadata.
+//! - [`Selection`] — set of currently selected items.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::std_instead_of_core)]
 
 extern crate alloc;
 
+/// Stable node identifiers for collections.
+pub mod key;
+/// Node types and structural metadata for collection items.
+pub mod node;
+
 use alloc::vec::Vec;
+
+pub use key::Key;
+pub use node::{Node, NodeType};
 
 /// A set of currently selected items in a collection component.
 ///
