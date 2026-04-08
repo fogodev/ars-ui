@@ -99,6 +99,9 @@ fn has_scrollable_overflow(
     scroll_height: i32,
     client_height: i32,
 ) -> bool {
+    // CSS overflow alone is not enough. The element only participates in the
+    // scroll-ancestor chain if it both advertises a scrollable overflow mode
+    // and has content larger than its viewport on at least one axis.
     (is_scrollable_axis_value(overflow_y) && scroll_height > client_height)
         || (is_scrollable_axis_value(overflow_x) && scroll_width > client_width)
 }
@@ -154,12 +157,16 @@ fn target_scroll_offset(
     match position {
         ScrollLogicalPosition::Start => Some(current_scroll + (element.start - container.start)),
         ScrollLogicalPosition::Center => {
+            // Center alignment compares midpoints in viewport space, then turns
+            // that delta back into the container's scroll coordinate space.
             let element_center = (element.start + element.end) / 2.0;
             let container_center = (container.start + container.end) / 2.0;
             Some(current_scroll + (element_center - container_center))
         }
         ScrollLogicalPosition::End => Some(current_scroll + (element.end - container.end)),
         ScrollLogicalPosition::Nearest => {
+            // "Nearest" preserves the current scroll position unless one edge is
+            // clipped. If clipped, move just enough to reveal that edge.
             if element.start < container.start {
                 Some(current_scroll - (container.start - element.start))
             } else if element.end > container.end {
@@ -279,6 +286,9 @@ fn scroll_into_view_if_needed_impl(element: &web_sys::Element, options: ScrollIn
         let element_rect = element.get_bounding_client_rect();
         let ancestor_rect = ancestor.get_bounding_client_rect();
 
+        // Each axis is resolved independently against the current ancestor's
+        // viewport. The returned offsets are still floating-point client-space
+        // values, so round once at the DOM write boundary.
         if let Some(target_top) = target_scroll_offset(
             block,
             AxisBounds {

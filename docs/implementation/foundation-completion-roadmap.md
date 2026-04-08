@@ -251,20 +251,24 @@ The project needs a fully stable foundation before component work starts. Compon
 
 **Depends on:** Wave 1 complete.
 
-**Parallelism:** #62, #65, #66, and #68 can run in parallel. #63 and #64 depend on #62. #67 depends on #66. #69 depends on #68.
+**Parallelism:** #62, #65, #66, and #68 can run in parallel. #63 and #64 depend on #62. #67 depends on #66. #112, #113, and #115 depend on #67. #114 depends on #67 and #112. #69 depends on #68.
 
-| GitHub                                             | Title                                                              | Points | Epic | Deps   |
-| -------------------------------------------------- | ------------------------------------------------------------------ | ------ | ---- | ------ |
-| [#62](https://github.com/fogodev/ars-ui/issues/62) | Implement Key, NodeType, and Node in ars-collections               | 3      | #53  | —      |
-| [#63](https://github.com/fogodev/ars-ui/issues/63) | Implement Collection trait and StaticCollection in ars-collections | 5      | #53  | #62    |
-| [#64](https://github.com/fogodev/ars-ui/issues/64) | Implement selection::Mode, Set, and State in ars-collections       | 5      | #53  | #62    |
-| [#65](https://github.com/fogodev/ars-ui/issues/65) | Implement InteractOutside interaction in ars-interactions          | 3      | #4   | Wave 1 |
-| [#66](https://github.com/fogodev/ars-ui/issues/66) | Implement positioning engine types in ars-dom                      | 3      | #6   | —      |
-| [#67](https://github.com/fogodev/ars-ui/issues/67) | Implement compute_position with flip, shift, and arrow in ars-dom  | 5      | #6   | #66    |
-| [#68](https://github.com/fogodev/ars-ui/issues/68) | Implement z-index allocator in ars-dom                             | 2      | #6   | —      |
-| [#69](https://github.com/fogodev/ars-ui/issues/69) | Implement portal root and background inert utilities in ars-dom    | 3      | #6   | #68    |
+| GitHub                                               | Title                                                                                       | Points | Epic | Deps      |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------ | ---- | --------- |
+| [#62](https://github.com/fogodev/ars-ui/issues/62)   | Implement Key, NodeType, and Node in ars-collections                                        | 3      | #53  | —         |
+| [#63](https://github.com/fogodev/ars-ui/issues/63)   | Implement Collection trait and StaticCollection in ars-collections                          | 5      | #53  | #62       |
+| [#64](https://github.com/fogodev/ars-ui/issues/64)   | Implement selection::Mode, Set, and State in ars-collections                                | 5      | #53  | #62       |
+| [#65](https://github.com/fogodev/ars-ui/issues/65)   | Implement InteractOutside interaction in ars-interactions                                   | 3      | #4   | Wave 1    |
+| [#66](https://github.com/fogodev/ars-ui/issues/66)   | Implement positioning engine types in ars-dom                                               | 3      | #6   | —         |
+| [#67](https://github.com/fogodev/ars-ui/issues/67)   | Implement compute_position with flip, shift, and arrow in ars-dom                           | 5      | #6   | #66       |
+| [#112](https://github.com/fogodev/ars-ui/issues/112) | Implement viewport measurement and visualViewport support for positioning in ars-dom        | 3      | #6   | #67       |
+| [#113](https://github.com/fogodev/ars-ui/issues/113) | Implement containing-block detection and coordinate-space conversion in ars-dom positioning | 5      | #6   | #67       |
+| [#114](https://github.com/fogodev/ars-ui/issues/114) | Implement auto_update observer lifecycle for positioned overlays in ars-dom                 | 5      | #6   | #67, #112 |
+| [#115](https://github.com/fogodev/ars-ui/issues/115) | Add VirtualElement helper for non-DOM positioning anchors in ars-dom                        | 1      | #6   | #67       |
+| [#68](https://github.com/fogodev/ars-ui/issues/68)   | Implement z-index allocator in ars-dom                                                      | 2      | #6   | —         |
+| [#69](https://github.com/fogodev/ars-ui/issues/69)   | Implement portal root and background inert utilities in ars-dom                             | 3      | #6   | #68       |
 
-**Total:** 29 points
+**Total:** 43 points
 
 ---
 
@@ -395,8 +399,8 @@ The project needs a fully stable foundation before component work starts. Compon
   - `Side` (Top, Right, Bottom, Left), `Alignment` (Start, Center, End), `Axis` (Horizontal, Vertical).
   - All 21 `Placement` variants including Auto and Logical (Start/End).
   - `Placement` methods: `opposite()`, `main_axis()`, `resolve_logical()`, `side()`, `alignment()`, `side_and_alignment()`, `with_side()`.
-  - `PositionOptions` struct (placement, offset, flip, shift, arrow, boundary).
-  - `PositionResult` struct (x, y, actual_placement, arrow_offset).
+  - `PositioningOptions` struct (placement, offset, flip, shift, arrow, boundary).
+  - `PositioningResult` struct (x, y, actual_placement, arrow_offset, max size metadata).
 - Spec impact: `No spec change required`.
 
 #### W2-6: Implement compute_position with flip, shift, and arrow in ars-dom
@@ -420,11 +424,109 @@ The project needs a fully stable foundation before component work starts. Compon
   - Unit tests for arrow: cross-axis offset computed correctly.
   - Unit tests for auto placement: picks side with most available space.
 - Acceptance criteria:
-  - `compute_position(anchor, floating, options) -> PositionResult`.
+  - `compute_position(anchor, floating, viewport, options) -> PositioningResult`.
   - Flip middleware: detects overflow, tries opposite, falls back to adjacent.
   - Shift middleware: clamps to boundary with configurable padding.
   - Arrow middleware: computes cross-axis offset.
   - Auto placement: tries all sides, picks one with most space.
+- Spec impact: `No spec change required`.
+
+#### W2-6b: Implement viewport measurement and visualViewport support for positioning in ars-dom
+
+- Points: `3`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Mixed`
+- Depends on: #67
+- Spec refs:
+  - `spec/foundation/11-dom-utilities.md` §2.2.2 "Visual Viewport and Virtual Keyboard" (L468)
+  - `spec/foundation/11-dom-utilities.md` §2.3.2 "Step 1: Measure" (L627)
+  - `spec/foundation/11-dom-utilities.md` §2.8 "Coordinate System" (L1045)
+- Goal: implement viewport measurement helpers and visual viewport integration for DOM-backed positioning.
+- Files to create/modify: `crates/ars-dom/src/positioning/viewport.rs` (new), `crates/ars-dom/src/positioning/mod.rs`, `crates/ars-dom/src/lib.rs`, `crates/ars-dom/Cargo.toml`
+- Tests to add first:
+  - Unit tests for non-web fallback viewport measurements.
+  - Web-targeted smoke tests for `window.innerWidth` / `window.innerHeight` fallback behavior.
+  - Web-targeted smoke tests for `visualViewport` width, height, and offset handling when available.
+  - Tests proving `viewport_rect()` reflects the visual viewport when the browser exposes it.
+- Acceptance criteria:
+  - Viewport helpers expose the dimensions needed by the positioning spec.
+  - `visualViewport` support is used when available and falls back cleanly otherwise.
+  - Host builds compile without requiring browser globals.
+  - The public helpers are documented as the measurement layer for DOM positioning.
+- Spec impact: `No spec change required`.
+
+#### W2-6c: Implement containing-block detection and coordinate-space conversion in ars-dom positioning
+
+- Points: `5`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Mixed`
+- Depends on: #67
+- Spec refs:
+  - `spec/foundation/11-dom-utilities.md` §2.3.1 "Step 0: Detect Containing Block" (L539)
+  - `spec/foundation/11-dom-utilities.md` §2.8 "Coordinate System" (L1045)
+  - `spec/foundation/11-dom-utilities.md` §2.8.1 "CSS Transform Ancestor Detection" (L1074)
+  - `spec/foundation/11-dom-utilities.md` §6.6 "CSS Containment Interaction" (L2434)
+- Goal: implement DOM coordinate-space detection and conversion for positioned overlays rendered in transformed or contained ancestors.
+- Files to create/modify: `crates/ars-dom/src/positioning/dom.rs` (new), `crates/ars-dom/src/positioning/mod.rs`, `crates/ars-dom/src/lib.rs`, `crates/ars-dom/Cargo.toml`
+- Tests to add first:
+  - Unit tests for containing-block detection from computed style flags.
+  - Unit tests for `position: absolute` offset-parent coordinate conversion.
+  - Web-targeted smoke tests for transformed ancestors and CSS containment.
+  - Tests proving host builds stub or fall back safely when DOM APIs are unavailable.
+- Acceptance criteria:
+  - The DOM positioning layer can detect containing-block ancestors per spec.
+  - Coordinate conversion accounts for transformed and contained ancestors.
+  - `absolute` strategy conversion uses the correct offset parent space.
+  - Portal-target mismatches are surfaced in the documented way.
+- Spec impact: `No spec change required`.
+
+#### W2-6d: Implement auto_update observer lifecycle for positioned overlays in ars-dom
+
+- Points: `5`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Mixed`
+- Depends on: #67, #112
+- Spec refs:
+  - `spec/foundation/11-dom-utilities.md` §2.2.1 "ResizeObserver Lifecycle for Positioning" (L446)
+  - `spec/foundation/11-dom-utilities.md` §2.2.2 "Visual Viewport and Virtual Keyboard" (L468)
+  - `spec/foundation/11-dom-utilities.md` §2.10 "Auto-Update" (L1095)
+  - `spec/foundation/11-dom-utilities.md` §4.2 "Scrollable Ancestor Detection" (listener usage at L1696)
+- Goal: implement the browser-facing observer and listener lifecycle that keeps positioned overlays updated as layout changes.
+- Files to create/modify: `crates/ars-dom/src/positioning/auto_update.rs` (new), `crates/ars-dom/src/positioning/mod.rs`, `crates/ars-dom/src/lib.rs`, `crates/ars-dom/Cargo.toml`
+- Tests to add first:
+  - Unit tests for non-web/SSR no-op cleanup behavior.
+  - Unit tests for cleanup idempotency and teardown sequencing.
+  - Web-targeted smoke tests for window resize and ancestor scroll listener wiring.
+  - Web-targeted smoke tests for `visualViewport` listener registration and cleanup.
+- Acceptance criteria:
+  - `auto_update(anchor, floating, update) -> Box<dyn FnOnce()>` is implemented per spec.
+  - Resize, scroll, mutation, intersection, and `visualViewport` hooks are wired as specified.
+  - Cleanup removes every observer and listener and is safe in host builds.
+  - RAF batching remains an adapter responsibility, matching the spec split.
+- Spec impact: `No spec change required`.
+
+#### W2-6e: Add VirtualElement helper for non-DOM positioning anchors in ars-dom
+
+- Points: `1`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: #67
+- Spec refs:
+  - `spec/foundation/11-dom-utilities.md` §2.6 "Virtual Elements" (L956)
+- Goal: add the `VirtualElement` helper used by the positioning API for non-DOM anchors.
+- Files to create/modify: `crates/ars-dom/src/positioning/types.rs`, `crates/ars-dom/src/positioning/mod.rs`, `crates/ars-dom/src/lib.rs`
+- Tests to add first:
+  - Unit tests proving `VirtualElement` can return a synthetic `Rect` through its callback.
+  - Unit tests proving repeated calls may return different rects, matching manual recomputation semantics.
+  - Public API tests covering exports from `positioning` and the crate root.
+- Acceptance criteria:
+  - `VirtualElement` exists exactly as specified for geometry-only anchors.
+  - The helper is documented as caller-driven for recomputation.
+  - The type is publicly exported through the positioning module and crate root.
 - Spec impact: `No spec change required`.
 
 #### W2-7: Implement z-index allocator in ars-dom
@@ -978,13 +1080,17 @@ Wave 1 (19 pts)
     ├─→ #59 (hover, 2)   ──────────────────────────────────┤
     └─→ #60 (focus, 3)   ──────────────────────────────────┤
                                                            ▼
-Wave 2 (29 pts)                              ┌─── Wave 1 complete
+Wave 2 (43 pts)                              ┌─── Wave 1 complete
   #62 (key/node, 3)                          │
     ├─→ #63 (collection trait, 5)            │
     └─→ #64 (selection, 5)                   │
   #65 (interact outside, 3)  ◄───────────────┘
   #66 (positioning types, 3)
     └─→ #67 (positioning algo, 5)
+         ├─→ #112 (viewport, 3)
+         │    └─→ #114 (auto_update, 5)
+         ├─→ #113 (containing block, 5)
+         └─→ #115 (virtual element, 1)
   #68 (z-index, 2)
     └─→ #69 (portal/inert, 3)
                             │
@@ -1019,16 +1125,16 @@ Wave 4 (50 pts)            ┌─── Wave 3 complete
 
 ## Epic Mapping
 
-| Epic                | Issue | Tasks covered                                    |
-| ------------------- | ----- | ------------------------------------------------ |
-| Interactions        | #4    | #57, #58, #59, #60, #61, #65, #76, #77, #78, #90 |
-| DOM utilities       | #6    | #66, #67, #68, #69, #72, #74, #85, #88           |
-| Leptos adapter      | #8    | #55, #105                                        |
-| Dioxus adapter      | #9    | #56, #106                                        |
-| A11y                | #3    | #73, #89                                         |
-| Collections         | #53   | #62, #63, #64, #70, #71, #81, #82, #83, #84      |
-| I18n                | #54   | #75, #79, #80                                    |
-| First utility slice | #10   | #104                                             |
+| Epic                | Issue | Tasks covered                                                  |
+| ------------------- | ----- | -------------------------------------------------------------- |
+| Interactions        | #4    | #57, #58, #59, #60, #61, #65, #76, #77, #78, #90               |
+| DOM utilities       | #6    | #66, #67, #68, #69, #72, #74, #85, #88, #112, #113, #114, #115 |
+| Leptos adapter      | #8    | #55, #105                                                      |
+| Dioxus adapter      | #9    | #56, #106                                                      |
+| A11y                | #3    | #73, #89                                                       |
+| Collections         | #53   | #62, #63, #64, #70, #71, #81, #82, #83, #84                    |
+| I18n                | #54   | #75, #79, #80                                                  |
+| First utility slice | #10   | #104                                                           |
 
 ## Post-Foundation Plan
 
