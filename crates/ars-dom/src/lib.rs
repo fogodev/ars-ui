@@ -1,4 +1,5 @@
-//! DOM utilities for focus management, scroll control, and platform feature detection.
+//! DOM utilities for focus management, scroll control, z-index allocation,
+//! and platform feature detection.
 //!
 //! This crate provides browser-level helpers shared across framework adapters,
 //! including focus management, scroll lock management for modal overlays, and
@@ -17,6 +18,7 @@ pub mod modality;
 pub mod positioning;
 mod scroll;
 pub mod scroll_lock;
+pub mod z_index;
 
 pub use focus::{
     FocusScope, FocusedElement, focus_body, focus_element_by_id, focus_first_tabbable,
@@ -39,6 +41,7 @@ pub use scroll_lock::{
 };
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub use scroll_lock::{needs_ios_workaround, scrollbar_width};
+pub use z_index::{ZIndexAllocator, next_z_index, reset_z_index};
 
 /// Describes the platform capabilities available to the current runtime.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

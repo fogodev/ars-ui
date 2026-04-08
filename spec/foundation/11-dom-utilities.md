@@ -2264,6 +2264,11 @@ pub fn next_z_index() -> u32 {
         if val >= Z_INDEX_CEILING {
             // Reset to base — existing overlays at high z-indexes will still
             // render above normal content; new overlays start fresh.
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "[ars-dom] z-index counter reached ceiling ({Z_INDEX_CEILING}), \
+                 resetting to base ({Z_INDEX_BASE})"
+            );
             z.set(Z_INDEX_BASE + 1);
             Z_INDEX_BASE
         } else {
