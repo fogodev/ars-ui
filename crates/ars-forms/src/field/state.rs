@@ -59,13 +59,13 @@ impl State {
     /// prevents flashing validation errors on fields the user hasn't
     /// visited yet.
     #[must_use]
-    pub fn show_error(&self) -> bool {
+    pub const fn show_error(&self) -> bool {
         self.touched && self.validation.is_err()
     }
 
     /// Whether the field is currently invalid.
     #[must_use]
-    pub fn is_invalid(&self) -> bool {
+    pub const fn is_invalid(&self) -> bool {
         self.validation.is_err()
     }
 

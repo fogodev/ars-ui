@@ -30,7 +30,7 @@ pub enum HoverState {
 impl HoverState {
     /// Returns `true` when the pointer is over the element.
     #[must_use]
-    pub fn is_hovered(&self) -> bool {
+    pub const fn is_hovered(&self) -> bool {
         matches!(self, HoverState::Hovered)
     }
 }

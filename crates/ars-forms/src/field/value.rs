@@ -55,7 +55,7 @@ impl Value {
     /// Extracts the numeric value, if this is a [`Number`](Value::Number)
     /// variant containing `Some`.
     #[must_use]
-    pub fn as_number(&self) -> Option<f64> {
+    pub const fn as_number(&self) -> Option<f64> {
         match self {
             Value::Number(n) => *n,
             _ => None,
@@ -64,7 +64,7 @@ impl Value {
 
     /// Extracts the boolean value, if this is a [`Bool`](Value::Bool) variant.
     #[must_use]
-    pub fn as_bool(&self) -> Option<bool> {
+    pub const fn as_bool(&self) -> Option<bool> {
         match self {
             Value::Bool(b) => Some(*b),
             _ => None,

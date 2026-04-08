@@ -84,7 +84,7 @@ impl ArsContext {
 
     /// Returns the active locale.
     #[must_use]
-    pub fn locale(&self) -> &Locale {
+    pub const fn locale(&self) -> &Locale {
         &self.locale
     }
 
@@ -144,7 +144,7 @@ impl ArsContext {
 
     /// Returns the active style strategy.
     #[must_use]
-    pub fn style_strategy(&self) -> &StyleStrategy {
+    pub const fn style_strategy(&self) -> &StyleStrategy {
         &self.style_strategy
     }
 }

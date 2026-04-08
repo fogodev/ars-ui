@@ -49,7 +49,7 @@ impl PressState {
     /// The transient `Pressing` state (which resolves within the same event tick
     /// before any render) returns `false` to prevent `data-ars-pressed` from flashing.
     #[must_use]
-    pub fn is_pressed(&self) -> bool {
+    pub const fn is_pressed(&self) -> bool {
         matches!(
             self,
             PressState::PressedInside { .. } | PressState::PressedOutside { .. }
@@ -58,7 +58,7 @@ impl PressState {
 
     /// Returns `true` when pressed and the pointer is within element bounds.
     #[must_use]
-    pub fn is_pressed_inside(&self) -> bool {
+    pub const fn is_pressed_inside(&self) -> bool {
         matches!(self, PressState::PressedInside { .. })
     }
 
@@ -67,7 +67,7 @@ impl PressState {
     /// This is an associated function, not a method — it does not depend on
     /// press state. Callers may also use `config.disabled` directly.
     #[must_use]
-    pub fn is_disabled(config: &PressConfig) -> bool {
+    pub const fn is_disabled(config: &PressConfig) -> bool {
         config.disabled
     }
 }

@@ -38,7 +38,7 @@ impl Error {
     /// Used by [`FormContext::set_server_errors()`](crate::FormContext::set_server_errors)
     /// to separate server-sourced errors from client-side ones.
     #[must_use]
-    pub fn is_server(&self) -> bool {
+    pub const fn is_server(&self) -> bool {
         matches!(&self.code, ErrorCode::Server(_) | ErrorCode::Async(_))
     }
 }
@@ -79,7 +79,7 @@ pub struct Errors(pub Vec<Error>);
 impl Errors {
     /// Creates an empty error collection.
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self(Vec::new())
     }
 

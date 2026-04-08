@@ -4,6 +4,14 @@
 //! including focus management, scroll lock management for modal overlays, and
 //! platform capability detection.
 
+// Many ars-dom functions have cfg-gated web implementations that call
+// web_sys/js_sys APIs at runtime. The non-web stubs look const-eligible
+// to clippy, but the web paths cannot be const.
+#![expect(
+    clippy::missing_const_for_fn,
+    reason = "cfg-gated web impls prevent const fn"
+)]
+
 mod focus;
 pub mod modality;
 pub mod positioning;

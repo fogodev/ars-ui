@@ -113,8 +113,9 @@ use alloc::string::String;
 ///
 /// The `String` variant covers most real-world use-cases including numeric
 /// IDs rendered as strings. The `Int` variant is a zero-allocation fast
-/// path for purely numeric identifiers (e.g., row IDs from a u64 database
-/// primary key).
+/// path for purely numeric identifiers (e.g., row IDs from a `u64` database
+/// primary key). The `Uuid` variant (requires the `uuid` feature) provides
+/// a zero-allocation path for UUID-based identifiers.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Key {
     /// String key — the universal fallback.
@@ -122,6 +123,14 @@ pub enum Key {
 
     /// Integer key — allocation-free for numeric identifiers.
     Int(u64),
+
+    /// UUID key — allocation-free for UUID-based identifiers.
+    ///
+    /// Available only when the `uuid` feature is enabled. Provides a
+    /// 16-byte `Copy` key without heap allocation, compared to the 36-byte
+    /// `String` representation of a UUID.
+    #[cfg(feature = "uuid")]
+    Uuid(uuid::Uuid),
 }
 
 /// Manual `PartialOrd` / `Ord` implementation: `Int` keys sort before `String`
@@ -129,6 +138,10 @@ pub enum Key {
 /// cluster together at the front of `BTreeSet<Key>` used by `selection::State`.
 /// Within each variant the natural ordering applies (`u64::cmp` for `Int`,
 /// lexicographic for `String`).
+///
+/// When the `uuid` feature is enabled, the ordering is `Int < Uuid < String`:
+/// numeric IDs first, then UUIDs (also structured identifiers), then
+/// arbitrary strings.
 ///
 /// **Note on mixed-key ordering**: When a collection contains
 /// both `Key::Int` and `Key::String` keys, all `Int` keys sort before all
@@ -146,11 +159,23 @@ impl PartialOrd for Key {
 
 impl Ord for Key {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        // Variant ordering: Int (0) < Uuid (1) < String (2).
+        // Within the same variant: natural ordering.
         match (self, other) {
             (Key::Int(a), Key::Int(b)) => a.cmp(b),
             (Key::String(a), Key::String(b)) => a.cmp(b),
             (Key::Int(_), Key::String(_)) => core::cmp::Ordering::Less,
             (Key::String(_), Key::Int(_)) => core::cmp::Ordering::Greater,
+            #[cfg(feature = "uuid")]
+            (Key::Uuid(a), Key::Uuid(b)) => a.cmp(b),
+            #[cfg(feature = "uuid")]
+            (Key::Int(_), Key::Uuid(_)) => core::cmp::Ordering::Less,
+            #[cfg(feature = "uuid")]
+            (Key::Uuid(_), Key::Int(_)) => core::cmp::Ordering::Greater,
+            #[cfg(feature = "uuid")]
+            (Key::Uuid(_), Key::String(_)) => core::cmp::Ordering::Less,
+            #[cfg(feature = "uuid")]
+            (Key::String(_), Key::Uuid(_)) => core::cmp::Ordering::Greater,
         }
     }
 }
@@ -164,7 +189,7 @@ impl Key {
 
     /// Construct an integer key.
     #[must_use]
-    pub fn int(n: u64) -> Self {
+    pub const fn int(n: u64) -> Self {
         Key::Int(n)
     }
 
@@ -173,8 +198,18 @@ impl Key {
     /// Alias for `Key::Int`. Exists to make the ordering behavior explicit:
     /// database ID keys sort before string keys in `BTreeSet<Key>`.
     #[must_use]
-    pub fn from_database_id(n: u64) -> Self {
+    pub const fn from_database_id(n: u64) -> Self {
         Key::Int(n)
+    }
+
+    /// Construct a UUID key.
+    ///
+    /// Available only when the `uuid` feature is enabled. Provides a
+    /// zero-allocation key for UUID-based identifiers.
+    #[cfg(feature = "uuid")]
+    #[must_use]
+    pub const fn uuid(id: uuid::Uuid) -> Self {
+        Key::Uuid(id)
     }
 }
 
@@ -198,6 +233,11 @@ impl From<usize> for Key {
     fn from(n: usize) -> Self { Key::Int(n as u64) }
 }
 
+#[cfg(feature = "uuid")]
+impl From<uuid::Uuid> for Key {
+    fn from(id: uuid::Uuid) -> Self { Key::Uuid(id) }
+}
+
 impl Default for Key {
     fn default() -> Self { Key::Int(0) }
 }
@@ -207,12 +247,14 @@ impl core::fmt::Display for Key {
         match self {
             Key::String(s) => f.write_str(s),
             Key::Int(n)    => write!(f, "{n}"),
+            #[cfg(feature = "uuid")]
+            Key::Uuid(id)  => write!(f, "{id}"),
         }
     }
 }
 ```
 
-**Key parsing:** `Key::parse(s: &str)` attempts integer parsing first; if it fails, returns `Key::String(s.to_owned())`. To avoid ambiguity, prefer explicit constructors: `Key::Int(42)` or `Key::String("42abc".into())`. Display implementation: `Int` variants format as the number, `String` variants format as the string value.
+**Key parsing:** `Key::parse(s: &str)` attempts integer parsing first; if it fails, returns `Key::String(s.to_owned())`. To avoid ambiguity, prefer explicit constructors: `Key::Int(42)` or `Key::String("42abc".into())`. Display implementation: `Int` variants format as the number, `String` variants format as the string value, `Uuid` variants format as the standard hyphenated UUID string.
 
 ### 1.4 NodeType
 
@@ -299,7 +341,7 @@ impl<T> Node<T> {
     /// Returns `true` if this node represents a structural boundary
     /// (Section, Header, or Separator) that is never selectable.
     #[must_use]
-    pub fn is_structural(&self) -> bool {
+    pub const fn is_structural(&self) -> bool {
         !matches!(self.node_type, NodeType::Item)
     }
 
@@ -518,14 +560,22 @@ pub trait Collection<T> {
     // Iteration                                                           //
     // ------------------------------------------------------------------ //
 
+    // NOTE: Methods below use explicit lifetime parameters with `T: 'a`
+    // bounds. Rust 2024 edition's RPITIT lifetime capture rules require
+    // them: the opaque return type captures `T`, so the compiler must
+    // know `T` outlives the borrow.
+
     /// An iterator over all node keys in flat iteration order.
-    fn keys(&self) -> impl Iterator<Item = &Key>;
+    fn keys<'a>(&'a self) -> impl Iterator<Item = &'a Key> where T: 'a;
 
     /// An iterator over all nodes in flat iteration order.
-    fn nodes(&self) -> impl Iterator<Item = &Node<T>>;
+    fn nodes<'a>(&'a self) -> impl Iterator<Item = &'a Node<T>> where T: 'a;
 
     /// An iterator over only focusable item keys, skipping structural nodes.
-    fn item_keys(&self) -> impl Iterator<Item = &Key> {
+    fn item_keys<'a>(&'a self) -> impl Iterator<Item = &'a Key>
+    where
+        T: 'a,
+    {
         self.nodes()
             .filter(|n| n.is_focusable())
             .map(|n| &n.key)
@@ -537,7 +587,9 @@ pub trait Collection<T> {
 
     /// Returns an iterator over the direct children of a given parent key.
     /// For flat collections this always returns an empty iterator.
-    fn children_of(&self, parent_key: &Key) -> impl Iterator<Item = &Node<T>>;
+    fn children_of<'a>(&'a self, parent_key: &Key) -> impl Iterator<Item = &'a Node<T>>
+    where
+        T: 'a;
 
     // ------------------------------------------------------------------ //
     // Text value access                                                   //
@@ -546,7 +598,10 @@ pub trait Collection<T> {
     /// The plain-text representation of the item with the given key.
     /// Used by type-ahead matching. Returns `None` if the key is unknown
     /// or the node is structural.
-    fn text_value_of(&self, key: &Key) -> Option<&str> {
+    fn text_value_of<'a>(&'a self, key: &Key) -> Option<&'a str>
+    where
+        T: 'a,
+    {
         self.get(key).map(|n| n.text_value.as_str())
     }
 }
@@ -941,6 +996,7 @@ pub struct CollectionBuilder<T> {
 // Only `build()` requires `T: Clone` (because `StaticCollection` needs it).
 impl<T> CollectionBuilder<T> {
     /// Create an empty builder.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             nodes: Vec::new(),
@@ -952,6 +1008,7 @@ impl<T> CollectionBuilder<T> {
     /// Add a focusable item.
     ///
     /// `text_value` is used for type-ahead matching and ARIA label fallback.
+    #[must_use]
     pub fn item(
         mut self,
         key: impl Into<Key>,
@@ -973,7 +1030,7 @@ impl<T> CollectionBuilder<T> {
         };
         debug_assert!(
             !self.key_to_index.contains_key(&key),
-            "CollectionBuilder: duplicate key {:?}", key
+            "CollectionBuilder: duplicate key {key:?}"
         );
         self.key_to_index.insert(key, index);
         self.nodes.push(node);
@@ -982,13 +1039,14 @@ impl<T> CollectionBuilder<T> {
 
     /// Begin a named section. All subsequent `item` calls until the next
     /// `end_section` (or another `section`) belong to this section.
+    #[must_use]
     pub fn section(
         mut self,
         key: impl Into<Key>,
         header_text: impl Into<String>,
     ) -> Self {
         let key = key.into();
-        let header_key = Key::str(format!("{}-header", key));
+        let header_key = Key::str(format!("{key}-header"));
 
         // Push the Section node itself.
         let section_index = self.nodes.len();
@@ -1025,15 +1083,17 @@ impl<T> CollectionBuilder<T> {
     }
 
     /// End the current section. Items added after this call are top-level.
+    #[must_use]
     pub fn end_section(mut self) -> Self {
         self.current_section = None;
         self
     }
 
     /// Add a visual separator.
+    #[must_use]
     pub fn separator(mut self) -> Self {
         let index = self.nodes.len();
-        let key = Key::str(format!("separator-{}", index));
+        let key = Key::str(format!("separator-{index}"));
         self.key_to_index.insert(key.clone(), index);
         self.nodes.push(Node {
             key,
@@ -1048,7 +1108,6 @@ impl<T> CollectionBuilder<T> {
         });
         self
     }
-
 }
 
 impl<T: Clone> CollectionBuilder<T> {
@@ -1056,6 +1115,7 @@ impl<T: Clone> CollectionBuilder<T> {
     ///
     /// This is the only method that requires `T: Clone`, because
     /// `StaticCollection<T>` has a `Clone` bound on its impl.
+    #[must_use]
     pub fn build(self) -> StaticCollection<T> {
         StaticCollection::from_parts(self.nodes, self.key_to_index)
     }
@@ -1063,6 +1123,15 @@ impl<T: Clone> CollectionBuilder<T> {
 
 impl<T> Default for CollectionBuilder<T> {
     fn default() -> Self { Self::new() }
+}
+
+/// Manual `Debug` avoids requiring `T: Debug`. Prints item count only.
+impl<T> core::fmt::Debug for CollectionBuilder<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("CollectionBuilder")
+            .field("items", &self.nodes.len())
+            .finish()
+    }
 }
 ````
 
@@ -1104,17 +1173,19 @@ pub struct StaticCollection<T> {
 impl<T: Clone> StaticCollection<T> {
     /// Construct from pre-built parts (used by `CollectionBuilder`).
     pub(crate) fn from_parts(nodes: Vec<Node<T>>, key_to_index: IndexMap<Key, usize>) -> Self {
-        let first_focusable = nodes.iter().position(|n| n.is_focusable());
-        let last_focusable  = nodes.iter().rposition(|n| n.is_focusable());
+        let first_focusable = nodes.iter().position(Node::is_focusable);
+        let last_focusable  = nodes.iter().rposition(Node::is_focusable);
         Self { nodes, key_to_index, first_focusable, last_focusable }
     }
 
     /// Construct from a `Vec` of `(Key, text_value, T)` tuples.
+    #[must_use]
     pub fn new(items: Vec<(Key, String, T)>) -> Self {
         Self::from_vec(items)
     }
 
     /// Convenience constructor from a `Vec` of `(Key, label, data)` tuples.
+    #[must_use]
     pub fn from_vec(items: Vec<(Key, String, T)>) -> Self {
         let mut builder = CollectionBuilder::new();
         for (key, text, value) in items {
@@ -1183,15 +1254,18 @@ impl<T: Clone> Collection<T> for StaticCollection<T> {
             .map(|n| &n.key)
     }
 
-    fn keys(&self) -> impl Iterator<Item = &Key> {
+    fn keys<'a>(&'a self) -> impl Iterator<Item = &'a Key> where T: 'a {
         self.nodes.iter().map(|n| &n.key)
     }
 
-    fn nodes(&self) -> impl Iterator<Item = &Node<T>> {
+    fn nodes<'a>(&'a self) -> impl Iterator<Item = &'a Node<T>> where T: 'a {
         self.nodes.iter()
     }
 
-    fn children_of(&self, parent_key: &Key) -> impl Iterator<Item = &Node<T>> {
+    fn children_of<'a>(&'a self, parent_key: &Key) -> impl Iterator<Item = &'a Node<T>>
+    where
+        T: 'a,
+    {
         self.nodes
             .iter()
             .filter(move |n| n.parent_key.as_ref() == Some(parent_key))
@@ -1234,7 +1308,12 @@ impl<T: Clone + PartialEq> PartialEq for StaticCollection<T> {
 /// `IndexMap` and `Vec` and are O(1) amortized for append, O(n) for mid-list insert.
 impl<T: CollectionItem> StaticCollection<T> {
     /// Number of items.
+    #[must_use]
     pub fn len(&self) -> usize { self.nodes.len() }
+
+    /// Returns `true` when the collection contains no items.
+    #[must_use]
+    pub fn is_empty(&self) -> bool { self.nodes.is_empty() }
 
     /// Insert an item at the given index, shifting subsequent items.
     pub fn insert(&mut self, index: usize, item: T) {
@@ -1249,7 +1328,7 @@ impl<T: CollectionItem> StaticCollection<T> {
     pub fn remove_by_keys(&mut self, keys: &[Key]) -> Vec<T> {
         let mut removed = Vec::with_capacity(keys.len());
         for key in keys {
-            if let Some(idx) = self.key_to_index.remove(key) {
+            if let Some(idx) = self.key_to_index.shift_remove(key) {
                 let node = self.nodes.remove(idx);
                 if let Some(val) = node.value {
                     removed.push(val);
@@ -1283,6 +1362,7 @@ impl<T: CollectionItem> StaticCollection<T> {
     }
 
     /// Get the index of an item by key.
+    #[must_use]
     pub fn index_of(&self, key: &Key) -> Option<usize> {
         self.key_to_index.get(key).copied()
     }
@@ -4469,12 +4549,16 @@ edition = "2021"
 ars-core  = { path = "../ars-core" }
 ars-a11y  = { path = "../ars-a11y" }
 ars-i18n  = { path = "../ars-i18n", optional = true }
-indexmap  = { version = "2", default-features = false, features = ["alloc"] }
+# indexmap v2 provides no_std + alloc support by default when "std" is disabled;
+# there is no separate "alloc" feature.
+indexmap  = { version = "2", default-features = false }
+uuid     = { version = "1", default-features = false, optional = true }
 
 [features]
 default  = ["std"]
 std      = ["indexmap/std"]
 i18n     = ["dep:ars-i18n"]          # Enables locale-aware collation helpers
+uuid     = ["dep:uuid"]              # Enables Key::Uuid variant (zero-allocation UUID keys)
 serde    = ["dep:serde", "indexmap/serde"] # Serializable selection::Set, Key
 ```
 

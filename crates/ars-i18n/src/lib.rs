@@ -25,7 +25,7 @@ pub enum Direction {
 impl Direction {
     /// CSS `direction` value.
     #[must_use]
-    pub fn as_css(&self) -> &'static str {
+    pub const fn as_css(&self) -> &'static str {
         match self {
             Direction::Ltr => "ltr",
             Direction::Rtl => "rtl",
@@ -35,7 +35,7 @@ impl Direction {
 
     /// HTML `dir` attribute value.
     #[must_use]
-    pub fn as_html_attr(&self) -> &'static str {
+    pub const fn as_html_attr(&self) -> &'static str {
         self.as_css()
     }
 
@@ -101,7 +101,7 @@ impl CalendarDate {
     /// Placeholder implementation — returns an empty string until the full
     /// ICU4X-backed date type is available.
     #[must_use]
-    pub fn to_iso8601(&self) -> String {
+    pub const fn to_iso8601(&self) -> String {
         String::new()
     }
 }
@@ -122,7 +122,7 @@ impl Time {
     /// Placeholder implementation — returns an empty string until the full
     /// ICU4X-backed time type is available.
     #[must_use]
-    pub fn to_iso8601(&self) -> String {
+    pub const fn to_iso8601(&self) -> String {
         String::new()
     }
 }
@@ -144,7 +144,7 @@ impl DateRange {
     /// Placeholder implementation — returns an empty string until the full
     /// ICU4X-backed date range type is available.
     #[must_use]
-    pub fn to_iso8601(&self) -> String {
+    pub const fn to_iso8601(&self) -> String {
         String::new()
     }
 }

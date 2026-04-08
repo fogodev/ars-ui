@@ -183,13 +183,13 @@ pub struct TimerHandle(u64);
 impl TimerHandle {
     /// Creates a new timer handle from a platform-specific ID.
     #[must_use]
-    pub fn new(id: u64) -> Self {
+    pub const fn new(id: u64) -> Self {
         Self(id)
     }
 
     /// Returns the platform-specific ID wrapped by this handle.
     #[must_use]
-    pub fn id(&self) -> u64 {
+    pub const fn id(&self) -> u64 {
         self.0
     }
 }
@@ -350,7 +350,7 @@ impl MissingProviderEffects {
 
     #[cfg(not(all(debug_assertions, feature = "std")))]
     #[inline]
-    fn warn(_method: &str) {}
+    const fn warn(_method: &str) {}
 }
 
 impl PlatformEffects for MissingProviderEffects {

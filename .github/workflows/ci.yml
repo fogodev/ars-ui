@@ -61,7 +61,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Unit test tier
-        run: cargo test -p ars-a11y -p ars-core -p ars-dom -p ars-interactions -p ars-forms --all-targets --all-features
+        run: cargo test -p ars-a11y -p ars-core -p ars-collections -p ars-dom -p ars-interactions -p ars-forms --all-targets --all-features
 
   integration:
     name: Integration Tests
@@ -224,11 +224,14 @@ jobs:
             "-p ars-interactions --no-default-features"
             "-p ars-interactions --features aria-drag-drop-compat"
             "-p ars-a11y -p ars-interactions --features ars-a11y/aria-drag-drop-compat,ars-interactions/aria-drag-drop-compat"
-            "-p ars-collections --no-default-features"
+            # ars-collections: no-default-features is not tested because
+            # IndexMap requires a hasher (std feature provides RandomState).
             "-p ars-collections --features i18n"
+            "-p ars-collections --features uuid"
+            "-p ars-collections --features std,uuid"
             "-p ars-collections --features std,i18n,serde"
+            "-p ars-collections --features std,uuid,i18n"
             "-p ars-collections --features serde"
-            "-p ars-collections --no-default-features --features i18n"
             "-p ars-forms --no-default-features"
             "-p ars-forms --features serde"
             "-p ars-dom --no-default-features"

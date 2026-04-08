@@ -9,14 +9,17 @@ rust-version.workspace = true
 
 [features]
 default = ["std"]
-std     = []
+std     = ["indexmap/std"]
 i18n    = ["dep:ars-i18n"]
+uuid    = ["dep:uuid"]
 serde   = []
 
 [dependencies]
 ars-a11y = { path = "../ars-a11y", default-features = false }
 ars-core = { path = "../ars-core", default-features = false }
 ars-i18n = { path = "../ars-i18n", optional = true }
+indexmap = { version = "2", default-features = false }
+uuid     = { version = "1", default-features = false, optional = true }
 
 [lints]
 workspace = true

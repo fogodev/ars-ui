@@ -62,7 +62,7 @@ pub enum AriaAutocomplete {
 impl AriaAutocomplete {
     /// Returns the WAI-ARIA token for this value.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",
             Self::Inline => "inline",
@@ -94,7 +94,7 @@ pub enum AriaCurrent {
 impl AriaCurrent {
     /// Returns the WAI-ARIA token for this value.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::False => "false",
             Self::True => "true",
@@ -129,7 +129,7 @@ pub enum AriaHasPopup {
 impl AriaHasPopup {
     /// Returns the WAI-ARIA token for this value.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::False => "false",
             Self::True => "true",
@@ -158,7 +158,7 @@ pub enum AriaInvalid {
 impl AriaInvalid {
     /// Returns the WAI-ARIA token for this value.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::False => "false",
             Self::True => "true",
@@ -182,7 +182,7 @@ pub enum AriaLive {
 impl AriaLive {
     /// Returns the WAI-ARIA token for this value.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Off => "off",
             Self::Polite => "polite",
@@ -205,7 +205,7 @@ pub enum AriaOrientation {
 impl AriaOrientation {
     /// Returns the WAI-ARIA token for this value.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Horizontal => "horizontal",
             Self::Vertical => "vertical",
@@ -228,7 +228,7 @@ pub enum AriaPressed {
 impl AriaPressed {
     /// Returns the WAI-ARIA token for this value.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::False => "false",
             Self::True => "true",
@@ -251,7 +251,7 @@ pub enum AriaChecked {
 impl AriaChecked {
     /// Returns the WAI-ARIA token for this value.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::False => "false",
             Self::True => "true",
@@ -276,7 +276,7 @@ pub enum AriaSort {
 impl AriaSort {
     /// Returns the WAI-ARIA token for this value.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",
             Self::Ascending => "ascending",
@@ -364,7 +364,7 @@ pub enum AriaDropeffect {
 impl AriaDropeffect {
     /// Returns the WAI-ARIA token for this value.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",
             Self::Copy => "copy",
