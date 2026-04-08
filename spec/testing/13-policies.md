@@ -276,13 +276,14 @@ fn form_context_round_trips_via_serde() {
 #[cfg(feature = "web")]
 #[test]
 fn dom_queries_work_in_wasm() {
-    // ars-dom web feature requires wasm32; SSR feature compiles on any target
+    // Raw DOM-typed ars-dom APIs belong to the web-only surface.
 }
 
 #[cfg(feature = "ssr")]
 #[test]
 fn ssr_dom_abstraction_available() {
-    // Verify SSR DOM abstraction compiles and basic operations work
+    // Verify only the cross-build ars-dom surface compiles.
+    // Raw web_sys-typed functions are not part of the SSR contract.
 }
 ```
 

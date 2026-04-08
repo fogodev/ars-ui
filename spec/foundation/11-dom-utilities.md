@@ -4,7 +4,9 @@
 
 The `ars-dom` crate provides browser DOM utilities shared by all framework adapters (Leptos, Dioxus). It serves as the convergence layer between the framework-agnostic core crates (`ars-core`, `ars-a11y`, `ars-interactions`) and the actual browser DOM. Components never touch `web_sys` directly — they delegate through `ars-dom` APIs for positioning, focus management, scroll control, z-index allocation, portal management, modality tracking, media queries, and URL sanitization.
 
-`ars-dom` depends on: `ars-core`, `ars-a11y`, `ars-i18n`, `ars-interactions`, `web-sys`, `js-sys`. It is always `std`-enabled because `web-sys` requires it. The crate exposes two feature flags: `web` (default, enables `web_sys` bindings for all DOM functions) and `ssr` (server-side rendering stubs — all DOM functions become no-ops or return sensible defaults, enabling the same adapter code to compile for both client and server targets).
+`ars-dom` depends on: `ars-core`, `ars-a11y`, `ars-i18n`, `ars-interactions`, `web-sys`, `js-sys`. It is always `std`-enabled because `web-sys` requires it. The crate exposes two feature flags: `web` (default, enables the DOM-backed APIs that expose raw `web_sys` types) and `ssr` (server-side rendering support for the cross-build subset of `ars-dom`).
+
+**Feature-surface rule:** any public API that mentions `web_sys` types in its signature is **web-only** and may be omitted entirely when the `web` feature is disabled. Only the cross-build subset of `ars-dom` participates in the `ssr` contract, where functions return safe defaults or no-op instead of touching the DOM. Adapters and components must treat raw DOM-typed helpers as browser-only APIs and gate their usage accordingly.
 
 On `wasm32` targets the crate uses `thread_local!` with `Cell`/`RefCell` for mutable global state, consistent with the library's single-threaded WASM-first design. On native targets (Dioxus Desktop), most utilities follow the same pattern, with one exception: Scroll Locking (§5.3) uses `AtomicU32`/`Mutex` where thread safety is needed because Dioxus Desktop runs the event loop and rendering on separate threads.
 
@@ -1583,6 +1585,8 @@ impl Drop for FocusScope {
 
 ### 4.1 Scroll Into View
 
+The scroll-management APIs in this section operate on raw DOM elements and are therefore part of the **web-only** surface of `ars-dom`. They are available when the `web` feature is enabled and are not part of the `ssr` stub contract.
+
 ```rust
 /// Options for scrolling an element into view within a scrollable container.
 pub struct ScrollIntoViewOptions {
@@ -1603,8 +1607,8 @@ pub enum ScrollLogicalPosition {
     Nearest,
 }
 
-/// Scroll an element into view within a scrollable container.
-pub fn scroll_into_view(element: &web_sys::Element, options: ScrollIntoViewOptions) {
+/// Scroll an element into view within a scrollable container when needed.
+pub fn scroll_into_view_if_needed(element: &web_sys::Element, options: ScrollIntoViewOptions) {
     let rect = element.get_bounding_client_rect();
     let parent = nearest_scrollable_ancestor(element);
 

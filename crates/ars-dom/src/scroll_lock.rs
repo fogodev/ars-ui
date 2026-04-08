@@ -577,7 +577,7 @@ fn reset_global_state() {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::MutexGuard;
+    use std::sync::{Mutex, MutexGuard};
 
     use super::*;
 
