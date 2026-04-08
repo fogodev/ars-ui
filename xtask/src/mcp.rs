@@ -4,7 +4,7 @@
 //! [Model Context Protocol](https://modelcontextprotocol.io/) using JSON-RPC
 //! over stdin/stdout.
 
-use std::sync::Arc;
+use std::{future, sync::Arc};
 
 /// Alias the rmcp protocol type to avoid confusion with our [`crate::tool::Tool`] trait.
 use rmcp::model::Tool as McpTool;
@@ -52,7 +52,7 @@ impl ServerHandler for McpServer {
                 McpTool::new(t.name().to_owned(), t.description().to_owned(), schema_obj)
             })
             .collect();
-        std::future::ready(Ok(ListToolsResult::with_all_items(tools)))
+        future::ready(Ok(ListToolsResult::with_all_items(tools)))
     }
 
     fn call_tool(
@@ -77,7 +77,7 @@ impl ServerHandler for McpServer {
                 None,
             )),
         };
-        std::future::ready(result)
+        future::ready(result)
     }
 }
 

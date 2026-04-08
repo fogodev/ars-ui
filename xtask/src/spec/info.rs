@@ -2,14 +2,14 @@
 
 use std::fmt::Write;
 
-use crate::manifest::{self, ManifestError, SpecRoot};
+use crate::manifest::{self, Error, SpecRoot};
 
 /// Return component metadata as text.
 ///
 /// # Errors
 ///
 /// Returns [`ManifestError::ComponentNotFound`] if the component is not in the manifest.
-pub fn execute(root: &SpecRoot, component: &str) -> Result<String, ManifestError> {
+pub fn execute(root: &SpecRoot, component: &str) -> Result<String, Error> {
     let (key, comp) = manifest::find_component(&root.manifest, component)?;
     let mut out = String::new();
     writeln!(out, "component: {component}").expect("write to String");

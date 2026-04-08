@@ -2,19 +2,19 @@
 
 use std::{collections::BTreeMap, fmt::Write};
 
-use crate::manifest::{ManifestError, SpecRoot};
+use crate::manifest::{Error, SpecRoot};
 
 /// Return all adapter files for a framework, grouped by category.
 ///
 /// # Errors
 ///
 /// Returns [`ManifestError::UnknownFramework`] if the framework is not `"leptos"` or `"dioxus"`.
-pub fn execute(root: &SpecRoot, framework: &str) -> Result<String, ManifestError> {
+pub fn execute(root: &SpecRoot, framework: &str) -> Result<String, Error> {
     let m = &root.manifest;
     let adapters = match framework {
         "leptos" => &m.leptos_adapters,
         "dioxus" => &m.dioxus_adapters,
-        _ => return Err(ManifestError::UnknownFramework(framework.to_string())),
+        _ => return Err(Error::UnknownFramework(framework.to_string())),
     };
     if adapters.is_empty() {
         return Ok(format!("No {framework} adapter files registered.\n"));

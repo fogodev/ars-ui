@@ -4,7 +4,11 @@
 //! branch coverage against configurable thresholds. Used by CI to gate merges
 //! and by developers for local coverage checks.
 
-use std::{fmt::Write, fs, path::Path};
+use std::{
+    fmt::{self, Write},
+    fs, io,
+    path::Path,
+};
 
 /// Per-crate coverage threshold.
 #[derive(Debug, Clone)]
@@ -73,9 +77,9 @@ pub fn default_thresholds() -> Vec<CrateThreshold> {
 
 /// Errors from coverage operations.
 #[derive(Debug)]
-pub enum CoverageError {
+pub enum Error {
     /// IO error reading the lcov file.
-    Io(std::io::Error),
+    Io(io::Error),
     /// No source files matched the requested package.
     NoSourceFiles {
         /// The package that was looked up.
@@ -88,8 +92,8 @@ pub enum CoverageError {
     },
 }
 
-impl std::fmt::Display for CoverageError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(e) => write!(f, "IO error reading lcov file: {e}"),
             Self::NoSourceFiles { package } => {
@@ -104,7 +108,7 @@ impl std::fmt::Display for CoverageError {
     }
 }
 
-impl std::error::Error for CoverageError {}
+impl std::error::Error for Error {}
 
 /// Accumulated coverage counters for a single crate.
 #[derive(Debug, Default)]
@@ -190,13 +194,8 @@ fn parse_package_stats(lcov_content: &str, package: &str) -> CrateStats {
 /// - [`CoverageError::Io`] if the lcov file cannot be read.
 /// - [`CoverageError::NoSourceFiles`] if no source files match the package.
 /// - [`CoverageError::BelowThreshold`] if coverage is below the minimum.
-pub fn check(
-    file: &Path,
-    package: &str,
-    min_line: f64,
-    min_branch: f64,
-) -> Result<String, CoverageError> {
-    let content = fs::read_to_string(file).map_err(CoverageError::Io)?;
+pub fn check(file: &Path, package: &str, min_line: f64, min_branch: f64) -> Result<String, Error> {
+    let content = fs::read_to_string(file).map_err(Error::Io)?;
     check_from_content(&content, package, min_line, min_branch)
 }
 
@@ -207,11 +206,11 @@ fn check_from_content(
     package: &str,
     min_line: f64,
     min_branch: f64,
-) -> Result<String, CoverageError> {
+) -> Result<String, Error> {
     let stats = parse_package_stats(content, package);
 
     if stats.lines_found == 0 {
-        return Err(CoverageError::NoSourceFiles {
+        return Err(Error::NoSourceFiles {
             package: package.to_string(),
         });
     }
@@ -256,7 +255,7 @@ fn check_from_content(
     if line_ok && branch_ok {
         Ok(out)
     } else {
-        Err(CoverageError::BelowThreshold { summary: out })
+        Err(Error::BelowThreshold { summary: out })
     }
 }
 
@@ -269,16 +268,13 @@ fn check_from_content(
 ///
 /// - [`CoverageError::Io`] if the lcov file cannot be read.
 /// - [`CoverageError::BelowThreshold`] if any crate fails its threshold.
-pub fn check_all(file: &Path, thresholds: &[CrateThreshold]) -> Result<String, CoverageError> {
-    let content = fs::read_to_string(file).map_err(CoverageError::Io)?;
+pub fn check_all(file: &Path, thresholds: &[CrateThreshold]) -> Result<String, Error> {
+    let content = fs::read_to_string(file).map_err(Error::Io)?;
     check_all_from_content(&content, thresholds)
 }
 
 /// Inner implementation that operates on lcov content directly.
-fn check_all_from_content(
-    content: &str,
-    thresholds: &[CrateThreshold],
-) -> Result<String, CoverageError> {
+fn check_all_from_content(content: &str, thresholds: &[CrateThreshold]) -> Result<String, Error> {
     let mut out = String::new();
     let mut any_failed = false;
 
@@ -348,7 +344,7 @@ fn check_all_from_content(
             "Coverage check FAILED — one or more crates below threshold."
         )
         .expect("write to String");
-        Err(CoverageError::BelowThreshold { summary: out })
+        Err(Error::BelowThreshold { summary: out })
     } else {
         writeln!(out).expect("write to String");
         writeln!(out, "All crates meet coverage thresholds.").expect("write to String");
@@ -440,7 +436,7 @@ end_of_record
         let result = check_from_content(SAMPLE_LCOV, "ars-core", 90.0, 60.0);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, CoverageError::BelowThreshold { .. }));
+        assert!(matches!(err, Error::BelowThreshold { .. }));
         assert!(err.to_string().contains("FAIL"));
     }
 
@@ -463,10 +459,7 @@ end_of_record
     fn check_errors_on_missing_package() {
         let result = check_from_content(SAMPLE_LCOV, "ars-nonexistent", 50.0, 50.0);
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            CoverageError::NoSourceFiles { .. }
-        ));
+        assert!(matches!(result.unwrap_err(), Error::NoSourceFiles { .. }));
     }
 
     #[test]

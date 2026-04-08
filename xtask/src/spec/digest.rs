@@ -5,7 +5,7 @@
 
 use std::{fmt::Write, fs};
 
-use crate::manifest::{self, ManifestError, SpecRoot};
+use crate::manifest::{self, Error, SpecRoot};
 
 /// Extract a compact digest of a component's key sections.
 ///
@@ -15,10 +15,10 @@ use crate::manifest::{self, ManifestError, SpecRoot};
 /// # Errors
 ///
 /// Returns [`ManifestError`] if the component is not found or the file cannot be read.
-pub fn execute(root: &SpecRoot, component: &str) -> Result<String, ManifestError> {
+pub fn execute(root: &SpecRoot, component: &str) -> Result<String, Error> {
     let (key, comp) = manifest::find_component(&root.manifest, component)?;
     let file_path = root.path.join(&comp.path);
-    let content = fs::read_to_string(&file_path).map_err(ManifestError::Io)?;
+    let content = fs::read_to_string(&file_path).map_err(Error::Io)?;
 
     let mut out = String::new();
     writeln!(out, "# Digest: {component}").expect("write to String");

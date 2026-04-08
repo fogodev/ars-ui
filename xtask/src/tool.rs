@@ -17,8 +17,8 @@ impl std::fmt::Display for ToolError {
 
 impl std::error::Error for ToolError {}
 
-impl From<crate::manifest::ManifestError> for ToolError {
-    fn from(e: crate::manifest::ManifestError) -> Self {
+impl From<crate::manifest::Error> for ToolError {
+    fn from(e: crate::manifest::Error) -> Self {
         Self {
             message: e.to_string(),
         }

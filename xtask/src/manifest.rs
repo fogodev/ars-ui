@@ -2,7 +2,7 @@
 
 use std::{
     collections::BTreeMap,
-    fs,
+    fmt, fs, io,
     path::{Path, PathBuf},
 };
 
@@ -80,11 +80,11 @@ pub struct SpecRoot {
 
 /// Errors from manifest operations.
 #[derive(Debug)]
-pub enum ManifestError {
+pub enum Error {
     /// Could not find `spec/manifest.toml` in any parent directory.
     NotFound,
     /// IO error reading a file.
-    Io(std::io::Error),
+    Io(io::Error),
     /// TOML parse error.
     Parse(toml::de::Error),
     /// Component not found in manifest.
@@ -127,8 +127,8 @@ pub enum ManifestError {
     ),
 }
 
-impl std::fmt::Display for ManifestError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotFound => {
                 write!(
@@ -174,7 +174,7 @@ impl std::fmt::Display for ManifestError {
     }
 }
 
-impl std::error::Error for ManifestError {}
+impl std::error::Error for Error {}
 
 impl SpecRoot {
     /// Discover and load the spec root by walking up from `start_dir`.
@@ -184,21 +184,21 @@ impl SpecRoot {
     /// Returns [`ManifestError::NotFound`] if no `spec/manifest.toml` exists in any
     /// ancestor, [`ManifestError::Io`] on read failure, or [`ManifestError::Parse`]
     /// on invalid TOML.
-    pub fn discover(start_dir: &Path) -> Result<Self, ManifestError> {
+    pub fn discover(start_dir: &Path) -> Result<Self, Error> {
         let mut dir = start_dir.to_path_buf();
         loop {
             let candidate = dir.join("spec").join("manifest.toml");
             if candidate.exists() {
                 let spec_path = dir.join("spec");
-                let content = fs::read_to_string(&candidate).map_err(ManifestError::Io)?;
-                let manifest: Manifest = toml::from_str(&content).map_err(ManifestError::Parse)?;
+                let content = fs::read_to_string(&candidate).map_err(Error::Io)?;
+                let manifest: Manifest = toml::from_str(&content).map_err(Error::Parse)?;
                 return Ok(Self {
                     path: spec_path,
                     manifest,
                 });
             }
             if !dir.pop() {
-                return Err(ManifestError::NotFound);
+                return Err(Error::NotFound);
             }
         }
     }
@@ -209,7 +209,7 @@ impl SpecRoot {
 /// # Errors
 ///
 /// Returns [`ManifestError::ComponentNotFound`] if no match exists.
-pub fn find_component_key(manifest: &Manifest, name: &str) -> Result<String, ManifestError> {
+pub fn find_component_key(manifest: &Manifest, name: &str) -> Result<String, Error> {
     let key = name.to_lowercase();
     if manifest.components.contains_key(&key) {
         return Ok(key);
@@ -218,7 +218,7 @@ pub fn find_component_key(manifest: &Manifest, name: &str) -> Result<String, Man
     if manifest.components.contains_key(&alt) {
         return Ok(alt);
     }
-    Err(ManifestError::ComponentNotFound {
+    Err(Error::ComponentNotFound {
         name: name.to_string(),
         available: manifest.components.keys().cloned().collect(),
     })
@@ -232,7 +232,7 @@ pub fn find_component_key(manifest: &Manifest, name: &str) -> Result<String, Man
 pub fn find_component<'a>(
     manifest: &'a Manifest,
     name: &str,
-) -> Result<(&'a str, &'a Component), ManifestError> {
+) -> Result<(&'a str, &'a Component), Error> {
     let key = find_component_key(manifest, name)?;
     let key_ref = manifest
         .components
@@ -280,7 +280,7 @@ pub fn extract_html_comment_header(content: &str) -> Option<String> {
 /// # Errors
 ///
 /// Returns [`ManifestError::FrontmatterError`] on malformed YAML.
-pub fn parse_frontmatter_yaml(yaml_str: &str) -> Result<Frontmatter, ManifestError> {
+pub fn parse_frontmatter_yaml(yaml_str: &str) -> Result<Frontmatter, Error> {
     let mut fm = Frontmatter::default();
     for line in yaml_str.lines() {
         let line = line.trim();

@@ -4,7 +4,7 @@ use std::{fmt::Write, fs};
 
 use regex::Regex;
 
-use crate::manifest::{self, ManifestError, SpecRoot};
+use crate::manifest::{self, Error, SpecRoot};
 
 /// Section filter — maps to known heading patterns in the spec template.
 #[derive(Debug, Clone, Copy)]
@@ -81,9 +81,9 @@ pub fn execute(
     category: Option<&str>,
     section: Option<&str>,
     tier: Option<&str>,
-) -> Result<String, ManifestError> {
-    let re = Regex::new(query)
-        .map_err(|e| ManifestError::FrontmatterError(format!("invalid regex: {e}")))?;
+) -> Result<String, Error> {
+    let re =
+        Regex::new(query).map_err(|e| Error::FrontmatterError(format!("invalid regex: {e}")))?;
     let section_filter = section.and_then(SectionFilter::parse);
     let m = &root.manifest;
     let mut hits: Vec<SearchHit> = Vec::new();

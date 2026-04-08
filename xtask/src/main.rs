@@ -1,8 +1,9 @@
 //! ars-ui workspace task runner.
 
-use std::{path::PathBuf, process};
+use std::{env, path::PathBuf, process, sync};
 
 use clap::{Parser, Subcommand};
+use xtask::{ci, coverage, manifest, mcp, spec};
 
 /// ars-ui workspace task runner.
 #[derive(Parser)]
@@ -14,6 +15,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Run CI pipeline steps locally (alias: `cargo xci`).
+    Ci {
+        /// Steps to run (default: all in pipeline order).
+        ///
+        /// Use `feature-matrix` to run all five feature-flag groups at once.
+        #[arg(value_enum)]
+        steps: Vec<ci::Step>,
+    },
     /// Start MCP stdio server exposing all workspace tools.
     #[cfg(feature = "mcp")]
     Mcp,
@@ -130,28 +139,43 @@ enum SpecCommand {
     },
 }
 
-fn main() {
-    let cli = Cli::parse();
-    let cwd = std::env::current_dir().expect("cannot read current directory");
-    let root = match xtask::manifest::SpecRoot::discover(&cwd) {
+/// Discover the spec root or exit with a diagnostic.
+fn discover_spec_root() -> manifest::SpecRoot {
+    let cwd = env::current_dir().expect("cannot read current directory");
+    match manifest::SpecRoot::discover(&cwd) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: {e}");
             process::exit(1);
         }
-    };
+    }
+}
 
-    let result = match cli.command {
+fn main() {
+    let cli = Cli::parse();
+
+    match cli.command {
+        // ── CI ────────────────────────────────────────────────────────
+        Command::Ci { steps } => match ci::run(steps) {
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("error: {e}");
+                process::exit(1);
+            }
+        },
+
+        // ── MCP ───────────────────────────────────────────────────────
         #[cfg(feature = "mcp")]
         Command::Mcp => {
-            let root = std::sync::Arc::new(root);
+            let root = sync::Arc::new(discover_spec_root());
             let rt = tokio::runtime::Runtime::new().expect("cannot create tokio runtime");
-            rt.block_on(xtask::mcp::serve(root)).unwrap_or_else(|e| {
+            rt.block_on(mcp::serve(root)).unwrap_or_else(|e| {
                 eprintln!("error: {e}");
                 process::exit(1);
             });
-            return;
         }
+
+        // ── Coverage ──────────────────────────────────────────────────
         Command::Coverage { cmd } => {
             let result = match cmd {
                 CoverageCommand::Check {
@@ -159,77 +183,71 @@ fn main() {
                     package,
                     min,
                     branch_min,
-                } => xtask::coverage::check(&file, &package, min, branch_min),
+                } => coverage::check(&file, &package, min, branch_min),
                 CoverageCommand::CheckAll { file } => {
-                    let thresholds = xtask::coverage::default_thresholds();
-                    xtask::coverage::check_all(&file, &thresholds)
+                    let thresholds = coverage::default_thresholds();
+                    coverage::check_all(&file, &thresholds)
                 }
             };
             match result {
-                Ok(output) => {
-                    print!("{output}");
-                    return;
-                }
+                Ok(output) => print!("{output}"),
                 Err(e) => {
                     eprintln!("{e}");
                     process::exit(1);
                 }
             }
         }
-        Command::Spec { cmd } => match cmd {
-            SpecCommand::Info { component } => xtask::spec::info::execute(&root, &component),
-            SpecCommand::Deps { component } => xtask::spec::deps::execute(&root, &component),
-            SpecCommand::Category { name } => xtask::spec::category::execute(&root, &name),
-            SpecCommand::Reverse { shared_type } => {
-                xtask::spec::reverse::execute(&root, &shared_type)
-            }
-            SpecCommand::Related { component } => xtask::spec::related::execute(&root, &component),
-            SpecCommand::Profile { name } => xtask::spec::profile::execute(&root, &name),
-            SpecCommand::Toc { file } => xtask::spec::toc::execute(&root, &file),
-            SpecCommand::Validate => {
-                let report = xtask::spec::validate::execute(&root);
-                if let Ok(ref text) = report {
-                    if text.contains("error(s) found:") {
-                        print!("{text}");
-                        process::exit(1);
-                    }
-                }
-                report
-            }
-            SpecCommand::Adapters { framework } => {
-                xtask::spec::adapters::execute(&root, &framework)
-            }
-            SpecCommand::Digest { component } => xtask::spec::digest::execute(&root, &component),
-            SpecCommand::Context {
-                component,
-                framework,
-                include_testing,
-            } => xtask::spec::context::execute(
-                &root,
-                &component,
-                framework.as_deref(),
-                include_testing,
-            ),
-            SpecCommand::Search {
-                query,
-                category,
-                section,
-                tier,
-            } => xtask::spec::search::execute(
-                &root,
-                &query,
-                category.as_deref(),
-                section.as_deref(),
-                tier.as_deref(),
-            ),
-        },
-    };
 
-    match result {
-        Ok(output) => print!("{output}"),
-        Err(e) => {
-            eprintln!("error: {e}");
-            process::exit(1);
+        // ── Spec ──────────────────────────────────────────────────────
+        Command::Spec { cmd } => {
+            let root = discover_spec_root();
+            let result = match cmd {
+                SpecCommand::Info { component } => spec::info::execute(&root, &component),
+                SpecCommand::Deps { component } => spec::deps::execute(&root, &component),
+                SpecCommand::Category { name } => spec::category::execute(&root, &name),
+                SpecCommand::Reverse { shared_type } => spec::reverse::execute(&root, &shared_type),
+                SpecCommand::Related { component } => spec::related::execute(&root, &component),
+                SpecCommand::Profile { name } => spec::profile::execute(&root, &name),
+                SpecCommand::Toc { file } => spec::toc::execute(&root, &file),
+                SpecCommand::Validate => {
+                    let report = spec::validate::execute(&root);
+                    if let Ok(ref text) = report {
+                        if text.contains("error(s) found:") {
+                            print!("{text}");
+                            process::exit(1);
+                        }
+                    }
+                    report
+                }
+                SpecCommand::Adapters { framework } => spec::adapters::execute(&root, &framework),
+                SpecCommand::Digest { component } => spec::digest::execute(&root, &component),
+                SpecCommand::Context {
+                    component,
+                    framework,
+                    include_testing,
+                } => {
+                    spec::context::execute(&root, &component, framework.as_deref(), include_testing)
+                }
+                SpecCommand::Search {
+                    query,
+                    category,
+                    section,
+                    tier,
+                } => spec::search::execute(
+                    &root,
+                    &query,
+                    category.as_deref(),
+                    section.as_deref(),
+                    tier.as_deref(),
+                ),
+            };
+            match result {
+                Ok(output) => print!("{output}"),
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    process::exit(1);
+                }
+            }
         }
     }
 }
