@@ -127,85 +127,209 @@ jobs:
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
 
-  feature-flags:
-    name: Feature Flag Matrix
+  feature-flags-core:
+    name: Feature Flags — Core
     needs: [adapter]
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        features:
-          - "-p ars-core --no-default-features"
-          - "-p ars-core --features std"
-          - "-p ars-core --features serde"
-          - "-p ars-core --features debug"
-          - "-p ars-core --features ssr"
-          - "-p ars-core --features embedded-css"
-          - "-p ars-core --features std,ssr"
-          - "-p ars-core --features std,serde"
-          - "-p ars-core --features std,debug"
-          - "-p ars-core --features serde,debug"
-          - "-p ars-core --features serde,ssr"
-          - "-p ars-core --features debug,ssr"
-          - "-p ars-core --features serde,embedded-css"
-          - "-p ars-core --features std,serde,debug"
-          - "-p ars-core --all-features"
-          - "-p ars-i18n --no-default-features --features gregorian,icu4x"
-          - "-p ars-i18n --features gregorian,hebrew"
-          - "-p ars-i18n --features gregorian,islamic"
-          - "-p ars-i18n --features gregorian,hebrew,islamic"
-          - "-p ars-i18n --features all-calendars"
-          - "-p ars-i18n --features buddhist"
-          - "-p ars-i18n --features japanese"
-          - "-p ars-i18n --no-default-features --features japanese-extended,icu4x"
-          - "-p ars-i18n --features persian"
-          - "-p ars-i18n --features chinese"
-          - "-p ars-i18n --no-default-features"
-          - "-p ars-i18n --no-default-features --features web-intl --target wasm32-unknown-unknown"
-          - "-p ars-interactions --no-default-features"
-          - "-p ars-interactions --features aria-drag-drop-compat"
-          - "-p ars-a11y -p ars-interactions --features ars-a11y/aria-drag-drop-compat,ars-interactions/aria-drag-drop-compat"
-          - "-p ars-collections --no-default-features"
-          - "-p ars-collections --features i18n"
-          - "-p ars-collections --features std,i18n,serde"
-          - "-p ars-collections --features serde"
-          - "-p ars-collections --no-default-features --features i18n"
-          - "-p ars-forms --no-default-features"
-          - "-p ars-forms --features serde"
-          - "-p ars-dom --no-default-features"
-          - "-p ars-dom --features ssr"
-          - "-p ars-dom --features web --target wasm32-unknown-unknown"
-          - "-p ars-leptos --features ssr"
-          - "-p ars-leptos --features hydrate"
-          - "-p ars-leptos --features csr"
-          - "-p ars-dioxus --features web --target wasm32-unknown-unknown"
-          - "-p ars-dioxus --features desktop"
-          - "-p ars-dioxus --features desktop-dom"
-          - "-p ars-dioxus --features mobile"
-          - "-p ars-dioxus --features ssr"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: feature-flags
+      - name: Check and test feature combinations
+        run: |
+          set -euo pipefail
+          combos=(
+            "-p ars-core --no-default-features"
+            "-p ars-core --features std"
+            "-p ars-core --features serde"
+            "-p ars-core --features debug"
+            "-p ars-core --features ssr"
+            "-p ars-core --features embedded-css"
+            "-p ars-core --features std,ssr"
+            "-p ars-core --features std,serde"
+            "-p ars-core --features std,debug"
+            "-p ars-core --features serde,debug"
+            "-p ars-core --features serde,ssr"
+            "-p ars-core --features debug,ssr"
+            "-p ars-core --features serde,embedded-css"
+            "-p ars-core --features std,serde,debug"
+            "-p ars-core --all-features"
+          )
+          for combo in "${combos[@]}"; do
+            echo "::group::cargo check $combo"
+            cargo check $combo
+            echo "::endgroup::"
+            echo "::group::cargo test $combo --lib"
+            cargo test $combo --lib
+            echo "::endgroup::"
+          done
+
+  feature-flags-i18n:
+    name: Feature Flags — I18n
+    needs: [adapter]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: feature-flags
+      - name: Check and test feature combinations
+        run: |
+          set -euo pipefail
+          combos=(
+            "-p ars-i18n --no-default-features --features gregorian,icu4x"
+            "-p ars-i18n --features gregorian,hebrew"
+            "-p ars-i18n --features gregorian,islamic"
+            "-p ars-i18n --features gregorian,hebrew,islamic"
+            "-p ars-i18n --features all-calendars"
+            "-p ars-i18n --features buddhist"
+            "-p ars-i18n --features japanese"
+            "-p ars-i18n --no-default-features --features japanese-extended,icu4x"
+            "-p ars-i18n --features persian"
+            "-p ars-i18n --features chinese"
+            "-p ars-i18n --no-default-features"
+          )
+          for combo in "${combos[@]}"; do
+            echo "::group::cargo check $combo"
+            cargo check $combo
+            echo "::endgroup::"
+            echo "::group::cargo test $combo --lib"
+            cargo test $combo --lib
+            echo "::endgroup::"
+          done
+      - name: Check wasm32 target (no tests)
+        run: cargo check -p ars-i18n --no-default-features --features web-intl --target wasm32-unknown-unknown
+
+  feature-flags-subsystems:
+    name: Feature Flags — Subsystems
+    needs: [adapter]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: feature-flags
+      - name: Check and test feature combinations
+        run: |
+          set -euo pipefail
+          combos=(
+            "-p ars-interactions --no-default-features"
+            "-p ars-interactions --features aria-drag-drop-compat"
+            "-p ars-a11y -p ars-interactions --features ars-a11y/aria-drag-drop-compat,ars-interactions/aria-drag-drop-compat"
+            "-p ars-collections --no-default-features"
+            "-p ars-collections --features i18n"
+            "-p ars-collections --features std,i18n,serde"
+            "-p ars-collections --features serde"
+            "-p ars-collections --no-default-features --features i18n"
+            "-p ars-forms --no-default-features"
+            "-p ars-forms --features serde"
+            "-p ars-dom --no-default-features"
+            "-p ars-dom --features ssr"
+          )
+          for combo in "${combos[@]}"; do
+            echo "::group::cargo check $combo"
+            cargo check $combo
+            echo "::endgroup::"
+            echo "::group::cargo test $combo --lib"
+            cargo test $combo --lib
+            echo "::endgroup::"
+          done
+      - name: Check wasm32 target (no tests)
+        run: cargo check -p ars-dom --features web --target wasm32-unknown-unknown
+
+  feature-flags-leptos:
+    name: Feature Flags — Leptos
+    needs: [adapter]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: feature-flags
+      - name: Check and test feature combinations
+        run: |
+          set -euo pipefail
+          combos=(
+            "-p ars-leptos --features ssr"
+            "-p ars-leptos --features hydrate"
+            "-p ars-leptos --features csr"
+          )
+          for combo in "${combos[@]}"; do
+            echo "::group::cargo check $combo"
+            cargo check $combo
+            echo "::endgroup::"
+            echo "::group::cargo test $combo --lib"
+            cargo test $combo --lib
+            echo "::endgroup::"
+          done
+
+  feature-flags-dioxus:
+    name: Feature Flags — Dioxus
+    needs: [adapter]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: feature-flags
       - name: Install Dioxus desktop system dependencies
         run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
-      - name: Cargo check
-        run: cargo check ${{ matrix.features }}
-      - name: Library tests
-        if: ${{ !contains(matrix.features, 'wasm32') }}
-        run: cargo test ${{ matrix.features }} --lib
+      - name: Check and test feature combinations
+        run: |
+          set -euo pipefail
+          combos=(
+            "-p ars-dioxus --features desktop"
+            "-p ars-dioxus --features desktop-dom"
+            "-p ars-dioxus --features mobile"
+            "-p ars-dioxus --features ssr"
+          )
+          for combo in "${combos[@]}"; do
+            echo "::group::cargo check $combo"
+            cargo check $combo
+            echo "::endgroup::"
+            echo "::group::cargo test $combo --lib"
+            cargo test $combo --lib
+            echo "::endgroup::"
+          done
+      - name: Check wasm32 target (no tests)
+        run: cargo check -p ars-dioxus --features web --target wasm32-unknown-unknown
 
   feature-flag-check:
     name: Feature Flag Check
-    needs: [feature-flags]
+    needs:
+      - feature-flags-core
+      - feature-flags-i18n
+      - feature-flags-subsystems
+      - feature-flags-leptos
+      - feature-flags-dioxus
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Enforce feature matrix success
         run: |
-          if [ "${{ needs.feature-flags.result }}" != "success" ]; then
-            echo "Feature flag matrix failed"
-            exit 1
-          fi
+          results=(
+            "${{ needs.feature-flags-core.result }}"
+            "${{ needs.feature-flags-i18n.result }}"
+            "${{ needs.feature-flags-subsystems.result }}"
+            "${{ needs.feature-flags-leptos.result }}"
+            "${{ needs.feature-flags-dioxus.result }}"
+          )
+          for result in "${results[@]}"; do
+            if [ "$result" != "success" ]; then
+              echo "Feature flag check failed: $result"
+              exit 1
+            fi
+          done
+          echo "All feature flag jobs passed"
