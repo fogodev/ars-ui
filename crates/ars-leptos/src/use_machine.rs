@@ -277,6 +277,7 @@ where
 #[cfg(test)]
 mod tests {
     use ars_core::{AriaAttr, AttrMap, ComponentPart, ConnectApi, HasId, HtmlAttr};
+    use leptos::reactive::traits::Get;
 
     use super::*;
 
@@ -334,11 +335,22 @@ mod tests {
         }
     }
 
-    struct ToggleApi {
+    struct ToggleApi<'a> {
         is_on: bool,
+        send: &'a dyn Fn(ToggleEvent),
     }
 
-    impl ConnectApi for ToggleApi {
+    impl ToggleApi<'_> {
+        fn is_on(&self) -> bool {
+            self.is_on
+        }
+
+        fn trigger_toggle(&self) {
+            (self.send)(ToggleEvent::Toggle);
+        }
+    }
+
+    impl ConnectApi for ToggleApi<'_> {
         type Part = TogglePart;
 
         fn part_attrs(&self, _part: Self::Part) -> AttrMap {
@@ -355,7 +367,7 @@ mod tests {
         type Event = ToggleEvent;
         type Context = ToggleContext;
         type Props = ToggleProps;
-        type Api<'a> = ToggleApi;
+        type Api<'a> = ToggleApi<'a>;
 
         fn init(_props: &Self::Props) -> (Self::State, Self::Context) {
             (ToggleState::Off, ToggleContext)
@@ -377,10 +389,11 @@ mod tests {
             state: &'a Self::State,
             _context: &'a Self::Context,
             _props: &'a Self::Props,
-            _send: &'a dyn Fn(Self::Event),
+            send: &'a dyn Fn(Self::Event),
         ) -> Self::Api<'a> {
             ToggleApi {
                 is_on: *state == ToggleState::On,
+                send,
             }
         }
     }
@@ -394,6 +407,36 @@ mod tests {
         // not Copy, this function won't compile.
         fn assert_copy<T: Copy>() {}
         assert_copy::<UseMachineReturn<ToggleMachine>>();
+    }
+
+    #[test]
+    fn use_machine_return_type_clone_delegates_to_copy_fields() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let machine = use_machine::<ToggleMachine>(ToggleProps {
+                id: String::from("toggle"),
+            });
+            let cloned = <UseMachineReturn<ToggleMachine> as Clone>::clone(&machine);
+
+            cloned.send.run(ToggleEvent::Toggle);
+
+            assert_eq!(machine.state.get_untracked(), ToggleState::On);
+            assert_eq!(cloned.state.get_untracked(), ToggleState::On);
+        });
+    }
+
+    #[test]
+    fn use_machine_return_debug_names_the_type() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let machine = use_machine::<ToggleMachine>(ToggleProps {
+                id: String::from("toggle"),
+            });
+
+            let debug = format!("{machine:?}");
+            assert!(debug.contains("UseMachineReturn"));
+            assert!(debug.contains("context_version"));
+        });
     }
 
     #[test]
@@ -432,6 +475,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::redundant_closure_for_method_calls,
+        reason = "Method pointers are not general enough for the lifetime-parameterized test API."
+    )]
     fn with_api_snapshot_reads_current_state() {
         let owner = Owner::new();
         owner.with(|| {
@@ -439,13 +486,99 @@ mod tests {
                 id: String::from("toggle"),
             });
 
-            let is_on = machine.with_api_snapshot(|api| api.is_on);
+            let is_on = machine.with_api_snapshot(|api| api.is_on());
             assert!(!is_on);
 
             machine.send.run(ToggleEvent::Toggle);
 
-            let is_on = machine.with_api_snapshot(|api| api.is_on);
+            let is_on = machine.with_api_snapshot(|api| api.is_on());
             assert!(is_on);
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "Cannot send events inside with_api_snapshot")]
+    #[expect(
+        clippy::redundant_closure_for_method_calls,
+        reason = "Method pointers are not general enough for the lifetime-parameterized test API."
+    )]
+    fn with_api_snapshot_panics_when_callback_sends_events() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let machine = use_machine::<ToggleMachine>(ToggleProps {
+                id: String::from("toggle"),
+            });
+
+            machine.with_api_snapshot(|api| api.trigger_toggle());
+        });
+    }
+
+    #[test]
+    #[expect(
+        clippy::redundant_closure_for_method_calls,
+        reason = "Method pointers are not general enough for the lifetime-parameterized test API."
+    )]
+    fn derive_tracks_connect_output() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let machine = use_machine::<ToggleMachine>(ToggleProps {
+                id: String::from("toggle"),
+            });
+            let is_on = machine.derive(|api| api.is_on());
+
+            assert!(!is_on.get());
+
+            machine.send.run(ToggleEvent::Toggle);
+
+            assert!(is_on.get());
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "Cannot send events inside derive()")]
+    fn derive_panics_when_callback_sends_events() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let machine = use_machine::<ToggleMachine>(ToggleProps {
+                id: String::from("toggle"),
+            });
+            let derived = machine.derive(|api| {
+                api.trigger_toggle();
+                api.is_on()
+            });
+
+            let _ = derived.get();
+        });
+    }
+
+    #[test]
+    fn with_api_ephemeral_reads_current_state() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let machine = use_machine::<ToggleMachine>(ToggleProps {
+                id: String::from("toggle"),
+            });
+
+            let is_on = machine.with_api_ephemeral(|api| api.get().is_on());
+            assert!(!is_on);
+
+            machine.send.run(ToggleEvent::Toggle);
+
+            let attrs = machine.with_api_ephemeral(|api| api.get().part_attrs(TogglePart));
+            assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Pressed)), Some("true"));
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "Requires Service::set_props()")]
+    fn use_machine_with_reactive_props_is_explicitly_unimplemented() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let props = Signal::stored(ToggleProps {
+                id: String::from("toggle"),
+            });
+
+            let _ = use_machine_with_reactive_props::<ToggleMachine>(props);
         });
     }
 

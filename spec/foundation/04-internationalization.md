@@ -380,8 +380,7 @@ is compiled out in release builds.
 fn warn_missing_provider(hook_name: &str) {
     eprintln!(
         "[ars-ui] {hook_name}: No ArsProvider found in the component tree. \
-         Falling back to defaults. Wrap your app root in <ArsProvider> to \
-         configure locale, direction, i18n, platform effects, etc."
+         Falling back to defaults."
     );
 }
 
