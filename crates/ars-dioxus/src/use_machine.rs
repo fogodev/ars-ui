@@ -4,7 +4,7 @@
 //! reactive primitives, and returns a [`UseMachineReturn`] handle for reading
 //! state, sending events, and deriving fine-grained reactive values.
 
-use ars_core::{Machine, Service};
+use ars_core::{Env, Machine, Service};
 use dioxus::prelude::*;
 
 use crate::ephemeral::EphemeralRef;
@@ -213,8 +213,13 @@ where
     M::Context: Clone + 'static,
     M::Props: Clone + PartialEq + 'static,
 {
+    // TODO: Resolve environment values from ArsProvider context.
+    // Placeholder: when ArsProvider context is available, resolve from there.
+    let env = Env::default();
+    let messages = M::Messages::default();
+
     // Create the service once — use_signal runs its closure only on first mount.
-    let mut service_signal = use_signal(|| Service::<M>::new(props));
+    let mut service_signal = use_signal(|| Service::<M>::new(props, &env, &messages));
 
     // Create a signal tracking the current state.
     // Use .peek() to avoid subscribing the component to service_signal changes.
@@ -349,9 +354,14 @@ mod tests {
         type Event = ToggleEvent;
         type Context = ToggleContext;
         type Props = ToggleProps;
+        type Messages = ();
         type Api<'a> = ToggleApi;
 
-        fn init(_props: &Self::Props) -> (Self::State, Self::Context) {
+        fn init(
+            _props: &Self::Props,
+            _env: &Env,
+            _messages: &Self::Messages,
+        ) -> (Self::State, Self::Context) {
             (ToggleState::Off, ToggleContext)
         }
 

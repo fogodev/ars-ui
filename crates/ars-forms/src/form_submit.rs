@@ -11,7 +11,7 @@ use std::{collections::BTreeMap, fmt};
 
 use ars_a11y::ComponentIds;
 use ars_core::{
-    AriaAttr, AttrMap, Callback, ComponentPart, ConnectApi, HtmlAttr, PendingEffect,
+    AriaAttr, AttrMap, Callback, ComponentPart, ConnectApi, Env, HtmlAttr, PendingEffect,
     TransitionPlan, WeakSend, no_cleanup,
 };
 
@@ -157,9 +157,14 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = ();
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
+    fn init(
+        props: &Self::Props,
+        _env: &Env,
+        _messages: &Self::Messages,
+    ) -> (Self::State, Self::Context) {
         (
             State::Idle,
             Context {
@@ -454,7 +459,7 @@ mod tests {
 
     #[test]
     fn init_state_is_idle() {
-        let service = Service::<Machine>::new(test_props());
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
         assert_eq!(service.state(), &State::Idle);
         assert!(service.context().submit_error.is_none());
         assert!(!service.context().sync_valid);
@@ -462,7 +467,7 @@ mod tests {
 
     #[test]
     fn submit_from_idle_transitions_to_validating() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         let result = service.send(Event::Submit);
         assert!(result.state_changed);
         assert_eq!(service.state(), &State::Validating);
@@ -473,7 +478,7 @@ mod tests {
 
     #[test]
     fn submit_from_validation_failed_transitions_to_validating() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         drop(service.send(Event::Submit));
         drop(service.send(Event::ValidationFailed));
         assert_eq!(service.state(), &State::ValidationFailed);
@@ -485,7 +490,7 @@ mod tests {
 
     #[test]
     fn submit_from_failed_transitions_to_validating() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         drop(service.send(Event::Submit));
         drop(service.send(Event::ValidationPassed));
         drop(service.send(Event::SubmitError("server error".into())));
@@ -498,7 +503,7 @@ mod tests {
 
     #[test]
     fn submit_from_succeeded_transitions_to_validating() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         drop(service.send(Event::Submit));
         drop(service.send(Event::ValidationPassed));
         drop(service.send(Event::SubmitComplete));
@@ -511,7 +516,7 @@ mod tests {
 
     #[test]
     fn submit_from_validating_is_ignored() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         drop(service.send(Event::Submit));
         assert_eq!(service.state(), &State::Validating);
 
@@ -522,7 +527,7 @@ mod tests {
 
     #[test]
     fn submit_from_submitting_is_ignored() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         drop(service.send(Event::Submit));
         drop(service.send(Event::ValidationPassed));
         assert_eq!(service.state(), &State::Submitting);
@@ -534,7 +539,7 @@ mod tests {
 
     #[test]
     fn validation_passed_transitions_to_submitting() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         drop(service.send(Event::Submit));
 
         let result = service.send(Event::ValidationPassed);
@@ -547,7 +552,7 @@ mod tests {
 
     #[test]
     fn validation_failed_transitions_to_validation_failed() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         drop(service.send(Event::Submit));
 
         let result = service.send(Event::ValidationFailed);
@@ -558,7 +563,7 @@ mod tests {
 
     #[test]
     fn submit_complete_transitions_to_succeeded() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         drop(service.send(Event::Submit));
         drop(service.send(Event::ValidationPassed));
 
@@ -571,7 +576,7 @@ mod tests {
 
     #[test]
     fn submit_error_transitions_to_failed() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         drop(service.send(Event::Submit));
         drop(service.send(Event::ValidationPassed));
 
@@ -589,7 +594,7 @@ mod tests {
 
     #[test]
     fn set_server_errors_from_idle_transitions_to_validation_failed() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         // Register a field so set_server_errors has something to inject into.
         service.context_mut().form.register(
             "email",
@@ -608,7 +613,7 @@ mod tests {
 
     #[test]
     fn set_server_errors_from_submitting_clears_is_submitting() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         drop(service.send(Event::Submit));
         drop(service.send(Event::ValidationPassed));
         assert!(service.context().form.is_submitting);
@@ -624,7 +629,7 @@ mod tests {
 
     #[test]
     fn reset_transitions_to_idle_and_cancels_effects() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         drop(service.send(Event::Submit));
         drop(service.send(Event::ValidationPassed));
         drop(service.send(Event::SubmitError("err".into())));
@@ -642,7 +647,7 @@ mod tests {
 
     #[test]
     fn set_mode_updates_context_only() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         let result = service.send(Event::SetMode(Mode::on_change()));
         assert!(!result.state_changed);
         assert!(result.context_changed);
@@ -674,7 +679,7 @@ mod tests {
 
     #[test]
     fn api_is_submitting_reflects_state() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         let noop = |_: Event| {};
 
         let api = service.connect(&noop);
@@ -689,7 +694,7 @@ mod tests {
 
     #[test]
     fn api_submit_error_reflects_context() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         let noop = |_: Event| {};
 
         let api = service.connect(&noop);
@@ -705,7 +710,7 @@ mod tests {
 
     #[test]
     fn api_root_attrs_contain_required_fields() {
-        let service = Service::<Machine>::new(test_props());
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
         let noop = |_: Event| {};
         let api = service.connect(&noop);
         let attrs = api.root_attrs();
@@ -721,7 +726,7 @@ mod tests {
 
     #[test]
     fn api_submit_button_attrs_disabled_when_submitting() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         drop(service.send(Event::Submit));
         drop(service.send(Event::ValidationPassed));
 
@@ -739,7 +744,7 @@ mod tests {
 
     #[test]
     fn api_submit_button_attrs_not_disabled_when_idle() {
-        let service = Service::<Machine>::new(test_props());
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
         let noop = |_: Event| {};
         let api = service.connect(&noop);
         let attrs = api.submit_button_attrs();
@@ -752,7 +757,7 @@ mod tests {
 
     #[test]
     fn submit_touches_all_fields_and_runs_validation() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         // Register two fields — neither is touched initially.
         service.context_mut().form.register(
             "email",
@@ -796,7 +801,7 @@ mod tests {
             }
         }
 
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         service.context_mut().form.register(
             "email",
             crate::field::Value::Text(String::new()),
@@ -811,7 +816,7 @@ mod tests {
 
     #[test]
     fn submit_from_failed_clears_stale_error() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         drop(service.send(Event::Submit));
         drop(service.send(Event::ValidationPassed));
         drop(service.send(Event::SubmitError("old error".into())));
@@ -824,7 +829,7 @@ mod tests {
 
     #[test]
     fn set_server_errors_clears_submit_error() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         drop(service.send(Event::Submit));
         drop(service.send(Event::ValidationPassed));
         drop(service.send(Event::SubmitError("network failure".into())));
@@ -839,7 +844,7 @@ mod tests {
 
     #[test]
     fn validation_passed_ignored_outside_validating() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         // From Idle — should be ignored.
         let result = service.send(Event::ValidationPassed);
         assert!(!result.state_changed);
@@ -848,7 +853,7 @@ mod tests {
 
     #[test]
     fn submit_complete_ignored_outside_submitting() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         let result = service.send(Event::SubmitComplete);
         assert!(!result.state_changed);
         assert_eq!(service.state(), &State::Idle);
@@ -856,7 +861,7 @@ mod tests {
 
     #[test]
     fn submit_error_ignored_outside_submitting() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         let result = service.send(Event::SubmitError("err".into()));
         assert!(!result.state_changed);
         assert_eq!(service.state(), &State::Idle);
@@ -876,7 +881,7 @@ mod tests {
 
     #[test]
     fn root_attrs_state_reflects_current_state() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         let noop = |_: Event| {};
 
         drop(service.send(Event::Submit));
@@ -896,7 +901,7 @@ mod tests {
 
     #[test]
     fn submit_button_attrs_contain_scope_and_part() {
-        let service = Service::<Machine>::new(test_props());
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
         let noop = |_: Event| {};
         let attrs = service.connect(&noop).submit_button_attrs();
 
@@ -914,7 +919,7 @@ mod tests {
 
     #[test]
     fn full_happy_path_lifecycle() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         assert_eq!(service.state(), &State::Idle);
 
         drop(service.send(Event::Submit));
@@ -931,7 +936,7 @@ mod tests {
 
     #[test]
     fn error_retry_lifecycle() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
 
         // First attempt fails.
         drop(service.send(Event::Submit));
@@ -950,7 +955,7 @@ mod tests {
 
     #[test]
     fn set_props_updates_mode_through_service() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         assert_eq!(service.context().form.validation_mode, Mode::on_submit());
 
         let result = service.set_props(Props {
@@ -965,7 +970,7 @@ mod tests {
 
     #[test]
     fn reset_from_validating_cancels_async_validation() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         drop(service.send(Event::Submit));
         assert_eq!(service.state(), &State::Validating);
 
@@ -976,7 +981,7 @@ mod tests {
 
     #[test]
     fn reset_from_submitting_cancels_submit() {
-        let mut service = Service::<Machine>::new(test_props());
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
         drop(service.send(Event::Submit));
         drop(service.send(Event::ValidationPassed));
         assert_eq!(service.state(), &State::Submitting);
@@ -989,7 +994,7 @@ mod tests {
 
     #[test]
     fn on_form_submit_dispatches_submit_event() {
-        let service = Service::<Machine>::new(test_props());
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
         let called = std::cell::Cell::new(false);
         let send_fn = |e: Event| {
             assert!(matches!(e, Event::Submit));
@@ -1002,7 +1007,7 @@ mod tests {
 
     #[test]
     fn init_context_has_correct_component_ids() {
-        let service = Service::<Machine>::new(test_props());
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
         assert_eq!(service.context().ids.id(), "test-form");
     }
 }

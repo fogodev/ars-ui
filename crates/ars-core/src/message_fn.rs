@@ -110,6 +110,12 @@ impl MessageFn<dyn Fn(&Locale) -> String + Send + Sync> {
 /// sharing across reactive scopes) and [`Default`] (for English fallbacks).
 pub trait ComponentMessages: Clone + Default {}
 
+/// Blanket impl for components with no translatable strings.
+///
+/// Use `type Messages = ();` in [`Machine`](crate::Machine) implementations
+/// that have no user-facing i18n messages.
+impl ComponentMessages for () {}
+
 #[cfg(test)]
 mod tests {
     use alloc::format;

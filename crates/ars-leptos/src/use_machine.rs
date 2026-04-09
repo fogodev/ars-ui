@@ -4,7 +4,7 @@
 //! reactive primitives, and returns a [`UseMachineReturn`] handle for reading
 //! state, sending events, and deriving fine-grained reactive values.
 
-use ars_core::{Machine, Service};
+use ars_core::{Env, Machine, Service};
 use leptos::prelude::*;
 
 use crate::ephemeral::EphemeralRef;
@@ -220,8 +220,13 @@ where
     M::Props: Clone + PartialEq + Send + Sync + 'static,
     M::Event: Send + Sync + 'static,
 {
+    // TODO: Resolve environment values from ArsProvider context.
+    // Placeholder: when ArsProvider context is available, resolve from there.
+    let env = Env::default();
+    let messages = M::Messages::default();
+
     // Create the service once — runs only on component initialization.
-    let service = StoredValue::new(Service::<M>::new(props));
+    let service = StoredValue::new(Service::<M>::new(props, &env, &messages));
 
     // Create a signal tracking the current state.
     let initial_state = service.with_value(|s| s.state().clone());
@@ -367,9 +372,14 @@ mod tests {
         type Event = ToggleEvent;
         type Context = ToggleContext;
         type Props = ToggleProps;
+        type Messages = ();
         type Api<'a> = ToggleApi<'a>;
 
-        fn init(_props: &Self::Props) -> (Self::State, Self::Context) {
+        fn init(
+            _props: &Self::Props,
+            _env: &Env,
+            _messages: &Self::Messages,
+        ) -> (Self::State, Self::Context) {
             (ToggleState::Off, ToggleContext)
         }
 
