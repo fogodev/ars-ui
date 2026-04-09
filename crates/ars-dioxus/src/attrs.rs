@@ -536,10 +536,10 @@ mod tests {
             use ars_core::{
                 ArsContext, ArsRc, ColorMode, DefaultModalityContext, NullPlatformEffects,
             };
-            use ars_i18n::{Direction, Locale};
+            use ars_i18n::{Direction, locales};
 
             let ctx = ArsContext::new(
-                Locale::new("en-US"),
+                locales::en_us(),
                 Direction::Ltr,
                 ColorMode::System,
                 false,

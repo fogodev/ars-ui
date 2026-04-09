@@ -314,7 +314,8 @@ impl ars_core::Machine for Machine {
         let locale = env.locale.clone();
         let messages = messages.clone();
 
-        let default_format = match locale.as_str() {
+        let locale_tag = locale.to_bcp47();
+        let default_format = match locale_tag.as_str() {
             "en-US" | "en-CA" => "MM/dd/yyyy",
             "en-GB" | "de-DE" | "fr-FR" | "es-ES" | "it-IT" | "ru-RU" => "dd/MM/yyyy",
             "ja-JP" | "zh-CN" | "zh-TW" | "ko-KR" => "yyyy/MM/dd",

@@ -9,7 +9,7 @@ extern crate alloc;
 use alloc::string::String;
 use core::fmt;
 
-use ars_i18n::{Direction, Locale};
+use ars_i18n::{Direction, Locale, locales};
 
 use crate::{
     ArsRc, DefaultModalityContext, ModalityContext, NullPlatformEffects, PlatformEffects,
@@ -152,7 +152,7 @@ impl ArsContext {
 impl Default for ArsContext {
     fn default() -> Self {
         Self {
-            locale: Locale::new("en-US"),
+            locale: locales::en_us(),
             direction: Direction::Ltr,
             color_mode: ColorMode::System,
             disabled: false,
@@ -213,7 +213,7 @@ mod tests {
     fn ars_context_default_uses_default_modality_context() {
         let context = ArsContext::default();
 
-        assert_eq!(context.locale().as_str(), "en-US");
+        assert_eq!(context.locale().to_bcp47(), "en-US");
         assert_eq!(context.direction(), Direction::Ltr);
         assert_eq!(context.color_mode(), ColorMode::System);
         assert_eq!(context.modality().snapshot(), ModalitySnapshot::default());
@@ -222,7 +222,7 @@ mod tests {
     #[test]
     fn ars_context_constructor_preserves_values() {
         let context = ArsContext::new(
-            Locale::new("pt-BR"),
+            locales::br(),
             Direction::Ltr,
             ColorMode::Dark,
             true,
@@ -235,7 +235,7 @@ mod tests {
             StyleStrategy::Cssom,
         );
 
-        assert_eq!(context.locale().as_str(), "pt-BR");
+        assert_eq!(context.locale().to_bcp47(), "pt-BR");
         assert!(context.disabled());
         assert!(context.read_only());
         assert_eq!(context.id_prefix(), Some("prefix"));

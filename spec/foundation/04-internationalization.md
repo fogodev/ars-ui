@@ -21,6 +21,12 @@ The `ars-i18n` crate provides complete internationalization support for ars-ui c
 - **`icu4x`** (default): Rust-native ICU4X implementation. Required for SSR, desktop, and non-browser environments. Adds ~100-500KB to WASM binary.
 - **`web-intl`**: Delegates to the browser's `Intl` API via `js-sys`. Zero binary size overhead. WASM client only.
 
+`Locale` parsing, BCP 47 metadata access (`language()`, `script()`, `region()`,
+Unicode extensions), and `DataLocale` conversion are foundational and may rely on
+the lightweight ICU locale/provider crates in all builds, including WASM clients.
+The `icu4x` vs `web-intl` split applies to formatter backends and compiled CLDR
+data, not to the core `Locale` wrapper itself.
+
 ```rust
 #[cfg(feature = "icu4x")]
 pub type DefaultNumberFormatter = icu4x::Icu4xNumberFormatter;
@@ -68,7 +74,7 @@ use icu::locale::{Locale as IcuLocale, locale};
 /// A BCP 47 locale identifier.
 ///
 /// Wraps ICU4X's Locale type with ars-ui-specific helpers.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Locale(IcuLocale);
 
 impl Locale {
@@ -163,6 +169,20 @@ impl Locale {
     }
 }
 
+// ICU4X 2.x does not implement `Ord` on `icu::locale::Locale`, so ars-i18n
+// defines a stable lexical ordering on the canonical BCP 47 string form.
+impl PartialOrd for Locale {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Locale {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.to_bcp47().cmp(&other.to_bcp47())
+    }
+}
+
 /// Scripts that use right-to-left text direction.
 const RTL_SCRIPTS: &[&str] = &[
     "Arab", // Arabic
@@ -235,15 +255,19 @@ pub mod locales {
         Locale::parse("en-US").expect("en-US must always be a valid locale")
     }
 
+    pub fn en() -> Locale { Locale::parse("en").unwrap_or_else(|_| fallback()) }
     pub fn en_us() -> Locale { Locale::parse("en-US").unwrap_or_else(|_| fallback()) }
     pub fn en_gb() -> Locale { Locale::parse("en-GB").unwrap_or_else(|_| fallback()) }
     pub fn ar() -> Locale { Locale::parse("ar").unwrap_or_else(|_| fallback()) }
     pub fn ar_sa() -> Locale { Locale::parse("ar-SA").unwrap_or_else(|_| fallback()) }
+    pub fn ar_eg() -> Locale { Locale::parse("ar-EG").unwrap_or_else(|_| fallback()) }
     pub fn he() -> Locale { Locale::parse("he").unwrap_or_else(|_| fallback()) }
     pub fn fa() -> Locale { Locale::parse("fa").unwrap_or_else(|_| fallback()) }
     pub fn de() -> Locale { Locale::parse("de").unwrap_or_else(|_| fallback()) }
+    pub fn de_de() -> Locale { Locale::parse("de-DE").unwrap_or_else(|_| fallback()) }
     pub fn fr() -> Locale { Locale::parse("fr-FR").unwrap_or_else(|_| fallback()) }
     pub fn ja() -> Locale { Locale::parse("ja").unwrap_or_else(|_| fallback()) }
+    pub fn ja_jp() -> Locale { Locale::parse("ja-JP").unwrap_or_else(|_| fallback()) }
     pub fn zh_hans() -> Locale { Locale::parse("zh-Hans").unwrap_or_else(|_| fallback()) }
     pub fn ko() -> Locale { Locale::parse("ko").unwrap_or_else(|_| fallback()) }
 }
@@ -1449,14 +1473,13 @@ fn platform_today_iso() -> Result<(i32, u8, u8), String> {
     Ok((y, m, d))
 }
 
-// `Weekday` — defined in `shared/date-time-types.md`
-// The following extension methods are provided by `ars-i18n` on the canonical type.
+// `Weekday` — specified in `shared/date-time-types.md` and implemented in `ars-i18n`.
+// The following extension methods are provided on that canonical type.
 
 impl Weekday {
     // `from_sunday_zero()` and `from_iso_8601()` are defined on the canonical
-    // Weekday type in shared/date-time-types.md (ars-core crate). The ars-i18n
-    // crate re-exports Weekday from ars-core, so these methods are available
-    // without redefinition. See shared/date-time-types.md §3.
+    // `Weekday` type in `shared/date-time-types.md`. `ars-core` may re-export
+    // the type for convenience, but `ars-i18n` owns the implementation.
 
     pub fn from_icu_str(s: &str) -> Option<Self> {
         match s {
@@ -2994,6 +3017,8 @@ impl StringCollator {
 [dependencies]
 # Umbrella crate — re-exports icu::calendar, icu::collator, icu::datetime, etc.
 # All code uses icu::* paths; no need for individual icu_* crates in [dependencies].
+# The lightweight locale/provider portions may be used unconditionally because
+# `Locale` parsing and metadata access are part of the core contract on every target.
 icu = { version = "2.1", features = ["serde"] }
 icu_experimental = "0.4"  # Contains relativetime (not yet in umbrella)
 fixed_decimal = "0.7"     # Main type is Decimal (not FixedDecimal)
@@ -3004,6 +3029,9 @@ icu_datagen = { version = "2.1", optional = true }
 
 [features]
 default = ["icu4x", "compiled-data", "gregorian"]
+# `icu4x` enables formatter backends and compiled CLDR data. `Locale` itself may
+# still depend on ICU locale/provider crates even when `web-intl` is the active
+# formatting backend on the client.
 icu4x = ["dep:icu"]
 web-intl = ["dep:wasm-bindgen", "dep:js-sys"]
 compiled-data = ["icu/compiled_data"]

@@ -24,7 +24,7 @@ references:
 #[derive(Clone, Debug)]
 pub struct Props {
     /// The active locale for i18n message formatting and text direction inference.
-    /// Defaults to `Locale::new("en-US")`.
+    /// Defaults to `Locale::parse("en-US").expect("en-US is always valid")`.
     pub locale: Option<Locale>,
 
     /// Explicit reading direction override. When `None`, direction is inferred
@@ -132,7 +132,7 @@ impl ArsContext {
 impl Default for ArsContext {
     fn default() -> Self {
         Self {
-            locale: Locale::new("en-US").expect("en-US is always valid"),
+            locale: Locale::parse("en-US").expect("en-US is always valid"),
             direction: Direction::Ltr,
             color_mode: ColorMode::System,
             disabled: false,

@@ -402,7 +402,8 @@ impl Machine {
         }
 
         // Locale-dependent segment order.
-        match locale.as_str() {
+        let locale_tag = locale.to_bcp47();
+        match locale_tag.as_str() {
             "ja-JP" | "zh-CN" | "zh-TW" | "ko-KR" => {
                 segs.push(year_seg);
                 segs.push(DateSegment::new_literal("/"));

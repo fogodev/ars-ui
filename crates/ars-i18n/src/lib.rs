@@ -10,7 +10,14 @@
 extern crate alloc;
 
 use alloc::string::String;
-use core::fmt;
+
+mod bidi;
+mod locale;
+mod weekday;
+
+pub use bidi::{IsolateDirection, isolate_text_safe};
+pub use locale::{Locale, LocaleParseError, locales};
+pub use weekday::Weekday;
 
 /// Text and layout direction.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -65,92 +72,6 @@ pub enum Orientation {
     /// Children are laid out along the vertical axis.
     Vertical,
 }
-
-/// A BCP 47 locale identifier (e.g. `"en-US"`, `"ar-EG"`).
-///
-/// Wraps a locale string and is used by the environment provider to propagate
-/// locale context to all components for i18n-aware formatting and RTL handling.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Locale(String);
-
-impl Locale {
-    /// Creates a new locale from a BCP 47 string.
-    #[must_use]
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    /// Returns the locale as a string slice.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    /// Parse a BCP 47 locale identifier with structural validation.
-    ///
-    /// Validates that the string follows the basic BCP 47 structure
-    /// (RFC 5646 §2.1): a 2–8 letter language subtag, followed by optional
-    /// hyphen-separated subtags of 1–8 alphanumeric characters each.
-    ///
-    /// This performs **structural** validation only — it does not check whether
-    /// the language, script, or region subtags are registered in the IANA
-    /// subtag registry. Full semantic validation will come with ICU4X.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`LocaleParseError`] if the string is empty, contains invalid
-    /// characters, or violates basic BCP 47 structure.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use ars_i18n::Locale;
-    /// let en = Locale::parse("en-US").expect("valid");
-    /// let ar = Locale::parse("ar").expect("valid");
-    /// let ja = Locale::parse("ja-JP-u-ca-japanese").expect("valid");
-    ///
-    /// assert!(Locale::parse("").is_err());
-    /// assert!(Locale::parse("123").is_err());
-    /// assert!(Locale::parse("-en").is_err());
-    /// ```
-    pub fn parse(s: &str) -> Result<Self, LocaleParseError> {
-        let mut subtags = s.split('-');
-
-        // Language subtag: 2–8 ASCII alphabetic characters (required).
-        let lang = subtags.next().ok_or(LocaleParseError { _private: () })?;
-        if lang.len() < 2 || lang.len() > 8 || !lang.bytes().all(|b| b.is_ascii_alphabetic()) {
-            return Err(LocaleParseError { _private: () });
-        }
-
-        // Subsequent subtags: 1–8 ASCII alphanumeric characters each.
-        for subtag in subtags {
-            if subtag.is_empty()
-                || subtag.len() > 8
-                || !subtag.bytes().all(|b| b.is_ascii_alphanumeric())
-            {
-                return Err(LocaleParseError { _private: () });
-            }
-        }
-
-        Ok(Self(String::from(s)))
-    }
-}
-
-/// Error returned when a locale string fails BCP 47 structural validation.
-///
-/// See [`Locale::parse`] for the validation rules.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LocaleParseError {
-    _private: (),
-}
-
-impl fmt::Display for LocaleParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("invalid BCP 47 locale identifier")
-    }
-}
-
-impl core::error::Error for LocaleParseError {}
 
 // ────────────────────────────────────────────────────────────────────
 // ICU data provider abstraction
@@ -257,7 +178,7 @@ impl DateRange {
 
 #[cfg(test)]
 mod tests {
-    use alloc::string::ToString;
+    use alloc::{string::ToString, vec, vec::Vec};
 
     use super::*;
 
@@ -294,64 +215,292 @@ mod tests {
         assert!(!Direction::Auto.inline_start_is_right());
     }
 
-    // ── Locale::parse tests ────────────────────────────────────────
+    // ── Locale tests ───────────────────────────────────────────────
 
     #[test]
     fn parse_valid_locales() {
-        assert!(Locale::parse("en").is_ok());
-        assert!(Locale::parse("en-US").is_ok());
-        assert!(Locale::parse("zh-Hans-CN").is_ok());
-        assert!(Locale::parse("ja-JP-u-ca-japanese").is_ok());
-        assert!(Locale::parse("ar").is_ok());
-        assert!(Locale::parse("sr-Latn-RS").is_ok());
+        for locale in [
+            "en",
+            "en-US",
+            "zh-Hans-CN",
+            "ja-JP-u-ca-japanese",
+            "en-US-u-fw-mon",
+            "ar",
+            "sr-Latn-RS",
+        ] {
+            assert!(Locale::parse(locale).is_ok(), "{locale} should parse");
+        }
     }
 
     #[test]
     fn parse_invalid_locales() {
-        assert!(Locale::parse("").is_err());
-        assert!(Locale::parse("e").is_err()); // too short
-        assert!(Locale::parse("123").is_err()); // digits in language
-        assert!(Locale::parse("-en").is_err()); // leading hyphen
-        assert!(Locale::parse("en-").is_err()); // trailing hyphen
-        assert!(Locale::parse("en--US").is_err()); // double hyphen
-        assert!(Locale::parse("abcdefghi").is_err()); // language too long (>8)
+        for locale in [
+            "",
+            "e",
+            "123",
+            "-en",
+            "en-",
+            "en--US",
+            "abcdefghi",
+            "en-abcdefghi",
+            "en-US!",
+            "en-\u{00DC}",
+        ] {
+            assert!(
+                Locale::parse(locale).is_err(),
+                "{locale} should be rejected"
+            );
+        }
     }
 
     #[test]
-    fn parse_rejects_invalid_subsequent_subtags() {
-        // Subtag too long in second position
-        assert!(Locale::parse("en-abcdefghi").is_err());
-        // Non-alphanumeric character in subtag
-        assert!(Locale::parse("en-US!").is_err());
-        // Non-ASCII in subtag
-        assert!(Locale::parse("en-Ü").is_err());
+    fn locale_accessors_roundtrip() {
+        let locale = Locale::parse("zh-Hans-CN").expect("zh-Hans-CN is valid");
+        assert_eq!(locale.to_bcp47(), "zh-Hans-CN");
+        assert_eq!(locale.language(), "zh");
+        assert_eq!(locale.script(), Some("Hans"));
+        assert_eq!(locale.region(), Some("CN"));
     }
 
     #[test]
-    fn parse_roundtrips_through_as_str() {
-        let locale = Locale::parse("en-US").expect("valid");
-        assert_eq!(locale.as_str(), "en-US");
+    fn locale_extensions_are_exposed() {
+        let locale =
+            Locale::parse("ja-JP-u-ca-japanese-fw-mon").expect("locale with unicode extensions");
+        assert_eq!(locale.calendar_extension(), Some("japanese"));
+        assert_eq!(locale.first_day_of_week_extension(), Some(Weekday::Monday));
     }
 
     #[test]
-    fn locale_new_creates_unvalidated_locale() {
-        let locale = Locale::new("en-US");
-        assert_eq!(locale.as_str(), "en-US");
-
-        // new() accepts anything — no validation
-        let garbage = Locale::new("not-a-real-locale-!!!");
-        assert_eq!(garbage.as_str(), "not-a-real-locale-!!!");
+    fn locale_accessors_return_none_when_subtags_are_absent() {
+        let locale = Locale::parse("en").expect("en is valid");
+        assert_eq!(locale.script(), None);
+        assert_eq!(locale.region(), None);
+        assert_eq!(locale.calendar_extension(), None);
+        assert_eq!(locale.first_day_of_week_extension(), None);
     }
 
     #[test]
-    fn locale_default_is_empty() {
-        let locale = Locale::default();
-        assert_eq!(locale.as_str(), "");
+    fn locale_from_langid_roundtrips_to_bcp47() {
+        let langid = "en-US"
+            .parse::<icu::locale::LanguageIdentifier>()
+            .expect("en-US langid is valid");
+        let locale = Locale::from_langid(langid);
+        assert_eq!(locale.to_bcp47(), "en-US");
+    }
+
+    #[test]
+    fn locale_to_data_locale_roundtrips_to_string() {
+        let locale = Locale::parse("en-US").expect("en-US is valid");
+        assert_eq!(locale.to_data_locale().to_string(), "en-US");
+    }
+
+    #[test]
+    fn locale_ordering_is_lexical_by_bcp47() {
+        let mut locales = vec![
+            Locale::parse("fr-FR").expect("fr-FR is valid"),
+            Locale::parse("de-DE").expect("de-DE is valid"),
+            Locale::parse("en-US").expect("en-US is valid"),
+        ];
+        locales.sort();
+        let sorted: Vec<_> = locales
+            .into_iter()
+            .map(|locale| locale.to_bcp47())
+            .collect();
+        assert_eq!(sorted, vec!["de-DE", "en-US", "fr-FR"]);
+    }
+
+    #[test]
+    fn locale_direction_detects_rtl_scripts() {
+        for locale in ["ar", "he", "fa", "ar-EG"] {
+            let locale = Locale::parse(locale).expect("locale should parse");
+            assert_eq!(
+                locale.direction(),
+                Direction::Rtl,
+                "{} should be RTL",
+                locale.to_bcp47()
+            );
+            assert!(locale.is_rtl(), "{} should be RTL", locale.to_bcp47());
+        }
+    }
+
+    #[test]
+    fn locale_direction_infers_scripts_for_rtl_languages() {
+        for locale in ["dv", "nqo", "pa-PK", "ku-IQ", "yi", "ks"] {
+            let locale = Locale::parse(locale).expect("locale should parse");
+            assert_eq!(
+                locale.direction(),
+                Direction::Rtl,
+                "{} should be RTL",
+                locale.to_bcp47()
+            );
+            assert!(locale.is_rtl(), "{} should be RTL", locale.to_bcp47());
+        }
+    }
+
+    #[test]
+    fn locale_direction_defaults_to_ltr_when_not_rtl() {
+        let locale = Locale::parse("en-US").expect("en-US is valid");
+        assert_eq!(locale.direction(), Direction::Ltr);
+        assert!(!locale.is_rtl());
     }
 
     #[test]
     fn locale_parse_error_display() {
         let err = Locale::parse("").unwrap_err();
-        assert_eq!(err.to_string(), "invalid BCP 47 locale identifier");
+        assert_eq!(
+            err.to_string(),
+            "ars-ui locale parse error: The given language subtag is invalid"
+        );
+    }
+
+    #[test]
+    fn locale_prelude_constructors_return_expected_tags() {
+        let constructors = [
+            (locales::en(), "en"),
+            (locales::en_us(), "en-US"),
+            (locales::en_gb(), "en-GB"),
+            (locales::ar(), "ar"),
+            (locales::ar_sa(), "ar-SA"),
+            (locales::ar_eg(), "ar-EG"),
+            (locales::he(), "he"),
+            (locales::fa(), "fa"),
+            (locales::de(), "de"),
+            (locales::de_de(), "de-DE"),
+            (locales::fr(), "fr-FR"),
+            (locales::ja(), "ja"),
+            (locales::ja_jp(), "ja-JP"),
+            (locales::zh_hans(), "zh-Hans"),
+            (locales::ko(), "ko"),
+        ];
+
+        for (locale, expected) in constructors {
+            assert_eq!(locale.to_bcp47(), expected);
+        }
+    }
+
+    // ── Weekday tests ──────────────────────────────────────────────
+
+    #[test]
+    fn weekday_from_sunday_zero_wraps() {
+        assert_eq!(Weekday::from_sunday_zero(0), Weekday::Sunday);
+        assert_eq!(Weekday::from_sunday_zero(1), Weekday::Monday);
+        assert_eq!(Weekday::from_sunday_zero(6), Weekday::Saturday);
+        assert_eq!(Weekday::from_sunday_zero(7), Weekday::Sunday);
+    }
+
+    #[test]
+    fn weekday_from_iso_8601_validates_range() {
+        let cases = [
+            (1, Some(Weekday::Monday)),
+            (2, Some(Weekday::Tuesday)),
+            (3, Some(Weekday::Wednesday)),
+            (4, Some(Weekday::Thursday)),
+            (5, Some(Weekday::Friday)),
+            (6, Some(Weekday::Saturday)),
+            (7, Some(Weekday::Sunday)),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(Weekday::from_iso_8601(input), expected);
+        }
+
+        assert_eq!(Weekday::from_iso_8601(0), None);
+        assert_eq!(Weekday::from_iso_8601(8), None);
+    }
+
+    #[test]
+    fn weekday_from_icu_str_matches_bcp47_values() {
+        assert_eq!(Weekday::from_icu_str("mon"), Some(Weekday::Monday));
+        assert_eq!(Weekday::from_bcp47_fw("sun"), Some(Weekday::Sunday));
+        assert_eq!(Weekday::from_icu_str("bad"), None);
+    }
+
+    #[test]
+    fn weekday_from_icu_str_covers_all_named_variants() {
+        let cases = [
+            ("mon", Weekday::Monday),
+            ("tue", Weekday::Tuesday),
+            ("wed", Weekday::Wednesday),
+            ("thu", Weekday::Thursday),
+            ("fri", Weekday::Friday),
+            ("sat", Weekday::Saturday),
+            ("sun", Weekday::Sunday),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(Weekday::from_icu_str(input), Some(expected));
+            assert_eq!(Weekday::from_bcp47_fw(input), Some(expected));
+        }
+    }
+
+    #[test]
+    fn weekday_from_icu_weekday_covers_all_variants() {
+        let cases = [
+            (icu::calendar::types::Weekday::Monday, Weekday::Monday),
+            (icu::calendar::types::Weekday::Tuesday, Weekday::Tuesday),
+            (icu::calendar::types::Weekday::Wednesday, Weekday::Wednesday),
+            (icu::calendar::types::Weekday::Thursday, Weekday::Thursday),
+            (icu::calendar::types::Weekday::Friday, Weekday::Friday),
+            (icu::calendar::types::Weekday::Saturday, Weekday::Saturday),
+            (icu::calendar::types::Weekday::Sunday, Weekday::Sunday),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(Weekday::from_icu_weekday(input), expected);
+        }
+    }
+
+    #[test]
+    fn placeholder_iso_helpers_return_empty_strings() {
+        let date = CalendarDate { _private: () };
+        let time = Time { _private: () };
+        let range = DateRange { _private: () };
+
+        assert_eq!(date.to_iso8601(), "");
+        assert_eq!(time.to_iso8601(), "");
+        assert_eq!(range.to_iso8601(), "");
+    }
+
+    // ── BiDi isolation tests ───────────────────────────────────────
+
+    #[test]
+    fn isolate_text_safe_returns_empty_for_empty_input() {
+        assert_eq!(isolate_text_safe("", IsolateDirection::FirstStrong), "");
+    }
+
+    #[test]
+    fn isolate_text_safe_wraps_text_with_ltr_marks() {
+        assert_eq!(
+            isolate_text_safe("hello", IsolateDirection::Ltr),
+            "\u{2066}hello\u{2069}"
+        );
+    }
+
+    #[test]
+    fn isolate_text_safe_wraps_text_with_rtl_marks() {
+        assert_eq!(
+            isolate_text_safe("مرحبا", IsolateDirection::Rtl),
+            "\u{2067}مرحبا\u{2069}"
+        );
+    }
+
+    #[test]
+    fn isolate_text_safe_wraps_text_with_first_strong_marks() {
+        assert_eq!(
+            isolate_text_safe("abc", IsolateDirection::FirstStrong),
+            "\u{2068}abc\u{2069}"
+        );
+    }
+
+    #[test]
+    fn isolate_text_safe_preserves_zwj_sequences() {
+        let family = "👨‍👩‍👧";
+        let isolated = isolate_text_safe(family, IsolateDirection::FirstStrong);
+        let stripped = isolated
+            .strip_prefix('\u{2068}')
+            .expect("must start with FSI")
+            .strip_suffix('\u{2069}')
+            .expect("must end with PDI");
+        assert_eq!(stripped, family);
     }
 }

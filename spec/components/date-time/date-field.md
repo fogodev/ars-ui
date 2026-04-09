@@ -855,7 +855,7 @@ pub fn segments_for_locale(
     // Language-prefix matching ensures that locale tags without a region
     // (e.g., "de", "fr") and uncommon region variants (e.g., "en-ZA") get
     // appropriate segment orders rather than falling through to the ISO default.
-    let locale_str = locale.as_str();
+    let locale_str = locale.to_bcp47();
     let lang = locale.language();
 
     let base: Vec<DateSegmentKind> = if locale_str == "en-US" || locale_str == "en-PH" || locale_str == "en-CA" || locale_str == "es-MX" {
@@ -953,7 +953,8 @@ pub struct LocaleSeparators {
 impl LocaleSeparators {
     pub fn for_locale(locale: &Locale) -> Self {
         // Production: ICU4X pattern parsing extracts exact separator strings.
-        let seps: Vec<String> = match locale.as_str() {
+        let locale_tag = locale.to_bcp47();
+        let seps: Vec<String> = match locale_tag.as_str() {
             "de-DE" | "de-AT" | "nl-NL" | "pl-PL" | "ru-RU" | "cs-CZ"
             | "sk-SK" | "hr-HR" | "bg-BG" | "ro-RO" =>
                 vec![".".into(), ".".into()],
