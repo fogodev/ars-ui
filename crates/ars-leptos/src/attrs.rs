@@ -262,7 +262,7 @@ mod tests {
         let owner = Owner::new();
         owner.with(|| {
             provide_context(ArsContext::new(
-                ars_i18n::Locale::new("en-US"),
+                ars_i18n::locales::en_us(),
                 ars_i18n::Direction::Ltr,
                 ars_core::ColorMode::System,
                 false,

@@ -4680,7 +4680,7 @@ let state = typeahead::State::default();
 let focus = Some(Key::int(0));
 
 // Type "b" — should jump to Banana (the first item starting with "b" after Apple).
-let locale = Locale::new("en-US").expect("valid locale");
+let locale = Locale::parse("en-US").expect("valid locale");
 let (state, found) = state.process_char('b', 1000, focus.as_ref(), &collection, &locale);
 assert_eq!(found, Some(Key::int(2))); // Banana
 

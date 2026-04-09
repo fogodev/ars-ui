@@ -603,6 +603,7 @@ impl core::fmt::Debug for CalendarMessages {
 
 ```rust
 // Canonical Weekday. ISO 8601: Monday=1..Sunday=7.
+// Implemented in `ars_i18n` and re-exported by `ars_core` for convenience.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Weekday {
     Monday,
@@ -671,7 +672,7 @@ pub struct Era {
 /// **Production code MUST use `ars_i18n::Locale` directly.** This placeholder is
 /// `#[cfg(test)]` only — it exists so that unit tests in `date-time-types` can compile
 /// without pulling in the full `ars-i18n` crate. The two types convert via `From`:
-///   `impl From<&ars_i18n::Locale> for Locale { fn from(l) -> Self { Locale(l.to_string()) } }`
+///   `impl From<&ars_i18n::Locale> for Locale { fn from(l) -> Self { Locale(l.to_bcp47()) } }`
 ///   `impl From<&Locale> for ars_i18n::Locale { fn from(l) -> Self { ars_i18n::Locale::parse(l.as_str()).expect("test locale is valid BCP-47") } }`
 #[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

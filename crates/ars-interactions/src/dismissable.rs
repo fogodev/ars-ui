@@ -155,6 +155,7 @@ pub fn dismiss_button_attrs(locale: &Locale, messages: &Messages) -> AttrMap {
 #[cfg(test)]
 mod tests {
     use ars_core::AttrValue;
+    use ars_i18n::locales;
 
     use super::*;
 
@@ -163,14 +164,14 @@ mod tests {
     #[test]
     fn messages_default_close_label_returns_dismiss() {
         let messages = Messages::default();
-        let locale = Locale::new("en-US");
+        let locale = locales::en_us();
         assert_eq!((messages.close_label)(&locale), "Dismiss");
     }
 
     #[test]
     fn messages_default_close_label_ignores_locale() {
         let messages = Messages::default();
-        assert_eq!((messages.close_label)(&Locale::new("ja-JP")), "Dismiss");
+        assert_eq!((messages.close_label)(&locales::ja_jp()), "Dismiss");
     }
 
     #[test]
@@ -319,7 +320,7 @@ mod tests {
     // ── dismiss_button_attrs tests ─────────────────────────────────
 
     fn default_locale() -> Locale {
-        Locale::new("en-US")
+        locales::en_us()
     }
 
     #[test]
@@ -372,14 +373,14 @@ mod tests {
     fn dismiss_button_attrs_uses_locale_in_message_fn() {
         let messages = Messages {
             close_label: MessageFn::from(|locale: &Locale| {
-                if locale.as_str() == "de-DE" {
+                if locale.to_bcp47() == "de-DE" {
                     "Schlie\u{00df}en".into()
                 } else {
                     "Dismiss".into()
                 }
             }),
         };
-        let attrs = dismiss_button_attrs(&Locale::new("de-DE"), &messages);
+        let attrs = dismiss_button_attrs(&locales::de_de(), &messages);
         assert_eq!(
             attrs.get(&HtmlAttr::Aria(AriaAttr::Label)),
             Some("Schlie\u{00df}en")

@@ -51,7 +51,10 @@ pub mod __private {
 #[doc(inline)]
 pub use ars_derive::{ComponentPart, HasId};
 // ── External re-exports ─────────────────────────────────────────────
-pub use ars_i18n::{Direction, IcuProvider, Locale, LocaleParseError, StubIcuProvider};
+pub use ars_i18n::{
+    Direction, IcuProvider, IsolateDirection, Locale, LocaleParseError, StubIcuProvider, Weekday,
+    isolate_text_safe,
+};
 // ── Platform-conditional smart pointers (extracted modules) ─────────
 pub use callback::{Callback, callback};
 // ── DOM attribute / connect primitives ──────────────────────────────
@@ -514,7 +517,7 @@ pub struct Env {
 impl Default for Env {
     fn default() -> Self {
         Self {
-            locale: Locale::parse("en-US").expect("en-US is a valid BCP-47 tag"),
+            locale: ars_i18n::locales::en_us(),
             icu_provider: ArsRc::from_icu_provider(StubIcuProvider),
         }
     }
@@ -1324,7 +1327,7 @@ mod tests {
     #[test]
     fn env_default_has_en_us_locale() {
         let env = Env::default();
-        assert_eq!(env.locale.as_str(), "en-US");
+        assert_eq!(env.locale.to_bcp47(), "en-US");
     }
 
     #[test]

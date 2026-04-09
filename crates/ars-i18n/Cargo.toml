@@ -7,6 +7,11 @@ description.workspace  = true
 repository.workspace   = true
 rust-version.workspace = true
 
+[dependencies]
+icu                  = { version = "2.1", default-features = false }
+icu_provider         = { version = "2.1", default-features = false }
+unicode-segmentation = "1.13"
+
 [features]
 default             = ["std", "gregorian", "icu4x"]
 std                 = []

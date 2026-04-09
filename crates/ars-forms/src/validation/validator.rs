@@ -181,7 +181,7 @@ mod tests {
             [("name".to_string(), Value::Text("Alice".to_string()))]
                 .into_iter()
                 .collect();
-        let locale = ars_i18n::Locale::new("en-US");
+        let locale = ars_i18n::locales::en_us();
         let ctx = Context {
             field_name: "name",
             form_values: &values,
@@ -192,7 +192,11 @@ mod tests {
         assert_eq!(owned.field_name, "name");
         assert_eq!(owned.form_values.len(), 1);
         assert_eq!(
-            owned.locale.as_ref().map(ars_i18n::Locale::as_str),
+            owned
+                .locale
+                .as_ref()
+                .map(ars_i18n::Locale::to_bcp47)
+                .as_deref(),
             Some("en-US")
         );
     }
@@ -202,12 +206,15 @@ mod tests {
         let owned = OwnedContext {
             field_name: "email".to_string(),
             form_values: BTreeMap::new(),
-            locale: Some(ars_i18n::Locale::new("fr-FR")),
+            locale: Some(ars_i18n::locales::fr()),
         };
         let borrowed = owned.as_ref();
         assert_eq!(borrowed.field_name, "email");
         assert!(borrowed.form_values.is_empty());
-        assert_eq!(borrowed.locale.map(ars_i18n::Locale::as_str), Some("fr-FR"));
+        assert_eq!(
+            borrowed.locale.map(ars_i18n::Locale::to_bcp47).as_deref(),
+            Some("fr-FR")
+        );
     }
 
     #[test]

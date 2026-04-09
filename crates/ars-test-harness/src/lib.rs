@@ -80,9 +80,9 @@ mod tests {
 
     #[test]
     fn test_harness_with_locale() {
-        let harness = TestHarness::with_locale(Locale::new("en-US"));
+        let harness = TestHarness::with_locale(ars_i18n::locales::en_us());
         let locale = harness.locale().expect("locale should be set");
-        assert_eq!(locale.as_str(), "en-US");
+        assert_eq!(locale.to_bcp47(), "en-US");
     }
 
     #[test]
