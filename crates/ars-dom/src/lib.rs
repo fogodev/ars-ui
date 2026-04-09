@@ -31,7 +31,7 @@ pub use focus::{
 pub use modality::ModalityManager;
 pub use positioning::{
     Alignment, Axis, Boundary, Offset, Overflow, Placement, PositioningOptions, PositioningResult,
-    Rect, Side, Strategy, compute_position,
+    Rect, Side, Strategy, VirtualElement, compute_position,
 };
 pub use scroll::{ScrollIntoViewOptions, ScrollLogicalPosition, supports_scroll_into_view_options};
 #[cfg(feature = "web")]
