@@ -819,7 +819,7 @@ use ars_core::Service;
 #[test]
 fn submit_transitions_from_idle_to_submitting() {
     let props = form::Props::default();
-    let (state, ctx) = form::Machine::init(&props);
+    let (state, ctx) = form::Machine::init(&props, &Env::default(), &Default::default());
     assert_eq!(state, form::State::Idle);
 
     let plan = form::Machine::transition(&state, &form::Event::Submit, &ctx, &props)
@@ -830,7 +830,7 @@ fn submit_transitions_from_idle_to_submitting() {
 #[test]
 fn submit_complete_success_returns_to_idle() {
     let props = form::Props::default();
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(form::Event::Submit);
     assert_eq!(*svc.state(), form::State::Submitting);
 
@@ -842,7 +842,7 @@ fn submit_complete_success_returns_to_idle() {
 #[test]
 fn submit_during_submitting_is_ignored() {
     let props = form::Props::default();
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(form::Event::Submit);
     assert_eq!(*svc.state(), form::State::Submitting);
 
@@ -856,7 +856,7 @@ fn submit_during_submitting_is_ignored() {
 #[test]
 fn reset_clears_server_errors_and_status() {
     let props = form::Props::default();
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(form::Event::SetServerErrors(BTreeMap::from([
         ("email".into(), vec!["taken".into()]),
     ])));
@@ -870,7 +870,7 @@ fn reset_clears_server_errors_and_status() {
 #[test]
 fn set_server_errors_works_from_any_state() {
     let props = form::Props::default();
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
 
     // From Idle
     svc.send(form::Event::SetServerErrors(BTreeMap::from([
@@ -895,7 +895,7 @@ fn init_seeds_server_errors_from_props() {
         validation_errors: errors.clone(),
         ..Default::default()
     };
-    let (state, ctx) = form::Machine::init(&props);
+    let (state, ctx) = form::Machine::init(&props, &Env::default(), &Default::default());
     assert_eq!(ctx.server_errors, errors, "init must seed server_errors from props.validation_errors");
 }
 
@@ -931,7 +931,7 @@ fn root_attrs_emits_action_attribute() {
         action: Some("https://example.com/submit".into()),
         ..Default::default()
     };
-    let (state, ctx) = form::Machine::init(&props);
+    let (state, ctx) = form::Machine::init(&props, &Env::default(), &Default::default());
     let api = form::Machine::connect(&state, &ctx, &props, &|_| {});
     let attrs = api.root_attrs();
     assert_eq!(attrs.get(&HtmlAttr::Action), Some("https://example.com/submit"));
@@ -943,7 +943,7 @@ fn root_attrs_emits_role_attribute() {
         role: Some("search".into()),
         ..Default::default()
     };
-    let (state, ctx) = form::Machine::init(&props);
+    let (state, ctx) = form::Machine::init(&props, &Env::default(), &Default::default());
     let api = form::Machine::connect(&state, &ctx, &props, &|_| {});
     let attrs = api.root_attrs();
     assert_eq!(attrs.get(&HtmlAttr::Role), Some("search"));
@@ -1018,7 +1018,7 @@ fn async_validators_run_even_when_sync_fails() {
         }),
         schedule_microtask: Callback::new(|f| f()),
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
 
     // Submit triggers validation of all registered fields
     svc.send(form_submit::Event::Submit);

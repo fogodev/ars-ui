@@ -680,7 +680,7 @@ async fn combobox_activedescendant_updates_on_navigation() {
 ```rust
 #[test]
 fn text_field_invalid_sets_aria_attributes() {
-    let mut svc = Service::new(text_field::Props::new("tf1"));
+    let mut svc = Service::new(text_field::Props::new("tf1"), Env::default(), Default::default());
     // Simulate validation failure
     svc.send(text_field::Event::SetInvalid {
         message_id: "tf1-error"
@@ -700,14 +700,14 @@ fn text_field_invalid_sets_aria_attributes() {
 ```rust
 #[test]
 fn required_text_field_has_aria_required() {
-    let svc = Service::new(text_field::Props::new("tf1").required(true));
+    let svc = Service::new(text_field::Props::new("tf1").required(true), Env::default(), Default::default());
     let api = svc.connect(&|_| {});
     assert_aria_required(&api.input_attrs(), true);
 }
 
 #[test]
 fn required_select_has_aria_required() {
-    let svc = Service::new(select::Props::new("sel1").required(true));
+    let svc = Service::new(select::Props::new("sel1").required(true), Env::default(), Default::default());
     let api = svc.connect(&|_| {});
     assert_aria_required(&api.trigger_attrs(), true);
 }
@@ -720,7 +720,7 @@ fn required_select_has_aria_required() {
 fn slider_value_text_with_formatter() {
     let svc = Service::new(slider::Props::new("sl1")
         .min(0.0).max(100.0).value(50.0)
-        .value_text(|v| format!("{}%", v)));
+        .value_text(|v| format!("{}%", v)), Env::default(), Default::default());
     let api = svc.connect(&|_| {});
     assert_aria_valuetext(&api.thumb_attrs(), "50%");
 }
@@ -731,7 +731,7 @@ fn slider_value_text_with_formatter() {
 ```rust
 #[test]
 fn tabs_aria_controls_links_tab_to_panel() {
-    let svc = Service::new(tabs::Props::new("tabs1"));
+    let svc = Service::new(tabs::Props::new("tabs1"), Env::default(), Default::default());
     let api = svc.connect(&|_| {});
     let tab_attrs = api.tab_attrs("tab-0");
     let controls_id = tab_attrs.get(&HtmlAttr::Aria(AriaAttr::Controls));
@@ -747,7 +747,7 @@ fn tabs_aria_controls_links_tab_to_panel() {
 ```rust
 #[test]
 fn dialog_open_has_aria_modal() {
-    let mut svc = Service::new(dialog::Props::new("d1"));
+    let mut svc = Service::new(dialog::Props::new("d1"), Env::default(), Default::default());
     svc.send(dialog::Event::Open);
     let api = svc.connect(&|_| {});
     assert_eq!(api.root_attrs().get(&HtmlAttr::Aria(AriaAttr::Modal)), Some("true"));
@@ -755,7 +755,7 @@ fn dialog_open_has_aria_modal() {
 
 #[test]
 fn checkbox_checked_has_aria_checked_true() {
-    let mut svc = Service::new(checkbox::Props::new("cb1"));
+    let mut svc = Service::new(checkbox::Props::new("cb1"), Env::default(), Default::default());
     svc.send(checkbox::Event::Toggle);
     let api = svc.connect(&|_| {});
     assert_aria_checked(&api.root_attrs(), "true");
@@ -763,7 +763,7 @@ fn checkbox_checked_has_aria_checked_true() {
 
 #[test]
 fn tabs_active_tab_has_aria_selected() {
-    let svc = Service::new(tabs::Props::new("t1"));
+    let svc = Service::new(tabs::Props::new("t1"), Env::default(), Default::default());
     let api = svc.connect(&|_| {});
     assert_aria_selected(&api.tab_attrs("tab-0"), true);
     assert_aria_selected(&api.tab_attrs("tab-1"), false);
@@ -1083,7 +1083,7 @@ mod aria_describedby_tests {
             description: Some("Helper text".into()),
             ..Default::default()
         };
-        let (state, ctx) = checkbox::Machine::init(&props);
+        let (state, ctx) = checkbox::Machine::init(&props, &Env::default(), &Default::default());
         let api = checkbox::Machine::connect(&state, &ctx, &props, &|_| {});
         let control_attrs = api.control_attrs();
 
@@ -1102,7 +1102,7 @@ mod aria_describedby_tests {
             description: None,
             ..Default::default()
         };
-        let (state, ctx) = checkbox::Machine::init(&props);
+        let (state, ctx) = checkbox::Machine::init(&props, &Env::default(), &Default::default());
         let api = checkbox::Machine::connect(&state, &ctx, &props, &|_| {});
         let control_attrs = api.control_attrs();
 
@@ -1121,7 +1121,7 @@ mod aria_describedby_tests {
             description: Some("Helper text".into()),
             ..Default::default()
         };
-        let (state, mut ctx) = checkbox::Machine::init(&props);
+        let (state, mut ctx) = checkbox::Machine::init(&props, &Env::default(), &Default::default());
         ctx.invalid = true;
         ctx.error_message = Some("This field is required".into());
         let api = checkbox::Machine::connect(&state, &ctx, &props, &|_| {});

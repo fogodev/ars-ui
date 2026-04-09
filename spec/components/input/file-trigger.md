@@ -54,11 +54,6 @@ pub struct Props {
     pub disabled: bool,
     /// Form field name for the hidden input.
     pub name: Option<String>,
-    /// Optional locale override. When `None`, resolved from the nearest
-    /// `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Translatable messages.
-    pub messages: Option<Messages>,
     // `on_select` callback is framework-specific; provided by adapter layer.
 }
 
@@ -72,8 +67,6 @@ impl Default for Props {
             capture: None,
             disabled: false,
             name: None,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -118,9 +111,9 @@ pub struct Api<'a> {
 }
 
 impl<'a> Api<'a> {
-    pub fn new(props: &'a Props) -> Self {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    pub fn new(props: &'a Props, env: &Env, messages: &Messages) -> Self {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         Self { props, locale, messages }
     }
 

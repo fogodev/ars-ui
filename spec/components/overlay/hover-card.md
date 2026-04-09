@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: [z-index-stacking]
 related: [tooltip, popover]
 references:
-  ark-ui: HoverCard
-  radix-ui: HoverCard
+    ark-ui: HoverCard
+    radix-ui: HoverCard
 ---
 
 # HoverCard
@@ -130,10 +130,6 @@ pub struct Props {
     pub lazy_mount: bool,
     /// When true, hover card content is removed from the DOM after closing. Default: false.
     pub unmount_on_exit: bool,
-    /// Localizable messages for the hover card (see §4 Internationalization).
-    pub messages: Option<Messages>,
-    /// Locale override. When `None`, resolved via `resolve_locale()`.
-    pub locale: Option<Locale>,
 }
 
 impl Default for Props {
@@ -149,8 +145,6 @@ impl Default for Props {
             on_open_change: None,
             lazy_mount: false,
             unmount_on_exit: false,
-            messages: None,
-            locale: None,
         }
     }
 }
@@ -185,9 +179,9 @@ remains open.
    Simplify to a triangle: the pointer's current position, and the two nearest corners of the
    content element.
 2. Attach a `pointermove` listener on `document`. On each move:
-   - If the pointer is inside the safe polygon: do nothing (keep content open).
-   - If the pointer enters the content element: cancel the listener, transition to `Open`.
-   - If the pointer exits the safe polygon: remove the listener, start the close delay normally.
+    - If the pointer is inside the safe polygon: do nothing (keep content open).
+    - If the pointer enters the content element: cancel the listener, transition to `Open`.
+    - If the pointer exits the safe polygon: remove the listener, start the close delay normally.
 3. The safe area listener is cleaned up on close, unmount, or when the pointer enters content.
 
 > **Tooltip**: The same safe-area algorithm applies to interactive `Tooltip`s (`interactive: true`).
@@ -204,17 +198,18 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(&props.id);
         let trigger_id = ids.part("trigger");
         let content_id = ids.part("content");
         let title_id = ids.part("title");
         let initial_open = props.open.unwrap_or(props.default_open);
         let initial_state = if initial_open { State::Open } else { State::Closed };
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         (initial_state, Context {
             open: initial_open,
             open_delay_ms: props.open_delay_ms,
@@ -337,11 +332,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

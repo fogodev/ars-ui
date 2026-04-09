@@ -6,9 +6,9 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: [z-index-stacking]
 related: []
 references:
-  ark-ui: Dialog
-  radix-ui: Dialog
-  react-aria: Dialog
+    ark-ui: Dialog
+    radix-ui: Dialog
+    react-aria: Dialog
 ---
 
 # Dialog
@@ -160,8 +160,6 @@ pub struct Props {
     /// Heading level for the Title part (renders as `<h{level}>`).
     /// Clamped to 1..=6. Default: `2`.
     pub title_level: u8,
-    /// The messages of the dialog (see §4.1 Messages).
-    pub messages: Option<Messages>,
     /// When true, dialog content is not mounted until first opened.
     /// Useful for heavy content that should not render until needed. Default: false.
     pub lazy_mount: bool,
@@ -179,8 +177,6 @@ pub struct Props {
     /// Call `event.prevent_default()` to prevent the dialog from closing.
     /// Fires before the close transition — if prevented, the transition is cancelled.
     pub on_interact_outside: Option<Callback<PreventableEvent>>,
-    /// Locale override. When `None`, resolved via `resolve_locale()`.
-    pub locale: Option<Locale>,
 }
 
 impl Default for Props {
@@ -198,13 +194,11 @@ impl Default for Props {
             final_focus: None,
             role: Role::Dialog,
             title_level: 2,
-            messages: None,
             lazy_mount: false,
             unmount_on_exit: false,
             on_open_change: None,
             on_escape_key_down: None,
             on_interact_outside: None,
-            locale: None,
         }
     }
 }
@@ -246,8 +240,8 @@ dialog's portal root:
 2. **Collect all tabbable elements** within each sibling (elements matching
    `a[href], button, input, select, textarea, [tabindex]` that are not already `disabled`
    or `tabindex="-1"`). For each tabbable element:
-   - Store the original `tabindex` value.
-   - Set `tabindex="-1"` to remove it from the tab order.
+    - Store the original `tabindex` value.
+    - Set `tabindex="-1"` to remove it from the tab order.
 3. **Add a document-level `keydown` listener** that traps Tab key navigation within the
    dialog content. On Tab: if focus would leave the dialog, wrap to the first/last
    tabbable element inside the dialog.
@@ -414,14 +408,15 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let open = props.open.unwrap_or(props.default_open);
         let state = if open { State::Open } else { State::Closed };
         let ids = ComponentIds::from_id(&props.id);
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         (state, Context {
             open,
             modal: props.modal,
@@ -916,17 +911,17 @@ Implementation requirements:
    only the DOM element and open/close mechanism change.
 3. **Test case**: Verify virtual cursor containment with the following test:
 
-   ```text
-   test "modal dialog prevents NVDA browse mode escape" {
-       // 1. Open modal dialog
-       // 2. Verify all siblings of portal root have `inert` attribute
-       // 3. Verify `aria-hidden="true"` fallback is set on siblings when
-       //    `inert` is not supported
-       // 4. Verify no focusable elements outside dialog are reachable
-       //    via sequential Tab presses (focus wraps within dialog)
-       // 5. Close dialog → verify `inert` and `aria-hidden` removed
-   }
-   ```
+    ```text
+    test "modal dialog prevents NVDA browse mode escape" {
+        // 1. Open modal dialog
+        // 2. Verify all siblings of portal root have `inert` attribute
+        // 3. Verify `aria-hidden="true"` fallback is set on siblings when
+        //    `inert` is not supported
+        // 4. Verify no focusable elements outside dialog are reachable
+        //    via sequential Tab presses (focus wraps within dialog)
+        // 5. Close dialog → verify `inert` and `aria-hidden` removed
+    }
+    ```
 
 ## 4. Internationalization
 

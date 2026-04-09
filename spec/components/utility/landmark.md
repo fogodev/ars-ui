@@ -67,10 +67,6 @@ pub struct Props {
     /// simultaneously. When `labelledby_id` is set, it takes precedence
     /// over `messages.label` and emits `aria-labelledby` instead of `aria-label`.
     pub labelledby_id: Option<String>,
-    /// Locale override. When `None`, inherits from nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Localizable strings. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -79,8 +75,6 @@ impl Default for Props {
             id: String::new(),
             role: Role::Region,
             labelledby_id: None,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -102,9 +96,7 @@ pub struct Api<'a> {
 }
 
 impl<'a> Api<'a> {
-    pub fn new(props: &'a Props) -> Self {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    pub fn new(props: &'a Props, locale: Locale, messages: Messages) -> Self {
         Self { props, locale, messages }
     }
 

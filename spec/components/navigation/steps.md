@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: []
 references:
-  ark-ui: Steps
+    ark-ui: Steps
 ---
 
 # Steps
@@ -104,10 +104,6 @@ pub struct Props {
     pub on_complete: Option<Callback<()>>,
     /// Visual stacking axis.
     pub orientation: Orientation,
-    /// Locale for i18n message resolution.
-    pub locale: Option<Locale>,
-    /// Translatable messages.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -123,8 +119,6 @@ impl Default for Props {
             is_step_skippable: None,
             on_complete: None,
             orientation: Orientation::Horizontal,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -172,8 +166,9 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props   = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let step = match props.step {
             Some(s) => Bindable::controlled(s),
             None    => Bindable::uncontrolled(props.default_step),
@@ -185,8 +180,8 @@ impl ars_core::Machine for Machine {
             }).collect()
         });
         let ids = ComponentIds::from_id(&props.id);
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         (State::Idle, Context {
             step,
             count,
@@ -200,10 +195,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        _state: &State,
-        event: &Event,
-        ctx: &Context,
-        _props: &Props,
+        _state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match event {
             Event::GoToStep(target) => {
@@ -308,10 +303,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }

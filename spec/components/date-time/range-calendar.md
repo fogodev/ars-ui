@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, i18n, interactions]
 shared_deps: [date-time-types]
 related: [calendar, date-range-picker]
 references:
-  react-aria: RangeCalendar
+    react-aria: RangeCalendar
 ---
 
 # RangeCalendar
@@ -102,7 +102,7 @@ pub struct Context {
     /// Resolved translatable messages.
     pub messages: Messages,
     /// ICU data provider for locale-dependent formatting (month/weekday names, etc.).
-    pub provider: Arc<dyn IcuProvider>,
+    pub provider: ArsRc<dyn IcuProvider>,
     /// Override for first day of week (falls back to locale default).
     pub first_day_of_week: Weekday,
     /// Right-to-left layout.
@@ -195,8 +195,6 @@ pub struct Props {
     /// Predicate returning true for dates that should be marked unavailable.
     /// Unavailable dates are focusable but not selectable.
     pub is_date_unavailable: Option<fn(&CalendarDate) -> bool>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     /// Explicit override of the locale's default first day of week.
     pub first_day_of_week: Option<Weekday>,
     /// Whether to display ISO week numbers.
@@ -209,8 +207,6 @@ pub struct Props {
     pub page_behavior: PageBehavior,
     /// The "today" date, injected by the adapter for testability.
     pub today: CalendarDate,
-    /// Localizable messages. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -224,14 +220,12 @@ impl Default for Props {
             disabled: false,
             readonly: false,
             is_date_unavailable: None,
-            locale: None,
             first_day_of_week: None,
             show_week_numbers: false,
             is_rtl: false,
             visible_months: 2,
             page_behavior: PageBehavior::Visible,
             today: CalendarDate::new_gregorian(2024, nzu8(1), nzu8(1)),
-            messages: None,
         }
     }
 }
@@ -323,9 +317,10 @@ impl ars_core::Machine for Machine {
     type Event   = Event;
     type Context = Context;
     type Props   = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let initial_range = props.value.flatten();
         let focused = initial_range
             .as_ref()
@@ -337,8 +332,8 @@ impl ars_core::Machine for Machine {
             None    => Bindable::uncontrolled(props.default_value.clone()),
         };
 
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
 
         let first_day = props
             .first_day_of_week
@@ -355,7 +350,7 @@ impl ars_core::Machine for Machine {
             max: props.max.clone(),
             locale,
             messages,
-            provider: use_icu_provider(),
+            provider: env.icu_provider.clone(),
             first_day_of_week: first_day,
             is_rtl: props.is_rtl,
             disabled: props.disabled,
@@ -372,10 +367,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         if ctx.disabled { return None; }
 

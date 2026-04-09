@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: []
 references:
-  ark-ui: Swap
+    ark-ui: Swap
 ---
 
 # Swap
@@ -38,7 +38,6 @@ Swap does not support `read_only` because it does not participate in forms.
 | `SetOn`       | ---                 | Explicitly set to on.             |
 | `SetOff`      | ---                 | Explicitly set to off.            |
 | `SetDisabled` | `bool`              | Update disabled state from props. |
-| `SetLocale`   | `Locale`            | Update locale from props.         |
 | `Focus`       | `is_keyboard: bool` | Focus received.                   |
 | `Blur`        | ---                 | Focus lost.                       |
 
@@ -79,8 +78,6 @@ pub struct Props {
     pub default_checked: bool,
     /// Disabled state.
     pub disabled: bool,
-    /// Locale override. When `None`, inherits from nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     /// Stable accessible label for the root element (e.g., "Toggle dark mode").
     /// Applied as `aria-label`. Should describe the control's purpose, not its current state.
     pub label: Option<String>,
@@ -89,8 +86,6 @@ pub struct Props {
     /// Callback invoked when the checked state changes.
     /// Adapters invoke this with the new checked value after a Toggle, SetOn, or SetOff transition.
     pub on_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
-    /// Localizable messages for the swap component. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 ```
 
@@ -119,8 +114,6 @@ pub enum Event {
     SetOff,
     /// Update disabled state from props.
     SetDisabled(bool),
-    /// Update locale from props.
-    SetLocale(Locale),
     /// Focus received.
     Focus {
         /// True if the focus was initiated by a keyboard.
@@ -139,15 +132,16 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props   = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(&props.id);
         let checked = match props.checked {
             Some(v) => Bindable::controlled(v),
             None    => Bindable::uncontrolled(props.default_checked),
         };
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let state = if *checked.get() { State::On } else { State::Off };
         (state, Context {
             checked,
@@ -160,14 +154,14 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        _props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         // Standard disabled guard: allow Focus/Blur for screen reader discoverability,
         // and SetDisabled so props sync always applies.
-        if ctx.disabled && !matches!(event, Event::Focus { .. } | Event::Blur | Event::SetDisabled(_) | Event::SetLocale(_)) {
+        if ctx.disabled && !matches!(event, Event::Focus { .. } | Event::Blur | Event::SetDisabled(_)) {
             return None;
         }
 
@@ -206,12 +200,6 @@ impl ars_core::Machine for Machine {
                     ctx.focus_visible = false;
                 }))
             }
-            Event::SetLocale(locale) => {
-                let locale = locale.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.locale = locale;
-                }))
-            }
         }
     }
 
@@ -229,19 +217,15 @@ impl ars_core::Machine for Machine {
         if old.disabled != new.disabled {
             events.push(Event::SetDisabled(new.disabled));
         }
-        // Sync locale.
-        if old.locale != new.locale {
-            events.push(Event::SetLocale(resolve_locale(new.locale.as_ref())));
-        }
         events
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }
@@ -412,10 +396,10 @@ In `@media (forced-colors: active)`, custom colors are stripped. The on/off stat
 
 ```css
 @media (forced-colors: active) {
-  [data-ars-state="on"] {
-    outline: 2px solid ButtonText;
-    outline-offset: -2px;
-  }
+    [data-ars-state="on"] {
+        outline: 2px solid ButtonText;
+        outline-offset: -2px;
+    }
 }
 ```
 

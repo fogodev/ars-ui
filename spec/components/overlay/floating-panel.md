@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: [z-index-stacking]
 related: []
 references:
-  ark-ui: FloatingPanel
+    ark-ui: FloatingPanel
 ---
 
 # FloatingPanel
@@ -222,10 +222,6 @@ pub struct Props {
     pub on_size_change_end: Option<Callback<(f64, f64)>>,
     /// Callback invoked when the panel stage changes (minimized/maximized/idle).
     pub on_stage_change: Option<Callback<Stage>>,
-    /// Internationalized messages for accessible labels.
-    pub messages: Option<Messages>,
-    /// Locale override. When `None`, resolved via `resolve_locale()`.
-    pub locale: Option<Locale>,
 }
 
 /// The stage of the floating panel (for callbacks and data attributes).
@@ -269,8 +265,6 @@ impl Default for Props {
             on_size_change: None,
             on_size_change_end: None,
             on_stage_change: None,
-            messages: None,
-            locale: None,
         }
     }
 }
@@ -289,12 +283,13 @@ impl ars_core::Machine for Machine {
     type Event   = Event;
     type Context = Context;
     type Props   = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(&props.id);
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         (State::Idle, Context {
             position: props.initial_position,
             size: props.initial_size,
@@ -316,10 +311,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
             // ── Drag ────────────────────────────────────────────────────
@@ -488,11 +483,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

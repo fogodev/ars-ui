@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility]
 shared_deps: []
 related: [toggle-group, toggle-button]
 references:
-  ark-ui: Toggle
-  radix-ui: Toggle
+    ark-ui: Toggle
+    radix-ui: Toggle
 ---
 
 # Toggle
@@ -118,14 +118,20 @@ pub struct Props {
 /// The machine for the `Toggle` component.
 pub struct Machine;
 
+/// This component has no translatable strings.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Messages;
+impl ComponentMessages for Messages {}
+
 impl ars_core::Machine for Machine {
     type State = State;
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Props, _env: &Env, _messages: &Messages) -> (State, Context) {
         let pressed = match props.pressed {
             Some(v) => Bindable::controlled(v),
             None => Bindable::uncontrolled(props.default_pressed),
@@ -135,10 +141,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        _props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         // Disabled guard: blocks value-changing events but allows Focus/Blur
         // so the toggle remains discoverable by screen readers.
@@ -199,11 +205,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }
@@ -303,8 +309,8 @@ The `Indicator` part enables conditional content rendering based on toggle state
 
 ```html
 <toggle::Indicator>
-  <!-- Shown when on -->
-  <CheckIcon />
+    <!-- Shown when on -->
+    <CheckIcon />
 </toggle::Indicator>
 ```
 
@@ -337,10 +343,10 @@ In `@media (forced-colors: active)`, the pressed state indicator MUST remain vis
 
 ```css
 @media (forced-colors: active) {
-  [data-ars-state="on"] {
-    outline: 2px solid ButtonText;
-    outline-offset: -2px;
-  }
+    [data-ars-state="on"] {
+        outline: 2px solid ButtonText;
+        outline-offset: -2px;
+    }
 }
 ```
 

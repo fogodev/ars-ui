@@ -2291,8 +2291,9 @@ pub mod form_submit {
         type Context = Context;
         type Props = Props;
         type Api<'a> = Api<'a>;
+        type Messages = Messages;
 
-        fn init(props: &Props) -> (State, Context) {
+        fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
             (
                 State::Idle,
                 Context {
@@ -2305,10 +2306,10 @@ pub mod form_submit {
         }
 
         fn transition(
-            state: &State,
-            event: &Event,
-            ctx: &Context,
-            props: &Props,
+            state: &Self::State,
+            event: &Self::Event,
+            ctx: &Self::Context,
+            props: &Self::Props,
         ) -> Option<TransitionPlan<Self>> {
             match (state, event) {
                 // These methods are provided by Context:
@@ -2519,10 +2520,10 @@ pub mod form_submit {
     }
 
     pub struct Api<'a> {
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
     }
 
     #[derive(ComponentPart)]
@@ -3010,8 +3011,9 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
+    fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ctx = Context {
             disabled: props.disabled,
             invalid: props.invalid,
@@ -3426,8 +3428,9 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
+    fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ctx = Context {
             required: props.required,
             disabled: props.disabled,
@@ -3904,8 +3907,9 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
+    fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ctx = Context {
             validation_behavior: props.validation_behavior,
             is_submitting: false,

@@ -231,7 +231,7 @@ fn uncontrolled_toggle_then_external_set() {
 #[test]
 fn set_props_triggers_on_props_changed() {
     let props = slider::Props { value: Bindable::controlled(50.0), ..Default::default() };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     let new_props = slider::Props { value: Bindable::controlled(75.0), ..Default::default() };
     let result = svc.set_props(new_props);
     assert!(result.state_changed || result.context_changed,
@@ -247,7 +247,7 @@ detects leaks where an effect is set up but its cleanup is never called on state
 ```rust
 #[test]
 fn effect_cleanup_runs_on_state_change() {
-    let mut svc = Service::new(dialog::Props::new("d1"));
+    let mut svc = Service::new(dialog::Props::new("d1"), Env::default(), Default::default());
 
     // Open dialog — triggers the focus-trap effect
     let open_result = svc.send(dialog::Event::Open);
@@ -284,7 +284,7 @@ Tests for `SendResult` fields not covered by existing tests:
 ```rust
 #[test]
 fn context_only_transition_sets_context_changed() {
-    let mut svc = Service::new(slider::Props::new("s1"));
+    let mut svc = Service::new(slider::Props::new("s1"), Env::default(), Default::default());
     // Send an event that only updates context (e.g., hover highlight)
     let result = svc.send(slider::Event::PointerMove { value: 50.0 });
     assert!(result.context_changed);
@@ -292,7 +292,7 @@ fn context_only_transition_sets_context_changed() {
 
 #[test]
 fn cancel_effects_contains_cancelled_effect_names() {
-    let mut svc = Service::new(tooltip::Props::new("t1"));
+    let mut svc = Service::new(tooltip::Props::new("t1"), Env::default(), Default::default());
     let _open = svc.send(tooltip::Event::PointerEnter);
     // Close before delay effect fires — should cancel it
     let close_result = svc.send(tooltip::Event::PointerLeave);
@@ -303,7 +303,7 @@ fn cancel_effects_contains_cancelled_effect_names() {
 #[test]
 fn send_result_state_changed_reflects_transition() {
     let props = toggle::Props::default();
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     let result = svc.send(toggle::Event::Toggle);
     assert!(result.state_changed, "toggling must change state");
 
@@ -315,7 +315,7 @@ fn send_result_state_changed_reflects_transition() {
 #[test]
 fn send_result_context_changed_on_thumb_move() {
     let props = slider::Props { value: Bindable::controlled(50.0), ..Default::default() };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     let result = svc.send(slider::Event::PointerMove { value: 75.0 });
     assert!(result.context_changed, "context must change on thumb move");
 }

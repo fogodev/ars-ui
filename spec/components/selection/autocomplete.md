@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions, collections]
 shared_deps: [selection-patterns]
 related: []
 references:
-  react-aria: Autocomplete
+    react-aria: Autocomplete
 ---
 
 # Autocomplete
@@ -193,10 +193,6 @@ pub struct Props {
     /// component loses focus. Useful for preventing free-form text entry when only
     /// predefined options are valid. Default: `false`.
     pub clear_on_blur: bool,
-    /// Translatable messages for accessibility labels (see §4.1 Messages).
-    pub messages: Option<Messages>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     // Change callbacks provided by the adapter layer
 }
 
@@ -210,8 +206,6 @@ impl Default for Props {
             collection_id: String::new(),
             filter_mode: FilterMode::default(),
             clear_on_blur: false,
-            messages: None,
-            locale: None,
         }
     }
 }
@@ -233,11 +227,12 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props   = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(&props.id);
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         (State::Idle, Context {
             locale,
             input_value: match &props.input_value {
@@ -254,10 +249,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        _props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         if ctx.disabled {
             if let Event::Blur = event {
@@ -327,11 +322,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }
@@ -560,8 +555,8 @@ Effect::new(move || {
 
 ```tsx
 <Autocomplete>
-  <SearchInput />
-  <Menu items={filtered_commands} on_select={run_command} />
+    <SearchInput />
+    <Menu items={filtered_commands} on_select={run_command} />
 </Autocomplete>
 ```
 
@@ -569,8 +564,8 @@ Effect::new(move || {
 
 ```tsx
 <Autocomplete>
-  <TextField />
-  <Listbox items={filtered_options} selection_mode="single" />
+    <TextField />
+    <Listbox items={filtered_options} selection_mode="single" />
 </Autocomplete>
 ```
 

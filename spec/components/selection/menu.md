@@ -6,9 +6,9 @@ foundation_deps: [architecture, accessibility, interactions, collections]
 shared_deps: [selection-patterns]
 related: []
 references:
-  ark-ui: Menu
-  radix-ui: DropdownMenu
-  react-aria: Menu
+    ark-ui: Menu
+    radix-ui: DropdownMenu
+    react-aria: Menu
 ---
 
 # Menu
@@ -261,14 +261,20 @@ The adapter MUST resolve the placement based on `ctx.dir` before calling
 ```rust
 pub struct Machine;
 
+/// This component has no translatable strings.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Messages;
+impl ComponentMessages for Messages {}
+
 impl ars_core::Machine for Machine {
     type State = State;
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ctx = Context {
             items: StaticCollection::empty(),
             open: false,
@@ -286,10 +292,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
             // Open: highlight first item, focus content
@@ -471,11 +477,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

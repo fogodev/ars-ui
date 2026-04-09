@@ -678,7 +678,7 @@ iOS may fire them simultaneously.
 
 ```rust
 fn make_textfield_service() -> Service<text_field::Machine> {
-    Service::new(text_field::Props::default())
+    Service::new(text_field::Props::default(), Env::default(), Default::default())
 }
 
 #[test]

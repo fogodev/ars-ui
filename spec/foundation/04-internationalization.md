@@ -368,7 +368,13 @@ impl LocaleProvider for StaticLocaleProvider {
 
 #### 2.3.1 Canonical Per-Component Locale Inheritance Pattern
 
-**Missing provider warning:** All context hooks (`use_locale()`, `use_icu_provider()`,
+Locale, messages, and ICU provider are **environment context** resolved by the adapter
+layer — not by core component code. Core `Props` structs MUST NOT contain `locale`,
+`messages`, or `icu_provider` fields. The adapter reads these from `ArsProvider`
+context and passes them to core code via the `Env` struct and `Messages` parameter
+(see `01-architecture.md` §2.1 for the `Env` definition).
+
+**Missing provider warning:** All adapter context hooks (`use_locale()`, `use_icu_provider()`,
 `use_style_strategy()`) emit a debug-mode warning when no `ArsProvider` is found.
 This helps developers catch missing provider setup during development. The warning
 is compiled out in release builds.
@@ -388,23 +394,23 @@ fn warn_missing_provider(hook_name: &str) {
 fn warn_missing_provider(_hook_name: &str) {}
 ```
 
-ALL locale-dependent components MUST follow this inheritance pattern for locale resolution:
+The adapter resolves locale through a three-level chain:
 
-1. **Component prop** — Each locale-dependent component accepts `locale: Option<Locale>` as a prop. If provided, the component uses this locale directly.
-2. **ArsProvider inheritance** — If `locale` prop is `None`, the component calls `use_locale()` to inherit the locale from the nearest `ArsProvider` in the component tree.
-3. **Ultimate fallback** — If no `ArsProvider` is found (e.g., component is rendered outside a provider), the fallback is `Locale::parse("en-US").expect("en-US is always valid")`.
+1. **Adapter prop override** — The adapter-level component (Leptos/Dioxus) accepts `locale: Option<Locale>`. If provided, the adapter uses this locale directly.
+2. **ArsProvider inheritance** — If the adapter prop is `None`, the adapter calls `use_locale()` to read the locale from the nearest `ArsProvider` in the component tree.
+3. **Ultimate fallback** — If no `ArsProvider` is found, the fallback is `Locale::parse("en-US").expect("en-US is always valid")`.
 
 ```rust
-// Canonical locale resolution in any locale-dependent component:
-fn resolve_locale(props_locale: Option<&Locale>) -> Locale {
-    props_locale
+// resolve_locale() — an ADAPTER-ONLY utility (defined in 08-adapter-leptos.md / 09-adapter-dioxus.md).
+// NOT available in core crates. Core code receives a fully-resolved Locale via Env.
+fn resolve_locale(adapter_props_locale: Option<&Locale>) -> Locale {
+    adapter_props_locale
         .cloned()
-        .unwrap_or_else(|| use_locale())  // from ArsProvider context
+        .unwrap_or_else(|| use_locale())  // adapter hook, reads from ArsProvider
 }
 
 // use_locale() implementation (in adapter layer):
 fn use_locale() -> Locale {
-    // Adapters provide their own ArsContext type with reactive signals.
     use_context::<ArsContext>()
         .map(|ctx| ctx.locale().clone())
         .unwrap_or_else(|| {
@@ -412,40 +418,48 @@ fn use_locale() -> Locale {
             Locale::parse("en-US").expect("en-US is a valid BCP-47 tag")
         })
 }
+
+// Adapter usage — resolve env before passing to core:
+let locale = resolve_locale(adapter_props.locale.as_ref());
+let icu_provider = use_icu_provider();
+let env = Env { locale, icu_provider };
+let messages = resolve_messages::<dialog::Messages>(adapter_props.messages.as_ref(), &registries, &env.locale);
+let service = Service::new(core_props, env, messages);
 ```
 
-This pattern ensures consistent locale resolution across all components (DatePicker, NumberField, Combobox, Table, etc.) without each component implementing its own fallback logic.
+Core component code receives a fully-resolved `Env` — it never calls `use_locale()`
+or `use_context()` directly. This ensures framework-agnostic crates (`ars-core`,
+`ars-interactions`) have no dependency on adapter hooks.
 
 #### 2.3.2 Canonical ICU Provider Resolution
 
-Date-time components need locale-aware calendar data (weekday names, month names, hour cycles, etc.) via the `IcuProvider` trait (§9.5). Like locale, the provider is resolved from context — **never passed as a component prop**:
+Date-time components need locale-aware calendar data (weekday names, month names, hour cycles, etc.) via the `IcuProvider` trait (§9.5). The provider is resolved by the adapter and passed to core code via the `Env` struct — **never called from core code directly**:
 
-1. **ArsProvider inheritance** — The component calls `use_icu_provider()` to inherit the provider from the nearest provider in the component tree.
+1. **ArsProvider inheritance** — The adapter calls `use_icu_provider()` to read the provider from the nearest `ArsProvider` in the component tree.
 2. **Ultimate fallback** — If no provider is found, the fallback is `StubIcuProvider` (English-only, zero dependencies).
 
 ```rust
 // use_icu_provider() implementation (in adapter layer):
-fn use_icu_provider() -> Arc<dyn IcuProvider> {
+fn use_icu_provider() -> ArsRc<dyn IcuProvider> {
     use_context::<ArsContext>()
         .map(|ctx| ctx.icu_provider())
         .unwrap_or_else(|| {
             warn_missing_provider("use_icu_provider");
-            Arc::new(StubIcuProvider)
+            ArsRc::new(StubIcuProvider)
         })
 }
 ```
 
-Components call `use_icu_provider()` directly — no wrapper needed.
-
-Components store the resolved provider in `Context` (not `Props`):
+The adapter calls `use_icu_provider()` and passes the result via `Env.icu_provider`.
+Core component code accesses the provider from `Env` during `init()`:
 
 ```rust
-// In Props: NO provider field — resolved from context.
+// In Props: NO provider field — resolved by the adapter.
 // In Context:
-pub provider: Arc<dyn IcuProvider>,
+pub provider: ArsRc<dyn IcuProvider>,
 
 // In init():
-provider: use_icu_provider(),
+provider: env.icu_provider.clone(),
 ```
 
 This mirrors how React Aria resolves calendar data through its `I18nProvider` and how Ark UI uses the browser's `Intl` API — the data source is an application-level concern, not a per-component prop.
@@ -2228,7 +2242,7 @@ The `MessagesProvider` is exposed by each framework adapter (Leptos, Dioxus) as 
 **Normative rule — no hardcoded English in connect functions:**
 Every `aria-label`, `aria-valuetext`, `aria-roledescription`, and live-region announcement string
 that is set inside a connect function (e.g., `attrs.set(HtmlAttr::Aria(AriaAttr::Label), ...)`) **MUST**
-read from `self.props.messages` (or the component's `Messages` struct). Hardcoding English string
+read from the component's `Messages` struct (via `self.ctx.messages`). Hardcoding English string
 literals directly in connect code is a spec violation because it bypasses the `Messages` override
 mechanism and makes the string untranslatable. The only acceptable English strings are the
 **defaults inside `impl Default for xxx::Messages`**, which serve as the en-US baseline.
@@ -2237,18 +2251,17 @@ mechanism and makes the string untranslatable. The only acceptable English strin
 text at call time. This means every message invocation in a connect function passes the active
 locale. The three patterns for how locale reaches the call site are:
 
-| Component type                                                       | Locale source                                                                                                           | Access pattern                            |
-| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| **Stateful** (has `Machine` + `Context`)                             | `Context` struct carries `locale: Locale`, populated by the adapter from `ArsProvider` during `init()` / `transition()` | `(self.messages.label)(&self.ctx.locale)` |
-| **Stateless with `Api`** (no state machine, but has an `Api` struct) | `Api` struct carries `locale: &'a Locale`, passed by the adapter when constructing the `Api`                            | `(self.messages.label)(self.locale)`      |
-| **Standalone function** (no `Api` struct)                            | `locale: &Locale` is a function parameter, passed by the adapter                                                        | `(messages.label)(locale)`                |
+| Component type                                                       | Locale source                                                                                                                                  | Access pattern                                |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| **Stateful** (has `Machine` + `Context`)                             | Adapter constructs `Env { locale, icu_provider }`, passes to `Machine::init(props, &env, &messages)`. `init()` stores `env.locale` in Context. | `(self.ctx.messages.label)(&self.ctx.locale)` |
+| **Stateless with `Api`** (no state machine, but has an `Api` struct) | Adapter passes `&Env` to `Api::new(props, env, messages)`. Api stores `&env.locale`.                                                           | `(self.messages.label)(self.locale)`          |
+| **Standalone function** (no `Api` struct)                            | Adapter passes `locale: &Locale` directly as a function parameter.                                                                             | `(messages.label)(locale)`                    |
 
-For stateful components, the adapter layer is responsible for copying the locale from
-`ArsProvider` context into the machine's `Context` struct. This happens during
-`init()` (initial value) and on locale changes via `set_props()` or a dedicated
-`SetLocale` event. The `transition()` function copies the locale from props/environment
-into the context so that `connect()` → `Api` → `root_attrs()` can access it via
-`self.ctx.locale`. See `01-architecture.md` §6.4.2 for the locale selection rule.
+For stateful components, the adapter resolves locale from `ArsProvider` context,
+places it in the `Env` struct, and passes `Env` to `Machine::init()`. The `init()`
+function stores `env.locale.clone()` in the machine's `Context` struct. Connect
+functions then access it via `self.ctx.locale`. See `01-architecture.md` §6.4.3
+for the environment resolution rule.
 
 **Closure fields** use `MessageFn<dyn Fn>` (`Arc` on native, `Rc` on WASM — not `Box`) so the struct remains `Clone`.
 `MessageFn<T>` implements `Debug` by printing `"<closure>"`, so all Messages structs
@@ -2541,9 +2554,9 @@ impl<M: ComponentMessages> MessagesRegistry<M> {
 
 ### 7.3 I18n Registries and Global Message Resolution
 
-Components resolve messages through a three-level chain — matching the locale resolution pattern:
+The adapter resolves messages through a three-level chain — matching the locale resolution pattern:
 
-1. **Component prop** — `messages: Option<Messages>` per-instance override (highest priority)
+1. **Adapter prop override** — `messages: Option<Messages>` on the adapter-level component (highest priority)
 2. **ArsProvider context** — Application-level `I18nRegistries` bundled in `ArsContext`
 3. **Built-in defaults** — `Messages::default()` (English fallbacks)
 
@@ -2577,64 +2590,67 @@ impl I18nRegistries {
 }
 ````
 
-**Canonical resolution function** — called by every component in `init()` (stateful) or `Api::new()` (stateless):
+**Canonical resolution function** — a **pure function** called by the adapter before constructing
+a `Service` or `Api`. Takes `registries` as an explicit parameter; does NOT call `use_context()`.
+Can live in `ars-i18n` or `ars-core`.
 
-````rust
+```rust
 /// Resolve messages for a component following the three-level chain.
 ///
-/// - `props_messages`: The optional per-instance override from Props.
-/// - `locale`: The resolved locale (from `resolve_locale()`).
+/// This is a pure function — no framework hooks. The adapter passes
+/// `registries` explicitly after reading them from `ArsContext`.
 ///
-/// Components call this in init():
-/// ```rust
-/// let locale = resolve_locale(props.locale.as_ref());
-/// let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
-/// ```
+/// - `adapter_props_messages`: The optional per-instance override from the adapter's Props.
+/// - `registries`: The `I18nRegistries` from `ArsContext`.
+/// - `locale`: The resolved locale (from `resolve_locale()`).
 fn resolve_messages<M: ComponentMessages + 'static>(
-    props_messages: Option<&M>,
+    adapter_props_messages: Option<&M>,
+    registries: &I18nRegistries,
     locale: &Locale,
 ) -> M {
-    // Level 1: explicit prop override
-    if let Some(m) = props_messages {
+    // Level 1: explicit adapter prop override
+    if let Some(m) = adapter_props_messages {
         return m.clone();
     }
     // Level 2: ArsProvider i18n registries
-    if let Some(registries) = use_context::<ArsContext>().map(|ctx| Rc::clone(&ctx.i18n_registries)) {
-        if let Some(registry) = registries.get::<M>() {
-            return registry.get(locale).clone();
-        }
+    if let Some(registry) = registries.get::<M>() {
+        return registry.get(locale).clone();
     }
     // Level 3: built-in defaults
     M::default()
 }
-````
+```
 
-**Component Props pattern:**
+**Core component Props pattern** — Props contain only behavioral configuration.
+Locale and messages are NOT in Props; they arrive via `Env` and `Messages` parameters:
 
 ```rust
-// Props: messages is OPTIONAL (None = resolve from provider or defaults)
+// Core Props: NO locale or messages fields.
 pub struct Props {
-    pub messages: Option<Messages>,
-    pub locale: Option<Locale>,
-    // ...
+    pub id: String,
+    // ... behavioral configuration only ...
 }
 
-impl Default for Props {
-    fn default() -> Self {
-        Self {
-            messages: None,  // resolved via resolve_messages() in init()
-            locale: None,    // resolved via resolve_locale() in init()
-            // ...
-        }
-    }
-}
-
-// init(): resolve both locale and messages
-fn init(props: &Props) -> (State, Context) {
-    let locale = resolve_locale(props.locale.as_ref());
-    let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+// init(): receives Env and Messages from the adapter.
+fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+    let locale = env.locale.clone();
+    let messages = messages.clone();
     // ...
 }
+```
+
+**Adapter usage** — the adapter resolves environment values and passes them to core:
+
+```rust
+// In Leptos/Dioxus adapter component:
+let locale = resolve_locale(adapter_props.locale.as_ref());
+let icu_provider = use_icu_provider();
+let registries = use_i18n_registries();
+let messages = resolve_messages::<dialog::Messages>(
+    adapter_props.messages.as_ref(), &registries, &locale,
+);
+let env = Env { locale, icu_provider };
+let service = Service::new(core_props, env, messages);
 ```
 
 **Application setup:**

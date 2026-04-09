@@ -65,7 +65,7 @@ pub struct Props {
     /// Calendar/locale data provider for date-time components.
     /// Production uses `Icu4xProvider`; tests use `StubIcuProvider`.
     /// Defaults to `StubIcuProvider` (English-only).
-    pub icu_provider: Option<Arc<dyn IcuProvider>>,
+    pub icu_provider: Option<ArsRc<dyn IcuProvider>>,
 
     /// Per-component translation message registries.
     /// Defaults to empty (components use built-in English defaults).
@@ -95,8 +95,8 @@ pub struct ArsContext {
     root_node_id: Option<String>,
     platform: ArsRc<dyn PlatformEffects>,
     modality: ArsRc<dyn ModalityContext>,
-    icu_provider: Arc<dyn IcuProvider>,
-    i18n_registries: Rc<I18nRegistries>,
+    icu_provider: ArsRc<dyn IcuProvider>,
+    i18n_registries: ArsRc<I18nRegistries>,
     style_strategy: StyleStrategy,
 }
 
@@ -122,7 +122,7 @@ impl ArsContext {
     /// Returns the provider-scoped modality context.
     pub fn modality(&self) -> ArsRc<dyn ModalityContext> { ArsRc::clone(&self.modality) }
     /// Returns the ICU calendar/locale data provider.
-    pub fn icu_provider(&self) -> Arc<dyn IcuProvider> { Arc::clone(&self.icu_provider) }
+    pub fn icu_provider(&self) -> ArsRc<dyn IcuProvider> { ArsRc::clone(&self.icu_provider) }
     /// Returns the i18n translation registries.
     pub fn i18n_registries(&self) -> &I18nRegistries { &self.i18n_registries }
     /// Returns the active CSS style injection strategy.

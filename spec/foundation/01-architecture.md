@@ -434,6 +434,31 @@ pub trait ConnectApi {
 /// - Non-`String` `id` field → `"HasId: `id` field must be of type String"`
 /// - Applied to enum or union → `"HasId can only be derived for structs"`
 
+/// Adapter-resolved environment context passed to `Machine::init()`.
+///
+/// The adapter reads these values from `ArsProvider` / `ArsContext` and passes
+/// them to framework-agnostic core code. Core component code **never** calls
+/// framework hooks (`use_locale()`, `use_icu_provider()`, `use_context()`) —
+/// all environment values arrive through this struct.
+///
+/// Non-date-time components ignore `icu_provider` (it defaults to `StubIcuProvider`).
+pub struct Env {
+    /// The resolved locale from `ArsProvider`.
+    pub locale: Locale,
+    /// Calendar/locale data provider for date-time formatting.
+    /// Defaults to `StubIcuProvider` (English-only, zero dependencies).
+    pub icu_provider: ArsRc<dyn IcuProvider>,
+}
+
+impl Default for Env {
+    fn default() -> Self {
+        Self {
+            locale: Locale::parse("en-US").expect("en-US is a valid BCP-47 tag"),
+            icu_provider: ArsRc::new(StubIcuProvider),
+        }
+    }
+}
+
 /// A finite state machine definition for a UI component.
 ///
 /// Bounds are inlined on associated types — no separate marker traits needed.
@@ -442,10 +467,16 @@ pub trait Machine: Sized + 'static {
     type Event: Clone + Debug;          // PartialEq removed — core engine never compares events; avoids O(n) cost on events like UpdateItems(Vec<..>)
     type Context: Clone + Debug;        // Debug added — enables logging/inspection of context
     type Props: Clone + PartialEq + HasId; // PartialEq required for Dioxus memoization; Clone for reactive prop sync; HasId for adapter ID access
+    type Messages: ComponentMessages + Clone + Default + 'static; // Per-component i18n messages type
     type Api<'a>: ConnectApi;           // ConnectApi bound enables generic adapter utilities (e.g., part_attrs() access)
 
-    /// Initialize the machine from props, returning initial state and context.
-    fn init(props: &Self::Props) -> (Self::State, Self::Context);
+    /// Initialize the machine from props and adapter-resolved environment values,
+    /// returning initial state and context.
+    ///
+    /// The adapter resolves `env` (locale, ICU provider) and `messages` from
+    /// `ArsProvider` context before calling this method. Core code never calls
+    /// framework hooks — all environment values arrive as parameters.
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context);
 
     /// Pure decision function. Reads state and context immutably, returns a transition plan.
     /// Guards see consistent pre-transition state because context is immutable here.
@@ -1774,9 +1805,9 @@ pub struct Service<M: Machine> {
 }
 
 impl<M: Machine> Service<M> {
-    pub fn new(props: M::Props) -> Self {
+    pub fn new(props: M::Props, env: Env, messages: M::Messages) -> Self {
         debug_assert!(!props.id().is_empty(), "Props::id must not be empty");
-        let (state, context) = M::init(&props);
+        let (state, context) = M::init(&props, &env, &messages);
         Self {
             state,
             context,
@@ -1793,9 +1824,9 @@ impl<M: Machine> Service<M> {
     /// contains computed IDs, derived flags, etc.) is always correctly derived
     /// from props, while state is restored from the server snapshot.
     #[cfg(feature = "ssr")]
-    pub fn new_hydrated(props: M::Props, state: M::State) -> Self {
+    pub fn new_hydrated(props: M::Props, state: M::State, env: Env, messages: M::Messages) -> Self {
         debug_assert!(!props.id().is_empty(), "Props::id must not be empty");
-        let (_init_state, context) = M::init(&props);
+        let (_init_state, context) = M::init(&props, &env, &messages);
         Self {
             state,
             context,
@@ -1818,10 +1849,11 @@ impl<M: Machine> Service<M> {
 
     /// Test-only: force the service into a specific state. Re-derives context
     /// from the new state and current props via `Machine::init`, discarding
-    /// the init state. Used by keyboard matrix tests to start from arbitrary states.
+    /// the init state. Uses default env and messages. Used by keyboard matrix
+    /// tests to start from arbitrary states.
     #[cfg(test)]
     pub fn set_state_for_test(&mut self, state: M::State) {
-        let (_init_state, context) = M::init(&self.props);
+        let (_init_state, context) = M::init(&self.props, &Env::default(), &M::Messages::default());
         self.state = state;
         self.context = context;
     }
@@ -2469,10 +2501,10 @@ pub mod toggle {
     /// The lifetime `'a` on `Api` enforces that it cannot outlive the `send`
     /// callback or the `Service` borrow.
     pub struct Api<'a> {
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
     }
 
     impl<'a> Api<'a> {
@@ -2528,14 +2560,20 @@ pub mod toggle {
     pub struct Machine;
 
     // Fully-qualified path avoids shadowing the local `Machine` struct name.
+    /// Toggle has no translatable strings, so Messages is a unit struct.
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct Messages;
+    impl ComponentMessages for Messages {}
+
     impl ars_core::Machine for Machine {
         type State = State;
         type Event = Event;
         type Context = Context;
         type Props = Props;
+        type Messages = Messages;
         type Api<'a> = Api<'a>;  // Lifetime `'a` is bound to the `send` closure in `connect()` — see §2.4
 
-        fn init(props: &Props) -> (State, Context) {
+        fn init(props: &Props, _env: &Env, _messages: &Messages) -> (State, Context) {
             let pressed = match props.pressed {
                 Some(v) => Bindable::controlled(v),
                 None => Bindable::uncontrolled(props.default_pressed),
@@ -4308,10 +4346,10 @@ pub mod checkbox {
     }
 
     pub struct Api<'a> {
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
     }
 
     impl<'a> Api<'a> {
@@ -4532,7 +4570,7 @@ SSR Idempotency: `props.id` MUST be stable across SSR/hydration. Adapters MUST a
 //   - "ars-3-description" (ids.part("description"))
 
 // In a machine's init():
-fn init(props: &Props) -> (State, Context) {
+fn init(props: &Props, _env: &Env, _messages: &Messages) -> (State, Context) {
     let ids = ComponentIds::from_id(props.id());
     (State::default(), Context {
         trigger_id: ids.part("trigger"),
@@ -4682,7 +4720,7 @@ pub enum ColorMode {
 | `root_node_id`        | `Option<String>`                            | ID of the root node for focus scope and portal queries. `None` means default.  |
 | `platform`            | `ArsRc<dyn PlatformEffects>`                | Platform capabilities for side effects. Defaults to `NullPlatformEffects`.     |
 | `modality`            | `ArsRc<dyn ModalityContext>`                | Shared input-modality state for the current provider root.                     |
-| `icu_provider`        | `Arc<dyn IcuProvider>`                      | Calendar/locale data for date-time components. Defaults to `StubIcuProvider`.  |
+| `icu_provider`        | `ArsRc<dyn IcuProvider>`                    | Calendar/locale data for date-time components. Defaults to `StubIcuProvider`.  |
 | `i18n_registries`     | `Rc<I18nRegistries>`                        | Per-component translation registries. Defaults to empty (English fallbacks).   |
 | `style_strategy`      | `StyleStrategy`                             | CSS style injection strategy. Defaults to `StyleStrategy::Inline`.             |
 
@@ -4694,20 +4732,27 @@ hooks read from `ArsContext` with fallback defaults:
 - `use_modality_context()` — shared input-modality state
 - `use_icu_provider()` — calendar/locale data
 - `use_style_strategy()` — CSS style strategy, falls back to `Inline`
-- `resolve_messages::<M>()` — translation registries
+- `resolve_messages::<M>()` — translation registries (pure function, not a hook — takes `&I18nRegistries` explicitly)
 
-#### 6.4.3 Locale Selection Rule
+#### 6.4.3 Environment Resolution Rule
 
-Locale is provided by `ArsProvider` and accessible via `ctx.locale`. Components
-MUST NOT accept locale as a prop. This ensures a single source of truth for locale across
-the component tree and prevents mismatches between parent and child locale assumptions.
+Locale, messages, and ICU provider are **environment context** provided by `ArsProvider`.
+Core component `Props` structs MUST NOT contain `locale`, `messages`, or `icu_provider`
+fields — these are resolved by the adapter and passed explicitly via the `Env` struct
+and `Messages` parameter.
 
-**How locale reaches connect functions:** The adapter reads locale from `ArsProvider`
-context and writes it into the machine's `Context` struct (e.g., `ctx.locale: Locale`).
+Adapter component Props (in `ars-leptos` / `ars-dioxus`) MAY accept
+`locale: Option<Locale>` and `messages: Option<Messages>` as optional override props.
+The three-level resolution chain (prop override → ArsProvider → default) lives entirely
+in adapter code. See `04-internationalization.md` §2.3.1 for the adapter-side pattern.
+
+**How locale reaches connect functions:** The adapter resolves locale from `ArsProvider`
+context and passes it to `Machine::init()` via the `Env` struct. The `init()` function
+stores `env.locale` in the machine's `Context` struct (e.g., `ctx.locale: Locale`).
 Connect functions then pass `&self.ctx.locale` to `MessageFn` closures when resolving
 translatable strings. For stateless components (no `Machine`), the adapter passes
-`&Locale` directly to the `Api` struct or as a function parameter. See
-`04-internationalization.md` §7.1 for the full pattern.
+`&Env` directly to the `Api` struct or individual parameters to standalone functions.
+See `04-internationalization.md` §7.1 for the full pattern.
 
 ## 7. Error Handling Strategy
 

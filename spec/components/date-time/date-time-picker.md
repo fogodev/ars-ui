@@ -305,8 +305,6 @@ pub struct Props {
     pub calendar: CalendarSystem,
     /// Hour cycle override. `HourCycle::Auto` uses the locale default.
     pub hour_cycle: HourCycle,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     /// Whether the field is required.
     pub required: bool,
     /// Label text.
@@ -321,8 +319,6 @@ pub struct Props {
     pub is_rtl: bool,
     /// Number of months to display in the calendar popover. Default: `1`.
     pub visible_months: usize,
-    /// Localized messages. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -339,7 +335,6 @@ impl Default for Props {
             name: None,
             calendar: CalendarSystem::Gregorian,
             hour_cycle: HourCycle::Auto,
-            locale: None,
             required: false,
             label: String::new(),
             description: None,
@@ -347,7 +342,6 @@ impl Default for Props {
             invalid: false,
             is_rtl: false,
             visible_months: 1,
-            messages: None,
         }
     }
 }
@@ -506,16 +500,17 @@ impl ars_core::Machine for Machine {
     type Event   = Event;
     type Context = Context;
     type Props   = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let value = match props.value {
             Some(v) => Bindable::controlled(v),
             None    => Bindable::uncontrolled(props.default_value.clone()),
         };
 
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
 
         let date_value = value.get().as_ref().map(|dt| dt.date.clone());
         let time_value = value.get().as_ref().map(|dt| dt.time);
@@ -1279,7 +1274,6 @@ impl<'a> Api<'a> {
             max: self.ctx.max_value.as_ref().map(|dt| dt.date.clone()),
             disabled: self.ctx.disabled,
             readonly: self.ctx.readonly,
-            locale: Some(self.ctx.locale.clone()),
             is_rtl: self.ctx.is_rtl,
             visible_months: self.props.visible_months,
             ..calendar::Props::default()

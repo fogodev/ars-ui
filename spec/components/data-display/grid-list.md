@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, collections, interactions]
 shared_deps: []
 related: []
 references:
-  react-aria: GridList
+    react-aria: GridList
 ---
 
 # GridList
@@ -145,10 +145,7 @@ pub struct Props {
     ///   independently; useful when items contain complex interactive content
     ///   that needs its own focus management.
     pub composite: bool,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     /// Localizable messages for position announcements.
-    pub messages: Option<Messages>,
     /// Callback invoked when the loading sentinel enters the viewport,
     /// signalling that the next page of items should be loaded. When `None`,
     /// the `LoadingSentinel` part is not rendered. See `06-collections.md` §5.3.
@@ -176,8 +173,6 @@ impl Default for Props {
             escape_key_behavior: EscapeKeyBehavior::ClearSelection,
             label: None,
             composite: true,
-            locale: None,
-            messages: None,
             on_load_more: None,
             loading: false,
         }
@@ -264,11 +259,12 @@ impl ars_core::Machine for Machine {
     type Event   = Event;
     type Context = Context;
     type Props   = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let columns = props.columns.unwrap_or(props.items.len().max(1));
         (State::Idle, Context {
             items: props.items.clone(),
@@ -290,10 +286,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx:   &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx:   &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         if ctx.disabled {
             return match event {
@@ -468,11 +464,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx:   &'a Context,
-        props: &'a Props,
-        send:  &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx:   &'a Self::Context,
+        props: &'a Self::Props,
+        send:  &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }
@@ -687,11 +683,11 @@ GridList
   in grid layouts. ArrowUp/ArrowDown navigate within the same column across rows.
 - **Composite mode** (`composite` prop):
   - `composite: true` (default) — `role="grid"` on root. Single tab stop; arrow keys navigate
-    between cells. This is the standard ARIA grid keyboard pattern.
+      between cells. This is the standard ARIA grid keyboard pattern.
   - `composite: false` — `role="list"` on root, `role="listitem"` on each item. Each item is
-    an independent tab stop. Arrow keys are not captured. Useful when grid items contain complex
-    interactive content (e.g., embedded forms, multi-action cards) that needs its own focus
-    management.
+      an independent tab stop. Arrow keys are not captured. Useful when grid items contain complex
+      interactive content (e.g., embedded forms, multi-action cards) that needs its own focus
+      management.
 - **Link items** (`href` on `ItemDef`): When a grid item has an `href`, the adapter renders the
   `Cell` as an `<a>` element. The `role="gridcell"` on the cell and `role="row"` on the parent
   row are preserved -- the `<a>` carries the grid role, not `role="link"`. This allows native

@@ -35,10 +35,6 @@ pub struct Props {
     pub mime_type: Option<String>,
     /// Disabled state. When true, the trigger is visually and functionally disabled.
     pub disabled: bool,
-    /// Locale override. When `None`, inherits from nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Localizable strings. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -49,8 +45,6 @@ impl Default for Props {
             filename: None,
             mime_type: None,
             disabled: false,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -73,9 +67,7 @@ pub struct Api<'a> {
 }
 
 impl<'a> Api<'a> {
-    pub fn new(props: &'a Props) -> Self {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    pub fn new(props: &'a Props, locale: Locale, messages: Messages) -> Self {
         Self { props, locale, messages }
     }
 

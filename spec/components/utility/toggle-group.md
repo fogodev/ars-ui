@@ -6,9 +6,9 @@ foundation_deps: [architecture, accessibility, interactions, forms, collections]
 shared_deps: []
 related: [toggle-button, toggle]
 references:
-  ark-ui: ToggleGroup
-  radix-ui: ToggleGroup
-  react-aria: ToggleButtonGroup
+    ark-ui: ToggleGroup
+    radix-ui: ToggleGroup
+    react-aria: ToggleButtonGroup
 ---
 
 # ToggleGroup
@@ -218,8 +218,6 @@ pub struct Props {
     pub invalid: bool,
     /// Whether a selection is required (set by form validation).
     pub required: bool,
-    /// Locale override. When `None`, inherits from nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     /// Associates the group's hidden inputs with a `<form>` element by `id`,
     /// even if the group is not a descendant of that form. Threaded to
     /// `HiddenInputConfig::form_id`.
@@ -232,8 +230,6 @@ pub struct Props {
     /// disabled: `aria-disabled="true"`, press handlers skipped, excluded from
     /// roving tabindex navigation.
     pub disabled_items: BTreeSet<Key>,
-    /// Translatable messages. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -254,11 +250,9 @@ impl Default for Props {
             name: None,
             invalid: false,
             required: false,
-            locale: None,
             form: None,
             read_only: false,
             disabled_items: BTreeSet::new(),
-            messages: None,
         }
     }
 }
@@ -276,11 +270,12 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(&props.id);
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
 
         let value = match &props.value {
             Some(v) => Bindable::controlled(v.clone()),
@@ -307,10 +302,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         // Disabled groups still allow keyboard navigation for screen reader discoverability (WAI-ARIA)
         if ctx.disabled && matches!(event,
@@ -342,7 +337,6 @@ impl ars_core::Machine for Machine {
                 let loop_focus = props.loop_focus;
                 let roving_focus = props.roving_focus;
                 let disallow_empty_selection = props.disallow_empty_selection;
-                let locale = resolve_locale(props.locale.as_ref());
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.disabled = disabled;
                     ctx.selection_mode = selection_mode;
@@ -351,7 +345,6 @@ impl ars_core::Machine for Machine {
                     ctx.loop_focus = loop_focus;
                     ctx.roving_focus = roving_focus;
                     ctx.disallow_empty_selection = disallow_empty_selection;
-                    ctx.locale = locale;
                 }))
             }
             // ── SelectItem ───────────────────────────────────────────────────
@@ -574,7 +567,6 @@ impl ars_core::Machine for Machine {
             || old.selection_mode != new.selection_mode
             || old.read_only != new.read_only
             || old.disallow_empty_selection != new.disallow_empty_selection
-            || old.locale != new.locale
         {
             events.push(Event::SetProps);
         }
@@ -582,10 +574,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
@@ -917,10 +909,10 @@ invisible. Selected items MUST have a visible border or outline fallback:
 
 ```css
 @media (forced-colors: active) {
-  [data-ars-selected="true"] {
-    outline: 2px solid Highlight;
-    outline-offset: -2px;
-  }
+    [data-ars-selected="true"] {
+        outline: 2px solid Highlight;
+        outline-offset: -2px;
+    }
 }
 ```
 

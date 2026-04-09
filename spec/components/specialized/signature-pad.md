@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: []
 references:
-  ark-ui: SignaturePad
+    ark-ui: SignaturePad
 ---
 
 # SignaturePad
@@ -234,10 +234,6 @@ pub struct Props {
     pub min_distance: f64,
     /// Name for form submission.
     pub name: Option<String>,
-    /// Locale override. When `None`, resolved via `resolve_locale()`.
-    pub locale: Option<Locale>,
-    /// Translatable messages. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -252,8 +248,6 @@ impl Default for Props {
             pen_width: 2.0,
             min_distance: 3.0,
             name: None,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -270,9 +264,10 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let data = match &props.data {
             Some(d) => Bindable::controlled(d.clone()),
             None => Bindable::uncontrolled(props.default_data.clone()),
@@ -285,8 +280,8 @@ impl ars_core::Machine for Machine {
         };
 
         let ids = ComponentIds::from_id(&props.id);
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
 
         (state, Context {
             data,
@@ -304,10 +299,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        _props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         // Focus/Blur always pass through regardless of disabled/readonly.
         match event {
@@ -410,12 +405,12 @@ impl ars_core::Machine for Machine {
         }
     }
 
-    fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+    fn connect(
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

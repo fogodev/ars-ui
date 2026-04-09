@@ -6,9 +6,9 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: [z-index-stacking]
 related: []
 references:
-  ark-ui: Toast
-  radix-ui: Toast
-  react-aria: Toast
+    ark-ui: Toast
+    radix-ui: Toast
+    react-aria: Toast
 ---
 
 # Toast
@@ -137,10 +137,6 @@ pub struct Props {
     pub duration: Option<u32>,
     /// Whether to show a progress bar.
     pub show_progress: bool,
-    /// Messages for accessibility labels (see §5.1 Messages).
-    pub messages: Option<Messages>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
 }
 
 impl Default for Props {
@@ -152,8 +148,6 @@ impl Default for Props {
             kind: Kind::Info,
             duration: Some(5000),
             show_progress: false,
-            messages: None,
-            locale: None,
         }
     }
 }
@@ -191,11 +185,12 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         (State::Visible, Context {
             locale,
             id: props.id.clone(),
@@ -888,7 +883,7 @@ The progress value is exposed as a CSS custom property for styling:
 
 ```css
 [data-ars-part="progress-bar"] {
-  --ars-toast-progress: 0; /* 0.0 to 1.0, updated by the adapter */
+    --ars-toast-progress: 0; /* 0.0 to 1.0, updated by the adapter */
 }
 ```
 

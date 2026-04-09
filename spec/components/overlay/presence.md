@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: []
 references:
-  ark-ui: Presence
+    ark-ui: Presence
 ---
 
 # Presence
@@ -113,9 +113,9 @@ When the user has `prefers-reduced-motion: reduce` set in their OS/browser prefe
 
 1. **All animations MUST complete in 0ms** or be omitted entirely. Presence detects this via `window.matchMedia('(prefers-reduced-motion: reduce)')`.
 2. When reduced motion is active:
-   - `skip_animation` in Props is effectively `true` regardless of its configured value.
-   - The `Mounted → Unmount` transition skips `UnmountPending` entirely and goes directly to `Unmounted`.
-   - Entry animations (`data-ars-state="open"`) still apply but with `animation-duration: 0s` — the element appears instantly.
+    - `skip_animation` in Props is effectively `true` regardless of its configured value.
+    - The `Mounted → Unmount` transition skips `UnmountPending` entirely and goes directly to `Unmounted`.
+    - Entry animations (`data-ars-state="open"`) still apply but with `animation-duration: 0s` — the element appears instantly.
 3. Presence MUST **not wait** for `animationend` or `transitionend` events when reduced motion is active, as these events may never fire when durations are zero.
 4. The `matchMedia` query is evaluated **once** at effect setup time and cached for the lifecycle of that effect. However, Presence MUST also register a dynamic listener to handle mid-animation preference changes as described below.
 
@@ -159,11 +159,11 @@ When the page becomes hidden (user switches tabs, minimizes window), animations 
 
 - Listen to `document.addEventListener('visibilitychange', ...)` in the `"listen-animation-end"` effect.
 - When `document.visibilityState === "hidden"`:
-  - Pause the 5000ms fallback timeout by recording elapsed time via `performance.now()`.
-  - Browsers may throttle or pause `requestAnimationFrame` callbacks in background tabs — do not rely on rAF for timing while hidden.
+    - Pause the 5000ms fallback timeout by recording elapsed time via `performance.now()`.
+    - Browsers may throttle or pause `requestAnimationFrame` callbacks in background tabs — do not rely on rAF for timing while hidden.
 - When `document.visibilityState === "visible"`:
-  - Resume the fallback timeout with the remaining duration.
-  - Trigger a fresh `getComputedStyle()` read to check if the animation completed while hidden.
+    - Resume the fallback timeout with the remaining duration.
+    - Trigger a fresh `getComputedStyle()` read to check if the animation completed while hidden.
 
 **Batch Announcements:**
 
@@ -196,11 +196,11 @@ When a component is being removed from the DOM while an animation is still in pr
 4. **State access guard**: Animation callbacks that access component state (context, props, signals) MUST verify the component is still alive before reading or writing state. In Rust frameworks, this means checking that `Rc`/`Arc` references have not been dropped (e.g., `Weak::upgrade()` returns `Some`).
 
 5. **Cleanup ordering**: The effect cleanup function MUST:
-   - Set the `completed` flag to `true` (prevents any pending listener from firing)
-   - Cancel the fallback timeout
-   - Remove `animationend` and `transitionend` event listeners
-   - Call `animation.cancel()` on any Web Animations API animations
-   - All of the above synchronously, in a single synchronous cleanup call
+    - Set the `completed` flag to `true` (prevents any pending listener from firing)
+    - Cancel the fallback timeout
+    - Remove `animationend` and `transitionend` event listeners
+    - Call `animation.cancel()` on any Web Animations API animations
+    - All of the above synchronously, in a single synchronous cleanup call
 
 ### 1.9 Full Machine Implementation
 
@@ -208,14 +208,20 @@ When a component is being removed from the DOM while an animation is still in pr
 /// The machine for the `Presence` component.
 pub struct Machine;
 
+/// This component has no translatable strings.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Messages;
+impl ComponentMessages for Messages {}
+
 impl ars_core::Machine for Machine {
     type State = State;
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Props, _env: &Env, _messages: &Messages) -> (State, Context) {
         let initial_state = if props.present {
             State::Mounted
         } else {
@@ -231,10 +237,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        _ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        _ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
             // ── Present becomes true ─────────────────────────────────────────
@@ -400,11 +406,11 @@ impl ars_core::Machine for Machine {
     // elements during the exit animation.
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }
@@ -445,10 +451,10 @@ impl ars_core::Machine for Machine {
 >
 > ```js
 > requestAnimationFrame(() => {
->   requestAnimationFrame(() => {
->     const style = getComputedStyle(element);
->     // Now safe to read transitionDuration, animationName, etc.
->   });
+>     requestAnimationFrame(() => {
+>         const style = getComputedStyle(element);
+>         // Now safe to read transitionDuration, animationName, etc.
+>     });
 > });
 > ```
 >
@@ -584,35 +590,35 @@ The overlay component that composes Presence (Dialog, Tooltip, etc.) is responsi
 ```css
 /* Entry animation — runs when data-ars-state transitions to "open" */
 [data-ars-scope="tooltip"][data-ars-state="open"] {
-  animation: tooltip-in 150ms ease-out;
+    animation: tooltip-in 150ms ease-out;
 }
 
 /* Exit animation — runs when data-ars-state transitions to "closed"
    Presence keeps the element in the DOM until this finishes. */
 [data-ars-scope="tooltip"][data-ars-state="closed"] {
-  animation: tooltip-out 100ms ease-in;
+    animation: tooltip-out 100ms ease-in;
 }
 
 @keyframes tooltip-in {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
 }
 
 @keyframes tooltip-out {
-  from {
-    opacity: 1;
-    transform: scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: scale(0.95);
-  }
+    from {
+        opacity: 1;
+        transform: scale(1);
+    }
+    to {
+        opacity: 0;
+        transform: scale(0.95);
+    }
 }
 ```
 
@@ -631,15 +637,15 @@ The following overlay components **MUST** wrap their content in a Presence machi
 **Timing contract:**
 
 1. **Entry** (mount → visible):
-   - Presence transitions to `Mounted` — the adapter renders the element into the DOM.
-   - The overlay component sets `data-ars-state="open"` — CSS entry animation triggers.
-   - If no animation, both steps appear instantaneous.
+    - Presence transitions to `Mounted` — the adapter renders the element into the DOM.
+    - The overlay component sets `data-ars-state="open"` — CSS entry animation triggers.
+    - If no animation, both steps appear instantaneous.
 
 2. **Exit** (visible → unmount):
-   - The overlay component sets `data-ars-state="closed"` — CSS exit animation triggers.
-   - Presence transitions to `UnmountPending` and the `"listen-animation-end"` effect attaches `animationend`/`transitionend` listeners.
-   - On animation/transition end, Presence transitions to `Unmounted` — the adapter removes the element from the DOM.
-   - If no exit animation/transition is detected (or `skip_animation` is true), Presence skips `UnmountPending` and unmounts immediately.
+    - The overlay component sets `data-ars-state="closed"` — CSS exit animation triggers.
+    - Presence transitions to `UnmountPending` and the `"listen-animation-end"` effect attaches `animationend`/`transitionend` listeners.
+    - On animation/transition end, Presence transitions to `Unmounted` — the adapter removes the element from the DOM.
+    - If no exit animation/transition is detected (or `skip_animation` is true), Presence skips `UnmountPending` and unmounts immediately.
 
 **Consequence**: Overlay components that skip Presence will unmount instantly, losing exit animations.
 

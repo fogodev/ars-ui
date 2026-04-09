@@ -6,9 +6,9 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: []
 references:
-  ark-ui: Accordion
-  radix-ui: Accordion
-  react-aria: DisclosureGroup
+    ark-ui: Accordion
+    radix-ui: Accordion
+    react-aria: DisclosureGroup
 ---
 
 # Accordion
@@ -210,14 +210,20 @@ pub enum Event {
 /// Machine for the `Accordion` component.
 pub struct Machine;
 
+/// This component has no translatable strings.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Messages;
+impl ComponentMessages for Messages {}
+
 impl ars_core::Machine for Machine {
     type State   = State;
     type Event   = Event;
     type Context = Context;
     type Props   = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Props, _env: &Env, _messages: &Messages) -> (State, Context) {
         let value = match &props.value {
             Some(v) => Bindable::controlled(v.clone()),
             None    => Bindable::uncontrolled(props.default_value.clone()),
@@ -238,10 +244,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         // Machine-level disabled guard for mutation events
         match event {
@@ -410,10 +416,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }

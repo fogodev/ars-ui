@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: [layout-shared-types]
 related: []
 references:
-  ark-ui: ScrollArea
-  radix-ui: ScrollArea
+    ark-ui: ScrollArea
+    radix-ui: ScrollArea
 ---
 
 # ScrollArea
@@ -181,11 +181,6 @@ pub struct Props {
     /// Text/layout direction. Drives RTL scrollbar placement and
     /// `scrollLeft` normalization.
     pub dir: Option<Direction>,
-    /// Optional locale override. When `None`, resolved from the nearest
-    /// `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Translatable messages. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -198,8 +193,6 @@ impl Default for Props {
             hide_delay_ms: None,
             aria_label: None,
             dir: None,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -264,11 +257,12 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let mut ctx = Context {
             scroll_x: 0.0, scroll_y: 0.0,
             viewport_width: 0.0, viewport_height: 0.0,
@@ -293,10 +287,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match event {
             Event::Resize { viewport_width, viewport_height, content_width, content_height } => {
@@ -669,8 +663,8 @@ impl ComponentMessages for Messages {}
 
 ```css
 [data-ars-dir="rtl"] [data-ars-part="scrollbar-y"] {
-  right: auto;
-  left: 0;
+    right: auto;
+    left: 0;
 }
 ```
 

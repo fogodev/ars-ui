@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility, interactions, forms]
 shared_deps: []
 related: [textarea, password-input, search-input]
 references:
-  ark-ui: Field
-  react-aria: TextField
+    ark-ui: Field
+    react-aria: TextField
 ---
 
 # TextField
@@ -171,10 +171,6 @@ pub struct Props {
     pub dir: Direction,
     /// Hint for the virtual keyboard type on mobile devices.
     pub input_mode: Option<InputMode>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Localizable messages. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
     /// Convenience callback fired with `true` on Focus and `false` on Blur.
     pub on_focus_change: Option<Callback<bool>>,
 }
@@ -189,7 +185,6 @@ impl Default for Props {
             max_length: None, min_length: None, pattern: None,
             autocomplete: None, name: None, form: None, clearable: false,
             dir: Direction::Ltr, input_mode: None,
-            locale: None, messages: None,
             on_focus_change: None,
         }
     }
@@ -208,11 +203,12 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let state = State::Idle;
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let ctx = Context {
             value: match &props.value {
                 Some(v) => Bindable::controlled(v.clone()),

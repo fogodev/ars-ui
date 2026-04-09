@@ -6,9 +6,9 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: []
 references:
-  ark-ui: Tabs
-  radix-ui: Tabs
-  react-aria: Tabs
+    ark-ui: Tabs
+    radix-ui: Tabs
+    react-aria: Tabs
 ---
 
 # Tabs
@@ -122,10 +122,6 @@ pub struct Props {
     /// They are skipped during arrow-key navigation, receive `aria-disabled="true"`,
     /// and are visually indicated via the `data-ars-disabled` attribute.
     pub disabled_keys: BTreeSet<Key>,
-    /// Locale override. When `None`, inherits from nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Localizable strings.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -142,8 +138,6 @@ impl Default for Props {
             lazy_mount: false,
             unmount_on_exit: false,
             disabled_keys: BTreeSet::new(),
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -217,14 +211,15 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props   = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let value = match &props.value {
             Some(v) => Bindable::controlled(v.clone()),
             None    => Bindable::uncontrolled(props.default_value.clone()),
         };
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         (State::Idle, Context {
             value,
             focused_tab: None,
@@ -244,10 +239,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
 
@@ -477,10 +472,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }

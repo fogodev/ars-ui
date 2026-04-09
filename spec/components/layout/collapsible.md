@@ -6,9 +6,9 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: [layout-shared-types]
 related: []
 references:
-  ark-ui: Collapsible
-  radix-ui: Collapsible
-  react-aria: Disclosure
+    ark-ui: Collapsible
+    radix-ui: Collapsible
+    react-aria: Disclosure
 ---
 
 # Collapsible
@@ -110,10 +110,6 @@ pub struct Props {
     /// When `Some`, the collapsed state shows partial content at this CSS width
     /// instead of fully hiding (e.g., `"120px"`). Default: `None`.
     pub collapsed_width: Option<String>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Localizable messages for accessible trigger labels. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -127,8 +123,6 @@ impl Default for Props {
             unmount_on_exit: false,
             collapsed_height: None,
             collapsed_width: None,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -144,9 +138,10 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let initial_open = props.open.unwrap_or(props.default_open);
         let state = if initial_open { State::Open } else { State::Closed };
         let open = match props.open {
@@ -154,8 +149,8 @@ impl ars_core::Machine for Machine {
             None    => Bindable::uncontrolled(initial_open),
         };
 
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let ctx = Context {
             open,
             disabled: props.disabled,
@@ -171,10 +166,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        _props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match event {
             Event::Toggle if !ctx.disabled => {
@@ -220,11 +215,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

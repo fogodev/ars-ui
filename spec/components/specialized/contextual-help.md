@@ -66,10 +66,6 @@ pub struct Props {
     pub should_flip: bool,
     /// Padding between the popover and container edges.
     pub container_padding: f64,
-    /// Locale override. When `None`, resolved via `resolve_locale()`.
-    pub locale: Option<Locale>,
-    /// Translatable label strings. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
     /// Text direction override (inherited from locale if `None`).
     pub dir: Option<Direction>,
 }
@@ -84,8 +80,6 @@ impl Default for Props {
             cross_offset: 0.0,
             should_flip: true,
             container_padding: 12.0,
-            locale: None,
-            messages: None,
             dir: None,
         }
     }
@@ -117,9 +111,9 @@ pub struct Api<'a> {
 }
 
 impl<'a> Api<'a> {
-    pub fn new(popover_api: popover::Api<'a>, props: &'a Props) -> Self {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    pub fn new(popover_api: popover::Api<'a>, props: &'a Props, env: &Env, messages: &Messages) -> Self {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         Self { popover_api, props, locale, messages }
     }
 

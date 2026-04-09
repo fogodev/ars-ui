@@ -6,9 +6,9 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: [z-index-stacking]
 related: [hover-card]
 references:
-  ark-ui: Tooltip
-  radix-ui: Tooltip
-  react-aria: Tooltip
+    ark-ui: Tooltip
+    radix-ui: Tooltip
+    react-aria: Tooltip
 ---
 
 # Tooltip
@@ -155,10 +155,6 @@ pub struct Props {
     /// Auto-hide timeout in milliseconds for touch devices. Default: 20000ms.
     /// Minimum enforced: 5000ms — values below are clamped.
     pub touch_auto_hide_ms: u32,
-    /// Localizable messages for tooltip (see §4.1 Messages).
-    pub messages: Option<Messages>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
 }
 
 impl Default for Props {
@@ -180,8 +176,6 @@ impl Default for Props {
             unmount_on_exit: false,
             dir: Direction::Ltr,
             touch_auto_hide_ms: 20000,
-            messages: None,
-            locale: None,
         }
     }
 }
@@ -223,9 +217,10 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(&props.id);
         let close_delay = if props.interactive {
             props.close_delay_ms.max(200)
@@ -234,8 +229,8 @@ impl ars_core::Machine for Machine {
         };
         let initial_open = props.open.unwrap_or(props.default_open);
         let initial_state = if initial_open { State::Open } else { State::Closed };
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         (initial_state, Context {
             locale,
             open: initial_open,
@@ -465,11 +460,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

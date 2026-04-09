@@ -111,8 +111,6 @@ pub struct Props {
     pub min: Option<CalendarDate>,
     /// The maximum date.
     pub max: Option<CalendarDate>,
-    /// The locale.
-    pub locale: Option<Locale>,
     /// Whether the component is disabled.
     pub disabled: bool,
     /// Whether the component is readonly.
@@ -127,8 +125,6 @@ pub struct Props {
     /// Form field name for the end date (alternative to `name`).
     /// When set, submits the end date as a separate form field.
     pub end_name: Option<String>,
-    /// Internationalized messages. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
     /// When true, all numeric segments in both start and end fields display
     /// with leading zeros (e.g., "03" instead of "3"). Defaults to false,
     /// which uses locale-aware formatting. Passed through to child DateField
@@ -144,14 +140,12 @@ impl Default for Props {
             default_value: None,
             min: None,
             max: None,
-            locale: None,
             disabled: false,
             readonly: false,
             required: false,
             name: None,
             start_name: None,
             end_name: None,
-            messages: None,
             force_leading_zeros: false,
         }
     }
@@ -176,10 +170,11 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
-        let locale = resolve_locale(props.locale.as_ref());
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
         let ctx = Context {
             value: match &props.value {
                 Some(v) => Bindable::controlled(v.clone()),
@@ -188,7 +183,7 @@ impl ars_core::Machine for Machine {
             active_field: None,
             min: props.min.clone(),
             max: props.max.clone(),
-            messages: resolve_messages::<Messages>(props.messages.as_ref(), &locale),
+            messages: messages.clone(),
             locale,
             disabled: props.disabled,
             readonly: props.readonly,
@@ -381,7 +376,6 @@ impl<'a> Api<'a> {
         date_field::Props {
             id: self.ctx.ids.part("start"),
             value: self.ctx.value.get().as_ref().map(|r| Some(r.start.clone())),
-            locale: self.ctx.locale.clone(),
             min: self.ctx.min.clone(),
             max: self.ctx.value.get().as_ref().map(|r| r.end.clone()),
             disabled: self.ctx.disabled,
@@ -397,7 +391,6 @@ impl<'a> Api<'a> {
         date_field::Props {
             id: self.ctx.ids.part("end"),
             value: self.ctx.value.get().as_ref().map(|r| Some(r.end.clone())),
-            locale: self.ctx.locale.clone(),
             min: self.ctx.value.get().as_ref().map(|r| r.start.clone()),
             max: self.ctx.max.clone(),
             disabled: self.ctx.disabled,
@@ -703,7 +696,7 @@ mod tests {
 
     #[test]
     fn initial_state_is_idle() {
-        let (state, ctx) = Machine::init(&Props::default());
+        let (state, ctx) = Machine::init(&Props::default(), &Env::default(), &Default::default());
         assert_eq!(state, State::Idle);
         assert!(ctx.active_field.is_none());
     }
@@ -711,7 +704,7 @@ mod tests {
     #[test]
     fn focus_tracking() {
         let props = Props::default();
-        let (state, ctx) = Machine::init(&props);
+        let (state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
         let plan = Machine::transition(&state, &Event::FocusStart, &ctx, &props).unwrap();
         assert_eq!(plan.target, Some(State::StartFocused));
 
@@ -725,7 +718,7 @@ mod tests {
     #[test]
     fn range_validation_normalizes() {
         let props = Props::default();
-        let (state, mut ctx) = Machine::init(&props);
+        let (state, mut ctx) = Machine::init(&props, &Env::default(), &Default::default());
         // Set end first, then start after it — should normalize
         let end = CalendarDate::new_gregorian(2025, nzu8(1), nzu8(1));
         let start = CalendarDate::new_gregorian(2025, nzu8(3), nzu8(15));
@@ -735,14 +728,14 @@ mod tests {
     #[test]
     fn disabled_ignores_events() {
         let props = Props { disabled: true, ..Props::default() };
-        let (state, ctx) = Machine::init(&props);
+        let (state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
         assert!(Machine::transition(&state, &Event::FocusStart, &ctx, &props).is_none());
     }
 
     #[test]
     fn set_range_updates_value() {
         let props = Props::default();
-        let (state, ctx) = Machine::init(&props);
+        let (state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
         let range = DateRange::new(
             CalendarDate::new_gregorian(2025, nzu8(6), nzu8(1)),
             CalendarDate::new_gregorian(2025, nzu8(6), nzu8(30)),

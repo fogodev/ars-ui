@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility, interactions, forms]
 shared_deps: []
 related: [slider]
 references:
-  ark-ui: Slider
-  react-aria: Slider
+    ark-ui: Slider
+    react-aria: Slider
 ---
 
 # RangeSlider
@@ -175,10 +175,6 @@ pub struct Props {
     /// Callback fired when a drag interaction ends (pointerup), as opposed to
     /// continuous change callbacks. Receives the final `[start, end]` value pair.
     pub on_value_change_end: Option<Callback<[f64; 2]>>,
-    /// Translatable messages.
-    pub messages: Option<Messages>,
-    /// Locale for number formatting.
-    pub locale: Option<Locale>,
 }
 
 impl Default for Props {
@@ -200,8 +196,6 @@ impl Default for Props {
             format_value: None,
             thumb_alignment: ThumbAlignment::Contain,
             on_value_change_end: None,
-            messages: None,
-            locale: None,
         }
     }
 }
@@ -282,10 +276,11 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let state = State::Idle;
         let ctx = Context {
             value: match props.value {

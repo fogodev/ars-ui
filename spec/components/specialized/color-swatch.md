@@ -37,11 +37,6 @@ pub struct Props {
     pub color_name: Option<String>,
     /// Whether to visually represent the alpha channel (checkerboard pattern).
     pub respect_alpha: bool,
-    /// Optional locale override. When `None`, resolved from the nearest
-    /// `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Translatable messages. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -51,8 +46,6 @@ impl Default for Props {
             color: ColorValue::default(),
             color_name: None,
             respect_alpha: true,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -76,10 +69,10 @@ pub struct Api<'a> {
 }
 
 impl<'a> Api<'a> {
-    pub fn new(props: &'a Props) -> Self {
+    pub fn new(props: &'a Props, env: &Env, messages: &Messages) -> Self {
         let id = if props.id.is_empty() { generate_id() } else { props.id.clone() };
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         Self { props, id, locale, messages }
     }
 

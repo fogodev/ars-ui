@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: [color-area, color-slider, color-field, color-swatch, color-swatch-picker, color-wheel, angle-slider]
 references:
-  ark-ui: ColorPicker
-  react-aria: ColorPicker
+    ark-ui: ColorPicker
+    react-aria: ColorPicker
 ---
 
 # ColorPicker
@@ -787,10 +787,6 @@ pub struct Props {
     /// Unlike continuous change callbacks, this fires once at the end of the gesture.
     /// Use for expensive operations like saving to a server.
     pub on_change_end: Option<Callback<ColorValue>>,
-    /// Locale override. When `None`, resolved via `resolve_locale()`.
-    pub locale: Option<Locale>,
-    /// Translatable message strings. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -818,8 +814,6 @@ impl Default for Props {
             name: None,
             id: String::new(),
             on_change_end: None,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -890,9 +884,10 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let value = match &props.value {
             Some(v) => Bindable::controlled(v.clone()),
             None => Bindable::uncontrolled(props.default_value.clone()),
@@ -910,8 +905,8 @@ impl ars_core::Machine for Machine {
         };
 
         let ids = ComponentIds::from_id(&props.id);
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
 
         (state, Context {
             value,
@@ -951,10 +946,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         // Global guard: disabled components ignore all events except Focus/Blur.
         if ctx.disabled {
@@ -1192,11 +1187,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

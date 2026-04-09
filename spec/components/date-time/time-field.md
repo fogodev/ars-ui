@@ -78,7 +78,7 @@ pub struct Context {
     /// Resolved translatable messages.
     pub messages: Messages,
     /// ICU data provider for locale-dependent formatting (day period labels, etc.).
-    pub provider: Arc<dyn IcuProvider>,
+    pub provider: ArsRc<dyn IcuProvider>,
     /// The granularity of the component.
     pub granularity: TimeGranularity,
     /// The hour cycle of the component.
@@ -295,8 +295,6 @@ pub struct Props {
     pub value: Option<Time>,
     /// The default value of the component.
     pub default_value: Option<Time>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     /// The granularity of the component.
     pub granularity: TimeGranularity,
     /// Hour cycle override. When `Some`, overrides the locale's default hour cycle.
@@ -332,8 +330,6 @@ pub struct Props {
     pub invalid: bool,
     /// The name of the component.
     pub name: Option<String>,
-    /// Internationalization messages. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
     /// When true, all numeric segments display with leading zeros (e.g., "03"
     /// instead of "3"). Defaults to false, which uses locale-aware formatting.
     pub force_leading_zeros: bool,
@@ -345,7 +341,6 @@ impl Default for Props {
             id: String::new(),
             value: None,
             default_value: None,
-            locale: None,
             granularity: TimeGranularity::Minute,
             hour_cycle: HourCycle::Auto,
             hide_time_zone: false,
@@ -361,7 +356,6 @@ impl Default for Props {
             error_message: None,
             invalid: false,
             name: None,
-            messages: None,
             force_leading_zeros: false,
         }
     }
@@ -554,12 +548,13 @@ impl ars_core::Machine for Machine {
     type Event   = Event;
     type Context = Context;
     type Props   = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
-        let provider = use_icu_provider();
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
+        let provider = env.icu_provider.clone();
 
         // When hour_cycle is explicitly set (not Auto), override the locale default.
         let resolved_cycle = match props.hour_cycle {

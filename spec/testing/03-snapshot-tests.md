@@ -219,7 +219,7 @@ fn multi_word_state_uses_kebab_case() {
 #[test]
 fn data_attribute_order_is_deterministic() {
     let props = select::Props::default();
-    let (state, ctx) = select::Machine::init(&props);
+    let (state, ctx) = select::Machine::init(&props, &Env::default(), &Default::default());
 
     // Render twice and compare attribute order
     let attrs1 = select::Machine::connect(&state, &ctx, &props, &|_| {}).root_attrs();
@@ -271,7 +271,7 @@ fn all_data_ars_attributes_kebab_case() {
 /// Instead of relying on `M::Props: Default` (which may not provide a valid `id`
 /// via `HasId`), use a fixture function that returns test-appropriate props.
 fn collect_data_attrs<M: Machine>(props: M::Props) -> Vec<(HtmlAttr, String)> {
-    let (state, ctx) = M::init(&props);
+    let (state, ctx) = M::init(&props, &Env::default(), &Default::default());
     let api = M::connect(&state, &ctx, &props, &|_: M::Event| {});
     api.root_attrs()
         .iter()
@@ -292,7 +292,7 @@ fn test_checkbox_props() -> checkbox::Props {
 #[test]
 fn data_attribute_snapshot_select() {
     let props = select::Props::default();
-    let (state, ctx) = select::Machine::init(&props);
+    let (state, ctx) = select::Machine::init(&props, &Env::default(), &Default::default());
     let api = select::Machine::connect(&state, &ctx, &props, &|_| {});
 
     let data_attrs: BTreeMap<String, String> = api.root_attrs()

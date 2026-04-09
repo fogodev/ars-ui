@@ -148,14 +148,20 @@ fn is_readonly(ctx: &Context) -> bool { ctx.readonly }
 /// The machine for the Switch component.
 pub struct Machine;
 
+/// This component has no translatable strings.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Messages;
+impl ComponentMessages for Messages {}
+
 impl ars_core::Machine for Machine {
     type State = State;
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
+    fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
         let checked = match props.checked {
             Some(v) => Bindable::controlled(v),
             None => Bindable::uncontrolled(props.default_checked),

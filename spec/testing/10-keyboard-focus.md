@@ -47,7 +47,7 @@ fn presence_rapid_toggle_no_stuck_state() {
 
 #[test]
 fn presence_rapid_toggle_net_absent() {
-    let mut svc = Service::new(presence::Props { present: true, ..Default::default() });
+    let mut svc = Service::new(presence::Props { present: true, ..Default::default() }, Env::default(), Default::default());
     // true → false → true → false (net: absent)
     svc.send(presence::Event::SetPresent(false));
     svc.send(presence::Event::SetPresent(true));
@@ -58,7 +58,7 @@ fn presence_rapid_toggle_net_absent() {
 
 #[test]
 fn presence_triple_toggle_during_unmount_pending() {
-    let mut svc = Service::new(presence::Props { present: true, ..Default::default() });
+    let mut svc = Service::new(presence::Props { present: true, ..Default::default() }, Env::default(), Default::default());
     // Start unmount
     svc.send(presence::Event::SetPresent(false));
     assert_eq!(*svc.state(), presence::State::UnmountPending);
@@ -184,7 +184,7 @@ macro_rules! test_html_disabled {
     ($component:ident, $id:expr) => {
         #[test]
         fn html_disabled_removes_from_tab_order() {
-            let svc = Service::new($component::Props::new($id).disabled(true));
+            let svc = Service::new($component::Props::new($id).disabled(true), Env::default(), Default::default());
             let api = svc.connect(&|_| {});
             let attrs = api.root_attrs();
             assert!(attrs.contains(&HtmlAttr::Disabled));
@@ -200,7 +200,7 @@ macro_rules! test_aria_disabled {
     ($component:ident, $id:expr) => {
         #[test]
         fn aria_disabled_remains_focusable() {
-            let svc = Service::new($component::Props::new($id).disabled(true));
+            let svc = Service::new($component::Props::new($id).disabled(true), Env::default(), Default::default());
             let api = svc.connect(&|_| {});
             let attrs = api.root_attrs();
             assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
@@ -210,7 +210,7 @@ macro_rules! test_aria_disabled {
 
         #[test]
         fn aria_disabled_blocks_activation() {
-            let mut svc = Service::new($component::Props::new($id).disabled(true));
+            let mut svc = Service::new($component::Props::new($id).disabled(true), Env::default(), Default::default());
             let before = svc.state().clone();
             svc.send($component::Event::Click);
             assert_eq!(svc.state(), &before, "disabled component should not change state on activation");
@@ -330,7 +330,7 @@ macro_rules! test_disabled_guard {
             #[test]
             fn disabled_emits_aria_disabled() {
                 let props = $component::Props { disabled: true, ..Default::default() };
-                let (state, ctx) = $component::Machine::init(&props);
+                let (state, ctx) = $component::Machine::init(&props, &Env::default(), &Default::default());
                 let api = $component::Machine::connect(&state, &ctx, &props, &|_| {});
                 let root = api.root_attrs();
                 assert_eq!(
@@ -342,7 +342,7 @@ macro_rules! test_disabled_guard {
             #[test]
             fn disabled_emits_disabled_attribute() {
                 let props = $component::Props { disabled: true, ..Default::default() };
-                let (state, ctx) = $component::Machine::init(&props);
+                let (state, ctx) = $component::Machine::init(&props, &Env::default(), &Default::default());
                 let api = $component::Machine::connect(&state, &ctx, &props, &|_| {});
                 let control = api.control_attrs();
                 // Native form elements use `disabled`, custom elements use `aria-disabled`
@@ -368,7 +368,7 @@ macro_rules! test_html_disabled_guard {
             #[test]
             fn disabled_blocks_events() {
                 let props = $module::Props { disabled: true, ..Default::default() };
-                let (state, ctx) = $module::Machine::init(&props);
+                let (state, ctx) = $module::Machine::init(&props, &Env::default(), &Default::default());
                 for event in $events {
                     let plan = $module::Machine::transition(&state, &event, &ctx, &props);
                     assert!(
@@ -382,7 +382,7 @@ macro_rules! test_html_disabled_guard {
             #[test]
             fn disabled_emits_html_disabled_attribute() {
                 let props = $module::Props { disabled: true, ..Default::default() };
-                let (state, ctx) = $module::Machine::init(&props);
+                let (state, ctx) = $module::Machine::init(&props, &Env::default(), &Default::default());
                 let api = $module::Machine::connect(&state, &ctx, &props, &|_: $module::Event| {});
                 let attrs = api.root_attrs();
                 assert_eq!(
@@ -1318,7 +1318,7 @@ fn listbox_skips_disabled_items_on_arrow() {
         disabled_keys: vec!["B".into()].into_iter().collect(),
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(listbox::Event::Open);
     svc.send(listbox::Event::HighlightFirst); // highlights "A"
     svc.send(listbox::Event::HighlightNext); // should skip "B", highlight "C"
@@ -1339,7 +1339,7 @@ fn menu_skips_disabled_items_on_arrow() {
         ],
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(menu::Event::Open);
     svc.send(menu::Event::HighlightFirst); // highlights "cut"
     svc.send(menu::Event::HighlightNext); // should skip "copy", highlight "paste"
@@ -1357,7 +1357,7 @@ fn combobox_skips_disabled_items_on_arrow() {
         disabled_keys: vec!["Banana".into()].into_iter().collect(),
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(combobox::Event::Open);
     svc.send(combobox::Event::HighlightFirst); // highlights "Apple"
     svc.send(combobox::Event::HighlightNext); // should skip "Banana", highlight "Cherry"
@@ -1380,7 +1380,7 @@ fn tree_skips_disabled_items_on_arrow() {
         disabled_keys: vec!["b".into()].into_iter().collect(),
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(tree_view::Event::FocusFirst); // focuses "a"
     svc.send(tree_view::Event::FocusNext); // should skip "b", focus "c"
     assert_eq!(
@@ -1405,7 +1405,7 @@ use ars_core::{KeyboardKey, Bindable};
 #[test]
 fn tabs_rtl_arrow_keys_reversed() {
     let props = tabs::Props { dir: Direction::Rtl, ..Default::default() };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     // In LTR, ArrowRight moves to next tab. In RTL, ArrowLeft moves to next tab.
     svc.send(tabs::Event::KeyDown(KeyboardKey::ArrowLeft));
     assert_eq!(svc.context().focused_index, 1, "ArrowLeft should move to NEXT tab in RTL");
@@ -1414,7 +1414,7 @@ fn tabs_rtl_arrow_keys_reversed() {
 #[test]
 fn tabs_rtl_arrow_right_moves_prev() {
     let props = tabs::Props { dir: Direction::Rtl, ..Default::default() };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(tabs::Event::KeyDown(KeyboardKey::ArrowLeft)); // Move to index 1
     svc.send(tabs::Event::KeyDown(KeyboardKey::ArrowRight)); // Move back to index 0
     assert_eq!(svc.context().focused_index, 0, "ArrowRight should move to PREVIOUS tab in RTL");
@@ -1429,7 +1429,7 @@ fn slider_rtl_arrow_keys_reversed() {
         max: 100.0,
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     let initial_value = svc.context().value;
     // In RTL: ArrowLeft should INCREASE value (reversed from LTR)
     svc.send(slider::Event::KeyDown(KeyboardKey::ArrowLeft));
@@ -1445,7 +1445,7 @@ fn slider_rtl_arrow_right_decreases() {
         max: 100.0,
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     let initial_value = svc.context().value;
     // In RTL: ArrowRight should DECREASE value (reversed from LTR)
     svc.send(slider::Event::KeyDown(KeyboardKey::ArrowRight));
@@ -1459,7 +1459,7 @@ fn radiogroup_rtl_arrow_keys_reversed() {
         items: vec!["a", "b", "c"],
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     // ArrowLeft moves to next in RTL
     svc.send(radio_group::Event::KeyDown(KeyboardKey::ArrowLeft));
     assert_eq!(svc.context().focused_index, 1);
@@ -1471,7 +1471,7 @@ fn splitter_rtl_arrow_keys_reversed() {
         dir: Direction::Rtl,
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     let initial_size = svc.context().primary_size;
     // In RTL, ArrowLeft increases the primary panel size
     svc.send(splitter::Event::KeyDown(KeyboardKey::ArrowLeft));
@@ -1486,7 +1486,7 @@ fn menubar_rtl_arrow_keys_reversed() {
         menus: vec!["File", "Edit", "View"],
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     // In RTL, ArrowLeft moves to the NEXT menu (reversed from LTR)
     svc.send(menu_bar::Event::KeyDown(KeyboardKey::ArrowLeft));
     assert_eq!(svc.context().focused_index, 1,
@@ -1500,7 +1500,7 @@ fn accordion_horizontal_rtl_arrow_keys_reversed() {
         orientation: Orientation::Horizontal,
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     // In RTL horizontal, ArrowLeft moves to next trigger
     svc.send(accordion::Event::KeyDown(KeyboardKey::ArrowLeft));
     assert_eq!(svc.context().focused_index, 1,
@@ -1522,7 +1522,7 @@ fn listbox_typeahead_prefix_match() {
         items: vec!["Apple", "Banana", "Blueberry", "Cherry"],
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(listbox::Event::Open);
     // Type "ba" within 500ms → focuses first item starting with "ba"
     svc.send(listbox::Event::TypeaheadSearch('b', 0));
@@ -1540,7 +1540,7 @@ fn listbox_typeahead_timeout_clears_buffer() {
         items: vec!["Apple", "Banana", "Cherry"],
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(listbox::Event::Open);
     // Type "b", wait 600ms (past 500ms timeout), then type "a"
     svc.send(listbox::Event::TypeaheadSearch('b', 0));
@@ -1560,7 +1560,7 @@ fn listbox_typeahead_repeated_char_cycles() {
         items: vec!["Alpha", "Apex", "Atom", "Beta"],
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(listbox::Event::Open);
     // Type "a" three times → cycles through items starting with "a"
     svc.send(listbox::Event::TypeaheadSearch('a', 0));
@@ -1581,7 +1581,7 @@ fn listbox_typeahead_skips_disabled_items() {
         disabled_keys: vec!["Avocado".into()].into_iter().collect(),
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(listbox::Event::Open);
     svc.send(listbox::Event::TypeaheadSearch('a', 0));
     assert_eq!(svc.context().highlighted_key, Some(Key::from("Apple")));
@@ -1603,7 +1603,7 @@ Per [05-interactions.md](../foundation/05-interactions.md) §11.5, components MU
 #[test]
 fn ime_composition_suppresses_typeahead() {
     let props = listbox::Props::default();
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(listbox::Event::Focus);
 
     // Begin IME composition — should NOT trigger type-ahead
@@ -1631,7 +1631,7 @@ fn long_press_triggers_after_threshold() {
         threshold: Duration::from_millis(500),
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(long_press::Event::PointerDown { x: 100.0, y: 100.0 });
     assert_eq!(*svc.state(), long_press::State::Timing);
     svc.advance_time(Duration::from_millis(500));
@@ -1644,7 +1644,7 @@ fn long_press_cancels_on_pointer_up_before_threshold() {
         threshold: Duration::from_millis(500),
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(long_press::Event::PointerDown { x: 100.0, y: 100.0 });
     assert_eq!(*svc.state(), long_press::State::Timing);
     svc.advance_time(Duration::from_millis(200));
@@ -1659,7 +1659,7 @@ fn long_press_cancels_on_move_beyond_dead_zone() {
         move_dead_zone: 10.0,
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(long_press::Event::PointerDown { x: 100.0, y: 100.0 });
     assert_eq!(*svc.state(), long_press::State::Timing);
     // Move pointer > 10px from origin

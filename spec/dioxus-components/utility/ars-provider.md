@@ -36,13 +36,13 @@ pub struct ArsProviderProps {
     #[props(optional)]
     pub platform: Option<ArsRc<dyn PlatformEffects>>,
     #[props(optional)]
-    pub icu_provider: Option<Arc<dyn IcuProvider>>,
+    pub icu_provider: Option<ArsRc<dyn IcuProvider>>,
     #[props(optional)]
-    pub i18n_registries: Option<Rc<I18nRegistries>>,
+    pub i18n_registries: Option<ArsRc<I18nRegistries>>,
     #[props(optional)]
     pub style_strategy: Option<StyleStrategy>,
     #[props(optional)]
-    pub dioxus_platform: Option<Rc<dyn DioxusPlatform>>,
+    pub dioxus_platform: Option<ArsRc<dyn DioxusPlatform>>,
     pub children: Element,
 }
 
@@ -222,13 +222,13 @@ pub struct ArsProviderSketchProps {
     #[props(optional)]
     pub platform: Option<ArsRc<dyn PlatformEffects>>,
     #[props(optional)]
-    pub icu_provider: Option<Arc<dyn IcuProvider>>,
+    pub icu_provider: Option<ArsRc<dyn IcuProvider>>,
     #[props(optional)]
-    pub i18n_registries: Option<Rc<I18nRegistries>>,
+    pub i18n_registries: Option<ArsRc<I18nRegistries>>,
     #[props(optional)]
     pub style_strategy: Option<StyleStrategy>,
     #[props(optional)]
-    pub dioxus_platform: Option<Rc<dyn DioxusPlatform>>,
+    pub dioxus_platform: Option<ArsRc<dyn DioxusPlatform>>,
     pub children: Element,
 }
 

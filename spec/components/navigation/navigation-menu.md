@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: [z-index-stacking]
 related: [menu, menu-bar, tabs]
 references:
-  radix-ui: NavigationMenu
+    radix-ui: NavigationMenu
 ---
 
 # NavigationMenu
@@ -165,10 +165,6 @@ pub struct Props {
     /// Callback invoked when the open item changes. Receives `Some(key)` when an item
     /// opens and `None` when all content is closed.
     pub on_value_change: Option<Callback<Option<Key>>>,
-    /// Locale override. When `None`, inherits from nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Localizable strings.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -183,8 +179,6 @@ impl Default for Props {
             dir: Direction::Ltr,
             loop_focus: true,
             on_value_change: None,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -222,8 +216,9 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props   = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let (initial_value, bindable) = match &props.value {
             Some(v) => (v.clone(), Bindable::controlled(v.clone())),
             None    => (props.default_value.clone(), Bindable::uncontrolled(props.default_value.clone())),
@@ -232,8 +227,8 @@ impl ars_core::Machine for Machine {
             Some(key) => State::Open { item: key.clone() },
             None      => State::Idle,
         };
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let ids = ComponentIds::from_id(&props.id);
         let list_id = ids.part("list");
         (initial_state, Context {
@@ -256,10 +251,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
 
@@ -572,10 +567,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }

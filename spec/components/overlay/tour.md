@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: [z-index-stacking]
 related: []
 references:
-  ark-ui: Tour
+    ark-ui: Tour
 ---
 
 # Tour
@@ -182,10 +182,6 @@ pub struct Props {
     pub lazy_mount: bool,
     /// When true, tour content is removed from the DOM after completing. Default: false.
     pub unmount_on_exit: bool,
-    /// Localizable messages (see §4 Internationalization).
-    pub messages: Option<Messages>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
 }
 
 impl Default for Props {
@@ -203,8 +199,6 @@ impl Default for Props {
             on_step_change: None,
             lazy_mount: false,
             unmount_on_exit: false,
-            messages: None,
-            locale: None,
         }
     }
 }
@@ -223,9 +217,10 @@ impl ars_core::Machine for Machine {
     type Event   = Event;
     type Context = Context;
     type Props   = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(&props.id);
         let total = props.steps.len();
         let initial_state = if props.auto_start && total > 0 {
@@ -234,8 +229,8 @@ impl ars_core::Machine for Machine {
             State::Inactive
         };
         let open = matches!(initial_state, State::Active { .. });
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         (initial_state, Context {
             locale,
             steps: props.steps.clone(),
@@ -251,10 +246,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
             // ── Start ───────────────────────────────────────────────────
@@ -427,11 +422,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: []
 references:
-  ark-ui: Pagination
+    ark-ui: Pagination
 ---
 
 # Pagination
@@ -139,15 +139,11 @@ pub struct Props {
     /// Affects button dimensions, font size, and spacing.
     /// Default: `Size::Medium`.
     pub size: Size,
-    /// Locale for i18n message resolution.
-    pub locale: Option<Locale>,
     /// Optional URL generator for link-based pagination. When `Some`, page
     /// buttons render as `<a href="...">` instead of `<button>`, enabling
     /// progressive enhancement and SEO-friendly pagination. The callback
     /// receives a 1-based page number and returns the URL string.
     pub get_page_url: Option<Callback<dyn Fn(u32) -> String + Send + Sync>>,
-    /// Translatable messages.
-    pub messages: Option<Messages>,
 }
 
 /// Visual size variants for Pagination.
@@ -174,8 +170,6 @@ impl Default for Props {
             boundary_count: 1,
             size: Size::default(),
             get_page_url: None,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -219,16 +213,17 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props   = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let page = match props.page {
             Some(p) => Bindable::controlled(p),
             None    => Bindable::uncontrolled(props.default_page.max(1)),
         };
         let page_count = Context::compute_page_count(props.total_items, props.page_size);
         let ids = ComponentIds::from_id(&props.id);
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         (State::Idle, Context {
             page,
             page_size: props.page_size,
@@ -242,10 +237,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        _state: &State,
-        event: &Event,
-        ctx: &Context,
-        _props: &Props,
+        _state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match event {
             Event::GoToPage(p) => {
@@ -294,10 +289,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }

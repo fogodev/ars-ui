@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility, interactions, collections]
 shared_deps: [selection-patterns]
 related: []
 references:
-  ark-ui: Combobox
-  react-aria: ComboBox
+    ark-ui: Combobox
+    react-aria: ComboBox
 ---
 
 # Combobox
@@ -224,8 +224,6 @@ pub struct Props {
     /// When `true`, the listbox remains open even when the filter produces zero results,
     /// displaying the EmptyState message instead of closing. Default: `false`.
     pub allows_empty_collection: bool,
-    /// The messages of the combobox.
-    pub messages: Option<Messages>,
     /// Callback invoked when the dropdown open state changes.
     /// Fires during Open/Close state transitions with the new open state value (`true` for
     /// opening, `false` for closing). Invoked after the transition completes.
@@ -238,8 +236,6 @@ pub struct Props {
     /// even if it doesn't match any item in the collection.
     /// When `false` (default), non-matching input is reverted to the last valid selection on blur.
     pub allow_custom_value: bool,
-    /// Locale override. When `None`, resolved via `resolve_locale()`.
-    pub locale: Option<Locale>,
     // Change callbacks provided by the adapter layer
 }
 
@@ -260,10 +256,8 @@ impl Default for Props {
             default_highlighted_key: None,
             allows_empty_collection: false,
             disabled_keys: BTreeSet::new(),
-            messages: None,
             on_open_change: None,
             allow_custom_value: false,
-            locale: None,
         }
     }
 }
@@ -284,10 +278,11 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Props) -> (State, Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let selection_state = selection::State {
             mode: props.selection_mode.clone(),
             behavior: props.selection_behavior.clone(),
@@ -332,7 +327,12 @@ impl ars_core::Machine for Machine {
         (State::Closed, ctx)
     }
 
-    fn transition(state: &State, event: &Event, ctx: &Context, _props: &Props) -> Option<TransitionPlan<Self>> {
+    fn transition(
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
+    ) -> Option<TransitionPlan<Self>> {
         // Readonly guard: reject mutating events when readonly
         // (Open for browsing is allowed; selecting/deselecting/clearing is not)
         if ctx.readonly {
@@ -571,12 +571,16 @@ impl ars_core::Machine for Machine {
         }
     }
 
-    fn connect<'a>(state: &'a State, ctx: &'a Context, props: &'a Props, send: &'a dyn Fn(Event))
-        -> Api<'a>
-    {
+    fn connect<'a>(
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }
+
 ```
 
 ### 1.6 Connect / API

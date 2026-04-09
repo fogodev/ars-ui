@@ -159,10 +159,6 @@ pub struct Props {
     /// setting `submit_on_blur: false` with `submit_mode: SubmitMode::Both` is
     /// equivalent to `submit_mode: SubmitMode::Enter`.
     pub submit_on_blur: bool,
-    /// Optional locale override for i18n message resolution.
-    pub locale: Option<Locale>,
-    /// Translatable messages.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -183,8 +179,6 @@ impl Default for Props {
             name: None,
             form: None,
             submit_on_blur: true,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -236,10 +230,11 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let initial = props.value.clone()
             .unwrap_or_else(|| props.default_value.clone());
         let state = State::Preview;

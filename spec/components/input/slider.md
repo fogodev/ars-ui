@@ -6,9 +6,9 @@ foundation_deps: [architecture, accessibility, interactions, forms]
 shared_deps: []
 related: [range-slider]
 references:
-  ark-ui: Slider
-  radix-ui: Slider
-  react-aria: Slider
+    ark-ui: Slider
+    radix-ui: Slider
+    react-aria: Slider
 ---
 
 # Slider
@@ -199,11 +199,6 @@ pub struct Props {
     /// keyboard adjustment, as opposed to `on_value_change` which fires continuously.
     /// Use this for expensive operations like network requests.
     pub on_value_change_end: Option<Callback<f64>>,
-    /// Translatable messages.
-    pub messages: Option<Messages>,
-    /// Locale for number formatting in `aria-valuetext` and Output display.
-    /// When `None`, inherits from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     // Change callbacks provided by the adapter layer
 }
 
@@ -249,8 +244,6 @@ impl Default for Props {
             format_value: None,
             thumb_alignment: ThumbAlignment::Contain,
             on_value_change_end: None,
-            messages: None,
-            locale: None,
         }
     }
 }
@@ -315,10 +308,11 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let state = State::Idle;
         let ctx = Context {
             value: match props.value {

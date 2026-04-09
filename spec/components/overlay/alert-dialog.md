@@ -51,9 +51,6 @@ pub struct Props {
     pub final_focus: Option<FocusTarget>,
     pub role: dialog::Role,
     pub title_level: u8,
-    pub messages: Option<Messages>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     pub lazy_mount: bool,
     pub unmount_on_exit: bool,
     /// Whether the primary action is destructive (e.g., delete, remove).
@@ -84,8 +81,6 @@ impl Default for Props {
             initial_focus: None,        // Adapter should default to CancelTrigger
             final_focus: None,
             title_level: 2,
-            messages: None,
-            locale: None,
             lazy_mount: false,
             unmount_on_exit: false,
             is_destructive: false,

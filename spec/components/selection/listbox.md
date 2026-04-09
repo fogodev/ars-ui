@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility, interactions, collections]
 shared_deps: [selection-patterns]
 related: []
 references:
-  ark-ui: Listbox
-  react-aria: ListBox
+    ark-ui: Listbox
+    react-aria: ListBox
 ---
 
 # Listbox
@@ -180,10 +180,6 @@ pub struct Props {
     pub disabled_keys: BTreeSet<Key>,
     /// The name of the listbox.
     pub name: Option<String>,
-    /// The messages of the listbox.
-    pub messages: Option<Messages>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     /// Callback invoked when an item is activated (Enter/click), distinct from
     /// `on_selection_change`. Use for action items that trigger commands rather
     /// than toggling selection state.
@@ -215,8 +211,6 @@ impl Default for Props {
             disallow_empty_selection: false,
             disabled_keys: BTreeSet::new(),
             name: None,
-            messages: None,
-            locale: None,
             on_action: None,
             on_load_more: None,
             loading: false,
@@ -240,11 +234,12 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let state = State::Idle;
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let ctx = Context {
             locale,
             items: StaticCollection::from_vec(Vec::new()),

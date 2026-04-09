@@ -81,7 +81,7 @@ fn hydration_snapshot_round_trip() {
 fn hydration_snapshot_initializes_service() {
     // Server side: create service and serialize
     let props = dialog::Props { id: "dlg1".into(), ..Default::default() };
-    let mut svc = Service::new(props.clone());
+    let mut svc = Service::new(props.clone(), Env::default(), Default::default());
     svc.send(dialog::Event::Open);
     let snapshot = HydrationSnapshot {
         state: svc.state().clone(),
@@ -675,7 +675,7 @@ fn ssr_controlled_value_matches_client_dioxus() {
 ## 6. SSR/Hydration Tests (Adapter-Level)
 
 > **SSR mode is adapter-determined.** The `Service` type has a single constructor
-> (`Service::new(props)`) — there is no `new_ssr()` or `new_hydrate()` variant.
+> (`Service::new(props, Env::default(), Default::default())`) — there is no `new_ssr()` or `new_hydrate()` variant.
 > Whether a component renders to a string (SSR) or attaches to existing DOM
 > (hydration) is controlled by the adapter layer: Leptos uses the `ssr`/`hydrate`
 > feature flags, Dioxus uses the `server`/`web` feature flags.

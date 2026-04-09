@@ -83,11 +83,6 @@ pub struct Props {
     pub overlay_src: Option<String>,
     /// Overlay size as a fraction of the QR code size [0.0, 0.5].
     pub overlay_size: f64,
-    /// Optional locale override. When `None`, resolved from the nearest
-    /// `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Localized labels for accessibility. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -102,8 +97,6 @@ impl Default for Props {
             background: "#ffffff".into(),
             overlay_src: None,
             overlay_size: 0.2,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -131,11 +124,11 @@ pub struct Api<'a> {
 }
 
 impl<'a> Api<'a> {
-    pub fn new(props: &'a Props) -> Self {
+    pub fn new(props: &'a Props, env: &Env, messages: &Messages) -> Self {
         let matrix = QrMatrix::generate(&props.value, props.error_correction);
         let id = if props.id.is_empty() { generate_id() } else { props.id.clone() };
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         Self { props, matrix, id, locale, messages }
     }
 
