@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility, interactions, forms]
 shared_deps: []
 related: []
 references:
-  ark-ui: NumberInput
-  react-aria: NumberField
+    ark-ui: NumberInput
+    react-aria: NumberField
 ---
 
 # NumberInput
@@ -180,10 +180,6 @@ pub struct Props {
     pub format_options: Option<NumberFormatOptions>,
     /// Display formatting options applied when the input is not focused.
     pub display_format: Option<NumberFormatOptions>,
-    /// Locale for number formatting and input parsing.
-    pub locale: Option<Locale>,
-    /// Translatable messages.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -195,8 +191,7 @@ impl Default for Props {
             step: 1.0, large_step: 10.0, precision: None,
             disabled: false, readonly: false, invalid: false, required: false,
             name: None, form: None, allow_mouse_wheel: false, clamp_value_on_blur: true, spin_on_press: true,
-            format_options: None, display_format: None, locale: None,
-            messages: None,
+            format_options: None, display_format: None,
         }
     }
 }
@@ -263,10 +258,11 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let state = State::Idle;
         let ctx = Context {
             value: match props.value {
@@ -690,9 +686,9 @@ announcements.
 
 ## 4. Internationalization
 
-- **Locale resolution**: The effective locale is `resolve_locale(props.locale.as_ref())`,
-  where `resolve_locale()` reads from the nearest `ArsProvider`. All formatting and parsing
-  uses this resolved locale.
+- **Locale resolution**: The adapter resolves locale from `ArsProvider` and passes it
+  via `Env.locale` to `Machine::init()`, which stores it in `Context.locale`. All formatting
+  and parsing uses this resolved locale.
 - **Decimal separator**: Uses locale-appropriate separator (`,` vs `.`).
 - **Thousands separator**: Applied when formatting the displayed value.
 - **`aria-valuetext`**: Formatted using `NumberFormatter` from `ars-i18n` with the resolved locale.
@@ -755,7 +751,7 @@ ICU4X — leading minus, trailing minus, or accounting parentheses. Adapters mus
 | Clamp on blur              | `clamp_value_on_blur: bool`                   | `clampValueOnBlur` | --                                        | Ark parity                             |
 | Spin on press              | `spin_on_press: bool`                         | `spinOnPress`      | --                                        | Ark parity                             |
 | Format options             | `format_options: Option<NumberFormatOptions>` | `formatOptions`    | `formatOptions`                           | Full parity                            |
-| Locale                     | `locale: Option<Locale>`                      | `locale`           | --                                        | Ark parity                             |
+| Locale                     | via `Env.locale` (adapter-resolved)           | `locale`           | --                                        | Ark parity (adapter prop, not core)    |
 | Increment/decrement labels | via `Messages`                                | `translations`     | `incrementAriaLabel`/`decrementAriaLabel` | Full parity                            |
 
 **Gaps:** None.

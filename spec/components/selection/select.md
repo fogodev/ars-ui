@@ -6,9 +6,9 @@ foundation_deps: [architecture, accessibility, interactions, collections]
 shared_deps: [selection-patterns]
 related: []
 references:
-  ark-ui: Select
-  radix-ui: Select
-  react-aria: Select
+    ark-ui: Select
+    radix-ui: Select
+    react-aria: Select
 ---
 
 # Select
@@ -241,10 +241,6 @@ pub struct Props {
     pub positioning: PositioningOptions,
     /// The autocomplete of the select.
     pub autocomplete: Option<String>,
-    /// The messages of the select.
-    pub messages: Option<Messages>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     /// Prevents deselecting the last remaining selected item. When `true` and the user
     /// attempts to deselect the only selected value, the action is a no-op, ensuring at
     /// least one item is always selected. Commonly used for required single-select fields.
@@ -288,8 +284,6 @@ impl Default for Props {
             loop_focus: true,
             positioning: PositioningOptions::default(),
             autocomplete: None,
-            messages: None,
-            locale: None,
             disallow_empty_selection: false,
             multi_line_trigger: false,
             on_open_change: None,
@@ -311,11 +305,12 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let state = State::Closed;
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let ctx = Context {
             locale,
             items: StaticCollection::from_vec(Vec::new()),

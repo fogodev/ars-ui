@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, collections, interactions]
 shared_deps: []
 related: []
 references:
-  react-aria: TagGroup
+    react-aria: TagGroup
 ---
 
 # TagGroup
@@ -98,10 +98,6 @@ pub struct Props {
     pub disabled: bool,
     /// Accessible label for the tag group.
     pub label: Option<String>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Translatable messages for accessibility labels (see §4.1 Messages).
-    pub messages: Option<Messages>,
     // on_remove callback is registered in the adapter layer, not in Props.
 }
 
@@ -116,8 +112,6 @@ impl Default for Props {
             disallow_empty_selection: false,
             disabled: false,
             label: None,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -164,11 +158,12 @@ impl ars_core::Machine for Machine {
     type Event   = Event;
     type Context = Context;
     type Props   = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         (State::Idle, Context {
             items: props.items.clone(),
             focused_key: None,
@@ -186,10 +181,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx:   &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx:   &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         if ctx.disabled {
             return match event {
@@ -303,11 +298,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx:   &'a Context,
-        props: &'a Props,
-        send:  &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx:   &'a Self::Context,
+        props: &'a Self::Props,
+        send:  &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

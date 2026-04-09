@@ -194,7 +194,7 @@ async fn qr_code_canvas_has_alt_text() {
 #[test]
 fn signature_pad_canvas_has_accessible_label() {
     let props = signature_pad::Props::new("sp1").label("Your signature");
-    let svc = Service::new(props);
+    let svc = Service::new(props, Env::default(), Default::default());
     let api = svc.connect(&|_| {});
     let canvas_attrs = api.part_attrs(Part::Canvas);
     assert_role(&canvas_attrs, "img");
@@ -204,7 +204,7 @@ fn signature_pad_canvas_has_accessible_label() {
 #[test]
 fn qr_code_canvas_has_alt_text() {
     let props = qr_code::Props::new("qr1").value("https://example.com").alt("QR code for example.com");
-    let svc = Service::new(props);
+    let svc = Service::new(props, Env::default(), Default::default());
     let api = svc.connect(&|_| {});
     let canvas_attrs = api.part_attrs(Part::Canvas);
     assert_role(&canvas_attrs, "img");
@@ -448,7 +448,7 @@ fn no_signal_capture_leak() {
     }
 
     let (service, weak_service) = {
-        let svc = Rc::new(RefCell::new(Service::new(props)));
+        let svc = Rc::new(RefCell::new(Service::new(props, Env::default(), Default::default())));
         let weak = Rc::downgrade(&svc);
         // Mount component, creating effects that capture `svc`
         let _handle = mount_component(Rc::clone(&svc));
@@ -576,7 +576,7 @@ fn dialog_cleanup_on_unmount() {
 #[wasm_bindgen_test]
 async fn interleaved_effect_setup_and_cancel() {
     let props = tooltip::Props { open_delay_ms: 500, ..Default::default() };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     // PendingEffect::run() takes Rc<dyn Fn(M::Event)> on wasm32,
     // Arc<dyn Fn(M::Event) + Send + Sync> on native.
     #[cfg(target_arch = "wasm32")]
@@ -1486,7 +1486,7 @@ use criterion::{criterion_group, criterion_main, Criterion, black_box};
 
 fn bench_transition_throughput(c: &mut Criterion) {
     let props = toggle::Props::default();
-    let (state, ctx) = toggle::Machine::init(&props);
+    let (state, ctx) = toggle::Machine::init(&props, &Env::default(), &Default::default());
 
     c.bench_function("toggle::transition", |b| {
         b.iter(|| {
@@ -1503,13 +1503,13 @@ fn bench_transition_throughput(c: &mut Criterion) {
 fn bench_init(c: &mut Criterion) {
     c.bench_function("dialog::init", |b| {
         let props = dialog::Props::default();
-        b.iter(|| black_box(dialog::Machine::init(&props)))
+        b.iter(|| black_box(dialog::Machine::init(&props, &Env::default(), &Default::default())))
     });
 }
 
 fn bench_connect(c: &mut Criterion) {
     let props = button::Props::default();
-    let (state, ctx) = button::Machine::init(&props);
+    let (state, ctx) = button::Machine::init(&props, &Env::default(), &Default::default());
     let send = |_: button::Event| {};
 
     c.bench_function("button::connect", |b| {
@@ -1583,7 +1583,7 @@ fn bench_core_group(c: &mut Criterion) {
 
     group.bench_function("toggle::transition", |b| {
         let props = toggle::Props::default();
-        let (state, ctx) = toggle::Machine::init(&props);
+        let (state, ctx) = toggle::Machine::init(&props, &Env::default(), &Default::default());
         b.iter(|| black_box(toggle::Machine::transition(
             &state, &toggle::Event::Toggle, &ctx, &props,
         )))

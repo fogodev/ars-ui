@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility, interactions, forms]
 shared_deps: []
 related: [text-field]
 references:
-  ark-ui: PasswordInput
-  radix-ui: PasswordToggleField
+    ark-ui: PasswordInput
+    radix-ui: PasswordToggleField
 ---
 
 # PasswordInput
@@ -115,10 +115,6 @@ pub struct Props {
     pub form: Option<String>,
     /// Autocomplete hint for password managers. Defaults to "current-password".
     pub autocomplete: Option<String>,
-    /// Locale for i18n message resolution.
-    pub locale: Option<Locale>,
-    /// Translatable messages.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -136,8 +132,6 @@ impl Default for Props {
             name: None,
             form: None,
             autocomplete: None,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -175,10 +169,11 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let state = if props.default_visible { State::Visible } else { State::Masked };
         let ctx = Context {
             visible: props.default_visible,

@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions, collections]
 shared_deps: [selection-patterns]
 related: []
 references:
-  radix-ui: Menubar
+    radix-ui: Menubar
 ---
 
 # MenuBar
@@ -112,10 +112,6 @@ pub struct Props {
     /// Whether focus wraps from the last trigger back to the first (and vice versa).
     /// Default: `true`.
     pub loop_focus: bool,
-    /// Translatable messages.
-    pub messages: Option<Messages>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
 }
 
 impl Default for Props {
@@ -126,8 +122,6 @@ impl Default for Props {
             orientation: Orientation::Horizontal,
             dir: Direction::Ltr,
             loop_focus: true,
-            messages: None,
-            locale: None,
         }
     }
 }
@@ -144,10 +138,11 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Props) -> (State, Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let ctx = Context {
             locale,
             menus: StaticCollection::empty(),
@@ -161,10 +156,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        _props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
             // ActivateMenu: open the menu, enter Active state
@@ -355,11 +350,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

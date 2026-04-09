@@ -57,7 +57,8 @@ ssr = ["dioxus/server", "dep:ars-dom", "ars-dom/ssr"]
 ````rust
 use std::rc::Rc;
 use dioxus::prelude::*;
-use ars_core::{Machine, Service};
+use ars_core::{Machine, Service, Env};
+use ars_i18n::{Locale, IcuProvider, ComponentMessages, I18nRegistries};
 
 /// Return type from `use_machine`.
 ///
@@ -237,6 +238,10 @@ pub fn related_id(base: &str, suffix: &str) -> String {
 }
 
 /// Internal — creates a single Service shared by both public hooks.
+///
+/// Resolves environment values (locale, ICU provider) and messages from
+/// `ArsProvider` context before constructing the `Service`. Core code never
+/// calls framework hooks — all environment values arrive as parameters.
 fn use_machine_inner<M: Machine + 'static>(
     props: M::Props,
 ) -> (UseMachineReturn<M>, Signal<u64>)
@@ -257,13 +262,25 @@ where
         p
     };
 
+    // Resolve environment values from ArsProvider context.
+    // These are adapter-only hooks — core code receives Env and Messages as parameters.
+    let locale = resolve_locale(None);
+    let icu_provider = use_icu_provider();
+    let env = Env { locale, icu_provider };
+
+    // Resolve messages from adapter-level i18n registries.
+    let registries = try_use_context::<ArsContext>()
+        .map(|ctx| ctx.i18n_registries.clone())
+        .unwrap_or_default();
+    let messages = resolve_messages::<M::Messages>(None, &registries, &env.locale);
+
     // **Safety**: The `init()` function must not call `api.send()` or otherwise
     // produce events. It runs during component initialization and event
     // processing is not yet set up.
     // Clone props for use_sync_props before moving into use_signal.
     // use_signal's closure runs exactly once (first mount), consuming `props`.
     let props_for_sync = props.clone();
-    let mut service_signal = use_signal(|| Service::<M>::new(props));
+    let mut service_signal = use_signal(|| Service::<M>::new(props, env, messages));
     let mut context_version: Signal<u64> = use_signal(|| 0u64);
 
     // Create state_signal BEFORE use_sync_props to ensure it exists if sync triggers re-render.
@@ -2169,7 +2186,7 @@ includes the style strategy and the Dioxus-specific platform capabilities trait 
 
 ```rust
 use ars_i18n::{Locale, Direction};
-use ars_core::{ColorMode, PlatformEffects, StyleStrategy, ArsContext as CoreCtx};
+use ars_core::{ArsRc, ColorMode, PlatformEffects, StyleStrategy, ArsContext as CoreCtx};
 use ars_i18n::IcuProvider;
 
 /// Reactive environment context published by the Dioxus ArsProvider adapter.
@@ -2184,7 +2201,7 @@ pub struct ArsContext {
     pub portal_container_id: Signal<Option<String>>,
     pub root_node_id: Signal<Option<String>>,
     pub platform: ArsRc<dyn PlatformEffects>,
-    pub icu_provider: Arc<dyn IcuProvider>,
+    pub icu_provider: ArsRc<dyn IcuProvider>,
     pub i18n_registries: Rc<I18nRegistries>,
     pub style_strategy: StyleStrategy,
     /// Dioxus adapter-specific: platform services for file pickers, clipboard, drag data.
@@ -2217,7 +2234,87 @@ pub fn use_locale() -> Signal<Locale> {
 }
 ```
 
-### 16.2 t() — Translatable Text Resolver
+### 16.2 Environment Resolution Utilities
+
+These adapter-only utilities resolve environment values from `ArsProvider` context
+before passing them to core code via the `Env` struct and `Messages` parameter.
+Core component code never calls these functions directly.
+
+See `04-internationalization.md` §2.3.1 for the three-level resolution chain
+(prop override -> ArsProvider -> default) and §2.3.2 for ICU provider resolution.
+
+```rust
+use ars_core::{Env, ArsRc};
+use ars_i18n::{Locale, IcuProvider, StubIcuProvider, ComponentMessages, I18nRegistries};
+
+/// Resolve locale from an optional adapter prop override or ArsProvider context.
+///
+/// Resolution chain:
+/// 1. Explicit adapter prop override (if provided)
+/// 2. ArsProvider locale signal (via `use_locale()`)
+/// 3. Fallback: `en-US`
+///
+/// This is an **adapter-only** utility — NOT available in core crates. Core code
+/// receives a fully-resolved `Locale` via `Env`.
+///
+/// **Note:** Unlike `use_locale()` which returns `Signal<Locale>`, this function
+/// reads the signal and returns a plain `Locale` for use in `Env` construction.
+fn resolve_locale(adapter_props_locale: Option<&Locale>) -> Locale {
+    adapter_props_locale
+        .cloned()
+        .unwrap_or_else(|| {
+            // Read the reactive locale signal to get a plain Locale value.
+            // use_locale() returns Signal<Locale>; .read() subscribes the
+            // component to locale changes, ensuring re-render on locale change.
+            use_locale().read().clone()
+        })
+}
+
+/// Resolve the ICU provider from ArsProvider context.
+///
+/// Falls back to `StubIcuProvider` (English-only, zero dependencies) if no
+/// `ArsProvider` is present.
+///
+/// This is an **adapter-only** utility — NOT available in core crates. Core code
+/// receives the provider via `Env.icu_provider`.
+fn use_icu_provider() -> ArsRc<dyn IcuProvider> {
+    try_use_context::<ArsContext>()
+        .map(|ctx| ctx.icu_provider.clone())
+        .unwrap_or_else(|| {
+            warn_missing_provider("use_icu_provider");
+            ArsRc::new(StubIcuProvider)
+        })
+}
+
+/// Resolve per-component i18n messages from an optional adapter prop override,
+/// ArsProvider i18n registries, or built-in defaults.
+///
+/// Resolution chain:
+/// 1. Explicit adapter prop override (if provided)
+/// 2. ArsProvider i18n registries (locale-keyed lookup)
+/// 3. Fallback: `M::default()` (built-in English defaults)
+///
+/// This is a **pure function** — no framework hooks. The adapter passes
+/// `registries` explicitly after reading them from `ArsContext`.
+fn resolve_messages<M: ComponentMessages + 'static>(
+    adapter_props_messages: Option<&M>,
+    registries: &I18nRegistries,
+    locale: &Locale,
+) -> M {
+    // Level 1: explicit adapter prop override
+    if let Some(m) = adapter_props_messages {
+        return m.clone();
+    }
+    // Level 2: ArsProvider i18n registries
+    if let Some(registry) = registries.get::<M>() {
+        return registry.get(locale).clone();
+    }
+    // Level 3: built-in defaults
+    M::default()
+}
+```
+
+### 16.3 t() — Translatable Text Resolver
 
 ```rust
 use ars_i18n::Translate;
@@ -2264,7 +2361,9 @@ mod tests {
     #[test]
     fn dialog_opens_and_closes() {
         let props = dialog::Props::default();
-        let mut svc = Service::<dialog::Machine>::new(props);
+        let env = Env::default();
+        let messages = dialog::Messages::default();
+        let mut svc = Service::<dialog::Machine>::new(props, env, messages);
 
         assert_eq!(*svc.state(), dialog::State::Closed);
         svc.send(dialog::Event::Open);

@@ -36,9 +36,6 @@ pub struct Props {
     /// During SSR, defaults to `false` (non-Mac); client-side hydration updates
     /// the display if the actual platform differs.
     pub is_mac: bool,
-    /// Optional locale for localizing modifier key display names.
-    /// When `None`, English names are used (default behavior).
-    pub locale: Option<Locale>,
 }
 ```
 
@@ -72,9 +69,9 @@ impl<'a> Api<'a> {
 
     /// Returns the formatted shortcut text, applying platform-aware
     /// modifier mapping when `platform_aware` is true.
-    pub fn display_text(&self) -> String {
+    pub fn display_text(&self, locale: Option<&Locale>) -> String {
         if self.props.platform_aware {
-            format_platform_shortcut(&self.props.shortcut, self.props.is_mac, self.props.locale.as_ref())
+            format_platform_shortcut(&self.props.shortcut, self.props.is_mac, locale)
         } else {
             self.props.shortcut.clone()
         }

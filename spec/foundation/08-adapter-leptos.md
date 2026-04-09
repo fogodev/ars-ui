@@ -64,7 +64,8 @@ The central primitive. Creates a `Service<M>`, wraps it in a reactive signal, an
 ````rust
 use std::rc::Rc;
 use leptos::prelude::*;
-use ars_core::{Machine, Service};
+use ars_core::{Machine, Service, Env, ArsRc};
+use ars_i18n::IcuProvider;
 
 /// Return type from `use_machine`.
 #[derive(Clone, Copy)]
@@ -279,11 +280,22 @@ where
         p
     };
 
+    // Resolve environment values from ArsProvider context.
+    // These are snapshot reads — Leptos components run once, so each component
+    // gets the locale/icu_provider/messages at mount time.
+    let locale = resolve_locale(None);
+    let icu_provider = use_icu_provider();
+    let registries = use_context::<ArsContext>()
+        .map(|ctx| ctx.i18n_registries.clone())
+        .unwrap_or_default();
+    let messages = resolve_messages::<M::Messages>(None, &registries, &locale);
+    let env = Env { locale, icu_provider };
+
     // Create the service once — runs only on component initialization.
     // **Safety**: The `init()` function must not call `api.send()` or otherwise
     // produce events. It runs during component initialization and event
     // processing is not yet set up.
-    let service = StoredValue::new(Service::<M>::new(props));
+    let service = StoredValue::new(Service::<M>::new(props, env, messages));
 
     // Create a signal tracking the current state
     let initial_state = service.with_value(|s| s.state().clone());
@@ -1709,7 +1721,7 @@ trait object.
 
 ```rust
 use ars_i18n::{Locale, Direction};
-use ars_core::{ColorMode, PlatformEffects, StyleStrategy};
+use ars_core::{ArsRc, ColorMode, PlatformEffects, StyleStrategy};
 use ars_i18n::IcuProvider;
 
 /// Reactive environment context published by the Leptos ArsProvider adapter.
@@ -1724,8 +1736,8 @@ pub struct ArsContext {
     pub portal_container_id: Signal<Option<String>>,
     pub root_node_id: Signal<Option<String>>,
     pub platform: ArsRc<dyn PlatformEffects>,
-    pub icu_provider: Arc<dyn IcuProvider>,
-    pub i18n_registries: Rc<I18nRegistries>,
+    pub icu_provider: ArsRc<dyn IcuProvider>,
+    pub i18n_registries: ArsRc<I18nRegistries>,
     /// Non-reactive style strategy — set once at provider mount time.
     style_strategy: StyleStrategy,
 }
@@ -1772,7 +1784,26 @@ pub fn use_locale() -> Signal<Locale> {
 > `derive()` call creates an independent memo that only updates its dependents
 > when its output value actually changes.
 
-### 13.2 t() — Translatable Text Resolver
+### 13.2 resolve_locale() — Adapter Locale Resolution
+
+An adapter-only utility (not available in core crates) that resolves the effective locale for a component. If the adapter-level component provides a per-instance `locale` prop override, that value is used; otherwise falls back to the `ArsProvider` context locale.
+
+```rust
+/// Resolve the effective locale for a component.
+///
+/// - If `adapter_props_locale` is `Some`, use the per-instance override.
+/// - Otherwise, fall back to `use_locale()` from `ArsProvider` context.
+///
+/// This is a pure adapter utility — core code receives a fully-resolved
+/// `Locale` via `Env` and never calls this function.
+fn resolve_locale(adapter_props_locale: Option<&Locale>) -> Locale {
+    adapter_props_locale
+        .cloned()
+        .unwrap_or_else(|| use_locale().get())
+}
+```
+
+### 13.3 t() — Translatable Text Resolver
 
 ```rust
 use ars_i18n::Translate;
@@ -1834,7 +1865,9 @@ mod tests {
     #[test]
     fn checkbox_toggles() {
         let props = checkbox::Props::default();
-        let mut svc = Service::<checkbox::Machine>::new(props);
+        let env = Env::default();
+        let messages = checkbox::Messages::default();
+        let mut svc = Service::<checkbox::Machine>::new(props, env, messages);
 
         assert_eq!(*svc.state(), checkbox::State::Unchecked);
         svc.send(checkbox::Event::Toggle);

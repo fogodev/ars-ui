@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility, interactions, collections]
 shared_deps: [selection-patterns]
 related: []
 references:
-  ark-ui: TagsInput
-  react-aria: TagGroup
+    ark-ui: TagsInput
+    react-aria: TagGroup
 ---
 
 # TagsInput
@@ -178,10 +178,6 @@ pub struct Props {
     /// `Add` creates a tag from the current input (if non-empty and valid).
     /// `Clear` discards the pending input. Default: `BlurBehavior::Add`.
     pub blur_behavior: BlurBehavior,
-    /// Locale for i18n message resolution.
-    pub locale: Option<Locale>,
-    /// Translatable messages.
-    pub messages: Option<Messages>,
     // Change callbacks provided by the adapter layer
 }
 
@@ -206,8 +202,6 @@ impl Default for Props {
             name: None, placeholder: None,
             editable: false,
             blur_behavior: BlurBehavior::Add,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -265,11 +259,12 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let state = State::Idle;
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let ctx = Context {
             value: match &props.value {
                 Some(v) => Bindable::controlled(v.clone()),

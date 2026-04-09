@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: [color-picker, color-slider]
 references:
-  ark-ui: ColorPicker
-  react-aria: ColorArea
+    ark-ui: ColorPicker
+    react-aria: ColorArea
 ---
 
 # ColorArea
@@ -127,10 +127,6 @@ pub struct Props {
     pub dir: Direction,
     /// Name attribute for the hidden form input.
     pub name: Option<String>,
-    /// Locale override. When `None`, resolved via `resolve_locale()`.
-    pub locale: Option<Locale>,
-    /// Translatable messages. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
     /// Fired on `Event::DragEnd` / pointer release.
     pub on_change_end: Option<Callback<ColorValue>>,
 }
@@ -149,8 +145,6 @@ impl Default for Props {
             readonly: false,
             dir: Direction::Ltr,
             name: None,
-            locale: None,
-            messages: None,
             on_change_end: None,
         }
     }
@@ -179,16 +173,17 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let value = match &props.value {
             Some(v) => Bindable::controlled(v.clone()),
             None => Bindable::uncontrolled(props.default_value.clone()),
         };
         let ids = ComponentIds::from_id(&props.id);
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
 
         (State::Idle, Context {
             value,
@@ -208,10 +203,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        _props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         if ctx.disabled {
             return match event {
@@ -360,11 +355,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

@@ -49,10 +49,6 @@ pub struct Props {
     pub loading: bool,
     /// Formatting options passed to ars-i18n NumberFormatter.
     pub format_options: Option<NumberFormatOptions>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Localizable messages for screen reader announcements and display prefixes.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -66,8 +62,6 @@ impl Default for Props {
             help_text: None,
             loading: false,
             format_options: None,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -99,9 +93,9 @@ pub struct Api<'a> {
 
 impl<'a> Api<'a> {
     /// Create a new API for the stat.
-    pub fn new(props: &'a Props) -> Self {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    pub fn new(props: &'a Props, env: &Env, messages: &Messages) -> Self {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         Self { props, messages, locale }
     }
 

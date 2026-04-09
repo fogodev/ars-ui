@@ -142,7 +142,7 @@ fn gregorian_calendar_available() {
         calendar_system: CalendarSystem::Gregorian,
         ..Default::default()
     };
-    let (state, ctx) = calendar::Machine::init(&props);
+    let (state, ctx) = calendar::Machine::init(&props, &Env::default(), &Default::default());
     assert_eq!(state, calendar::State::Idle);
 }
 
@@ -153,7 +153,7 @@ fn hebrew_calendar_available() {
         calendar_system: CalendarSystem::Hebrew,
         ..Default::default()
     };
-    let (state, _ctx) = calendar::Machine::init(&props);
+    let (state, _ctx) = calendar::Machine::init(&props, &Env::default(), &Default::default());
     assert_eq!(state, calendar::State::Idle);
 }
 

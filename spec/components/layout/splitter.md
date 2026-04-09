@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: [layout-shared-types]
 related: []
 references:
-  ark-ui: Splitter
+    ark-ui: Splitter
 ---
 
 # Splitter
@@ -144,7 +144,7 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn from_props(props: &Props) -> Self {
+    pub fn from_props(props: &Props, env: &Env, messages: &Messages) -> Self {
         let sizes = if let Some(ref initial) = props.default_sizes {
             initial.clone()
         } else {
@@ -155,8 +155,8 @@ impl Context {
             };
             vec![share; props.panels.len()]
         };
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         Context {
             sizes: props.sizes.clone().unwrap_or_else(|| Bindable::uncontrolled(sizes)),
             panels: props.panels.clone(),
@@ -204,11 +204,6 @@ pub struct Props {
     pub keyboard_step: Option<f64>,
     /// Key for persisting sizes to localStorage across sessions.
     pub storage_key: Option<String>,
-    /// Optional locale override. When `None`, resolved from the nearest
-    /// `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Translatable messages. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -224,8 +219,6 @@ impl Default for Props {
             initial_total_px: None,
             keyboard_step: None,
             storage_key: None,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -371,14 +364,18 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
-        (State::Idle, Context::from_props(props))
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        (State::Idle, Context::from_props(props, env, messages))
     }
 
     fn transition(
-        state: &State, event: &Event, ctx: &Context, props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
             (State::Idle, Event::DragStart { handle_index, pos }) => {
@@ -456,11 +453,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

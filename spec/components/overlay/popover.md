@@ -6,9 +6,9 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: [z-index-stacking]
 related: [dialog]
 references:
-  ark-ui: Popover
-  radix-ui: Popover
-  react-aria: Popover
+    ark-ui: Popover
+    radix-ui: Popover
+    react-aria: Popover
 ---
 
 # Popover
@@ -123,10 +123,6 @@ pub struct Props {
     /// Callback invoked when the popover open state changes.
     /// Fires after the transition with the new open state value (`true` for open, `false` for close).
     pub on_open_change: Option<Callback<bool>>,
-    /// Translatable messages for accessibility labels (see §4.1 Messages).
-    pub messages: Option<Messages>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     // Change callbacks provided by the adapter layer
 }
 
@@ -147,8 +143,6 @@ impl Default for Props {
             lazy_mount: false,
             unmount_on_exit: false,
             on_open_change: None,
-            messages: None,
-            locale: None,
         }
     }
 }
@@ -260,9 +254,10 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(&props.id);
         // Apply convenience offset/cross_offset aliases into positioning options.
         // Explicit Props.offset / Props.cross_offset override the corresponding
@@ -270,8 +265,8 @@ impl ars_core::Machine for Machine {
         let mut positioning = props.positioning.clone();
         if props.offset != 0.0 { positioning.offset = props.offset; }
         if props.cross_offset != 0.0 { positioning.cross_axis_offset = props.cross_offset; }
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let initial_open = props.open.unwrap_or(props.default_open);
         let initial_state = if initial_open { State::Open } else { State::Closed };
         (initial_state, Context {

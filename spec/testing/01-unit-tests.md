@@ -48,7 +48,7 @@ mod tests {
 
     fn default_ctx() -> Context {
         let props = Props::default();
-        let (_state, ctx) = Machine::init(&props);
+        let (_state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
         ctx
     }
 
@@ -462,7 +462,7 @@ mod layout_tests {
 
     fn carousel_ctx(index: usize, count: usize, loop_nav: bool) -> Context {
         let props = carousel::Props::new("test-carousel");
-        let (_state, mut ctx) = carousel::Machine::init(&props);
+        let (_state, mut ctx) = carousel::Machine::init(&props, &Env::default(), &Default::default());
         ctx.index = Bindable::uncontrolled(index);
         ctx.slide_count = NonZero::new(count).expect("count must be non-zero");
         ctx.loop_nav = loop_nav;
@@ -607,7 +607,7 @@ proptest! {
     /// Machine::init() must never panic for any Props combination.
     #[test]
     fn init_never_panics(props in any::<slider::Props>()) {
-        let (_state, _ctx) = slider::Machine::init(&props);
+        let (_state, _ctx) = slider::Machine::init(&props, &Env::default(), &Default::default());
     }
 
     /// Machine::transition() must never panic for any (state, event, props) combination.
@@ -616,7 +616,7 @@ proptest! {
         props in any::<slider::Props>(),
         event in arb_slider_event(),
     ) {
-        let (state, ctx) = slider::Machine::init(&props);
+        let (state, ctx) = slider::Machine::init(&props, &Env::default(), &Default::default());
         let _plan = slider::Machine::transition(&state, &event, &ctx, &props);
     }
 }

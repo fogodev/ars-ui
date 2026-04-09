@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: [color-picker]
 references:
-  ark-ui: ColorPicker
-  react-aria: ColorField
+    ark-ui: ColorPicker
+    react-aria: ColorField
 ---
 
 # ColorField
@@ -159,11 +159,6 @@ pub struct Props {
     /// Large step size for channel-mode PageUp/PageDown.
     /// Default: `step * 10`.
     pub large_step: Option<f64>,
-    /// Optional locale override. When `None`, resolved from the nearest
-    /// `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Translatable messages. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -181,8 +176,6 @@ impl Default for Props {
             name: None,
             step: None,
             large_step: None,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -276,9 +269,10 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let value = match &props.value {
             Some(v) => Bindable::controlled(Some(v.clone())),
             None => Bindable::uncontrolled(props.default_value.clone()),
@@ -296,8 +290,8 @@ impl ars_core::Machine for Machine {
         };
 
         let ids = ComponentIds::from_id(&props.id);
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
 
         (State::Idle, Context {
             value,
@@ -322,10 +316,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        _props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         // During IME composition, suppress all keyboard shortcuts.
         if ctx.is_composing {
@@ -498,11 +492,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

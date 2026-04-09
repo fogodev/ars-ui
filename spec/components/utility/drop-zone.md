@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions, forms]
 shared_deps: []
 related: []
 references:
-  react-aria: DropZone
+    react-aria: DropZone
 ---
 
 # DropZone
@@ -134,10 +134,6 @@ pub struct Props {
     /// Read-only DropZone displays previously dropped files but prevents new drops.
     /// The `form_data()` method still returns items for form submission.
     pub read_only: bool,
-    /// Locale override. When `None`, inherits from nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Localizable strings. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
     /// Delay in milliseconds before firing `on_drop_activate` while hovering.
     /// Default: 500.
     pub activate_delay_ms: u32,
@@ -180,8 +176,6 @@ impl Default for Props {
             required: false,
             invalid: false,
             read_only: false,
-            locale: None,
-            messages: None,
             activate_delay_ms: 500,
             get_drop_operation: None,
             on_drop: None,
@@ -306,11 +300,12 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(props.id());
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let ctx = Context {
             accept: props.accept.clone(),
             max_files: props.max_files,
@@ -337,7 +332,6 @@ impl ars_core::Machine for Machine {
             || old.max_files != new.max_files
             || old.max_file_size != new.max_file_size
             || old.read_only != new.read_only
-            || old.locale != new.locale
         {
             events.push(Event::SetProps);
         }
@@ -345,10 +339,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         // Disabled guard: allow Focus/Blur so AT can still discover the element.
         if ctx.disabled && !matches!(event, Event::Focus { .. } | Event::Blur | Event::SetProps) {
@@ -368,14 +362,12 @@ impl ars_core::Machine for Machine {
                 let max_file_size = props.max_file_size;
                 let disabled = props.disabled;
                 let read_only = props.read_only;
-                let locale = resolve_locale(props.locale.as_ref());
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.accept = accept;
                     ctx.max_files = max_files;
                     ctx.max_file_size = max_file_size;
                     ctx.disabled = disabled;
                     ctx.read_only = read_only;
-                    ctx.locale = locale;
                 }))
             }
             // ── Drag enter ──────────────────────────────────────────────────
@@ -506,11 +498,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

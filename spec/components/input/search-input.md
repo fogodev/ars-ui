@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions, forms]
 shared_deps: []
 related: [text-field]
 references:
-  react-aria: SearchField
+    react-aria: SearchField
 ---
 
 # SearchInput
@@ -126,10 +126,6 @@ pub struct Props {
     /// this many ms after the last keystroke before propagating the change
     /// to the `on_change` callback. Set to `None` (default) for immediate.
     pub debounce_ms: Option<u32>,
-    /// Optional locale override for i18n message resolution.
-    pub locale: Option<Locale>,
-    /// Translatable messages.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -140,8 +136,6 @@ impl Default for Props {
             disabled: false, readonly: false, invalid: false, required: false,
             placeholder: None, name: None, form: None,
             debounce_ms: None,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -193,10 +187,11 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let state = State::Idle;
         let ctx = Context {
             value: match &props.value {

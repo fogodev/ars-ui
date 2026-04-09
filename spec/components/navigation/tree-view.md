@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility, interactions, collections]
 shared_deps: []
 related: []
 references:
-  ark-ui: TreeView
-  react-aria: Tree
+    ark-ui: TreeView
+    react-aria: Tree
 ---
 
 # TreeView
@@ -131,10 +131,6 @@ pub struct Props {
     pub selection_mode: selection::Mode,
     /// Selection behavior: Toggle (checkbox-like) or Replace (file-explorer-like).
     pub selection_behavior: selection::Behavior,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Localizable messages. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -149,8 +145,6 @@ impl Default for Props {
             multiple: false,
             selection_mode: selection::Mode::Single,
             selection_behavior: selection::Behavior::Toggle,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -219,8 +213,9 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props   = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let selected = match &props.selected {
             Some(v) => Bindable::controlled(v.clone()),
             None    => Bindable::uncontrolled(props.default_selected.clone()),
@@ -233,8 +228,8 @@ impl ars_core::Machine for Machine {
             props.selection_mode,
             props.selection_behavior,
         );
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let ids = ComponentIds::from_id(&props.id);
         (State::Idle, Context {
             items: props.items.clone(),
@@ -253,10 +248,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        _props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match event {
 
@@ -475,10 +470,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }

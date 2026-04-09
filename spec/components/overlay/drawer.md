@@ -123,8 +123,6 @@ pub struct Props {
     pub dir: Direction,
     /// Heading level for the Title part (renders as `<h{level}>`). Default: 2.
     pub title_level: u8,
-    /// Messages for accessibility labels (see §4.1 Messages).
-    pub messages: Option<Messages>,
     /// Snap points for bottom sheet behavior (see §5. Variant: Bottom Sheet).
     pub snap_points: Option<Vec<f64>>,
     /// Index into `snap_points` for the initial position. Defaults to 0.
@@ -153,7 +151,6 @@ impl Default for Props {
             final_focus: None,
             dir: Direction::Ltr,
             title_level: 2,
-            messages: None,
             snap_points: None,
             default_snap_index: 0,
             on_open_change: None,

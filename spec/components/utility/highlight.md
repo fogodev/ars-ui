@@ -32,10 +32,6 @@ pub struct Props {
     pub ignore_case: bool,
     /// Matching strategy.
     pub match_strategy: MatchStrategy,
-    /// Locale for case-insensitive matching. When `Some`, uses locale-aware
-    /// case folding (e.g., Turkish dotted-I). When `None`, uses Unicode
-    /// default case folding. See `04-internationalization.md` §2.1.1.
-    pub locale: Option<Locale>,
 }
 
 /// The strategy to use for matching the query within the text.
@@ -70,7 +66,7 @@ pub struct HighlightChunk<'a> {
 /// use default Unicode case folding (`CaseMapper::fold()`). This ensures correct
 /// matching for Turkish dotted-I (İ/i vs I/ı), German eszett (ß/SS), and other
 /// locale-specific case mappings.
-pub fn highlight_chunks<'a>(props: &'a Props) -> Vec<HighlightChunk<'a>> {
+pub fn highlight_chunks<'a>(props: &'a Props, locale: &Locale) -> Vec<HighlightChunk<'a>> {
     // Returns the text split into alternating highlighted/non-highlighted segments.
     // When queries are empty or all empty strings, returns the full text as a single
     // non-highlighted chunk. When multiple queries match overlapping regions, the

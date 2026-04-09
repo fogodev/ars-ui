@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: []
 references:
-  react-aria: Link
+    react-aria: Link
 ---
 
 # Link
@@ -102,10 +102,6 @@ pub struct Props {
     pub is_current: Option<AriaCurrent>,
     /// Disables the link (removes href, sets `aria-disabled`).
     pub disabled: bool,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Localizable messages for external link announcements.
-    pub messages: Option<Messages>,
     // Change callbacks provided by the adapter layer
 }
 
@@ -118,8 +114,6 @@ impl Default for Props {
             rel: None,
             is_current: None,
             disabled: false,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -174,11 +168,12 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props   = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(&props.id);
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         (State::Idle, Context {
             href: props.href.clone(),
             target: props.target.clone(),
@@ -195,10 +190,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
 
@@ -259,10 +254,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }

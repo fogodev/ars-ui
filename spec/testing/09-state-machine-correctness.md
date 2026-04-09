@@ -34,7 +34,7 @@ fn combobox_state_ctx_open_sync() {
         open_on_focus: true,
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
 
     // Focus with open_on_focus=true must transition State AND ctx.open
     svc.send(combobox::Event::Focus { is_keyboard: true });
@@ -95,7 +95,7 @@ non-interactive.
 #[test]
 fn focus_blur_handled() {
     let props = Props::default();
-    let (init_state, init_ctx) = Machine::init(&props);
+    let (init_state, init_ctx) = Machine::init(&props, &Env::default(), &Default::default());
 
     // Focus must produce Some from idle/closed state
     let plan = Machine::transition(
@@ -217,7 +217,7 @@ source is still active.
 #[test]
 fn hovercard_stays_open_when_one_source_remains() {
     let props = hover_card::Props::default();
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
 
     // Open via hover
     svc.send(hover_card::Event::TriggerPointerEnter);
@@ -237,7 +237,7 @@ fn hovercard_stays_open_when_one_source_remains() {
 #[test]
 fn hovercard_pointer_leave_updates_hover_active() {
     let props = Props::default();
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
 
     svc.send(Event::TriggerPointerEnter);
     assert!(svc.context().hover_active);
@@ -278,7 +278,7 @@ fn effect_callback_fires_in_setup_not_cleanup() {
     // Test by checking when the callback fires relative to setup/cleanup.
 
     let props = pin_input::Props::default();
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
 
     // Fill all pins to trigger the Complete transition
     for i in 0..svc.context().pin_count {
@@ -313,7 +313,7 @@ release timer resources.
 ### 1.8 `init()` Trait Compliance Test
 
 Every Machine implementation's `init()` must match the trait signature exactly:
-`fn init(props: &Self::Props) -> (Self::State, Self::Context)`.
+`fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context)`.
 
 ```rust
 /// Compile-time verified by the trait system, but this test ensures
@@ -321,7 +321,7 @@ Every Machine implementation's `init()` must match the trait signature exactly:
 #[test]
 fn init_returns_valid_pair() {
     let props = Props::default();
-    let (state, ctx) = Machine::init(&props);
+    let (state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
     // Verify initial state is the expected variant for this component.
     // Each component's init() test should assert against its documented initial state:
     // - Toggle: State::Off
@@ -348,7 +348,7 @@ callbacks.
 #[test]
 fn rapid_open_close_cancels_pending_timer() {
     let props = tooltip::Props::default();
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
 
     // Rapidly toggle: pointer enter → leave → enter → leave
     svc.send(Event::PointerEnter);  // → OpenPending, starts timer
@@ -383,7 +383,7 @@ fn named_effect_replaces_previous() {
 #[test]
 fn rapid_events_no_orphaned_timers() {
     let props = tooltip::Props::default();
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     let mut active_effects: Vec<Box<dyn FnOnce()>> = Vec::new();
 
     // Rapid sequence: open → close → open → close × 50
@@ -428,7 +428,7 @@ use ars_core::{Service, KeyboardKey};
 #[test]
 fn then_send_chain_fires_followup() {
     let props = calendar::Props::default();
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(calendar::Event::FocusIn);
 
     // Enter/Space in the calendar fires `.then(Event::SelectDate { ... })`
@@ -442,7 +442,7 @@ fn then_send_chain_fires_followup() {
 #[test]
 fn then_send_respects_disabled_guard() {
     let props = calendar::Props { disabled: true, ..Default::default() };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
 
     // Even if a then_send chain would fire SelectDate,
     // the disabled guard should block it.
@@ -462,7 +462,7 @@ the adapter can run their cleanup functions.
 #[test]
 fn rapid_transition_cancels_previous_effects() {
     let props = tooltip::Props::default();
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
 
     // Open tooltip (starts open-delay effect)
     let open_result = svc.send(tooltip::Event::PointerEnter);
@@ -487,7 +487,7 @@ use ars_core::{Service, CleanupFn};
 #[test]
 fn rapid_transitions_clean_up_effects() {
     let props = tooltip::Props::new("t1");
-    let mut svc = Service::new(props.clone());
+    let mut svc = Service::new(props.clone(), Env::default(), Default::default());
     // PendingEffect::run() takes Rc<dyn Fn(M::Event)> on wasm32,
     // Arc<dyn Fn(M::Event) + Send + Sync> on native.
     #[cfg(target_arch = "wasm32")]
@@ -529,7 +529,7 @@ is compile-time verified, but snapshot tests ensure attribute stability.
 #[test]
 fn connect_produces_all_required_attrs() {
     let props = Props::default();
-    let (state, ctx) = Machine::init(&props);
+    let (state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
     let api = Machine::connect(&state, &ctx, &props, &|_| {});
 
     // Root attrs must always include ars-scope and ars-part
@@ -544,7 +544,7 @@ fn connect_produces_all_required_attrs() {
 #[test]
 fn connect_produces_valid_attrs_in_all_reachable_states() {
     let props = dialog::Props::new("d1");
-    let mut svc = Service::new(props.clone());
+    let mut svc = Service::new(props.clone(), Env::default(), Default::default());
 
     // Test connect in initial (Closed) state
     let api = svc.connect(&|_| {});
@@ -590,7 +590,7 @@ fn effect_setup_does_not_require_mut_context() {
     // But verify at test time that effects don't panic when receiving
     // an immutable context snapshot.
     let props = tooltip::Props::default();
-    let mut svc = Service::new(props.clone());
+    let mut svc = Service::new(props.clone(), Env::default(), Default::default());
 
     let result = svc.send(tooltip::Event::PointerEnter);
     // PendingEffect::run() takes Rc<dyn Fn(M::Event)> on wasm32,
@@ -622,7 +622,7 @@ and that intermediate composition input is not prematurely committed.
 #[test]
 fn composition_start_sets_is_composing() {
     let props = number_input::Props::default();
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(number_input::Event::FocusIn);
 
     assert!(!svc.context().is_composing, "initially not composing");
@@ -643,7 +643,7 @@ fn composition_start_sets_is_composing() {
 #[test]
 fn disabled_component_rejects_composition_events() {
     let props = pin_input::Props { disabled: true, ..Default::default() };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
 
     svc.send(pin_input::Event::CompositionStart);
     assert!(!svc.context().is_composing,
@@ -657,7 +657,7 @@ fn disabled_component_rejects_composition_events() {
 #[test]
 fn text_field_ime_composition_produces_final_value() {
     let props = text_field::Props::new("tf1");
-    let mut svc = Service::new(props.clone());
+    let mut svc = Service::new(props.clone(), Env::default(), Default::default());
     svc.send(text_field::Event::CompositionStart);
     // Intermediate composition updates are handled by the adapter (DOM events),
     // not by the state machine. The machine only sees Start and End.
@@ -722,7 +722,7 @@ fn keyboard_navigation_respects_collection_ordering() {
             .build(),
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(combobox::Event::Open);
 
     // ArrowDown from first item should skip disabled "b" and land on "c"
@@ -740,7 +740,7 @@ fn empty_collection_produces_accessible_fallback() {
         collection: CollectionBuilder::new().build(),
         ..Default::default()
     };
-    let (state, ctx) = listbox::Machine::init(&props);
+    let (state, ctx) = listbox::Machine::init(&props, &Env::default(), &Default::default());
     let api = listbox::Machine::connect(&state, &ctx, &props, &|_| {});
 
     let root = api.root_attrs();
@@ -771,7 +771,7 @@ fn cyclic_follow_up_is_detected_and_bounded() {
     // Minimal machine: StateA transitions to StateB with follow_up(GoB),
     // StateB transitions to StateA with follow_up(GoA).
     let props = cycle_test::Props::default();
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
 
     // Trigger the cycle
     let result = svc.send(cycle_test::Event::GoB);
@@ -799,7 +799,7 @@ fn controlled_prop_sync_cycle_is_broken_by_guard() {
         on_change: Some(Box::new(move |_: &str| { count.set(count.get() + 1); })),
         ..Default::default()
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
 
     // Simulate: on_change sets the controlled value back to the same value.
     // The machine must detect no actual change and skip re-emission.
@@ -829,7 +829,7 @@ fn controlled_prop_sync_cycle_is_broken_by_guard() {
 #[test]
 fn machine_is_valid_after_drain_truncation() {
     let props = cycle_test::Props::default();
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
 
     // Trigger the cycle (will be truncated)
     let result = svc.send(cycle_test::Event::GoB);
@@ -860,7 +860,7 @@ use ars_core::Bindable;
 #[test]
 fn set_props_triggers_on_props_changed() {
     let initial_props = slider::Props { min: 0.0, max: 100.0, value: Bindable::controlled(50.0), ..Default::default() };
-    let mut svc = Service::new(initial_props);
+    let mut svc = Service::new(initial_props, Env::default(), Default::default());
     assert_eq!(svc.context().value, 50.0);
 
     // Update props with new controlled value
@@ -874,7 +874,7 @@ fn set_props_triggers_on_props_changed() {
 #[test]
 fn set_props_no_change_produces_no_events() {
     let props = checkbox::Props::default();
-    let mut svc = Service::new(props.clone());
+    let mut svc = Service::new(props.clone(), Env::default(), Default::default());
     let state_before = svc.state().clone();
     let ctx_before = svc.context().clone();
 
@@ -907,7 +907,7 @@ use ars_core::{Service, Machine, Key};
 fn disabled_guard_applies_to_all_states() {
     let props = combobox::Props { disabled: true, ..Default::default() };
     for state in combobox::State::iter_all() {
-        let ctx = combobox::Machine::init(&props).1;
+        let ctx = combobox::Machine::init(&props, &Env::default(), &Default::default()).1;
         let plan = combobox::Machine::transition(&state, &combobox::Event::Open, &ctx, &props);
         assert!(
             plan.is_none() || plan.as_ref().map_or(false, |p| p.target.is_none()),
@@ -925,7 +925,7 @@ fn readonly_guard_blocks_mutation_in_all_states() {
         combobox::Event::Clear,
     ];
     for state in combobox::State::iter_all() {
-        let ctx = combobox::Machine::init(&props).1;
+        let ctx = combobox::Machine::init(&props, &Env::default(), &Default::default()).1;
         for event in &mutation_events {
             let plan = combobox::Machine::transition(&state, event, &ctx, &props);
             assert!(
@@ -940,7 +940,7 @@ fn readonly_guard_blocks_mutation_in_all_states() {
 #[test]
 fn readonly_combobox_blocks_mutation() {
     let props = combobox::Props { readonly: true, ..Default::default() };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     let result = svc.send(combobox::Event::InputChange("test".into()));
     assert!(!result.state_changed,
         "readonly guard must prevent InputChange from changing state");
@@ -973,7 +973,7 @@ proptest! {
     #[test]
     fn toggle_never_panics(events in prop::collection::vec(arb_toggle_event(), 0..100)) {
         let props = toggle::Props { id: "prop-test".into(), ..Default::default() };
-        let mut svc = Service::new(props);
+        let mut svc = Service::new(props, Env::default(), Default::default());
         for event in events {
             let _ = svc.send(event);
         }
@@ -983,7 +983,7 @@ proptest! {
     #[test]
     fn toggle_aria_always_valid(events in prop::collection::vec(arb_toggle_event(), 0..50)) {
         let props = toggle::Props { id: "prop-test".into(), ..Default::default() };
-        let mut svc = Service::new(props);
+        let mut svc = Service::new(props, Env::default(), Default::default());
         for event in events {
             svc.send(event);
         }
@@ -1005,7 +1005,7 @@ proptest! {
     #[test]
     fn drain_queue_never_truncates(events in prop::collection::vec(arb_toggle_event(), 0..200)) {
         let props = toggle::Props { id: "prop-test".into(), ..Default::default() };
-        let mut svc = Service::new(props);
+        let mut svc = Service::new(props, Env::default(), Default::default());
         for event in events {
             let result = svc.send(event);
             assert!(!result.truncated, "drain_queue truncated on event {:?}", event);
@@ -1096,7 +1096,7 @@ fn arb_checkbox_event() -> impl Strategy<Value = CheckboxEvent> {
 proptest! {
     #[test]
     fn checkbox_invariant_holds(events in prop::collection::vec(arb_checkbox_event(), 0..100)) {
-        let mut svc = Service::new(checkbox::Props::default());
+        let mut svc = Service::new(checkbox::Props::default(), Env::default(), Default::default());
         for event in events {
             svc.send(event);
             // Invariant: checked is always a valid state
@@ -1170,7 +1170,7 @@ fn to_event(fe: &FuzzEvent) -> dialog::Event {
 
 fuzz_target!(|data: Vec<FuzzEvent>| {
     let props = dialog::Props { id: "fuzz".into(), ..Default::default() };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     for fe in &data {
         let result = svc.send(to_event(fe));
         assert!(!result.truncated, "drain_queue overflow");
@@ -1271,7 +1271,7 @@ macro_rules! test_disabled_guard {
             #[test]
             fn disabled_emits_aria_disabled() {
                 let props = $component::Props { disabled: true, ..Default::default() };
-                let (state, ctx) = $component::Machine::init(&props);
+                let (state, ctx) = $component::Machine::init(&props, &Env::default(), &Default::default());
                 let api = $component::Machine::connect(&state, &ctx, &props, &|_| {});
                 let root = api.root_attrs();
                 assert_eq!(
@@ -1283,7 +1283,7 @@ macro_rules! test_disabled_guard {
             #[test]
             fn disabled_emits_disabled_attribute() {
                 let props = $component::Props { disabled: true, ..Default::default() };
-                let (state, ctx) = $component::Machine::init(&props);
+                let (state, ctx) = $component::Machine::init(&props, &Env::default(), &Default::default());
                 let api = $component::Machine::connect(&state, &ctx, &props, &|_| {});
                 let control = api.control_attrs();
                 // Native form elements use `disabled`, custom elements use `aria-disabled`
@@ -1440,7 +1440,7 @@ fn state_event_matrix_completeness() {
     for state in &all_states {
         for event in &all_events {
             let props = Props::default();
-            let (_, ctx) = Machine::init(&props);
+            let (_, ctx) = Machine::init(&props, &Env::default(), &Default::default());
             let plan = Machine::transition(state, event, &ctx, &props);
             let next_state = plan.as_ref().map(|p| p.target.clone());
             results.push((state.clone(), event.clone(), next_state));
@@ -1530,7 +1530,7 @@ fn form_submit_idle_to_validating_to_submitting() {
         }),
         schedule_microtask: Callback::new(|f| f()),
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     assert_eq!(*svc.state(), form_submit::State::Idle);
 
     svc.send(form_submit::Event::Submit);
@@ -1553,7 +1553,7 @@ fn form_submit_reset_returns_to_idle() {
         }),
         schedule_microtask: Callback::new(|f| f()),
     };
-    let mut svc = Service::new(props);
+    let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(form_submit::Event::Submit);
     svc.send(form_submit::Event::ValidationFailed);
     assert_eq!(*svc.state(), form_submit::State::ValidationFailed);

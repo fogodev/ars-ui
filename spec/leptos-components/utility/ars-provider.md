@@ -26,8 +26,8 @@ pub fn ArsProvider(
     #[prop(optional)] portal_container_id: Option<String>,
     #[prop(optional)] root_node_id: Option<String>,
     #[prop(optional)] platform: Option<ArsRc<dyn PlatformEffects>>,
-    #[prop(optional)] icu_provider: Option<Arc<dyn IcuProvider>>,
-    #[prop(optional)] i18n_registries: Option<Rc<I18nRegistries>>,
+    #[prop(optional)] icu_provider: Option<ArsRc<dyn IcuProvider>>,
+    #[prop(optional)] i18n_registries: Option<ArsRc<I18nRegistries>>,
     #[prop(optional)] style_strategy: Option<StyleStrategy>,
     children: Children,
 ) -> impl IntoView
@@ -189,8 +189,8 @@ pub fn ArsProvider(
     #[prop(optional)] portal_container_id: Option<String>,
     #[prop(optional)] root_node_id: Option<String>,
     #[prop(optional)] platform: Option<ArsRc<dyn PlatformEffects>>,
-    #[prop(optional)] icu_provider: Option<Arc<dyn IcuProvider>>,
-    #[prop(optional)] i18n_registries: Option<Rc<I18nRegistries>>,
+    #[prop(optional)] icu_provider: Option<ArsRc<dyn IcuProvider>>,
+    #[prop(optional)] i18n_registries: Option<ArsRc<I18nRegistries>>,
     #[prop(optional)] style_strategy: Option<StyleStrategy>,
     children: Children,
 ) -> impl IntoView {

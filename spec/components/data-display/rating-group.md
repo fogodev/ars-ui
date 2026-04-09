@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility]
 shared_deps: []
 related: []
 references:
-  ark-ui: RatingGroup
+    ark-ui: RatingGroup
 ---
 
 # RatingGroup
@@ -118,10 +118,6 @@ pub struct Props {
     pub name: Option<String>,
     /// The ID of the form element the component is associated with.
     pub form: Option<String>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Localizable messages for the rating group.
-    pub messages: Option<Messages>,
     // on_value_change callback is registered in the adapter layer, not in Props.
 }
 
@@ -139,8 +135,6 @@ impl Default for Props {
             required: false,
             name: None,
             form: None,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -191,11 +185,12 @@ impl ars_core::Machine for Machine {
     type Event   = Event;
     type Context = Context;
     type Props   = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         (State::Idle, Context {
             value: match props.value {
                 Some(v) => Bindable::controlled(v),
@@ -214,10 +209,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx:   &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx:   &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         if ctx.readonly || ctx.disabled {
             // Read-only/disabled: only allow Focus/Blur for AT
@@ -311,11 +306,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx:   &'a Context,
-        props: &'a Props,
-        send:  &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx:   &'a Self::Context,
+        props: &'a Self::Props,
+        send:  &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

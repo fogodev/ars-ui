@@ -171,8 +171,6 @@ pub struct Props {
     pub readonly: bool,
     /// Predicate for unavailable dates (forwarded to Calendar).
     pub is_date_unavailable: Option<fn(&CalendarDate) -> bool>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     /// Date format pattern. Defaults to locale-appropriate format.
     pub format: Option<String>,
     /// Placeholder text for the input field.
@@ -207,8 +205,6 @@ pub struct Props {
     /// `page_behavior: PageBehavior::Single` is set on the underlying Calendar).
     /// Forwarded to the embedded Calendar component's `visible_months` prop.
     pub visible_months: usize,
-    /// Localized messages. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -222,7 +218,6 @@ impl Default for Props {
             disabled: false,
             readonly: false,
             is_date_unavailable: None,
-            locale: None,
             format: None,
             placeholder: None,
             name: None,
@@ -237,7 +232,6 @@ impl Default for Props {
             default_open: false,
             open_on_click: true,
             visible_months: 1,
-            messages: None,
         }
     }
 }
@@ -308,16 +302,17 @@ impl ars_core::Machine for Machine {
     type Event   = Event;
     type Context = Context;
     type Props   = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let value = match props.value {
             Some(v) => Bindable::controlled(v),
             None    => Bindable::uncontrolled(props.default_value.clone()),
         };
 
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
 
         let default_format = match locale.as_str() {
             "en-US" | "en-CA" => "MM/dd/yyyy",
@@ -826,7 +821,6 @@ impl<'a> Api<'a> {
             disabled: self.ctx.disabled,
             readonly: self.ctx.readonly,
             is_date_unavailable: self.props.is_date_unavailable,
-            locale: Some(self.ctx.locale.clone()),
             first_day_of_week: None,
             is_rtl: self.ctx.is_rtl,
             visible_months: self.props.visible_months,
@@ -1138,7 +1132,7 @@ mod tests {
             placeholder: Some("MM/DD/YYYY".into()),
             name: Some("date".into()),
             ..Props::default()
-        })
+        }, Env::default(), Default::default())
     }
 
     #[test]
@@ -1206,7 +1200,7 @@ mod tests {
             id: "test-dp".into(),
             disabled: true,
             ..Props::default()
-        });
+        }, Env::default(), Default::default());
         svc.send(Event::Open);
         assert_eq!(*svc.state(), State::Closed);
     }

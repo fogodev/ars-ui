@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: [layout-shared-types]
 related: []
 references:
-  ark-ui: Carousel
+    ark-ui: Carousel
 ---
 
 # Carousel
@@ -219,10 +219,6 @@ pub struct Props {
     pub swipe_threshold: Option<f64>,
     /// Whether the carousel is right-to-left.
     pub is_rtl: bool,
-    /// Translatable messages for accessibility labels (see §4.1 Messages). When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
 }
 
 impl Default for Props {
@@ -242,8 +238,6 @@ impl Default for Props {
             transition_duration: None,
             swipe_threshold: None,
             is_rtl: false,
-            messages: None,
-            locale: None,
         }
     }
 }
@@ -259,17 +253,18 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let initial_state = if props.auto_play.is_some() {
             State::AutoPlaying
         } else {
             State::Idle
         };
         let initial_index = props.default_index.unwrap_or(0);
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let ctx = Context {
             index: props.index.clone()
                 .unwrap_or_else(|| Bindable::uncontrolled(initial_index)),
@@ -299,10 +294,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match event {
             Event::GoToSlide { index } => {
@@ -484,11 +479,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

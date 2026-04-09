@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: [toggle-button]
 references:
-  react-aria: Button
+    react-aria: Button
 ---
 
 # Button
@@ -87,8 +87,6 @@ pub struct Props {
     pub value: Option<String>,
     /// When true, renders props onto the child element instead of a <button>.
     pub as_child: bool,
-    /// Locale override. When `None`, inherits from nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     /// When true, removes the button from sequential Tab navigation (sets `tabindex="-1"`).
     pub exclude_from_tab_order: bool,
     /// Form override: specifies the URL for form submission.
@@ -105,8 +103,6 @@ pub struct Props {
     pub auto_focus: bool,
     /// When true, the adapter suppresses focus events on pointer press.
     pub prevent_focus_on_press: bool,
-    /// Localizable messages for the button. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 /// The type of the button.
@@ -130,7 +126,6 @@ impl Default for Props {
             name: None,
             value: None,
             as_child: false,
-            locale: None,
             exclude_from_tab_order: false,
             form_action: None,
             form_method: None,
@@ -139,7 +134,6 @@ impl Default for Props {
             form_no_validate: false,
             auto_focus: false,
             prevent_focus_on_press: false,
-            messages: None,
         }
     }
 }
@@ -190,16 +184,17 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let initial_state = if props.loading {
             State::Loading
         } else {
             State::Idle
         };
 
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let ctx = Context {
             disabled: props.disabled,
             loading: props.loading,
@@ -214,10 +209,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        _props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         if ctx.disabled && !matches!(event, Event::Focus { .. } | Event::Blur | Event::SetDisabled(_) | Event::SetLoading(_)) {
             return None;
@@ -322,11 +317,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

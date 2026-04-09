@@ -59,7 +59,7 @@ Create a machine, send an event, and assert the resulting state — no DOM or ad
 #[test]
 fn toggle_transitions_to_pressed() {
     let props = toggle::Props::default();
-    let (state, ctx) = toggle::Machine::init(&props);
+    let (state, ctx) = toggle::Machine::init(&props, &Env::default(), &Default::default());
     assert_eq!(state, toggle::State::Off);
 
     // Machine::transition takes 4 args: (state, event, ctx, props) → returns Option<TransitionPlan>

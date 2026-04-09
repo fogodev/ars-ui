@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions, i18n]
 shared_deps: []
 related: [toggle-group]
 references:
-  react-aria: ActionGroup
+    react-aria: ActionGroup
 ---
 
 # ActionGroup
@@ -118,15 +118,11 @@ pub struct Props {
     /// When true, items stretch to fill the available space equally.
     /// Exposed as `data-ars-justified` on the root element.
     pub justified: bool,
-    /// Locale override. When `None`, inherits from nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     /// Accessible label for the toolbar. Either `aria_label` or `aria_labelledby` must be set.
     /// `role="toolbar"` requires an accessible name.
     pub aria_label: Option<String>,
     /// ID of the element that labels this toolbar (alternative to `aria_label`).
     pub aria_labelledby: Option<String>,
-    /// Localized labels for accessibility. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 /// Visual variant for `ActionGroup`. Exposed as `data-ars-variant` on the root
@@ -168,10 +164,8 @@ impl Default for Props {
             button_label_behavior: ButtonLabelBehavior::default(),
             density: None,
             justified: false,
-            locale: None,
             aria_label: None,
             aria_labelledby: None,
-            messages: None,
         }
     }
 }
@@ -273,10 +267,11 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Props) -> (State, Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let ctx = Context {
             disabled: props.disabled,
             focused_item: None,
@@ -293,10 +288,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         // Disabled guard: block value-changing events but allow focus/blur,
         // navigation, overflow updates, and prop sync through so screen readers
@@ -451,11 +446,9 @@ impl ars_core::Machine for Machine {
             (_, Event::SetProps) => {
                 let disabled = props.disabled;
                 let dir = props.dir;
-                let locale = resolve_locale(props.locale.as_ref());
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.disabled = disabled;
                     ctx.dir = dir;
-                    ctx.locale = locale;
                 }))
             }
 
@@ -463,14 +456,13 @@ impl ars_core::Machine for Machine {
         }
     }
 
-    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
         let mut events = Vec::new();
         // Only emit SetProps for fields that are stored in Context and need syncing.
         // Props like selection_mode, disabled_items, orientation, button_label_behavior
         // are read directly from self.props in API methods — no Context sync needed.
         if old.disabled != new.disabled
             || old.dir != new.dir
-            || old.locale != new.locale
         {
             events.push(Event::SetProps);
         }
@@ -478,11 +470,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

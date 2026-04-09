@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions, forms]
 shared_deps: []
 related: [button, toggle-group, toggle]
 references:
-  react-aria: ToggleButton
+    react-aria: ToggleButton
 ---
 
 # ToggleButton
@@ -42,7 +42,6 @@ across interactions.
 | `SetPressed`  | `bool`              | Programmatically set the pressed state to a specific value.         |
 | `SetDisabled` | `bool`              | Programmatically set the disabled state.                            |
 | `Reset`       | ---                 | Restore pressed to `default_pressed` (form reset).                  |
-| `SetLocale`   | `Locale`            | Update the active locale from props.                                |
 
 ### 1.3 Context
 
@@ -60,8 +59,6 @@ pub struct Context {
     pub focused: bool,
     /// Whether the button has keyboard focus (for focus-visible styles).
     pub focus_visible: bool,
-    /// The active locale, resolved during init().
-    pub locale: Locale,
 }
 ```
 
@@ -89,9 +86,6 @@ pub struct Props {
     /// Form field name. When set, a hidden `<input>` is rendered for
     /// native form submission (standalone use outside ToggleGroup).
     pub name: Option<String>,
-    /// Locale override. 3-tier fallback: prop override, ArsProvider, en-US.
-    /// The adapter resolves this before calling `use_machine()`.
-    pub locale: Option<Locale>,
     /// Associates the toggle button with a `<form>` element by `id`, even if the button
     /// is not a descendant of that form. Threaded to `HiddenInputConfig::form_id`.
     pub form: Option<String>,
@@ -119,7 +113,6 @@ impl Default for Props {
             required: false,
             value: None,
             name: None,
-            locale: None,
             form: None,
             prevent_focus_on_press: false,
             on_hover_start: None,
@@ -172,8 +165,6 @@ pub enum Event {
     SetDisabled(bool),
     /// Restore pressed to `default_pressed` (form reset).
     Reset,
-    /// Update the active locale from props.
-    SetLocale(Locale),
 }
 
 // ── Machine ───────────────────────────────────────────────────────────────────
@@ -181,14 +172,20 @@ pub enum Event {
 /// The machine for the `ToggleButton` component.
 pub struct Machine;
 
+/// This component has no translatable strings.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Messages;
+impl ComponentMessages for Messages {}
+
 impl ars_core::Machine for Machine {
     type State = State;
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
         let pressed = match props.pressed {
             Some(v) => Bindable::controlled(v),
             None => Bindable::uncontrolled(props.default_pressed),
@@ -199,23 +196,22 @@ impl ars_core::Machine for Machine {
             disabled: props.disabled,
             focused: false,
             focus_visible: false,
-            locale: resolve_locale(props.locale.as_ref()),
         };
 
         (State::Idle, ctx)
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         // Disabled guard: blocks value-changing events but allows Focus/Blur
         // so the button remains discoverable by screen readers.
         // Allow SetDisabled so props can re-enable the button.
         // Allow Reset so form reset works even when disabled.
-        if ctx.disabled && !matches!(event, Event::Focus { .. } | Event::Blur | Event::SetDisabled(_) | Event::Reset | Event::SetLocale(_)) {
+        if ctx.disabled && !matches!(event, Event::Focus { .. } | Event::Blur | Event::SetDisabled(_) | Event::Reset) {
             return None;
         }
 
@@ -311,14 +307,6 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            // ── SetLocale ──────────────────────────────────────────────────
-            (_, Event::SetLocale(locale)) => {
-                let locale = locale.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.locale = locale;
-                }))
-            }
-
             _ => None,
         }
     }
@@ -333,18 +321,15 @@ impl ars_core::Machine for Machine {
             (Some(true), Some(false)) => events.push(Event::SetPressed(false)),
             _ => {}
         }
-        if old.locale != new.locale {
-            events.push(Event::SetLocale(resolve_locale(new.locale.as_ref())));
-        }
         events
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }
@@ -550,10 +535,10 @@ The pressed/unpressed state MUST remain distinguishable via border, outline, or 
 
 ```css
 @media (forced-colors: active) {
-  [data-ars-pressed="true"] {
-    outline: 2px solid ButtonText;
-    outline-offset: -2px;
-  }
+    [data-ars-pressed="true"] {
+        outline: 2px solid ButtonText;
+        outline-offset: -2px;
+    }
 }
 ```
 

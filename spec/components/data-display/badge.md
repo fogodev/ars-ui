@@ -33,10 +33,6 @@ pub struct Props {
     /// readers announce value changes. Use for notification counts or status indicators
     /// that update at runtime. Default: `false`.
     pub dynamic: bool,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
-    /// Localizable messages for overflow and accessible labels.
-    pub messages: Option<Messages>,
 }
 
 /// Visual style variant of the badge.
@@ -75,8 +71,6 @@ impl Default for Props {
             size: Size::Md,
             content: None,
             dynamic: false,
-            locale: None,
-            messages: None,
         }
     }
 }
@@ -100,9 +94,9 @@ pub struct Api {
 
 impl Api {
     /// Create a new API for the badge.
-    pub fn new(props: Props) -> Self {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    pub fn new(props: Props, env: &Env, messages: &Messages) -> Self {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         Self { props, locale, messages }
     }
 

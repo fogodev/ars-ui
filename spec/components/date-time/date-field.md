@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, i18n, interactions, forms]
 shared_deps: [date-time-types]
 related: [date-picker, date-range-field, time-field]
 references:
-  react-aria: DateField
+    react-aria: DateField
 ---
 
 # DateField
@@ -85,6 +85,8 @@ pub struct Context {
     pub type_buffer: String,
     /// The locale.
     pub locale: Locale,
+    /// ICU data provider for locale-dependent formatting.
+    pub provider: ArsRc<dyn IcuProvider>,
     /// Resolved translatable messages.
     pub messages: Messages,
     /// The calendar system.
@@ -254,8 +256,6 @@ pub struct Props {
     pub value: Option<CalendarDate>,
     /// The default value of the field.
     pub default_value: Option<CalendarDate>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     /// The calendar system of the field.
     pub calendar: CalendarSystem,
     /// The granularity of the field.
@@ -291,8 +291,6 @@ pub struct Props {
     /// Optional override for segment display order. When `None`, the order is
     /// derived from the locale's date format pattern.
     pub segment_order: Option<Vec<DateSegmentKind>>,
-    /// Localized segment labels. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
     /// When true, all numeric segments display with leading zeros (e.g., "03"
     /// instead of "3"). Defaults to false, which uses locale-aware formatting.
     pub force_leading_zeros: bool,
@@ -304,7 +302,6 @@ impl Default for Props {
             id: String::new(),
             value: None,
             default_value: None,
-            locale: None,
             calendar: CalendarSystem::Gregorian,
             granularity: DateGranularity::Day,
             min_value: None,
@@ -322,7 +319,6 @@ impl Default for Props {
             invalid: false,
             name: None,
             segment_order: None,
-            messages: None,
             force_leading_zeros: false,
         }
     }
@@ -1156,13 +1152,14 @@ impl ars_core::Machine for Machine {
     type Event   = Event;
     type Context = Context;
     type Props   = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(&props.id);
         let error_message_id = ids.part("error-message");
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let mut ctx = Context {
             value: match &props.value {
                 Some(v) => Bindable::controlled(v.clone()),
@@ -1172,6 +1169,7 @@ impl ars_core::Machine for Machine {
             focused_segment: None,
             type_buffer: String::new(),
             locale,
+            provider: env.icu_provider.clone(),
             messages,
             calendar: props.calendar,
             granularity: props.granularity,
@@ -1456,10 +1454,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
@@ -2065,12 +2063,11 @@ mod tests {
     use super::*;
     use ars_core::service::Service;
 
-    fn make_service(locale: &str, granularity: DateGranularity) -> Service<DateField> {
+    fn make_service(granularity: DateGranularity) -> Service<DateField> {
         Service::new(Props {
             value: None,
             default_value: None,
             on_change: None,
-            locale: Some(Locale::parse(locale).expect("valid locale")),
             calendar: CalendarSystem::Gregorian,
             granularity,
             min_value: None,
@@ -2089,25 +2086,25 @@ mod tests {
             invalid: false,
             name: None,
             force_leading_zeros: false,
-        })
+        }, Env::default(), Default::default())
     }
 
     #[test]
     fn initial_state_is_idle() {
-        let svc = make_service("en-US", DateGranularity::Day);
+        let svc = make_service(DateGranularity::Day);
         assert_eq!(*svc.state(), State::Idle);
     }
 
     #[test]
     fn focus_segment_transitions_to_focused() {
-        let mut svc = make_service("en-US", DateGranularity::Day);
+        let mut svc = make_service(DateGranularity::Day);
         svc.send(Event::FocusSegment(DateSegmentKind::Month));
         assert_eq!(*svc.state(), State::Focused(DateSegmentKind::Month));
     }
 
     #[test]
     fn blur_all_returns_to_idle() {
-        let mut svc = make_service("en-US", DateGranularity::Day);
+        let mut svc = make_service(DateGranularity::Day);
         svc.send(Event::FocusSegment(DateSegmentKind::Day));
         svc.send(Event::BlurAll);
         assert_eq!(*svc.state(), State::Idle);
@@ -2115,7 +2112,7 @@ mod tests {
 
     #[test]
     fn typing_month_12_auto_advances_to_day() {
-        let mut svc = make_service("en-US", DateGranularity::Day);
+        let mut svc = make_service(DateGranularity::Day);
         svc.send(Event::FocusSegment(DateSegmentKind::Month));
         svc.send(Event::TypeIntoSegment(DateSegmentKind::Month, '1'));
         // "1" alone is ambiguous (could be 1, 10, 11, 12) -- stays on month
@@ -2128,7 +2125,7 @@ mod tests {
 
     #[test]
     fn increment_wraps_month_from_12_to_1() {
-        let mut svc = make_service("en-US", DateGranularity::Day);
+        let mut svc = make_service(DateGranularity::Day);
         svc.send(Event::FocusSegment(DateSegmentKind::Month));
         // Set month to 12 first
         svc.context_mut().set_segment_value(DateSegmentKind::Month, 12);
@@ -2138,7 +2135,7 @@ mod tests {
 
     #[test]
     fn en_us_segment_order_is_month_day_year() {
-        let svc = make_service("en-US", DateGranularity::Day);
+        let svc = make_service(DateGranularity::Day);
         let kinds: Vec<_> = svc.context().segments.iter().map(|s| s.kind).collect();
         assert_eq!(kinds, vec![
             DateSegmentKind::Month,
@@ -2151,7 +2148,8 @@ mod tests {
 
     #[test]
     fn de_de_segment_order_is_day_month_year() {
-        let svc = make_service("de-DE", DateGranularity::Day);
+        let env = Env { locale: Locale::parse("de-DE").expect("valid locale"), ..Env::default() };
+        let svc = Service::new(Props { granularity: DateGranularity::Day, ..Props::default() }, env, Default::default());
         let kinds: Vec<_> = svc.context().segments.iter().map(|s| s.kind).collect();
         assert_eq!(kinds, vec![
             DateSegmentKind::Day,
@@ -2165,14 +2163,14 @@ mod tests {
     #[test]
     fn disabled_field_ignores_events() {
         let mut props = Props { disabled: true, ..default_props() };
-        let mut svc = Service::new(props);
+        let mut svc = Service::new(props, Env::default(), Default::default());
         svc.send(Event::FocusSegment(DateSegmentKind::Month));
         assert_eq!(*svc.state(), State::Idle);
     }
 
     #[test]
     fn set_value_rebuilds_segments() {
-        let mut svc = make_service("en-US", DateGranularity::Day);
+        let mut svc = make_service(DateGranularity::Day);
         let date = CalendarDate::new_gregorian(2024, nzu8(3), nzu8(15));
         svc.send(Event::SetValue(Some(date.clone())));
         assert_eq!(svc.context().get_segment_value(DateSegmentKind::Year),  Some(2024));

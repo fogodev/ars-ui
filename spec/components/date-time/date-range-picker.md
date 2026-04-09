@@ -140,8 +140,6 @@ pub struct Props {
     pub min: Option<CalendarDate>,
     /// The maximum date.
     pub max: Option<CalendarDate>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
     /// The date format.
     pub format: DateFormat,
     /// Whether the component is disabled.
@@ -163,8 +161,6 @@ pub struct Props {
     pub close_on_select: bool,
     /// The positioning options.
     pub positioning: PositioningOptions,
-    /// Localizable messages. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
 }
 
 impl Default for Props {
@@ -175,7 +171,6 @@ impl Default for Props {
             default_value: None,
             min: None,
             max: None,
-            locale: None,
             format: DateFormat::default(),
             disabled: false,
             readonly: false,
@@ -185,7 +180,6 @@ impl Default for Props {
             end_name: None,
             close_on_select: true,
             positioning: PositioningOptions::default(),
-            messages: None,
         }
     }
 }
@@ -254,11 +248,12 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
 
         let (start_text, end_text, parsed_start, parsed_end) = match &props.default_value {
             Some(range) => (
@@ -471,7 +466,6 @@ impl<'a> Api<'a> {
         date_field::Props {
             id: self.ctx.ids.part("start-input"),
             value: self.ctx.parsed_start.clone(),
-            locale: Some(self.ctx.locale.clone()),
             format: self.ctx.format.clone(),
             min: self.ctx.min.clone(),
             max: self.ctx.parsed_end.clone(), // start can't exceed end
@@ -487,7 +481,6 @@ impl<'a> Api<'a> {
         date_field::Props {
             id: self.ctx.ids.part("end-input"),
             value: self.ctx.parsed_end.clone(),
-            locale: Some(self.ctx.locale.clone()),
             format: self.ctx.format.clone(),
             min: self.ctx.parsed_start.clone(), // end can't precede start
             max: self.ctx.max.clone(),
@@ -633,7 +626,6 @@ impl<'a> Api<'a> {
             range_end: self.ctx.parsed_end.clone(),
             min: self.ctx.min.clone(),
             max: self.ctx.max.clone(),
-            locale: Some(self.ctx.locale.clone()),
             ..Default::default()
         }
     }
@@ -895,7 +887,7 @@ mod tests {
 
     #[test]
     fn initial_state_is_closed() {
-        let (state, ctx) = Machine::init(&Props::default());
+        let (state, ctx) = Machine::init(&Props::default(), &Env::default(), &Default::default());
         assert_eq!(state, State::Closed);
         assert_eq!(*ctx.open.get(), false);
         assert!(ctx.value.get().is_none());
@@ -904,7 +896,7 @@ mod tests {
     #[test]
     fn open_and_close() {
         let props = Props::default();
-        let (state, ctx) = Machine::init(&props);
+        let (state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
         let plan = Machine::transition(&state, &Event::Open, &ctx, &props).unwrap();
         assert_eq!(plan.target, Some(State::Open));
 
@@ -916,7 +908,7 @@ mod tests {
     #[test]
     fn select_range_complete_closes_and_sets_value() {
         let props = Props::default();
-        let (_, ctx) = Machine::init(&props);
+        let (_, ctx) = Machine::init(&props, &Env::default(), &Default::default());
         let range = DateRange::new(
             CalendarDate::new_gregorian(2025, nzu8(3), nzu8(1)),
             CalendarDate::new_gregorian(2025, nzu8(3), nzu8(15)),
@@ -932,8 +924,8 @@ mod tests {
 
     #[test]
     fn start_input_change_parses_date() {
-        let props = Props { locale: Some(Locale::en_us()), ..Props::default() };
-        let (state, ctx) = Machine::init(&props);
+        let props = Props { ..Props::default() };
+        let (state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
         let plan = Machine::transition(
             &state,
             &Event::StartInputChange { value: "03/01/2025".to_string() },
@@ -947,7 +939,7 @@ mod tests {
     #[test]
     fn escape_closes_popover() {
         let props = Props::default();
-        let (_, ctx) = Machine::init(&props);
+        let (_, ctx) = Machine::init(&props, &Env::default(), &Default::default());
         let plan = Machine::transition(
             &State::Open,
             &Event::KeyDown { key: KeyboardKey::Escape },
@@ -960,14 +952,14 @@ mod tests {
     #[test]
     fn disabled_ignores_events() {
         let props = Props { disabled: true, ..Props::default() };
-        let (state, ctx) = Machine::init(&props);
+        let (state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
         assert!(Machine::transition(&state, &Event::Open, &ctx, &props).is_none());
     }
 
     #[test]
     fn focusout_closes_popover() {
         let props = Props::default();
-        let (_, ctx) = Machine::init(&props);
+        let (_, ctx) = Machine::init(&props, &Env::default(), &Default::default());
         let plan = Machine::transition(
             &State::Open,
             &Event::FocusOut,
@@ -980,7 +972,7 @@ mod tests {
     #[test]
     fn arrow_down_opens_from_closed() {
         let props = Props::default();
-        let (state, ctx) = Machine::init(&props);
+        let (state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
         let plan = Machine::transition(
             &state,
             &Event::KeyDown { key: KeyboardKey::ArrowDown },

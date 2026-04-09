@@ -36,10 +36,6 @@ pub struct Props {
     pub circle_size: Option<String>,
     /// Whether animation is enabled.
     pub animated: bool,
-    /// Internationalization messages.
-    pub messages: Option<Messages>,
-    /// Optional locale override for message resolution.
-    pub locale: Option<Locale>,
 }
 
 /// Animation variant for Skeleton loading placeholders.
@@ -73,8 +69,6 @@ impl Default for Props {
             gap: "0.5rem".into(),
             circle_size: None,
             animated: true,
-            messages: None,
-            locale: None,
         }
     }
 }
@@ -98,9 +92,9 @@ pub struct Api {
 }
 
 impl Api {
-    pub fn new(props: Props) -> Self {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    pub fn new(props: Props, env: &Env, messages: &Messages) -> Self {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         Self { props, locale, messages }
     }
 

@@ -230,14 +230,14 @@ Contains:
 
 1. **ASCII diagram** showing the part nesting hierarchy with role annotations. Part names match the Part enum variant names in kebab-case:
 
-   ```text
-   ComponentName
-   ├── Root                (required)
-   ├── Label               (required)
-   ├── Control        [A]  (required — role="checkbox")
-   ├── Indicator           (optional — aria-hidden)
-   └── HiddenInput         (required — native form submission)
-   ```
+    ```text
+    ComponentName
+    ├── Root                (required)
+    ├── Label               (required)
+    ├── Control        [A]  (required — role="checkbox")
+    ├── Indicator           (optional — aria-hidden)
+    └── HiddenInput         (required — native form submission)
+    ```
 
 2. **Parts table** listing each part's element and key attributes. The `data-ars-scope` and `data-ars-part` attributes are set automatically via `ComponentPart::data_attrs()`:
 
@@ -535,9 +535,10 @@ type State = State;
 type Event = Event;
 type Context = Context;
 type Props = Props;
+type Messages = Messages;
 type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let (initial, bindable) = match &props.value {
             Some(v) => (*v, Bindable::controlled(*v)),
             None => (props.default_value, Bindable::uncontrolled(props.default_value)),
@@ -553,10 +554,10 @@ type Api<'a> = Api<'a>;
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        _props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         if is_disabled(ctx) {
             match event {
@@ -594,11 +595,11 @@ type Api<'a> = Api<'a>;
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 

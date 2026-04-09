@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: [color-picker]
 references:
-  ark-ui: AngleSlider
+    ark-ui: AngleSlider
 ---
 
 # AngleSlider
@@ -132,10 +132,6 @@ pub struct Props {
     pub name: Option<String>,
     /// The ID of the form element the component is associated with.
     pub form: Option<String>,
-    /// Locale override. When `None`, resolved via `resolve_locale()`.
-    pub locale: Option<Locale>,
-    /// Internationalization messages. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
     /// Fired on `Event::DragEnd` / pointer release.
     pub on_change_end: Option<Callback<f64>>,
 }
@@ -153,8 +149,6 @@ impl Default for Props {
             readonly: false,
             name: None,
             form: None,
-            locale: None,
-            messages: None,
             on_change_end: None,
         }
     }
@@ -196,12 +190,13 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
+    type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(&props.id);
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let value = match props.value {
             Some(v) => Bindable::controlled(v),
             None    => Bindable::uncontrolled(props.default_value),
@@ -223,10 +218,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        ctx: &Context,
-        _props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         // Disabled blocks all except Focus/Blur.
         if ctx.disabled {
@@ -377,11 +372,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
 }

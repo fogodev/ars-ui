@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility, interactions, forms]
 shared_deps: []
 related: []
 references:
-  ark-ui: PinInput
-  radix-ui: OneTimePasswordField
+    ark-ui: PinInput
+    radix-ui: OneTimePasswordField
 ---
 
 # PinInput
@@ -180,10 +180,6 @@ pub struct Props {
     pub auto_submit: bool,
     /// Callback fired when all slots are filled.
     pub on_value_complete: Option<Callback<dyn Fn(&str)>>,
-    /// Translatable messages.
-    pub messages: Option<Messages>,
-    /// Locale override. When `None`, resolved via `resolve_locale()`.
-    pub locale: Option<Locale>,
 }
 
 impl Default for Props {
@@ -207,8 +203,6 @@ impl Default for Props {
             blur_on_complete: false,
             auto_submit: false,
             on_value_complete: None,
-            messages: None,
-            locale: None,
         }
     }
 }
@@ -243,10 +237,11 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
+    type Messages = Messages;
 
-    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
-        let locale = resolve_locale(props.locale.as_ref());
-        let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+        let messages = messages.clone();
         let initial = props.value.clone()
             .unwrap_or_else(|| {
                 let mut v = props.default_value.clone();
