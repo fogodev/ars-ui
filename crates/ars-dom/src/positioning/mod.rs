@@ -11,5 +11,5 @@ mod types;
 pub use compute::compute_position;
 pub use types::{
     Alignment, Axis, Boundary, Offset, Overflow, Placement, PositioningOptions, PositioningResult,
-    Rect, Side, Strategy,
+    Rect, Side, Strategy, VirtualElement,
 };

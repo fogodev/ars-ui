@@ -561,6 +561,36 @@ pub struct PositioningResult {
     pub max_width: Option<f64>,
 }
 
+// ---------------------------------------------------------------------------
+// Virtual element
+// ---------------------------------------------------------------------------
+
+/// A non-DOM anchor for positioning. The `get_rect` callback returns the
+/// current client-space bounding rect of the virtual anchor.
+///
+/// `compute_position()` accepts `anchor: &Rect`, so it already supports
+/// positioning relative to arbitrary rectangles instead of DOM elements.
+/// `VirtualElement` wraps a closure that produces such a `Rect` on demand,
+/// allowing the anchor geometry to change between calls (e.g., tracking a
+/// cursor position for context menus or a text selection range).
+///
+/// **Auto-update limitation:** `auto_update()` uses `ResizeObserver` and
+/// scroll listeners, which require real DOM elements. When using a virtual
+/// element, the consumer must call `compute_position()` manually whenever
+/// the virtual rect changes.
+pub struct VirtualElement {
+    /// Returns the current bounding rectangle in client-space coordinates.
+    pub get_rect: Box<dyn Fn() -> Rect>,
+}
+
+impl fmt::Debug for VirtualElement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VirtualElement")
+            .field("get_rect", &"Fn() -> Rect")
+            .finish()
+    }
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================
@@ -1156,5 +1186,79 @@ mod tests {
             assert_eq!(Boundary::Element(Rc::clone(&a)), Boundary::Element(b));
             assert_ne!(Boundary::Element(a), Boundary::Element(c));
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // VirtualElement
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn virtual_element_produces_rect_through_callback() {
+        let ve = VirtualElement {
+            get_rect: Box::new(|| Rect {
+                x: 10.0,
+                y: 20.0,
+                width: 100.0,
+                height: 50.0,
+            }),
+        };
+        let rect = (ve.get_rect)();
+        assert_eq!(
+            rect,
+            Rect {
+                x: 10.0,
+                y: 20.0,
+                width: 100.0,
+                height: 50.0,
+            }
+        );
+    }
+
+    #[test]
+    fn virtual_element_repeated_calls_may_return_different_rects() {
+        use std::{cell::Cell, rc::Rc};
+
+        let cursor_x = Rc::new(Cell::new(0.0));
+        let cursor_y = Rc::new(Cell::new(0.0));
+
+        let ve = VirtualElement {
+            get_rect: Box::new({
+                let cx = Rc::clone(&cursor_x);
+                let cy = Rc::clone(&cursor_y);
+                move || Rect {
+                    x: cx.get(),
+                    y: cy.get(),
+                    width: 0.0,
+                    height: 0.0,
+                }
+            }),
+        };
+
+        let first = (ve.get_rect)();
+        assert_eq!(first.x, 0.0);
+        assert_eq!(first.y, 0.0);
+
+        cursor_x.set(150.0);
+        cursor_y.set(300.0);
+
+        let second = (ve.get_rect)();
+        assert_eq!(second.x, 150.0);
+        assert_eq!(second.y, 300.0);
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn virtual_element_debug_does_not_panic() {
+        let ve = VirtualElement {
+            get_rect: Box::new(|| Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 0.0,
+                height: 0.0,
+            }),
+        };
+        let debug_str = format!("{ve:?}");
+        assert!(debug_str.contains("VirtualElement"));
+        assert!(debug_str.contains("Fn() -> Rect"));
     }
 }
