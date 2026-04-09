@@ -2254,24 +2254,22 @@ into the context so that `connect()` → `Api` → `root_attrs()` can access it 
 `MessageFn<T>` implements `Debug` by printing `"<closure>"`, so all Messages structs
 can `#[derive(Clone, Debug)]` uniformly — no manual `Debug` impls needed.
 
-On WASM targets, `Arc`'s atomic reference counting is unnecessary overhead since
-the runtime is single-threaded. A `MessageFn` type alias cfg-gates between `Arc`
-on native and `Rc` on WASM, consistent with the library's `Rc`-first philosophy:
+`MessageFn` lives in `ars-core` (not `ars-i18n`) and wraps [`ArsRc`](01-architecture.md)
+internally, eliminating cfg-gated code in its trait impls. `Clone`, `PartialEq`, `Deref`,
+and `AsRef` all delegate to `ArsRc`; only `Debug` is custom (prints `"<closure>"`).
+
+**`+ Send + Sync` bounds:** All `MessageFn` trait objects include `+ Send + Sync` on
+all targets as a deliberate project-wide convention. On WASM the `Rc` wrapper is
+non-atomic, but the trait object bounds remain `Send + Sync` so that the public API
+is identical across native and WASM — closures must be thread-safe for native desktop
+targets (multi-threaded runtimes in Dioxus Desktop, Tauri). The `Rc` wrapper satisfies
+WASM's single-threaded `Send`/`Sync` auto-impl. Do not remove these bounds.
 
 ```rust
 /// Shared function pointer for Messages closure fields.
-/// Uses `Arc` on native (thread-safe) and `Rc` on WASM (no atomic overhead).
-///
-/// **`+ Send + Sync` bounds:** All `MessageFn` trait objects include `+ Send + Sync` on
-/// all targets as a deliberate project-wide convention. On WASM the `Rc` wrapper is
-/// non-atomic, but the trait object bounds remain `Send + Sync` so that the public API
-/// is identical across native and WASM — closures must be thread-safe for native desktop
-/// targets (multi-threaded runtimes in Dioxus Desktop, Tauri). The `Rc` wrapper satisfies
-/// WASM's single-threaded `Send`/`Sync` auto-impl. Do not remove these bounds.
-#[cfg(target_arch = "wasm32")]
-pub struct MessageFn<T: ?Sized>(pub(crate) Rc<T>);
-#[cfg(not(target_arch = "wasm32"))]
-pub struct MessageFn<T: ?Sized>(pub(crate) Arc<T>);
+/// Wraps `ArsRc<T>` — `Rc` on WASM, `Arc` on native — so no cfg-gated
+/// trait impls are needed in this type. Only `Debug` is custom.
+pub struct MessageFn<T: ?Sized>(ArsRc<T>);
 
 impl<T: ?Sized> Clone for MessageFn<T> {
     fn clone(&self) -> Self { Self(self.0.clone()) }
@@ -2283,8 +2281,9 @@ impl<T: ?Sized> core::fmt::Debug for MessageFn<T> {
     }
 }
 
-impl<T: ?Sized> MessageFn<T> {
-    pub fn new(f: impl Into<Self>) -> Self { f.into() }
+// PartialEq by pointer identity — enables derive(PartialEq) on Messages structs.
+impl<T: ?Sized> PartialEq for MessageFn<T> {
+    fn eq(&self, other: &Self) -> bool { self.0 == other.0 }
 }
 
 impl<T: ?Sized> core::ops::Deref for MessageFn<T> {
@@ -2292,124 +2291,133 @@ impl<T: ?Sized> core::ops::Deref for MessageFn<T> {
     fn deref(&self) -> &T { &self.0 }
 }
 
-#[cfg(target_arch = "wasm32")]
-impl<F: Fn() -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn() -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Rc::new(f)) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn() -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn() -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Arc::new(f)) }
+impl<T: ?Sized> AsRef<T> for MessageFn<T> {
+    fn as_ref(&self) -> &T { self.0.as_ref() }
 }
 
-#[cfg(target_arch = "wasm32")]
-impl<F: Fn(usize, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Rc::new(f)) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(usize, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Arc::new(f)) }
+impl<T: ?Sized> MessageFn<T> {
+    pub fn new(f: impl Into<Self>) -> Self { f.into() }
 }
 
+// From impls — each closure signature needs a cfg-gated pair because
+// they create ArsRc from raw Rc/Arc for dyn trait object coercion.
+// One pair per distinct MessageFn signature used across the component library.
+
 #[cfg(target_arch = "wasm32")]
-impl<F: Fn(f64, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(f64, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Rc::new(f)) }
+impl<F: Fn() -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn() -> String + Send + Sync> {
+    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
 }
 #[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(f64, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(f64, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Arc::new(f)) }
+impl<F: Fn() -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn() -> String + Send + Sync> {
+    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl<F: Fn(&Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(&Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Rc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl<F: Fn(&Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(&Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Arc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<F: Fn(usize, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync> {
+    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl<F: Fn(usize, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync> {
+    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<F: Fn(f64, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(f64, &Locale) -> String + Send + Sync> {
+    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl<F: Fn(f64, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(f64, &Locale) -> String + Send + Sync> {
+    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl<F: Fn(&str, SortDirection, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(&str, SortDirection, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Rc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl<F: Fn(&str, SortDirection, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(&str, SortDirection, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Arc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
 }
 
 // From impls for CalendarMessages (shared/date-time-types.md)
 #[cfg(target_arch = "wasm32")]
 impl<F: Fn(u8, u8, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(u8, u8, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Rc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl<F: Fn(u8, u8, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(u8, u8, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Arc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl<F: Fn(u8, u8, &str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(u8, u8, &str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Rc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl<F: Fn(u8, u8, &str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(u8, u8, &str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Arc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl<F: Fn(u8, i32, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(u8, i32, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Rc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl<F: Fn(u8, i32, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(u8, i32, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Arc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl<F: Fn(&str, &str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(&str, &str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Rc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl<F: Fn(&str, &str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(&str, &str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Arc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl<F: Fn(i32, &str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(i32, &str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Rc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl<F: Fn(i32, &str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(i32, &str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Arc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
 }
 
 // From impls for DragAnnouncements (05-interactions.md §7.8)
 #[cfg(target_arch = "wasm32")]
 impl<F: Fn(&str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Rc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl<F: Fn(&str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Arc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl<F: Fn(usize, &str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(usize, &str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Rc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl<F: Fn(usize, &str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(usize, &str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(Arc::new(f)) }
+    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
 }
 
 impl MessageFn<dyn Fn(&Locale) -> String + Send + Sync> {
-    /// Create a MessageFn from a static string, avoiding closure allocation.
+    /// Create a MessageFn from a static string, ignoring the locale parameter.
     /// The locale parameter is ignored — use this for English baselines in Default impls.
     pub fn static_str(s: &'static str) -> Self {
-        #[cfg(target_arch = "wasm32")]
-        { Self(alloc::rc::Rc::new(move |_locale| s.to_string())) }
-        #[cfg(not(target_arch = "wasm32"))]
-        { Self(alloc::sync::Arc::new(move |_locale| s.to_string())) }
+        Self::new(move |_locale: &Locale| s.to_string())
     }
 }
 ```

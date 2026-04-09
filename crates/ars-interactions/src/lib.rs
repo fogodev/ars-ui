@@ -6,6 +6,7 @@
 
 pub mod compose;
 pub mod direction;
+pub mod dismissable;
 pub mod focus;
 pub mod hover;
 pub mod interact_outside;
@@ -17,6 +18,7 @@ pub use ars_core::{
 };
 pub use compose::merge_attrs;
 pub use direction::{LogicalDirection, resolve_arrow_key};
+pub use dismissable::dismiss_button_attrs;
 pub use focus::{
     FocusConfig, FocusEvent, FocusEventType, FocusResult, FocusState, FocusWithinConfig,
     FocusWithinResult, use_focus, use_focus_within,
