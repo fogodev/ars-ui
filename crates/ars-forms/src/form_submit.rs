@@ -159,7 +159,7 @@ impl ars_core::Machine for Machine {
     type Props = Props;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props) -> (State, Context) {
+    fn init(props: &Self::Props) -> (Self::State, Self::Context) {
         (
             State::Idle,
             Context {
@@ -172,10 +172,10 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &State,
-        event: &Event,
-        _ctx: &Context,
-        props: &Props,
+        state: &Self::State,
+        event: &Self::Event,
+        _ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
             // Allow re-submission from any terminal state (including Succeeded)
@@ -315,11 +315,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a State,
-        ctx: &'a Context,
-        props: &'a Props,
-        send: &'a dyn Fn(Event),
-    ) -> Api<'a> {
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
         Api {
             state,
             ctx,
