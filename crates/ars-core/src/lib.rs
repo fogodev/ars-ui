@@ -51,7 +51,7 @@ pub mod __private {
 #[doc(inline)]
 pub use ars_derive::{ComponentPart, HasId};
 // ── External re-exports ─────────────────────────────────────────────
-pub use ars_i18n::Direction;
+pub use ars_i18n::{Direction, IcuProvider, Locale, LocaleParseError, StubIcuProvider};
 // ── Platform-conditional smart pointers (extracted modules) ─────────
 pub use callback::{Callback, callback};
 // ── DOM attribute / connect primitives ──────────────────────────────
@@ -491,6 +491,57 @@ pub trait ConnectApi {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Env — adapter-resolved environment context
+// ────────────────────────────────────────────────────────────────────
+
+/// Adapter-resolved environment context passed to [`Machine::init`].
+///
+/// The adapter reads these values from `ArsProvider` / `ArsContext` and passes
+/// them to framework-agnostic core code. Core component code **never** calls
+/// framework hooks (`use_locale()`, `use_icu_provider()`, `use_context()`) —
+/// all environment values arrive through this struct.
+///
+/// Non-date-time components ignore `icu_provider` (it defaults to [`StubIcuProvider`]).
+#[derive(Debug)]
+pub struct Env {
+    /// The resolved locale from `ArsProvider`.
+    pub locale: Locale,
+    /// Calendar/locale data provider for date-time formatting.
+    /// Defaults to [`StubIcuProvider`] (English-only, zero dependencies).
+    pub icu_provider: ArsRc<dyn IcuProvider>,
+}
+
+impl Default for Env {
+    fn default() -> Self {
+        Self {
+            locale: Locale::parse("en-US").expect("en-US is a valid BCP-47 tag"),
+            icu_provider: ArsRc::from_icu_provider(StubIcuProvider),
+        }
+    }
+}
+
+// ── ArsRc<dyn IcuProvider> constructor ─────────────────────────────
+
+impl ArsRc<dyn IcuProvider> {
+    /// Creates a trait-object `ArsRc` from any [`IcuProvider`] implementation.
+    ///
+    /// This enables erased construction without requiring nightly `CoerceUnsized`:
+    /// ```ignore
+    /// let provider: ArsRc<dyn IcuProvider> = ArsRc::from_icu_provider(StubIcuProvider);
+    /// ```
+    pub fn from_icu_provider(value: impl IcuProvider) -> Self {
+        #[cfg(target_arch = "wasm32")]
+        {
+            Self(alloc::rc::Rc::new(value))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self(alloc::sync::Arc::new(value))
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Machine trait
 // ────────────────────────────────────────────────────────────────────
 
@@ -508,13 +559,24 @@ pub trait Machine: Sized + 'static {
     type Context: Clone + Debug;
     /// External configuration passed in by the parent component.
     type Props: Clone + PartialEq + HasId;
+    /// Per-component i18n messages type.
+    type Messages: ComponentMessages + Clone + Default + 'static;
     /// The connect API type that produces attributes from current state.
     type Api<'a>: ConnectApi
     where
         Self: 'a;
 
-    /// Computes the initial state and context from the given props.
-    fn init(props: &Self::Props) -> (Self::State, Self::Context);
+    /// Initialize the machine from props and adapter-resolved environment values,
+    /// returning initial state and context.
+    ///
+    /// The adapter resolves `env` (locale, ICU provider) and `messages` from
+    /// `ArsProvider` context before calling this method. Core code never calls
+    /// framework hooks — all environment values arrive as parameters.
+    fn init(
+        props: &Self::Props,
+        env: &Env,
+        messages: &Self::Messages,
+    ) -> (Self::State, Self::Context);
 
     /// Evaluates an event against the current state, context, and props.
     ///
@@ -622,10 +684,39 @@ impl<M: Machine> Debug for Service<M> {
 }
 
 impl<M: Machine> Service<M> {
-    /// Creates a new service by initializing the machine with the given props.
+    /// Creates a new service by initializing the machine with the given props,
+    /// adapter-resolved environment, and i18n messages.
     #[must_use]
-    pub fn new(props: M::Props) -> Self {
-        let (state, context) = M::init(&props);
+    pub fn new(props: M::Props, env: &Env, messages: &M::Messages) -> Self {
+        debug_assert!(!props.id().is_empty(), "Props::id must not be empty");
+        let (state, context) = M::init(&props, env, messages);
+        Self {
+            state,
+            context,
+            props,
+            event_queue: VecDeque::new(),
+            unmounted: false,
+        }
+    }
+
+    /// Construct a Service from a hydrated state snapshot.
+    ///
+    /// Used during SSR hydration to restore server-rendered state on the client
+    /// without re-running [`Machine::init`]. Calls `init` to derive a valid
+    /// context from props, then replaces the initial state with the hydrated
+    /// snapshot. This ensures context (which contains computed IDs, derived
+    /// flags, etc.) is always correctly derived from props, while state is
+    /// restored from the server snapshot.
+    #[cfg(feature = "ssr")]
+    #[must_use]
+    pub fn new_hydrated(
+        props: M::Props,
+        state: M::State,
+        env: &Env,
+        messages: &M::Messages,
+    ) -> Self {
+        debug_assert!(!props.id().is_empty(), "Props::id must not be empty");
+        let (_init_state, context) = M::init(&props, env, messages);
         Self {
             state,
             context,
@@ -801,10 +892,11 @@ impl<M: Machine> Service<M> {
     /// Test-only: force the service into a specific state.
     ///
     /// Re-derives context from the new state and current props via
-    /// `Machine::init`, discarding the init state.
+    /// `Machine::init`, discarding the init state. Uses default env and
+    /// messages. Used by keyboard matrix tests to start from arbitrary states.
     #[cfg(test)]
     pub fn set_state_for_test(&mut self, state: M::State) {
-        let (_init_state, context) = M::init(&self.props);
+        let (_init_state, context) = M::init(&self.props, &Env::default(), &M::Messages::default());
         self.state = state;
         self.context = context;
     }
@@ -889,9 +981,14 @@ mod tests {
         type Event = ToggleEvent;
         type Context = ToggleContext;
         type Props = ToggleProps;
+        type Messages = ();
         type Api<'a> = ToggleApi;
 
-        fn init(_props: &Self::Props) -> (Self::State, Self::Context) {
+        fn init(
+            _props: &Self::Props,
+            _env: &Env,
+            _messages: &Self::Messages,
+        ) -> (Self::State, Self::Context) {
             (ToggleState::Off, ToggleContext)
         }
 
@@ -923,9 +1020,13 @@ mod tests {
 
     #[test]
     fn service_applies_transitions() {
-        let mut service = Service::<ToggleMachine>::new(ToggleProps {
-            id: String::from("toggle"),
-        });
+        let mut service = Service::<ToggleMachine>::new(
+            ToggleProps {
+                id: String::from("toggle"),
+            },
+            &Env::default(),
+            &(),
+        );
         assert_eq!(service.state(), &ToggleState::Off);
 
         let result = service.send(ToggleEvent::Toggle);
@@ -936,9 +1037,13 @@ mod tests {
 
     #[test]
     fn send_result_reports_no_change_when_ignored() {
-        let mut service = Service::<ToggleMachine>::new(ToggleProps {
-            id: String::from("toggle"),
-        });
+        let mut service = Service::<ToggleMachine>::new(
+            ToggleProps {
+                id: String::from("toggle"),
+            },
+            &Env::default(),
+            &(),
+        );
         // Toggle is exhaustive so nothing is ignored — toggle twice and check.
         let result = service.send(ToggleEvent::Toggle);
         assert!(result.state_changed);
@@ -962,9 +1067,14 @@ mod tests {
             type Event = ToggleEvent;
             type Context = Ctx;
             type Props = ToggleProps;
+            type Messages = ();
             type Api<'a> = ToggleApi;
 
-            fn init(_props: &Self::Props) -> (Self::State, Self::Context) {
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
                 (ToggleState::Off, Ctx { count: 0 })
             }
 
@@ -987,9 +1097,13 @@ mod tests {
             }
         }
 
-        let mut service = Service::<CountMachine>::new(ToggleProps {
-            id: String::from("test"),
-        });
+        let mut service = Service::<CountMachine>::new(
+            ToggleProps {
+                id: String::from("test"),
+            },
+            &Env::default(),
+            &(),
+        );
         let result = service.send(ToggleEvent::Toggle);
         assert!(!result.state_changed);
         assert!(result.context_changed);
@@ -1005,9 +1119,14 @@ mod tests {
             type Event = ToggleEvent;
             type Context = ToggleContext;
             type Props = ToggleProps;
+            type Messages = ();
             type Api<'a> = ToggleApi;
 
-            fn init(_props: &Self::Props) -> (Self::State, Self::Context) {
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
                 (ToggleState::Off, ToggleContext)
             }
 
@@ -1034,9 +1153,13 @@ mod tests {
             }
         }
 
-        let mut service = Service::<CancelMachine>::new(ToggleProps {
-            id: String::from("test"),
-        });
+        let mut service = Service::<CancelMachine>::new(
+            ToggleProps {
+                id: String::from("test"),
+            },
+            &Env::default(),
+            &(),
+        );
         let result = service.send(ToggleEvent::Toggle);
         assert_eq!(result.cancel_effects, vec!["timer", "polling"]);
     }
@@ -1050,9 +1173,14 @@ mod tests {
             type Event = ToggleEvent;
             type Context = ToggleContext;
             type Props = ToggleProps;
+            type Messages = ();
             type Api<'a> = ToggleApi;
 
-            fn init(_props: &Self::Props) -> (Self::State, Self::Context) {
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
                 (ToggleState::Off, ToggleContext)
             }
 
@@ -1075,9 +1203,13 @@ mod tests {
             }
         }
 
-        let mut service = Service::<EffectMachine>::new(ToggleProps {
-            id: String::from("test"),
-        });
+        let mut service = Service::<EffectMachine>::new(
+            ToggleProps {
+                id: String::from("test"),
+            },
+            &Env::default(),
+            &(),
+        );
         let result = service.send(ToggleEvent::Toggle);
         assert_eq!(result.pending_effects.len(), 1);
         assert_eq!(result.pending_effects[0].name, "focus");
@@ -1106,9 +1238,14 @@ mod tests {
             type Event = PropsEvent;
             type Context = PropsCtx;
             type Props = ToggleProps;
+            type Messages = ();
             type Api<'a> = ToggleApi;
 
-            fn init(_props: &Self::Props) -> (Self::State, Self::Context) {
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
                 (ToggleState::Off, PropsCtx { mode: 0 })
             }
 
@@ -1146,9 +1283,13 @@ mod tests {
             }
         }
 
-        let mut service = Service::<PropsMachine>::new(ToggleProps {
-            id: String::from("a"),
-        });
+        let mut service = Service::<PropsMachine>::new(
+            ToggleProps {
+                id: String::from("a"),
+            },
+            &Env::default(),
+            &(),
+        );
         assert_eq!(service.context().mode, 0);
 
         let result = service.set_props(ToggleProps {
@@ -1156,6 +1297,34 @@ mod tests {
         });
         assert!(result.context_changed);
         assert_eq!(service.context().mode, 1);
+    }
+
+    #[test]
+    fn set_state_for_test_overrides_state_and_re_derives_context() {
+        let mut service = Service::<ToggleMachine>::new(
+            ToggleProps {
+                id: String::from("test"),
+            },
+            &Env::default(),
+            &(),
+        );
+        assert_eq!(service.state(), &ToggleState::Off);
+
+        service.set_state_for_test(ToggleState::On);
+        assert_eq!(service.state(), &ToggleState::On);
+    }
+
+    #[test]
+    #[should_panic(expected = "Props::id must not be empty")]
+    fn service_new_panics_on_empty_id_in_debug() {
+        let _service =
+            Service::<ToggleMachine>::new(ToggleProps { id: String::new() }, &Env::default(), &());
+    }
+
+    #[test]
+    fn env_default_has_en_us_locale() {
+        let env = Env::default();
+        assert_eq!(env.locale.as_str(), "en-US");
     }
 
     #[test]

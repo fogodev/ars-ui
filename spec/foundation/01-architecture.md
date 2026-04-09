@@ -454,7 +454,7 @@ impl Default for Env {
     fn default() -> Self {
         Self {
             locale: Locale::parse("en-US").expect("en-US is a valid BCP-47 tag"),
-            icu_provider: ArsRc::new(StubIcuProvider),
+            icu_provider: ArsRc::from_icu_provider(StubIcuProvider),
         }
     }
 }
@@ -468,7 +468,7 @@ pub trait Machine: Sized + 'static {
     type Context: Clone + Debug;        // Debug added — enables logging/inspection of context
     type Props: Clone + PartialEq + HasId; // PartialEq required for Dioxus memoization; Clone for reactive prop sync; HasId for adapter ID access
     type Messages: ComponentMessages + Clone + Default + 'static; // Per-component i18n messages type
-    type Api<'a>: ConnectApi;           // ConnectApi bound enables generic adapter utilities (e.g., part_attrs() access)
+    type Api<'a>: ConnectApi where Self: 'a; // ConnectApi bound enables generic adapter utilities (e.g., part_attrs() access); `where Self: 'a` required for GAT well-formedness
 
     /// Initialize the machine from props and adapter-resolved environment values,
     /// returning initial state and context.
@@ -483,7 +483,7 @@ pub trait Machine: Sized + 'static {
     fn transition(
         state: &Self::State,
         event: &Self::Event,
-        ctx: &Self::Context,
+        context: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>>;
 
@@ -496,7 +496,7 @@ pub trait Machine: Sized + 'static {
     /// infer which input lifetime should bind to the GAT output.
     fn connect<'a>(
         state: &'a Self::State,
-        ctx: &'a Self::Context,
+        context: &'a Self::Context,
         props: &'a Self::Props,
         send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a>;
@@ -1805,9 +1805,9 @@ pub struct Service<M: Machine> {
 }
 
 impl<M: Machine> Service<M> {
-    pub fn new(props: M::Props, env: Env, messages: M::Messages) -> Self {
+    pub fn new(props: M::Props, env: &Env, messages: &M::Messages) -> Self {
         debug_assert!(!props.id().is_empty(), "Props::id must not be empty");
-        let (state, context) = M::init(&props, &env, &messages);
+        let (state, context) = M::init(&props, env, messages);
         Self {
             state,
             context,
@@ -1824,9 +1824,9 @@ impl<M: Machine> Service<M> {
     /// contains computed IDs, derived flags, etc.) is always correctly derived
     /// from props, while state is restored from the server snapshot.
     #[cfg(feature = "ssr")]
-    pub fn new_hydrated(props: M::Props, state: M::State, env: Env, messages: M::Messages) -> Self {
+    pub fn new_hydrated(props: M::Props, state: M::State, env: &Env, messages: &M::Messages) -> Self {
         debug_assert!(!props.id().is_empty(), "Props::id must not be empty");
-        let (_init_state, context) = M::init(&props, &env, &messages);
+        let (_init_state, context) = M::init(&props, env, messages);
         Self {
             state,
             context,
@@ -2095,7 +2095,7 @@ The correct pattern is to include a guard in `transition()` that makes the follo
 fn transition(
     state: &Self::State,
     event: &Self::Event,
-    ctx: &Self::Context,
+    context: &Self::Context,
     _props: &Self::Props,
 ) -> Option<TransitionPlan<Self>> {
     match (state, event) {
@@ -2502,7 +2502,7 @@ pub mod toggle {
     /// callback or the `Service` borrow.
     pub struct Api<'a> {
         state: &'a Self::State,
-        ctx: &'a Self::Context,
+        context: &'a Self::Context,
         props: &'a Self::Props,
         send: &'a dyn Fn(Self::Event),
     }
@@ -2585,10 +2585,10 @@ pub mod toggle {
         fn transition(
             state: &State,
             event: &Event,
-            ctx: &Context,
+            context: &Context,
             _props: &Props,
         ) -> Option<TransitionPlan<Self>> {
-            if ctx.disabled { return None; }
+            if context.disabled { return None; }
 
             match event {
                 // Toggle delegates to SetPressed via `then()` rather than
@@ -4347,7 +4347,7 @@ pub mod checkbox {
 
     pub struct Api<'a> {
         state: &'a Self::State,
-        ctx: &'a Self::Context,
+        context: &'a Self::Context,
         props: &'a Self::Props,
         send: &'a dyn Fn(Self::Event),
     }
