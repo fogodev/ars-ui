@@ -846,13 +846,11 @@ pub fn no_cleanup() -> CleanupFn {
 }
 
 /// Shared callback wrapper for event handler closures in Props structs.
-/// Clones the smart pointer, NOT the closure itself.
+/// Wraps closures in `ArsRc<T>` — `Rc` on WASM, `Arc` on native — so
+/// `Clone`, `PartialEq`, `Deref`, and `AsRef` need no cfg-gated code.
 /// This is distinct from `MessageFn<T>` (used for i18n message closures)
 /// and `CleanupFn` (used for effect cleanup).
-#[cfg(target_arch = "wasm32")]
-pub struct Callback<T: ?Sized>(pub(crate) alloc::rc::Rc<T>);
-#[cfg(not(target_arch = "wasm32"))]
-pub struct Callback<T: ?Sized>(pub(crate) alloc::sync::Arc<T>);
+pub struct Callback<T: ?Sized>(pub(crate) ArsRc<T>);
 
 impl<T: ?Sized> Clone for Callback<T> {
     fn clone(&self) -> Self { Callback(self.0.clone()) }
@@ -864,41 +862,9 @@ impl<T: ?Sized> core::fmt::Debug for Callback<T> {
     }
 }
 
-/// Callback supports an optional return type via `Callback<dyn Fn(Args) -> Out>`.
-/// When the return type is `()` (the default), you can write `Callback<dyn Fn(Args)>`
-/// as shorthand — `Fn(Args)` is sugar for `Fn(Args) -> ()` in Rust.
-///
-/// This mirrors the Leptos `Callback<In, Out = ()>` and Dioxus `Callback<Args, Ret = ()>`
-/// patterns, enabling callbacks that return values (e.g., adapter-provided async spawners).
-impl<Args: 'static, Out: 'static> Callback<dyn Fn(Args) -> Out> {
-    #[cfg(target_arch = "wasm32")]
-    pub fn new(f: impl Fn(Args) -> Out + 'static) -> Self {
-        Self(alloc::rc::Rc::new(f))
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn new(f: impl Fn(Args) -> Out + Send + Sync + 'static) -> Self {
-        Self(alloc::sync::Arc::new(f))
-    }
-}
-
-// From impls for ergonomic construction
-#[cfg(target_arch = "wasm32")]
-impl<F: Fn(Args) -> Out + 'static, Args: 'static, Out: 'static> From<F> for Callback<dyn Fn(Args) -> Out> {
-    fn from(f: F) -> Self { Callback(alloc::rc::Rc::new(f)) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(Args) -> Out + Send + Sync + 'static, Args: 'static, Out: 'static> From<F> for Callback<dyn Fn(Args) -> Out> {
-    fn from(f: F) -> Self { Callback(alloc::sync::Arc::new(f)) }
-}
-
 // PartialEq by pointer identity — enables derive(PartialEq) on Props structs.
-#[cfg(target_arch = "wasm32")]
 impl<T: ?Sized> PartialEq for Callback<T> {
-    fn eq(&self, other: &Self) -> bool { alloc::rc::Rc::ptr_eq(&self.0, &other.0) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<T: ?Sized> PartialEq for Callback<T> {
-    fn eq(&self, other: &Self) -> bool { alloc::sync::Arc::ptr_eq(&self.0, &other.0) }
+    fn eq(&self, other: &Self) -> bool { self.0 == other.0 }
 }
 
 // Deref and AsRef impls for ergonomic invocation — avoids verbose `.0` access.
@@ -908,7 +874,65 @@ impl<T: ?Sized> core::ops::Deref for Callback<T> {
 }
 
 impl<T: ?Sized> AsRef<T> for Callback<T> {
-    fn as_ref(&self) -> &T { &self.0 }
+    fn as_ref(&self) -> &T { self.0.as_ref() }
+}
+
+/// Callback supports an optional return type via `Callback<dyn Fn(Args) -> Out>`.
+/// When the return type is `()` (the default), you can write `Callback<dyn Fn(Args)>`
+/// as shorthand — `Fn(Args)` is sugar for `Fn(Args) -> ()` in Rust.
+///
+/// This mirrors the Leptos `Callback<In, Out = ()>` and Dioxus `Callback<Args, Ret = ()>`
+/// patterns, enabling callbacks that return values (e.g., adapter-provided async spawners).
+///
+/// Constructors and `From` impls still need cfg gates because the `Send + Sync`
+/// bounds differ by platform, and raw `Rc`/`Arc` construction is needed for
+/// dyn trait object coercion (`ArsRc` lacks `CoerceUnsized`).
+impl<Args: 'static, Out: 'static> Callback<dyn Fn(Args) -> Out> {
+    #[cfg(target_arch = "wasm32")]
+    pub fn new(f: impl Fn(Args) -> Out + 'static) -> Self {
+        Self(ArsRc(alloc::rc::Rc::new(f)))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new(f: impl Fn(Args) -> Out + Send + Sync + 'static) -> Self {
+        Self(ArsRc(alloc::sync::Arc::new(f)))
+    }
+}
+
+/// Constructor for zero-argument `Callback<dyn Fn()>`.
+///
+/// `dyn Fn()` and `dyn Fn(Args) -> Out` are distinct trait objects in Rust,
+/// so the generic `Callback::new` (which requires one `Args` parameter)
+/// cannot produce `Callback<dyn Fn()>`. This fills that gap for
+/// void callbacks (e.g. `on_dismiss`, `on_escape_key_down`).
+impl Callback<dyn Fn()> {
+    #[cfg(target_arch = "wasm32")]
+    pub fn new_void(f: impl Fn() + 'static) -> Self {
+        Self(ArsRc(alloc::rc::Rc::new(f)))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new_void(f: impl Fn() + Send + Sync + 'static) -> Self {
+        Self(ArsRc(alloc::sync::Arc::new(f)))
+    }
+}
+
+// From impls for ergonomic construction
+#[cfg(target_arch = "wasm32")]
+impl<F: Fn(Args) -> Out + 'static, Args: 'static, Out: 'static> From<F> for Callback<dyn Fn(Args) -> Out> {
+    fn from(f: F) -> Self { Callback(ArsRc(alloc::rc::Rc::new(f))) }
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl<F: Fn(Args) -> Out + Send + Sync + 'static, Args: 'static, Out: 'static> From<F> for Callback<dyn Fn(Args) -> Out> {
+    fn from(f: F) -> Self { Callback(ArsRc(alloc::sync::Arc::new(f))) }
+}
+
+// From impls for zero-argument closures (`dyn Fn()`)
+#[cfg(target_arch = "wasm32")]
+impl<F: Fn() + 'static> From<F> for Callback<dyn Fn()> {
+    fn from(f: F) -> Self { Callback(ArsRc(alloc::rc::Rc::new(f))) }
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl<F: Fn() + Send + Sync + 'static> From<F> for Callback<dyn Fn()> {
+    fn from(f: F) -> Self { Callback(ArsRc(alloc::sync::Arc::new(f))) }
 }
 
 // Usage examples:
@@ -965,15 +989,13 @@ let cb = Callback::<dyn Fn(String)>::new(|s| log::info!("{s}"));
 
 #### 2.2.3 Inner Field Privacy
 
-The inner pointer fields of `Callback<T>` and `MessageFn` are `pub(crate)` to prevent external code from depending on the platform-specific pointer type (`Rc` on WASM, `Arc` on native). This ensures:
+Both `Callback<T>` and `MessageFn<T>` wrap `ArsRc<T>` internally. The `ArsRc` field is `pub(crate)` to prevent external code from depending on the platform-specific pointer type (`Rc` on WASM, `Arc` on native). This ensures:
 
 1. **Cross-platform safety**: Generic code cannot accidentally rely on `Rc`-specific or `Arc`-specific trait bounds (e.g., `Send`/`Sync` availability differs).
-2. **Encapsulation**: The smart pointer type is an implementation detail. External consumers interact through `Deref`-based invocation (`cb(value)`) and `Callback::new()` only.
-3. **Migration path**: If the inner type changes (e.g., to a custom reference-counted pointer), downstream code is unaffected.
+2. **Encapsulation**: The smart pointer type is an implementation detail. External consumers interact through `Deref`-based invocation (`cb(value)`) and `Callback::new()` / `MessageFn::new()` only.
+3. **Reduced cfg duplication**: `Clone`, `PartialEq`, `Deref`, and `AsRef` all delegate to `ArsRc` with no cfg-gated code. Only constructors and `From` impls need cfg gates (for `Send + Sync` bound differences and dyn trait object coercion).
 
-**Platform-specific trait bound implications**: On native targets (`not(target_arch = "wasm32")`), `Callback<T>` wraps `Arc<T>`, which requires `T: Send + Sync`. On WASM, `Callback<T>` wraps `Rc<T>`, which does not. Code that is generic over `Callback` MUST NOT assume `Send + Sync` bounds unless gated behind `#[cfg(not(target_arch = "wasm32"))]`.
-
-**Callback Clone bound asymmetry:** `Callback<T>` uses `Rc<dyn Fn(T)>` on WASM targets and `Arc<dyn Fn(T) + Send + Sync>` on native targets via `cfg` attributes. Generic code should not add `Send`/`Sync` bounds on `Callback`; instead, use the provided type alias which handles platform differences. The `Clone` impl clones the smart pointer (not the closure), so `Clone` works identically on both platforms.
+**Platform-specific trait bound implications**: On native targets (`not(target_arch = "wasm32")`), `ArsRc<T>` wraps `Arc<T>`, which requires `T: Send + Sync`. On WASM, it wraps `Rc<T>`, which does not. Code that is generic over `Callback` or `MessageFn` MUST NOT assume `Send + Sync` bounds unless gated behind `#[cfg(not(target_arch = "wasm32"))]`.
 
 ````rust
 /// ## MessageFn Definition

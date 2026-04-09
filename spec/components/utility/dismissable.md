@@ -21,9 +21,11 @@ A shared behavior primitive for handling outside interactions (click, focus, Esc
 
 ### 1.1 Props
 
+Core `Props` contain only behavioral configuration — callbacks, pointer-event blocking, and excluded IDs. Locale and messages are environment context resolved by the adapter and passed separately to [`dismiss_button_attrs`].
+
 ```rust
 /// Props for the `Dismissable` component.
-#[derive(Clone)]
+#[derive(Clone, Default, PartialEq)]
 pub struct Props {
     /// Called when the user interacts outside the dismissable element.
     /// The adapter invokes this on `pointerdown` outside, or `focusin` on an element outside.
@@ -38,10 +40,6 @@ pub struct Props {
     /// DOM IDs of elements that should NOT trigger an outside interaction when clicked.
     /// Typically includes the trigger button that opened the overlay.
     pub exclude_ids: Vec<String>,
-    /// Localizable strings. When `None`, resolved via `resolve_messages()`.
-    pub messages: Option<Messages>,
-    /// Optional locale override. When `None`, resolved from the nearest `ArsProvider` context.
-    pub locale: Option<Locale>,
 }
 
 impl fmt::Debug for Props {
@@ -52,20 +50,6 @@ impl fmt::Debug for Props {
             .field("on_escape_key_down", &self.on_escape_key_down.as_ref().map(|_| "<closure>"))
             .field("on_dismiss", &self.on_dismiss.as_ref().map(|_| "<closure>"))
             .finish()
-    }
-}
-
-impl Default for Props {
-    fn default() -> Self {
-        Self {
-            on_interact_outside: None,
-            on_escape_key_down: None,
-            on_dismiss: None,
-            disable_outside_pointer_events: false,
-            exclude_ids: Vec::new(),
-            messages: None,
-            locale: None,
-        }
     }
 }
 
@@ -83,16 +67,17 @@ pub enum Part {
 }
 
 /// Returns attrs for the visually-hidden DismissButton element.
-pub fn dismiss_button_attrs(props: &Props) -> AttrMap {
-    let locale = resolve_locale(props.locale.as_ref());
-    let messages = resolve_messages::<Messages>(props.messages.as_ref(), &locale);
+///
+/// `locale` and `messages` are resolved by the adapter from `ArsProvider`
+/// context and passed explicitly — this function has no framework dependency.
+pub fn dismiss_button_attrs(locale: &Locale, messages: &Messages) -> AttrMap {
     let mut attrs = AttrMap::new();
     let [(scope_attr, scope_val), (part_attr, part_val)] = Part::DismissButton.data_attrs();
     attrs.set(scope_attr, scope_val);
     attrs.set(part_attr, part_val);
     attrs.set(HtmlAttr::Role, "button");
     attrs.set(HtmlAttr::TabIndex, "0");
-    attrs.set(HtmlAttr::Aria(AriaAttr::Label), (messages.close_label)(&locale));
+    attrs.set(HtmlAttr::Aria(AriaAttr::Label), (messages.close_label)(locale));
     attrs.set_bool(HtmlAttr::Data("ars-visually-hidden"), true);
     attrs
 }
@@ -128,7 +113,7 @@ When `disable_outside_pointer_events` is true, screen reader users must still be
 ### 4.1 Messages
 
 ```rust
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     /// Accessible label for the visually-hidden DismissButton.
     pub close_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
@@ -199,12 +184,17 @@ Overlay components compose `Dismissable` internally:
 ```rust
 // Inside Dialog, Popover, Select content, Menu content, etc.
 let dismissable = dismissable::Props {
-    on_dismiss: Some(Arc::new(move || machine.send(Event::Close))),
-    on_escape_key_down: Some(Arc::new(move || machine.send(Event::Close))),
+    on_dismiss: Some(Callback::new_void(move || machine.send(Event::Close))),
+    on_escape_key_down: Some(Callback::new_void(move || machine.send(Event::Close))),
     disable_outside_pointer_events: props.modal,
     exclude_ids: vec![trigger_id.clone()],
     ..Default::default()
 };
+
+// The adapter hook resolves locale/messages from ArsProvider and passes them:
+// let locale = use_locale();
+// let messages = resolve_messages::<dismissable::Messages>(&locale);
+// let button_attrs = dismissable::dismiss_button_attrs(&locale, &messages);
 ```
 
 ## 7. Library Parity

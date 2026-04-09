@@ -30,6 +30,7 @@ use core::fmt::{self, Debug};
 mod callback;
 pub mod companion_css;
 mod connect;
+mod message_fn;
 pub mod modality;
 pub mod platform;
 pub mod provider;
@@ -58,6 +59,7 @@ pub use connect::{
     AriaAttr, AttrMap, AttrMapParts, AttrValue, CssProperty, EventOptions, HtmlAttr, HtmlEvent,
     StyleStrategy, UserAttrs, data,
 };
+pub use message_fn::{ComponentMessages, MessageFn};
 // ── Modality ────────────────────────────────────────────────────────
 pub use modality::{
     DefaultModalityContext, KeyModifiers, KeyboardKey, ModalityContext, ModalitySnapshot,
