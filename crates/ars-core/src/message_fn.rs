@@ -112,6 +112,8 @@ pub trait ComponentMessages: Clone + Default {}
 
 #[cfg(test)]
 mod tests {
+    use alloc::format;
+
     use super::*;
 
     #[test]
