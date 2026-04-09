@@ -2945,16 +2945,19 @@ pub enum AsyncLoadingState {
 }
 
 impl AsyncLoadingState {
-    pub fn is_loading(&self) -> bool {
-        matches!(self, AsyncLoadingState::Loading | AsyncLoadingState::LoadingMore)
+    #[must_use]
+    pub const fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading | Self::LoadingMore)
     }
 
-    pub fn is_error(&self) -> bool {
-        matches!(self, AsyncLoadingState::Error(_))
+    #[must_use]
+    pub const fn is_error(&self) -> bool {
+        matches!(self, Self::Error(_))
     }
 
+    #[must_use]
     pub fn error_message(&self) -> Option<&str> {
-        if let AsyncLoadingState::Error(msg) = self {
+        if let Self::Error(msg) = self {
             Some(msg.as_str())
         } else {
             None
@@ -3000,6 +3003,7 @@ pub struct AsyncCollection<T: Clone> {
 
 impl<T: Clone> AsyncCollection<T> {
     /// Create an empty async collection ready for its first load.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             inner: StaticCollection::from_vec(Vec::new()),
@@ -3011,6 +3015,7 @@ impl<T: Clone> AsyncCollection<T> {
     }
 
     /// Transition to the loading state before a fetch begins.
+    #[must_use]
     pub fn begin_load(&self) -> Self {
         let state = if self.inner.is_empty() {
             AsyncLoadingState::Loading
@@ -3024,6 +3029,7 @@ impl<T: Clone> AsyncCollection<T> {
     }
 
     /// Append a new page of items, updating cursor and has_more.
+    #[must_use]
     pub fn append_page(
         &self,
         new_items: Vec<(Key, String, T)>,
@@ -3052,6 +3058,7 @@ impl<T: Clone> AsyncCollection<T> {
     }
 
     /// Record a load error.
+    #[must_use]
     pub fn set_error(&self, message: impl Into<String>) -> Self {
         Self {
             loading_state: AsyncLoadingState::Error(message.into()),
@@ -3104,8 +3111,7 @@ While `AsyncCollection<T>` holds the accumulated state, the _loading logic_ is d
 ````rust
 // ars-collections/src/async_loader.rs
 
-use alloc::string::String;
-use core::future::Future;
+use alloc::{string::String, vec::Vec};
 
 /// The result of fetching a single page of items.
 #[derive(Clone, Debug)]
@@ -3184,6 +3190,11 @@ pub trait AsyncLoader<T> {
     ///   This is the standard cancellation semantic — if the component
     ///   unmounts or the user navigates away, the adapter drops the future
     ///   and no further callbacks fire.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CollectionError` when the page load fails. The `retryable`
+    /// flag indicates whether the caller should offer a retry.
     fn load_page(&self, cursor: Option<&str>) -> Self::Fut;
 }
 ````
