@@ -15,12 +15,21 @@
 //! - [`StaticCollection`] — in-memory `Collection` implementation.
 //! - [`selection`] — selection enums and state for collection-based components.
 //! - [`navigation`] — disabled-aware navigation helpers for collection widgets.
+//! - [`AsyncLoadingState`] — loading phase for async/paginated collections.
+//! - [`AsyncCollection`] — paginated collection that grows as pages are fetched.
+//! - [`AsyncLoader`] — trait for fetching pages of data from an async source.
+//! - [`LoadResult`] — result of a single page fetch.
+//! - [`CollectionError`] — error from an async page load.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::std_instead_of_core)]
 
 extern crate alloc;
 
+/// Async collection with pagination and loading state management.
+pub mod async_collection;
+/// Async data loading traits and result types.
+pub mod async_loader;
 /// Fluent builder for constructing [`StaticCollection`] instances.
 pub mod builder;
 /// Core collection traits: [`Collection`] and [`CollectionItem`].
@@ -36,6 +45,8 @@ pub mod selection;
 /// In-memory collection backed by `Vec` and `IndexMap`.
 pub mod static_collection;
 
+pub use async_collection::{AsyncCollection, AsyncLoadingState};
+pub use async_loader::{AsyncLoader, CollectionError, LoadResult};
 pub use builder::CollectionBuilder;
 pub use collection::{Collection, CollectionItem};
 pub use key::Key;
