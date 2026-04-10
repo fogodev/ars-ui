@@ -33,9 +33,11 @@ ars-collections = { workspace = true }
 ars-forms = { workspace = true }
 ars-dom = { workspace = true }
 leptos = "0.8"
+log = { version = "0.4", default-features = false, optional = true }
 
 [features]
 default = []
+debug = ["dep:log", "ars-core/debug", "ars-dom/debug", "ars-interactions/debug"]
 ssr = ["leptos/ssr", "ars-dom/ssr"]
 hydrate = ["leptos/hydrate"]
 csr = ["leptos/csr"]
@@ -820,6 +822,10 @@ pub fn use_style_strategy() -> StyleStrategy {
         })
 }
 ```
+
+`warn_missing_provider()` is an adapter-private helper. It emits `log::warn!`
+messages only when the `ars-leptos/debug` feature is enabled; otherwise these
+fallback paths remain silent.
 
 #### 4.5.1 Nonce CSS Collector
 

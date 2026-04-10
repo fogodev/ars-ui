@@ -10,10 +10,12 @@ rust-version.workspace = true
 [features]
 default               = ["aria-drag-drop-compat"]
 aria-drag-drop-compat = []
+debug                 = ["dep:log", "ars-core/debug"]
 
 [dependencies]
 ars-core = { path = "../ars-core" }
 ars-i18n = { path = "../ars-i18n" }
+log      = { version = "0.4", default-features = false, optional = true }
 
 [lints]
 workspace = true

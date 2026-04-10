@@ -2634,19 +2634,19 @@ Note: Class deduplication is handled by `AttrMap::set()` — space-separated tok
 list attributes (including `class`) are automatically appended with dedup.
 See `SPACE_SEPARATED` in `01-architecture.md`.
 
-**Dev-mode `style` conflict warning:** When `cfg!(debug_assertions)` is enabled, `merge_attrs` SHOULD emit a `console.warn` if the same CSS property is set by two different interaction `AttrMap` sources with different values. This helps component authors detect unintentional style conflicts during development:
+**Dev-mode `style` conflict warning:** When the `ars-interactions/debug` feature is enabled, `merge_attrs` SHOULD emit a `log::warn!` if the same CSS property is set by two different interaction `AttrMap` sources with different values. This helps component authors detect unintentional style conflicts during development while keeping diagnostics routed through the application's logger setup:
 
 ```rust
-// In merge_attrs, during style merging (debug builds only):
-#[cfg(debug_assertions)]
+// In merge_attrs, during style merging (debug feature only):
+#[cfg(feature = "debug")]
 if let Some(existing_value) = merged.iter_styles().find(|(k, _)| k == &property).map(|(_, v)| v) {
     if existing_value != &value {
-        web_sys::console::warn_1(
-            &format!(
-                "ars-interactions: style property '{}' set by multiple interactions \
-                 (existing: '{}', new: '{}'). Last write wins.",
-                property, existing_value, value
-            ).into()
+        log::warn!(
+            "ars-interactions: style property '{}' set by multiple interactions \
+             (existing: '{}', new: '{}'). Last write wins.",
+            property,
+            existing_value,
+            value
         );
     }
 }

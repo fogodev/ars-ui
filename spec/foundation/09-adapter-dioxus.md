@@ -40,9 +40,11 @@ ars-collections = { workspace = true }
 ars-forms = { workspace = true }
 ars-dom = { workspace = true, optional = true }
 dioxus = { version = "0.7" }
+log = { version = "0.4", default-features = false, optional = true }
 
 [features]
 default = []
+debug = ["dep:log", "ars-core/debug", "ars-interactions/debug", "ars-dom?/debug"]
 web = ["dioxus/web", "dep:ars-dom", "ars-dom/web"]
 desktop = ["dioxus/desktop"]
 desktop-dom = ["desktop", "dep:ars-dom"]
@@ -850,6 +852,10 @@ pub fn use_style_strategy() -> StyleStrategy {
         })
 }
 ```
+
+`warn_missing_provider()` is adapter-private. It emits `log::warn!` messages
+only when the `ars-dioxus/debug` feature is enabled; otherwise these fallback
+paths are silent.
 
 > **Note:** `ArsStyleProvider` and `ArsStyleCtx` have been removed. The style strategy is
 > now provided by `ArsProvider` (§16) via the `style_strategy` field on `ArsContext`.
@@ -2216,6 +2222,11 @@ The Dioxus adapter resolves `platform` via feature flags: `WebPlatformEffects` (
 `DesktopPlatformEffects` (desktop), `NullPlatformEffects` (SSR/tests/mobile fallback).
 
 ### 16.1 use_locale()
+
+All ArsProvider fallback helpers in this section (`use_locale()`,
+`use_icu_provider()`, `t()`, and `use_platform()`) route through
+`warn_missing_provider()`. That helper emits `log::warn!` only when the
+`ars-dioxus/debug` feature is enabled.
 
 ```rust
 /// Returns the current locale signal. The returned signal is **read-only in practice**:

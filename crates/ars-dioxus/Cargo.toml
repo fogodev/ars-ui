@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [features]
 default     = []
+debug       = ["dep:log", "ars-core/debug", "ars-interactions/debug", "ars-dom?/debug"]
 web         = ["dioxus/web", "dep:ars-dom", "ars-dom/web", "dep:web-sys"]
 desktop     = ["dioxus/desktop"]
 desktop-dom = ["desktop", "dep:ars-dom"]
@@ -23,6 +24,7 @@ ars-dom          = { path = "../ars-dom", optional = true, default-features = fa
 ars-forms        = { path = "../ars-forms" }
 ars-i18n         = { path = "../ars-i18n" }
 ars-interactions = { path = "../ars-interactions" }
+log              = { version = "0.4", default-features = false, optional = true }
 
 [dependencies.dioxus]
 version          = "0.7"

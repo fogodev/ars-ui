@@ -12,12 +12,13 @@ default      = ["std"]
 std          = []
 serde        = ["dep:serde"]
 ssr          = []
-debug        = []
+debug        = ["dep:log"]
 embedded-css = []
 
 [dependencies]
 ars-derive = { path = "../ars-derive" }
 ars-i18n = { path = "../ars-i18n", default-features = false }
+log      = { version = "0.4", default-features = false, optional = true }
 serde    = { version = "1", default-features = false, features = ["alloc", "derive"], optional = true }
 
 [dev-dependencies]

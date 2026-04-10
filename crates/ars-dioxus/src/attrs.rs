@@ -212,17 +212,17 @@ pub fn append_nonce_css(css: String) {
 
 /// Emit a debug-mode warning when a hook is called without an `ArsProvider`
 /// ancestor in the component tree.
-#[cfg(debug_assertions)]
+#[cfg(feature = "debug")]
 fn warn_missing_provider(hook: &str) {
-    eprintln!(
+    log::warn!(
         "[ars-ui] {hook}() called without ArsProvider. \
          Returning default value. Wrap your app root in <ArsProvider>."
     );
 }
 
 /// No-op in release builds.
-#[cfg(not(debug_assertions))]
-fn warn_missing_provider(_hook: &str) {}
+#[cfg(not(feature = "debug"))]
+const fn warn_missing_provider(_hook: &str) {}
 
 /// Read the current style strategy from Dioxus context.
 ///
