@@ -23,10 +23,24 @@ The project needs a fully stable foundation before component work starts. Compon
 | `ars-collections`  | 28    | Stub       | Selection\<T\> only                                                                                                                                                                                        |
 | `ars-i18n`         | 1,928 | Partial    | Locale (ICU4X-backed), Direction, Orientation, NumberFormatter, CurrencyCode, BiDi isolation, Weekday, IcuProvider trait (stub), placeholder date/time types                                               |
 
+### Architecture spec (01-architecture.md) completion — 2026-04-10 audit
+
+A full section-by-section audit of `spec/foundation/01-architecture.md` (§1–§10, ~5000 lines) against the implementation found that **~95% of the spec is implemented**. Four gaps remain, tracked as sub-issues of Epic #2:
+
+| Gap                                                          | Issue                                                | Points | Status |
+| ------------------------------------------------------------ | ---------------------------------------------------- | ------ | ------ |
+| `BindableValue` trait alias + `Bindable<T>: Default`         | [#145](https://github.com/fogodev/ars-ui/issues/145) | 1      | Open   |
+| `Orientation` re-export from ars-core                        | [#146](https://github.com/fogodev/ars-ui/issues/146) | 1      | Open   |
+| Structured debug logging (§2.9) — `debug` feature, `log` dep | [#147](https://github.com/fogodev/ars-ui/issues/147) | 3      | Open   |
+| `WebPlatformEffects` in ars-dom (§2.2.7)                     | [#148](https://github.com/fogodev/ars-ui/issues/148) | 5      | Open   |
+
+Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 depends partially on #73, #69, #85 for full method coverage but can land with documented stubs for blocked methods.
+
 ### Foundation gap matrix
 
 | Foundation area    | Spec file                    | Spec coverage            | Implementation % | Blocking impact                                                                                                        |
 | ------------------ | ---------------------------- | ------------------------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Architecture core  | `01-architecture.md`         | ~5000 lines, 10 sections | 95%              | 4 remaining gaps tracked above; core contract is stable                                                                |
 | Interactions       | `05-interactions.md`         | ~600 lines, 12 sections  | 5%               | Blocks ALL interactive components                                                                                      |
 | Collections        | `06-collections.md`          | ~400 lines, 6 sections   | 10%              | Blocks all list-based components                                                                                       |
 | I18n               | `04-internationalization.md` | ~4000 lines, 16 sections | 25%              | Blocks number/date components, RTL. Locale + NumberFormatter done; 16 tasks remaining (48 pts ICU4X + web-intl parity) |
