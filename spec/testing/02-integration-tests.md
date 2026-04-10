@@ -1416,7 +1416,7 @@ use ars_collections::{StaticCollection, CollectionBuilder, Collection, Key, Node
 
 #[test]
 fn empty_collection_returns_none_for_all_queries() {
-    let col = StaticCollection::<()>::from_vec(vec![]);
+    let col = StaticCollection::<()>::default();
     assert!(col.first_key().is_none(), "empty collection must return None for first_key");
     assert!(col.last_key().is_none(), "empty collection must return None for last_key");
     assert!(col.get_by_index(0).is_none(), "empty collection must return None for get_by_index(0)");

@@ -8,7 +8,7 @@
 //! The [`ResultExt`] extension trait adds domain-specific helpers like
 //! [`merge`](ResultExt::merge) and [`without_server_errors`](ResultExt::without_server_errors).
 
-use super::error::{Error, ErrorCode, Errors};
+use super::error::{ErrorCode, Errors};
 
 /// The result of validating a field value.
 ///
@@ -67,12 +67,12 @@ impl ResultExt for Result {
         match self {
             Ok(()) => Ok(()),
             Err(errors) => {
-                let filtered: Vec<Error> = errors
+                let filtered = errors
                     .0
                     .iter()
                     .filter(|e| !matches!(&e.code, ErrorCode::Server(_) | ErrorCode::Async(_)))
                     .cloned()
-                    .collect();
+                    .collect::<Vec<_>>();
                 if filtered.is_empty() {
                     Ok(())
                 } else {
@@ -86,17 +86,17 @@ impl ResultExt for Result {
 #[cfg(test)]
 mod tests {
 
-    use super::*;
+    use super::{super::Error, *};
 
     #[test]
     fn valid_result_is_ok() {
-        let result: Result = Ok(());
+        let result = Result::Ok(());
         assert!(result.is_ok());
     }
 
     #[test]
     fn invalid_result_is_err() {
-        let result: Result = Err(Errors(vec![Error {
+        let result = Result::Err(Errors(vec![Error {
             code: ErrorCode::Required,
             message: "This field is required".to_string(),
         }]));
@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn merge_first_invalid() {
-        let invalid: Result = Err(Errors(vec![Error {
+        let invalid = Result::Err(Errors(vec![Error {
             code: ErrorCode::Required,
             message: "required".to_string(),
         }]));
@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn merge_second_invalid() {
-        let invalid: Result = Err(Errors(vec![Error {
+        let invalid = Result::Err(Errors(vec![Error {
             code: ErrorCode::Email,
             message: "bad email".to_string(),
         }]));
@@ -133,11 +133,11 @@ mod tests {
 
     #[test]
     fn merge_both_invalid_combines_errors() {
-        let a: Result = Err(Errors(vec![Error {
+        let a = Result::Err(Errors(vec![Error {
             code: ErrorCode::Required,
             message: "required".to_string(),
         }]));
-        let b: Result = Err(Errors(vec![Error {
+        let b = Result::Err(Errors(vec![Error {
             code: ErrorCode::Email,
             message: "bad email".to_string(),
         }]));
@@ -147,13 +147,13 @@ mod tests {
 
     #[test]
     fn first_error_message_valid() {
-        let result: Result = Ok(());
+        let result = Result::Ok(());
         assert_eq!(result.first_error_message(), None);
     }
 
     #[test]
     fn first_error_message_invalid() {
-        let result: Result = Err(Errors(vec![Error {
+        let result = Result::Err(Errors(vec![Error {
             code: ErrorCode::Required,
             message: "required".to_string(),
         }]));
@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn without_server_errors_keeps_client() {
-        let result: Result = Err(Errors(vec![
+        let result = Result::Err(Errors(vec![
             Error {
                 code: ErrorCode::Required,
                 message: "required".to_string(),
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn without_server_errors_removes_all_server() {
-        let result: Result = Err(Errors(vec![
+        let result = Result::Err(Errors(vec![
             Error::server("err1"),
             Error {
                 code: ErrorCode::Async("check".to_string()),
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn without_server_errors_valid_stays_valid() {
-        let result: Result = Ok(());
+        let result = Result::Ok(());
         assert!(result.without_server_errors().is_ok());
     }
 }

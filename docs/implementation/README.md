@@ -18,4 +18,4 @@ Start with:
 4. The GitHub Project and initial issue backlog are expected to be kept in sync with these docs.
 5. [adapter-contract.md](./adapter-contract.md) for adapter work obligations and spec-sync checklist.
 6. [foundation-gap-audit.md](./foundation-gap-audit.md) for the backlog reset that defers `#24` and promotes the missing foundation contracts into issue-ready follow-on tasks.
-7. [foundation-completion-roadmap.md](./foundation-completion-roadmap.md) for the remaining foundation work (interactions, collections, DOM positioning, i18n) organized into four delivery waves before component work begins.
+7. [foundation-completion-roadmap.md](./foundation-completion-roadmap.md) for the remaining foundation work (interactions, collections, DOM positioning, i18n, and browser `web-intl` follow-ons) organized into five delivery waves before component work begins.

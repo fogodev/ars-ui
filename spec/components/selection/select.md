@@ -313,7 +313,7 @@ impl ars_core::Machine for Machine {
         let messages = messages.clone();
         let ctx = Context {
             locale,
-            items: StaticCollection::from_vec(Vec::new()),
+            items: StaticCollection::default(),
             selection: match &props.value {
                 Some(v) => Bindable::controlled(v.clone()),
                 None => Bindable::uncontrolled(props.default_value.clone()),

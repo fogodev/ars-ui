@@ -300,7 +300,7 @@ pub struct AriaRelevant {
 
 impl core::fmt::Display for AriaRelevant {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let mut parts: Vec<&str> = Vec::new();
+        let mut parts = Vec::new();
         if self.additions {
             parts.push("additions");
         }

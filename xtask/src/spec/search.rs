@@ -86,14 +86,14 @@ pub fn execute(
         Regex::new(query).map_err(|e| Error::FrontmatterError(format!("invalid regex: {e}")))?;
     let section_filter = section.and_then(SectionFilter::parse);
     let m = &root.manifest;
-    let mut hits: Vec<SearchHit> = Vec::new();
+    let mut hits = Vec::new();
 
-    let files: Vec<(&str, &str)> = m
+    let files = m
         .components
         .iter()
         .filter(|(_, c)| category.is_none() || category == Some(c.category.as_str()))
         .map(|(name, c)| (name.as_str(), c.path.as_str()))
-        .collect();
+        .collect::<Vec<_>>();
 
     for (_name, rel_path) in &files {
         let file_path = root.path.join(rel_path);
@@ -119,7 +119,7 @@ pub fn execute(
 
         let mut current_section = String::new();
         let mut in_matching_section = section_filter.is_none();
-        let mut section_level: u8 = 0;
+        let mut section_level = 0;
 
         for (line_idx, line) in content.lines().enumerate() {
             if let Some((level, text)) = manifest::parse_heading(line) {

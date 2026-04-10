@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn shared_state_default() {
-        let state: SharedState<u32> = SharedState::default();
+        let state = SharedState::<u32>::default();
         assert_eq!(state.get(), 0);
     }
 

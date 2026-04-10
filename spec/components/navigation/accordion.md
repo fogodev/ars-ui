@@ -348,14 +348,14 @@ impl ars_core::Machine for Machine {
                 if ctx.disabled { return None; }
                 if !ctx.multiple { return None; }
                 // Filter out items that are individually disabled.
-                let expandable_items: BTreeSet<Key> = ctx.items.iter()
+                let expandable_items = ctx.items.iter()
                     .filter(|id| !*ctx.disabled_items.get(*id).unwrap_or(&false))
                     .cloned()
-                    .collect();
+                    .collect::<BTreeSet<_>>();
                 // Merge with currently open items (disabled items that are already
                 // open remain open; we just don't add new disabled items).
                 let current = ctx.value.get().clone();
-                let merged: BTreeSet<Key> = current.union(&expandable_items).cloned().collect();
+                let merged = current.union(&expandable_items).cloned().collect::<BTreeSet<_>>();
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.value.set(merged);
                 }))

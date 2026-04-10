@@ -1,11 +1,16 @@
-//! Internationalization types for locale, text direction, and layout orientation.
+//! Internationalization types for locale, number formatting, text direction, and
+//! layout orientation.
 //!
 //! This crate provides the core i18n primitives shared across all ars-ui components:
-//! a BCP 47 [`Locale`] wrapper, a [`Direction`] enum for LTR/RTL text flow, an
-//! [`Orientation`] enum for horizontal/vertical layout axes, and the [`IcuProvider`]
-//! trait for calendar/locale data abstraction.
+//! a BCP 47 [`Locale`] wrapper, a locale-aware [`NumberFormatter`], a
+//! [`Direction`] enum for LTR/RTL text flow, an [`Orientation`] enum for
+//! horizontal/vertical layout axes, and the [`IcuProvider`] trait for
+//! calendar/locale data abstraction.
 
 #![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(all(feature = "icu4x", feature = "web-intl"))]
+compile_error!("features `icu4x` and `web-intl` are mutually exclusive");
 
 extern crate alloc;
 
@@ -13,10 +18,17 @@ use alloc::string::String;
 
 mod bidi;
 mod locale;
+mod number;
 mod weekday;
 
 pub use bidi::{IsolateDirection, isolate_text_safe};
 pub use locale::{Locale, LocaleParseError, locales};
+#[cfg(feature = "std")]
+pub use number::get_number_formatter;
+pub use number::{
+    CurrencyCode, MeasureUnit, NumberFormatOptions, NumberFormatter, NumberStyle, RoundingMode,
+    SignDisplay, UnitDisplay, decimal_and_group_separators, normalize_digits, parse_locale_number,
+};
 pub use weekday::Weekday;
 
 /// Text and layout direction.
@@ -302,10 +314,10 @@ mod tests {
             Locale::parse("en-US").expect("en-US is valid"),
         ];
         locales.sort();
-        let sorted: Vec<_> = locales
+        let sorted = locales
             .into_iter()
             .map(|locale| locale.to_bcp47())
-            .collect();
+            .collect::<Vec<_>>();
         assert_eq!(sorted, vec!["de-DE", "en-US", "fr-FR"]);
     }
 

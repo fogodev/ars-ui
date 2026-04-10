@@ -32,10 +32,10 @@ The `ars-collections` crate lives at layer three of the dependency graph, above 
 
 ```rust
 // CORRECT: RwSignal wraps the entire collection
-let items = RwSignal::new(StaticCollection::from_vec(vec![item1, item2]));
+let items = RwSignal::new(StaticCollection::new([item1, item2]));
 
 // WRONG: Do not use Signal<Rc<RefCell<Collection>>>
-// let items = RwSignal::new(Rc::new(RefCell::new(StaticCollection::from_vec(...))));
+// let items = RwSignal::new(Rc::new(RefCell::new(StaticCollection::new(...))));
 ```
 
 **Async loading safe pattern:** For collections populated asynchronously, use `Signal<Option<Collection<T>>>` to represent the loading state, or use `AsyncCollection<T>` (§5) which manages loading state internally:
@@ -45,7 +45,7 @@ let items = RwSignal::new(StaticCollection::from_vec(vec![item1, item2]));
 let items: RwSignal<Option<ListCollection<MyItem>>> = RwSignal::new(None);
 
 // After async load completes:
-items.set(Some(StaticCollection::from_vec(loaded_data)));
+items.set(Some(StaticCollection::new(loaded_data)));
 ```
 
 When the signal updates, the framework adapter triggers a re-render with the new collection. The old collection is dropped when no longer referenced.
@@ -1180,33 +1180,39 @@ impl<T: Clone> StaticCollection<T> {
 
     /// Construct from a `Vec` of `(Key, text_value, T)` tuples.
     #[must_use]
-    pub fn new(items: Vec<(Key, String, T)>) -> Self {
-        Self::from_vec(items)
+    pub fn new(items: impl IntoIterator<Item = (Key, String, T)>) -> Self {
+        Self::from_iter(items)
     }
+}
 
-    /// Convenience constructor from a `Vec` of `(Key, label, data)` tuples.
-    #[must_use]
-    pub fn from_vec(items: Vec<(Key, String, T)>) -> Self {
-        let mut builder = CollectionBuilder::new();
-        for (key, text, value) in items {
-            builder = builder.item(key, text, value);
-        }
-        builder.build()
+/// Construct an empty collection.
+impl<T: Clone> Default for StaticCollection<T> {
+    fn default() -> Self {
+        Self::new([])
     }
+}
 
+/// Construct from a `Vec` of `(Key, text_value, T)` tuples.
+impl<T: Clone> From<Vec<(Key, String, T)>> for StaticCollection<T> {
+    fn from(items: Vec<(Key, String, T)>) -> Self {
+        Self::from_iter(items)
+    }
 }
 
 /// Enables `iterator.collect::<StaticCollection<T>>()` as the idiomatic way
 /// to build a collection from an iterator of `(Key, text_value, T)` tuples.
-/// This replaces the inherent `from_iter()` method, which is now deprecated.
 impl<T: Clone> FromIterator<(Key, String, T)> for StaticCollection<T> {
     fn from_iter<I: IntoIterator<Item = (Key, String, T)>>(iter: I) -> Self {
-        Self::from_vec(iter.into_iter().collect())
+        let mut builder = CollectionBuilder::new();
+        for (key, text, value) in iter {
+            builder = builder.item(key, text, value);
+        }
+        builder.build()
     }
 }
 
 // Note: Clone bound on the trait impl is intentional — StaticCollection stores owned T values
-// and its constructors (from_vec, from_parts) require Clone for ergonomic initialization.
+// and its constructors (new, from_parts) require Clone for ergonomic initialization.
 // The Collection<T> trait itself has no bounds on T (read-only access), but this impl
 // inherits the Clone bound from the struct's constructors for simplicity.
 impl<T: Clone> Collection<T> for StaticCollection<T> {
@@ -3006,7 +3012,7 @@ impl<T: Clone> AsyncCollection<T> {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            inner: StaticCollection::from_vec(Vec::new()),
+            inner: StaticCollection::default(),
             next_cursor: None,
             has_more: true,
             loading_state: AsyncLoadingState::Idle,
@@ -3049,7 +3055,7 @@ impl<T: Clone> AsyncCollection<T> {
         merged.extend(new_items);
 
         Self {
-            inner: StaticCollection::from_vec(merged),
+            inner: StaticCollection::new(merged),
             next_cursor,
             has_more,
             loading_state: AsyncLoadingState::Loaded,
@@ -4668,7 +4674,7 @@ assert!(collapsed.nodes().all(|n| n.key != Key::str("apple"))); // not in visibl
 ```rust
 use ars_collections::{typeahead, StaticCollection, Key};
 
-let collection = StaticCollection::from_vec(vec![
+let collection = StaticCollection::new([
     (Key::int(0), "Apple".into(),      ()),
     (Key::int(1), "Avocado".into(),    ()),
     (Key::int(2), "Banana".into(),     ()),

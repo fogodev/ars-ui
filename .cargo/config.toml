@@ -1,5 +1,6 @@
 [alias]
-xtask = "run --package xtask --"
-xci   = "xtask ci"
-xmcp  = "xtask mcp"
-xspec = "xtask spec"
+xtask   = "run --package xtask --"
+xci     = "xtask ci"
+xclippy = "xtask clippy"
+xmcp    = "xtask mcp"
+xspec   = "xtask spec"

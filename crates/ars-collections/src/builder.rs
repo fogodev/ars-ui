@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn builder_empty() {
-        let c: StaticCollection<String> = CollectionBuilder::new().build();
+        let c = CollectionBuilder::<String>::new().build();
         assert_eq!(c.size(), 0);
         assert!(c.is_empty());
     }
@@ -203,7 +203,7 @@ mod tests {
             .build();
 
         assert_eq!(c.size(), 3);
-        let keys: Vec<_> = c.keys().collect();
+        let keys = c.keys().collect::<Vec<_>>();
         assert_eq!(keys, vec![&Key::int(1), &Key::int(2), &Key::int(3)]);
 
         // Verify indices
@@ -279,8 +279,8 @@ mod tests {
 
     #[test]
     fn builder_default_equals_new() {
-        let a: CollectionBuilder<String> = CollectionBuilder::new();
-        let b: CollectionBuilder<String> = CollectionBuilder::default();
+        let a = CollectionBuilder::<String>::new();
+        let b = CollectionBuilder::<String>::default();
         assert_eq!(a.build().size(), b.build().size());
     }
 

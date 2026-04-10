@@ -191,7 +191,7 @@ impl SpecRoot {
             if candidate.exists() {
                 let spec_path = dir.join("spec");
                 let content = fs::read_to_string(&candidate).map_err(Error::Io)?;
-                let manifest: Manifest = toml::from_str(&content).map_err(Error::Parse)?;
+                let manifest = toml::from_str::<Manifest>(&content).map_err(Error::Parse)?;
                 return Ok(Self {
                     path: spec_path,
                     manifest,

@@ -114,8 +114,11 @@ impl<'a> Api<'a> {
     pub fn formatted_change(&self) -> Option<String> {
         let change = self.props.change?;
         let locale = &self.locale;
-        let fmt = NumberFormatter::new(locale, self.props.format_options.as_ref());
-        let pct = fmt.format_percent(change.abs() / 100.0);
+        let fmt = NumberFormatter::new(
+            locale,
+            self.props.format_options.clone().unwrap_or_default(),
+        );
+        let pct = fmt.format_percent(change.abs() / 100.0, None);
         let msgs = &self.messages;
         let label = match self.resolved_trend() {
             Some(Trend::Up)      => format!("{} {}", (msgs.increase_prefix)(locale), pct),
@@ -338,50 +341,30 @@ impl ComponentMessages for Messages {}
 ### 4.2 Currency and Unit Formatting
 
 When `Stat` displays monetary or unit values, the `value` prop MUST be pre-formatted
-by the host application using the appropriate formatter. `ars-i18n` provides wrappers
-for locale-correct formatting:
+by the host application using `ars-i18n::NumberFormatter`. Currency and measurement
+formatting are selected through `NumberStyle` rather than separate wrapper types:
 
 ```rust
-/// Formats a currency value with locale-correct symbol placement and grouping.
-///
-/// Uses ICU4X `DecimalFormatter` + `CurrencyFormatter` under the hood.
-///
-/// Symbol placement varies by locale:
-/// - `en-US`: "$1,234.56" (symbol before, comma grouping, period decimal)
-/// - `de-DE`: "1.234,56 €" (symbol after with space, period grouping, comma decimal)
-/// - `ja-JP`: "￥1,234" (symbol before, no decimal for JPY)
-/// - `ar-SA`: "١٬٢٣٤٫٥٦ ر.س." (Arabic-Indic numerals, symbol after)
-pub struct CurrencyFormatter {
-    locale: Locale,
-    currency_code: String, // ISO 4217, e.g. "USD", "EUR", "JPY"
+pub fn format_currency_value(locale: &Locale, code: CurrencyCode, value: f64) -> String {
+    NumberFormatter::new(locale, NumberFormatOptions::default())
+        .format_currency(value, code.as_str())
 }
 
-impl CurrencyFormatter {
-    pub fn new(locale: &Locale, currency_code: &str) -> Self { /* ... */ }
-    pub fn format(&self, value: f64) -> String { /* ... */ }
-}
-
-/// Formats a value with a measurement unit, respecting locale conventions.
-///
-/// Uses ICU4X `MeasureUnit` for placement rules.
-///
-/// Placement varies by locale:
-/// - `en-US`: "98.6°F", "5 lbs"
-/// - `de-DE`: "37 °C", "2,3 kg"
-/// - `ja-JP`: "37°C", "5kg"
-/// - RTL locales: unit suffix ordering follows bidi algorithm
-pub struct UnitFormatter {
-    locale: Locale,
-    unit: String,          // CLDR unit ID, e.g. "temperature-celsius"
-    unit_display: UnitDisplay, // Long, Short, Narrow
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UnitDisplay { Long, Short, Narrow }
-
-impl UnitFormatter {
-    pub fn new(locale: &Locale, unit: &str, display: UnitDisplay) -> Self { /* ... */ }
-    pub fn format(&self, value: f64) -> String { /* ... */ }
+pub fn format_unit_value(
+    locale: &Locale,
+    unit: MeasureUnit,
+    display: UnitDisplay,
+    value: f64,
+) -> String {
+    NumberFormatter::new(
+        locale,
+        NumberFormatOptions {
+            style: NumberStyle::Unit(unit),
+            unit_display: display,
+            ..NumberFormatOptions::default()
+        },
+    )
+    .format(value)
 }
 ```
 
@@ -391,7 +374,7 @@ use ICU MessageFormat-style interpolation for locale-aware string building.
 
 ### 4.3 Currency Symbol Placement
 
-The `CurrencyFormatter` trait defined above handles locale-aware currency symbol placement. To streamline currency display in Stat, Progress, and Meter components:
+`NumberFormatter` with `NumberStyle::Currency` handles locale-aware currency symbol placement. To streamline currency display in Stat, Progress, and Meter components:
 
 **Stat `currency` Prop:**
 
@@ -400,13 +383,9 @@ pub struct Props {
     // ... existing fields ...
     /// Optional ISO 4217 currency code (e.g., "USD", "EUR", "JPY").
     /// When set, the `value` field is interpreted as a raw numeric value
-    /// and formatted using `CurrencyFormatter::new(&locale, &currency_code)`.
+    /// and formatted using `NumberFormatter::format_currency()`.
     pub currency: Option<CurrencyCode>,
 }
-
-/// ISO 4217 currency code wrapper.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CurrencyCode(pub String);
 ```
 
 **Symbol Placement Rules** (determined entirely by locale ICU data):
@@ -415,7 +394,7 @@ pub struct CurrencyCode(pub String);
 - Spacing between symbol and value is locale-dependent (e.g., `€1.00` in `en-IE` vs `1,00 €` in `de-DE`).
 - Narrow symbol variants (e.g., `$` vs `US$`) are selected automatically when the currency is unambiguous in the locale context.
 
-**Progress/Meter**: These components do not directly format currency values. When used to display monetary progress (e.g., fundraising), the application MUST pre-format `value_label` using `CurrencyFormatter` and pass it as a string prop.
+**Progress/Meter**: These components do not directly format currency values. When used to display monetary progress (e.g., fundraising), the application MUST pre-format `value_label` using `NumberFormatter` and pass it as a string prop.
 
 ## 5. Library Parity
 

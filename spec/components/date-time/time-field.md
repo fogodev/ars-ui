@@ -429,10 +429,10 @@ fn day_period_from_cjk_buffer(
     };
 
     // Normalize: strip combining marks for tone-mark resilience.
-    let normalized: String = buffer
+    let normalized = buffer
         .nfd()
         .filter(|c| !c.is_combining_mark())
-        .collect();
+        .collect::<String>();
 
     // Full or prefix match against AM/PM labels.
     if entry.am_label.starts_with(&normalized) && !entry.pm_label.starts_with(&normalized) {
@@ -795,10 +795,10 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly { return None; }
                 Some(TransitionPlan::to(State::Idle)
                     .apply(|ctx| {
-                        let editable: Vec<_> = ctx.segments.iter()
+                        let editable = ctx.segments.iter()
                             .filter(|s| s.is_editable)
                             .map(|s| s.kind)
-                            .collect();
+                            .collect::<Vec<_>>();
                         for k in editable { ctx.clear_segment_value(k); }
                         ctx.value.set(None);
                         ctx.type_buffer.clear();

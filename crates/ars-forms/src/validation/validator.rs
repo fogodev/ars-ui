@@ -177,10 +177,9 @@ mod tests {
 
     #[test]
     fn snapshot_produces_owned_context() {
-        let values: BTreeMap<String, Value> =
-            [("name".to_string(), Value::Text("Alice".to_string()))]
-                .into_iter()
-                .collect();
+        let values = [("name".to_string(), Value::Text("Alice".to_string()))]
+            .into_iter()
+            .collect();
         let locale = ars_i18n::locales::en_us();
         let ctx = Context {
             field_name: "name",

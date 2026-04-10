@@ -138,7 +138,7 @@ mod tests {
 
         // All unique tokens present, duplicates removed.
         let class = merged.get(&HtmlAttr::Class).expect("class should be set");
-        let tokens: Vec<&str> = class.split_whitespace().collect();
+        let tokens = class.split_whitespace().collect::<Vec<_>>();
         assert!(tokens.contains(&"base"), "missing 'base': {class}");
         assert!(tokens.contains(&"pressed"), "missing 'pressed': {class}");
         assert!(tokens.contains(&"hovered"), "missing 'hovered': {class}");

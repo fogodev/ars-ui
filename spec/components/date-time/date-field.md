@@ -858,7 +858,7 @@ pub fn segments_for_locale(
     let locale_str = locale.to_bcp47();
     let lang = locale.language();
 
-    let base: Vec<DateSegmentKind> = if locale_str == "en-US" || locale_str == "en-PH" || locale_str == "en-CA" || locale_str == "es-MX" {
+    let base = if locale_str == "en-US" || locale_str == "en-PH" || locale_str == "en-CA" || locale_str == "es-MX" {
         // United States / Canada / Philippines: M/D/Y
         vec![
             DateSegmentKind::Month,
@@ -954,7 +954,7 @@ impl LocaleSeparators {
     pub fn for_locale(locale: &Locale) -> Self {
         // Production: ICU4X pattern parsing extracts exact separator strings.
         let locale_tag = locale.to_bcp47();
-        let seps: Vec<String> = match locale_tag.as_str() {
+        let seps = match locale_tag.as_str() {
             "de-DE" | "de-AT" | "nl-NL" | "pl-PL" | "ru-RU" | "cs-CZ"
             | "sk-SK" | "hr-HR" | "bg-BG" | "ro-RO" =>
                 vec![".".into(), ".".into()],
@@ -1433,10 +1433,10 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly { return None; }
                 Some(TransitionPlan::to(State::Idle)
                     .apply(|ctx| {
-                        let editable: Vec<_> = ctx.segments.iter()
+                        let editable = ctx.segments.iter()
                             .filter(|s| s.is_editable)
                             .map(|s| s.kind)
-                            .collect();
+                            .collect::<Vec<_>>();
                         for k in editable { ctx.clear_segment_value(k); }
                         ctx.value.set(None);
                         ctx.type_buffer.clear();
@@ -2137,7 +2137,7 @@ mod tests {
     #[test]
     fn en_us_segment_order_is_month_day_year() {
         let svc = make_service(DateGranularity::Day);
-        let kinds: Vec<_> = svc.context().segments.iter().map(|s| s.kind).collect();
+        let kinds = svc.context().segments.iter().map(|s| s.kind).collect::<Vec<_>>();
         assert_eq!(kinds, vec![
             DateSegmentKind::Month,
             DateSegmentKind::Literal,
@@ -2151,7 +2151,7 @@ mod tests {
     fn de_de_segment_order_is_day_month_year() {
         let env = Env { locale: Locale::parse("de-DE").expect("valid locale"), ..Env::default() };
         let svc = Service::new(Props { granularity: DateGranularity::Day, ..Props::default() }, env, Default::default());
-        let kinds: Vec<_> = svc.context().segments.iter().map(|s| s.kind).collect();
+        let kinds = svc.context().segments.iter().map(|s| s.kind).collect::<Vec<_>>();
         assert_eq!(kinds, vec![
             DateSegmentKind::Day,
             DateSegmentKind::Literal,

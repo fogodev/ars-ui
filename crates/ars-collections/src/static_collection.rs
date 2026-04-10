@@ -40,20 +40,24 @@ impl<T: Clone> StaticCollection<T> {
         }
     }
 
-    /// Construct from a `Vec` of `(Key, text_value, T)` tuples.
+    /// Construct from any iterator of `(Key, text_value, T)` tuples.
     #[must_use]
-    pub fn new(items: Vec<(Key, String, T)>) -> Self {
-        Self::from_vec(items)
+    pub fn new(items: impl IntoIterator<Item = (Key, String, T)>) -> Self {
+        Self::from_iter(items)
     }
+}
 
-    /// Convenience constructor from a `Vec` of `(Key, label, data)` tuples.
-    #[must_use]
-    pub fn from_vec(items: Vec<(Key, String, T)>) -> Self {
-        let mut builder = CollectionBuilder::new();
-        for (key, text, value) in items {
-            builder = builder.item(key, text, value);
-        }
-        builder.build()
+/// Construct an empty collection.
+impl<T: Clone> Default for StaticCollection<T> {
+    fn default() -> Self {
+        Self::new([])
+    }
+}
+
+/// Construct from a `Vec` of `(Key, text_value, T)` tuples.
+impl<T: Clone> From<Vec<(Key, String, T)>> for StaticCollection<T> {
+    fn from(items: Vec<(Key, String, T)>) -> Self {
+        Self::from_iter(items)
     }
 }
 
@@ -61,7 +65,11 @@ impl<T: Clone> StaticCollection<T> {
 /// to build a collection from an iterator of `(Key, text_value, T)` tuples.
 impl<T: Clone> FromIterator<(Key, String, T)> for StaticCollection<T> {
     fn from_iter<I: IntoIterator<Item = (Key, String, T)>>(iter: I) -> Self {
-        Self::from_vec(iter.into_iter().collect())
+        let mut builder = CollectionBuilder::new();
+        for (key, text, value) in iter {
+            builder = builder.item(key, text, value);
+        }
+        builder.build()
     }
 }
 
@@ -292,7 +300,7 @@ mod tests {
     // ---------------------------------------------------------------
 
     fn three_items() -> StaticCollection<&'static str> {
-        StaticCollection::from_vec(vec![
+        StaticCollection::new([
             (Key::int(1), "Apple".to_string(), "a"),
             (Key::int(2), "Banana".to_string(), "b"),
             (Key::int(3), "Cherry".to_string(), "c"),
@@ -312,18 +320,18 @@ mod tests {
 
     #[test]
     fn from_vec_empty() {
-        let c = StaticCollection::<String>::from_vec(vec![]);
+        let c = StaticCollection::<String>::default();
         assert_eq!(c.size(), 0);
         assert!(c.is_empty());
     }
 
     #[test]
     fn new_delegates_to_from_vec() {
-        let a = StaticCollection::new(vec![
+        let a = StaticCollection::new([
             (Key::int(1), "X".to_string(), 10),
             (Key::int(2), "Y".to_string(), 20),
         ]);
-        let b = StaticCollection::from_vec(vec![
+        let b = StaticCollection::new([
             (Key::int(1), "X".to_string(), 10),
             (Key::int(2), "Y".to_string(), 20),
         ]);
@@ -332,11 +340,11 @@ mod tests {
 
     #[test]
     fn from_iterator() {
-        let items = vec![
+        let items = [
             (Key::int(1), "A".to_string(), "a"),
             (Key::int(2), "B".to_string(), "b"),
         ];
-        let c: StaticCollection<&str> = items.into_iter().collect();
+        let c = items.into_iter().collect::<StaticCollection<_>>();
         assert_eq!(c.size(), 2);
     }
 
@@ -412,7 +420,7 @@ mod tests {
 
     #[test]
     fn first_key_empty() {
-        let c = StaticCollection::<String>::from_vec(vec![]);
+        let c = StaticCollection::<String>::default();
         assert_eq!(c.first_key(), None);
     }
 
@@ -445,7 +453,7 @@ mod tests {
 
     #[test]
     fn first_and_last_key_only_structural() {
-        let c: StaticCollection<String> = CollectionBuilder::new().separator().build();
+        let c = CollectionBuilder::<String>::new().separator().build();
         assert_eq!(c.first_key(), None);
         assert_eq!(c.last_key(), None);
     }
@@ -588,14 +596,14 @@ mod tests {
     #[test]
     fn keys_iterator() {
         let c = three_items();
-        let keys: Vec<_> = c.keys().collect();
+        let keys = c.keys().collect::<Vec<_>>();
         assert_eq!(keys, vec![&Key::int(1), &Key::int(2), &Key::int(3)]);
     }
 
     #[test]
     fn nodes_iterator() {
         let c = three_items();
-        let text_values: Vec<_> = c.nodes().map(|n| n.text_value.as_str()).collect();
+        let text_values = c.nodes().map(|n| n.text_value.as_str()).collect::<Vec<_>>();
         assert_eq!(text_values, vec!["Apple", "Banana", "Cherry"]);
     }
 
@@ -609,7 +617,7 @@ mod tests {
             .item(Key::int(2), "B", "b")
             .build();
         // item_keys should only return focusable items
-        let item_keys: Vec<_> = c.item_keys().collect();
+        let item_keys = c.item_keys().collect::<Vec<_>>();
         assert_eq!(item_keys, vec![&Key::int(1), &Key::int(2)]);
     }
 
@@ -627,7 +635,7 @@ mod tests {
             .item(Key::int(3), "Other", "o")
             .build();
 
-        let children: Vec<_> = c.children_of(&Key::str("fruits")).collect();
+        let children = c.children_of(&Key::str("fruits")).collect::<Vec<_>>();
         // Header + 2 items are children of the section
         assert_eq!(children.len(), 3);
         assert_eq!(children[0].node_type, NodeType::Header);
@@ -638,7 +646,7 @@ mod tests {
     #[test]
     fn children_of_no_match() {
         let c = three_items();
-        let children: Vec<_> = c.children_of(&Key::str("nonexistent")).collect();
+        let children = c.children_of(&Key::str("nonexistent")).collect::<Vec<_>>();
         assert!(children.is_empty());
     }
 
@@ -687,14 +695,14 @@ mod tests {
     #[test]
     fn partial_eq_different_size() {
         let a = three_items();
-        let b = StaticCollection::from_vec(vec![(Key::int(1), "Apple".to_string(), "a")]);
+        let b = StaticCollection::new([(Key::int(1), "Apple".to_string(), "a")]);
         assert_ne!(a, b);
     }
 
     #[test]
     fn partial_eq_different_values() {
-        let a = StaticCollection::from_vec(vec![(Key::int(1), "Apple".to_string(), "a")]);
-        let b = StaticCollection::from_vec(vec![(Key::int(1), "Apple".to_string(), "z")]);
+        let a = StaticCollection::new([(Key::int(1), "Apple".to_string(), "a")]);
+        let b = StaticCollection::new([(Key::int(1), "Apple".to_string(), "z")]);
         assert_ne!(a, b);
     }
 
@@ -809,7 +817,7 @@ mod tests {
 
     #[test]
     fn single_item_wrapping_navigation() {
-        let c = StaticCollection::from_vec(vec![(Key::int(1), "Only".to_string(), "x")]);
+        let c = StaticCollection::new([(Key::int(1), "Only".to_string(), "x")]);
         // key_after wraps to itself
         assert_eq!(c.key_after(&Key::int(1)), Some(&Key::int(1)));
         // key_before wraps to itself
@@ -825,7 +833,7 @@ mod tests {
 
     #[test]
     fn empty_collection_navigation() {
-        let c = StaticCollection::<String>::from_vec(vec![]);
+        let c = StaticCollection::<String>::default();
         assert_eq!(c.first_key(), None);
         assert_eq!(c.last_key(), None);
         assert_eq!(c.key_after(&Key::int(1)), None);

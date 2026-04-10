@@ -150,17 +150,17 @@ mod tests {
 
     #[test]
     fn ars_rc_from_modality_creates_trait_object() {
-        use crate::{DefaultModalityContext, ModalityContext, ModalitySnapshot};
+        use crate::{DefaultModalityContext, ModalitySnapshot};
 
-        let rc: ArsRc<dyn ModalityContext> = ArsRc::from_modality(DefaultModalityContext::new());
+        let rc = ArsRc::from_modality(DefaultModalityContext::new());
         assert_eq!(rc.snapshot(), ModalitySnapshot::default());
     }
 
     #[test]
     fn ars_rc_from_platform_creates_trait_object() {
-        use crate::{NullPlatformEffects, PlatformEffects};
+        use crate::NullPlatformEffects;
 
-        let rc: ArsRc<dyn PlatformEffects> = ArsRc::from_platform(NullPlatformEffects);
+        let rc = ArsRc::from_platform(NullPlatformEffects);
         rc.focus_element_by_id("test");
     }
 

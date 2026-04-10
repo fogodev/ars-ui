@@ -367,7 +367,7 @@ impl Context {
 
     /// Validate all fields. Returns `true` if the form is valid.
     pub fn validate_all(&mut self) -> bool {
-        let names: Vec<String> = self.fields.keys().cloned().collect();
+        let names = self.fields.keys().cloned().collect::<Vec<_>>();
         let mut valid = true;
         for name in names {
             self.run_field_validation(&name);
@@ -386,13 +386,14 @@ impl Context {
     ///
     /// Old server errors are removed first, then new server errors are appended.
     /// Preserves client-side errors from `validate_all()`.
-    pub fn set_server_errors(&mut self, errors: BTreeMap<String, Vec<String>>) {
+    pub fn set_server_errors(&mut self, errors: impl Into<BTreeMap<String, Vec<String>>>) {
+        let errors = errors.into();
         for (name, messages) in &errors {
             if let Some(field) = self.fields.get_mut(name) {
                 field.touched = true; // Show errors immediately
-                let server_errs: Vec<Error> = messages.iter().map(Error::server).collect();
+                let server_errs = messages.iter().map(Error::server).collect::<Vec<_>>();
                 // Merge: keep existing client-side errors, replace server errors
-                let mut client_errs: Vec<Error> = match &field.validation {
+                let mut client_errs = match &field.validation {
                     Err(Errors(errs)) => errs.iter().filter(|e| !e.is_server()).cloned().collect(),
                     _ => vec![],
                 };
@@ -435,7 +436,7 @@ impl Context {
             None => return,
         };
 
-        let all_values: BTreeMap<String, Value> = self
+        let all_values = self
             .fields
             .iter()
             .map(|(k, v)| (k.clone(), v.value.clone()))
@@ -667,7 +668,7 @@ mod tests {
         ctx.register("email", text(""), None, None);
         ctx.register("age", Value::Number(None), None, None);
 
-        let keys: Vec<&String> = ctx.fields.keys().collect();
+        let keys = ctx.fields.keys().collect::<Vec<_>>();
         assert_eq!(keys, vec!["name", "email", "age"]);
     }
 
@@ -713,11 +714,7 @@ mod tests {
         ctx.register("email", text(""), None, None);
         assert!(!ctx.field("email").expect("exists").touched);
 
-        let errors: BTreeMap<String, Vec<String>> =
-            [("email".to_string(), vec!["Already exists".to_string()])]
-                .into_iter()
-                .collect();
-        ctx.set_server_errors(errors);
+        ctx.set_server_errors([("email".to_string(), vec!["Already exists".to_string()])]);
         assert!(ctx.field("email").expect("exists").touched);
     }
 
@@ -726,11 +723,7 @@ mod tests {
         let mut ctx = Context::new(Mode::on_submit());
         ctx.register("email", text(""), None, None);
 
-        let errors: BTreeMap<String, Vec<String>> =
-            [("email".to_string(), vec!["Already exists".to_string()])]
-                .into_iter()
-                .collect();
-        ctx.set_server_errors(errors);
+        ctx.set_server_errors([("email".to_string(), vec!["Already exists".to_string()])]);
 
         let field = ctx.field("email").expect("exists");
         assert!(field.show_error());
@@ -742,11 +735,7 @@ mod tests {
         let mut ctx = Context::new(Mode::on_submit());
         ctx.register("email", text(""), None, None);
 
-        let errors: BTreeMap<String, Vec<String>> =
-            [("email".to_string(), vec!["Taken".to_string()])]
-                .into_iter()
-                .collect();
-        ctx.set_server_errors(errors);
+        ctx.set_server_errors([("email".to_string(), vec!["Taken".to_string()])]);
         assert!(ctx.field("email").expect("exists").validation.is_err());
 
         // Change clears server error
@@ -765,11 +754,7 @@ mod tests {
         assert!(ctx.field("email").expect("exists").validation.is_err());
 
         // Now inject server errors — client errors should be preserved
-        let errors: BTreeMap<String, Vec<String>> =
-            [("email".to_string(), vec!["Already exists".to_string()])]
-                .into_iter()
-                .collect();
-        ctx.set_server_errors(errors);
+        ctx.set_server_errors([("email".to_string(), vec!["Already exists".to_string()])]);
 
         let field = ctx.field("email").expect("exists");
         let all_errors = field.validation.errors().expect("has errors");
@@ -1054,11 +1039,7 @@ mod tests {
         let mut ctx = Context::new(Mode::on_submit());
         ctx.register("email", text(""), None, None);
 
-        let errors: BTreeMap<String, Vec<String>> =
-            [("email".to_string(), vec!["Taken".to_string()])]
-                .into_iter()
-                .collect();
-        ctx.set_server_errors(errors);
+        ctx.set_server_errors([("email".to_string(), vec!["Taken".to_string()])]);
         assert!(ctx.field("email").expect("exists").validation.is_err());
 
         ctx.on_input("email", text("new"));
@@ -1117,11 +1098,7 @@ mod tests {
         let mut ctx = Context::new(Mode::on_submit());
         ctx.register("name", text(""), None, None);
 
-        let errors: BTreeMap<String, Vec<String>> =
-            [("nonexistent".to_string(), vec!["err".to_string()])]
-                .into_iter()
-                .collect();
-        ctx.set_server_errors(errors);
+        ctx.set_server_errors([("nonexistent".to_string(), vec!["err".to_string()])]);
 
         // The known field is unaffected
         assert!(ctx.field("name").expect("exists").validation.is_ok());
@@ -1193,11 +1170,7 @@ mod tests {
         let mut ctx = Context::new(Mode::on_submit());
         ctx.register("email", text(""), None, None);
 
-        let errors: BTreeMap<String, Vec<String>> =
-            [("email".to_string(), vec!["Taken".to_string()])]
-                .into_iter()
-                .collect();
-        ctx.set_server_errors(errors);
+        ctx.set_server_errors([("email".to_string(), vec!["Taken".to_string()])]);
         assert!(!ctx.server_errors.is_empty());
 
         ctx.reset();

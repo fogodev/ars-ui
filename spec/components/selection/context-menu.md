@@ -184,7 +184,7 @@ impl ars_core::Machine for Machine {
 
     fn init(props: &Props, _env: &Env, _messages: &Messages) -> (State, Context) {
         let ctx = Context {
-            items: StaticCollection::empty(),
+            items: StaticCollection::default(),
             open: false,
             highlighted_key: None,
             focus_visible: false,

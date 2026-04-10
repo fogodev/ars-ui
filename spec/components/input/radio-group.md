@@ -6,9 +6,9 @@ foundation_deps: [architecture, accessibility, interactions, forms]
 shared_deps: []
 related: []
 references:
-  ark-ui: RadioGroup
-  radix-ui: RadioGroup
-  react-aria: RadioGroup
+    ark-ui: RadioGroup
+    radix-ui: RadioGroup
+    react-aria: RadioGroup
 ---
 
 # RadioGroup
@@ -358,7 +358,7 @@ fn navigate_items(
     direction: i32,
     wrap: bool,
 ) -> Option<Key> {
-    let enabled: Vec<&Radio> = items.iter().filter(|i| !i.disabled).collect();
+    let enabled = items.iter().filter(|i| !i.disabled).collect::<Vec<_>>();
     if enabled.is_empty() { return None; }
 
     let current_idx = current.as_ref()

@@ -328,11 +328,11 @@ pub(crate) fn run_group(group: Group) -> Result<(), Error> {
         let label = combo.args.join(" ");
         eprintln!("  [{}/{}] {label}", i + 1, total);
 
-        let mut check_args: Vec<&str> = vec!["check"];
+        let mut check_args = vec!["check"];
         check_args.extend_from_slice(combo.args);
         super::cargo(step, &check_args)?;
 
-        let mut test_args: Vec<&str> = vec!["test"];
+        let mut test_args = vec!["test"];
         test_args.extend_from_slice(combo.args);
         test_args.push("--lib");
         super::cargo(step, &test_args)?;
@@ -342,7 +342,7 @@ pub(crate) fn run_group(group: Group) -> Result<(), Error> {
         let label = cross.args.join(" ");
         eprintln!("  [cross] {label} --target {}", cross.target);
 
-        let mut args: Vec<&str> = vec!["check"];
+        let mut args = vec!["check"];
         args.extend_from_slice(cross.args);
         args.extend_from_slice(&["--target", cross.target]);
         super::cargo(step, &args)?;
@@ -397,7 +397,7 @@ mod tests {
             Group::Leptos,
             Group::Dioxus,
         ];
-        let steps: Vec<_> = groups.iter().map(|g| group_step(*g)).collect();
+        let steps = groups.iter().map(|g| group_step(*g)).collect::<Vec<_>>();
         for (i, a) in steps.iter().enumerate() {
             for b in &steps[i + 1..] {
                 assert_ne!(a, b, "duplicate step mapping");
@@ -409,7 +409,7 @@ mod tests {
     /// cross-check counts are consistent with the static arrays.
     #[test]
     fn group_def_returns_correct_data() {
-        let cases: &[(Group, usize, usize)] = &[
+        let cases = &[
             (Group::Core, 15, 0),
             (Group::I18n, 11, 1),
             (Group::Subsystems, 13, 1),

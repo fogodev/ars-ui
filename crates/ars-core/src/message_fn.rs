@@ -160,16 +160,14 @@ mod tests {
 
     #[test]
     fn message_fn_from_closure() {
-        let mf: MessageFn<dyn Fn(&Locale) -> String + Send + Sync> =
-            MessageFn::from(|locale: &Locale| format!("Close ({})", locale.to_bcp47()));
+        let mf = MessageFn::from(|locale: &Locale| format!("Close ({})", locale.to_bcp47()));
         let locale = locales::de_de();
         assert_eq!(mf(&locale), "Close (de-DE)");
     }
 
     #[test]
     fn message_fn_new_delegates_to_from() {
-        let mf: MessageFn<dyn Fn(&Locale) -> String + Send + Sync> =
-            MessageFn::new(|locale: &Locale| format!("Hello {}", locale.to_bcp47()));
+        let mf = MessageFn::new(|locale: &Locale| format!("Hello {}", locale.to_bcp47()));
         assert_eq!(mf(&locales::fr()), "Hello fr-FR");
     }
 

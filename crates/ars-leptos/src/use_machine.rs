@@ -241,7 +241,7 @@ where
     // 2. Forward the event to Service::send()
     // 3. Update signals if state/context changed
     //
-    let send: Callback<M::Event> = Callback::new(move |event: M::Event| {
+    let send = Callback::new(move |event: M::Event| {
         // StoredValue::update_value returns (), so extract result via side-channel.
         let mut state_changed = false;
         let mut context_changed = false;

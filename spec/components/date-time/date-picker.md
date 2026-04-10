@@ -135,7 +135,7 @@ fn format_date(date: &CalendarDate, format: &str, locale: &Locale) -> String {
 fn parse_date(text: &str, format: &str, locale: &Locale) -> Option<CalendarDate> {
     // Production: ICU4X DateTimeParser.
     // Simplified placeholder for the spec:
-    let parts: Vec<&str> = text.split('/').collect();
+    let parts = text.split('/').collect::<Vec<_>>();
     if parts.len() != 3 { return None; }
     let month = parts[0].parse::<u8>().ok()?;
     let day   = parts[1].parse::<u8>().ok()?;

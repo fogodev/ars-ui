@@ -195,7 +195,7 @@ All segmenters follow an **owned/borrowed** pattern. Constructors often return t
 let segmenter = GraphemeClusterSegmenter::new();  // returns GraphemeClusterSegmenterBorrowed<'static>
 
 // Segment
-let breaks: Vec<usize> = segmenter.segment_str("hello").collect();
+let breaks = segmenter.segment_str("hello").collect::<Vec<_>>();
 ```
 
 ### 4.2 `WordSegmenter`
@@ -209,7 +209,7 @@ let seg = WordSegmenter::new_dictionary(Default::default()); // dictionary model
 // With locale-specific rules (fallible)
 let seg = WordSegmenter::try_new_auto(options)?;  // returns owned WordSegmenter
 let borrowed = seg.as_borrowed();
-let breaks: Vec<usize> = borrowed.segment_str("Hello world!").collect();
+let breaks = borrowed.segment_str("Hello world!").collect::<Vec<_>>();
 ```
 
 ### 4.3 `SentenceSegmenter`
@@ -229,9 +229,9 @@ All `segment_str()` / `segment_utf8()` / `segment_utf16()` methods return iterat
 ```rust
 let segmenter = WordSegmenter::new_auto(Default::default());
 let text = "Hello, world!";
-let words: Vec<&str> = {
-    let breaks: Vec<usize> = segmenter.segment_str(text).collect();
-    breaks.windows(2).map(|w| &text[w[0]..w[1]]).collect()
+let words = {
+    let breaks = segmenter.segment_str(text).collect::<Vec<_>>();
+    breaks.windows(2).map(|w| &text[w[0]..w[1]]).collect::<Vec<_>>()
 };
 ```
 
