@@ -53,8 +53,8 @@ pub mod __private {
 pub use ars_derive::{ComponentPart, HasId};
 // ── External re-exports ─────────────────────────────────────────────
 pub use ars_i18n::{
-    Direction, IcuProvider, IsolateDirection, Locale, LocaleParseError, StubIcuProvider, Weekday,
-    isolate_text_safe,
+    Direction, IcuProvider, IsolateDirection, Locale, LocaleParseError, Orientation,
+    StubIcuProvider, Weekday, isolate_text_safe,
 };
 // ── Platform-conditional smart pointers (extracted modules) ─────────
 pub use callback::{Callback, callback};
