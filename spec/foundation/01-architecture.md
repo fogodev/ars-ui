@@ -2164,25 +2164,28 @@ Keyboard and pointer events arriving in the same frame are processed in queue or
 /// Controlled/uncontrolled value container.
 /// Change notification is the adapter's responsibility using native callback types.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Bindable<T: Clone + PartialEq + Debug> {
+pub struct Bindable<T: BindableValue> {
     /// Value provided externally (controlled mode).
     controlled: Option<T>,
     /// Internally managed value (uncontrolled mode).
     internal: T,
 }
 
-impl<T: Clone + PartialEq + Debug> Bindable<T> {
+impl<T: BindableValue> Bindable<T> {
     /// Create an uncontrolled bindable with the given default value.
-    pub fn uncontrolled(default: T) -> Self {
+    #[must_use]
+    pub const fn uncontrolled(default: T) -> Self {
         Self { controlled: None, internal: default }
     }
 
     /// Create a controlled bindable with an externally managed value.
+    #[must_use]
     pub fn controlled(value: T) -> Self {
         Self { controlled: Some(value.clone()), internal: value }
     }
 
     /// Get the current effective value.
+    #[must_use]
     pub fn get(&self) -> &T {
         self.controlled.as_ref().unwrap_or(&self.internal)
     }
@@ -2200,12 +2203,13 @@ impl<T: Clone + PartialEq + Debug> Bindable<T> {
     }
 
     /// Whether this bindable is in controlled mode.
-    pub fn is_controlled(&self) -> bool {
+    #[must_use]
+    pub const fn is_controlled(&self) -> bool {
         self.controlled.is_some()
     }
 }
 
-impl<T: Clone + PartialEq + Debug + Default> Default for Bindable<T> {
+impl<T: BindableValue + Default> Default for Bindable<T> {
     fn default() -> Self {
         Self::uncontrolled(T::default())
     }
@@ -2234,12 +2238,13 @@ When `Context` contains `Bindable<Vec<T>>` (e.g., selection lists, tag inputs), 
 `Bindable<T>` provides `get_mut_owned()` to access the internal value for mutation without requiring a full clone when the value is uncontrolled:
 
 ```rust
-impl<T: Clone + PartialEq + Debug> Bindable<T> {
+impl<T: BindableValue> Bindable<T> {
     /// Returns a mutable reference to the internal value for in-place mutation.
     /// In controlled mode, mutations apply to the internal copy; the controlled
     /// value takes precedence on the next `get()` call until `sync_controlled`
     /// is called.
-    pub fn get_mut_owned(&mut self) -> &mut T {
+    #[must_use]
+    pub const fn get_mut_owned(&mut self) -> &mut T {
         &mut self.internal
     }
 }

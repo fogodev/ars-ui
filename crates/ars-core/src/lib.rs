@@ -10,6 +10,7 @@
 //! - [`Service`] — running machine instance that applies transitions and collects effects
 //! - [`ConnectApi`] — bridges machine state to DOM attributes via [`ComponentPart`]
 //! - [`Bindable`] — controlled/uncontrolled value pattern for two-way binding
+//! - [`BindableValue`] — marker trait for values usable with [`Bindable`]
 //! - [`TransitionPlan`] — declarative transition result with closures, effects, and follow-ups
 //! - [`PendingEffect`] — named side effect with setup closure and cleanup lifecycle
 //! - [`ArsRc`] — platform-conditional shared pointer (`Rc` on wasm, `Arc` on native)
@@ -348,6 +349,14 @@ impl<M: Machine> Debug for TransitionPlan<M> {
 // Bindable
 // ────────────────────────────────────────────────────────────────────
 
+/// Trait alias-style marker for values usable with [`Bindable`].
+///
+/// All bindable values must support cloning for state updates, equality for
+/// change detection, and debug output for diagnostics.
+pub trait BindableValue: Clone + PartialEq + Debug {}
+
+impl<T: Clone + PartialEq + Debug> BindableValue for T {}
+
 /// A value that may be controlled by the parent or managed internally.
 ///
 /// Components that support two-way binding use `Bindable` to distinguish between
@@ -359,14 +368,14 @@ impl<M: Machine> Debug for TransitionPlan<M> {
 /// must call [`sync_controlled`](Bindable::sync_controlled) to push new
 /// controlled values.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Bindable<T: Clone + PartialEq + Debug> {
+pub struct Bindable<T: BindableValue> {
     /// The externally controlled value, or `None` if uncontrolled.
     controlled: Option<T>,
     /// The internal value managed by the component.
     internal: T,
 }
 
-impl<T: Clone + PartialEq + Debug> Bindable<T> {
+impl<T: BindableValue> Bindable<T> {
     /// Creates a controlled bindable owned by the parent.
     ///
     /// Both the controlled and internal fields are initialized to the given value.
@@ -405,21 +414,18 @@ impl<T: Clone + PartialEq + Debug> Bindable<T> {
         self.controlled.is_some()
     }
 
-    /// Updates the internal value if uncontrolled. Has no effect on controlled values.
+    /// Updates the internal value.
+    ///
+    /// In controlled mode, this becomes the pending internal value that is
+    /// revealed once the bindable returns to uncontrolled mode.
     pub fn set(&mut self, value: T) {
-        if self.controlled.is_none() {
-            self.internal = value;
-        }
+        self.internal = value;
     }
 
     /// Pushes a new controlled value from the parent.
     ///
-    /// Updates both the controlled and internal fields. This should be called
-    /// when the parent's controlled prop changes.
+    /// This should be called when the parent's controlled prop changes.
     pub fn sync_controlled(&mut self, value: Option<T>) {
-        if let Some(ref v) = value {
-            self.internal = v.clone();
-        }
         self.controlled = value;
     }
 
@@ -430,6 +436,12 @@ impl<T: Clone + PartialEq + Debug> Bindable<T> {
     /// effect on what [`get`](Self::get) returns (it returns the controlled value).
     pub const fn get_mut_owned(&mut self) -> &mut T {
         &mut self.internal
+    }
+}
+
+impl<T: BindableValue + Default> Default for Bindable<T> {
+    fn default() -> Self {
+        Self::uncontrolled(T::default())
     }
 }
 
@@ -1331,7 +1343,26 @@ mod tests {
     }
 
     #[test]
-    fn bindable_only_updates_uncontrolled_values() {
+    fn bindable_value_blanket_impl_covers_common_types() {
+        fn assert_bindable_value<T: BindableValue>() {}
+
+        assert_bindable_value::<String>();
+        assert_bindable_value::<bool>();
+        assert_bindable_value::<u32>();
+        assert_bindable_value::<Vec<String>>();
+    }
+
+    #[test]
+    fn bindable_default_uses_default_uncontrolled_value() {
+        assert_eq!(
+            Bindable::<String>::default(),
+            Bindable::uncontrolled(String::default())
+        );
+        assert_eq!(Bindable::<bool>::default(), Bindable::uncontrolled(false));
+    }
+
+    #[test]
+    fn bindable_set_updates_internal_value_in_both_modes() {
         let mut uncontrolled = Bindable::uncontrolled(1_u8);
         uncontrolled.set(2);
         assert_eq!(uncontrolled.get(), &2);
@@ -1339,10 +1370,13 @@ mod tests {
         let mut controlled = Bindable::controlled(1_u8);
         controlled.set(2);
         assert_eq!(controlled.get(), &1);
+
+        controlled.sync_controlled(None);
+        assert_eq!(controlled.get(), &2);
     }
 
     #[test]
-    fn bindable_sync_controlled_updates_both_fields() {
+    fn bindable_sync_controlled_updates_only_the_controlled_value() {
         let mut b = Bindable::uncontrolled(10_u8);
         assert!(!b.is_controlled());
 
@@ -1352,8 +1386,30 @@ mod tests {
 
         b.sync_controlled(None);
         assert!(!b.is_controlled());
-        // Internal was updated to 20 by sync, now reads as uncontrolled
-        assert_eq!(b.get(), &20);
+        assert_eq!(b.get(), &10);
+    }
+
+    #[test]
+    fn bindable_get_mut_owned_updates_uncontrolled_values_in_place() {
+        let mut b = Bindable::uncontrolled(vec![String::from("a")]);
+
+        b.get_mut_owned().push(String::from("b"));
+
+        assert_eq!(b.get(), &vec![String::from("a"), String::from("b")]);
+    }
+
+    #[test]
+    fn bindable_get_mut_owned_preserves_controlled_precedence_until_uncontrolled() {
+        let mut b = Bindable::controlled(vec![String::from("controlled")]);
+
+        b.get_mut_owned().push(String::from("pending"));
+        assert_eq!(b.get(), &vec![String::from("controlled")]);
+
+        b.sync_controlled(None);
+        assert_eq!(
+            b.get(),
+            &vec![String::from("controlled"), String::from("pending")]
+        );
     }
 
     #[test]
