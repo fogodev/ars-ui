@@ -24,7 +24,7 @@ This backlog is the seed set for the implementation program. It intentionally st
 
 ### Epic: A11y
 
-- Point target: `5`
+- Point target: `25` (revised from `5` after full spec audit — 2026-04-10)
 - Layer: `Subsystem`
 - Framework: `None`
 - Test tier: `Mixed`
@@ -144,7 +144,7 @@ This backlog is the seed set for the implementation program. It intentionally st
 - Acceptance: adapter/component crates can depend on shared a11y types
 - Spec impact: `No spec change required`
 
-Note: this seed task only covered baseline a11y types. The follow-up `AriaAttribute` bridge onto typed `HtmlAttr`/`AttrMap` and the shared role/state helper layer are now tracked as [#33](https://github.com/fogodev/ars-ui/issues/33) and [#34](https://github.com/fogodev/ars-ui/issues/34), and are documented in [foundation-gap-audit.md](/Users/ericson/Workspace/Rust/ars-ui/docs/implementation/foundation-gap-audit.md).
+Note: this seed task only covered baseline a11y types. The follow-up `AriaAttribute` bridge onto typed `HtmlAttr`/`AttrMap` and the shared role/state helper layer landed as [#33](https://github.com/fogodev/ars-ui/issues/33) and [#34](https://github.com/fogodev/ars-ui/issues/34). A full spec audit (2026-04-10) revealed the original 4-task decomposition covered only ~30% of the 4000-line spec. Eight additional tasks (#150–#157, 22 pts) now cover FocusZone, keyboard shortcuts, VisuallyHidden, FieldContext, announcements, touch/mobile, and testing infrastructure. See [Epic #3](https://github.com/fogodev/ars-ui/issues/3) for the full decomposition.
 
 ### #16: Add baseline `ars-interactions` merge and state primitives
 

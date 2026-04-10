@@ -10,18 +10,18 @@ The project needs a fully stable foundation before component work starts. Compon
 
 ### What is built (357 tests passing)
 
-| Crate              | LOC   | Status     | Key surface                                                                                                                                                                                                |
-| ------------------ | ----- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ars-core`         | 4,306 | Solid      | Machine, Service, TransitionPlan, PendingEffect, Bindable, ConnectApi, ComponentPart, AttrMap/AttrValue/UserAttrs, StyleStrategy, Callback, WeakSend, PlatformEffects, Provider (ColorMode), companion CSS |
-| `ars-derive`       | 535   | Complete   | HasId, ComponentPart proc macros with error tests                                                                                                                                                          |
-| `ars-a11y`         | 2,271 | Solid      | AriaRole, AriaAttribute, ComponentIds, ARIA state helpers, FocusScopeBehavior, FocusStrategy                                                                                                               |
-| `ars-forms`        | 4,128 | Solid      | field::State/Value/Context/Descriptors/InputAria, validation::Error/Validator/AsyncValidator, form::Context/Data/Mode, hidden_input, form_submit machine                                                   |
-| `ars-interactions` | 559   | Stubs only | PointerType, PressState, FocusState enums, compose::merge_attrs                                                                                                                                            |
-| `ars-dom`          | 1,777 | Partial    | FocusScope, focus queries, ScrollLockManager                                                                                                                                                               |
-| `ars-leptos`       | 751   | Partial    | use_machine, UseMachineReturn, EphemeralRef, use_id, AdapterCapabilities                                                                                                                                   |
-| `ars-dioxus`       | 762   | Partial    | Same as Leptos adapter                                                                                                                                                                                     |
-| `ars-collections`  | 28    | Stub       | Selection\<T\> only                                                                                                                                                                                        |
-| `ars-i18n`         | 1,928 | Partial    | Locale (ICU4X-backed), Direction, Orientation, NumberFormatter, CurrencyCode, BiDi isolation, Weekday, IcuProvider trait (stub), placeholder date/time types                                               |
+| Crate              | LOC   | Status     | Key surface                                                                                                                                                                                                                                                         |
+| ------------------ | ----- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ars-core`         | 4,306 | Solid      | Machine, Service, TransitionPlan, PendingEffect, Bindable, ConnectApi, ComponentPart, AttrMap/AttrValue/UserAttrs, StyleStrategy, Callback, WeakSend, PlatformEffects, Provider (ColorMode), companion CSS                                                          |
+| `ars-derive`       | 535   | Complete   | HasId, ComponentPart proc macros with error tests                                                                                                                                                                                                                   |
+| `ars-a11y`         | 2,271 | Partial    | AriaRole, AriaAttribute, ComponentIds, ARIA state helpers, FocusScopeBehavior, FocusStrategy, FocusRing. Missing: FocusZone, DomEvent/KeyboardShortcut/Platform, VisuallyHidden, LabelConfig/FieldContext, Announcements, Touch/Mobile, AriaValidator, test helpers |
+| `ars-forms`        | 4,128 | Solid      | field::State/Value/Context/Descriptors/InputAria, validation::Error/Validator/AsyncValidator, form::Context/Data/Mode, hidden_input, form_submit machine                                                                                                            |
+| `ars-interactions` | 559   | Stubs only | PointerType, PressState, FocusState enums, compose::merge_attrs                                                                                                                                                                                                     |
+| `ars-dom`          | 1,777 | Partial    | FocusScope, focus queries, ScrollLockManager                                                                                                                                                                                                                        |
+| `ars-leptos`       | 751   | Partial    | use_machine, UseMachineReturn, EphemeralRef, use_id, AdapterCapabilities                                                                                                                                                                                            |
+| `ars-dioxus`       | 762   | Partial    | Same as Leptos adapter                                                                                                                                                                                                                                              |
+| `ars-collections`  | 28    | Stub       | Selection\<T\> only                                                                                                                                                                                                                                                 |
+| `ars-i18n`         | 1,928 | Partial    | Locale (ICU4X-backed), Direction, Orientation, NumberFormatter, CurrencyCode, BiDi isolation, Weekday, IcuProvider trait (stub), placeholder date/time types                                                                                                        |
 
 ### Architecture spec (01-architecture.md) completion — 2026-04-10 audit
 
@@ -45,7 +45,7 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 | Collections        | `06-collections.md`          | ~400 lines, 6 sections   | 10%              | Blocks all list-based components                                                                                       |
 | I18n               | `04-internationalization.md` | ~4000 lines, 16 sections | 25%              | Blocks number/date components, RTL. Locale + NumberFormatter done; 16 tasks remaining (48 pts ICU4X + web-intl parity) |
 | DOM utilities      | `11-dom-utilities.md`        | ~400 lines, 8 sections   | 30%              | Blocks all overlay components                                                                                          |
-| Accessibility      | `03-accessibility.md`        | ~300 lines               | 60%              | LiveAnnouncer, FocusRing missing                                                                                       |
+| Accessibility      | `03-accessibility.md`        | ~4000 lines, 14 sections | 30%              | FocusZone, keyboard shortcuts, VisuallyHidden, FieldContext, announcements, touch/mobile, testing infra all missing    |
 | Adapter conversion | `08/09-adapter-*.md` §4/§3   | ~200 lines               | 0%               | Blocks ALL component rendering                                                                                         |
 
 ## Task Waves
@@ -872,8 +872,16 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 | [#83](https://github.com/fogodev/ars-ui/issues/83)   | Implement TreeCollection in ars-collections                             | 5      | #53  | #63        |
 | [#84](https://github.com/fogodev/ars-ui/issues/84)   | Implement FilteredCollection and SortedCollection in ars-collections    | 3      | #53  | #63        |
 | [#85](https://github.com/fogodev/ars-ui/issues/85)   | Implement media query utilities in ars-dom                              | 2      | #6   | —          |
+| [#150](https://github.com/fogodev/ars-ui/issues/150) | Implement FocusZone for arrow-key navigation in composite widgets       | 5      | #3   | —          |
+| [#151](https://github.com/fogodev/ars-ui/issues/151) | Implement DomEvent trait, KeyboardShortcut, and Platform detection      | 3      | #3   | —          |
+| [#152](https://github.com/fogodev/ars-ui/issues/152) | Implement VisuallyHidden utilities for screen-reader-only content       | 1      | #3   | —          |
+| [#153](https://github.com/fogodev/ars-ui/issues/153) | Implement LabelConfig, DescriptionConfig, and FieldContext              | 3      | #3   | —          |
+| [#154](https://github.com/fogodev/ars-ui/issues/154) | Implement AnnouncementMessages and Announcements helpers                | 2      | #3   | —          |
+| [#155](https://github.com/fogodev/ars-ui/issues/155) | Implement Touch and Mobile accessibility utilities                      | 2      | #3   | #151       |
+| [#156](https://github.com/fogodev/ars-ui/issues/156) | Implement ARIA Validation testing infrastructure                        | 3      | #3   | —          |
+| [#157](https://github.com/fogodev/ars-ui/issues/157) | Implement Keyboard Navigation test helpers                              | 3      | #3   | #150, #151 |
 
-**Total:** 80 points
+**Total:** 102 points
 
 ---
 
@@ -1295,7 +1303,7 @@ Wave 3 (25 pts)            ┌─── Wave 2 complete
   #74 (scroll view, 3)     │
   #75 (ICU4X locale, 5)    │
                            ▼
-Wave 4 (50 pts)            ┌─── Wave 3 complete
+Wave 4 (72 pts)            ┌─── Wave 3 complete
   #76 (long press, 3)      │
   #77 (move, 3)            │
   #78 (drag/drop, 8*)      │  * decompose before pickup
@@ -1306,6 +1314,14 @@ Wave 4 (50 pts)            ┌─── Wave 3 complete
   #83 (tree collection, 5) │
   #84 (filter/sort, 3)     │
   #85 (media query, 2)     │
+  #150 (focus zone, 5)     │  A11y audit additions
+  #151 (dom event, 3)      │
+  #152 (visually hidden, 1)│
+  #153 (field context, 3)  │
+  #154 (announcements, 2)  │
+  #156 (aria validator, 3) │
+    ├─→ #155 (touch, 2)    │  depends on #151
+    └─→ #157 (kbd test, 3) │  depends on #150, #151
                            ▼
 Wave 5 (13 pts)            ┌─── Wave 4 i18n tasks available
   #124 (web number, 5)     │
@@ -1326,7 +1342,7 @@ Wave 5 (13 pts)            ┌─── Wave 4 i18n tasks available
 | DOM utilities       | #6    | #66, #67, #68, #69, #72, #74, #85, #88, #112, #113, #114, #115 |
 | Leptos adapter      | #8    | #55, #105                                                      |
 | Dioxus adapter      | #9    | #56, #106                                                      |
-| A11y                | #3    | #73, #89                                                       |
+| A11y                | #3    | #73, #89, #150, #151, #152, #153, #154, #155, #156, #157       |
 | Collections         | #53   | #62, #63, #64, #70, #71, #81, #82, #83, #84                    |
 | I18n                | #54   | #75, #79, #80, #124, #125, #126                                |
 | First utility slice | #10   | #104                                                           |
