@@ -10,18 +10,18 @@ The project needs a fully stable foundation before component work starts. Compon
 
 ### What is built (357 tests passing)
 
-| Crate              | LOC   | Status     | Key surface                                                                                                                                                                                                                                                         |
-| ------------------ | ----- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ars-core`         | 4,306 | Solid      | Machine, Service, TransitionPlan, PendingEffect, Bindable, ConnectApi, ComponentPart, AttrMap/AttrValue/UserAttrs, StyleStrategy, Callback, WeakSend, PlatformEffects, Provider (ColorMode), companion CSS                                                          |
-| `ars-derive`       | 535   | Complete   | HasId, ComponentPart proc macros with error tests                                                                                                                                                                                                                   |
-| `ars-a11y`         | 2,271 | Partial    | AriaRole, AriaAttribute, ComponentIds, ARIA state helpers, FocusScopeBehavior, FocusStrategy, FocusRing. Missing: FocusZone, DomEvent/KeyboardShortcut/Platform, VisuallyHidden, LabelConfig/FieldContext, Announcements, Touch/Mobile, AriaValidator, test helpers |
-| `ars-forms`        | 4,128 | Solid      | field::State/Value/Context/Descriptors/InputAria, validation::Error/Validator/AsyncValidator, form::Context/Data/Mode, hidden_input, form_submit machine                                                                                                            |
-| `ars-interactions` | 559   | Stubs only | PointerType, PressState, FocusState enums, compose::merge_attrs                                                                                                                                                                                                     |
-| `ars-dom`          | 1,777 | Partial    | FocusScope, focus queries, ScrollLockManager                                                                                                                                                                                                                        |
-| `ars-leptos`       | 751   | Partial    | use_machine, UseMachineReturn, EphemeralRef, use_id, AdapterCapabilities                                                                                                                                                                                            |
-| `ars-dioxus`       | 762   | Partial    | Same as Leptos adapter                                                                                                                                                                                                                                              |
-| `ars-collections`  | 28    | Stub       | Selection\<T\> only                                                                                                                                                                                                                                                 |
-| `ars-i18n`         | 1,928 | Partial    | Locale (ICU4X-backed), Direction, Orientation, NumberFormatter, CurrencyCode, BiDi isolation, Weekday, IcuProvider trait (stub), placeholder date/time types                                                                                                        |
+| Crate              | LOC   | Status   | Key surface                                                                                                                                                                                                                                                         |
+| ------------------ | ----- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ars-core`         | 4,306 | Solid    | Machine, Service, TransitionPlan, PendingEffect, Bindable, ConnectApi, ComponentPart, AttrMap/AttrValue/UserAttrs, StyleStrategy, Callback, WeakSend, PlatformEffects, Provider (ColorMode), companion CSS                                                          |
+| `ars-derive`       | 535   | Complete | HasId, ComponentPart proc macros with error tests                                                                                                                                                                                                                   |
+| `ars-a11y`         | 2,271 | Partial  | AriaRole, AriaAttribute, ComponentIds, ARIA state helpers, FocusScopeBehavior, FocusStrategy, FocusRing. Missing: FocusZone, DomEvent/KeyboardShortcut/Platform, VisuallyHidden, LabelConfig/FieldContext, Announcements, Touch/Mobile, AriaValidator, test helpers |
+| `ars-forms`        | 4,128 | Solid    | field::State/Value/Context/Descriptors/InputAria, validation::Error/Validator/AsyncValidator, form::Context/Data/Mode, hidden_input, form_submit machine                                                                                                            |
+| `ars-interactions` | 3,107 | Partial  | Press, Hover, Focus, FocusWithin, InteractOutside, Dismissable, compose::merge_attrs, LogicalDirection. Missing: LongPress, Move, DnD, Keyboard types                                                                                                               |
+| `ars-dom`          | 1,777 | Partial  | FocusScope, focus queries, ScrollLockManager                                                                                                                                                                                                                        |
+| `ars-leptos`       | 751   | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, AdapterCapabilities                                                                                                                                                                                            |
+| `ars-dioxus`       | 762   | Partial  | Same as Leptos adapter                                                                                                                                                                                                                                              |
+| `ars-collections`  | 28    | Stub     | Selection\<T\> only                                                                                                                                                                                                                                                 |
+| `ars-i18n`         | 1,928 | Partial  | Locale (ICU4X-backed), Direction, Orientation, NumberFormatter, CurrencyCode, BiDi isolation, Weekday, IcuProvider trait (stub), placeholder date/time types                                                                                                        |
 
 ### Architecture spec (01-architecture.md) completion — 2026-04-10 audit
 
@@ -41,7 +41,7 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 | Foundation area    | Spec file                    | Spec coverage            | Implementation % | Blocking impact                                                                                                        |
 | ------------------ | ---------------------------- | ------------------------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | Architecture core  | `01-architecture.md`         | ~5000 lines, 10 sections | 95%              | 4 remaining gaps tracked above; core contract is stable                                                                |
-| Interactions       | `05-interactions.md`         | ~600 lines, 12 sections  | 5%               | Blocks ALL interactive components                                                                                      |
+| Interactions       | `05-interactions.md`         | ~4000 lines, 12 sections | 60%              | 8 tasks closed; 6 open (#76, #77, #159–#162). Blocks Slider, DnD components, custom keyboard handlers                  |
 | Collections        | `06-collections.md`          | ~400 lines, 6 sections   | 10%              | Blocks all list-based components                                                                                       |
 | I18n               | `04-internationalization.md` | ~4000 lines, 16 sections | 25%              | Blocks number/date components, RTL. Locale + NumberFormatter done; 16 tasks remaining (48 pts ICU4X + web-intl parity) |
 | DOM utilities      | `11-dom-utilities.md`        | ~400 lines, 8 sections   | 30%              | Blocks all overlay components                                                                                          |
@@ -846,13 +846,16 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 
 **Depends on:** Wave 3 complete.
 
-**Note:** Tasks sized at `8` points (#78, #82) must be decomposed into ≤5-point subtasks before pickup. #80 (DateFormatter, 8pts) has been decomposed into #128, #129, #130.
+**Note:** Tasks sized at `8` points (#82) must be decomposed into ≤5-point subtasks before pickup. #80 (DateFormatter, 8pts) has been decomposed into #128, #129, #130. #78 (Drag and Drop, 8pts) has been decomposed into #159, #160, #161.
 
 | GitHub                                               | Title                                                                   | Points | Epic | Deps       |
 | ---------------------------------------------------- | ----------------------------------------------------------------------- | ------ | ---- | ---------- |
 | [#76](https://github.com/fogodev/ars-ui/issues/76)   | Implement LongPress interaction in ars-interactions                     | 3      | #4   | Wave 1     |
 | [#77](https://github.com/fogodev/ars-ui/issues/77)   | Implement Move interaction in ars-interactions                          | 3      | #4   | Wave 1     |
-| [#78](https://github.com/fogodev/ars-ui/issues/78)   | Implement Drag and Drop interactions in ars-interactions                | 8      | #4   | #58, #76   |
+| [#159](https://github.com/fogodev/ars-ui/issues/159) | Implement Drag and Drop core types in ars-interactions                  | 2      | #4   | #58        |
+| [#160](https://github.com/fogodev/ars-ui/issues/160) | Implement Drag/Drop state machines and use_drag/use_drop                | 3      | #4   | #159, #76  |
+| [#161](https://github.com/fogodev/ars-ui/issues/161) | Implement keyboard DnD protocol and screen reader announcements         | 3      | #4   | #160       |
+| [#162](https://github.com/fogodev/ars-ui/issues/162) | Implement Keyboard interaction types in ars-interactions                | 2      | #4   | —          |
 | [#79](https://github.com/fogodev/ars-ui/issues/79)   | Implement NumberFormatter trait with ICU4X backend in ars-i18n          | 5      | #54  | #75        |
 | [#128](https://github.com/fogodev/ars-ui/issues/128) | CalendarDate internal type, calendar system extensions, and error types | 5      | #54  | #75        |
 | [#129](https://github.com/fogodev/ars-ui/issues/129) | DateFormatter with ICU4X backend                                        | 3      | #54  | #128       |
@@ -881,7 +884,7 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 | [#156](https://github.com/fogodev/ars-ui/issues/156) | Implement ARIA Validation testing infrastructure                        | 3      | #3   | —          |
 | [#157](https://github.com/fogodev/ars-ui/issues/157) | Implement Keyboard Navigation test helpers                              | 3      | #3   | #150, #151 |
 
-**Total:** 102 points
+**Total:** 106 points
 
 ---
 
@@ -959,29 +962,87 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
   - CSS zoom/scale coordinate transformation per §6.5.
 - Spec impact: `No spec change required`.
 
-#### W4-3: Implement Drag and Drop interactions in ars-interactions
+#### W4-3a: Implement Drag and Drop core types in ars-interactions
 
-- Points: `8` (must be decomposed before pickup)
+- Points: `2`
 - Layer: `Subsystem`
 - Framework: `None`
 - Test tier: `Unit`
-- Depends on: #58, #76
+- Depends on: #58
 - Spec refs:
-  - `spec/foundation/05-interactions.md` §7 "Drag and Drop" (L1807)
-  - `spec/foundation/05-interactions.md` §7.2 "Item Types" (L1830)
-  - `spec/foundation/05-interactions.md` §7.3 "Drop Operation" (L1883)
-  - `spec/foundation/05-interactions.md` §7.4 "Drag Source Configuration" (L1916)
-  - `spec/foundation/05-interactions.md` §7.5 "Drop Target Configuration" (L1968)
-  - `spec/foundation/05-interactions.md` §7.6 "Drag State Machine" (L2075)
-  - `spec/foundation/05-interactions.md` §7.7 "Keyboard Drag and Drop Protocol" (L2137)
-  - `spec/foundation/05-interactions.md` §7.8 "Screen Reader DnD Announcements" (L2167)
-- Goal: implement full drag-and-drop state machines for both source and target sides.
+  - `spec/foundation/05-interactions.md` §7.2 "Item Types" (L1862–L1912)
+  - `spec/foundation/05-interactions.md` §7.3 "Drop Operation" (L1914–L1944)
+  - `spec/foundation/05-interactions.md` §7.4 "Drag Source Configuration" (L1947–L1997)
+  - `spec/foundation/05-interactions.md` §7.5 "Drop Target Configuration" (L1999–L2096)
+  - `spec/foundation/05-interactions.md` §7.5.1 "Dropzone Accept Type Validation" (L2098–L2100)
+- Goal: define all data types, configuration structs, event structs, and enums for drag-and-drop.
 - Acceptance criteria:
-  - `DragItem`, `DropOperation`, `DragConfig`, `DropTargetConfig`, `DragEvent`, `DropEvent`.
-  - Drag source state machine: Idle → DragPreview → Dragging → Dropped/Cancelled.
-  - Drop target state machine: Idle → DragOver → Dropped.
-  - Keyboard drag-and-drop protocol.
-  - Screen reader announcements during drag.
+  - `DragItem`, `FileHandle`, `DirectoryHandle`, `DropOperation` (with `as_drop_effect()`).
+  - `DragConfig`, `DragStartEvent`, `DragEndEvent`, `DragConfig::with_selection()`.
+  - `DropConfig`, `DropIndicatorPosition`, `DropTargetEvent`, `DragItemPreview`, `DragItemKind`, `DropEvent`.
+  - MIME type validation logic (case-insensitive, wildcard `image/*`).
+- Spec impact: `No spec change required`.
+
+#### W4-3b: Implement Drag/Drop state machines and use_drag/use_drop in ars-interactions
+
+- Points: `3`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: #159, #76
+- Spec refs:
+  - `spec/foundation/05-interactions.md` §7.6 "Drag State Machine (Source Side)" (L2106–L2166)
+  - `spec/foundation/05-interactions.md` §7.9 "Multi-Item Drag" (L2270–L2288)
+  - `spec/foundation/05-interactions.md` §7.10 "Drop Indicators and Positioning" (L2290–L2443)
+  - `spec/foundation/05-interactions.md` §7.10.1 "Pointer Capture Error Recovery" (L2387–L2415)
+- Goal: implement drag source and drop target state machines, `use_drag`/`use_drop` factory functions, and result types.
+- Acceptance criteria:
+  - `DragState` enum with full transition set per spec §7.6.
+  - Drop target enter/leave counting with `enter_count: i32`.
+  - `DragResult` and `DropResult` with snapshot-based `attrs: AttrMap`.
+  - `use_drag(config) -> DragResult` and `use_drop(config) -> DropResult`.
+  - Data attributes: `data-ars-dragging`, `data-ars-drag-over`, `data-ars-drop-operation`, `data-ars-drop-position`.
+- Spec impact: `No spec change required`.
+
+#### W4-3c: Implement keyboard DnD protocol and screen reader announcements in ars-interactions
+
+- Points: `3`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: #160
+- Spec refs:
+  - `spec/foundation/05-interactions.md` §7.7 "Keyboard Drag and Drop Protocol" (L2168–L2196)
+  - `spec/foundation/05-interactions.md` §7.8 "Screen Reader DnD Announcements" (L2198–L2268)
+  - `spec/foundation/04-internationalization.md` §7.1 (MessageFn pattern)
+- Goal: implement the keyboard DnD modal protocol and `DragAnnouncements` screen reader integration.
+- Acceptance criteria:
+  - `KeyboardDragRegistry` and `KeyboardDropTarget` structs.
+  - Full keyboard protocol: Enter → start, Tab/Shift+Tab → cycle targets, Enter → drop, Escape → cancel.
+  - `DragAnnouncements` with 5 `MessageFn` fields and `Default` impl.
+  - Announcement priority dispatch: Assertive for drag_start/drop/cancel, Polite for enter/leave.
+  - Per-element announcement closures take precedence over defaults.
+- Spec impact: `No spec change required`.
+
+#### W4-keyboard: Implement Keyboard interaction types in ars-interactions
+
+- Points: `2`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: none
+- Spec refs:
+  - `spec/foundation/05-interactions.md` §11 "Keyboard Interaction" (L2948–L3998)
+  - `spec/foundation/05-interactions.md` §11.2 "Configuration" (L2957–L3961)
+  - `spec/foundation/05-interactions.md` §11.5 "IME Composition Handling" (L3971–L3991)
+- Goal: implement the standalone keyboard interaction types that components with custom key handling consume.
+- Files to create/modify: `crates/ars-interactions/src/keyboard.rs` (new), wire into `lib.rs`
+- Acceptance criteria:
+  - `KeyboardConfig` with `disabled: bool`.
+  - `KeyboardEventData` with key, character, code, modifiers, repeat, is_composing.
+  - `ArsKeyboardEvent` enum: `KeyDown(KeyboardEventData)`, `KeyUp(KeyboardEventData)`.
+  - `pub use ars_core::KeyboardKey;` re-export.
+  - Doc comments on `is_composing` explain IME suppression requirement.
 - Spec impact: `No spec change required`.
 
 #### W4-4: Implement NumberFormatter trait with ICU4X backend in ars-i18n
@@ -1306,7 +1367,10 @@ Wave 3 (25 pts)            ┌─── Wave 2 complete
 Wave 4 (72 pts)            ┌─── Wave 3 complete
   #76 (long press, 3)      │
   #77 (move, 3)            │
-  #78 (drag/drop, 8*)      │  * decompose before pickup
+  #162 (keyboard types, 2) │
+  #159 (DnD types, 2)      │
+    └─→ #160 (DnD SM, 3)  │  depends on #159, #76
+         └─→ #161 (kbd DnD, 3)
   #79 (number fmt, 5)      │
   #80 (date fmt, 8*)       │  * decompose before pickup
   #81 (async collection, 5)│
@@ -1336,16 +1400,16 @@ Wave 5 (13 pts)            ┌─── Wave 4 i18n tasks available
 
 ## Epic Mapping
 
-| Epic                | Issue | Tasks covered                                                  |
-| ------------------- | ----- | -------------------------------------------------------------- |
-| Interactions        | #4    | #57, #58, #59, #60, #61, #65, #76, #77, #78, #90               |
-| DOM utilities       | #6    | #66, #67, #68, #69, #72, #74, #85, #88, #112, #113, #114, #115 |
-| Leptos adapter      | #8    | #55, #105                                                      |
-| Dioxus adapter      | #9    | #56, #106                                                      |
-| A11y                | #3    | #73, #89, #150, #151, #152, #153, #154, #155, #156, #157       |
-| Collections         | #53   | #62, #63, #64, #70, #71, #81, #82, #83, #84                    |
-| I18n                | #54   | #75, #79, #80, #124, #125, #126                                |
-| First utility slice | #10   | #104                                                           |
+| Epic                | Issue | Tasks covered                                                       |
+| ------------------- | ----- | ------------------------------------------------------------------- |
+| Interactions        | #4    | #57, #58, #59, #60, #61, #65, #76, #77, #90, #159, #160, #161, #162 |
+| DOM utilities       | #6    | #66, #67, #68, #69, #72, #74, #85, #88, #112, #113, #114, #115      |
+| Leptos adapter      | #8    | #55, #105                                                           |
+| Dioxus adapter      | #9    | #56, #106                                                           |
+| A11y                | #3    | #73, #89, #150, #151, #152, #153, #154, #155, #156, #157            |
+| Collections         | #53   | #62, #63, #64, #70, #71, #81, #82, #83, #84                         |
+| I18n                | #54   | #75, #79, #80, #124, #125, #126                                     |
+| First utility slice | #10   | #104                                                                |
 
 ## Post-Foundation Plan
 
@@ -1470,7 +1534,8 @@ pipeline and do not reopen the full `#24` planning thread.
 | Wave      | Tasks  | Points  | Unlocks                                                  |
 | --------- | ------ | ------- | -------------------------------------------------------- |
 | Wave 1    | 7      | 19      | Button, VisuallyHidden, Separator                        |
-| Wave 2    | 8      | 29      | Select, Combobox, Menu, Listbox, Dialog, Popover         |
-| Wave 3    | 8      | 25      | Tooltip, DatePicker prerequisites, accessibility         |
-| Wave 4    | 10     | 50      | All remaining components (Slider, TreeView, Table, etc.) |
-| **Total** | **33** | **123** | **Complete foundation for all 112 components**           |
+| Wave 2    | 12     | 43      | Select, Combobox, Menu, Listbox, Dialog, Popover         |
+| Wave 3    | 9      | 29      | Tooltip, DatePicker prerequisites, accessibility         |
+| Wave 4    | 33     | 106     | All remaining components (Slider, TreeView, Table, etc.) |
+| Wave 5    | 6      | 23      | Browser Intl backends for WASM client builds             |
+| **Total** | **67** | **220** | **Complete foundation for all 112 components**           |

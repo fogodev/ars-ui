@@ -388,3 +388,49 @@ Eight new tasks (#150–#157, 22 points) were created under [Epic #3](https://gi
 | [#157](https://github.com/fogodev/ars-ui/issues/157) | Keyboard Navigation Test Helpers             | 3      | §9.2         |
 
 Six of these (#150–#154, #156) are independent; #155 depends on #151 (Platform); #157 depends on #150 (FocusZone) + #151 (DomEvent). All placed in Wave 4 of the [foundation-completion-roadmap](./foundation-completion-roadmap.md).
+
+---
+
+## Interactions Spec Full Audit (2026-04-10)
+
+A full audit of `spec/foundation/05-interactions.md` (4172 lines, 12 sections) against Epic #4's 11 tasks (8 closed, 3 open) found one spec section with no coverage and one oversized task requiring decomposition.
+
+### Coverage summary
+
+| Spec Section         | Issue(s)         | Status                                     |
+| -------------------- | ---------------- | ------------------------------------------ |
+| §1 Design Philosophy | —                | N/A (principles only)                      |
+| §2 Press             | #58              | ✅ Closed                                  |
+| §3 Hover             | #59              | ✅ Closed                                  |
+| §4 Focus/FocusWithin | #60              | ✅ Closed                                  |
+| §5 Long Press        | #76              | 🟡 Open (3 pts)                            |
+| §6 Move              | #77              | 🟡 Open (3 pts)                            |
+| §7 Drag and Drop     | #159, #160, #161 | 🟡 Open (8 pts total, decomposed from #78) |
+| §8 Composition       | #16, #41         | ✅ Closed                                  |
+| §9 Moved Sections    | —                | N/A (pointer to 11-dom-utilities.md)       |
+| §10 Forced Colors    | #85 (Epic #6)    | ⚪ Covered by other epic                   |
+| §11 Keyboard types   | #162             | 🟡 Open (2 pts, **new — gap task**)        |
+| §12 InteractOutside  | #65              | ✅ Closed                                  |
+
+Plus foundational infra: #57 (modality, closed), #61 (LogicalDirection, closed), #90 (shared ModalityContext, closed).
+
+### Gap: §11 Keyboard Interaction types
+
+The spec defines `KeyboardConfig`, `KeyboardEventData`, and `ArsKeyboardEvent` in `ars-interactions/src/keyboard.rs` — types that components with custom key handling (Combobox, Menu, rich text) need as the normalized event contract. The `KeyboardKey` enum and its conversion methods are already implemented in `ars-core::modality`, but the interaction-level types had no task. Created as [#162](https://github.com/fogodev/ars-ui/issues/162) (2 pts, unblocked).
+
+### Decomposition: #78 → #159, #160, #161
+
+[#78](https://github.com/fogodev/ars-ui/issues/78) (Drag and Drop, 8 pts) exceeded the 5-point agent-ready limit. Closed as superseded and decomposed into:
+
+| Issue                                                | Points | Scope                                                                |
+| ---------------------------------------------------- | ------ | -------------------------------------------------------------------- |
+| [#159](https://github.com/fogodev/ars-ui/issues/159) | 2      | DnD core types — all data types, configs, events, enums (§7.2–7.5)   |
+| [#160](https://github.com/fogodev/ars-ui/issues/160) | 3      | Drag/Drop state machines + `use_drag`/`use_drop` (§7.6, §7.9, §7.10) |
+| [#161](https://github.com/fogodev/ars-ui/issues/161) | 3      | Keyboard DnD protocol + screen reader announcements (§7.7, §7.8)     |
+
+Dependency chain: #159 → #160 → #161. Total: 8 pts (same as original).
+
+### Updated Epic #4 totals
+
+- Closed: 8 tasks (plus #78 closed as superseded)
+- Open: #76 (3), #77 (3), #159 (2), #160 (3), #161 (3), #162 (2) = 6 tasks, 16 points remaining
