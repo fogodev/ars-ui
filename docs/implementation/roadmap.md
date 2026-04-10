@@ -68,6 +68,15 @@ Exit criteria:
 
 Status (2026-04-10): Phase 3 crate shells and CI tier split are done (#19, #20). The full harness API, ARIA helpers, snapshot setup, adapter backends, parity types, CI enforcement, mock infrastructure, and nightly pipeline remain as 11 open tasks (#178–#188, 34 pts). See [Epic #7](https://github.com/fogodev/ars-ui/issues/7).
 
+#### Adapter foundation audit (2026-04-10)
+
+An audit of Epic #8 (Leptos adapter) revealed that the original 3 tasks (#22, #55, #105) covered ~40% of the foundational spec sections in `08-adapter-leptos.md`. Two new tasks were added to close the gaps before component work begins:
+
+- [#190](https://github.com/fogodev/ars-ui/issues/190) — ArsProvider context, reactive props, controlled value helper (5 pts)
+- [#191](https://github.com/fogodev/ars-ui/issues/191) — emit/emit_map, event mapping, nonce CSS collector, safe event listeners (3 pts)
+
+Symmetric gaps likely exist in Epic #9 (Dioxus adapter) and should be audited separately. See `foundation-completion-roadmap.md` for full task details.
+
 ### Phase 4: First shippable utility slice
 
 Scope:

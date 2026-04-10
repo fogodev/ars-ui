@@ -18,7 +18,7 @@ The project needs a fully stable foundation before component work starts. Compon
 | `ars-forms`        | 4,128 | Partial  | field::State/Value/Context/Descriptors/InputAria, validation::Error/Validator/AsyncValidator, form::Context/Data/Mode, hidden_input, form_submit machine. Missing: built-in validators, ValidatorsBuilder, FormMessages, DebouncedAsyncValidator, Fieldset/Field/Form machines                                                                     |
 | `ars-interactions` | 3,107 | Partial  | Press, Hover, Focus, FocusWithin, InteractOutside, Dismissable, compose::merge_attrs, LogicalDirection. Missing: LongPress, Move, DnD, Keyboard types                                                                                                                                                                                              |
 | `ars-dom`          | 5,880 | Partial  | FocusScope, focus queries, ScrollLockManager, positioning engine (types + compute_position + overflow + VirtualElement), z-index allocator, scroll_into_view, modality manager. Missing: viewport/visualViewport, containing-block detection, auto_update, portal/inert, overlay stack, media queries, URL sanitization, ModalityManager listeners |
-| `ars-leptos`       | 751   | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, AdapterCapabilities                                                                                                                                                                                                                                                                           |
+| `ars-leptos`       | 1,195 | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, attr_map_to_leptos, use_style_strategy, AdapterCapabilities. Missing: ArsProvider context (#190), reactive props (#190), controlled value helper (#190), emit/emit_map (#191), event mapping (#191), nonce CSS collector (#191), safe event listeners (#191)                                  |
 | `ars-dioxus`       | 762   | Partial  | Same as Leptos adapter                                                                                                                                                                                                                                                                                                                             |
 | `ars-collections`  | 28    | Stub     | Selection\<T\> only                                                                                                                                                                                                                                                                                                                                |
 | `ars-i18n`         | 1,928 | Partial  | Locale (ICU4X-backed), Direction, Orientation, NumberFormatter, CurrencyCode, BiDi isolation, Weekday, IcuProvider trait (stub), placeholder date/time types                                                                                                                                                                                       |
@@ -38,16 +38,16 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 
 ### Foundation gap matrix
 
-| Foundation area    | Spec file                    | Spec coverage            | Implementation % | Blocking impact                                                                                                        |
-| ------------------ | ---------------------------- | ------------------------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Architecture core  | `01-architecture.md`         | ~5000 lines, 10 sections | 95%              | 4 remaining gaps tracked above; core contract is stable                                                                |
-| Interactions       | `05-interactions.md`         | ~4000 lines, 12 sections | 60%              | 8 tasks closed; 6 open (#76, #77, #159–#162). Blocks Slider, DnD components, custom keyboard handlers                  |
-| Collections        | `06-collections.md`          | ~400 lines, 6 sections   | 10%              | Blocks all list-based components                                                                                       |
-| I18n               | `04-internationalization.md` | ~4000 lines, 16 sections | 25%              | Blocks number/date components, RTL. Locale + NumberFormatter done; 16 tasks remaining (48 pts ICU4X + web-intl parity) |
-| DOM utilities      | `11-dom-utilities.md`        | ~2800 lines, 10 sections | 50%              | 8 tasks closed; 8 open (#69, #72, #85, #88, #112–#114, #176). Blocks all overlay components                            |
-| Accessibility      | `03-accessibility.md`        | ~4000 lines, 14 sections | 30%              | FocusZone, keyboard shortcuts, VisuallyHidden, FieldContext, announcements, touch/mobile, testing infra all missing    |
-| Forms              | `07-forms.md`                | ~4300 lines, 15 sections | 50%              | 3 tasks closed; 8 open (#164–#171, 26 pts). Blocks Field, Fieldset, Form components and validator builder API          |
-| Adapter conversion | `08/09-adapter-*.md` §4/§3   | ~200 lines               | 0%               | Blocks ALL component rendering                                                                                         |
+| Foundation area    | Spec file                    | Spec coverage            | Implementation % | Blocking impact                                                                                                                                                                                 |
+| ------------------ | ---------------------------- | ------------------------ | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Architecture core  | `01-architecture.md`         | ~5000 lines, 10 sections | 95%              | 4 remaining gaps tracked above; core contract is stable                                                                                                                                         |
+| Interactions       | `05-interactions.md`         | ~4000 lines, 12 sections | 60%              | 8 tasks closed; 6 open (#76, #77, #159–#162). Blocks Slider, DnD components, custom keyboard handlers                                                                                           |
+| Collections        | `06-collections.md`          | ~400 lines, 6 sections   | 10%              | Blocks all list-based components                                                                                                                                                                |
+| I18n               | `04-internationalization.md` | ~4000 lines, 16 sections | 25%              | Blocks number/date components, RTL. Locale + NumberFormatter done; 16 tasks remaining (48 pts ICU4X + web-intl parity)                                                                          |
+| DOM utilities      | `11-dom-utilities.md`        | ~2800 lines, 10 sections | 50%              | 8 tasks closed; 8 open (#69, #72, #85, #88, #112–#114, #176). Blocks all overlay components                                                                                                     |
+| Accessibility      | `03-accessibility.md`        | ~4000 lines, 14 sections | 30%              | FocusZone, keyboard shortcuts, VisuallyHidden, FieldContext, announcements, touch/mobile, testing infra all missing                                                                             |
+| Forms              | `07-forms.md`                | ~4300 lines, 15 sections | 50%              | 3 tasks closed; 8 open (#164–#171, 26 pts). Blocks Field, Fieldset, Form components and validator builder API                                                                                   |
+| Adapter conversion | `08/09-adapter-*.md` §4/§3   | ~200 lines               | 40%              | AttrMap conversion done (#55/#56). Missing: ArsProvider (#190), reactive props, controlled helpers, emit, event mapping, nonce collector, safe listeners (#191). Blocks ALL component rendering |
 
 ## Task Waves
 
@@ -1440,7 +1440,7 @@ Wave 5 (13 pts)            ┌─── Wave 4 i18n tasks available
 | ------------------- | ----- | -------------------------------------------------------------------- |
 | Interactions        | #4    | #57, #58, #59, #60, #61, #65, #76, #77, #90, #159, #160, #161, #162  |
 | DOM utilities       | #6    | #66, #67, #68, #69, #72, #74, #85, #88, #112, #113, #114, #115, #176 |
-| Leptos adapter      | #8    | #55, #105                                                            |
+| Leptos adapter      | #8    | #55, #105, #190, #191                                                |
 | Dioxus adapter      | #9    | #56, #106                                                            |
 | A11y                | #3    | #73, #89, #150, #151, #152, #153, #154, #155, #156, #157             |
 | Collections         | #53   | #62, #63, #64, #70, #71, #81, #82, #83, #84                          |
@@ -1565,6 +1565,74 @@ pipeline and do not reopen the full `#24` planning thread.
     - Dioxus Web/Desktop behavior and cleanup ordering match the spec and adapter contract.
 - Spec impact: `No spec change required`.
 
+### Targeted Follow-On: Leptos Adapter Foundation Completion
+
+These cards complete the remaining foundational infrastructure in `ars-leptos` that every
+component will depend on. They were identified by an audit of `spec/foundation/08-adapter-leptos.md`
+against the 3 original Epic #8 tasks (2026-04-10).
+
+| GitHub                                               | Title                                                                                     | Points | Epic | Deps |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------ | ---- | ---- |
+| [#190](https://github.com/fogodev/ars-ui/issues/190) | Implement ArsProvider context, reactive props, and controlled value helper in ars-leptos  | 5      | #8   | —    |
+| [#191](https://github.com/fogodev/ars-ui/issues/191) | Implement Leptos adapter utilities — emit, event mapping, nonce collector, safe listeners | 3      | #8   | #190 |
+
+#### PF-LA-1: Implement ArsProvider context, reactive props, and controlled value helper in ars-leptos
+
+- Points: `5`
+- Layer: `Adapter`
+- Framework: `Leptos`
+- Test tier: `Unit`
+- Depends on: none (all core dependencies exist: `Service::set_props()` in ars-core, `ArsContext` in ars-core, `Locale`/`IcuProvider`/`Direction` in ars-i18n)
+- Spec refs:
+  - `spec/foundation/08-adapter-leptos.md` §13 "ArsProvider Context" (L1721)
+  - `spec/foundation/08-adapter-leptos.md` §13.1 `use_locale()` (L1764)
+  - `spec/foundation/08-adapter-leptos.md` §13.2 `resolve_locale()` (L1793)
+  - `spec/foundation/08-adapter-leptos.md` §13.3 `t()` — Translatable Text Resolver (L1812)
+  - `spec/foundation/08-adapter-leptos.md` §3.3 "Reactive Props Variant" (L442)
+  - `spec/foundation/08-adapter-leptos.md` §16 "Controlled Value Helper" (L1922)
+- Goal: implement the ArsProvider reactive context bridge, complete `use_machine_with_reactive_props` (currently a `todo!()` stub), and add the `use_controlled_prop` DRY helper.
+- Files to create/modify: `crates/ars-leptos/src/provider.rs` (new), `crates/ars-leptos/src/controlled.rs` (new), `crates/ars-leptos/src/use_machine.rs`, `crates/ars-leptos/src/lib.rs`, `crates/ars-leptos/src/prelude.rs`
+- Tests to add first:
+  - Unit tests for `use_locale()` fallback to `en-US` when no `ArsProvider` present.
+  - Unit tests for `resolve_locale()` preferring per-instance override over context.
+  - Unit tests for `use_controlled_prop()` skipping initial value and dispatching on change.
+  - Unit tests for `use_machine_with_reactive_props()` syncing external prop changes to the machine service.
+  - Unit tests for `use_machine_inner()` resolving locale and ICU provider from ArsProvider context.
+- Acceptance criteria:
+  - `ArsContext` struct with reactive signals matching spec §13.
+  - `use_locale()`, `use_icu_provider()`, `resolve_locale()`, `resolve_messages()`, `t()` implemented.
+  - `use_machine_with_reactive_props` fully implemented (replacing `todo!()` stub).
+  - `use_controlled_prop(signal, send, event_fn)` helper with skip-initial and previous-value tracking.
+  - `use_machine_inner` reads environment from `ArsProvider` context.
+- Spec impact: `No spec change required`.
+
+#### PF-LA-2: Implement Leptos adapter utilities — emit, event mapping, nonce collector, safe listeners
+
+- Points: `3`
+- Layer: `Adapter`
+- Framework: `Leptos`
+- Test tier: `Unit`
+- Depends on: #190 (`ArsNonceStyle` needs `ArsNonceCssCtx` which is provided alongside `ArsProvider`)
+- Spec refs:
+  - `spec/foundation/08-adapter-leptos.md` §10 "Event Callbacks Pattern" (L1595)
+  - `spec/foundation/08-adapter-leptos.md` §14 "Event Mapping" (L1841)
+  - `spec/foundation/08-adapter-leptos.md` §4.5.1 "Nonce CSS Collector" (L830)
+  - `spec/foundation/08-adapter-leptos.md` §7.5 "Effect Cleanup and Event Safety" (L1395)
+- Goal: implement the remaining small foundational utilities that many components depend on.
+- Files to create/modify: `crates/ars-leptos/src/callbacks.rs` (new), `crates/ars-leptos/src/event_mapping.rs` (new), `crates/ars-leptos/src/nonce.rs` (new), `crates/ars-leptos/src/safe_listener.rs` (new), `crates/ars-leptos/src/lib.rs`
+- Tests to add first:
+  - Unit tests for `emit()` with `Some(callback)` and `None`.
+  - Unit tests for `emit_map()` applying transform before dispatch.
+  - Unit tests for `leptos_key_to_keyboard_key()` mapping common DOM key strings.
+  - Unit tests for `ArsNonceCssCtx` accumulating CSS rules.
+  - Unit tests for `use_safe_event_listener` cleanup idempotency and weak-guard pattern.
+- Acceptance criteria:
+  - `emit()` and `emit_map()` helpers implemented.
+  - `leptos_key_to_keyboard_key()` correctly maps DOM key strings via `KeyboardKey::from_key_str()`.
+  - `ArsNonceCssCtx`, `ArsNonceStyle` component, and `append_nonce_css()` implemented.
+  - `use_safe_event_listener()` with weak-guard, idempotent cleanup, and two-phase lifecycle.
+- Spec impact: `No spec change required`.
+
 ## Summary
 
 | Wave      | Tasks  | Points  | Unlocks                                                  |
@@ -1574,4 +1642,6 @@ pipeline and do not reopen the full `#24` planning thread.
 | Wave 3    | 9      | 29      | Tooltip, DatePicker prerequisites, accessibility         |
 | Wave 4    | 33     | 106     | All remaining components (Slider, TreeView, Table, etc.) |
 | Wave 5    | 6      | 23      | Browser Intl backends for WASM client builds             |
-| **Total** | **67** | **220** | **Complete foundation for all 112 components**           |
+| Post-F IO | 3      | 13      | Dismissable for overlays                                 |
+| Post-F LA | 2      | 8       | Leptos adapter foundation completion                     |
+| **Total** | **72** | **241** | **Complete foundation for all 112 components**           |
