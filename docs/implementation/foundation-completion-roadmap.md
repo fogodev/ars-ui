@@ -10,18 +10,18 @@ The project needs a fully stable foundation before component work starts. Compon
 
 ### What is built (357 tests passing)
 
-| Crate              | LOC   | Status   | Key surface                                                                                                                                                                                                                                                         |
-| ------------------ | ----- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ars-core`         | 4,306 | Solid    | Machine, Service, TransitionPlan, PendingEffect, Bindable, ConnectApi, ComponentPart, AttrMap/AttrValue/UserAttrs, StyleStrategy, Callback, WeakSend, PlatformEffects, Provider (ColorMode), companion CSS                                                          |
-| `ars-derive`       | 535   | Complete | HasId, ComponentPart proc macros with error tests                                                                                                                                                                                                                   |
-| `ars-a11y`         | 2,271 | Partial  | AriaRole, AriaAttribute, ComponentIds, ARIA state helpers, FocusScopeBehavior, FocusStrategy, FocusRing. Missing: FocusZone, DomEvent/KeyboardShortcut/Platform, VisuallyHidden, LabelConfig/FieldContext, Announcements, Touch/Mobile, AriaValidator, test helpers |
-| `ars-forms`        | 4,128 | Solid    | field::State/Value/Context/Descriptors/InputAria, validation::Error/Validator/AsyncValidator, form::Context/Data/Mode, hidden_input, form_submit machine                                                                                                            |
-| `ars-interactions` | 3,107 | Partial  | Press, Hover, Focus, FocusWithin, InteractOutside, Dismissable, compose::merge_attrs, LogicalDirection. Missing: LongPress, Move, DnD, Keyboard types                                                                                                               |
-| `ars-dom`          | 1,777 | Partial  | FocusScope, focus queries, ScrollLockManager                                                                                                                                                                                                                        |
-| `ars-leptos`       | 751   | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, AdapterCapabilities                                                                                                                                                                                            |
-| `ars-dioxus`       | 762   | Partial  | Same as Leptos adapter                                                                                                                                                                                                                                              |
-| `ars-collections`  | 28    | Stub     | Selection\<T\> only                                                                                                                                                                                                                                                 |
-| `ars-i18n`         | 1,928 | Partial  | Locale (ICU4X-backed), Direction, Orientation, NumberFormatter, CurrencyCode, BiDi isolation, Weekday, IcuProvider trait (stub), placeholder date/time types                                                                                                        |
+| Crate              | LOC   | Status   | Key surface                                                                                                                                                                                                                                                                    |
+| ------------------ | ----- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ars-core`         | 4,306 | Solid    | Machine, Service, TransitionPlan, PendingEffect, Bindable, ConnectApi, ComponentPart, AttrMap/AttrValue/UserAttrs, StyleStrategy, Callback, WeakSend, PlatformEffects, Provider (ColorMode), companion CSS                                                                     |
+| `ars-derive`       | 535   | Complete | HasId, ComponentPart proc macros with error tests                                                                                                                                                                                                                              |
+| `ars-a11y`         | 2,271 | Partial  | AriaRole, AriaAttribute, ComponentIds, ARIA state helpers, FocusScopeBehavior, FocusStrategy, FocusRing. Missing: FocusZone, DomEvent/KeyboardShortcut/Platform, VisuallyHidden, LabelConfig/FieldContext, Announcements, Touch/Mobile, AriaValidator, test helpers            |
+| `ars-forms`        | 4,128 | Partial  | field::State/Value/Context/Descriptors/InputAria, validation::Error/Validator/AsyncValidator, form::Context/Data/Mode, hidden_input, form_submit machine. Missing: built-in validators, ValidatorsBuilder, FormMessages, DebouncedAsyncValidator, Fieldset/Field/Form machines |
+| `ars-interactions` | 3,107 | Partial  | Press, Hover, Focus, FocusWithin, InteractOutside, Dismissable, compose::merge_attrs, LogicalDirection. Missing: LongPress, Move, DnD, Keyboard types                                                                                                                          |
+| `ars-dom`          | 1,777 | Partial  | FocusScope, focus queries, ScrollLockManager                                                                                                                                                                                                                                   |
+| `ars-leptos`       | 751   | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, AdapterCapabilities                                                                                                                                                                                                       |
+| `ars-dioxus`       | 762   | Partial  | Same as Leptos adapter                                                                                                                                                                                                                                                         |
+| `ars-collections`  | 28    | Stub     | Selection\<T\> only                                                                                                                                                                                                                                                            |
+| `ars-i18n`         | 1,928 | Partial  | Locale (ICU4X-backed), Direction, Orientation, NumberFormatter, CurrencyCode, BiDi isolation, Weekday, IcuProvider trait (stub), placeholder date/time types                                                                                                                   |
 
 ### Architecture spec (01-architecture.md) completion — 2026-04-10 audit
 
@@ -46,6 +46,7 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 | I18n               | `04-internationalization.md` | ~4000 lines, 16 sections | 25%              | Blocks number/date components, RTL. Locale + NumberFormatter done; 16 tasks remaining (48 pts ICU4X + web-intl parity) |
 | DOM utilities      | `11-dom-utilities.md`        | ~400 lines, 8 sections   | 30%              | Blocks all overlay components                                                                                          |
 | Accessibility      | `03-accessibility.md`        | ~4000 lines, 14 sections | 30%              | FocusZone, keyboard shortcuts, VisuallyHidden, FieldContext, announcements, touch/mobile, testing infra all missing    |
+| Forms              | `07-forms.md`                | ~4300 lines, 15 sections | 50%              | 3 tasks closed; 8 open (#164–#171, 26 pts). Blocks Field, Fieldset, Form components and validator builder API          |
 | Adapter conversion | `08/09-adapter-*.md` §4/§3   | ~200 lines               | 0%               | Blocks ALL component rendering                                                                                         |
 
 ## Task Waves
@@ -883,8 +884,16 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 | [#155](https://github.com/fogodev/ars-ui/issues/155) | Implement Touch and Mobile accessibility utilities                      | 2      | #3   | #151       |
 | [#156](https://github.com/fogodev/ars-ui/issues/156) | Implement ARIA Validation testing infrastructure                        | 3      | #3   | —          |
 | [#157](https://github.com/fogodev/ars-ui/issues/157) | Implement Keyboard Navigation test helpers                              | 3      | #3   | #150, #151 |
+| [#164](https://github.com/fogodev/ars-ui/issues/164) | Add MessageFn From impls for usize and f64 arity closures               | 1      | #5   | —          |
+| [#165](https://github.com/fogodev/ars-ui/issues/165) | Implement FormMessages, Error factory methods, DEFAULT_VALIDATOR_LOCALE | 3      | #5   | #164       |
+| [#166](https://github.com/fogodev/ars-ui/issues/166) | Implement built-in validators and FnValidator                           | 5      | #5   | #165       |
+| [#167](https://github.com/fogodev/ars-ui/issues/167) | Implement ChainValidator, ValidatorsBuilder, and Validators alias       | 3      | #5   | #166       |
+| [#168](https://github.com/fogodev/ars-ui/issues/168) | Implement AsyncFnValidator, DebouncedAsyncValidator, and TimerHandle    | 3      | #5   | —          |
+| [#169](https://github.com/fogodev/ars-ui/issues/169) | Implement Fieldset component machine in ars-forms                       | 3      | #5   | —          |
+| [#170](https://github.com/fogodev/ars-ui/issues/170) | Implement Field component machine in ars-forms                          | 3      | #5   | —          |
+| [#171](https://github.com/fogodev/ars-ui/issues/171) | Implement Form component machine in ars-forms                           | 5      | #5   | —          |
 
-**Total:** 106 points
+**Total:** 132 points
 
 ---
 
