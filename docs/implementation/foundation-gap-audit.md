@@ -321,3 +321,42 @@ Why this is next:
 - Keep `#24` open but deferred.
 - Do not move it to `In Progress`.
 - Treat this audit as the prerequisite planning artifact for replacing `#24` with the missing foundation cards above.
+
+---
+
+## Architecture Spec Completion Audit (2026-04-10)
+
+After all original gap-audit tasks (#31–#41) landed, a second audit compared the full `spec/foundation/01-architecture.md` (§1–§10) against the actual `ars-core`, `ars-derive`, and `ars-dom` implementations. The audit found that the vast majority of the spec is implemented, but identified four remaining gaps. These are now tracked as sub-issues of Epic #2.
+
+### Resolved gaps (no action needed)
+
+The following spec sections are fully implemented and match the spec contract:
+
+- §1 Crate Structure (all 13 crates, dependency graph, feature flags, no_std compatibility)
+- §2.1 Machine trait, HasId, ComponentPart, ConnectApi, Env
+- §2.2 TransitionPlan, PendingEffect, CleanupFn, no_cleanup(), Callback, MessageFn, WeakSend, SharedState, SharedFlag, ArsRc
+- §2.2.7 PlatformEffects trait, NullPlatformEffects, MissingProviderEffects, Rect, TimerHandle
+- §2.2.8 Context snapshot semantics (encoded in PendingEffect::run API)
+- §2.3 Service runtime (new, new_hydrated, send, set_props, unmount, drain_queue, SendResult)
+- §2.4 Callback invocation protocol and modality types
+- §2.6 Bindable (controlled, uncontrolled, get, set, sync_controlled, get_mut_owned)
+- §3 Connect pattern (HtmlAttr, AriaAttr, HtmlEvent, CssProperty, AttrMap, AttrValue, UserAttrs, StyleStrategy, EventOptions, data())
+- §4 Anatomy system (ComponentPart derive macro)
+- §5.1 ID contract (ComponentIds in ars-a11y)
+- §5.2 Orientation (defined in ars-i18n)
+- §6.4 ArsProvider / ArsContext with all 11 context fields, ColorMode
+
+### New gaps → new issues
+
+| #   | Gap                                                                                                                             | Issue                                                | Points | Blocked by              |
+| --- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ------ | ----------------------- |
+| 1   | `BindableValue` trait alias + `Bindable<T>: Default` impl (§2.6)                                                                | [#145](https://github.com/fogodev/ars-ui/issues/145) | 1      | —                       |
+| 2   | `Orientation` re-export from `ars-core` (§5.2)                                                                                  | [#146](https://github.com/fogodev/ars-ui/issues/146) | 1      | —                       |
+| 3   | Structured debug logging in `Service::drain_queue` (§2.9) — `debug` feature flag is empty, no `log` dependency, no trace output | [#147](https://github.com/fogodev/ars-ui/issues/147) | 3      | —                       |
+| 4   | `WebPlatformEffects` in `ars-dom` (§2.2.7) — the production web_sys-backed implementation of PlatformEffects                    | [#148](https://github.com/fogodev/ars-ui/issues/148) | 5      | #73, #69, #85 (partial) |
+
+### Execution order
+
+1. #145 and #146 — trivial, unblocked, can land in parallel
+2. #147 — self-contained, adds `log` crate and structured tracing
+3. #148 — largest task, implements WebPlatformEffects with real delegates for existing utilities and documented stubs for methods blocked on other epics
