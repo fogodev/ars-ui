@@ -94,6 +94,86 @@ Note: the original 3-task decomposition (#23, #56, #106) covered only ~40% of th
 
 Note: the original "First utility slice" epic scoped only 11 components and had a single decomposition card (#24). A full decomposition (2026-04-10) expanded the epic to cover all 26 utility components as framework-agnostic core implementations. Twenty tasks (#199–#218, 64 pts) organized in 5 dependency waves now cover every component. Issue #24 was closed as superseded. See [Epic #10](https://github.com/fogodev/ars-ui/issues/10) for the full sub-issue breakdown.
 
+### Epic: Agnostic input components
+
+- Point target: `48`
+- Layer: `Component`
+- Framework: `None` (agnostic core only; adapter work tracked under Epics #8/#9)
+- Test tier: `Unit`
+- Spec refs: `spec/components/input/_category.md`, `spec/components/input/*.md`, `spec/foundation/07-forms.md`
+
+All 14 input components (1 stateless, 11 stateful, 2 complex). Twelve tasks (#228–#251, 48 pts) organized in 2 dependency waves. See [Epic #220](https://github.com/fogodev/ars-ui/issues/220) for the full sub-issue breakdown.
+
+### Epic: Agnostic selection components
+
+- Point target: `55`
+- Layer: `Component`
+- Framework: `None` (agnostic core only; adapter work tracked under Epics #8/#9)
+- Test tier: `Unit`
+- Spec refs: `spec/components/selection/_category.md`, `spec/components/selection/*.md`, `spec/shared/selection-patterns.md`
+
+All 9 selection components (2 stateful, 7 complex). Nine tasks (#232–#255, 55 pts) organized in 4 dependency waves. External dep: ars-collections (Epic #53). See [Epic #221](https://github.com/fogodev/ars-ui/issues/221) for the full sub-issue breakdown.
+
+### Epic: Agnostic overlay components
+
+- Point target: `50`
+- Layer: `Component`
+- Framework: `None` (agnostic core only; adapter work tracked under Epics #8/#9)
+- Test tier: `Unit`
+- Spec refs: `spec/components/overlay/_category.md`, `spec/components/overlay/*.md`, `spec/shared/z-index-stacking.md`
+
+All 10 overlay components (4 stateful, 6 complex). Ten tasks (#238–#265, 50 pts) organized in 4 dependency waves. See [Epic #222](https://github.com/fogodev/ars-ui/issues/222) for the full sub-issue breakdown.
+
+### Epic: Agnostic navigation components
+
+- Point target: `33`
+- Layer: `Component`
+- Framework: `None` (agnostic core only; adapter work tracked under Epics #8/#9)
+- Test tier: `Unit`
+- Spec refs: `spec/components/navigation/_category.md`, `spec/components/navigation/*.md`
+
+All 8 navigation components (1 stateless, 4 stateful, 3 complex). Seven tasks (#247–#267, 33 pts) organized in 3 dependency waves. External dep: TreeView depends on ars-collections TreeCollection (#83). See [Epic #223](https://github.com/fogodev/ars-ui/issues/223) for the full sub-issue breakdown.
+
+### Epic: Agnostic date-time components
+
+- Point target: `47`
+- Layer: `Component`
+- Framework: `None` (agnostic core only; adapter work tracked under Epics #8/#9)
+- Test tier: `Unit`
+- Spec refs: `spec/components/date-time/_category.md`, `spec/components/date-time/*.md`, `spec/shared/date-time-types.md`
+
+All 8 date-time components (5 stateful, 3 complex). Eight tasks (#262–#292, 47 pts) organized in 4 dependency waves. External dep: all depend on ars-i18n (Epic #54). See [Epic #224](https://github.com/fogodev/ars-ui/issues/224) for the full sub-issue breakdown.
+
+### Epic: Agnostic data-display components
+
+- Point target: `40`
+- Layer: `Component`
+- Framework: `None` (agnostic core only; adapter work tracked under Epics #8/#9)
+- Test tier: `Unit`
+- Spec refs: `spec/components/data-display/_category.md`, `spec/components/data-display/*.md`
+
+All 11 data-display components (4 stateless, 6 stateful, 1 complex). Nine tasks (#266–#286, 40 pts) organized in 3 dependency waves. External dep: GridList, TagGroup, Table depend on ars-collections (Epic #53). See [Epic #225](https://github.com/fogodev/ars-ui/issues/225) for the full sub-issue breakdown.
+
+### Epic: Agnostic layout components
+
+- Point target: `31`
+- Layer: `Component`
+- Framework: `None` (agnostic core only; adapter work tracked under Epics #8/#9)
+- Test tier: `Unit`
+- Spec refs: `spec/components/layout/_category.md`, `spec/components/layout/*.md`, `spec/shared/layout-shared-types.md`
+
+All 11 layout components (5 stateless, 6 stateful). Eight tasks (#270–#281, 31 pts) in a single wave — no intra-epic dependencies. See [Epic #226](https://github.com/fogodev/ars-ui/issues/226) for the full sub-issue breakdown.
+
+### Epic: Agnostic specialized components
+
+- Point target: `55`
+- Layer: `Component`
+- Framework: `None` (agnostic core only; adapter work tracked under Epics #8/#9)
+- Test tier: `Unit`
+- Spec refs: `spec/components/specialized/_category.md`, `spec/components/specialized/*.md`
+
+All 15 specialized components (3 stateless, 10 stateful, 2 complex). Eleven tasks (#288–#301, 55 pts) organized in 4 dependency waves. External dep: FileUpload depends on DnD interactions (#159–#161). See [Epic #227](https://github.com/fogodev/ars-ui/issues/227) for the full sub-issue breakdown.
+
 ### Epic: Spec synchronization
 
 - Point target: `3`
