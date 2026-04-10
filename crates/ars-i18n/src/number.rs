@@ -665,23 +665,40 @@ fn build_decimal_formatter(_locale: &Locale, _options: &NumberFormatOptions) -> 
 }
 
 fn round_value(value: f64, fraction_digits: u8, mode: RoundingMode) -> f64 {
-    let factor = 10_f64.powi(i32::from(fraction_digits));
+    let factor = core_maths::CoreFloat::powi(10_f64, i32::from(fraction_digits));
     let scaled = value * factor;
     let rounded = match mode {
-        RoundingMode::HalfEven => scaled.round_ties_even(),
+        RoundingMode::HalfEven => round_half_even(scaled),
         RoundingMode::HalfUp => round_half_away_from_zero(scaled),
         RoundingMode::HalfDown => round_half_toward_zero(scaled),
-        RoundingMode::Ceiling => scaled.ceil(),
-        RoundingMode::Floor => scaled.floor(),
-        RoundingMode::Truncate => scaled.trunc(),
+        RoundingMode::Ceiling => core_maths::CoreFloat::ceil(scaled),
+        RoundingMode::Floor => core_maths::CoreFloat::floor(scaled),
+        RoundingMode::Truncate => core_maths::CoreFloat::trunc(scaled),
     };
 
     rounded / factor
 }
 
+fn round_half_even(value: f64) -> f64 {
+    let abs = value.abs();
+    let floor = core_maths::CoreFloat::floor(abs);
+    let fraction = abs - floor;
+    let rounded = if fraction < 0.5 {
+        floor
+    } else if fraction > 0.5 {
+        floor + 1.0
+    } else if core_maths::CoreFloat::rem_euclid(floor, 2.0) == 0.0 {
+        floor
+    } else {
+        floor + 1.0
+    };
+
+    rounded.copysign(value)
+}
+
 fn round_half_away_from_zero(value: f64) -> f64 {
     let abs = value.abs();
-    let floor = abs.floor();
+    let floor = core_maths::CoreFloat::floor(abs);
     let fraction = abs - floor;
     let rounded = if fraction >= 0.5 { floor + 1.0 } else { floor };
     rounded.copysign(value)
@@ -689,7 +706,7 @@ fn round_half_away_from_zero(value: f64) -> f64 {
 
 fn round_half_toward_zero(value: f64) -> f64 {
     let abs = value.abs();
-    let floor = abs.floor();
+    let floor = core_maths::CoreFloat::floor(abs);
     let fraction = abs - floor;
     let rounded = if fraction > 0.5 { floor + 1.0 } else { floor };
     rounded.copysign(value)
@@ -920,6 +937,9 @@ mod tests {
     #[test]
     fn rounds_values_for_all_rounding_modes() {
         assert_eq!(round_value(1.25, 1, RoundingMode::HalfEven), 1.2);
+        assert_eq!(round_value(1.35, 1, RoundingMode::HalfEven), 1.4);
+        assert_eq!(round_value(2.5, 0, RoundingMode::HalfEven), 2.0);
+        assert_eq!(round_value(3.5, 0, RoundingMode::HalfEven), 4.0);
         assert_eq!(round_value(-1.25, 1, RoundingMode::HalfUp), -1.3);
         assert_eq!(round_value(-1.25, 1, RoundingMode::HalfDown), -1.2);
         assert_eq!(round_value(1.21, 1, RoundingMode::Ceiling), 1.3);

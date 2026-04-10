@@ -75,8 +75,8 @@ pub fn next_z_index() -> u32 {
             // this call receives the fresh base and the next call advances.
             // Reset to base — existing overlays at high z-indexes will still
             // render above normal content; new overlays start fresh.
-            #[cfg(debug_assertions)]
-            eprintln!(
+            #[cfg(feature = "debug")]
+            log::warn!(
                 "[ars-dom] z-index counter reached ceiling ({Z_INDEX_CEILING}), \
                  resetting to base ({Z_INDEX_BASE})"
             );

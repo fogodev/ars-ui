@@ -94,17 +94,20 @@ web-intl = ["dep:js-sys"]      # Browser Intl API via wasm-bindgen (WASM-only)
 [features]
 default = ["aria-drag-drop-compat"]
 aria-drag-drop-compat = []        # Emit deprecated aria-grabbed/aria-dropeffect for legacy AT
+debug = ["dep:log", "ars-core/debug"]  # Dev-time warnings for interaction attr conflicts
 
 # ars-dom/Cargo.toml
 # Non-feature deps: ars-core, ars-a11y, ars-i18n, ars-interactions (always included)
 [features]
 default = ["web"]
+debug = ["dep:log", "ars-core/debug", "ars-interactions/debug"]  # Dev-time DOM/platform diagnostics
 ssr = []                          # Server-side rendering support (no web-sys)
 web = ["dep:web-sys", "dep:wasm-bindgen", "dep:js-sys"]  # Browser DOM access
 
 # ars-leptos/Cargo.toml
 [features]
 default = []
+debug = ["dep:log", "ars-core/debug", "ars-dom/debug", "ars-interactions/debug"]
 ssr = ["leptos/ssr", "ars-dom/ssr"]
 hydrate = ["leptos/hydrate"]
 csr = ["leptos/csr"]
@@ -132,6 +135,7 @@ serde = ["dep:serde"]          # Serialization for form data
 # ars-dioxus/Cargo.toml
 [features]
 default = []
+debug = ["dep:log", "ars-core/debug", "ars-interactions/debug", "ars-dom?/debug"]
 web = ["dioxus/web", "dep:ars-dom", "ars-dom/web"]
 desktop = ["dioxus/desktop"]
 desktop-dom = ["desktop", "dep:ars-dom"]  # ars-dom declared with default-features = false; no web-sys on desktop
@@ -1568,8 +1572,8 @@ impl TimerHandle {
 /// Resolve platform effects from ArsProvider context.
 /// ArsProvider is the single root provider that bundles configuration,
 /// platform capabilities, i18n, and style strategy.
-/// Falls back to `NullPlatformEffects` with debug-mode warnings if no
-/// ArsProvider is found.
+/// Falls back to `NullPlatformEffects` with `log::warn!` diagnostics when
+/// the `ars-core/debug` feature is enabled and no ArsProvider is found.
 fn use_platform_effects() -> ArsRc<dyn PlatformEffects> {
     use_context::<ArsContext>()
         .map(|ctx| ctx.platform())
@@ -1614,22 +1618,23 @@ method call so the developer sees exactly which platform operations are silently
 
 ```rust
 /// Fallback PlatformEffects used when no ArsProvider is in the component tree.
-/// Behaves identically to NullPlatformEffects but emits debug warnings per call.
+/// Behaves identically to NullPlatformEffects but emits `log::warn!` diagnostics
+/// per call when the `ars-core/debug` feature is enabled.
 /// This is NOT used in tests — only in the `use_platform_effects()` fallback path
 /// inside adapters.
 pub struct MissingProviderEffects;
 
 impl MissingProviderEffects {
-    #[cfg(all(debug_assertions, feature = "std"))]
+    #[cfg(feature = "debug")]
     #[inline]
     fn warn(method: &str) {
-        eprintln!(
+        log::warn!(
             "[ars-ui] {method}() called without ArsProvider. \
              Platform effects are disabled. Wrap your app root in <ArsProvider>."
         );
     }
 
-    #[cfg(not(all(debug_assertions, feature = "std")))]
+    #[cfg(not(feature = "debug"))]
     #[inline]
     fn warn(_method: &str) {}
 }
@@ -2658,18 +2663,18 @@ All transition log lines follow a single structured format for machine-parseable
 
 **Field definitions (tracing-compatible span/event fields):**
 
-| Field          | Type     | Description                                                                         |
-| -------------- | -------- | ----------------------------------------------------------------------------------- |
-| `component_id` | `String` | The `Props::id()` value, e.g. `"toggle#btn-1"`                                      |
-| `state`        | `String` | `Debug` representation of the current state before transition                       |
-| `event`        | `String` | `Debug` representation of the incoming event                                        |
-| `target_state` | `String` | `Debug` representation of the state after transition; `"(same)"` if no state change |
-| `guard`        | `String` | `"pass"` if transition matched, `"reject"` if no transition plan was returned       |
-| `effects`      | `String` | Comma-separated list of effect names from `PendingEffect::name`, or `"none"`        |
-| `apply`        | `String` | The `apply_description` from `TransitionPlan`, or `"none"`                          |
-| `then_send`    | `String` | Comma-separated list of follow-up events, or `"none"`                               |
-| `iteration`    | `u32`    | 1-based index within the current `drain_queue()` cycle                              |
-| `queue_depth`  | `u32`    | Number of events remaining in the queue after this iteration                        |
+| Field          | Type     | Description                                                                                    |
+| -------------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `component_id` | `String` | The `Props::id()` value, e.g. `"toggle#btn-1"`                                                 |
+| `state`        | `String` | `Debug` representation of the current state before transition                                  |
+| `event`        | `String` | `Debug` representation of the incoming event                                                   |
+| `target_state` | `String` | `Debug` representation of the state after transition; `"(same)"` if no state change            |
+| `guard`        | `String` | `"pass"` if transition matched, `"reject"` if no transition plan was returned                  |
+| `effects`      | `String` | Bracketed list of effect names from `PendingEffect::name`, for example `[focus]` or `[]`       |
+| `apply`        | `String` | The `apply_description` from `TransitionPlan`, or `"none"`                                     |
+| `then_send`    | `String` | Bracketed list of follow-up events using their `Debug` form, for example `[FocusTrap]` or `[]` |
+| `iteration`    | `u32`    | 1-based index within the current `drain_queue()` cycle                                         |
+| `queue_depth`  | `u32`    | Number of events remaining in the queue after this iteration                                   |
 
 **Example output for a complete transition cycle:**
 

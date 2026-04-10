@@ -24,6 +24,8 @@ pub enum Step {
     Clippy,
     /// Unit tests for core crates.
     Unit,
+    /// Release-profile compile and test smoke checks.
+    Release,
     /// Integration tests.
     Integration,
     /// Adapter harness tests (Leptos + Dioxus).
@@ -94,6 +96,7 @@ const PIPELINE_ORDER: &[Step] = &[
     Step::Check,
     Step::Clippy,
     Step::Unit,
+    Step::Release,
     Step::Integration,
     Step::Adapter,
     Step::Coverage,
@@ -225,6 +228,7 @@ fn run_step(step: Step, message_format: Option<&str>) -> Result<(), Error> {
         Step::Check => run_check(message_format),
         Step::Clippy => run_clippy(message_format),
         Step::Unit => run_unit(),
+        Step::Release => run_release(),
         Step::Integration => run_integration(),
         Step::Adapter => run_adapter(),
         Step::Coverage => run_coverage(),
@@ -353,6 +357,47 @@ fn run_unit() -> Result<(), Error> {
             "ars-forms",
             "--all-targets",
             "--all-features",
+        ],
+    )
+}
+
+fn run_release() -> Result<(), Error> {
+    cargo(
+        Step::Release,
+        &[
+            "check",
+            "-p",
+            "ars-i18n",
+            "--release",
+            "--all-targets",
+            "--no-default-features",
+            "--features",
+            "icu4x",
+        ],
+    )?;
+    cargo(
+        Step::Release,
+        &["test", "-p", "ars-i18n", "--lib", "--release"],
+    )?;
+    cargo(
+        Step::Release,
+        &[
+            "test",
+            "-p",
+            "ars-a11y",
+            "-p",
+            "ars-core",
+            "-p",
+            "ars-collections",
+            "-p",
+            "ars-dom",
+            "-p",
+            "ars-interactions",
+            "-p",
+            "ars-forms",
+            "--all-targets",
+            "--all-features",
+            "--release",
         ],
     )
 }
@@ -529,6 +574,7 @@ const fn step_name(step: Step) -> &'static str {
         Step::Check => "check",
         Step::Clippy => "clippy",
         Step::Unit => "unit",
+        Step::Release => "release",
         Step::Integration => "integration",
         Step::Adapter => "adapter",
         Step::Coverage => "coverage",
@@ -641,6 +687,7 @@ mod tests {
             Step::Check,
             Step::Clippy,
             Step::Unit,
+            Step::Release,
             Step::Integration,
             Step::Adapter,
             Step::Coverage,

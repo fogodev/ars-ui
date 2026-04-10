@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [features]
 default = ["web"]
+debug   = ["dep:log", "ars-core/debug", "ars-interactions/debug"]
 ssr     = []
 web     = ["dep:js-sys", "dep:wasm-bindgen", "dep:web-sys"]
 
@@ -18,8 +19,13 @@ ars-core         = { path = "../ars-core" }
 ars-i18n         = { path = "../ars-i18n" }
 ars-interactions = { path = "../ars-interactions" }
 js-sys           = { version = "0.3", optional = true }
+log              = { version = "0.4", default-features = false, optional = true }
 wasm-bindgen     = { version = "0.2", optional = true }
-web-sys          = { version = "0.3", optional = true, features = [
+
+[dependencies.web-sys]
+version = "0.3"
+optional = true
+features = [
     "CssStyleDeclaration",
     "DomRect",
     "Document",
@@ -39,8 +45,8 @@ web-sys          = { version = "0.3", optional = true, features = [
     "ScrollLogicalPosition",
     "ScrollToOptions",
     "TouchEvent",
-    "Window",
-] }
+    "Window"
+]
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"

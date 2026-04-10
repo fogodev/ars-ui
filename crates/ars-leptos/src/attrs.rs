@@ -108,16 +108,16 @@ fn styles_to_nonce_css(id: &str, styles: &[(CssProperty, String)]) -> String {
     format!("[data-ars-style-id=\"{id}\"] {{\n{declarations}\n}}")
 }
 
-#[cfg(debug_assertions)]
+#[cfg(feature = "debug")]
 fn warn_missing_provider(hook_name: &str) {
-    eprintln!(
+    log::warn!(
         "[ars-ui] {hook_name}: No ArsProvider found in the component tree. \
         Falling back to defaults."
     );
 }
 
-#[cfg(not(debug_assertions))]
-fn warn_missing_provider(_hook_name: &str) {}
+#[cfg(not(feature = "debug"))]
+const fn warn_missing_provider(_hook_name: &str) {}
 
 #[cfg(test)]
 mod tests {

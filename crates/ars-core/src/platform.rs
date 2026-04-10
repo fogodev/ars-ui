@@ -339,16 +339,16 @@ impl PlatformEffects for NullPlatformEffects {
 pub struct MissingProviderEffects;
 
 impl MissingProviderEffects {
-    #[cfg(all(debug_assertions, feature = "std"))]
+    #[cfg(feature = "debug")]
     #[inline]
     fn warn(method: &str) {
-        eprintln!(
+        log::warn!(
             "[ars-ui] {method}() called without ArsProvider. \
              Platform effects are disabled. Wrap your app root in <ArsProvider>."
         );
     }
 
-    #[cfg(not(all(debug_assertions, feature = "std")))]
+    #[cfg(not(feature = "debug"))]
     #[inline]
     const fn warn(_method: &str) {}
 }

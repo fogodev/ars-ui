@@ -64,9 +64,20 @@ jobs:
       - name: Unit Tests
         run: cargo xtask ci unit
 
+  release:
+    name: Release Verification
+    needs: [unit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Release Verification
+        run: cargo xtask ci release
+
   integration:
     name: Integration Tests
-    needs: [unit]
+    needs: [release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

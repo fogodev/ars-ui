@@ -43,13 +43,13 @@ where
 {
     let mut merged = AttrMap::new();
     for attrs in attrs_iter {
-        // In debug builds, warn when the same CSS property is set by multiple
-        // interaction sources with different values.
-        #[cfg(debug_assertions)]
+        // When the optional debug feature is enabled, warn when the same CSS
+        // property is set by multiple interaction sources with different values.
+        #[cfg(feature = "debug")]
         for (prop, new_value) in attrs.iter_styles() {
             if let Ok(idx) = merged.styles().binary_search_by(|(k, _)| k.cmp(prop)) {
                 if merged.styles()[idx].1 != *new_value {
-                    eprintln!(
+                    log::warn!(
                         "ars-interactions: style property '{prop}' set by multiple interactions \
                          (existing: '{}', new: '{new_value}'). Last write wins.",
                         merged.styles()[idx].1

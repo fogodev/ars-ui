@@ -628,6 +628,40 @@ pub trait Machine: Sized + 'static {
 /// breaking to prevent infinite transition loops.
 const MAX_DRAIN_ITERATIONS: usize = 100;
 
+#[cfg(feature = "debug")]
+fn format_effect_names<M: Machine>(effects: &[PendingEffect<M>]) -> String {
+    let mut formatted = String::from("[");
+    for (index, effect) in effects.iter().enumerate() {
+        if index > 0 {
+            formatted.push_str(", ");
+        }
+        formatted.push_str(effect.name);
+    }
+    formatted.push(']');
+    formatted
+}
+
+#[cfg(feature = "debug")]
+fn format_follow_up_events<Event: Debug>(events: &[Event]) -> String {
+    format!("{events:?}")
+}
+
+#[cfg(feature = "debug")]
+fn format_target_state<State: Debug>(target: Option<&State>) -> String {
+    match target {
+        Some(next) => format!("{next:?}"),
+        None => String::from("(same)"),
+    }
+}
+
+#[cfg(feature = "debug")]
+fn format_apply_description(description: Option<&'static str>) -> String {
+    match description {
+        Some(description) => format!("{description:?}"),
+        None => String::from("\"none\""),
+    }
+}
+
 /// Result of sending an event to the service.
 ///
 /// Contains state/context change flags and pending effects for the adapter.
@@ -777,6 +811,12 @@ impl<M: Machine> Service<M> {
     pub fn send(&mut self, event: M::Event) -> SendResult<M> {
         debug_assert!(!self.unmounted, "send() called after unmount()");
         if self.unmounted {
+            #[cfg(feature = "debug")]
+            log::debug!(
+                "[ars:{}] dropped event after unmount: {:?}",
+                self.props.id(),
+                event
+            );
             return SendResult {
                 state_changed: false,
                 context_changed: false,
@@ -796,9 +836,12 @@ impl<M: Machine> Service<M> {
         let mut cancel_effects = Vec::new();
         let mut state_changed = false;
         let mut context_changed = false;
-        #[expect(
-            unused_mut,
-            reason = "only mutated in release builds (debug panics first)"
+        #[cfg_attr(
+            debug_assertions,
+            expect(
+                unused_mut,
+                reason = "only mutated in release builds (debug panics first)"
+            )
         )]
         let mut truncated = false;
         let mut iterations = 0;
@@ -806,6 +849,10 @@ impl<M: Machine> Service<M> {
 
         while let Some(event) = self.event_queue.pop_front() {
             iterations += 1;
+            #[cfg(feature = "debug")]
+            let state_before = format!("{:?}", self.state);
+            #[cfg(feature = "debug")]
+            let event_repr = format!("{event:?}");
             if iterations > MAX_DRAIN_ITERATIONS {
                 #[cfg(debug_assertions)]
                 panic!(
@@ -814,12 +861,27 @@ impl<M: Machine> Service<M> {
                 );
                 #[cfg(not(debug_assertions))]
                 {
+                    #[cfg(feature = "debug")]
+                    log::warn!(
+                        "drain_queue: event queue exceeded {MAX_DRAIN_ITERATIONS} iterations, \
+                         truncating. This likely indicates an infinite loop in state machine \
+                         transitions."
+                    );
                     truncated = true;
                     break;
                 }
             }
 
             if let Some(plan) = M::transition(&self.state, &event, &self.context, &self.props) {
+                #[cfg(feature = "debug")]
+                let target_state = format_target_state(plan.target.as_ref());
+                #[cfg(feature = "debug")]
+                let effect_names = format_effect_names(&plan.effects);
+                #[cfg(feature = "debug")]
+                let apply_description = format_apply_description(plan.apply_description);
+                #[cfg(feature = "debug")]
+                let follow_up_events = format_follow_up_events(&plan.then_send);
+
                 // Apply context mutation.
                 if let Some(apply) = plan.apply {
                     apply(&mut self.context);
@@ -829,12 +891,32 @@ impl<M: Machine> Service<M> {
                 // Track context-only iterations for diagnostics.
                 if plan.target.is_none() {
                     context_change_count += 1;
+                    if context_change_count >= MAX_DRAIN_ITERATIONS {
+                        #[cfg(debug_assertions)]
+                        panic!(
+                            "drain_queue: {context_change_count} consecutive context_only \
+                             iterations without a state change — likely an infinite \
+                             context_only + then_send loop"
+                        );
+                        #[cfg(not(debug_assertions))]
+                        {
+                            #[cfg(feature = "debug")]
+                            log::warn!(
+                                "drain_queue: {context_change_count} context_only iterations \
+                                 without state change — possible infinite loop, truncating."
+                            );
+                            truncated = true;
+                            break;
+                        }
+                    }
                 } else {
                     context_change_count = 0;
                 }
 
                 // Enqueue follow-up events.
                 self.event_queue.extend(plan.then_send);
+                #[cfg(feature = "debug")]
+                let queue_depth = self.event_queue.len();
 
                 // Apply state change.
                 if let Some(next) = plan.target {
@@ -851,6 +933,27 @@ impl<M: Machine> Service<M> {
                     e.target_state = Some(target.clone());
                     e
                 }));
+
+                #[cfg(feature = "debug")]
+                {
+                    let component_id = self.props.id();
+                    log::trace!(
+                        "[ars:{component_id}] {state_before} + {event_repr} → {target_state} \
+                         (guard: pass, effects: {effect_names})"
+                    );
+                    log::trace!(
+                        "[ars:{component_id}]   apply: {apply_description}, then_send: \
+                         {follow_up_events}, iteration: {iterations}, queue_depth: {queue_depth}"
+                    );
+                }
+            } else {
+                #[cfg(feature = "debug")]
+                log::trace!(
+                    "[ars:{}] {} + {} → (same) (guard: reject, effects: [])",
+                    self.props.id(),
+                    state_before,
+                    event_repr
+                );
             }
         }
 
@@ -924,6 +1027,8 @@ impl<M: Machine> Service<M> {
 #[cfg(test)]
 mod tests {
     use alloc::vec;
+    #[cfg(feature = "debug")]
+    use std::sync::{Mutex, Once};
 
     use super::*;
 
@@ -931,6 +1036,81 @@ mod tests {
     enum ToggleState {
         Off,
         On,
+    }
+
+    #[cfg(feature = "debug")]
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct CapturedLog {
+        level: log::Level,
+        message: String,
+    }
+
+    #[cfg(feature = "debug")]
+    struct TestLogger {
+        records: Mutex<Vec<CapturedLog>>,
+    }
+
+    #[cfg(feature = "debug")]
+    static TEST_LOGGER: TestLogger = TestLogger {
+        records: Mutex::new(Vec::new()),
+    };
+
+    #[cfg(feature = "debug")]
+    static LOGGER_INIT: Once = Once::new();
+
+    #[cfg(feature = "debug")]
+    static CAPTURE_LOCK: Mutex<()> = Mutex::new(());
+
+    #[cfg(feature = "debug")]
+    impl log::Log for TestLogger {
+        fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+            metadata.level() <= log::Level::Trace
+        }
+
+        fn log(&self, record: &log::Record<'_>) {
+            if self.enabled(record.metadata()) {
+                self.records
+                    .lock()
+                    .expect("test logger mutex poisoned")
+                    .push(CapturedLog {
+                        level: record.level(),
+                        message: format!("{}", record.args()),
+                    });
+            }
+        }
+
+        fn flush(&self) {}
+    }
+
+    #[cfg(feature = "debug")]
+    fn init_test_logger() {
+        LOGGER_INIT.call_once(|| {
+            log::set_logger(&TEST_LOGGER).expect("test logger should install once");
+            log::set_max_level(log::LevelFilter::Trace);
+        });
+    }
+
+    #[cfg(feature = "debug")]
+    fn capture_logs(run: impl FnOnce()) -> Vec<CapturedLog> {
+        init_test_logger();
+        let _capture_guard = CAPTURE_LOCK.lock().expect("capture mutex poisoned");
+        TEST_LOGGER
+            .records
+            .lock()
+            .expect("test logger mutex poisoned")
+            .clear();
+        run();
+        let records = TEST_LOGGER
+            .records
+            .lock()
+            .expect("test logger mutex poisoned")
+            .clone();
+        TEST_LOGGER
+            .records
+            .lock()
+            .expect("test logger mutex poisoned")
+            .clear();
+        records
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1329,6 +1509,7 @@ mod tests {
         assert_eq!(service.state(), &ToggleState::On);
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "Props::id must not be empty")]
     fn service_new_panics_on_empty_id_in_debug() {
@@ -1359,6 +1540,709 @@ mod tests {
             Bindable::uncontrolled(String::default())
         );
         assert_eq!(Bindable::<bool>::default(), Bindable::uncontrolled(false));
+    }
+
+    #[cfg(feature = "debug")]
+    #[test]
+    fn send_emits_trace_log_for_processed_event() {
+        let logs = capture_logs(|| {
+            let mut service = Service::<ToggleMachine>::new(
+                ToggleProps {
+                    id: String::from("toggle#btn-1"),
+                },
+                &Env::default(),
+                &(),
+            );
+
+            let _result = service.send(ToggleEvent::Toggle);
+        });
+
+        assert!(
+            logs.iter().any(|record| record.level == log::Level::Trace),
+            "expected at least one trace log, got {logs:?}"
+        );
+    }
+
+    #[cfg(feature = "debug")]
+    #[test]
+    fn trace_log_formats_multiple_effect_names() {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum MultiEffectEvent {
+            Trigger,
+        }
+
+        struct MultiEffectMachine;
+
+        impl Machine for MultiEffectMachine {
+            type State = ToggleState;
+            type Event = MultiEffectEvent;
+            type Context = ToggleContext;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::Off, ToggleContext)
+            }
+
+            fn transition(
+                state: &Self::State,
+                event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                match (state, event) {
+                    (ToggleState::Off, MultiEffectEvent::Trigger) => Some(
+                        TransitionPlan::to(ToggleState::On)
+                            .with_effect(PendingEffect::named("focus"))
+                            .with_effect(PendingEffect::named("announce")),
+                    ),
+                    _ => None,
+                }
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+        }
+
+        let logs = capture_logs(|| {
+            let mut service = Service::<MultiEffectMachine>::new(
+                ToggleProps {
+                    id: String::from("menu#item-1"),
+                },
+                &Env::default(),
+                &(),
+            );
+
+            let _result = service.send(MultiEffectEvent::Trigger);
+        });
+
+        let transition = logs
+            .iter()
+            .find(|record| record.message.contains("[ars:menu#item-1]"))
+            .expect("expected transition log");
+        assert!(
+            transition.message.contains("effects: [focus, announce]"),
+            "expected comma-joined effect names: {transition:?}"
+        );
+    }
+
+    #[cfg(feature = "debug")]
+    #[test]
+    fn trace_log_includes_required_structured_fields() {
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        struct DebugContext {
+            pressed: bool,
+        }
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum DebugEvent {
+            Toggle,
+            Notify,
+        }
+
+        struct DebugMachine;
+
+        impl Machine for DebugMachine {
+            type State = ToggleState;
+            type Event = DebugEvent;
+            type Context = DebugContext;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::Off, DebugContext { pressed: false })
+            }
+
+            fn transition(
+                state: &Self::State,
+                event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                match (state, event) {
+                    (ToggleState::Off, DebugEvent::Toggle) => {
+                        let mut plan = TransitionPlan::to(ToggleState::On)
+                            .apply(|ctx: &mut DebugContext| ctx.pressed = true)
+                            .then(DebugEvent::Notify)
+                            .with_effect(PendingEffect::named("notify_change"));
+                        plan.apply_description = Some("set pressed = true");
+                        Some(plan)
+                    }
+                    (ToggleState::On, DebugEvent::Notify) => Some(TransitionPlan::new()),
+                    _ => None,
+                }
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+        }
+
+        let logs = capture_logs(|| {
+            let mut service = Service::<DebugMachine>::new(
+                ToggleProps {
+                    id: String::from("toggle#btn-1"),
+                },
+                &Env::default(),
+                &(),
+            );
+
+            let _result = service.send(DebugEvent::Toggle);
+        });
+
+        let transition = logs
+            .iter()
+            .find(|record| {
+                record
+                    .message
+                    .contains("[ars:toggle#btn-1] Off + Toggle → On")
+            })
+            .expect("expected transition log");
+        assert_eq!(transition.level, log::Level::Trace);
+        assert!(
+            transition.message.contains("guard: pass"),
+            "missing guard result: {transition:?}"
+        );
+        assert!(
+            transition.message.contains("effects: [notify_change]"),
+            "missing effect names: {transition:?}"
+        );
+
+        let detail = logs
+            .iter()
+            .find(|record| {
+                record
+                    .message
+                    .contains("[ars:toggle#btn-1]   apply: \"set pressed = true\"")
+            })
+            .expect("expected detail log");
+        assert!(
+            detail.message.contains("then_send: [Notify]"),
+            "missing follow-up events: {detail:?}"
+        );
+        assert!(
+            detail.message.contains("iteration: 1"),
+            "missing iteration counter: {detail:?}"
+        );
+        assert!(
+            detail.message.contains("queue_depth: 1"),
+            "missing queue depth: {detail:?}"
+        );
+    }
+
+    #[cfg(feature = "debug")]
+    #[test]
+    fn rejected_event_logs_guard_reject() {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum RejectEvent {
+            Ignore,
+        }
+
+        struct RejectMachine;
+
+        impl Machine for RejectMachine {
+            type State = ToggleState;
+            type Event = RejectEvent;
+            type Context = ToggleContext;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::Off, ToggleContext)
+            }
+
+            fn transition(
+                _state: &Self::State,
+                _event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                None
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+        }
+
+        let logs = capture_logs(|| {
+            let mut service = Service::<RejectMachine>::new(
+                ToggleProps {
+                    id: String::from("combobox#cb-1"),
+                },
+                &Env::default(),
+                &(),
+            );
+
+            let _result = service.send(RejectEvent::Ignore);
+        });
+
+        let rejected = logs
+            .iter()
+            .find(|record| record.message.contains("[ars:combobox#cb-1]"))
+            .expect("expected rejected transition log");
+        assert!(
+            rejected.message.contains("guard: reject"),
+            "missing guard reject marker: {rejected:?}"
+        );
+        assert!(
+            rejected.message.contains("→ (same)"),
+            "missing same-state marker: {rejected:?}"
+        );
+    }
+
+    #[cfg(feature = "debug")]
+    #[test]
+    fn multi_step_drain_cycle_logs_each_iteration_with_queue_depth() {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum ChainEvent {
+            Start,
+            Continue,
+        }
+
+        struct ChainMachine;
+
+        impl Machine for ChainMachine {
+            type State = ToggleState;
+            type Event = ChainEvent;
+            type Context = ToggleContext;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::Off, ToggleContext)
+            }
+
+            fn transition(
+                state: &Self::State,
+                event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                match (state, event) {
+                    (ToggleState::Off, ChainEvent::Start) => {
+                        Some(TransitionPlan::to(ToggleState::On).then(ChainEvent::Continue))
+                    }
+                    (ToggleState::On, ChainEvent::Continue) => {
+                        Some(TransitionPlan::to(ToggleState::Off))
+                    }
+                    _ => None,
+                }
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+        }
+
+        let logs = capture_logs(|| {
+            let mut service = Service::<ChainMachine>::new(
+                ToggleProps {
+                    id: String::from("dialog#dlg-1"),
+                },
+                &Env::default(),
+                &(),
+            );
+
+            let _result = service.send(ChainEvent::Start);
+        });
+
+        let iteration_one = logs
+            .iter()
+            .find(|record| {
+                record
+                    .message
+                    .contains("[ars:dialog#dlg-1]   apply: \"none\"")
+                    && record.message.contains("iteration: 1")
+            })
+            .expect("expected first detail log");
+        assert!(
+            iteration_one.message.contains("queue_depth: 1"),
+            "expected queued follow-up event after first iteration: {iteration_one:?}"
+        );
+
+        let iteration_two = logs
+            .iter()
+            .find(|record| {
+                record
+                    .message
+                    .contains("[ars:dialog#dlg-1]   apply: \"none\"")
+                    && record.message.contains("iteration: 2")
+            })
+            .expect("expected second detail log");
+        assert!(
+            iteration_two.message.contains("queue_depth: 0"),
+            "expected queue to be drained after second iteration: {iteration_two:?}"
+        );
+    }
+
+    #[cfg(all(feature = "debug", debug_assertions))]
+    #[test]
+    #[should_panic(expected = "Event queue exceeded 100 iterations")]
+    fn drain_queue_panics_on_iteration_limit_in_debug_builds() {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum LoopEvent {
+            Continue,
+        }
+
+        struct IterationLoopMachine;
+
+        impl Machine for IterationLoopMachine {
+            type State = ToggleState;
+            type Event = LoopEvent;
+            type Context = ToggleContext;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::Off, ToggleContext)
+            }
+
+            fn transition(
+                state: &Self::State,
+                event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                match (state, event) {
+                    (ToggleState::Off, LoopEvent::Continue) => {
+                        Some(TransitionPlan::to(ToggleState::On).then(LoopEvent::Continue))
+                    }
+                    (ToggleState::On, LoopEvent::Continue) => {
+                        Some(TransitionPlan::to(ToggleState::Off).then(LoopEvent::Continue))
+                    }
+                }
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+        }
+
+        let mut service = Service::<IterationLoopMachine>::new(
+            ToggleProps {
+                id: String::from("loop#iteration"),
+            },
+            &Env::default(),
+            &(),
+        );
+
+        let _result = service.send(LoopEvent::Continue);
+    }
+
+    #[cfg(all(feature = "debug", debug_assertions))]
+    #[test]
+    #[should_panic(expected = "consecutive context_only iterations")]
+    fn drain_queue_panics_on_context_only_loop_in_debug_builds() {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum LoopEvent {
+            Continue,
+        }
+
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        struct LoopContext {
+            ticks: usize,
+        }
+
+        struct ContextLoopMachine;
+
+        impl Machine for ContextLoopMachine {
+            type State = ToggleState;
+            type Event = LoopEvent;
+            type Context = LoopContext;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::Off, LoopContext { ticks: 0 })
+            }
+
+            fn transition(
+                _state: &Self::State,
+                event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                match event {
+                    LoopEvent::Continue => Some(
+                        TransitionPlan::context_only(|ctx: &mut LoopContext| ctx.ticks += 1)
+                            .then(LoopEvent::Continue),
+                    ),
+                }
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+        }
+
+        let mut service = Service::<ContextLoopMachine>::new(
+            ToggleProps {
+                id: String::from("loop#context"),
+            },
+            &Env::default(),
+            &(),
+        );
+
+        let _result = service.send(LoopEvent::Continue);
+    }
+
+    #[cfg(all(feature = "debug", not(debug_assertions)))]
+    #[test]
+    fn send_after_unmount_emits_debug_log() {
+        let mut service = Service::<ToggleMachine>::new(
+            ToggleProps {
+                id: String::from("toggle#btn-1"),
+            },
+            &Env::default(),
+            &(),
+        );
+        service.unmount(Vec::new());
+
+        let logs = capture_logs(|| {
+            let result = service.send(ToggleEvent::Toggle);
+            assert!(!result.state_changed);
+            assert!(!result.context_changed);
+            assert!(result.pending_effects.is_empty());
+            assert!(result.cancel_effects.is_empty());
+            assert!(!result.truncated);
+            assert_eq!(result.context_change_count, 0);
+        });
+
+        let dropped = logs
+            .iter()
+            .find(|record| record.level == log::Level::Debug)
+            .expect("expected dropped-event debug log");
+        assert!(
+            dropped
+                .message
+                .contains("[ars:toggle#btn-1] dropped event after unmount: Toggle"),
+            "missing dropped-event diagnostic: {dropped:?}"
+        );
+    }
+
+    #[cfg(all(feature = "debug", not(debug_assertions)))]
+    #[test]
+    fn iteration_limit_truncation_emits_warning_in_release_builds() {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum LoopEvent {
+            Continue,
+        }
+
+        struct IterationLoopMachine;
+
+        impl Machine for IterationLoopMachine {
+            type State = ToggleState;
+            type Event = LoopEvent;
+            type Context = ToggleContext;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::Off, ToggleContext)
+            }
+
+            fn transition(
+                state: &Self::State,
+                event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                match (state, event) {
+                    (ToggleState::Off, LoopEvent::Continue) => {
+                        Some(TransitionPlan::to(ToggleState::On).then(LoopEvent::Continue))
+                    }
+                    (ToggleState::On, LoopEvent::Continue) => {
+                        Some(TransitionPlan::to(ToggleState::Off).then(LoopEvent::Continue))
+                    }
+                }
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+        }
+
+        let mut service = Service::<IterationLoopMachine>::new(
+            ToggleProps {
+                id: String::from("loop#iteration"),
+            },
+            &Env::default(),
+            &(),
+        );
+
+        let logs = capture_logs(|| {
+            let result = service.send(LoopEvent::Continue);
+            assert!(result.truncated);
+            assert!(result.state_changed);
+            assert!(!result.context_changed);
+            assert_eq!(result.context_change_count, 0);
+        });
+
+        let warning = logs
+            .iter()
+            .find(|record| record.level == log::Level::Warn)
+            .expect("expected truncation warning log");
+        assert!(
+            warning
+                .message
+                .contains("event queue exceeded 100 iterations, truncating"),
+            "missing iteration-limit warning: {warning:?}"
+        );
+    }
+
+    #[cfg(all(feature = "debug", not(debug_assertions)))]
+    #[test]
+    fn context_only_truncation_emits_warning_in_release_builds() {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum LoopEvent {
+            Continue,
+        }
+
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        struct LoopContext {
+            ticks: usize,
+        }
+
+        struct ContextLoopMachine;
+
+        impl Machine for ContextLoopMachine {
+            type State = ToggleState;
+            type Event = LoopEvent;
+            type Context = LoopContext;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::Off, LoopContext { ticks: 0 })
+            }
+
+            fn transition(
+                _state: &Self::State,
+                event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                match event {
+                    LoopEvent::Continue => Some(
+                        TransitionPlan::context_only(|ctx: &mut LoopContext| ctx.ticks += 1)
+                            .then(LoopEvent::Continue),
+                    ),
+                }
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+        }
+
+        let mut service = Service::<ContextLoopMachine>::new(
+            ToggleProps {
+                id: String::from("loop#context"),
+            },
+            &Env::default(),
+            &(),
+        );
+
+        let logs = capture_logs(|| {
+            let result = service.send(LoopEvent::Continue);
+            assert!(result.truncated);
+            assert!(!result.state_changed);
+            assert!(result.context_changed);
+            assert_eq!(result.context_change_count, 100);
+        });
+
+        let warning = logs
+            .iter()
+            .find(|record| record.level == log::Level::Warn)
+            .expect("expected context_only truncation warning");
+        assert!(
+            warning
+                .message
+                .contains("100 context_only iterations without state change"),
+            "missing context_only warning: {warning:?}"
+        );
     }
 
     #[test]

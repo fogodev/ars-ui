@@ -409,23 +409,24 @@ context and passes them to core code via the `Env` struct and `Messages` paramet
 (see `01-architecture.md` §2.1 for the `Env` definition).
 
 **Missing provider warning:** All adapter context hooks (`use_locale()`, `use_icu_provider()`,
-`use_style_strategy()`) emit a debug-mode warning when no `ArsProvider` is found.
-This helps developers catch missing provider setup during development. The warning
-is compiled out in release builds.
+`use_style_strategy()`) emit a `log::warn!` diagnostic when the adapter crate's
+`debug` feature is enabled and no `ArsProvider` is found. This helps developers
+catch missing provider setup during development while keeping diagnostics routed
+through the application's configured logger.
 
 ```rust
-/// Emit a debug-mode warning when ArsProvider context is missing.
-/// Compiled out in release builds (zero-cost).
-#[cfg(debug_assertions)]
+/// Emit a warning when ArsProvider context is missing.
+/// Compiled out unless the adapter crate's `debug` feature is enabled.
+#[cfg(feature = "debug")]
 fn warn_missing_provider(hook_name: &str) {
-    eprintln!(
+    log::warn!(
         "[ars-ui] {hook_name}: No ArsProvider found in the component tree. \
          Falling back to defaults."
     );
 }
 
-#[cfg(not(debug_assertions))]
-fn warn_missing_provider(_hook_name: &str) {}
+#[cfg(not(feature = "debug"))]
+const fn warn_missing_provider(_hook_name: &str) {}
 ```
 
 The adapter resolves locale through a three-level chain:

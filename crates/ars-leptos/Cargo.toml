@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [features]
 default = []
+debug   = ["dep:log", "ars-core/debug", "ars-dom/debug", "ars-interactions/debug"]
 ssr     = ["leptos/ssr", "ars-dom/ssr"]
 hydrate = ["leptos/hydrate"]
 csr     = ["leptos/csr"]
@@ -22,6 +23,7 @@ ars-forms        = { path = "../ars-forms" }
 ars-i18n         = { path = "../ars-i18n" }
 ars-interactions = { path = "../ars-interactions" }
 leptos           = { version = "0.8", default-features = false }
+log              = { version = "0.4", default-features = false, optional = true }
 
 [lints]
 workspace = true
