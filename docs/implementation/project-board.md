@@ -15,7 +15,7 @@ Top-level epics:
 - Test infrastructure
 - Leptos adapter
 - Dioxus adapter
-- First utility slice
+- Agnostic utility components
 - Spec synchronization
 
 ## Required Project fields
