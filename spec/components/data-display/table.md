@@ -1116,7 +1116,7 @@ fn build_sort_announcement(
         };
     }
     // Multi-column: build comma-separated list.
-    let parts: Vec<String> = sort_descriptors.iter().map(|desc| {
+    let parts = sort_descriptors.iter().map(|desc| {
         let col_name = columns.iter()
             .find(|c| c.key == desc.column_key)
             .map(|c| c.header_text.as_str())
@@ -1126,7 +1126,7 @@ fn build_sort_announcement(
             SortDirection::Descending => "descending",
         };
         format!("{col_name} {dir}")
-    }).collect();
+    }).collect::<Vec<_>>();
     messages.multi_sort_changed.replace("{columns}", &parts.join(", "))
 }
 ```

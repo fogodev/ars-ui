@@ -224,11 +224,11 @@ where
     // Create a signal tracking the current state.
     // Use .peek() to avoid subscribing the component to service_signal changes.
     let initial_state = service_signal.peek().state().clone();
-    let mut state_signal: Signal<M::State> = use_signal(|| initial_state);
+    let mut state_signal = use_signal::<M::State>(|| initial_state);
 
     // Context version counter — incremented on every context change so that
     // derive() memos re-run even when state itself hasn't changed.
-    let mut context_version: Signal<u64> = use_signal(|| 0u64);
+    let mut context_version = use_signal(|| 0u64);
 
     // Build the send callback. When an event is sent:
     // 1. Snapshot the old state for comparison

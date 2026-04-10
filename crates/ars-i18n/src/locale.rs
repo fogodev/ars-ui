@@ -113,6 +113,11 @@ impl Locale {
         (&self.0).into()
     }
 
+    #[cfg(feature = "icu4x")]
+    pub(crate) const fn as_icu(&self) -> &IcuLocale {
+        &self.0
+    }
+
     fn script_or_default(&self) -> &str {
         self.script().unwrap_or_else(|| match self.language() {
             "ar" | "fa" | "ur" | "ps" | "ug" | "sd" | "ks" => "Arab",

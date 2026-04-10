@@ -34,7 +34,7 @@ pub type DefaultNumberFormatter = icu4x::Icu4xNumberFormatter;
 pub type DefaultNumberFormatter = web_intl::JsIntlNumberFormatter;
 ```
 
-Both backends implement the same formatter traits. Components are backend-agnostic.
+Both backends expose the same concrete formatter surface. Components are backend-agnostic.
 
 #### 1.1.1 Number Formatter Context Propagation
 
@@ -48,17 +48,27 @@ Numeric components (NumberInput, Slider, RangeSlider, Progress, Meter) MUST reso
 All numeric components MUST accept a `number_formatter: Option<NumberFormatter>` prop. If not provided, a default `NumberFormatter` is constructed from the resolved locale.
 
 ```rust
-/// Trait for locale-aware number formatting and parsing.
-pub trait NumberFormatter {
-    /// Format a numeric value for display (e.g., 1234.5 -> "1,234.5" in en-US, "1.234,5" in de-DE).
-    fn format(&self, value: f64) -> String;
-    /// Parse a locale-formatted string back to a number. Accepts both canonical ("1.5") and
-    /// locale-specific ("1,5" in de-DE) formats. Returns None if unparseable.
-    fn parse(&self, input: &str) -> Option<f64>;
-    /// Return the decimal separator for the current locale (e.g., '.' for en-US, ',' for de-DE).
-    fn decimal_separator(&self) -> char;
-    /// Return the grouping separator for the current locale (e.g., ',' for en-US, '.' for de-DE).
-    fn grouping_separator(&self) -> Option<char>;
+pub struct NumberFormatter {
+    /* private fields */
+}
+
+impl NumberFormatter {
+    /// Create a locale-aware formatter with the requested options.
+    pub fn new(locale: &Locale, options: NumberFormatOptions) -> Self;
+    /// Format a numeric value for display.
+    pub fn format(&self, value: f64) -> String;
+    /// Parse a locale-formatted string back to a number.
+    pub fn parse(&self, input: &str) -> Option<f64>;
+    /// Return the decimal separator for the current locale.
+    pub fn decimal_separator(&self) -> char;
+    /// Return the grouping separator for the current locale.
+    pub fn grouping_separator(&self) -> Option<char>;
+    /// Format a monetary amount using the supplied ISO 4217 currency code.
+    pub fn format_currency(&self, amount: f64, currency_code: &str) -> String;
+    /// Format a fractional value such as `0.47` as a localized percentage.
+    pub fn format_percent(&self, value: f64, max_fraction_digits: Option<u8>) -> String;
+    /// Format a numeric range using locale-appropriate range punctuation.
+    pub fn format_range(&self, start: f64, end: f64, locale: &Locale) -> String;
 }
 ```
 
@@ -735,14 +745,20 @@ Overlay components use `Placement` from `11-dom-utilities.md` §2.2, which inclu
 ### 4.1 NumberFormatter
 
 ````rust
-use icu::decimal::DecimalFormatter;
+use core::num::NonZeroU8;
+
 use fixed_decimal::Decimal;
+use icu::decimal::DecimalFormatter;
+// ICU4X 2.1 currently exposes MeasureUnit and related formatter APIs through
+// `icu_experimental`, not an `icu::experimental` umbrella path.
+pub use icu_experimental::measure::measureunit::MeasureUnit;
 
 /// Options for formatting numbers.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NumberFormatOptions {
     pub style: NumberStyle,
-    pub min_integer_digits: NonZero<u8>,
+    pub unit_display: UnitDisplay,
+    pub min_integer_digits: NonZeroU8,
     pub min_fraction_digits: u8,
     pub max_fraction_digits: u8,
     pub use_grouping: bool,
@@ -756,7 +772,7 @@ pub struct NumberFormatOptions {
 //
 // The `max_fraction_digits` for currency formatting MUST default to the
 // ISO 4217 standard fraction digits for the given currency code. The
-// `NumberFormatter` resolves this via ICU4X `CurrencyInfo`.
+// `NumberFormatter` resolves this via ars-i18n's ISO 4217 helper table.
 //
 // | Currency Code | Currency Name           | Fraction Digits |
 // |---------------|-------------------------|-----------------|
@@ -792,7 +808,7 @@ pub struct NumberFormatOptions {
 //
 // This minimizes cumulative rounding bias in financial calculations.
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NumberStyle {
     Decimal,
     Percent,
@@ -800,7 +816,15 @@ pub enum NumberStyle {
     Unit(MeasureUnit),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UnitDisplay {
+    Long,
+    #[default]
+    Short,
+    Narrow,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SignDisplay {
     Auto,       // negative only
     Always,     // always show sign
@@ -851,7 +875,7 @@ pub enum RoundingMode {
 /// | KWD           | Kuwaiti Dinar           | 3               |
 /// | OMR           | Omani Rial              | 3               |
 /// | CLF           | Chilean UF              | 4               |
-fn iso4217_minor_units(code: &CurrencyCode) -> u8 {
+fn iso4217_minor_units(code: CurrencyCode) -> u8 {
     match code.as_str() {
         "BHD" | "KWD" | "OMR" | "IQD" | "LYD" | "TND" => 3,
         "CLF" | "UYW" => 4,
@@ -862,8 +886,9 @@ fn iso4217_minor_units(code: &CurrencyCode) -> u8 {
     }
 }
 
-// Currency, percent, and rounding helpers are inherent methods on NumberFormatter
-// (no separate trait — these are not used polymorphically).
+// Currency, percent, unit, and range helpers are inherent methods on
+// NumberFormatter. ars-i18n does not define separate CurrencyFormatter or
+// UnitFormatter wrapper types.
 
 impl NumberFormatter {
     /// Format a monetary amount using the ISO 4217 precision for the
@@ -876,13 +901,13 @@ impl NumberFormatter {
     /// ```
     /// let fmt = NumberFormatter::new(&locale_en_us, opts);
     /// assert_eq!(fmt.format_currency(1234.5, "USD"), "$1,234.50");
-    /// assert_eq!(fmt.format_currency(1234.5, "JPY"), "¥1,235");
+    /// assert_eq!(fmt.format_currency(1234.5, "JPY"), "￥1,234");
     /// assert_eq!(fmt.format_currency(1234.5, "KWD"), "KWD 1,234.500");
     /// ```
     pub fn format_currency(&self, amount: f64, currency_code: &str) -> String {
         let code = CurrencyCode::from_str(currency_code)
             .expect("invalid ISO 4217 currency code");
-        let precision = iso4217_minor_units(&code);
+        let precision = iso4217_minor_units(code);
 
         let mut opts = self.options.clone();
         opts.style = NumberStyle::Currency(code);
@@ -892,6 +917,12 @@ impl NumberFormatter {
         NumberFormatter::new(&self.locale, opts).format(amount)
     }
 
+    /// Format a fractional value as a percentage.
+    ///
+    /// ars-ui percent formatting accepts fractional inputs such as `0.47`
+    /// for `47%`. The formatter scales by `100` before delegating to ICU4X's
+    /// percent formatter so that locale-specific percent symbols, placement,
+    /// and spacing still come from CLDR data.
     pub fn format_percent(&self, value: f64, max_fraction_digits: Option<u8>) -> String {
         let frac = max_fraction_digits.unwrap_or(0);
 
@@ -900,13 +931,7 @@ impl NumberFormatter {
         opts.min_fraction_digits = 0;
         opts.max_fraction_digits = frac;
 
-        // ICU4X Percent style handles the ×100 conversion internally;
-        // pass the raw fraction (e.g., 0.75 for 75%).
         NumberFormatter::new(&self.locale, opts).format(value)
-    }
-
-    fn rounding_mode(&self) -> RoundingMode {
-        self.options.rounding_mode
     }
 }
 
@@ -943,7 +968,8 @@ impl Default for NumberFormatOptions {
     fn default() -> Self {
         Self {
             style: NumberStyle::Decimal,
-            min_integer_digits: NonZero::new(1).expect("hardcoded nonzero"),
+            unit_display: UnitDisplay::Short,
+            min_integer_digits: NonZeroU8::new(1).expect("hardcoded nonzero"),
             min_fraction_digits: 0,
             max_fraction_digits: 3,
             use_grouping: true,
@@ -956,52 +982,49 @@ impl Default for NumberFormatOptions {
 /// A locale-aware number formatter.
 ///
 /// `Clone` is derived to support caching in `NUMBER_FORMATTER_CACHE` (§9.3).
-/// The inner `DecimalFormatter` is wrapped in `Arc` so cloning is cheap.
+/// The formatter stores precomputed separators and delegates formatting to a
+/// style-specific ICU4X backend selected from `NumberStyle`.
 #[derive(Clone)]
 pub struct NumberFormatter {
     locale: Locale,
     options: NumberFormatOptions,
-    formatter: Arc<DecimalFormatter>,
+    decimal_separator: char,
+    grouping_separator: Option<char>,
+    /* style-specific backend */
 }
 
 impl NumberFormatter {
     /// Create a new locale-aware number formatter.
-    ///
-    /// With the `compiled_data` feature (our default), `DecimalFormatter::try_new()`
-    /// cannot fail — CLDR data is baked into the binary for all locales.
     pub fn new(locale: &Locale, options: NumberFormatOptions) -> Self {
-        let mut dec_opts = DecimalFormatterOptions::default();
-        dec_opts.grouping_strategy = if options.use_grouping {
-            Some(GroupingStrategy::Auto)
-        } else {
-            Some(GroupingStrategy::Never)
-        };
-        let formatter = DecimalFormatter::try_new((&locale.0).into(), dec_opts)
-            .expect("compiled_data guarantees decimal formatter is available for all locales");
-
-        Self {
-            locale: locale.clone(),
-            options,
-            formatter: Arc::new(formatter),
-        }
+        /* normalize defaults, precompute separators, and build a style-specific backend */
     }
 
     /// Format an f64 value.
     pub fn format(&self, value: f64) -> String {
-        // Note: Decimal::try_from_f64 returns Ok(Decimal::default()) for NaN/Inf inputs,
-        // silently formatting them as "0". This is intentional — callers should validate
-        // inputs before formatting if special NaN/Inf display is needed.
-        let mut fd = Decimal::try_from_f64(value, fixed_decimal::FloatPrecision::Floating)
-            .unwrap_or_default();
+        /* convert to Decimal, apply rounding/sign rules, and format with the backend */
+    }
 
-        // Apply max fraction digits (truncate beyond the limit)
-        fd.trunc(-(self.options.max_fraction_digits as i16));
-        // Apply min fraction digits (pad trailing zeros)
-        // Decimal = Signed<UnsignedDecimal>; .absolute accesses the unsigned inner
-        fd.absolute.pad_end(-(self.options.min_fraction_digits as i16));
+    /// Parse a locale-formatted number string back to f64.
+    ///
+    /// Parsing normalizes non-Latin digits, strips currency/unit affixes, and
+    /// accepts locale-specific decimal and grouping separators.
+    pub fn parse(&self, input: &str) -> Option<f64> {
+        let parsed = parse_locale_number(input, &self.locale)?;
+        if matches!(self.options.style, NumberStyle::Percent) {
+            Some(parsed / 100.0)
+        } else {
+            Some(parsed)
+        }
+    }
 
-        let formatted = self.formatter.format(&fd);
-        formatted.to_string()
+    /// Return this formatter's decimal separator.
+    pub const fn decimal_separator(&self) -> char {
+        self.decimal_separator
+    }
+
+    /// Return this formatter's grouping separator, when one is known.
+    pub const fn grouping_separator(&self) -> Option<char> {
+        self.grouping_separator
     }
 
     /// Format a range (for sliders with min-max display).
@@ -1034,15 +1057,6 @@ impl NumberFormatter {
         format!("{}{}{}", self.format(start), separator, self.format(end))
     }
 
-    /// Parse a locale-formatted number string back to f64.
-    ///
-    /// Before parsing, all Unicode Nd (decimal digit) characters are normalized
-    /// to ASCII 0-9 via `normalize_digits()`, enabling seamless input from
-    /// non-Latin numeral systems.
-    pub fn parse(&self, input: &str) -> Option<f64> {
-        let normalized = normalize_digits(input);
-        parse_locale_number(&normalized, &self.locale)
-    }
 }
 ````
 
@@ -1090,7 +1104,8 @@ pub fn normalize_digits(input: &str) -> String {
 /// Parse a locale-aware number string to f64.
 ///
 /// Handles locale-specific decimal separators (`.` vs `,`) and grouping,
-/// as well as non-Latin numeral systems (Arabic-Indic, Devanagari, Bengali, etc.).
+/// strips currency/unit affixes, and normalizes non-Latin numeral systems
+/// (Arabic-Indic, Devanagari, Bengali, etc.).
 ///
 /// # Examples
 /// - `"1,234.56"` (en-US) → `Some(1234.56)`
@@ -1098,18 +1113,11 @@ pub fn normalize_digits(input: &str) -> String {
 /// - `"1 234,56"` (fr-FR) → `Some(1234.56)`
 /// - `"١٬٢٣٤٫٥٦"` (ar) → `Some(1234.56)` (Arabic-Indic numerals)
 pub fn parse_locale_number(input: &str, locale: &Locale) -> Option<f64> {
-    // Step 1: Transliterate non-Latin digits to Western Arabic (0-9).
     let transliterated = normalize_digits(input);
-
     let (decimal_sep, group_sep) = decimal_and_group_separators(locale);
-
-    // Step 2: Strip grouping separators, replace decimal separator with '.'
-    let normalized: String = transliterated
-        .chars()
-        .filter(|&c| c != group_sep)
-        .map(|c| if c == decimal_sep { '.' } else { c })
-        .collect();
-
+    let filtered = filter_numeric_characters(&transliterated, decimal_sep, group_sep);
+    let chosen_decimal = choose_decimal_separator(&filtered, decimal_sep, group_sep);
+    let normalized = normalize_numeric_syntax(&filtered, chosen_decimal);
     normalized.parse::<f64>().ok()
 }
 
@@ -1186,17 +1194,15 @@ pub fn decimal_and_group_separators(locale: &Locale) -> (char, char) {
 
 ```rust
 impl NumberFormatter {
-    /// Format as a percentage (0.0-1.0 or 0.0-100.0 based on options).
+    /// Format a fractional value such as `0.47` as a localized percentage.
     ///
-    /// Production: Use ICU4X `DecimalFormatter` with `NumberStyle::Percent`.
-    /// ICU4X handles locale-specific percent symbols (Arabic: ٪ U+066A),
-    /// placement (before vs after number), and spacing.
+    /// Production: Use ICU4X's percent formatter for locale-specific percent
+    /// symbols (Arabic: ٪ U+066A), placement (before vs after number), and
+    /// spacing.
     ///
-    /// The `format_percent` function MUST use locale-aware spacing between
-    /// the number and percent symbol. Per CLDR, many locales require a
-    /// non-breaking space (e.g., French: "75 %", German: "75 %"). The
-    /// function should use ICU4X's percent formatter for full locale support.
-    /// At minimum, check the locale's percent pattern for spacing requirements.
+    /// ars-ui percent formatting treats the input as a fraction, not a raw
+    /// percent. `0.47` therefore formats as `47%`, and `parse()` divides by
+    /// `100` to round-trip the original fractional value.
 }
 ```
 
@@ -3019,22 +3025,24 @@ impl StringCollator {
 # All code uses icu::* paths; no need for individual icu_* crates in [dependencies].
 # The lightweight locale/provider portions may be used unconditionally because
 # `Locale` parsing and metadata access are part of the core contract on every target.
-icu = { version = "2.1", features = ["serde"] }
-icu_experimental = "0.4"  # Contains relativetime (not yet in umbrella)
-fixed_decimal = "0.7"     # Main type is Decimal (not FixedDecimal)
+icu = { version = "2.1", default-features = false }
+icu_experimental = { version = "0.4", default-features = false }
+fixed_decimal = { version = "0.7", default-features = false, features = ["ryu"] }
+tinystr = { version = "0.8", default-features = false }
 
 # Infrastructure crates — not re-exported by the umbrella
-icu_provider = "2.1"
+icu_provider = { version = "2.1", default-features = false }
 icu_datagen = { version = "2.1", optional = true }
 
 [features]
-default = ["icu4x", "compiled-data", "gregorian"]
-# `icu4x` enables formatter backends and compiled CLDR data. `Locale` itself may
-# still depend on ICU locale/provider crates even when `web-intl` is the active
-# formatting backend on the client.
-icu4x = ["dep:icu"]
+default = ["std", "gregorian", "icu4x"]
+# `icu4x` enables formatter backends and compiled CLDR data. ICU4X 2.1's
+# experimental measurement, currency, and percent formatters are provided by
+# the direct `icu_experimental` dependency rather than the umbrella crate.
+# This is an intentional implementation detail of the current ICU4X release,
+# not a public ars-i18n API distinction.
+icu4x = ["icu/compiled_data", "icu_experimental/compiled_data"]
 web-intl = ["dep:wasm-bindgen", "dep:js-sys"]
-compiled-data = ["icu/compiled_data"]
 
 # Calendar feature flags — include only what you need
 gregorian = []     # Always included
@@ -3060,7 +3068,7 @@ all-calendars = ["buddhist", "japanese", "hebrew", "islamic", "persian", "ethiop
 // In a build.rs (optional — for custom locale data sets):
 // icu_datagen generates a Rust file with embedded data.
 
-// Usage (automatically used when "compiled-data" feature is on):
+// Usage (automatically used when the `icu4x` feature enables compiled data):
 // ICU4X formatters use compiled baked data internally (via each crate's `compiled_data` feature).
 
 // Estimate WASM binary size impact:
@@ -3075,24 +3083,29 @@ all-calendars = ["buddhist", "japanese", "hebrew", "islamic", "persian", "ethiop
 ```rust
 /// Cache formatters keyed by locale + options to avoid re-creation.
 ///
-/// Note: This cache uses `std::sync::Mutex`, which requires `std`.
-/// On `no_std` targets (bare `alloc`), formatters must be constructed
-/// per-call or cached by the application using thread-local storage.
+/// Note: ICU4X formatter handles used inside `NumberFormatter` are not
+/// `Send`, so ars-i18n uses a `std` thread-local cache rather than a process-
+/// wide `Mutex`-guarded static. On `no_std` targets (bare `alloc`),
+/// formatters must be constructed per-call or cached by the application.
 #[cfg(feature = "std")]
-static NUMBER_FORMATTER_CACHE: std::sync::LazyLock<
-    std::sync::Mutex<alloc::collections::BTreeMap<String, NumberFormatter>>
-> = std::sync::LazyLock::new(Default::default);
+thread_local! {
+    static NUMBER_FORMATTER_CACHE:
+        std::cell::RefCell<alloc::collections::BTreeMap<String, NumberFormatter>> =
+            std::cell::RefCell::new(alloc::collections::BTreeMap::new());
+}
 
 #[cfg(feature = "std")]
 pub fn get_number_formatter(locale: &Locale, options: &NumberFormatOptions) -> NumberFormatter {
     let key = format!("{:?}-{:?}", locale.to_bcp47(), options);
-    let mut cache = NUMBER_FORMATTER_CACHE.lock().expect("NumberFormatter cache lock poisoned");
-    if let Some(existing) = cache.get(&key) {
-        return existing.clone();
-    }
-    let formatter = NumberFormatter::new(locale, options.clone());
-    cache.insert(key, formatter.clone());
-    formatter
+    NUMBER_FORMATTER_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(existing) = cache.get(&key) {
+            return existing.clone();
+        }
+        let formatter = NumberFormatter::new(locale, options.clone());
+        cache.insert(key, formatter.clone());
+        formatter
+    })
 }
 ```
 
@@ -3973,4 +3986,4 @@ Adapter styling guidance must account for text expansion ratios across locales (
 
 ## 16. Currency Formatting for Mixed LTR/RTL Content
 
-Currency formatting in mixed-direction content must wrap formatted values in Unicode BiDi isolates (U+2066 LRI ... U+2069 PDI) or HTML `<bdi>` elements. `CurrencyFormatter` output includes directional isolates by default. Components displaying monetary values in RTL contexts must not rely on CSS `direction` alone — explicit BiDi isolation prevents digit reordering.
+Currency formatting in mixed-direction content must wrap formatted values in Unicode BiDi isolates (U+2066 LRI ... U+2069 PDI) or HTML `<bdi>` elements. `NumberFormatter` output does not implicitly insert directional isolates. Components displaying monetary values in RTL contexts must not rely on CSS `direction` alone — explicit BiDi isolation prevents digit reordering.

@@ -90,7 +90,7 @@ impl<T: Clone> AsyncCollection<T> {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            inner: StaticCollection::from_vec(Vec::new()),
+            inner: StaticCollection::default(),
             next_cursor: None,
             has_more: true,
             loading_state: AsyncLoadingState::Idle,
@@ -128,7 +128,7 @@ impl<T: Clone> AsyncCollection<T> {
     ) -> Self {
         let has_more = next_cursor.is_some();
         // Merge existing items with the new page.
-        let mut merged: Vec<(Key, String, T)> = self
+        let mut merged = self
             .inner
             .nodes()
             .filter_map(|n| {
@@ -136,11 +136,11 @@ impl<T: Clone> AsyncCollection<T> {
                     .as_ref()
                     .map(|v| (n.key.clone(), n.text_value.clone(), v.clone()))
             })
-            .collect();
+            .collect::<Vec<_>>();
         merged.extend(new_items);
 
         Self {
-            inner: StaticCollection::from_vec(merged),
+            inner: merged.into(),
             next_cursor,
             has_more,
             loading_state: AsyncLoadingState::Loaded,
@@ -527,20 +527,20 @@ mod tests {
     #[test]
     fn collection_delegation_keys_iterator() {
         let c = loaded_collection();
-        let keys: Vec<_> = c.keys().collect();
+        let keys = c.keys().collect::<Vec<_>>();
         assert_eq!(keys, vec![&Key::int(1), &Key::int(2), &Key::int(3)]);
 
-        let nodes: Vec<_> = c.nodes().map(|n| n.text_value.as_str()).collect();
+        let nodes = c.nodes().map(|n| n.text_value.as_str()).collect::<Vec<_>>();
         assert_eq!(nodes, vec!["Apple", "Banana", "Cherry"]);
 
-        let item_keys: Vec<_> = c.item_keys().collect();
+        let item_keys = c.item_keys().collect::<Vec<_>>();
         assert_eq!(item_keys, vec![&Key::int(1), &Key::int(2), &Key::int(3)]);
     }
 
     #[test]
     fn collection_delegation_children_of_empty() {
         let c = loaded_collection();
-        let children: Vec<_> = c.children_of(&Key::str("nonexistent")).collect();
+        let children = c.children_of(&Key::str("nonexistent")).collect::<Vec<_>>();
         assert!(children.is_empty());
     }
 

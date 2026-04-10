@@ -214,31 +214,31 @@ mod tests {
 
     #[test]
     fn key_from_str_ref() {
-        let key: Key = Key::from("hello");
+        let key = Key::from("hello");
         assert_eq!(key, Key::String("hello".into()));
     }
 
     #[test]
     fn key_from_string() {
-        let key: Key = Key::from(String::from("x"));
+        let key = Key::from(String::from("x"));
         assert_eq!(key, Key::String("x".into()));
     }
 
     #[test]
     fn key_from_u64() {
-        let key: Key = Key::from(42u64);
+        let key = Key::from(42u64);
         assert_eq!(key, Key::Int(42));
     }
 
     #[test]
     fn key_from_u32() {
-        let key: Key = Key::from(7u32);
+        let key = Key::from(7u32);
         assert_eq!(key, Key::Int(7));
     }
 
     #[test]
     fn key_from_usize() {
-        let key: Key = Key::from(3usize);
+        let key = Key::from(3usize);
         assert_eq!(key, Key::Int(3));
     }
 
@@ -303,7 +303,7 @@ mod tests {
         set.insert(Key::str("a"));
         set.insert(Key::Int(1));
 
-        let keys: Vec<_> = set.into_iter().collect();
+        let keys = set.into_iter().collect::<Vec<_>>();
         assert_eq!(
             keys,
             vec![Key::Int(1), Key::Int(2), Key::str("a"), Key::str("z")]
@@ -400,7 +400,7 @@ mod tests {
         #[test]
         fn uuid_from_impl() {
             let id = sample_uuid_a();
-            let key: Key = Key::from(id);
+            let key = Key::from(id);
             assert_eq!(key, Key::Uuid(id));
         }
 
@@ -459,7 +459,7 @@ mod tests {
             set.insert(Key::str("a"));
             set.insert(Key::Int(2));
 
-            let keys: Vec<_> = set.into_iter().collect();
+            let keys = set.into_iter().collect::<Vec<_>>();
             assert_eq!(
                 keys,
                 vec![

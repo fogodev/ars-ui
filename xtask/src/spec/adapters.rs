@@ -19,7 +19,7 @@ pub fn execute(root: &SpecRoot, framework: &str) -> Result<String, Error> {
     if adapters.is_empty() {
         return Ok(format!("No {framework} adapter files registered.\n"));
     }
-    let mut by_category: BTreeMap<String, Vec<(&String, &String)>> = BTreeMap::new();
+    let mut by_category = BTreeMap::<_, Vec<_>>::new();
     for (name, path) in adapters {
         let category = m
             .components

@@ -32,7 +32,7 @@ pub fn attr_map_to_leptos(
     element_id: Option<&str>,
 ) -> LeptosAttrResult {
     let parts = map.into_parts();
-    let mut attrs: Vec<(String, String)> = parts
+    let mut attrs = parts
         .attrs
         .into_iter()
         .filter_map(|(key, value)| match value {
@@ -40,7 +40,7 @@ pub fn attr_map_to_leptos(
             AttrValue::Bool(true) => Some((key.to_string(), String::new())),
             AttrValue::Bool(false) | AttrValue::None => None,
         })
-        .collect();
+        .collect::<Vec<_>>();
 
     let mut cssom_styles = Vec::new();
     let mut nonce_css = String::new();

@@ -455,10 +455,10 @@ mod tests {
         assert_eq!(all.len(), 0);
         assert_eq!(single.len(), 1);
 
-        let empty_keys: Vec<_> = empty.keys().cloned().collect();
-        let single_keys: Vec<_> = single.keys().cloned().collect();
-        let multiple_keys: Vec<_> = multiple.keys().cloned().collect();
-        let all_keys: Vec<_> = all.keys().cloned().collect();
+        let empty_keys = empty.keys().cloned().collect::<Vec<_>>();
+        let single_keys = single.keys().cloned().collect::<Vec<_>>();
+        let multiple_keys = multiple.keys().cloned().collect::<Vec<_>>();
+        let all_keys = all.keys().cloned().collect::<Vec<_>>();
 
         assert!(empty_keys.is_empty());
         assert_eq!(single_keys, vec![Key::int(3)]);

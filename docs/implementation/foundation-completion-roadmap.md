@@ -851,6 +851,22 @@ The project needs a fully stable foundation before component work starts. Compon
 
 ---
 
+### Wave 5: Browser Intl Backends
+
+**Goal:** Complete the `web-intl` i18n backend so WASM client builds can rely on browser `Intl` services behind the same public `ars-i18n` API surface established by the ICU4X tasks.
+
+**Depends on:** `#75` plus the relevant Wave 4 i18n foundation tasks.
+
+| GitHub                                               | Title                                                                          | Points | Epic | Deps      |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------ | ------ | ---- | --------- |
+| [#124](https://github.com/fogodev/ars-ui/issues/124) | Implement web-intl NumberFormatter backend in ars-i18n                         | 5      | #54  | #75, #79  |
+| [#125](https://github.com/fogodev/ars-ui/issues/125) | Implement web-intl DateFormatter and RelativeTimeFormatter backend in ars-i18n | 5      | #54  | #75, #80  |
+| [#126](https://github.com/fogodev/ars-ui/issues/126) | Implement web-intl plural and ordinal rules backend in ars-i18n                | 3      | #54  | #75       |
+
+**Total:** 13 points
+
+---
+
 ### Wave 4 Task Details
 
 #### W4-1: Implement LongPress interaction in ars-interactions
@@ -1067,6 +1083,105 @@ The project needs a fully stable foundation before component work starts. Compon
 
 ---
 
+### Wave 5 Task Details
+
+#### W5-1: Implement web-intl NumberFormatter backend in ars-i18n
+
+- Points: `5`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: #75, #79
+- Spec refs:
+  - `spec/foundation/04-internationalization.md`
+  - `spec/testing/14-ci.md`
+- Goal: implement the browser `Intl.NumberFormat` backend behind the existing `ars-i18n::NumberFormatter` public API.
+- Files to create/modify:
+  - `crates/ars-i18n/Cargo.toml`
+  - `crates/ars-i18n/src/lib.rs`
+  - `crates/ars-i18n/src/number.rs` or `crates/ars-i18n/src/web_intl/number.rs`
+  - `spec/foundation/04-internationalization.md`
+  - `spec/testing/14-ci.md` only if checks/spec drift need sync
+- Tests to add first:
+  - Feature-gated compile coverage proving `ars-i18n` builds with `--no-default-features --features web-intl --target wasm32-unknown-unknown`.
+  - Tests for option mapping of decimal, percent, and currency formatting.
+  - Tests proving `icu4x` and `web-intl` are mutually exclusive.
+  - Tests or smoke coverage for locale separator extraction and parsing behavior under `web-intl`.
+- Acceptance criteria:
+  - `web-intl` is a real backend, not an empty feature flag.
+  - `NumberFormatter` keeps the same public API under both `icu4x` and `web-intl`.
+  - Browser builds use `Intl.NumberFormat` for decimal, percent, and currency formatting.
+  - `format_percent(0.47, None)` preserves ars-ui fractional semantics and formats as `47%`.
+  - `format_currency()` preserves ISO-4217 minor-unit defaults.
+  - `decimal_separator()` and `grouping_separator()` work under `web-intl`.
+  - `parse()` remains locale-aware for browser-backed formatting.
+  - `icu4x` and `web-intl` cannot be enabled together.
+  - CI and verification include the wasm `web-intl` cargo check path required by the spec.
+- Spec impact: `Likely yes` to remove stale backend-specific public wrapper sketches if the concrete `NumberFormatter` API remains canonical.
+
+#### W5-2: Implement web-intl DateFormatter and RelativeTimeFormatter backend in ars-i18n
+
+- Points: `5`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: #75, #80
+- Spec refs:
+  - `spec/foundation/04-internationalization.md`
+  - `spec/shared/date-time-types.md`
+  - `spec/testing/14-ci.md`
+- Goal: implement browser `Intl.DateTimeFormat` and `Intl.RelativeTimeFormat` backends for the existing `ars-i18n` date and relative-time public APIs.
+- Files to create/modify:
+  - `crates/ars-i18n/Cargo.toml`
+  - `crates/ars-i18n/src/lib.rs`
+  - `crates/ars-i18n/src/date.rs` and/or `crates/ars-i18n/src/web_intl/date.rs`
+  - `spec/foundation/04-internationalization.md`
+  - `spec/testing/14-ci.md` only if checks/spec drift need sync
+- Tests to add first:
+  - Feature-gated compile coverage proving `ars-i18n` builds with `--no-default-features --features web-intl --target wasm32-unknown-unknown`.
+  - Tests for representative date formatting under locale-sensitive browser patterns.
+  - Tests for relative time formatting via browser `Intl.RelativeTimeFormat`.
+  - Tests proving `icu4x` and `web-intl` are mutually exclusive.
+- Acceptance criteria:
+  - `web-intl` is a real backend for the public date and relative-time formatter surface.
+  - Browser builds use `Intl.DateTimeFormat` for date and time formatting where the spec maps cleanly to browser capabilities.
+  - Browser builds use `Intl.RelativeTimeFormat` for relative time output.
+  - The public `DateFormatter` and related API stay stable across `icu4x` and `web-intl` builds.
+  - Unsupported browser gaps are handled explicitly in code and spec rather than silently changing semantics.
+  - CI and verification include the wasm `web-intl` cargo check path required by the spec.
+- Spec impact: `Likely yes` if browser APIs cannot exactly match every ICU4X-oriented option or calendar behavior currently described.
+
+#### W5-3: Implement web-intl plural and ordinal rules backend in ars-i18n
+
+- Points: `3`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: #75
+- Spec refs:
+  - `spec/foundation/04-internationalization.md`
+  - `spec/testing/14-ci.md`
+- Goal: implement browser `Intl.PluralRules` support for plural and ordinal category selection behind the existing `ars-i18n` contract.
+- Files to create/modify:
+  - `crates/ars-i18n/Cargo.toml`
+  - `crates/ars-i18n/src/lib.rs`
+  - `crates/ars-i18n/src/plural.rs` and/or `crates/ars-i18n/src/web_intl/plural.rs`
+  - `spec/foundation/04-internationalization.md`
+  - `spec/testing/14-ci.md` only if checks/spec drift need sync
+- Tests to add first:
+  - Feature-gated compile coverage proving `ars-i18n` builds with `--no-default-features --features web-intl --target wasm32-unknown-unknown`.
+  - Tests for representative cardinal and ordinal category selection across multiple locales.
+  - Tests proving `icu4x` and `web-intl` are mutually exclusive.
+- Acceptance criteria:
+  - `web-intl` is a real backend for plural and ordinal rules.
+  - Browser builds use `Intl.PluralRules` for cardinal and ordinal category selection.
+  - The public plural-category API stays stable across `icu4x` and `web-intl` builds.
+  - Any browser and ICU naming or behavior mismatches are normalized at the `ars-i18n` API boundary.
+  - CI and verification include the wasm `web-intl` cargo check path required by the spec.
+- Spec impact: `Potentially yes` if the current spec still assumes ICU4X-only plural-rule abstractions.
+
+---
+
 ## Dependency Graph
 
 ```diagram
@@ -1117,6 +1232,11 @@ Wave 4 (50 pts)            ┌─── Wave 3 complete
   #84 (filter/sort, 3)     │
   #85 (media query, 2)     │
                            ▼
+Wave 5 (13 pts)            ┌─── Wave 4 i18n tasks available
+  #124 (web number, 5)     │
+  #125 (web date/rtf, 5)   │
+  #126 (web plural, 3)     │
+                           ▼
             ┌─── All waves complete
             │
             ▼
@@ -1133,12 +1253,12 @@ Wave 4 (50 pts)            ┌─── Wave 3 complete
 | Dioxus adapter      | #9    | #56, #106                                                      |
 | A11y                | #3    | #73, #89                                                       |
 | Collections         | #53   | #62, #63, #64, #70, #71, #81, #82, #83, #84                    |
-| I18n                | #54   | #75, #79, #80                                                  |
+| I18n                | #54   | #75, #79, #80, #124, #125, #126                                |
 | First utility slice | #10   | #104                                                           |
 
 ## Post-Foundation Plan
 
-After all four waves are complete:
+After all five waves are complete:
 
 1. Close or supersede `#24` ("Break the first utility slice into agent-ready delivery cards").
 2. Decompose the first utility slice (Button, VisuallyHidden, Separator, FocusScope, Toggle, Field, Form) into agent-ready component tasks.

@@ -292,7 +292,7 @@ impl ars_core::Machine for Machine {
         };
 
         let ctx = Context {
-            items: StaticCollection::from_vec(Vec::new()),
+            items: StaticCollection::default(),
             input_value: match &props.input_value {
                 Some(v) => Bindable::controlled(v.clone()),
                 None => Bindable::uncontrolled(props.default_input_value.clone()),

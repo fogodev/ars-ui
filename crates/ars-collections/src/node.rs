@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn node_with_tree_fields() {
-        let node: Node<String> = Node {
+        let node = Node {
             key: Key::str("child-1"),
             node_type: NodeType::Item,
             value: Some("child".to_string()),

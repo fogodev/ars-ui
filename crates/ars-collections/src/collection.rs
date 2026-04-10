@@ -93,7 +93,7 @@ pub trait Collection<T> {
     ///
     /// **Callers that need to store keys across mutations MUST clone:**
     /// ```rust,ignore
-    /// let key: Key = collection.first_key().cloned().expect("collection is non-empty");
+    /// let key = collection.first_key().cloned().expect("collection is non-empty");
     /// // `key` is now owned — safe across mutations
     /// ```
     ///

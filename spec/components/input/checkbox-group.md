@@ -308,7 +308,7 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx| {
                     match max {
                         Some(n) => {
-                            let truncated: BTreeSet<Key> = all.into_iter().take(n).collect();
+                            let truncated = all.into_iter().take(n).collect::<BTreeSet<_>>();
                             ctx.value.set(truncated);
                         }
                         None => ctx.value.set(all),

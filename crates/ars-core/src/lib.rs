@@ -790,7 +790,7 @@ impl<M: Machine> Service<M> {
         )]
         let mut truncated = false;
         let mut iterations = 0;
-        let mut context_change_count: usize = 0;
+        let mut context_change_count = 0;
 
         while let Some(event) = self.event_queue.pop_front() {
             iterations += 1;

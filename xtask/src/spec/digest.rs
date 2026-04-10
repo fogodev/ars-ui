@@ -65,9 +65,9 @@ pub fn execute(root: &SpecRoot, component: &str) -> Result<String, Error> {
 
 /// Extract content under a section heading until the next heading of equal or higher level.
 fn extract_section(content: &str, heading_prefixes: &[&str]) -> Option<String> {
-    let lines: Vec<&str> = content.lines().collect();
+    let lines = content.lines().collect::<Vec<_>>();
     let mut start_idx = None;
-    let mut start_level: u8 = 0;
+    let mut start_level = 0;
 
     for (i, line) in lines.iter().enumerate() {
         if let Some((level, text)) = manifest::parse_heading(line) {
@@ -91,7 +91,7 @@ fn extract_section(content: &str, heading_prefixes: &[&str]) -> Option<String> {
         }
     }
 
-    let section: String = lines[start..end].join("\n");
+    let section = lines[start..end].join("\n");
     let trimmed = section.trim();
     if trimmed.is_empty() {
         None

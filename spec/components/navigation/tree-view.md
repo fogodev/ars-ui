@@ -445,10 +445,10 @@ impl ars_core::Machine for Machine {
             // ── Expand/Collapse All ────────────────────────────────────
             // ExpandAll — expand every expandable node
             Event::ExpandAll => {
-                let expandable: Vec<String> = ctx.items.nodes()
+                let expandable = ctx.items.nodes()
                     .filter(|n| n.has_children)
                     .map(|n| n.key.to_string())
-                    .collect();
+                    .collect::<Vec<_>>();
                 Some(TransitionPlan::context_only(move |ctx| {
                     let mut exp = ctx.expanded.get().clone();
                     for key in expandable {

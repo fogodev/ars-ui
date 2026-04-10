@@ -145,7 +145,7 @@ impl ars_core::Machine for Machine {
         let messages = messages.clone();
         let ctx = Context {
             locale,
-            menus: StaticCollection::empty(),
+            menus: StaticCollection::default(),
             active_menu: None,
             focused_item: None,
             focus_visible: false,

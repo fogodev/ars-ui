@@ -146,19 +146,19 @@ mod tests {
 
     #[test]
     fn calendar_date_none_empty() {
-        let date: Option<ars_i18n::CalendarDate> = None;
+        let date = None::<ars_i18n::CalendarDate>;
         assert!(date.is_empty());
     }
 
     #[test]
     fn option_f64_none_empty() {
-        let n: Option<f64> = None;
+        let n = None::<f64>;
         assert!(n.is_empty());
     }
 
     #[test]
     fn option_f64_some_not_empty() {
-        let n: Option<f64> = Some(42.0);
+        let n = Some(42.0);
         assert!(!n.is_empty());
     }
 

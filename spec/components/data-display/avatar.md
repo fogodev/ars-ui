@@ -154,7 +154,7 @@ impl Default for Messages {
     fn default() -> Self {
         Self {
             initials_fn: MessageFn::new(|name, _locale| {
-                let parts: Vec<&str> = name.split_whitespace().collect();
+                let parts = name.split_whitespace().collect::<Vec<_>>();
                 match parts.as_slice() {
                     [] => String::new(),
                     [single] => single.chars().next()

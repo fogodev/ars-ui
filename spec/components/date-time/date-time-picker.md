@@ -148,7 +148,7 @@ impl Context {
     /// Find the next editable segment after the given segment, crossing the
     /// date-to-time boundary when the current segment is the last date segment.
     pub fn next_editable_after(&self, kind: DateSegmentKind) -> Option<DateSegmentKind> {
-        let all: Vec<_> = self.all_segments().collect();
+        let all = self.all_segments().collect::<Vec<_>>();
         let idx = all.iter().position(|s| s.kind == kind)?;
         all[idx + 1..].iter().find(|s| s.is_editable).map(|s| s.kind)
     }
@@ -156,7 +156,7 @@ impl Context {
     /// Find the previous editable segment before the given segment, crossing
     /// the time-to-date boundary when the current segment is the first time segment.
     pub fn prev_editable_before(&self, kind: DateSegmentKind) -> Option<DateSegmentKind> {
-        let all: Vec<_> = self.all_segments().collect();
+        let all = self.all_segments().collect::<Vec<_>>();
         let idx = all.iter().position(|s| s.kind == kind)?;
         all[..idx].iter().rev().find(|s| s.is_editable).map(|s| s.kind)
     }
@@ -834,11 +834,11 @@ impl ars_core::Machine for Machine {
                 if is_readonly(ctx) { return None; }
                 Some(TransitionPlan::to(State::Idle)
                     .apply(|ctx| {
-                        let date_editable: Vec<_> = ctx.date_segments.iter()
-                            .filter(|s| s.is_editable).map(|s| s.kind).collect();
+                        let date_editable = ctx.date_segments.iter()
+                            .filter(|s| s.is_editable).map(|s| s.kind).collect::<Vec<_>>();
                         for k in date_editable { ctx.clear_segment_value(k); }
-                        let time_editable: Vec<_> = ctx.time_segments.iter()
-                            .filter(|s| s.is_editable).map(|s| s.kind).collect();
+                        let time_editable = ctx.time_segments.iter()
+                            .filter(|s| s.is_editable).map(|s| s.kind).collect::<Vec<_>>();
                         for k in time_editable { ctx.clear_segment_value(k); }
                         ctx.date_value = None;
                         ctx.time_value = None;

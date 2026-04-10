@@ -322,7 +322,7 @@ impl ars_core::Machine for Machine {
                 vals[i] = c.to_string();
 
                 if vals.iter().all(|v| !v.is_empty()) {
-                    let combined: String = vals.iter().map(|v| v.as_str()).collect();
+                    let combined = vals.iter().map(|v| v.as_str()).collect::<String>();
                     let blur = ctx.blur_on_complete;
                     let mut plan = TransitionPlan::to(State::Completed).apply(move |ctx| {
                         ctx.value.set(vals);
@@ -388,7 +388,7 @@ impl ars_core::Machine for Machine {
             // ── Paste ─────────────────────────────────────────────
             (_, Event::Paste(text)) => {
                 let mode = ctx.mode.clone();
-                let chars: Vec<char> = text.chars()
+                let chars = text.chars::<Vec<_>>()
                     .filter(|c| match mode {
                         Mode::Numeric => c.is_ascii_digit(),
                         Mode::Alphanumeric => c.is_alphanumeric(),
@@ -404,7 +404,7 @@ impl ars_core::Machine for Machine {
                 }
 
                 if vals.iter().all(|v| !v.is_empty()) {
-                    let combined: String = vals.iter().map(|v| v.as_str()).collect();
+                    let combined = vals.iter().map(|v| v.as_str()).collect::<String>();
                     let blur = ctx.blur_on_complete;
                     let mut plan = TransitionPlan::to(State::Completed).apply(move |ctx| {
                         ctx.value.set(vals);
@@ -582,7 +582,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Type, "hidden");
-        let combined: String = self.ctx.value.get().iter().map(|v| v.as_str()).collect();
+        let combined = self.ctx.value.get().iter().map(|v| v.as_str()).collect::<String>();
         attrs.set(HtmlAttr::Value, combined);
         if let Some(ref name) = self.ctx.name { attrs.set(HtmlAttr::Name, name); }
         if let Some(ref form) = self.props.form { attrs.set(HtmlAttr::Form, form); }

@@ -77,7 +77,7 @@ pub fn attr_map_to_dioxus(
 ) -> DioxusAttrResult {
     let AttrMapParts { attrs, styles } = map.into_parts();
 
-    let mut result: Vec<Attribute> = attrs
+    let mut result = attrs
         .into_iter()
         .filter_map(|(key, val)| match val {
             AttrValue::String(s) => Some(Attribute::new(
@@ -94,7 +94,7 @@ pub fn attr_map_to_dioxus(
             )),
             AttrValue::Bool(false) | AttrValue::None => None,
         })
-        .collect();
+        .collect::<Vec<_>>();
 
     let mut cssom_styles = Vec::new();
     let mut nonce_css = String::new();
@@ -102,7 +102,7 @@ pub fn attr_map_to_dioxus(
     match strategy {
         StyleStrategy::Inline => {
             if !styles.is_empty() {
-                let style_str: String = styles
+                let style_str = styles
                     .into_iter()
                     .map(|(prop, val)| format!("{prop}: {val};"))
                     .collect::<Vec<_>>()
@@ -160,10 +160,10 @@ pub fn apply_styles_cssom(el: &web_sys::HtmlElement, styles: &[(CssProperty, Str
 
 /// Convert styles to a CSS rule string for nonce-based injection.
 fn styles_to_nonce_css(id: &str, styles: &[(CssProperty, String)]) -> String {
-    let decls: Vec<String> = styles
+    let decls = styles
         .iter()
         .map(|(prop, val)| format!("  {prop}: {val};"))
-        .collect();
+        .collect::<Vec<_>>();
     format!("[data-ars-style-id=\"{id}\"] {{\n{}\n}}", decls.join("\n"))
 }
 

@@ -83,7 +83,7 @@ impl Context {
         let show_left_ellipsis  = left_start > 2;
         let show_right_ellipsis = right_end < total.saturating_sub(1);
 
-        let mut pages: Vec<Option<u32>> = vec![Some(1)];
+        let mut pages = vec![Some(1)];
 
         if show_left_ellipsis {
             pages.push(None); // ellipsis

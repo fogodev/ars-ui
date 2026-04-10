@@ -17,11 +17,11 @@ pub fn execute(root: &SpecRoot, shared_type: &str) -> Result<String, Error> {
             available: m.shared.keys().cloned().collect(),
         });
     }
-    let dependents: Vec<_> = m
+    let dependents = m
         .components
         .iter()
         .filter(|(_, c)| c.shared_deps.iter().any(|d| d == shared_type))
-        .collect();
+        .collect::<Vec<_>>();
     let mut out = String::new();
     writeln!(out, "# Components depending on shared/{shared_type}").expect("write to String");
     writeln!(out).expect("write to String");

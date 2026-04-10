@@ -6,7 +6,7 @@
 
 pub(crate) mod feature_matrix;
 
-use std::{fmt, io, path::Path, process};
+use std::{fmt, fs, io, path::Path, process};
 
 /// CI pipeline steps, matching the GitHub Actions job names.
 ///
@@ -42,6 +42,47 @@ pub enum Step {
     FeatureMatrixLeptos,
     /// Feature flags — ars-dioxus (4 combos + wasm32).
     FeatureMatrixDioxus,
+}
+
+/// The two mutually exclusive `ars-i18n` backend features.
+const I18N_BACKENDS: [&str; 2] = ["icu4x", "web-intl"];
+
+/// Read `crates/ars-i18n/Cargo.toml` and build two comma-separated feature
+/// lists — one per backend — that together cover every feature.
+///
+/// Each list contains all features except `default` and the *other* backend,
+/// so new features added to the crate are picked up automatically.
+fn i18n_feature_lists() -> Result<[String; 2], Error> {
+    let path = Path::new("crates/ars-i18n/Cargo.toml");
+    let content = fs::read_to_string(path).map_err(Error::Io)?;
+    let doc = content.parse::<toml::Table>().map_err(|e| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{path:?}: {e}"),
+        ))
+    })?;
+
+    let features = doc
+        .get("features")
+        .and_then(toml::Value::as_table)
+        .ok_or_else(|| {
+            Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{path:?}: missing [features] table"),
+            ))
+        })?;
+
+    let common = features
+        .keys()
+        .map(String::as_str)
+        .filter(|k| *k != "default" && !I18N_BACKENDS.contains(k))
+        .collect::<Vec<_>>();
+
+    Ok(I18N_BACKENDS.map(|backend| {
+        let mut all = common.clone();
+        all.push(backend);
+        all.join(",")
+    }))
 }
 
 /// Default pipeline order when no steps are specified.
@@ -129,12 +170,12 @@ impl std::error::Error for Error {}
 ///
 /// Returns [`CiError`] on the first step that fails — either a subprocess
 /// non-zero exit, a missing tool, or a coverage threshold violation.
-pub fn run(steps: Vec<Step>) -> Result<(), Error> {
+pub fn run(steps: Vec<Step>, message_format: Option<&str>) -> Result<(), Error> {
     let steps = resolve_steps(steps);
 
     for (i, step) in steps.iter().enumerate() {
         print_header(*step, i + 1, steps.len());
-        run_step(*step)?;
+        run_step(*step, message_format)?;
         print_pass(*step);
     }
 
@@ -178,11 +219,11 @@ fn resolve_steps(steps: Vec<Step>) -> Vec<Step> {
 // ---------------------------------------------------------------------------
 
 /// Execute a single CI step.
-fn run_step(step: Step) -> Result<(), Error> {
+fn run_step(step: Step, message_format: Option<&str>) -> Result<(), Error> {
     match step {
         Step::Fmt => run_fmt(),
-        Step::Check => run_check(),
-        Step::Clippy => run_clippy(),
+        Step::Check => run_check(message_format),
+        Step::Clippy => run_clippy(message_format),
         Step::Unit => run_unit(),
         Step::Integration => run_integration(),
         Step::Adapter => run_adapter(),
@@ -209,23 +250,88 @@ fn run_fmt() -> Result<(), Error> {
     cargo(Step::Fmt, &["+nightly", "fmt", "--all", "--check"])
 }
 
-fn run_check() -> Result<(), Error> {
-    cargo(Step::Check, &["check", "--workspace", "--all-features"])
+fn run_check(message_format: Option<&str>) -> Result<(), Error> {
+    // Exclude ars-i18n: its `icu4x` and `web-intl` features are mutually
+    // exclusive, so `--all-features` would trigger a compile_error!.
+    // Instead, check ars-i18n twice — once per backend — to cover all features.
+    cargo_with_format(
+        Step::Check,
+        &[
+            "check",
+            "--workspace",
+            "--all-features",
+            "--exclude",
+            "ars-i18n",
+        ],
+        message_format,
+    )?;
+
+    let [icu4x_features, web_intl_features] = i18n_feature_lists()?;
+    for features in [&icu4x_features, &web_intl_features] {
+        cargo_with_format(
+            Step::Check,
+            &[
+                "check",
+                "-p",
+                "ars-i18n",
+                "--all-targets",
+                "--no-default-features",
+                "--features",
+                features,
+            ],
+            message_format,
+        )?;
+    }
+    Ok(())
 }
 
-fn run_clippy() -> Result<(), Error> {
-    cargo(
-        Step::Clippy,
-        &[
+fn run_clippy(message_format: Option<&str>) -> Result<(), Error> {
+    clippy_workspace(message_format, true)
+}
+
+/// Run workspace-wide clippy with ars-i18n backend splitting.
+///
+/// Used by both the CI `clippy` step (`deny_warnings = true`) and
+/// `cargo xclippy` for development (`deny_warnings = false`).
+///
+/// # Errors
+///
+/// Returns [`Error::StepFailed`] if any clippy invocation exits non-zero,
+/// or [`Error::Io`] if `crates/ars-i18n/Cargo.toml` cannot be read.
+pub fn clippy_workspace(message_format: Option<&str>, deny_warnings: bool) -> Result<(), Error> {
+    // Exclude ars-i18n: its `icu4x` and `web-intl` features are mutually
+    // exclusive, so `--all-features` would trigger a compile_error!.
+    // Instead, lint ars-i18n twice — once per backend — to cover all features.
+    let mut workspace_args = vec![
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--all-features",
+        "--exclude",
+        "ars-i18n",
+    ];
+    if deny_warnings {
+        workspace_args.extend_from_slice(&["--", "-D", "warnings"]);
+    }
+    cargo_with_format(Step::Clippy, &workspace_args, message_format)?;
+
+    let [icu4x_features, web_intl_features] = i18n_feature_lists()?;
+    for features in [&icu4x_features, &web_intl_features] {
+        let mut args = vec![
             "clippy",
-            "--workspace",
+            "-p",
+            "ars-i18n",
             "--all-targets",
-            "--all-features",
-            "--",
-            "-D",
-            "warnings",
-        ],
-    )
+            "--no-default-features",
+            "--features",
+            features.as_str(),
+        ];
+        if deny_warnings {
+            args.extend_from_slice(&["--", "-D", "warnings"]);
+        }
+        cargo_with_format(Step::Clippy, &args, message_format)?;
+    }
+    Ok(())
 }
 
 fn run_unit() -> Result<(), Error> {
@@ -321,6 +427,33 @@ fn run_coverage() -> Result<(), Error> {
 // ---------------------------------------------------------------------------
 // Subprocess helper
 // ---------------------------------------------------------------------------
+
+/// Run `cargo <args>` with an optional `--message-format` flag injected.
+///
+/// The flag is inserted before `--` if present, otherwise appended. This
+/// lets rust-analyzer's `overrideCommand` request JSON diagnostics via
+/// `cargo xtask ci clippy --message-format=json`.
+fn cargo_with_format(step: Step, args: &[&str], message_format: Option<&str>) -> Result<(), Error> {
+    match message_format {
+        None => cargo(step, args),
+        Some(fmt) => {
+            let fmt_flag = format!("--message-format={fmt}");
+            let mut full_args = Vec::with_capacity(args.len() + 1);
+            let mut inserted = false;
+            for &arg in args {
+                if arg == "--" && !inserted {
+                    full_args.push(fmt_flag.as_str());
+                    inserted = true;
+                }
+                full_args.push(arg);
+            }
+            if !inserted {
+                full_args.push(fmt_flag.as_str());
+            }
+            cargo(step, &full_args)
+        }
+    }
+}
 
 /// Run `cargo <args>`, inheriting stdout/stderr.
 ///

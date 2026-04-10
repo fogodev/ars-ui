@@ -11,13 +11,17 @@ use crate::manifest::{self, Error, SpecRoot};
 /// Returns [`ManifestError::CategoryNotFound`] if no components match the category.
 pub fn execute(root: &SpecRoot, name: &str) -> Result<String, Error> {
     let m = &root.manifest;
-    let components: Vec<_> = m
+    let components = m
         .components
         .iter()
         .filter(|(_, c)| c.category == name)
-        .collect();
+        .collect::<Vec<_>>();
     if components.is_empty() {
-        let mut cats: Vec<&str> = m.components.values().map(|c| c.category.as_str()).collect();
+        let mut cats = m
+            .components
+            .values()
+            .map(|c| c.category.as_str())
+            .collect::<Vec<_>>();
         cats.sort();
         cats.dedup();
         return Err(Error::CategoryNotFound {

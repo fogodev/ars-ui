@@ -22,6 +22,21 @@ enum Command {
         /// Use `feature-matrix` to run all five feature-flag groups at once.
         #[arg(value_enum)]
         steps: Vec<ci::Step>,
+
+        /// Forward `--message-format` to cargo check/clippy (e.g. `json` for
+        /// rust-analyzer's `overrideCommand`).
+        #[arg(long)]
+        message_format: Option<String>,
+    },
+    /// Run workspace clippy without `-D warnings` (alias: `cargo xclippy`).
+    ///
+    /// Same ars-i18n backend splitting as `cargo xci clippy`, but warnings
+    /// stay as warnings — suitable for rust-analyzer and interactive use.
+    Clippy {
+        /// Forward `--message-format` to cargo clippy (e.g. `json` for
+        /// rust-analyzer's `overrideCommand`).
+        #[arg(long)]
+        message_format: Option<String>,
     },
     /// Start MCP stdio server exposing all workspace tools.
     #[cfg(feature = "mcp")]
@@ -156,13 +171,27 @@ fn main() {
 
     match cli.command {
         // ── CI ────────────────────────────────────────────────────────
-        Command::Ci { steps } => match ci::run(steps) {
+        Command::Ci {
+            steps,
+            message_format,
+        } => match ci::run(steps, message_format.as_deref()) {
             Ok(()) => {}
             Err(e) => {
                 eprintln!("error: {e}");
                 process::exit(1);
             }
         },
+
+        // ── Clippy (dev) ─────────────────────────────────────────────
+        Command::Clippy { message_format } => {
+            match ci::clippy_workspace(message_format.as_deref(), false) {
+                Ok(()) => {}
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    process::exit(1);
+                }
+            }
+        }
 
         // ── MCP ───────────────────────────────────────────────────────
         #[cfg(feature = "mcp")]

@@ -11,7 +11,7 @@ use crate::manifest::{self, Error, SpecRoot};
 /// Returns [`ManifestError::Io`] if a spec file cannot be read.
 pub fn execute(root: &SpecRoot) -> Result<String, Error> {
     let m = &root.manifest;
-    let mut errors: Vec<String> = Vec::new();
+    let mut errors = Vec::new();
     let mut checked = 0u32;
     for (name, comp) in &m.components {
         let file_path = root.path.join(&comp.path);

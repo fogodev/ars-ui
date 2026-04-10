@@ -8,7 +8,7 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
-    Data, DeriveInput, Expr, Fields, Generics, Ident, Lit, LitStr, Meta, Type, Variant, Visibility,
+    Data, DeriveInput, Expr, Fields, Generics, Lit, LitStr, Meta, Type, Variant, Visibility,
     parse_macro_input, parse_quote,
 };
 
@@ -365,9 +365,9 @@ fn clone_arm(variant: &Variant) -> TokenStream2 {
     match &variant.fields {
         Fields::Unit => quote!(Self::#ident => Self::#ident),
         Fields::Unnamed(fields) => {
-            let bindings: Vec<_> = (0..fields.unnamed.len())
+            let bindings = (0..fields.unnamed.len())
                 .map(|index| format_ident!("field_{index}"))
-                .collect();
+                .collect::<Vec<_>>();
             let clones = bindings
                 .iter()
                 .map(|binding| quote!(::core::clone::Clone::clone(#binding)));
@@ -375,11 +375,11 @@ fn clone_arm(variant: &Variant) -> TokenStream2 {
             quote!(Self::#ident(#(#bindings),*) => Self::#ident(#(#clones),*))
         }
         Fields::Named(fields) => {
-            let bindings: Vec<_> = fields
+            let bindings = fields
                 .named
                 .iter()
                 .map(|field| field.ident.as_ref().expect("named field").clone())
-                .collect();
+                .collect::<Vec<_>>();
             let clones = bindings
                 .iter()
                 .map(|binding| quote!(#binding: ::core::clone::Clone::clone(#binding)));
@@ -396,9 +396,9 @@ fn debug_arm(variant: &Variant) -> TokenStream2 {
     match &variant.fields {
         Fields::Unit => quote!(Self::#ident => f.write_str(#debug_name)),
         Fields::Unnamed(fields) => {
-            let bindings: Vec<_> = (0..fields.unnamed.len())
+            let bindings = (0..fields.unnamed.len())
                 .map(|index| format_ident!("field_{index}"))
-                .collect();
+                .collect::<Vec<_>>();
             let field_calls = bindings
                 .iter()
                 .map(|binding| quote!(debug.field(#binding);));
@@ -412,11 +412,11 @@ fn debug_arm(variant: &Variant) -> TokenStream2 {
             }
         }
         Fields::Named(fields) => {
-            let bindings: Vec<_> = fields
+            let bindings = fields
                 .named
                 .iter()
                 .map(|field| field.ident.as_ref().expect("named field").clone())
-                .collect();
+                .collect::<Vec<_>>();
             let field_calls = bindings.iter().map(|binding| {
                 let name = LitStr::new(&binding.to_string(), binding.span());
                 quote!(debug.field(#name, #binding);)
@@ -439,12 +439,12 @@ fn partial_eq_arm(_index: usize, variant: &Variant) -> TokenStream2 {
     match &variant.fields {
         Fields::Unit => quote!((Self::#ident, Self::#ident) => true),
         Fields::Unnamed(fields) => {
-            let lefts: Vec<_> = (0..fields.unnamed.len())
+            let lefts = (0..fields.unnamed.len())
                 .map(|index| format_ident!("left_{index}"))
-                .collect();
-            let rights: Vec<_> = (0..fields.unnamed.len())
+                .collect::<Vec<_>>();
+            let rights = (0..fields.unnamed.len())
                 .map(|index| format_ident!("right_{index}"))
-                .collect();
+                .collect::<Vec<_>>();
             let comparisons = lefts
                 .iter()
                 .zip(rights.iter())
@@ -453,16 +453,16 @@ fn partial_eq_arm(_index: usize, variant: &Variant) -> TokenStream2 {
             quote!((Self::#ident(#(#lefts),*), Self::#ident(#(#rights),*)) => true #(&& #comparisons)*)
         }
         Fields::Named(fields) => {
-            let lefts: Vec<_> = fields
+            let lefts = fields
                 .named
                 .iter()
                 .map(|field| format_ident!("left_{}", field.ident.as_ref().expect("named field")))
-                .collect();
-            let rights: Vec<_> = fields
+                .collect::<Vec<_>>();
+            let rights = fields
                 .named
                 .iter()
                 .map(|field| format_ident!("right_{}", field.ident.as_ref().expect("named field")))
-                .collect();
+                .collect::<Vec<_>>();
             let left_pattern = fields.named.iter().zip(lefts.iter()).map(|(field, left)| {
                 let ident = field.ident.as_ref().expect("named field");
                 quote!(#ident: #left)
@@ -500,9 +500,9 @@ fn hash_arm(index: usize, variant: &Variant) -> TokenStream2 {
             }
         },
         Fields::Unnamed(fields) => {
-            let bindings: Vec<_> = (0..fields.unnamed.len())
+            let bindings = (0..fields.unnamed.len())
                 .map(|field_index| format_ident!("field_{field_index}"))
-                .collect();
+                .collect::<Vec<_>>();
             let hashes = bindings
                 .iter()
                 .map(|binding| quote!(::core::hash::Hash::hash(#binding, state);));
@@ -515,11 +515,11 @@ fn hash_arm(index: usize, variant: &Variant) -> TokenStream2 {
             }
         }
         Fields::Named(fields) => {
-            let bindings: Vec<Ident> = fields
+            let bindings = fields
                 .named
                 .iter()
                 .map(|field| field.ident.as_ref().expect("named field").clone())
-                .collect();
+                .collect::<Vec<_>>();
             let hashes = bindings
                 .iter()
                 .map(|binding| quote!(::core::hash::Hash::hash(#binding, state);));

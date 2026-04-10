@@ -162,11 +162,11 @@ use icu::segmenter::{GraphemeClusterSegmenter, WordSegmenter};
 
 // Infallible, no locale needed
 let segmenter = GraphemeClusterSegmenter::new();
-let breaks: Vec<usize> = segmenter.segment_str("hello").collect();
+let breaks = segmenter.segment_str("hello").collect::<Vec<_>>();
 
 // Word segmenter (auto-selects algorithm)
 let segmenter = WordSegmenter::new_auto(Default::default());
-let breaks: Vec<usize> = segmenter.segment_str("Hello world!").collect();
+let breaks = segmenter.segment_str("Hello world!").collect::<Vec<_>>();
 ```
 
 ## Reference Files

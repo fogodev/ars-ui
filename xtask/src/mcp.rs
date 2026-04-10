@@ -42,13 +42,13 @@ impl ServerHandler for McpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
-        let tools: Vec<McpTool> = self
+        let tools = self
             .registry
             .tools()
             .iter()
             .map(|t| {
                 let schema = t.input_schema();
-                let schema_obj: JsonObject = serde_json::from_value(schema).unwrap_or_default();
+                let schema_obj = serde_json::from_value::<JsonObject>(schema).unwrap_or_default();
                 McpTool::new(t.name().to_owned(), t.description().to_owned(), schema_obj)
             })
             .collect();
