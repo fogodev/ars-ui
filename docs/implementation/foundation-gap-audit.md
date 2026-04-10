@@ -360,3 +360,31 @@ The following spec sections are fully implemented and match the spec contract:
 1. #145 and #146 — trivial, unblocked, can land in parallel
 2. #147 — self-contained, adds `log` crate and structured tracing
 3. #148 — largest task, implements WebPlatformEffects with real delegates for existing utilities and documented stubs for methods blocked on other epics
+
+---
+
+## Accessibility Spec Full Audit (2026-04-10)
+
+The original gap matrix listed `ars-a11y` as needing only the ARIA bridge (#33) and state helpers (#34). After those landed along with FocusRing (#89), a full audit of `spec/foundation/03-accessibility.md` (4003 lines, 14 sections) found the original 4-task decomposition covered only **~30%** of the spec's implementable Rust types. The remaining 70% — FocusZone, keyboard shortcuts, VisuallyHidden, FieldContext, announcements, touch/mobile utilities, and testing infrastructure — had no tasks.
+
+### Original gap matrix row (now superseded)
+
+| `ars-a11y` ARIA bridge | Deferred TODO for typed bridge | `AriaAttribute` bridging helpers | Blocks spec-compliant ARIA application | ✅ Resolved by #33 |
+| `ars-a11y` role/state helpers | Missing helper layer | `apply_role`, `set_expanded`, etc. | Blocks reuse of accessibility patterns | ✅ Resolved by #34 |
+
+### New tasks from the audit
+
+Eight new tasks (#150–#157, 22 points) were created under [Epic #3](https://github.com/fogodev/ars-ui/issues/3):
+
+| Issue                                                | Title                                        | Points | Spec Section |
+| ---------------------------------------------------- | -------------------------------------------- | ------ | ------------ |
+| [#150](https://github.com/fogodev/ars-ui/issues/150) | FocusZone (arrow-key navigation engine)      | 5      | §3.5         |
+| [#151](https://github.com/fogodev/ars-ui/issues/151) | DomEvent, KeyboardShortcut, Platform         | 3      | §4.4         |
+| [#152](https://github.com/fogodev/ars-ui/issues/152) | VisuallyHidden utilities                     | 1      | §5.3         |
+| [#153](https://github.com/fogodev/ars-ui/issues/153) | LabelConfig, DescriptionConfig, FieldContext | 3      | §5.4         |
+| [#154](https://github.com/fogodev/ars-ui/issues/154) | AnnouncementMessages + Announcements         | 2      | §5.5         |
+| [#155](https://github.com/fogodev/ars-ui/issues/155) | Touch/Mobile utilities                       | 2      | §7.1–7.4     |
+| [#156](https://github.com/fogodev/ars-ui/issues/156) | ARIA Validator (testing)                     | 3      | §9.1         |
+| [#157](https://github.com/fogodev/ars-ui/issues/157) | Keyboard Navigation Test Helpers             | 3      | §9.2         |
+
+Six of these (#150–#154, #156) are independent; #155 depends on #151 (Platform); #157 depends on #150 (FocusZone) + #151 (DomEvent). All placed in Wave 4 of the [foundation-completion-roadmap](./foundation-completion-roadmap.md).
