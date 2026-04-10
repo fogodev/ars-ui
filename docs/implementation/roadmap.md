@@ -54,11 +54,19 @@ Outcome:
 
 - `ars-test-harness`, `ars-test-harness-leptos`, and `ars-test-harness-dioxus` expose a unified adapter testing entry point
 - CI runs unit, integration, and adapter suites separately
+- ARIA assertion helpers are available for all component tests
+- `insta` snapshot infrastructure is wired into CI
+- Adapter parity types (`ParityTestCase`, `InteractionTestCase`) enable cross-adapter testing
 
 Exit criteria:
 
 - test-harness API is stable enough for the first component slice
 - CI failures identify the failing tier
+- `ars-core/src/test_helpers.rs` exports 35+ ARIA assertion functions
+- `insta` snapshot tests compile and CI rejects unapproved changes
+- Both adapter backends can mount, query, and interact with components
+
+Status (2026-04-10): Phase 3 crate shells and CI tier split are done (#19, #20). The full harness API, ARIA helpers, snapshot setup, adapter backends, parity types, CI enforcement, mock infrastructure, and nightly pipeline remain as 11 open tasks (#178–#188, 34 pts). See [Epic #7](https://github.com/fogodev/ars-ui/issues/7).
 
 ### Phase 4: First shippable utility slice
 

@@ -58,11 +58,13 @@ Note: the original 4-task decomposition (#18, #39, #40, #88) covered only the ba
 
 ### Epic: Test infrastructure
 
-- Point target: `8`
+- Point target: `42` (revised from `8` after full spec audit — 2026-04-10)
 - Layer: `Harness`
 - Framework: `Both`
 - Test tier: `Mixed`
-- Spec refs: `spec/testing/00-overview.md`, `spec/testing/15-test-harness.md`
+- Spec refs: `spec/testing/00-overview.md`, `spec/testing/15-test-harness.md`, `spec/testing/04-aria-helpers.md`, `spec/testing/03-snapshot-tests.md`, `spec/testing/05-adapter-harness.md`, `spec/testing/14-ci.md`
+
+Note: the original 2-task decomposition (#19 harness shell, #20 CI tier split) established crate skeletons and CI tier separation but covered only ~5% of the spec-defined test harness API. A full spec audit (2026-04-10) found `15-test-harness.md` defines 30+ methods across 8 sections, `04-aria-helpers.md` defines 35+ assertion functions, and `14-ci.md` defines 3 enforcement scripts and a nightly pipeline — none of which were implemented. Eleven additional tasks (#178–#188, 34 pts) now cover the full TestHarness API, ARIA helpers, `insta` snapshot setup, Leptos/Dioxus backends, parity types, CI enforcement scripts, mock infrastructure, and nightly pipeline. See [Epic #7](https://github.com/fogodev/ars-ui/issues/7) for the full decomposition.
 
 ### Epic: Leptos adapter
 
@@ -202,6 +204,8 @@ Note: this seed task only covered the baseline crate shell. Follow-on tasks deli
 - Acceptance: shared harness and per-framework backend crates compile
 - Spec impact: `No spec change required`
 
+Note: this seed task established the crate shells only (~14 lines per backend). The full harness API (30+ methods, ElementHandle, KeyboardKey, AnyService, HarnessBackend trait) is covered by #178. Leptos and Dioxus backend implementations are covered by #181 and #182.
+
 ### #20: Add CI workflow split by unit, integration, and adapter tiers
 
 - Points: `5`
@@ -213,6 +217,8 @@ Note: this seed task only covered the baseline crate shell. Follow-on tasks deli
 - Tests first: workflow validation via local dry-run or syntax checks
 - Acceptance: CI clearly separates tiers and targets workspace crates
 - Spec impact: `No spec change required`
+
+Note: this seed task delivered the tier split via xtask CI runner. Additional CI enforcement (adapter parity #184, snapshot linting #185, error variant coverage #186, nightly pipeline #188) are covered by Wave 2 tasks.
 
 ### #21: Define shared adapter contract notes and sync checklist in repo workflow
 
