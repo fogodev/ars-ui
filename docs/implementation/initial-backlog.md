@@ -48,11 +48,13 @@ This backlog is the seed set for the implementation program. It intentionally st
 
 ### Epic: DOM utilities
 
-- Point target: `5`
+- Point target: `42` (revised from `5` after full spec audit — 2026-04-10)
 - Layer: `Subsystem`
 - Framework: `None`
 - Test tier: `Mixed`
 - Spec refs: `spec/foundation/01-architecture.md#25-scrolllockmanager-ars-dom`, `spec/foundation/11-dom-utilities.md`
+
+Note: the original 4-task decomposition (#18, #39, #40, #88) covered only the baseline shell and three immediate utilities. A full spec audit (2026-04-10) found `11-dom-utilities.md` is 2804 lines across 10 sections (§2 Positioning, §3 Focus, §4 Scroll, §5 Scroll Lock, §6 Z-Index, §7 Portal/Inert, §8 Modality, §9 Media Queries, §10 URL Sanitization), not the ~400 lines originally estimated. Twelve additional tasks now cover positioning engine (#66, #67, #112–#115), z-index/overlay (#68, #88), portal (#69), modality (#72), scroll (#74), media queries (#85), and URL sanitization (#176). See [Epic #6](https://github.com/fogodev/ars-ui/issues/6) for the full decomposition.
 
 ### Epic: Test infrastructure
 
@@ -185,6 +187,8 @@ Note: this seed task only covered baseline validation types and field state. Fol
 - Tests first: compile checks for feature layout
 - Acceptance: DOM crate exists with web/ssr feature structure
 - Spec impact: `No spec change required`
+
+Note: this seed task only covered the baseline crate shell. Follow-on tasks delivered focus utilities (#39), scroll locking (#40), positioning engine (#66, #67, #115), z-index allocator (#68), scroll-into-view (#74), and modality manager (#72/partial). A full spec audit (2026-04-10) found `11-dom-utilities.md` is 2804 lines across 10 sections — far larger than the ~400 lines originally estimated. Sixteen sub-issues now cover the full spec. See [Epic #6](https://github.com/fogodev/ars-ui/issues/6) for the full decomposition.
 
 ### #19: Add initial harness crates and locale-aware test harness shell
 
