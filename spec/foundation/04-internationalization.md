@@ -2227,8 +2227,11 @@ This field is present on `pin_input::Messages` and any component using positiona
 Components that transform text case (e.g., uppercase labels, lowercase placeholders) MUST use locale-aware case mapping functions rather than Rust's default `.to_uppercase()` / `.to_lowercase()`, which operate on Unicode scalar values without locale context.
 
 ```rust
+// ── ICU4X backend (default) ──
+
 /// Locale-aware uppercase transformation.
 /// Delegates to ICU4X CaseMapper for correct locale-specific mappings.
+#[cfg(feature = "icu4x")]
 pub fn to_uppercase(text: &str, locale: &Locale) -> String {
     // CaseMapper::new() returns CaseMapperBorrowed<'static> (compiled data).
     // Methods take &LanguageIdentifier, not &DataLocale.
@@ -2238,11 +2241,36 @@ pub fn to_uppercase(text: &str, locale: &Locale) -> String {
 }
 
 /// Locale-aware lowercase transformation.
+#[cfg(feature = "icu4x")]
 pub fn to_lowercase(text: &str, locale: &Locale) -> String {
     let case_mapper = icu::casemap::CaseMapper::new();
     case_mapper.lowercase_to_string(text, &locale.0.id).into_owned()
 }
+
+// ── web-intl backend (WASM client builds) ──
+
+/// Locale-aware uppercase transformation.
+/// Delegates to browser `String.prototype.toLocaleUpperCase()`.
+#[cfg(feature = "web-intl")]
+pub fn to_uppercase(text: &str, locale: &Locale) -> String {
+    let js_str = js_sys::JsString::from(text);
+    let locale_tag = js_sys::JsString::from(locale.to_bcp47().as_str());
+    js_str.to_locale_upper_case(&locale_tag).as_string().unwrap_or_default()
+}
+
+/// Locale-aware lowercase transformation.
+/// Delegates to browser `String.prototype.toLocaleLowerCase()`.
+#[cfg(feature = "web-intl")]
+pub fn to_lowercase(text: &str, locale: &Locale) -> String {
+    let js_str = js_sys::JsString::from(text);
+    let locale_tag = js_sys::JsString::from(locale.to_bcp47().as_str());
+    js_str.to_locale_lower_case(&locale_tag).as_string().unwrap_or_default()
+}
 ```
+
+Note: Case transformation uses free functions rather than structs, so backend dispatch is
+via `#[cfg]` on the function definitions. No type alias is needed (unlike the formatter types).
+The public signatures are identical under both backends.
 
 **Notable locale-specific rules:**
 
@@ -2952,14 +2980,24 @@ impl Default for CollationOptions {
 }
 
 /// A locale-aware string collator.
-/// ICU4X 2.x: `Collator::try_new()` returns `CollatorBorrowed<'static>`.
-/// We store the owned `Collator` (via `.static_to_owned()`) and call
-/// `.as_borrowed()` for comparison operations.
+///
+/// The struct layout and `compare()` implementation are feature-gated:
+/// - `icu4x`: backed by ICU4X `Collator` with CLDR data.
+/// - `web-intl`: backed by browser `Intl.Collator` via `js_sys`.
+/// - Neither: falls back to Rust's default `Ord` (byte-order) comparison.
+///
+/// The `sort()` and `sort_by_key()` methods are generic over `compare()`
+/// and work identically under all backends.
+
+// ── ICU4X backend (default) ──
+
+#[cfg(feature = "icu4x")]
 pub struct StringCollator {
     locale: Locale,
     collator: OwnedCollator,
 }
 
+#[cfg(feature = "icu4x")]
 impl StringCollator {
     /// Create a new locale-aware string collator.
     ///
@@ -2999,7 +3037,83 @@ impl StringCollator {
     pub fn compare(&self, a: &str, b: &str) -> core::cmp::Ordering {
         self.collator.as_borrowed().compare(a, b)
     }
+}
 
+// ── web-intl backend (WASM client builds) ──
+
+#[cfg(feature = "web-intl")]
+pub struct StringCollator {
+    locale: Locale,
+    collator: js_sys::Intl::Collator,
+}
+
+#[cfg(feature = "web-intl")]
+impl StringCollator {
+    /// Create a new locale-aware string collator using `Intl.Collator`.
+    ///
+    /// Maps `CollationStrength` to `Intl.Collator` `sensitivity` option:
+    /// - `Primary` → `"base"` (ignore accents and case)
+    /// - `Secondary` → `"accent"` (ignore case, respect accents)
+    /// - `Tertiary` → `"case"` (respect accents and case)
+    /// - `Quaternary` → `"variant"` (also respect punctuation)
+    pub fn new(locale: &Locale, options: CollationOptions) -> Self {
+        use js_sys::{Array, Object, Reflect, Intl};
+        use wasm_bindgen::JsValue;
+
+        let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
+        let js_opts = Object::new();
+
+        let sensitivity = if options.case_insensitive {
+            "accent" // case_insensitive overrides strength to Secondary
+        } else {
+            match options.strength {
+                CollationStrength::Primary => "base",
+                CollationStrength::Secondary => "accent",
+                CollationStrength::Tertiary => "case",
+                CollationStrength::Quaternary => "variant",
+            }
+        };
+        Reflect::set(&js_opts, &"sensitivity".into(), &JsValue::from_str(sensitivity))
+            .expect("Reflect::set on JS object");
+        Reflect::set(&js_opts, &"numeric".into(), &JsValue::from_bool(options.numeric))
+            .expect("Reflect::set on JS object");
+
+        let collator = Intl::Collator::new(&locales, &js_opts);
+        Self { locale: locale.clone(), collator }
+    }
+
+    /// Compare two strings according to locale rules.
+    pub fn compare(&self, a: &str, b: &str) -> core::cmp::Ordering {
+        let result = self.collator.compare(a, b);
+        if result < 0 { core::cmp::Ordering::Less }
+        else if result > 0 { core::cmp::Ordering::Greater }
+        else { core::cmp::Ordering::Equal }
+    }
+}
+
+// ── Fallback (no ICU4X, no web-intl) ──
+
+#[cfg(not(any(feature = "icu4x", feature = "web-intl")))]
+pub struct StringCollator {
+    locale: Locale,
+}
+
+#[cfg(not(any(feature = "icu4x", feature = "web-intl")))]
+impl StringCollator {
+    /// Fallback collator using Rust's default byte-order comparison.
+    /// Locale-aware sorting is not available without a backend.
+    pub fn new(locale: &Locale, _options: CollationOptions) -> Self {
+        Self { locale: locale.clone() }
+    }
+
+    pub fn compare(&self, a: &str, b: &str) -> core::cmp::Ordering {
+        a.cmp(b)
+    }
+}
+
+// ── Backend-independent sort methods ──
+
+impl StringCollator {
     /// Sort a slice of strings in-place according to locale rules.
     pub fn sort(&self, items: &mut Vec<String>) {
         items.sort_by(|a, b| self.compare(a, b));
@@ -3135,6 +3249,15 @@ pub type DefaultDateFormatter = web_intl::JsIntlDateFormatter;
 pub type DefaultPluralRules = icu4x::Icu4xPluralRules;
 #[cfg(feature = "web-intl")]
 pub type DefaultPluralRules = web_intl::JsIntlPluralRules;
+
+// ── Collation ──
+// StringCollator uses cfg-gated struct definitions (§8) rather than a type alias,
+// because the struct layout differs between backends (OwnedCollator vs js_sys::Intl::Collator).
+// The public API (new, compare, sort, sort_by_key) is identical under all backends.
+
+// ── Case transformation ──
+// to_uppercase/to_lowercase use cfg-gated free functions (§6.4) rather than type aliases,
+// because they are standalone functions, not struct-based formatters.
 ```
 
 #### 9.4.2 Shared traits
@@ -3153,7 +3276,16 @@ pub trait DateFormat {
 pub trait PluralRulesFormat {
     fn select(&self, number: f64) -> PluralCategory;
 }
+
+pub trait CollationFormat {
+    fn compare(&self, a: &str, b: &str) -> core::cmp::Ordering;
+}
 ```
+
+Note: `StringCollator` implements `CollationFormat` under all backends. Case transformation
+functions (`to_uppercase`/`to_lowercase`) are free functions rather than trait methods because
+they operate on borrowed strings and return owned `String`s — there is no `self` state to
+abstract over.
 
 #### 9.4.3 `web-intl` backend sketch
 
@@ -3191,6 +3323,27 @@ impl NumberFormat for JsIntlNumberFormatter {
         self.inner.format(value).as_string().unwrap_or_default()
     }
 }
+
+// ── web-intl collation ──
+// StringCollator's web-intl backend is defined inline in §8 alongside the
+// ICU4X backend. Both use the same public API (new, compare, sort, sort_by_key).
+// The web-intl backend maps CollationStrength to Intl.Collator sensitivity:
+//   Primary → "base", Secondary → "accent", Tertiary → "case", Quaternary → "variant".
+
+#[cfg(feature = "web-intl")]
+impl CollationFormat for StringCollator {
+    fn compare(&self, a: &str, b: &str) -> core::cmp::Ordering {
+        self.compare(a, b) // delegates to the inherent method
+    }
+}
+
+// ── web-intl case transformation ──
+// to_uppercase/to_lowercase web-intl backends are defined inline in §6.4
+// alongside the ICU4X implementations. They use:
+//   js_sys::JsString::to_locale_upper_case(&locale_tag) / to_locale_lower_case(&locale_tag)
+// The browser delegates to the platform's ICU library, providing the same
+// locale-aware case mapping rules (Turkish dotted-I, German eszett, etc.)
+// with zero WASM bundle overhead.
 ```
 
 #### 9.4.4 Feature combination guidance
@@ -3720,12 +3873,357 @@ impl IcuProvider for Icu4xProvider {
 /// Returns the default IcuProvider for the current feature-flag configuration.
 ///
 /// - With `icu4x` feature: returns `Icu4xProvider` (full CLDR data).
-/// - Without `icu4x`: returns `StubIcuProvider` (English-only).
+/// - With `web-intl` feature: returns `WebIntlProvider` (browser-backed).
+/// - Without either: returns `StubIcuProvider` (English-only).
 pub fn default_provider() -> Box<dyn IcuProvider> {
     #[cfg(feature = "icu4x")]
     { Box::new(Icu4xProvider::new()) }
-    #[cfg(not(feature = "icu4x"))]
+    #[cfg(feature = "web-intl")]
+    { Box::new(WebIntlProvider::new()) }
+    #[cfg(not(any(feature = "icu4x", feature = "web-intl")))]
     { Box::new(StubIcuProvider) }
+}
+```
+
+#### 9.5.4 Browser implementation (`WebIntlProvider`)
+
+The `web-intl` backend implements `IcuProvider` using browser `Intl` APIs for WASM client
+builds. This mirrors `Icu4xProvider` (§9.5.2) but delegates to browser-native ICU data,
+eliminating compiled CLDR data from the WASM bundle.
+
+**Browser API mapping:**
+
+| IcuProvider method      | Browser API                                                     | Strategy     |
+| ----------------------- | --------------------------------------------------------------- | ------------ |
+| `weekday_short_label`   | `Intl.DateTimeFormat(locale, {weekday:'short'}).format(date)`   | Clean        |
+| `weekday_long_label`    | `Intl.DateTimeFormat(locale, {weekday:'long'}).format(date)`    | Clean        |
+| `month_long_name`       | `Intl.DateTimeFormat(locale, {month:'long'}).format(date)`      | Clean        |
+| `day_period_label`      | `Intl.DateTimeFormat` `formatToParts()` → `dayPeriod` part      | Clean        |
+| `day_period_from_char`  | Parse against cached AM/PM labels from `formatToParts()`        | Lookup       |
+| `format_segment_digits` | `Intl.NumberFormat(locale, {minimumIntegerDigits}).format()`    | Clean        |
+| `max_months_in_year`    | Lookup table keyed by calendar system, with date probing        | Lookup       |
+| `days_in_month`         | Date arithmetic (Gregorian direct; other calendars via probing) | Lookup       |
+| `hour_cycle`            | `Intl.DateTimeFormat(locale).resolvedOptions().hourCycle`       | Clean        |
+| `first_day_of_week`     | `Intl.Locale(locale).getWeekInfo().firstDay`                    | Clean+table  |
+| `convert_date`          | `Intl.DateTimeFormat` with target calendar → format+reparse     | Format+parse |
+
+**Strategy legend:**
+
+- **Clean** — Direct browser API call, 1:1 mapping to our return type.
+- **Lookup** — No single browser API; uses lookup tables or date arithmetic probing.
+- **Clean+table** — Browser API exists (`getWeekInfo()`) but is newer; falls back to a
+  static table for browsers that don't support it.
+- **Format+parse** — Formats a date with `Intl.DateTimeFormat` using the target calendar's
+  `calendar` option, then parses the formatted parts back into structured fields.
+
+```rust
+#[cfg(feature = "web-intl")]
+pub struct WebIntlProvider;
+
+#[cfg(feature = "web-intl")]
+impl WebIntlProvider {
+    pub fn new() -> Self { Self }
+
+    /// Format a known date to extract a weekday/month/period label from the browser.
+    /// Creates a DateTimeFormat with the specified options and formats a reference date.
+    fn format_date_part(locale: &Locale, date: &js_sys::Date, opts: &js_sys::Object) -> String {
+        use js_sys::{Array, Intl};
+        let locales = Array::of1(&wasm_bindgen::JsValue::from_str(&locale.to_bcp47()));
+        let fmt = Intl::DateTimeFormat::new(&locales, opts);
+        fmt.format(date).as_string().unwrap_or_default()
+    }
+
+    /// Build a JS Date for a known weekday. January 2024 starts on Monday:
+    /// Mon=1, Tue=2, ..., Sun=7 → day offset from Jan 1, 2024.
+    fn date_for_weekday(weekday: Weekday) -> js_sys::Date {
+        // January 1, 2024 is a Monday (ISO weekday 1).
+        let day = match weekday {
+            Weekday::Monday => 1,
+            Weekday::Tuesday => 2,
+            Weekday::Wednesday => 3,
+            Weekday::Thursday => 4,
+            Weekday::Friday => 5,
+            Weekday::Saturday => 6,
+            Weekday::Sunday => 7,
+        };
+        js_sys::Date::new_with_year_month_day(2024, 0, day) // month is 0-indexed
+    }
+
+    /// Build a JS Date for a known month (1-indexed).
+    fn date_for_month(month: u8) -> js_sys::Date {
+        js_sys::Date::new_with_year_month_day(2024, (month - 1) as i32, 15)
+    }
+
+    /// Probe the number of months in a year by incrementing months until the
+    /// year changes. Uses Intl.DateTimeFormat with the target calendar.
+    fn probe_max_months(locale: &Locale, calendar: &CalendarSystem, year: i32) -> u8 {
+        use js_sys::{Array, Object, Reflect, Intl};
+        use wasm_bindgen::JsValue;
+
+        let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
+        let opts = Object::new();
+        Reflect::set(&opts, &"calendar".into(),
+            &JsValue::from_str(&calendar.to_bcp47_value()))
+            .expect("Reflect::set on JS object");
+        Reflect::set(&opts, &"year".into(), &"numeric".into())
+            .expect("Reflect::set on JS object");
+        Reflect::set(&opts, &"month".into(), &"numeric".into())
+            .expect("Reflect::set on JS object");
+
+        let fmt = Intl::DateTimeFormat::new(&locales, &opts);
+
+        // Start from month 12 and probe upward for calendars with 13 months.
+        // Most calendars have 12; Hebrew leap years have 13.
+        for m in (12..=14).rev() {
+            let date = js_sys::Date::new_with_year_month_day(year, m - 1, 1);
+            let parts = fmt.format_to_parts(&date);
+            // Check if the formatted year still matches — if month overflows,
+            // the year will increment.
+            // (Implementation detail: parse year from parts and compare.)
+            let _ = parts; // sketch — full implementation extracts year from parts
+        }
+        12 // conservative default
+    }
+}
+
+#[cfg(feature = "web-intl")]
+impl IcuProvider for WebIntlProvider {
+    fn weekday_short_label(&self, weekday: Weekday, locale: &Locale) -> String {
+        use js_sys::{Object, Reflect};
+        use wasm_bindgen::JsValue;
+        let opts = Object::new();
+        Reflect::set(&opts, &"weekday".into(), &JsValue::from_str("short"))
+            .expect("Reflect::set on JS object");
+        Self::format_date_part(locale, &Self::date_for_weekday(weekday), &opts)
+    }
+
+    fn weekday_long_label(&self, weekday: Weekday, locale: &Locale) -> String {
+        use js_sys::{Object, Reflect};
+        use wasm_bindgen::JsValue;
+        let opts = Object::new();
+        Reflect::set(&opts, &"weekday".into(), &JsValue::from_str("long"))
+            .expect("Reflect::set on JS object");
+        Self::format_date_part(locale, &Self::date_for_weekday(weekday), &opts)
+    }
+
+    fn month_long_name(&self, month: u8, locale: &Locale) -> String {
+        use js_sys::{Object, Reflect};
+        use wasm_bindgen::JsValue;
+        let opts = Object::new();
+        Reflect::set(&opts, &"month".into(), &JsValue::from_str("long"))
+            .expect("Reflect::set on JS object");
+        Self::format_date_part(locale, &Self::date_for_month(month), &opts)
+    }
+
+    fn day_period_label(&self, is_pm: bool, locale: &Locale) -> String {
+        use js_sys::{Array, Object, Reflect, Intl};
+        use wasm_bindgen::JsValue;
+
+        let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
+        let opts = Object::new();
+        Reflect::set(&opts, &"hour".into(), &JsValue::from_str("numeric"))
+            .expect("Reflect::set on JS object");
+        Reflect::set(&opts, &"hour12".into(), &JsValue::TRUE)
+            .expect("Reflect::set on JS object");
+        let fmt = Intl::DateTimeFormat::new(&locales, &opts);
+
+        // 6:00 for AM, 18:00 for PM
+        let date = js_sys::Date::new_with_year_month_day_hr(2024, 0, 1, if is_pm { 18 } else { 6 });
+        let parts = fmt.format_to_parts(&date);
+
+        // Extract the dayPeriod part from formatToParts result.
+        for i in 0..parts.length() {
+            let part = parts.get(i);
+            let part_type = Reflect::get(&part, &"type".into())
+                .ok()
+                .and_then(|v| v.as_string());
+            if part_type.as_deref() == Some("dayPeriod") {
+                return Reflect::get(&part, &"value".into())
+                    .ok()
+                    .and_then(|v| v.as_string())
+                    .unwrap_or_default();
+            }
+        }
+        if is_pm { "PM".into() } else { "AM".into() } // fallback
+    }
+
+    fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
+        // Compare against the first character of AM/PM labels for this locale.
+        let am_label = self.day_period_label(false, locale);
+        let pm_label = self.day_period_label(true, locale);
+        let ch_lower = ch.to_lowercase().next().unwrap_or(ch);
+        if am_label.chars().next().map(|c| c.to_lowercase().next().unwrap_or(c)) == Some(ch_lower) {
+            Some(false)
+        } else if pm_label.chars().next().map(|c| c.to_lowercase().next().unwrap_or(c)) == Some(ch_lower) {
+            Some(true)
+        } else {
+            None
+        }
+    }
+
+    fn format_segment_digits(&self, value: u32, min_digits: core::num::NonZero<u8>, locale: &Locale) -> String {
+        use js_sys::{Array, Object, Reflect, Intl};
+        use wasm_bindgen::JsValue;
+
+        let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
+        let opts = Object::new();
+        Reflect::set(&opts, &"minimumIntegerDigits".into(),
+            &JsValue::from_f64(min_digits.get() as f64))
+            .expect("Reflect::set on JS object");
+        Reflect::set(&opts, &"useGrouping".into(), &JsValue::FALSE)
+            .expect("Reflect::set on JS object");
+        let fmt = Intl::NumberFormat::new(&locales, &opts);
+        fmt.format(value as f64).as_string().unwrap_or_default()
+    }
+
+    fn max_months_in_year(&self, calendar: &CalendarSystem, year: i32, _era: Option<&str>) -> u8 {
+        // Most calendars have 12 months. Hebrew leap years have 13.
+        // Use a static lookup table since the browser has no direct API.
+        match calendar {
+            CalendarSystem::Hebrew => {
+                // Hebrew leap years add Adar I (month 6).
+                // Leap years occur in years 3, 6, 8, 11, 14, 17, 19 of the 19-year cycle.
+                let year_in_cycle = ((year % 19) + 19) % 19;
+                if [0, 3, 6, 8, 11, 14, 17].contains(&year_in_cycle) { 13 } else { 12 }
+            }
+            _ => 12,
+        }
+    }
+
+    fn days_in_month(&self, calendar: &CalendarSystem, year: i32, month: u8, _era: Option<&str>) -> u8 {
+        match calendar {
+            CalendarSystem::Gregorian | CalendarSystem::Iso => {
+                // Standard date arithmetic: day 0 of next month = last day of this month.
+                let date = js_sys::Date::new_with_year_month_day(year, month as i32, 0);
+                date.get_date() as u8
+            }
+            _ => {
+                // For non-Gregorian calendars, probe via Intl.DateTimeFormat:
+                // format increasing day numbers until the month changes.
+                // Conservative fallback for the sketch:
+                30
+            }
+        }
+    }
+
+    fn hour_cycle(&self, locale: &Locale) -> HourCycle {
+        use js_sys::{Array, Object, Intl, Reflect};
+        use wasm_bindgen::JsValue;
+
+        let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
+        let opts = Object::new();
+        let fmt = Intl::DateTimeFormat::new(&locales, &opts);
+        let resolved = fmt.resolved_options();
+        let cycle = Reflect::get(&resolved, &"hourCycle".into())
+            .ok()
+            .and_then(|v| v.as_string())
+            .unwrap_or_default();
+        match cycle.as_str() {
+            "h11" => HourCycle::H11,
+            "h12" => HourCycle::H12,
+            "h23" => HourCycle::H23,
+            "h24" => HourCycle::H24,
+            _ => HourCycle::H23, // fallback to 24-hour
+        }
+    }
+
+    fn first_day_of_week(&self, locale: &Locale) -> Weekday {
+        use wasm_bindgen::JsValue;
+
+        // Try Intl.Locale.getWeekInfo() (available in modern browsers).
+        // Falls back to a static lookup table for older browsers.
+        let js_locale = js_sys::Intl::Locale::new(&JsValue::from_str(&locale.to_bcp47()));
+        if let Ok(week_info) = js_sys::Reflect::get(&js_locale, &"getWeekInfo".into()) {
+            if week_info.is_function() {
+                let func: js_sys::Function = week_info.unchecked_into();
+                if let Ok(info) = func.call0(&js_locale) {
+                    if let Ok(first_day) = js_sys::Reflect::get(&info, &"firstDay".into()) {
+                        if let Some(day) = first_day.as_f64() {
+                            return match day as u8 {
+                                1 => Weekday::Monday,
+                                2 => Weekday::Tuesday,
+                                3 => Weekday::Wednesday,
+                                4 => Weekday::Thursday,
+                                5 => Weekday::Friday,
+                                6 => Weekday::Saturday,
+                                7 => Weekday::Sunday,
+                                _ => Weekday::Monday, // ISO default
+                            };
+                        }
+                    }
+                }
+            }
+        }
+
+        // Static fallback table: covers the most common first-day-of-week rules.
+        // Sunday-first: US, CA, JP, IL, SA, etc.
+        // Saturday-first: AF, IR, etc.
+        // Monday-first: most of Europe, Asia, Oceania.
+        match locale.region().unwrap_or("001") {
+            "US" | "CA" | "JP" | "IL" | "SA" | "KR" | "TW" | "PH" | "IN" | "BR"
+                => Weekday::Sunday,
+            "AF" | "IR" => Weekday::Saturday,
+            _ => Weekday::Monday,
+        }
+    }
+
+    fn convert_date(&self, date: &CalendarDate, target: CalendarSystem) -> CalendarDate {
+        use js_sys::{Array, Object, Reflect, Intl};
+        use wasm_bindgen::JsValue;
+
+        // Strategy: use Intl.DateTimeFormat with the target calendar to format the
+        // source date, then parse the formatted parts back into CalendarDate fields.
+        //
+        // 1. Create a JS Date from the source CalendarDate's ISO representation.
+        // 2. Format with Intl.DateTimeFormat({ calendar: target, year: 'numeric',
+        //    month: 'numeric', day: 'numeric' }).
+        // 3. Extract year/month/day from formatToParts().
+        // 4. Construct a CalendarDate from the extracted components.
+        //
+        // This approach leverages the browser's full calendar conversion engine
+        // without shipping any calendar data in the WASM bundle.
+
+        let locales = Array::of1(&JsValue::from_str("en-US")); // locale for parsing, not display
+        let opts = Object::new();
+        Reflect::set(&opts, &"calendar".into(),
+            &JsValue::from_str(&target.to_bcp47_value()))
+            .expect("Reflect::set on JS object");
+        Reflect::set(&opts, &"year".into(), &JsValue::from_str("numeric"))
+            .expect("Reflect::set on JS object");
+        Reflect::set(&opts, &"month".into(), &JsValue::from_str("numeric"))
+            .expect("Reflect::set on JS object");
+        Reflect::set(&opts, &"day".into(), &JsValue::from_str("numeric"))
+            .expect("Reflect::set on JS object");
+
+        let fmt = Intl::DateTimeFormat::new(&locales, &opts);
+
+        // Convert source date to JS Date via ISO epoch milliseconds.
+        let js_date = js_sys::Date::new_with_year_month_day(
+            date.year(), (date.month() - 1) as i32, date.day() as i32,
+        );
+
+        let parts = fmt.format_to_parts(&js_date);
+        let mut year = 0i32;
+        let mut month = 0u8;
+        let mut day = 0u8;
+
+        for i in 0..parts.length() {
+            let part = parts.get(i);
+            let part_type = Reflect::get(&part, &"type".into())
+                .ok().and_then(|v| v.as_string()).unwrap_or_default();
+            let value = Reflect::get(&part, &"value".into())
+                .ok().and_then(|v| v.as_string()).unwrap_or_default();
+            match part_type.as_str() {
+                "year" | "relatedYear" => { year = value.parse().unwrap_or(0); }
+                "month" => { month = value.parse().unwrap_or(0); }
+                "day" => { day = value.parse().unwrap_or(0); }
+                _ => {}
+            }
+        }
+
+        CalendarDate::from_calendar(year, month, day, target)
+            .unwrap_or_else(|_| date.clone())
+    }
 }
 ```
 
