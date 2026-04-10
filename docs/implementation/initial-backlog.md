@@ -76,11 +76,13 @@ Note: the original 2-task decomposition (#19 harness shell, #20 CI tier split) e
 
 ### Epic: Dioxus adapter
 
-- Point target: `8`
+- Point target: `24` (revised from `8` after full spec audit — 2026-04-10)
 - Layer: `Adapter`
 - Framework: `Dioxus`
 - Test tier: `Adapter`
 - Spec refs: `spec/foundation/09-adapter-dioxus.md`
+
+Note: the original 3-task decomposition (#23, #56, #106) covered only ~40% of the foundational spec sections. A full spec audit (2026-04-10) found the same gaps as the Leptos adapter plus Dioxus-unique sections (DioxusPlatform, SSR Hydration, Error Boundary). Five additional tasks (#193–#197, 16 pts) now cover ArsProvider context, adapter utilities, platform abstraction, SSR hydration, and error boundaries. See [Epic #9](https://github.com/fogodev/ars-ui/issues/9) for the full decomposition.
 
 ### Epic: First utility slice
 
@@ -254,6 +256,66 @@ Note: this seed task delivered the tier split via xtask CI runner. Additional CI
 - Spec refs: `spec/foundation/09-adapter-dioxus.md`
 - Tests first: compile checks and adapter crate smoke tests
 - Acceptance: Dioxus adapter crate exists with initial feature structure
+- Spec impact: `No spec change required`
+
+### #193: Implement ArsProvider context, reactive props, and controlled value helper in ars-dioxus
+
+- Points: `5`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Unit`
+- Depends on: none
+- Spec refs: `spec/foundation/09-adapter-dioxus.md` §16, §16.1, §16.2, §2.3, §19
+- Tests first: use_locale fallback, resolve_locale override, use_controlled_prop_sync skip-initial, use_sync_props state_changed/context_changed
+- Acceptance: ArsContext, use_locale, use_icu_provider, resolve_locale, resolve_messages, use_sync_props (replacing todo!() stub), use_controlled_prop_sync, use_controlled_prop_sync_optional, use_machine_inner wired to ArsProvider
+- Spec impact: `No spec change required`
+
+### #194: Implement Dioxus adapter utilities — emit, event mapping, nonce collector, safe listeners
+
+- Points: `3`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Unit`
+- Depends on: `#193`
+- Spec refs: `spec/foundation/09-adapter-dioxus.md` §19.1, §13.1, §3.5.1, §10
+- Tests first: emit with Some/None, emit_map transform, dioxus_key_to_keyboard_key mapping, ArsNonceCssCtx accumulation, use_safe_event_listener cleanup idempotency
+- Acceptance: emit, emit_map, dioxus_key_to_keyboard_key, ArsNonceCssCtx/ArsNonceStyle wired to provider, use_safe_event_listener with stale-check guard
+- Spec impact: `No spec change required`
+
+### #195: Implement DioxusPlatform trait, platform implementations, and use_platform() hook
+
+- Points: `3`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Unit`
+- Depends on: `#193`
+- Spec refs: `spec/foundation/09-adapter-dioxus.md` §6, §6.1, §6.2, §6.3
+- Tests first: NullPlatform no-ops, use_platform fallback chain, compile-gate feature tests
+- Acceptance: DioxusPlatform trait, WebPlatform (web-sys), DesktopPlatform (native), NullPlatform (testing/SSR), use_platform() hook
+- Spec impact: `No spec change required`
+
+### #196: Implement SSR Hydration support in ars-dioxus
+
+- Points: `3`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Unit`
+- Depends on: `#193`
+- Spec refs: `spec/foundation/09-adapter-dioxus.md` §20, §20.1, §20.2, §19.2
+- Tests first: HydrationSnapshot serde, orphan inert cleanup, focus target validation, use_stable_id format
+- Acceptance: `HydrationSnapshot<M>`, setup_focus_scope_hydration_safe with 5 spec rules, use_stable_id, debug hydration mismatch detection
+- Spec impact: `No spec change required`
+
+### #197: Implement ArsErrorBoundary component in ars-dioxus
+
+- Points: `2`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Unit`
+- Depends on: none
+- Spec refs: `spec/foundation/09-adapter-dioxus.md` §21
+- Tests first: children render when no error, fallback with data-ars-error and role=alert on error, ErrorContext::error() display
+- Acceptance: ArsErrorBoundary wrapping Dioxus ErrorBoundary, accessible fallback UI, prelude export
 - Spec impact: `No spec change required`
 
 ### #24: Break the first utility slice into per-primitive delivery cards

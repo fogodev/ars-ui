@@ -434,3 +434,39 @@ Dependency chain: #159 → #160 → #161. Total: 8 pts (same as original).
 
 - Closed: 8 tasks (plus #78 closed as superseded)
 - Open: #76 (3), #77 (3), #159 (2), #160 (3), #161 (3), #162 (2) = 6 tasks, 16 points remaining
+
+---
+
+## Dioxus Adapter Gap Audit (2026-04-10)
+
+### Dioxus adapter gap summary
+
+An audit of Epic #9 (Dioxus adapter) against `spec/foundation/09-adapter-dioxus.md` found that the original 3 tasks (#23 shell, #56 AttrMap conversion, #106 Dismissable) covered ~40% of the foundational spec sections — the same coverage gap as the Leptos adapter, plus Dioxus-unique sections (platform abstraction, SSR hydration, error boundary) that have no Leptos equivalent.
+
+### Dioxus adapter gap matrix
+
+| Area                     | Current surface                                                                             | Spec-required surface                                                                                                                                              | Blocker impact                                                                                      | Classification                             |
+| ------------------------ | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| ArsProvider / ArsContext | `use_machine_inner` uses hardcoded defaults; `use_machine_with_reactive_props` is `todo!()` | `ArsContext` struct, `use_locale()`, `use_icu_provider()`, `resolve_locale()`, `resolve_messages()`, `use_sync_props`, `use_controlled_prop_sync` (§16, §2.3, §19) | Blocks ALL component rendering — every component reads locale, ICU, style strategy from ArsProvider | Must land before any component             |
+| Adapter utilities        | No emit helpers, no event mapping, no safe listener utility                                 | `emit()`, `emit_map()`, `dioxus_key_to_keyboard_key()`, nonce collector wiring, `use_safe_event_listener()` (§19.1, §13.1, §3.5.1, §10)                            | Blocks keyboard handling, callback dispatch, CSP-safe styling, and safe event lifecycle             | Must land before any component             |
+| DioxusPlatform           | Not implemented (Dioxus-unique, no Leptos equivalent)                                       | `DioxusPlatform` trait, `WebPlatform`, `DesktopPlatform`, `NullPlatform`, `use_platform()` (§6)                                                                    | Blocks focus management, clipboard, bounding rect, scroll, file picker on web/desktop/mobile        | Must land before any interactive component |
+| SSR Hydration            | `use_id()` exists but is not hydration-safe; no state transfer                              | `HydrationSnapshot<M>`, `setup_focus_scope_hydration_safe()`, `use_stable_id()`, hydration mismatch detection (§20, §19.2)                                         | Blocks SSR + hydration for stateful components (Dialog, DatePicker)                                 | Can land before SSR-dependent components   |
+| Error boundary           | Not implemented                                                                             | `ArsErrorBoundary` component wrapping Dioxus `ErrorBoundary` with `role="alert"` (§21)                                                                             | Blocks graceful error handling for machine panics                                                   | Can land independently                     |
+
+### Replacement Tasks
+
+Five new tasks close all gaps. All are sub-issues of [Epic #9](https://github.com/fogodev/ars-ui/issues/9).
+
+| Issue                                                | Title                                                                    | Points | Deps | Parity                     |
+| ---------------------------------------------------- | ------------------------------------------------------------------------ | ------ | ---- | -------------------------- |
+| [#193](https://github.com/fogodev/ars-ui/issues/193) | ArsProvider context, reactive props, controlled value helper             | 5      | none | Symmetric with Leptos #190 |
+| [#194](https://github.com/fogodev/ars-ui/issues/194) | Adapter utilities — emit, event mapping, nonce collector, safe listeners | 3      | #193 | Symmetric with Leptos #191 |
+| [#195](https://github.com/fogodev/ars-ui/issues/195) | DioxusPlatform trait, platform implementations, use_platform()           | 3      | #193 | Dioxus-unique              |
+| [#196](https://github.com/fogodev/ars-ui/issues/196) | SSR Hydration support                                                    | 3      | #193 | Dioxus-unique              |
+| [#197](https://github.com/fogodev/ars-ui/issues/197) | ArsErrorBoundary component                                               | 2      | none | Dioxus-unique              |
+
+### Updated Epic #9 totals
+
+- Point target revised from `8` to `24`.
+- Closed: 2 tasks (#23, #56) = 6 pts
+- Open: #106 (5), #193 (5), #194 (3), #195 (3), #196 (3), #197 (2) = 6 tasks, 21 points remaining

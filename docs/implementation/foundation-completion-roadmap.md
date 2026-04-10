@@ -10,18 +10,18 @@ The project needs a fully stable foundation before component work starts. Compon
 
 ### What is built (357 tests passing)
 
-| Crate              | LOC   | Status   | Key surface                                                                                                                                                                                                                                                                                                                                        |
-| ------------------ | ----- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ars-core`         | 4,306 | Solid    | Machine, Service, TransitionPlan, PendingEffect, Bindable, ConnectApi, ComponentPart, AttrMap/AttrValue/UserAttrs, StyleStrategy, Callback, WeakSend, PlatformEffects, Provider (ColorMode), companion CSS                                                                                                                                         |
-| `ars-derive`       | 535   | Complete | HasId, ComponentPart proc macros with error tests                                                                                                                                                                                                                                                                                                  |
-| `ars-a11y`         | 2,271 | Partial  | AriaRole, AriaAttribute, ComponentIds, ARIA state helpers, FocusScopeBehavior, FocusStrategy, FocusRing. Missing: FocusZone, DomEvent/KeyboardShortcut/Platform, VisuallyHidden, LabelConfig/FieldContext, Announcements, Touch/Mobile, AriaValidator, test helpers                                                                                |
-| `ars-forms`        | 4,128 | Partial  | field::State/Value/Context/Descriptors/InputAria, validation::Error/Validator/AsyncValidator, form::Context/Data/Mode, hidden_input, form_submit machine. Missing: built-in validators, ValidatorsBuilder, FormMessages, DebouncedAsyncValidator, Fieldset/Field/Form machines                                                                     |
-| `ars-interactions` | 3,107 | Partial  | Press, Hover, Focus, FocusWithin, InteractOutside, Dismissable, compose::merge_attrs, LogicalDirection. Missing: LongPress, Move, DnD, Keyboard types                                                                                                                                                                                              |
-| `ars-dom`          | 5,880 | Partial  | FocusScope, focus queries, ScrollLockManager, positioning engine (types + compute_position + overflow + VirtualElement), z-index allocator, scroll_into_view, modality manager. Missing: viewport/visualViewport, containing-block detection, auto_update, portal/inert, overlay stack, media queries, URL sanitization, ModalityManager listeners |
-| `ars-leptos`       | 1,195 | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, attr_map_to_leptos, use_style_strategy, AdapterCapabilities. Missing: ArsProvider context (#190), reactive props (#190), controlled value helper (#190), emit/emit_map (#191), event mapping (#191), nonce CSS collector (#191), safe event listeners (#191)                                  |
-| `ars-dioxus`       | 762   | Partial  | Same as Leptos adapter                                                                                                                                                                                                                                                                                                                             |
-| `ars-collections`  | 28    | Stub     | Selection\<T\> only                                                                                                                                                                                                                                                                                                                                |
-| `ars-i18n`         | 1,928 | Partial  | Locale (ICU4X-backed), Direction, Orientation, NumberFormatter, CurrencyCode, BiDi isolation, Weekday, IcuProvider trait (stub), placeholder date/time types                                                                                                                                                                                       |
+| Crate              | LOC   | Status   | Key surface                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------ | ----- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ars-core`         | 4,306 | Solid    | Machine, Service, TransitionPlan, PendingEffect, Bindable, ConnectApi, ComponentPart, AttrMap/AttrValue/UserAttrs, StyleStrategy, Callback, WeakSend, PlatformEffects, Provider (ColorMode), companion CSS                                                                                                                                                                            |
+| `ars-derive`       | 535   | Complete | HasId, ComponentPart proc macros with error tests                                                                                                                                                                                                                                                                                                                                     |
+| `ars-a11y`         | 2,271 | Partial  | AriaRole, AriaAttribute, ComponentIds, ARIA state helpers, FocusScopeBehavior, FocusStrategy, FocusRing. Missing: FocusZone, DomEvent/KeyboardShortcut/Platform, VisuallyHidden, LabelConfig/FieldContext, Announcements, Touch/Mobile, AriaValidator, test helpers                                                                                                                   |
+| `ars-forms`        | 4,128 | Partial  | field::State/Value/Context/Descriptors/InputAria, validation::Error/Validator/AsyncValidator, form::Context/Data/Mode, hidden_input, form_submit machine. Missing: built-in validators, ValidatorsBuilder, FormMessages, DebouncedAsyncValidator, Fieldset/Field/Form machines                                                                                                        |
+| `ars-interactions` | 3,107 | Partial  | Press, Hover, Focus, FocusWithin, InteractOutside, Dismissable, compose::merge_attrs, LogicalDirection. Missing: LongPress, Move, DnD, Keyboard types                                                                                                                                                                                                                                 |
+| `ars-dom`          | 5,880 | Partial  | FocusScope, focus queries, ScrollLockManager, positioning engine (types + compute_position + overflow + VirtualElement), z-index allocator, scroll_into_view, modality manager. Missing: viewport/visualViewport, containing-block detection, auto_update, portal/inert, overlay stack, media queries, URL sanitization, ModalityManager listeners                                    |
+| `ars-leptos`       | 1,195 | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, attr_map_to_leptos, use_style_strategy, AdapterCapabilities. Missing: ArsProvider context (#190), reactive props (#190), controlled value helper (#190), emit/emit_map (#191), event mapping (#191), nonce CSS collector (#191), safe event listeners (#191)                                                                     |
+| `ars-dioxus`       | 762   | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, attr_map_to_dioxus, use_style_strategy, AdapterCapabilities. Missing: ArsProvider context (#193), reactive props (#193), controlled value helper (#193), emit/emit_map (#194), event mapping (#194), nonce CSS collector (#194), safe event listeners (#194), DioxusPlatform (#195), SSR hydration (#196), error boundary (#197) |
+| `ars-collections`  | 28    | Stub     | Selection\<T\> only                                                                                                                                                                                                                                                                                                                                                                   |
+| `ars-i18n`         | 1,928 | Partial  | Locale (ICU4X-backed), Direction, Orientation, NumberFormatter, CurrencyCode, BiDi isolation, Weekday, IcuProvider trait (stub), placeholder date/time types                                                                                                                                                                                                                          |
 
 ### Architecture spec (01-architecture.md) completion — 2026-04-10 audit
 
@@ -38,16 +38,16 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 
 ### Foundation gap matrix
 
-| Foundation area    | Spec file                    | Spec coverage            | Implementation % | Blocking impact                                                                                                                                                                                 |
-| ------------------ | ---------------------------- | ------------------------ | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Architecture core  | `01-architecture.md`         | ~5000 lines, 10 sections | 95%              | 4 remaining gaps tracked above; core contract is stable                                                                                                                                         |
-| Interactions       | `05-interactions.md`         | ~4000 lines, 12 sections | 60%              | 8 tasks closed; 6 open (#76, #77, #159–#162). Blocks Slider, DnD components, custom keyboard handlers                                                                                           |
-| Collections        | `06-collections.md`          | ~400 lines, 6 sections   | 10%              | Blocks all list-based components                                                                                                                                                                |
-| I18n               | `04-internationalization.md` | ~4000 lines, 16 sections | 25%              | Blocks number/date components, RTL. Locale + NumberFormatter done; 16 tasks remaining (48 pts ICU4X + web-intl parity)                                                                          |
-| DOM utilities      | `11-dom-utilities.md`        | ~2800 lines, 10 sections | 50%              | 8 tasks closed; 8 open (#69, #72, #85, #88, #112–#114, #176). Blocks all overlay components                                                                                                     |
-| Accessibility      | `03-accessibility.md`        | ~4000 lines, 14 sections | 30%              | FocusZone, keyboard shortcuts, VisuallyHidden, FieldContext, announcements, touch/mobile, testing infra all missing                                                                             |
-| Forms              | `07-forms.md`                | ~4300 lines, 15 sections | 50%              | 3 tasks closed; 8 open (#164–#171, 26 pts). Blocks Field, Fieldset, Form components and validator builder API                                                                                   |
-| Adapter conversion | `08/09-adapter-*.md` §4/§3   | ~200 lines               | 40%              | AttrMap conversion done (#55/#56). Missing: ArsProvider (#190), reactive props, controlled helpers, emit, event mapping, nonce collector, safe listeners (#191). Blocks ALL component rendering |
+| Foundation area    | Spec file                    | Spec coverage            | Implementation % | Blocking impact                                                                                                                                                                                                                   |
+| ------------------ | ---------------------------- | ------------------------ | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Architecture core  | `01-architecture.md`         | ~5000 lines, 10 sections | 95%              | 4 remaining gaps tracked above; core contract is stable                                                                                                                                                                           |
+| Interactions       | `05-interactions.md`         | ~4000 lines, 12 sections | 60%              | 8 tasks closed; 6 open (#76, #77, #159–#162). Blocks Slider, DnD components, custom keyboard handlers                                                                                                                             |
+| Collections        | `06-collections.md`          | ~400 lines, 6 sections   | 10%              | Blocks all list-based components                                                                                                                                                                                                  |
+| I18n               | `04-internationalization.md` | ~4000 lines, 16 sections | 25%              | Blocks number/date components, RTL. Locale + NumberFormatter done; 16 tasks remaining (48 pts ICU4X + web-intl parity)                                                                                                            |
+| DOM utilities      | `11-dom-utilities.md`        | ~2800 lines, 10 sections | 50%              | 8 tasks closed; 8 open (#69, #72, #85, #88, #112–#114, #176). Blocks all overlay components                                                                                                                                       |
+| Accessibility      | `03-accessibility.md`        | ~4000 lines, 14 sections | 30%              | FocusZone, keyboard shortcuts, VisuallyHidden, FieldContext, announcements, touch/mobile, testing infra all missing                                                                                                               |
+| Forms              | `07-forms.md`                | ~4300 lines, 15 sections | 50%              | 3 tasks closed; 8 open (#164–#171, 26 pts). Blocks Field, Fieldset, Form components and validator builder API                                                                                                                     |
+| Adapter conversion | `08/09-adapter-*.md` §4/§3   | ~200 lines               | 40%              | AttrMap conversion done (#55/#56). Leptos: ArsProvider (#190), utilities (#191). Dioxus: ArsProvider (#193), utilities (#194), DioxusPlatform (#195), SSR hydration (#196), error boundary (#197). Blocks ALL component rendering |
 
 ## Task Waves
 
@@ -1441,7 +1441,7 @@ Wave 5 (13 pts)            ┌─── Wave 4 i18n tasks available
 | Interactions        | #4    | #57, #58, #59, #60, #61, #65, #76, #77, #90, #159, #160, #161, #162  |
 | DOM utilities       | #6    | #66, #67, #68, #69, #72, #74, #85, #88, #112, #113, #114, #115, #176 |
 | Leptos adapter      | #8    | #55, #105, #190, #191                                                |
-| Dioxus adapter      | #9    | #56, #106                                                            |
+| Dioxus adapter      | #9    | #56, #106, #193, #194, #195, #196, #197                              |
 | A11y                | #3    | #73, #89, #150, #151, #152, #153, #154, #155, #156, #157             |
 | Collections         | #53   | #62, #63, #64, #70, #71, #81, #82, #83, #84                          |
 | I18n                | #54   | #75, #79, #80, #124, #125, #126                                      |
@@ -1633,6 +1633,144 @@ against the 3 original Epic #8 tasks (2026-04-10).
   - `use_safe_event_listener()` with weak-guard, idempotent cleanup, and two-phase lifecycle.
 - Spec impact: `No spec change required`.
 
+### Targeted Follow-On: Dioxus Adapter Foundation Completion
+
+These tasks close the foundation gaps in the Dioxus adapter (Epic #9). The first two
+are symmetric with Leptos #190/#191; the remaining three cover Dioxus-unique sections
+(multi-platform, SSR hydration, error boundary). All are sub-issues of Epic #9.
+
+| GitHub                                               | Title                                                                           | Points | Epic | Deps |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------- | ------ | ---- | ---- |
+| [#193](https://github.com/fogodev/ars-ui/issues/193) | ArsProvider context, reactive props, controlled value helper in ars-dioxus      | 5      | #9   | —    |
+| [#194](https://github.com/fogodev/ars-ui/issues/194) | Dioxus adapter utilities — emit, event mapping, nonce collector, safe listeners | 3      | #9   | #193 |
+| [#195](https://github.com/fogodev/ars-ui/issues/195) | DioxusPlatform trait, platform implementations, use_platform() hook             | 3      | #9   | #193 |
+| [#196](https://github.com/fogodev/ars-ui/issues/196) | SSR Hydration support in ars-dioxus                                             | 3      | #9   | #193 |
+| [#197](https://github.com/fogodev/ars-ui/issues/197) | ArsErrorBoundary component in ars-dioxus                                        | 2      | #9   | —    |
+
+#### PF-DA-1: Implement ArsProvider context, reactive props, and controlled value helper in ars-dioxus
+
+- Points: `5`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Unit`
+- Depends on: none
+- Spec refs:
+  - `spec/foundation/09-adapter-dioxus.md` §16 "ArsProvider Context" (L2186)
+  - `spec/foundation/09-adapter-dioxus.md` §16.1 `use_locale()` (L2224)
+  - `spec/foundation/09-adapter-dioxus.md` §16.2 "Environment Resolution Utilities" (L2248)
+  - `spec/foundation/09-adapter-dioxus.md` §2.3 "Reactive Props Sync" (L435)
+  - `spec/foundation/09-adapter-dioxus.md` §19 "Controlled Value Helper" (L2448)
+- Goal: implement the ArsProvider reactive context bridge, complete `use_machine_with_reactive_props` (currently `todo!()`), and add controlled value helpers.
+- Files to create/modify: `crates/ars-dioxus/src/provider.rs` (new), `crates/ars-dioxus/src/controlled.rs` (new), `crates/ars-dioxus/src/use_machine.rs`, `crates/ars-dioxus/src/lib.rs`
+- Tests to add first:
+  - Unit tests for `use_locale()` fallback to `en-US` when no `ArsProvider` present.
+  - Unit tests for `resolve_locale()` preferring per-instance override over context.
+  - Unit tests for `use_controlled_prop_sync()` skipping initial value and dispatching on change.
+  - Unit tests for `use_sync_props()` syncing external prop changes to the machine service.
+  - Unit tests for `use_machine_inner()` resolving locale and ICU provider from ArsProvider context.
+- Acceptance criteria:
+  - `ArsContext` struct with reactive signals matching spec §16.
+  - `use_locale()`, `use_icu_provider()`, `resolve_locale()`, `resolve_messages()` implemented.
+  - `use_sync_props` fully implemented (replacing `todo!()` stub) with deadlock-safe `try_write()` fallback.
+  - `use_controlled_prop_sync()` and `use_controlled_prop_sync_optional()` helpers with body-level sync.
+  - `use_machine_inner` reads environment from `ArsProvider` context.
+- Spec impact: `No spec change required`.
+
+#### PF-DA-2: Implement Dioxus adapter utilities — emit, event mapping, nonce collector, safe listeners
+
+- Points: `3`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Unit`
+- Depends on: #193 (`ArsNonceStyle` needs `ArsNonceCssCtx` provided alongside `ArsProvider`)
+- Spec refs:
+  - `spec/foundation/09-adapter-dioxus.md` §19.1 "Event Callback Helper" (L2501)
+  - `spec/foundation/09-adapter-dioxus.md` §13.1 "Event Mapping" (L1905)
+  - `spec/foundation/09-adapter-dioxus.md` §3.5.1 "Nonce CSS Collector" (L864)
+  - `spec/foundation/09-adapter-dioxus.md` §10 "Effect Cleanup and Event Safety" (L1698)
+- Goal: implement the remaining small foundational utilities that many components depend on.
+- Files to create/modify: `crates/ars-dioxus/src/callbacks.rs` (new), `crates/ars-dioxus/src/event_mapping.rs` (new), `crates/ars-dioxus/src/nonce.rs` (new), `crates/ars-dioxus/src/safe_listener.rs` (new), `crates/ars-dioxus/src/lib.rs`
+- Tests to add first:
+  - Unit tests for `emit()` with `Some(handler)` and `None`.
+  - Unit tests for `emit_map()` applying transform before dispatch.
+  - Unit tests for `dioxus_key_to_keyboard_key()` mapping Dioxus `Key` variants.
+  - Unit tests for `ArsNonceCssCtx` accumulating CSS rules.
+  - Unit tests for `use_safe_event_listener` cleanup idempotency and stale-check guard.
+- Acceptance criteria:
+  - `emit()` and `emit_map()` helpers implemented.
+  - `dioxus_key_to_keyboard_key()` maps Dioxus `Key` variants to `KeyboardKey`.
+  - `ArsNonceCssCtx`, `ArsNonceStyle` component, and `append_nonce_css()` wired to provider.
+  - `use_safe_event_listener()` (web feature) with `Signal::try_read()` guard, idempotent cleanup, and two-phase lifecycle.
+- Spec impact: `No spec change required`.
+
+#### PF-DA-3: Implement DioxusPlatform trait, platform implementations, and use_platform() hook
+
+- Points: `3`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Unit`
+- Depends on: #193 (`use_platform()` reads `dioxus_platform` from `ArsContext`)
+- Spec refs:
+  - `spec/foundation/09-adapter-dioxus.md` §6 "Multi-Platform Support" (L1268)
+  - `spec/foundation/09-adapter-dioxus.md` §6.1 "Platform Abstraction Trait" (L1270)
+  - `spec/foundation/09-adapter-dioxus.md` §6.2 "Platform Hook" (L1501)
+  - `spec/foundation/09-adapter-dioxus.md` §6.3 "Platform Support Matrix" (L1534)
+- Goal: implement the Dioxus-specific platform abstraction for cross-platform operations.
+- Files to create/modify: `crates/ars-dioxus/src/platform.rs` (new), `crates/ars-dioxus/src/lib.rs`, `crates/ars-dioxus/Cargo.toml`
+- Tests to add first:
+  - Unit tests for `NullPlatform` no-op implementations.
+  - Unit tests for `use_platform()` fallback chain.
+  - Compile-gate tests for `WebPlatform` and `DesktopPlatform` feature gating.
+- Acceptance criteria:
+  - `DioxusPlatform` trait with 8 methods (focus, bounding rect, scroll, clipboard, file picker, timestamp, ID, drag data).
+  - `WebPlatform` (web feature), `DesktopPlatform` (desktop feature), `NullPlatform` implementations.
+  - `use_platform() -> Rc<dyn DioxusPlatform>` with feature-gated fallback.
+- Spec impact: `No spec change required`.
+
+#### PF-DA-4: Implement SSR Hydration support in ars-dioxus
+
+- Points: `3`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Unit`
+- Depends on: #193 (ArsProvider context and `use_machine` wiring)
+- Spec refs:
+  - `spec/foundation/09-adapter-dioxus.md` §20 "SSR Hydration Support" (L2567)
+  - `spec/foundation/09-adapter-dioxus.md` §20.1 "FocusScope Hydration Handling" (L2569)
+  - `spec/foundation/09-adapter-dioxus.md` §20.2 "HydrationSnapshot" (L2679)
+  - `spec/foundation/09-adapter-dioxus.md` §19.2 "Hydration-Safe ID Generation" (L2526)
+- Goal: implement SSR-to-client hydration support with FocusScope safety and state transfer.
+- Files to create/modify: `crates/ars-dioxus/src/hydration.rs` (new), `crates/ars-dioxus/src/id.rs`, `crates/ars-dioxus/src/lib.rs`
+- Tests to add first:
+  - Unit tests for `HydrationSnapshot<M>` serde round-trip.
+  - Unit tests for `setup_focus_scope_hydration_safe()` gating on `data-ars-hydrated`.
+  - Unit tests for `use_stable_id()` deterministic format.
+- Acceptance criteria:
+  - `HydrationSnapshot<M>` with serde support.
+  - `setup_focus_scope_hydration_safe()` implementing all 5 spec rules.
+  - `use_stable_id(prefix)` with documented hydration-safety caveat.
+- Spec impact: `No spec change required`.
+
+#### PF-DA-5: Implement ArsErrorBoundary component in ars-dioxus
+
+- Points: `2`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Unit`
+- Depends on: none
+- Spec refs:
+  - `spec/foundation/09-adapter-dioxus.md` §21 "Error Boundary Pattern" (L2714)
+- Goal: implement the `ArsErrorBoundary` wrapper component for graceful error handling.
+- Files to create/modify: `crates/ars-dioxus/src/error_boundary.rs` (new), `crates/ars-dioxus/src/lib.rs`, `crates/ars-dioxus/src/prelude.rs`
+- Tests to add first:
+  - Unit tests for children rendering when no error.
+  - Unit tests for fallback with `data-ars-error="true"` and `role="alert"`.
+- Acceptance criteria:
+  - `ArsErrorBoundary` wrapping Dioxus `ErrorBoundary`.
+  - Accessible fallback UI with error message display.
+  - Exported in `ars_dioxus::prelude`.
+- Spec impact: `No spec change required`.
+
 ## Summary
 
 | Wave      | Tasks  | Points  | Unlocks                                                  |
@@ -1644,4 +1782,5 @@ against the 3 original Epic #8 tasks (2026-04-10).
 | Wave 5    | 6      | 23      | Browser Intl backends for WASM client builds             |
 | Post-F IO | 3      | 13      | Dismissable for overlays                                 |
 | Post-F LA | 2      | 8       | Leptos adapter foundation completion                     |
-| **Total** | **72** | **241** | **Complete foundation for all 112 components**           |
+| Post-F DA | 5      | 16      | Dioxus adapter foundation completion                     |
+| **Total** | **77** | **257** | **Complete foundation for all 112 components**           |
