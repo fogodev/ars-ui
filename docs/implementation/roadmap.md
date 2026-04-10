@@ -75,7 +75,15 @@ An audit of Epic #8 (Leptos adapter) revealed that the original 3 tasks (#22, #5
 - [#190](https://github.com/fogodev/ars-ui/issues/190) — ArsProvider context, reactive props, controlled value helper (5 pts)
 - [#191](https://github.com/fogodev/ars-ui/issues/191) — emit/emit_map, event mapping, nonce CSS collector, safe event listeners (3 pts)
 
-Symmetric gaps likely exist in Epic #9 (Dioxus adapter) and should be audited separately. See `foundation-completion-roadmap.md` for full task details.
+A symmetric audit of Epic #9 (Dioxus adapter) confirmed the same gaps plus Dioxus-unique sections. Five new tasks were added (16 pts):
+
+- [#193](https://github.com/fogodev/ars-ui/issues/193) — ArsProvider context, reactive props, controlled value helper (5 pts, symmetric with #190)
+- [#194](https://github.com/fogodev/ars-ui/issues/194) — emit/emit_map, event mapping, nonce CSS collector, safe event listeners (3 pts, symmetric with #191)
+- [#195](https://github.com/fogodev/ars-ui/issues/195) — DioxusPlatform trait, WebPlatform, DesktopPlatform, NullPlatform, use_platform() (3 pts, Dioxus-unique)
+- [#196](https://github.com/fogodev/ars-ui/issues/196) — SSR Hydration: HydrationSnapshot, FocusScope hydration safety (3 pts)
+- [#197](https://github.com/fogodev/ars-ui/issues/197) — ArsErrorBoundary component (2 pts)
+
+See `foundation-completion-roadmap.md` for full task details and `foundation-gap-audit.md` for the gap matrix.
 
 ### Phase 4: First shippable utility slice
 
