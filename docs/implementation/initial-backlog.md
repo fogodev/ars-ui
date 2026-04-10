@@ -32,7 +32,7 @@ This backlog is the seed set for the implementation program. It intentionally st
 
 ### Epic: Interactions
 
-- Point target: `8`
+- Point target: `30` (revised from `8` after full spec audit — 2026-04-10)
 - Layer: `Subsystem`
 - Framework: `None`
 - Test tier: `Mixed`
@@ -157,6 +157,8 @@ Note: this seed task only covered baseline a11y types. The follow-up `AriaAttrib
 - Tests first: unit tests for attribute merge semantics
 - Acceptance: shared merge helper and initial interaction states exist
 - Spec impact: `No spec change required`
+
+Note: this seed task only covered attribute composition. Follow-on tasks delivered Press (#58), Hover (#59), Focus (#60), InteractOutside (#65), Dismissable (#104), and shared modality (#57/#90). A full spec audit (2026-04-10) found the original decomposition covered ~60% of the 4000-line spec. #78 (Drag and Drop, 8pts) was decomposed into #159, #160, #161 (8pts total), and a gap task #162 (Keyboard interaction types, 2pts) was created for spec §11 which had no coverage. See [Epic #4](https://github.com/fogodev/ars-ui/issues/4) for the full decomposition.
 
 ### #17: Add baseline `ars-forms` validation and field-state types
 
