@@ -21,18 +21,18 @@ The project needs a fully stable foundation before component work starts. Compon
 | `ars-leptos`       | 751   | Partial    | use_machine, UseMachineReturn, EphemeralRef, use_id, AdapterCapabilities                                                                                                                                   |
 | `ars-dioxus`       | 762   | Partial    | Same as Leptos adapter                                                                                                                                                                                     |
 | `ars-collections`  | 28    | Stub       | Selection\<T\> only                                                                                                                                                                                        |
-| `ars-i18n`         | 116   | Stub       | Locale, Direction, Orientation, placeholder date/time types                                                                                                                                                |
+| `ars-i18n`         | 1,928 | Partial    | Locale (ICU4X-backed), Direction, Orientation, NumberFormatter, CurrencyCode, BiDi isolation, Weekday, IcuProvider trait (stub), placeholder date/time types                                               |
 
 ### Foundation gap matrix
 
-| Foundation area    | Spec file                    | Spec coverage           | Implementation % | Blocking impact                    |
-| ------------------ | ---------------------------- | ----------------------- | ---------------- | ---------------------------------- |
-| Interactions       | `05-interactions.md`         | ~600 lines, 12 sections | 5%               | Blocks ALL interactive components  |
-| Collections        | `06-collections.md`          | ~400 lines, 6 sections  | 10%              | Blocks all list-based components   |
-| I18n               | `04-internationalization.md` | ~500 lines              | 10%              | Blocks number/date components, RTL |
-| DOM utilities      | `11-dom-utilities.md`        | ~400 lines, 8 sections  | 30%              | Blocks all overlay components      |
-| Accessibility      | `03-accessibility.md`        | ~300 lines              | 60%              | LiveAnnouncer, FocusRing missing   |
-| Adapter conversion | `08/09-adapter-*.md` §4/§3   | ~200 lines              | 0%               | Blocks ALL component rendering     |
+| Foundation area    | Spec file                    | Spec coverage            | Implementation % | Blocking impact                                                                                                        |
+| ------------------ | ---------------------------- | ------------------------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Interactions       | `05-interactions.md`         | ~600 lines, 12 sections  | 5%               | Blocks ALL interactive components                                                                                      |
+| Collections        | `06-collections.md`          | ~400 lines, 6 sections   | 10%              | Blocks all list-based components                                                                                       |
+| I18n               | `04-internationalization.md` | ~4000 lines, 16 sections | 25%              | Blocks number/date components, RTL. Locale + NumberFormatter done; 16 tasks remaining (48 pts ICU4X + web-intl parity) |
+| DOM utilities      | `11-dom-utilities.md`        | ~400 lines, 8 sections   | 30%              | Blocks all overlay components                                                                                          |
+| Accessibility      | `03-accessibility.md`        | ~300 lines               | 60%              | LiveAnnouncer, FocusRing missing                                                                                       |
+| Adapter conversion | `08/09-adapter-*.md` §4/§3   | ~200 lines               | 0%               | Blocks ALL component rendering                                                                                         |
 
 ## Task Waves
 
@@ -832,38 +832,53 @@ The project needs a fully stable foundation before component work starts. Compon
 
 **Depends on:** Wave 3 complete.
 
-**Note:** Tasks sized at `8` points (#78, #80, #82) must be decomposed into ≤5-point subtasks before pickup.
+**Note:** Tasks sized at `8` points (#78, #82) must be decomposed into ≤5-point subtasks before pickup. #80 (DateFormatter, 8pts) has been decomposed into #128, #129, #130.
 
-| GitHub                                             | Title                                                                | Points | Epic | Deps     |
-| -------------------------------------------------- | -------------------------------------------------------------------- | ------ | ---- | -------- |
-| [#76](https://github.com/fogodev/ars-ui/issues/76) | Implement LongPress interaction in ars-interactions                  | 3      | #4   | Wave 1   |
-| [#77](https://github.com/fogodev/ars-ui/issues/77) | Implement Move interaction in ars-interactions                       | 3      | #4   | Wave 1   |
-| [#78](https://github.com/fogodev/ars-ui/issues/78) | Implement Drag and Drop interactions in ars-interactions             | 8      | #4   | #58, #76 |
-| [#79](https://github.com/fogodev/ars-ui/issues/79) | Implement NumberFormatter trait with ICU4X backend in ars-i18n       | 5      | #54  | #75      |
-| [#80](https://github.com/fogodev/ars-ui/issues/80) | Implement DateFormatter and calendar system support in ars-i18n      | 8      | #54  | #75      |
-| [#81](https://github.com/fogodev/ars-ui/issues/81) | Implement AsyncCollection with pagination support in ars-collections | 5      | #53  | #63      |
-| [#82](https://github.com/fogodev/ars-ui/issues/82) | Implement Virtualizer for large collection rendering                 | 8      | #53  | #63      |
-| [#83](https://github.com/fogodev/ars-ui/issues/83) | Implement TreeCollection in ars-collections                          | 5      | #53  | #63      |
-| [#84](https://github.com/fogodev/ars-ui/issues/84) | Implement FilteredCollection and SortedCollection in ars-collections | 3      | #53  | #63      |
-| [#85](https://github.com/fogodev/ars-ui/issues/85) | Implement media query utilities in ars-dom                           | 2      | #6   | —        |
+| GitHub                                               | Title                                                                   | Points | Epic | Deps       |
+| ---------------------------------------------------- | ----------------------------------------------------------------------- | ------ | ---- | ---------- |
+| [#76](https://github.com/fogodev/ars-ui/issues/76)   | Implement LongPress interaction in ars-interactions                     | 3      | #4   | Wave 1     |
+| [#77](https://github.com/fogodev/ars-ui/issues/77)   | Implement Move interaction in ars-interactions                          | 3      | #4   | Wave 1     |
+| [#78](https://github.com/fogodev/ars-ui/issues/78)   | Implement Drag and Drop interactions in ars-interactions                | 8      | #4   | #58, #76   |
+| [#79](https://github.com/fogodev/ars-ui/issues/79)   | Implement NumberFormatter trait with ICU4X backend in ars-i18n          | 5      | #54  | #75        |
+| [#128](https://github.com/fogodev/ars-ui/issues/128) | CalendarDate internal type, calendar system extensions, and error types | 5      | #54  | #75        |
+| [#129](https://github.com/fogodev/ars-ui/issues/129) | DateFormatter with ICU4X backend                                        | 3      | #54  | #128       |
+| [#130](https://github.com/fogodev/ars-ui/issues/130) | RelativeTimeFormatter with ICU4X backend                                | 3      | #54  | #75        |
+| [#131](https://github.com/fogodev/ars-ui/issues/131) | Plural and ordinal rules with ICU4X backend                             | 3      | #54  | #75        |
+| [#132](https://github.com/fogodev/ars-ui/issues/132) | Logical/Physical side and rect layout types                             | 2      | #54  | #75        |
+| [#133](https://github.com/fogodev/ars-ui/issues/133) | Locale-aware case transformation with ICU4X backend                     | 2      | #54  | #75        |
+| [#134](https://github.com/fogodev/ars-ui/issues/134) | LocaleStack fallback chain                                              | 2      | #54  | #75        |
+| [#135](https://github.com/fogodev/ars-ui/issues/135) | MessagesRegistry, I18nRegistries, and resolve_messages                  | 3      | #54  | #134       |
+| [#136](https://github.com/fogodev/ars-ui/issues/136) | StringCollator with ICU4X backend                                       | 3      | #54  | #75        |
+| [#137](https://github.com/fogodev/ars-ui/issues/137) | Translate trait                                                         | 2      | #54  | #75        |
+| [#138](https://github.com/fogodev/ars-ui/issues/138) | IcuProvider full trait + Icu4xProvider production implementation        | 5      | #54  | #128, #131 |
+| [#139](https://github.com/fogodev/ars-ui/issues/139) | locale_from_accept_language server utility                              | 2      | #54  | #75        |
+| [#140](https://github.com/fogodev/ars-ui/issues/140) | t() function for Leptos and Dioxus adapters                             | 3      | #54  | #137       |
+| [#81](https://github.com/fogodev/ars-ui/issues/81)   | Implement AsyncCollection with pagination support in ars-collections    | 5      | #53  | #63        |
+| [#82](https://github.com/fogodev/ars-ui/issues/82)   | Implement Virtualizer for large collection rendering                    | 8      | #53  | #63        |
+| [#83](https://github.com/fogodev/ars-ui/issues/83)   | Implement TreeCollection in ars-collections                             | 5      | #53  | #63        |
+| [#84](https://github.com/fogodev/ars-ui/issues/84)   | Implement FilteredCollection and SortedCollection in ars-collections    | 3      | #53  | #63        |
+| [#85](https://github.com/fogodev/ars-ui/issues/85)   | Implement media query utilities in ars-dom                              | 2      | #6   | —          |
 
-**Total:** 50 points
+**Total:** 80 points
 
 ---
 
 ### Wave 5: Browser Intl Backends
 
-**Goal:** Complete the `web-intl` i18n backend so WASM client builds can rely on browser `Intl` services behind the same public `ars-i18n` API surface established by the ICU4X tasks.
+**Goal:** Complete the `web-intl` i18n backend so WASM client builds can rely on browser `Intl` services behind the same public `ars-i18n` API surface established by the ICU4X tasks. Includes full parity for collation, case transformation, and IcuProvider.
 
 **Depends on:** `#75` plus the relevant Wave 4 i18n foundation tasks.
 
 | GitHub                                               | Title                                                                          | Points | Epic | Deps      |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------ | ------ | ---- | --------- |
 | [#124](https://github.com/fogodev/ars-ui/issues/124) | Implement web-intl NumberFormatter backend in ars-i18n                         | 5      | #54  | #75, #79  |
-| [#125](https://github.com/fogodev/ars-ui/issues/125) | Implement web-intl DateFormatter and RelativeTimeFormatter backend in ars-i18n | 5      | #54  | #75, #80  |
+| [#125](https://github.com/fogodev/ars-ui/issues/125) | Implement web-intl DateFormatter and RelativeTimeFormatter backend in ars-i18n | 5      | #54  | #75, #129 |
 | [#126](https://github.com/fogodev/ars-ui/issues/126) | Implement web-intl plural and ordinal rules backend in ars-i18n                | 3      | #54  | #75       |
+| [#141](https://github.com/fogodev/ars-ui/issues/141) | web-intl StringCollator backend                                                | 3      | #54  | #136      |
+| [#142](https://github.com/fogodev/ars-ui/issues/142) | web-intl case transformation backend                                           | 2      | #54  | #133      |
+| [#143](https://github.com/fogodev/ars-ui/issues/143) | WebIntlProvider implementation of IcuProvider                                  | 5      | #54  | #138      |
 
-**Total:** 13 points
+**Total:** 23 points
 
 ---
 
@@ -968,23 +983,17 @@ The project needs a fully stable foundation before component work starts. Compon
   - Support for decimal, percent, and currency formatting modes.
 - Spec impact: `No spec change required`.
 
-#### W4-5: Implement DateFormatter and calendar system support in ars-i18n
+#### W4-5: ~~Implement DateFormatter and calendar system support in ars-i18n~~ (SUPERSEDED)
 
-- Points: `8` (must be decomposed before pickup)
-- Layer: `Subsystem`
-- Framework: `None`
-- Test tier: `Unit`
-- Depends on: #75
-- Spec refs:
-  - `spec/foundation/04-internationalization.md` (date formatting and calendar sections)
-  - `spec/shared/date-time-types.md`
-- Goal: implement locale-aware date/time formatting with multiple calendar system support.
-- Acceptance criteria:
-  - `DateFormatter` trait with locale-aware formatting.
-  - Calendar system support: Gregorian, Islamic, Hebrew, Japanese, Buddhist.
-  - `CalendarDate` backed by ICU4X types instead of placeholder struct.
-  - `Time` and `DateRange` backed by real types.
-- Spec impact: `No spec change required`.
+**#80 has been closed and decomposed into 16 granular tasks under epic #54:**
+
+- **Wave 4a (replaces #80):** #128 CalendarDate (5pts), #129 DateFormatter (3pts), #130 RelativeTimeFormatter (3pts)
+- **Wave 4b:** #131 Plural rules (3pts), #132 Layout geometry (2pts), #133 Case transformation (2pts), #134 LocaleStack (2pts)
+- **Wave 4c:** #135 MessagesRegistry (3pts), #136 StringCollator (3pts), #137 Translate trait (2pts)
+- **Wave 5a:** #138 IcuProvider+Icu4xProvider (5pts), #139 accept_language (2pts), #140 t() function (3pts)
+- **Wave 5b (web-intl parity):** #141 web-intl Collation (3pts), #142 web-intl Case (2pts), #143 WebIntlProvider (5pts)
+
+See epic #54 for the full wave structure, dependency graph, and ICU4X ↔ web-intl parity matrix.
 
 #### W4-6: Implement AsyncCollection with pagination support in ars-collections
 
@@ -1125,7 +1134,7 @@ The project needs a fully stable foundation before component work starts. Compon
 - Layer: `Subsystem`
 - Framework: `None`
 - Test tier: `Unit`
-- Depends on: #75, #80
+- Depends on: #75, #129
 - Spec refs:
   - `spec/foundation/04-internationalization.md`
   - `spec/shared/date-time-types.md`
@@ -1178,7 +1187,59 @@ The project needs a fully stable foundation before component work starts. Compon
   - The public plural-category API stays stable across `icu4x` and `web-intl` builds.
   - Any browser and ICU naming or behavior mismatches are normalized at the `ars-i18n` API boundary.
   - CI and verification include the wasm `web-intl` cargo check path required by the spec.
-- Spec impact: `Potentially yes` if the current spec still assumes ICU4X-only plural-rule abstractions.
+- Spec impact: `No` — spec §9.4 already updated with web-intl parity definitions.
+
+#### W5-4: Implement web-intl StringCollator backend in ars-i18n
+
+- Points: `3`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: #136 (ICU4X StringCollator defines the public API)
+- Spec refs:
+  - `spec/foundation/04-internationalization.md` §8, §9.4
+- Goal: implement browser `Intl.Collator`-backed StringCollator for WASM client builds.
+- Acceptance criteria:
+  - `StringCollator::new()` uses `Intl.Collator` under `web-intl`.
+  - `CollationStrength` maps to Intl.Collator sensitivity: Primary→"base", Secondary→"accent", Tertiary→"case", Quaternary→"variant".
+  - `numeric: true` produces natural sort order.
+  - Builds with `--no-default-features --features web-intl --target wasm32-unknown-unknown`.
+- Spec impact: `No` — spec §8 already updated with web-intl backend definition.
+
+#### W5-5: Implement web-intl case transformation backend in ars-i18n
+
+- Points: `2`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: #133 (ICU4X case transformation defines the public API)
+- Spec refs:
+  - `spec/foundation/04-internationalization.md` §6.4, §9.4
+- Goal: implement browser `toLocaleUpperCase`/`toLocaleLowerCase`-backed case transformation for WASM client builds.
+- Acceptance criteria:
+  - `to_uppercase`/`to_lowercase` use `js_sys::JsString` locale methods under `web-intl`.
+  - Same public function signatures as ICU4X backend.
+  - Turkish dotted-I and German eszett tests pass via browser.
+  - Builds with `--no-default-features --features web-intl --target wasm32-unknown-unknown`.
+- Spec impact: `No` — spec §6.4 already updated with web-intl dispatch.
+
+#### W5-6: Implement WebIntlProvider for IcuProvider trait in ars-i18n
+
+- Points: `5`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: #138 (IcuProvider full trait definition)
+- Spec refs:
+  - `spec/foundation/04-internationalization.md` §9.5.4
+- Goal: implement browser-backed IcuProvider using Intl APIs for WASM client builds, providing full parity with Icu4xProvider.
+- Acceptance criteria:
+  - All 11 `IcuProvider` methods implemented under `web-intl`.
+  - Clean-mapping methods (weekday/month labels, digits, hourCycle) produce locale-correct output.
+  - Fallback methods (max_months, days_in_month, convert_date) have documented strategies per spec §9.5.4.
+  - `default_provider()` returns `WebIntlProvider` under `web-intl`.
+  - Builds with `--no-default-features --features web-intl --target wasm32-unknown-unknown`.
+- Spec impact: `No` — spec §9.5.4 already added with full WebIntlProvider definition.
 
 ---
 
@@ -1370,7 +1431,8 @@ pipeline and do not reopen the full `#24` planning thread.
   - Client-only `pointerdown`, `focusin`, and Escape listeners with proper cleanup.
   - Portal-aware containment and overlay-stack-aware topmost dismissal behavior.
   - `disable_outside_pointer_events` behavior supported without breaking keyboard dismissal.
-  - Dioxus Web/Desktop behavior and cleanup ordering match the spec and adapter contract.
+  - `disable_outside_pointer_events` behavior supported without breaking keyboard dismissal.
+    - Dioxus Web/Desktop behavior and cleanup ordering match the spec and adapter contract.
 - Spec impact: `No spec change required`.
 
 ## Summary
