@@ -8,7 +8,7 @@ Build `ars-ui` from a spec-only workspace into an implementation workspace with:
 - stable core contracts
 - reusable subsystem primitives
 - framework-agnostic test harnesses
-- a first shippable utility slice in both Leptos and Dioxus
+- the full agnostic utility component layer (26 components)
 
 ## Phase Order
 
@@ -85,27 +85,28 @@ A symmetric audit of Epic #9 (Dioxus adapter) confirmed the same gaps plus Dioxu
 
 See `foundation-completion-roadmap.md` for full task details and `foundation-gap-audit.md` for the gap matrix.
 
-### Phase 4: First shippable utility slice
+### Phase 4: Agnostic utility components
 
 Scope:
 
-- `ArsProvider`
-- `AsChild`
-- `VisuallyHidden`
-- `FocusRing`
-- `Button`
-- `Toggle`
-- `ToggleButton`
-- `FocusScope`
-- `Field`
-- `Fieldset`
-- `Form`
+All 26 utility components defined in `spec/components/utility/`, implemented as framework-agnostic core (state machines, ConnectApi, Props/Api/Part types):
+
+**Stateless (17):** AsChild, ArsProvider, ClientOnly, Dismissable, DownloadTrigger, Field, Fieldset, FocusRing, Form, Group, Heading, Highlight, Keyboard, Landmark, Separator, VisuallyHidden, ZIndexAllocator
+
+**Stateful (9):** ActionGroup, Button, DropZone, FocusScope, LiveRegion, Swap, Toggle, ToggleButton, ToggleGroup
+
+Decomposed into 20 tasks (64 story points) organized in 5 dependency waves. See [Epic #10](https://github.com/fogodev/ars-ui/issues/10) for the full task breakdown with sub-issues.
 
 Exit criteria:
 
-- all slice components exist in both adapters
-- parity tests cover shared behavior and `data-ars-*`/ARIA output
-- spec and implementation remain aligned for any discovered framework-specific constraints
+- all 26 utility components have agnostic core implementations
+- state machines (stateful components) match their spec §1 exactly
+- ConnectApi implementations produce correct ARIA attributes per spec §2
+- all public types documented per workspace `missing_docs` lint
+- all tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+Status (2026-04-10): Epic repurposed from "First utility slice" (11 components) to cover all 26 agnostic utility components. Issue #24 (decomposition card) closed as superseded. Twenty new task issues (#199–#218) created as sub-issues of Epic #10.
 
 ## Spec synchronization rules
 

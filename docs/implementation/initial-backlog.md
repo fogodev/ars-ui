@@ -84,13 +84,15 @@ Note: the original 2-task decomposition (#19 harness shell, #20 CI tier split) e
 
 Note: the original 3-task decomposition (#23, #56, #106) covered only ~40% of the foundational spec sections. A full spec audit (2026-04-10) found the same gaps as the Leptos adapter plus Dioxus-unique sections (DioxusPlatform, SSR Hydration, Error Boundary). Five additional tasks (#193–#197, 16 pts) now cover ArsProvider context, adapter utilities, platform abstraction, SSR hydration, and error boundaries. See [Epic #9](https://github.com/fogodev/ars-ui/issues/9) for the full decomposition.
 
-### Epic: First utility slice
+### Epic: Agnostic utility components
 
-- Point target: `8`
+- Point target: `64` (revised from `8` after full decomposition — 2026-04-10)
 - Layer: `Component`
-- Framework: `Both`
-- Test tier: `Mixed`
-- Spec refs: `spec/components/utility/_category.md`
+- Framework: `None` (agnostic core only; adapter work tracked under Epics #8/#9)
+- Test tier: `Unit`
+- Spec refs: `spec/components/utility/_category.md`, `spec/components/utility/*.md`
+
+Note: the original "First utility slice" epic scoped only 11 components and had a single decomposition card (#24). A full decomposition (2026-04-10) expanded the epic to cover all 26 utility components as framework-agnostic core implementations. Twenty tasks (#199–#218, 64 pts) organized in 5 dependency waves now cover every component. Issue #24 was closed as superseded. See [Epic #10](https://github.com/fogodev/ars-ui/issues/10) for the full sub-issue breakdown.
 
 ### Epic: Spec synchronization
 
@@ -318,17 +320,9 @@ Note: this seed task delivered the tier split via xtask CI runner. Additional CI
 - Acceptance: ArsErrorBoundary wrapping Dioxus ErrorBoundary, accessible fallback UI, prelude export
 - Spec impact: `No spec change required`
 
-### #24: Break the first utility slice into per-primitive delivery cards
+### ~~#24: Break the first utility slice into per-primitive delivery cards~~ (CLOSED)
 
-- Points: `2`
-- Layer: `Component`
-- Framework: `Both`
-- Test tier: `Mixed`
-- Depends on: `#21`
-- Spec refs: `spec/components/utility/_category.md`, `spec/components/utility/button.md`, `spec/components/utility/focus-scope.md`, `spec/components/utility/form.md`
-- Tests first: not applicable; verify each card includes tests-first details
-- Acceptance: the first slice is decomposed into component-level or behavior-level cards no larger than `5`
-- Spec impact: `No spec change required`
+Closed (2026-04-10): Superseded by the full decomposition of all 26 agnostic utility components under Epic #10. Twenty task issues (#199–#218) now cover every utility component. See [Epic #10](https://github.com/fogodev/ars-ui/issues/10) sub-issues.
 
 ## Backlog Reset
 

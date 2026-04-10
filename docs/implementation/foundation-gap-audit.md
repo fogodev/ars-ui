@@ -25,15 +25,15 @@ This audit resets the implementation backlog after the initial seed tasks landed
 | `ars-dom` scroll locking                   | No reference-counted scroll lock implementation exists.                                                                                                                                                                                                                                                             | `ScrollLockManager`, low-level `acquire`/`release`, and public aliases from [`spec/foundation/11-dom-utilities.md`](/Users/ericson/Workspace/Rust/ars-ui/spec/foundation/11-dom-utilities.md):5.2-5.4.                                                   | Not needed for the first utility slice, but required before overlay work starts.                                                                                               | Can wait until later slices                       |
 | Interaction composition depth              | [`crates/ars-interactions/src/lib.rs`](/Users/ericson/Workspace/Rust/ars-ui/crates/ars-interactions/src/lib.rs) only does shallow overwrite merging.                                                                                                                                                                | Token-aware composition behavior expected by [`spec/foundation/05-interactions.md`](/Users/ericson/Workspace/Rust/ars-ui/spec/foundation/05-interactions.md):8.1-8.2 and by `as_child`/button specs.                                                     | Blocks `AsChild`, `Button`, and other composed interactive utilities, but not all utility work.                                                                                | Can land before specific utilities only           |
 
-## Why `#24` Is Blocked
+## ~~Why `#24` Is Blocked~~ (Resolved)
 
-`#24` assumed the first utility slice could be decomposed directly into adapter-facing delivery cards. The audit shows that the current repo still lacks the shared contracts those cards would depend on:
+> **Update (2026-04-10):** Issue #24 has been **closed** as superseded. Epic #10 was repurposed from "First utility slice" to "Agnostic utility components" covering all 26 utility components. Twenty new task issues (#199–#218, 64 pts) replace #24's decomposition role. Each task declares its foundation dependencies via native GitHub issue dependencies, so blocked tasks are explicit. See [Epic #10](https://github.com/fogodev/ars-ui/issues/10) for the full sub-issue breakdown.
+
+The original analysis below remains accurate — the foundation gaps identified here are still the prerequisite contracts that utility component tasks depend on:
 
 - Utility specs already call for typed `HtmlAttr`, `AttrMap::set_bool`, style handling, and part-derived `data_attrs()`.
-- `Field`, `Fieldset`, `Form`, and `ToggleButton` all assume `FormContext`, `FieldCtx`, hidden-input helpers, and submit lifecycle machinery that do not exist yet.
-- `FocusScope` and any effectful component assume DOM focus helpers and `PlatformEffects` integration that are still missing.
-
-Because of that, decomposing the utility slice now would create issue cards that are blocked on unstated prerequisites. `#24` should stay deferred until the replacement foundation tasks below exist as issue-backed work.
+- `Field`, `Fieldset`, `Form`, and `ToggleButton` all assume `FormContext`, `FieldCtx`, hidden-input helpers, and submit lifecycle machinery.
+- `FocusScope` and any effectful component assume DOM focus helpers and `PlatformEffects` integration.
 
 ## Replacement Task Sequence
 
