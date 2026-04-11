@@ -10,6 +10,7 @@ Build `ars-ui` from a spec-only workspace into an implementation workspace with:
 - framework-agnostic test harnesses
 - the full agnostic component layer (112 components across 9 categories)
 - the Leptos adapter component layer (112 components across 9 categories)
+- the Dioxus adapter component layer (112 components across 9 categories)
 
 ## Phase Order
 
@@ -551,6 +552,234 @@ Exit criteria:
 External deps: All depend on ars-i18n (Epic #54) for CalendarDate, DateFormatter, WeekInfo. Date fields and pickers depend on ars-forms (Epic #5) for form integration.
 
 Status (2026-04-10): Epic #308 created with 8 sub-issue tasks as a sub-issue of Epic #8.
+
+### Phase 22: Dioxus utility adapter components
+
+Scope:
+
+All 26 utility components defined in `spec/dioxus-components/utility/`, implemented as Dioxus 0.7.x reactive component shells wiring the agnostic core machines to props, slots, context, event mapping, and SSR:
+
+**Stateless (17):** AsChild, ArsProvider, ClientOnly, Dismissable, DownloadTrigger, Field, Fieldset, FocusRing, Form, Group, Heading, Highlight, Keyboard, Landmark, Separator, VisuallyHidden, ZIndexAllocator
+
+**Stateful (9):** ActionGroup, Button, DropZone, FocusScope, LiveRegion, Swap, Toggle, ToggleButton, ToggleGroup
+
+Decomposed into 20 tasks (44 story points) organized in 5 dependency waves. See [Epic #407](https://github.com/fogodev/ars-ui/issues/407) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 26 utility components have Dioxus adapter implementations
+- each adapter component matches its spec in `spec/dioxus-components/utility/`
+- props, events, context, and attr merge rules match the adapter spec contract
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+Status (2026-04-11): Epic #407 created with 20 sub-issue tasks as a sub-issue of Epic #9.
+
+### Phase 23: Dioxus layout adapter components
+
+Scope:
+
+All 11 layout components defined in `spec/dioxus-components/layout/`, implemented as Dioxus adapter shells:
+
+**Stateless (5):** AspectRatio, Center, Frame, Grid, Stack
+
+**Stateful (6):** Carousel, Collapsible, Portal, ScrollArea, Splitter, Toolbar
+
+Decomposed into 8 tasks (21 story points) in a single wave — no intra-epic dependencies. See [Epic #414](https://github.com/fogodev/ars-ui/issues/414) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 11 layout components have Dioxus adapter implementations
+- each adapter component matches its spec in `spec/dioxus-components/layout/`
+- layout measurement and portal patterns match adapter spec
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+Status (2026-04-11): Epic #414 created with 8 sub-issue tasks as a sub-issue of Epic #9.
+
+### Phase 24: Dioxus input adapter components
+
+Scope:
+
+All 14 input components defined in `spec/dioxus-components/input/`, implemented as Dioxus adapter shells:
+
+**Stateless (1):** FileTrigger
+
+**Stateful (11):** Checkbox, CheckboxGroup, Editable, NumberInput, PasswordInput, PinInput, RadioGroup, SearchInput, Switch, TextField, Textarea
+
+**Complex (2):** Slider, RangeSlider
+
+Decomposed into 12 tasks (34 story points) organized in 2 dependency waves. See [Epic #408](https://github.com/fogodev/ars-ui/issues/408) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 14 input components have Dioxus adapter implementations
+- each adapter component matches its spec in `spec/dioxus-components/input/`
+- form integration (hidden inputs, validation, field context) matches adapter spec
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+Status (2026-04-11): Epic #408 created with 12 sub-issue tasks as a sub-issue of Epic #9.
+
+### Phase 25: Dioxus data-display adapter components
+
+Scope:
+
+All 11 data-display components defined in `spec/dioxus-components/data-display/`, implemented as Dioxus adapter shells:
+
+**Stateless (4):** Badge, Meter, Skeleton, Stat
+
+**Stateful (6):** Avatar, GridList, Marquee, Progress, RatingGroup, TagGroup
+
+**Complex (1):** Table
+
+Decomposed into 9 tasks (24 story points) organized in 3 dependency waves. See [Epic #413](https://github.com/fogodev/ars-ui/issues/413) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 11 data-display components have Dioxus adapter implementations
+- each adapter component matches its spec in `spec/dioxus-components/data-display/`
+- collection-dependent components use collection registration helpers
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+Status (2026-04-11): Epic #413 created with 9 sub-issue tasks as a sub-issue of Epic #9.
+
+### Phase 26: Dioxus overlay adapter components
+
+Scope:
+
+All 10 overlay components defined in `spec/dioxus-components/overlay/`, implemented as Dioxus adapter shells:
+
+**Stateful (4):** AlertDialog, Popover, Presence, Tooltip
+
+**Complex (6):** Dialog, Drawer, FloatingPanel, HoverCard, Toast, Tour
+
+Decomposed into 10 tasks (29 story points) organized in 4 dependency waves. See [Epic #410](https://github.com/fogodev/ars-ui/issues/410) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 10 overlay components have Dioxus adapter implementations
+- each adapter component matches its spec in `spec/dioxus-components/overlay/`
+- portal, z-index, focus-scope, and dismissal patterns match adapter spec
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+Status (2026-04-11): Epic #410 created with 10 sub-issue tasks as a sub-issue of Epic #9.
+
+### Phase 27: Dioxus navigation adapter components
+
+Scope:
+
+All 8 navigation components defined in `spec/dioxus-components/navigation/`, implemented as Dioxus adapter shells:
+
+**Stateless (1):** Breadcrumbs
+
+**Stateful (4):** Accordion, Link, Pagination, Steps
+
+**Complex (3):** NavigationMenu, Tabs, TreeView
+
+Decomposed into 7 tasks (21 story points) organized in 3 dependency waves. See [Epic #411](https://github.com/fogodev/ars-ui/issues/411) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 8 navigation components have Dioxus adapter implementations
+- each adapter component matches its spec in `spec/dioxus-components/navigation/`
+- roving focus and descendant registration match adapter spec
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+Status (2026-04-11): Epic #411 created with 7 sub-issue tasks as a sub-issue of Epic #9.
+
+### Phase 28: Dioxus selection adapter components
+
+Scope:
+
+All 9 selection components defined in `spec/dioxus-components/selection/`, implemented as Dioxus adapter shells:
+
+**Stateful (2):** Autocomplete, SegmentGroup
+
+**Complex (7):** Combobox, ContextMenu, Listbox, Menu, MenuBar, Select, TagsInput
+
+Decomposed into 9 tasks (34 story points) organized in 4 dependency waves. See [Epic #409](https://github.com/fogodev/ars-ui/issues/409) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 9 selection components have Dioxus adapter implementations
+- each adapter component matches its spec in `spec/dioxus-components/selection/`
+- keyed item registration and typeahead bridging match adapter spec
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+Status (2026-04-11): Epic #409 created with 9 sub-issue tasks as a sub-issue of Epic #9.
+
+### Phase 29: Dioxus specialized adapter components
+
+Scope:
+
+All 15 specialized components defined in `spec/dioxus-components/specialized/`, implemented as Dioxus adapter shells:
+
+**Stateless (3):** ColorSwatch, ContextualHelp, QrCode
+
+**Stateful (10):** AngleSlider, Clipboard, ColorArea, ColorField, ColorSlider, ColorSwatchPicker, ColorWheel, ImageCropper, SignaturePad, Timer
+
+**Complex (2):** ColorPicker, FileUpload
+
+Decomposed into 11 tasks (32 story points) organized in 4 dependency waves. See [Epic #415](https://github.com/fogodev/ars-ui/issues/415) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 15 specialized components have Dioxus adapter implementations
+- each adapter component matches its spec in `spec/dioxus-components/specialized/`
+- color components share ColorValue type; ColorPicker composes all color primitives
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+External deps: FileUpload depends on DnD interactions (#159–#161).
+
+Status (2026-04-11): Epic #415 created with 11 sub-issue tasks as a sub-issue of Epic #9.
+
+### Phase 30: Dioxus date-time adapter components
+
+Scope:
+
+All 8 date-time components defined in `spec/dioxus-components/date-time/`, implemented as Dioxus adapter shells:
+
+**Stateful (5):** DateField, DateRangeField, DateRangePicker, RangeCalendar, TimeField
+
+**Complex (3):** Calendar, DatePicker, DateTimePicker
+
+Decomposed into 8 tasks (29 story points) organized in 4 dependency waves. See [Epic #412](https://github.com/fogodev/ars-ui/issues/412) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 8 date-time components have Dioxus adapter implementations
+- each adapter component matches its spec in `spec/dioxus-components/date-time/`
+- segmented fields and calendar grids match adapter spec
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+External deps: All depend on ars-i18n (Epic #54) for CalendarDate, DateFormatter, WeekInfo. Date fields and pickers depend on ars-forms (Epic #5) for form integration.
+
+Status (2026-04-11): Epic #412 created with 8 sub-issue tasks as a sub-issue of Epic #9.
 
 ## Spec synchronization rules
 
