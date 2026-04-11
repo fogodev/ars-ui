@@ -206,7 +206,10 @@ mod tests {
         announcer.announce_assertive("Critical alert");
 
         assert!(announcer.announcing);
-        assert_eq!(announcer.active_priority, Some(AnnouncementPriority::Assertive));
+        assert_eq!(
+            announcer.active_priority,
+            Some(AnnouncementPriority::Assertive)
+        );
         assert_eq!(announcer.last_message.as_deref(), Some("Critical alert"));
         assert!(announcer.queue.is_empty());
     }
@@ -252,7 +255,10 @@ mod tests {
         announcer.announce_assertive("Critical alert 1");
         announcer.announce_assertive("Critical alert 2");
 
-        assert_eq!(announcer.active_priority, Some(AnnouncementPriority::Assertive));
+        assert_eq!(
+            announcer.active_priority,
+            Some(AnnouncementPriority::Assertive)
+        );
         assert_eq!(announcer.last_message.as_deref(), Some("Critical alert 1"));
         assert_eq!(
             announcer.queue,
@@ -263,16 +269,16 @@ mod tests {
         );
 
         announcer.notify_announced();
-        assert_eq!(announcer.active_priority, Some(AnnouncementPriority::Assertive));
+        assert_eq!(
+            announcer.active_priority,
+            Some(AnnouncementPriority::Assertive)
+        );
         assert_eq!(announcer.last_message.as_deref(), Some("Critical alert 2"));
         assert!(announcer.queue.is_empty());
 
         announcer.notify_announced();
         assert_eq!(announcer.active_priority, None);
-        assert_eq!(
-            announcer.last_message.as_deref(),
-            Some("Critical alert 2")
-        );
+        assert_eq!(announcer.last_message.as_deref(), Some("Critical alert 2"));
     }
 
     #[test]
@@ -280,12 +286,18 @@ mod tests {
         let mut announcer = LiveAnnouncer::new();
 
         announcer.announce("Background update");
-        assert_eq!(announcer.active_priority, Some(AnnouncementPriority::Polite));
+        assert_eq!(
+            announcer.active_priority,
+            Some(AnnouncementPriority::Polite)
+        );
 
         announcer.announce_assertive("Critical alert");
 
         assert!(announcer.announcing);
-        assert_eq!(announcer.active_priority, Some(AnnouncementPriority::Assertive));
+        assert_eq!(
+            announcer.active_priority,
+            Some(AnnouncementPriority::Assertive)
+        );
         assert_eq!(announcer.last_message.as_deref(), Some("Critical alert"));
         assert!(announcer.queue.is_empty());
     }
