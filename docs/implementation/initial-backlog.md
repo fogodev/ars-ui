@@ -78,13 +78,13 @@ Note: the original 3-task decomposition (#22, #55, #105) covered only the adapte
 
 ### Epic: Dioxus adapter
 
-- Point target: `24` (revised from `8` after full spec audit — 2026-04-10)
+- Point target: `292` (revised from `24` after full component adapter decomposition — 2026-04-11)
 - Layer: `Adapter`
 - Framework: `Dioxus`
 - Test tier: `Adapter`
-- Spec refs: `spec/foundation/09-adapter-dioxus.md`
+- Spec refs: `spec/foundation/09-adapter-dioxus.md`, `spec/dioxus-components/`
 
-Note: the original 3-task decomposition (#23, #56, #106) covered only ~40% of the foundational spec sections. A full spec audit (2026-04-10) found the same gaps as the Leptos adapter plus Dioxus-unique sections (DioxusPlatform, SSR Hydration, Error Boundary). Five additional tasks (#193–#197, 16 pts) now cover ArsProvider context, adapter utilities, platform abstraction, SSR hydration, and error boundaries. See [Epic #9](https://github.com/fogodev/ars-ui/issues/9) for the full decomposition.
+Note: the original 3-task decomposition (#23, #56, #106) covered only ~40% of the foundational spec sections. Five additional foundation tasks (#193–#197, 16 pts) close the remaining foundational gaps. Nine category epics (#407–#415, 268 pts) now cover all 112 Dioxus adapter components across 94 tasks organized by category. See [Epic #9](https://github.com/fogodev/ars-ui/issues/9) for the full sub-issue breakdown.
 
 ### Epic: Agnostic utility components
 
@@ -265,6 +265,96 @@ All 11 layout components (5 stateless, 6 stateful). Eight tasks in a single wave
 - Spec refs: `spec/leptos-components/specialized/_category.md`, `spec/leptos-components/specialized/*.md`, `spec/foundation/08-adapter-leptos.md`
 
 All 15 specialized components (3 stateless, 10 stateful, 2 complex). Eleven tasks organized in 4 dependency waves. External dep: FileUpload depends on DnD interactions (#159–#161). See [Epic #311](https://github.com/fogodev/ars-ui/issues/311) for the full sub-issue breakdown.
+
+### Epic: Dioxus utility adapter components
+
+- Point target: `44`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Adapter`
+- Spec refs: `spec/dioxus-components/utility/_category.md`, `spec/dioxus-components/utility/*.md`, `spec/foundation/09-adapter-dioxus.md`
+
+All 26 utility components (17 stateless, 9 stateful). Twenty tasks organized in 5 dependency waves. See [Epic #407](https://github.com/fogodev/ars-ui/issues/407) for the full sub-issue breakdown.
+
+### Epic: Dioxus input adapter components
+
+- Point target: `34`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Adapter`
+- Spec refs: `spec/dioxus-components/input/_category.md`, `spec/dioxus-components/input/*.md`, `spec/foundation/09-adapter-dioxus.md`
+
+All 14 input components (1 stateless, 11 stateful, 2 complex). Twelve tasks organized in 2 dependency waves. See [Epic #408](https://github.com/fogodev/ars-ui/issues/408) for the full sub-issue breakdown.
+
+### Epic: Dioxus selection adapter components
+
+- Point target: `34`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Adapter`
+- Spec refs: `spec/dioxus-components/selection/_category.md`, `spec/dioxus-components/selection/*.md`, `spec/foundation/09-adapter-dioxus.md`
+
+All 9 selection components (2 stateful, 7 complex). Nine tasks organized in 4 dependency waves. See [Epic #409](https://github.com/fogodev/ars-ui/issues/409) for the full sub-issue breakdown.
+
+### Epic: Dioxus overlay adapter components
+
+- Point target: `29`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Adapter`
+- Spec refs: `spec/dioxus-components/overlay/_category.md`, `spec/dioxus-components/overlay/*.md`, `spec/foundation/09-adapter-dioxus.md`
+
+All 10 overlay components (4 stateful, 6 complex). Ten tasks organized in 4 dependency waves. See [Epic #410](https://github.com/fogodev/ars-ui/issues/410) for the full sub-issue breakdown.
+
+### Epic: Dioxus navigation adapter components
+
+- Point target: `21`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Adapter`
+- Spec refs: `spec/dioxus-components/navigation/_category.md`, `spec/dioxus-components/navigation/*.md`, `spec/foundation/09-adapter-dioxus.md`
+
+All 8 navigation components (1 stateless, 4 stateful, 3 complex). Seven tasks organized in 3 dependency waves. See [Epic #411](https://github.com/fogodev/ars-ui/issues/411) for the full sub-issue breakdown.
+
+### Epic: Dioxus date-time adapter components
+
+- Point target: `29`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Adapter`
+- Spec refs: `spec/dioxus-components/date-time/_category.md`, `spec/dioxus-components/date-time/*.md`, `spec/foundation/09-adapter-dioxus.md`
+
+All 8 date-time components (5 stateful, 3 complex). Eight tasks organized in 4 dependency waves. External dep: all depend on ars-i18n (Epic #54). See [Epic #412](https://github.com/fogodev/ars-ui/issues/412) for the full sub-issue breakdown.
+
+### Epic: Dioxus data-display adapter components
+
+- Point target: `24`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Adapter`
+- Spec refs: `spec/dioxus-components/data-display/_category.md`, `spec/dioxus-components/data-display/*.md`, `spec/foundation/09-adapter-dioxus.md`
+
+All 11 data-display components (4 stateless, 6 stateful, 1 complex). Nine tasks organized in 3 dependency waves. See [Epic #413](https://github.com/fogodev/ars-ui/issues/413) for the full sub-issue breakdown.
+
+### Epic: Dioxus layout adapter components
+
+- Point target: `21`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Adapter`
+- Spec refs: `spec/dioxus-components/layout/_category.md`, `spec/dioxus-components/layout/*.md`, `spec/foundation/09-adapter-dioxus.md`
+
+All 11 layout components (5 stateless, 6 stateful). Eight tasks in a single wave — no intra-epic dependencies. See [Epic #414](https://github.com/fogodev/ars-ui/issues/414) for the full sub-issue breakdown.
+
+### Epic: Dioxus specialized adapter components
+
+- Point target: `32`
+- Layer: `Adapter`
+- Framework: `Dioxus`
+- Test tier: `Adapter`
+- Spec refs: `spec/dioxus-components/specialized/_category.md`, `spec/dioxus-components/specialized/*.md`, `spec/foundation/09-adapter-dioxus.md`
+
+All 15 specialized components (3 stateless, 10 stateful, 2 complex). Eleven tasks organized in 4 dependency waves. External dep: FileUpload depends on DnD interactions (#159–#161). See [Epic #415](https://github.com/fogodev/ars-ui/issues/415) for the full sub-issue breakdown.
 
 ### Epic: Spec synchronization
 
