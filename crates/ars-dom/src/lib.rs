@@ -15,6 +15,7 @@
 
 mod focus;
 pub mod modality;
+pub mod portal;
 pub mod positioning;
 mod scroll;
 pub mod scroll_lock;
@@ -29,6 +30,11 @@ pub use focus::{
     get_html_element_by_id, get_last_focusable,
 };
 pub use modality::ModalityManager;
+#[cfg(feature = "web")]
+pub use portal::{
+    ensure_portal_mount_root, get_or_create_portal_root, remove_inert_from_siblings,
+    set_background_inert, supports_inert,
+};
 pub use positioning::{
     Alignment, Axis, Boundary, Offset, Overflow, Placement, PositioningOptions, PositioningResult,
     Rect, Side, Strategy, VirtualElement, compute_position,

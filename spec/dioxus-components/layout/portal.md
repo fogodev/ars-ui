@@ -246,6 +246,7 @@ pub fn Portal(props: PortalProps) -> Element {
 
 - Portal itself adds no ARIA role; the portaled content remains responsible for semantics and focus management.
 - The adapter should preserve a stable portal owner id so overlay consumers can bridge outside-interaction boundaries when needed.
+- On web, when the resolved target is the shared portal root, the adapter MUST delegate mount-node creation to `ars_dom::ensure_portal_mount_root(owner_id)` so the mount node carries the required `data-ars-portal-owner` marker.
 
 ## 28. Parity Summary and Intentional Deviations
 

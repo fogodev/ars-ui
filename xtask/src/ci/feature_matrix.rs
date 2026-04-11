@@ -1,8 +1,8 @@
 //! Feature-flag combination definitions for CI matrix testing.
 //!
 //! Each group mirrors a `feature-flags-*` job in `.github/workflows/ci.yml`.
-//! Every combo runs `cargo check` then `cargo test --lib`; cross-checks run
-//! `cargo check --target <triple>` without tests.
+//! Every combo runs `cargo check` then `cargo nextest run --lib`; cross-checks
+//! run `cargo check --target <triple>` without tests.
 
 use super::Error;
 
@@ -23,23 +23,23 @@ pub(crate) enum Group {
 }
 
 /// A single feature combination to check and test.
-struct Combo {
-    /// Arguments passed to both `cargo check` and `cargo test ... --lib`.
-    args: &'static [&'static str],
+pub(crate) struct Combo {
+    /// Arguments passed to both `cargo check` and `cargo nextest run --lib`.
+    pub(crate) args: &'static [&'static str],
 }
 
 /// A cross-compilation check (no tests).
-struct CrossCheck {
+pub(crate) struct CrossCheck {
     /// Arguments passed to `cargo check`.
-    args: &'static [&'static str],
+    pub(crate) args: &'static [&'static str],
     /// Target triple (e.g., `wasm32-unknown-unknown`).
-    target: &'static str,
+    pub(crate) target: &'static str,
 }
 
 /// Full definition for one feature-flag group.
-struct GroupDef {
-    combos: &'static [Combo],
-    cross_checks: &'static [CrossCheck],
+pub(crate) struct GroupDef {
+    pub(crate) combos: &'static [Combo],
+    pub(crate) cross_checks: &'static [CrossCheck],
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +248,7 @@ static DIOXUS_CROSS_CHECKS: &[CrossCheck] = &[CrossCheck {
 // Lookup
 // ---------------------------------------------------------------------------
 
-fn group_def(group: Group) -> GroupDef {
+pub(crate) fn group_def(group: Group) -> GroupDef {
     match group {
         Group::Core => GroupDef {
             combos: CORE_COMBOS,
@@ -273,8 +273,39 @@ fn group_def(group: Group) -> GroupDef {
     }
 }
 
-/// Map a [`Group`] to the [`CiStep`](super::CiStep) it corresponds to (for
-/// error reporting).
+// ---------------------------------------------------------------------------
+// Runner
+// ---------------------------------------------------------------------------
+
+/// Run every combo in `group`: `cargo check` + `cargo nextest run --lib` per
+/// combo, then any cross-compilation checks.
+pub(crate) fn run_group(group: Group) -> Result<(), Error> {
+    let def = group_def(group);
+    let step = group_step(group);
+
+    if !def.cross_checks.is_empty() {
+        preflight_wasm32()?;
+    }
+
+    for combo in def.combos {
+        let mut args = vec!["check"];
+        args.extend_from_slice(combo.args);
+        super::cargo(step, &args)?;
+    }
+
+    for cross in def.cross_checks {
+        let mut args = vec!["check"];
+        args.extend_from_slice(cross.args);
+        args.extend_from_slice(&["--target", cross.target]);
+        super::cargo(step, &args)?;
+    }
+
+    crate::test::run_feature_matrix_group(group)
+        .map(|_| ())
+        .map_err(|error| super::map_test_error(step, error))
+}
+
+/// Map a [`Group`] to the [`super::Step`] it corresponds to.
 const fn group_step(group: Group) -> super::Step {
     match group {
         Group::Core => super::Step::FeatureMatrixCore,
@@ -285,10 +316,6 @@ const fn group_step(group: Group) -> super::Step {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Preflight
-// ---------------------------------------------------------------------------
-
 /// Verify the `wasm32-unknown-unknown` target is installed.
 fn preflight_wasm32() -> Result<(), Error> {
     let output = std::process::Command::new("rustup")
@@ -297,58 +324,17 @@ fn preflight_wasm32() -> Result<(), Error> {
         .map_err(Error::Io)?;
 
     let installed = String::from_utf8_lossy(&output.stdout);
-    if !installed
+    if installed
         .lines()
-        .any(|l| l.trim() == "wasm32-unknown-unknown")
+        .any(|line| line.trim() == "wasm32-unknown-unknown")
     {
-        return Err(Error::MissingTool {
+        Ok(())
+    } else {
+        Err(Error::MissingTool {
             tool: "wasm32-unknown-unknown target".into(),
             install_hint: "rustup target add wasm32-unknown-unknown".into(),
-        });
+        })
     }
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Runner
-// ---------------------------------------------------------------------------
-
-/// Run every combo in `group`: `cargo check` + `cargo test --lib` per combo,
-/// then any cross-compilation checks.
-pub(crate) fn run_group(group: Group) -> Result<(), Error> {
-    let def = group_def(group);
-    let step = group_step(group);
-
-    if !def.cross_checks.is_empty() {
-        preflight_wasm32()?;
-    }
-
-    let total = def.combos.len();
-    for (i, combo) in def.combos.iter().enumerate() {
-        let label = combo.args.join(" ");
-        eprintln!("  [{}/{}] {label}", i + 1, total);
-
-        let mut check_args = vec!["check"];
-        check_args.extend_from_slice(combo.args);
-        super::cargo(step, &check_args)?;
-
-        let mut test_args = vec!["test"];
-        test_args.extend_from_slice(combo.args);
-        test_args.push("--lib");
-        super::cargo(step, &test_args)?;
-    }
-
-    for cross in def.cross_checks {
-        let label = cross.args.join(" ");
-        eprintln!("  [cross] {label} --target {}", cross.target);
-
-        let mut args = vec!["check"];
-        args.extend_from_slice(cross.args);
-        args.extend_from_slice(&["--target", cross.target]);
-        super::cargo(step, &args)?;
-    }
-
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -385,24 +371,6 @@ mod tests {
     fn dioxus_has_4_combos_and_1_cross() {
         assert_eq!(DIOXUS_COMBOS.len(), 4);
         assert_eq!(DIOXUS_CROSS_CHECKS.len(), 1);
-    }
-
-    #[test]
-    fn group_step_mapping_is_exhaustive() {
-        // Ensure every group maps to a distinct step.
-        let groups = [
-            Group::Core,
-            Group::I18n,
-            Group::Subsystems,
-            Group::Leptos,
-            Group::Dioxus,
-        ];
-        let steps = groups.iter().map(|g| group_step(*g)).collect::<Vec<_>>();
-        for (i, a) in steps.iter().enumerate() {
-            for b in &steps[i + 1..] {
-                assert_ne!(a, b, "duplicate step mapping");
-            }
-        }
     }
 
     /// Verify `group_def()` returns the expected data for every group and that

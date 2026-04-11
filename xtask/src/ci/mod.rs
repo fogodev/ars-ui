@@ -6,7 +6,13 @@
 
 pub(crate) mod feature_matrix;
 
-use std::{fmt, fs, io, path::Path, process};
+use std::{
+    fmt, fs, io,
+    path::{Path, PathBuf},
+    process,
+};
+
+use crate::{coverage, i18n, test};
 
 /// CI pipeline steps, matching the GitHub Actions job names.
 ///
@@ -44,47 +50,6 @@ pub enum Step {
     FeatureMatrixLeptos,
     /// Feature flags — ars-dioxus (4 combos + wasm32).
     FeatureMatrixDioxus,
-}
-
-/// The two mutually exclusive `ars-i18n` backend features.
-const I18N_BACKENDS: [&str; 2] = ["icu4x", "web-intl"];
-
-/// Read `crates/ars-i18n/Cargo.toml` and build two comma-separated feature
-/// lists — one per backend — that together cover every feature.
-///
-/// Each list contains all features except `default` and the *other* backend,
-/// so new features added to the crate are picked up automatically.
-fn i18n_feature_lists() -> Result<[String; 2], Error> {
-    let path = Path::new("crates/ars-i18n/Cargo.toml");
-    let content = fs::read_to_string(path).map_err(Error::Io)?;
-    let doc = content.parse::<toml::Table>().map_err(|e| {
-        Error::Io(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("{path:?}: {e}"),
-        ))
-    })?;
-
-    let features = doc
-        .get("features")
-        .and_then(toml::Value::as_table)
-        .ok_or_else(|| {
-            Error::Io(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("{path:?}: missing [features] table"),
-            ))
-        })?;
-
-    let common = features
-        .keys()
-        .map(String::as_str)
-        .filter(|k| *k != "default" && !I18N_BACKENDS.contains(k))
-        .collect::<Vec<_>>();
-
-    Ok(I18N_BACKENDS.map(|backend| {
-        let mut all = common.clone();
-        all.push(backend);
-        all.join(",")
-    }))
 }
 
 /// Default pipeline order when no steps are specified.
@@ -129,7 +94,7 @@ pub enum Error {
     /// IO error spawning a subprocess.
     Io(io::Error),
     /// Coverage threshold check failed.
-    Coverage(crate::coverage::Error),
+    Coverage(coverage::Error),
 }
 
 impl fmt::Display for Error {
@@ -270,7 +235,7 @@ fn run_check(message_format: Option<&str>) -> Result<(), Error> {
         message_format,
     )?;
 
-    let [icu4x_features, web_intl_features] = i18n_feature_lists()?;
+    let [icu4x_features, web_intl_features] = i18n::i18n_feature_lists().map_err(Error::Io)?;
     for features in [&icu4x_features, &web_intl_features] {
         cargo_with_format(
             Step::Check,
@@ -319,7 +284,7 @@ pub fn clippy_workspace(message_format: Option<&str>, deny_warnings: bool) -> Re
     }
     cargo_with_format(Step::Clippy, &workspace_args, message_format)?;
 
-    let [icu4x_features, web_intl_features] = i18n_feature_lists()?;
+    let [icu4x_features, web_intl_features] = i18n::i18n_feature_lists().map_err(Error::Io)?;
     for features in [&icu4x_features, &web_intl_features] {
         let mut args = vec![
             "clippy",
@@ -339,26 +304,7 @@ pub fn clippy_workspace(message_format: Option<&str>, deny_warnings: bool) -> Re
 }
 
 fn run_unit() -> Result<(), Error> {
-    cargo(
-        Step::Unit,
-        &[
-            "test",
-            "-p",
-            "ars-a11y",
-            "-p",
-            "ars-core",
-            "-p",
-            "ars-collections",
-            "-p",
-            "ars-dom",
-            "-p",
-            "ars-interactions",
-            "-p",
-            "ars-forms",
-            "--all-targets",
-            "--all-features",
-        ],
-    )
+    run_test_stage(Step::Unit, test::Stage::Unit)
 }
 
 fn run_release() -> Result<(), Error> {
@@ -366,106 +312,114 @@ fn run_release() -> Result<(), Error> {
         Step::Release,
         &[
             "check",
-            "-p",
-            "ars-i18n",
-            "--release",
-            "--all-targets",
-            "--no-default-features",
-            "--features",
-            "icu4x",
-        ],
-    )?;
-    cargo(
-        Step::Release,
-        &["test", "-p", "ars-i18n", "--lib", "--release"],
-    )?;
-    cargo(
-        Step::Release,
-        &[
-            "test",
-            "-p",
-            "ars-a11y",
-            "-p",
-            "ars-core",
-            "-p",
-            "ars-collections",
-            "-p",
-            "ars-dom",
-            "-p",
-            "ars-interactions",
-            "-p",
-            "ars-forms",
-            "--all-targets",
+            "--workspace",
             "--all-features",
             "--release",
+            "--exclude",
+            "ars-i18n",
         ],
-    )
+    )?;
+    let [icu4x_features, web_intl_features] = i18n::i18n_feature_lists().map_err(Error::Io)?;
+    for features in [&icu4x_features, &web_intl_features] {
+        cargo(
+            Step::Release,
+            &[
+                "check",
+                "-p",
+                "ars-i18n",
+                "--release",
+                "--all-targets",
+                "--no-default-features",
+                "--features",
+                features.as_str(),
+            ],
+        )?;
+    }
+    run_test_stage(Step::Release, test::Stage::Release)
 }
 
 fn run_integration() -> Result<(), Error> {
-    cargo(
-        Step::Integration,
-        &["test", "-p", "ars-core", "service_applies_transitions"],
-    )
+    run_test_stage(Step::Integration, test::Stage::Integration)
 }
 
 fn run_adapter() -> Result<(), Error> {
-    cargo(
-        Step::Adapter,
-        &[
-            "test",
-            "-p",
-            "ars-test-harness",
-            "-p",
-            "ars-test-harness-leptos",
-            "-p",
-            "ars-test-harness-dioxus",
-            "-p",
-            "ars-leptos",
-            "-p",
-            "ars-dioxus",
-            "--all-targets",
-            "--all-features",
-        ],
-    )
+    run_test_stage(Step::Adapter, test::Stage::Adapter)
 }
 
 fn run_coverage() -> Result<(), Error> {
     preflight_llvm_cov()?;
+    preflight_nextest()?;
+    coverage::preflight_nightly().map_err(Error::Coverage)?;
+    let coverage_dir = Path::new("target").join("coverage");
+    fs::create_dir_all(&coverage_dir).map_err(Error::Io)?;
+    let native_lcov = coverage_dir.join("native.lcov");
+    let merged_lcov = PathBuf::from("lcov.info");
 
-    // Generate lcov via cargo-llvm-cov.
+    // Generate native lcov via cargo-llvm-cov + cargo-nextest.
     cargo(
         Step::Coverage,
         &[
+            "+nightly",
             "llvm-cov",
+            "nextest",
+            "--branch",
             "--workspace",
-            "--exclude",
-            "ars-leptos",
-            "--exclude",
-            "ars-dioxus",
-            "--exclude",
-            "ars-test-harness-leptos",
-            "--exclude",
-            "ars-test-harness-dioxus",
-            "--exclude",
-            "ars-derive",
-            "--exclude",
-            "xtask",
             "--lcov",
             "--output-path",
-            "lcov.info",
+            native_lcov.to_str().expect("valid utf-8 path"),
+            "--no-fail-fast",
         ],
     )?;
 
+    let mut reports = vec![native_lcov];
+    for target in coverage::default_wasm_coverage_targets() {
+        let wasm_lcov = coverage_dir.join(format!("{}-wasm.lcov", target.package));
+        coverage::generate_wasm_lcov(&coverage::WasmCoverageOptions {
+            package: target.package.to_owned(),
+            output: wasm_lcov.clone(),
+            features: target
+                .features
+                .iter()
+                .map(|feature| (*feature).to_owned())
+                .collect(),
+            no_default_features: false,
+            extra_test_args: Vec::new(),
+        })
+        .map_err(Error::Coverage)?;
+        reports.push(wasm_lcov);
+    }
+
+    coverage::merge_files(&reports, &merged_lcov).map_err(Error::Coverage)?;
+
     // Check thresholds programmatically (reuses coverage module).
-    let thresholds = crate::coverage::default_thresholds();
-    let lcov_path = Path::new("lcov.info");
-    match crate::coverage::check_all(lcov_path, &thresholds) {
+    let thresholds = coverage::default_thresholds();
+    match coverage::check_all(&merged_lcov, &thresholds) {
         Ok(output) => {
             eprint!("{output}");
             Ok(())
         }
         Err(e) => Err(Error::Coverage(e)),
+    }
+}
+
+fn run_test_stage(step: Step, stage: test::Stage) -> Result<(), Error> {
+    test::run_stage(stage)
+        .map(|_| ())
+        .map_err(|error| map_test_error(step, error))
+}
+
+pub(crate) fn map_test_error(step: Step, error: test::Error) -> Error {
+    match error {
+        test::Error::MissingTool { tool, install_hint } => {
+            Error::MissingTool { tool, install_hint }
+        }
+        test::Error::CommandFailed { command, code } => Error::StepFailed {
+            step,
+            command,
+            code,
+        },
+        test::Error::Io(error) => Error::Io(error),
+        test::Error::Failed { summary } => Error::Io(io::Error::other(summary)),
     }
 }
 
@@ -558,6 +512,24 @@ fn preflight_llvm_cov() -> Result<(), Error> {
         return Err(Error::MissingTool {
             tool: "cargo-llvm-cov".into(),
             install_hint: "cargo install cargo-llvm-cov --locked".into(),
+        });
+    }
+    Ok(())
+}
+
+/// Verify `cargo-nextest` is installed.
+fn preflight_nextest() -> Result<(), Error> {
+    let output = process::Command::new("cargo")
+        .args(["nextest", "--version"])
+        .stdout(process::Stdio::null())
+        .stderr(process::Stdio::null())
+        .status()
+        .map_err(Error::Io)?;
+
+    if !output.success() {
+        return Err(Error::MissingTool {
+            tool: "cargo-nextest".into(),
+            install_hint: "cargo install cargo-nextest --locked".into(),
         });
     }
     Ok(())
@@ -754,7 +726,7 @@ mod tests {
 
     #[test]
     fn display_coverage_error() {
-        let err = Error::Coverage(crate::coverage::Error::NoSourceFiles {
+        let err = Error::Coverage(coverage::Error::NoSourceFiles {
             package: "ars-core".into(),
         });
         let msg = err.to_string();

@@ -4,9 +4,10 @@
 use core::fmt;
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-use js_sys::Reflect;
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-use wasm_bindgen::JsValue;
+use {
+    js_sys::Reflect,
+    wasm_bindgen::{JsCast, JsValue, closure::Closure},
+};
 
 /// Options controlling how an element should be brought into view.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -185,16 +186,57 @@ fn supports_scroll_into_view_options_impl() -> bool {
         let Some(document) = web_sys::window().and_then(|window| window.document()) else {
             return false;
         };
-        let Ok(_element) = document.create_element("div") else {
+        let Ok(element) = document.create_element("div") else {
             return false;
         };
-
-        Reflect::get(
-            &js_sys::global(),
-            &JsValue::from_str("ScrollIntoViewOptions"),
+        let descriptor = js_sys::Object::new();
+        let supported = std::rc::Rc::new(std::cell::Cell::new(false));
+        let marker = std::rc::Rc::clone(&supported);
+        let getter = Closure::<dyn FnMut() -> JsValue>::wrap(Box::new(move || {
+            marker.set(true);
+            JsValue::from_str("auto")
+        }));
+        if Reflect::set(
+            &descriptor,
+            &JsValue::from_str("get"),
+            getter.as_ref().unchecked_ref(),
         )
-        .map(|value| !value.is_undefined())
-        .unwrap_or(false)
+        .is_err()
+        {
+            return false;
+        }
+        if Reflect::set(
+            &descriptor,
+            &JsValue::from_str("enumerable"),
+            &JsValue::TRUE,
+        )
+        .is_err()
+        {
+            return false;
+        }
+        if Reflect::set(
+            &descriptor,
+            &JsValue::from_str("configurable"),
+            &JsValue::TRUE,
+        )
+        .is_err()
+        {
+            return false;
+        }
+
+        let options = js_sys::Object::new();
+        js_sys::Object::define_property(&options, &JsValue::from_str("behavior"), &descriptor);
+
+        let Some(function) = Reflect::get(element.as_ref(), &JsValue::from_str("scrollIntoView"))
+            .ok()
+            .and_then(|value| value.dyn_into::<js_sys::Function>().ok())
+        else {
+            return false;
+        };
+        let result = function.call1(element.as_ref(), options.as_ref());
+        getter.forget();
+
+        result.is_ok() && supported.get()
     }
 
     #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
@@ -231,7 +273,7 @@ fn nearest_scrollable_ancestor_impl(element: &web_sys::Element) -> Option<web_sy
 
 #[cfg(all(feature = "web", not(target_arch = "wasm32")))]
 #[must_use]
-fn nearest_scrollable_ancestor_impl(_element: &web_sys::Element) -> Option<web_sys::Element> {
+const fn nearest_scrollable_ancestor_impl(_element: &web_sys::Element) -> Option<web_sys::Element> {
     None
 }
 
@@ -322,7 +364,11 @@ fn scroll_into_view_if_needed_impl(element: &web_sys::Element, options: ScrollIn
 }
 
 #[cfg(all(feature = "web", not(target_arch = "wasm32")))]
-fn scroll_into_view_if_needed_impl(_element: &web_sys::Element, _options: ScrollIntoViewOptions) {}
+const fn scroll_into_view_if_needed_impl(
+    _element: &web_sys::Element,
+    _options: ScrollIntoViewOptions,
+) {
+}
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 #[must_use]
@@ -630,7 +676,7 @@ mod wasm_tests {
         );
         let inner_scroll = append_div(
             outer.as_ref(),
-            "width:180px;height:180px;overflow:auto;border:0;padding:0;margin:0;",
+            "width:180px;height:260px;overflow:auto;border:0;padding:0;margin:0;margin-top:40px;",
         );
         let content = append_div(inner_scroll.as_ref(), "width:160px;height:500px;");
         let target = append_div(

@@ -1476,7 +1476,10 @@ pub trait PlatformEffects {
     /// Set `inert` on all siblings of the portal root. Returns a cleanup function
     /// that restores the original state.
     fn set_background_inert(&self, portal_root_id: &str) -> Box<dyn FnOnce()>;
-    /// Remove `inert` from all siblings of the given element.
+    /// Best-effort direct inert clearing for siblings of the given element.
+    /// This is not a substitute for the cleanup closure returned by
+    /// `set_background_inert()`, which remains the authoritative path for
+    /// restoring any polyfill state such as `tabindex` values or listeners.
     fn remove_inert_from_siblings(&self, portal_id: &str);
     /// Lock body scroll (prevent background scrolling under modals).
     fn scroll_lock_acquire(&self);

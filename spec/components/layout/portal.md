@@ -224,6 +224,11 @@ Portal
 
 Root is the mount point inserted at the portal target container.
 
+When `PortalTarget::PortalRoot` is used, the web adapter MUST create or reuse
+the mount node through `ars_dom::ensure_portal_mount_root(props.id)`. This
+ensures the mount node ID stays stable as `ars-portal-<id>` and carries
+`data-ars-portal-owner="<id>"` for outside-interaction boundary detection.
+
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties

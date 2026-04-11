@@ -12,3 +12,16 @@ pub struct DioxusHarnessBackend;
 impl HarnessBackend for DioxusHarnessBackend {
     fn flush(&mut self) {}
 }
+
+#[cfg(test)]
+mod tests {
+    use ars_test_harness::HarnessBackend;
+
+    use super::DioxusHarnessBackend;
+
+    #[test]
+    fn flush_is_a_no_op() {
+        let mut backend = DioxusHarnessBackend;
+        backend.flush();
+    }
+}

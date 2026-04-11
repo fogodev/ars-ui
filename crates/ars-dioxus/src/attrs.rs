@@ -149,9 +149,11 @@ pub fn attr_map_to_dioxus(
 pub fn apply_styles_cssom(el: &web_sys::HtmlElement, styles: &[(CssProperty, String)]) {
     let style = el.style();
     for (prop, val) in styles {
-        if let Err(e) = style.set_property(&prop.to_string(), val) {
+        if let Err(error) = style.set_property(&prop.to_string(), val) {
             #[cfg(debug_assertions)]
-            web_sys::console::warn_1(&e);
+            web_sys::console::warn_1(&error);
+            #[cfg(not(debug_assertions))]
+            drop(error);
         }
     }
 }

@@ -27,7 +27,7 @@ jobs:
 
   clippy:
     name: Clippy
-    needs: [check]
+    needs: [fmt]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,8 +35,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Install Dioxus desktop system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: ./.github/actions/install-dioxus-desktop-deps
       - name: Clippy
         run: cargo xtask ci clippy
 
@@ -48,8 +47,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install Dioxus desktop system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: ./.github/actions/install-dioxus-desktop-deps
       - name: Workspace Check
         run: cargo xtask ci check
 
@@ -61,8 +59,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - uses: ./.github/actions/install-dioxus-desktop-deps
       - name: Unit Tests
-        run: cargo xtask ci unit
+        run: cargo xtest unit
 
   release:
     name: Release Verification
@@ -72,32 +72,37 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Release Verification
-        run: cargo xtask ci release
+      - uses: taiki-e/install-action@nextest
+      - uses: ./.github/actions/install-dioxus-desktop-deps
+      - name: Release Compile Check
+        run: cargo check -p ars-i18n --release --all-targets --no-default-features --features icu4x
+      - name: Release Tests
+        run: cargo xtest release
 
   integration:
     name: Integration Tests
-    needs: [release]
+    needs: [unit]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
       - name: Integration Tests
-        run: cargo xtask ci integration
+        run: cargo xtest integration
 
   adapter:
     name: Adapter Tests
-    needs: [integration]
+    needs: [unit]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install Dioxus desktop system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+      - uses: taiki-e/install-action@nextest
+      - uses: ./.github/actions/install-dioxus-desktop-deps
       - name: Adapter Tests
-        run: cargo xtask ci adapter
+        run: cargo xtest adapter
 
   coverage:
     name: Coverage
@@ -108,8 +113,23 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: wasm32-unknown-unknown
+          components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
-      - run: cargo install cargo-llvm-cov --locked
+      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Install LLVM 22 for wasm coverage
+        run: |
+          wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 22
+          sudo apt-get install -y clang-22 lld-22
+      - run: cargo install wasm-bindgen-cli --locked --version 0.2.118
+      - name: Configure wasm coverage clang
+        run: echo "WASM_COVERAGE_CLANG=/usr/bin/clang-22" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/install-dioxus-desktop-deps
       - name: Coverage
         run: cargo xtask ci coverage
       - name: Upload to Codecov
@@ -122,7 +142,7 @@ jobs:
 
   feature-flags-core:
     name: Feature Flags — Core
-    needs: [adapter]
+    needs: [unit]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -130,12 +150,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: feature-flags
+      - uses: taiki-e/install-action@nextest
       - name: Feature Flags — Core
         run: cargo xtask ci feature-matrix-core
 
   feature-flags-i18n:
     name: Feature Flags — I18n
-    needs: [adapter]
+    needs: [unit]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -145,12 +166,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: feature-flags
+      - uses: taiki-e/install-action@nextest
       - name: Feature Flags — I18n
         run: cargo xtask ci feature-matrix-i18n
 
   feature-flags-subsystems:
     name: Feature Flags — Subsystems
-    needs: [adapter]
+    needs: [unit]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -160,12 +182,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: feature-flags
+      - uses: taiki-e/install-action@nextest
       - name: Feature Flags — Subsystems
         run: cargo xtask ci feature-matrix-subsystems
 
   feature-flags-leptos:
     name: Feature Flags — Leptos
-    needs: [adapter]
+    needs: [unit]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -173,12 +196,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: feature-flags
+      - uses: taiki-e/install-action@nextest
       - name: Feature Flags — Leptos
         run: cargo xtask ci feature-matrix-leptos
 
   feature-flags-dioxus:
     name: Feature Flags — Dioxus
-    needs: [adapter]
+    needs: [unit]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -188,8 +212,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: feature-flags
-      - name: Install Dioxus desktop system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+      - uses: taiki-e/install-action@nextest
+      - uses: ./.github/actions/install-dioxus-desktop-deps
       - name: Feature Flags — Dioxus
         run: cargo xtask ci feature-matrix-dioxus
 
