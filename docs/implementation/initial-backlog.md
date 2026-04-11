@@ -68,11 +68,13 @@ Note: the original 2-task decomposition (#19 harness shell, #20 CI tier split) e
 
 ### Epic: Leptos adapter
 
-- Point target: `8`
+- Point target: `283` (revised from `8` after full component adapter decomposition — 2026-04-10)
 - Layer: `Adapter`
 - Framework: `Leptos`
 - Test tier: `Adapter`
-- Spec refs: `spec/foundation/08-adapter-leptos.md`
+- Spec refs: `spec/foundation/08-adapter-leptos.md`, `spec/leptos-components/`
+
+Note: the original 3-task decomposition (#22, #55, #105) covered only the adapter shell and foundational hooks. Two additional foundation tasks (#190, #191, 8 pts) close the remaining foundational gaps. Nine category epics (#303–#311, 264 pts) now cover all 112 Leptos adapter components across 94 tasks organized by category. See [Epic #8](https://github.com/fogodev/ars-ui/issues/8) for the full sub-issue breakdown.
 
 ### Epic: Dioxus adapter
 
@@ -173,6 +175,96 @@ All 11 layout components (5 stateless, 6 stateful). Eight tasks (#270–#281, 31
 - Spec refs: `spec/components/specialized/_category.md`, `spec/components/specialized/*.md`
 
 All 15 specialized components (3 stateless, 10 stateful, 2 complex). Eleven tasks (#288–#301, 55 pts) organized in 4 dependency waves. External dep: FileUpload depends on DnD interactions (#159–#161). See [Epic #227](https://github.com/fogodev/ars-ui/issues/227) for the full sub-issue breakdown.
+
+### Epic: Leptos utility adapter components
+
+- Point target: `40`
+- Layer: `Adapter`
+- Framework: `Leptos`
+- Test tier: `Adapter`
+- Spec refs: `spec/leptos-components/utility/_category.md`, `spec/leptos-components/utility/*.md`, `spec/foundation/08-adapter-leptos.md`
+
+All 26 utility components (17 stateless, 9 stateful). Twenty tasks organized in 5 dependency waves. See [Epic #303](https://github.com/fogodev/ars-ui/issues/303) for the full sub-issue breakdown.
+
+### Epic: Leptos input adapter components
+
+- Point target: `34`
+- Layer: `Adapter`
+- Framework: `Leptos`
+- Test tier: `Adapter`
+- Spec refs: `spec/leptos-components/input/_category.md`, `spec/leptos-components/input/*.md`, `spec/foundation/08-adapter-leptos.md`
+
+All 14 input components (1 stateless, 11 stateful, 2 complex). Twelve tasks organized in 2 dependency waves. See [Epic #304](https://github.com/fogodev/ars-ui/issues/304) for the full sub-issue breakdown.
+
+### Epic: Leptos selection adapter components
+
+- Point target: `34`
+- Layer: `Adapter`
+- Framework: `Leptos`
+- Test tier: `Adapter`
+- Spec refs: `spec/leptos-components/selection/_category.md`, `spec/leptos-components/selection/*.md`, `spec/foundation/08-adapter-leptos.md`
+
+All 9 selection components (2 stateful, 7 complex). Nine tasks organized in 4 dependency waves. See [Epic #305](https://github.com/fogodev/ars-ui/issues/305) for the full sub-issue breakdown.
+
+### Epic: Leptos overlay adapter components
+
+- Point target: `29`
+- Layer: `Adapter`
+- Framework: `Leptos`
+- Test tier: `Adapter`
+- Spec refs: `spec/leptos-components/overlay/_category.md`, `spec/leptos-components/overlay/*.md`, `spec/foundation/08-adapter-leptos.md`
+
+All 10 overlay components (4 stateful, 6 complex). Ten tasks organized in 4 dependency waves. See [Epic #306](https://github.com/fogodev/ars-ui/issues/306) for the full sub-issue breakdown.
+
+### Epic: Leptos navigation adapter components
+
+- Point target: `21`
+- Layer: `Adapter`
+- Framework: `Leptos`
+- Test tier: `Adapter`
+- Spec refs: `spec/leptos-components/navigation/_category.md`, `spec/leptos-components/navigation/*.md`, `spec/foundation/08-adapter-leptos.md`
+
+All 8 navigation components (1 stateless, 4 stateful, 3 complex). Seven tasks organized in 3 dependency waves. See [Epic #307](https://github.com/fogodev/ars-ui/issues/307) for the full sub-issue breakdown.
+
+### Epic: Leptos date-time adapter components
+
+- Point target: `29`
+- Layer: `Adapter`
+- Framework: `Leptos`
+- Test tier: `Adapter`
+- Spec refs: `spec/leptos-components/date-time/_category.md`, `spec/leptos-components/date-time/*.md`, `spec/foundation/08-adapter-leptos.md`
+
+All 8 date-time components (5 stateful, 3 complex). Eight tasks organized in 4 dependency waves. External dep: all depend on ars-i18n (Epic #54). See [Epic #308](https://github.com/fogodev/ars-ui/issues/308) for the full sub-issue breakdown.
+
+### Epic: Leptos data-display adapter components
+
+- Point target: `24`
+- Layer: `Adapter`
+- Framework: `Leptos`
+- Test tier: `Adapter`
+- Spec refs: `spec/leptos-components/data-display/_category.md`, `spec/leptos-components/data-display/*.md`, `spec/foundation/08-adapter-leptos.md`
+
+All 11 data-display components (4 stateless, 6 stateful, 1 complex). Nine tasks organized in 3 dependency waves. See [Epic #309](https://github.com/fogodev/ars-ui/issues/309) for the full sub-issue breakdown.
+
+### Epic: Leptos layout adapter components
+
+- Point target: `21`
+- Layer: `Adapter`
+- Framework: `Leptos`
+- Test tier: `Adapter`
+- Spec refs: `spec/leptos-components/layout/_category.md`, `spec/leptos-components/layout/*.md`, `spec/foundation/08-adapter-leptos.md`
+
+All 11 layout components (5 stateless, 6 stateful). Eight tasks in a single wave — no intra-epic dependencies. See [Epic #310](https://github.com/fogodev/ars-ui/issues/310) for the full sub-issue breakdown.
+
+### Epic: Leptos specialized adapter components
+
+- Point target: `32`
+- Layer: `Adapter`
+- Framework: `Leptos`
+- Test tier: `Adapter`
+- Spec refs: `spec/leptos-components/specialized/_category.md`, `spec/leptos-components/specialized/*.md`, `spec/foundation/08-adapter-leptos.md`
+
+All 15 specialized components (3 stateless, 10 stateful, 2 complex). Eleven tasks organized in 4 dependency waves. External dep: FileUpload depends on DnD interactions (#159–#161). See [Epic #311](https://github.com/fogodev/ars-ui/issues/311) for the full sub-issue breakdown.
 
 ### Epic: Spec synchronization
 
