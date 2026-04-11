@@ -507,20 +507,26 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Cannot send events inside with_api_snapshot")]
     #[expect(
         clippy::redundant_closure_for_method_calls,
         reason = "Method pointers are not general enough for the lifetime-parameterized test API."
     )]
-    fn with_api_snapshot_panics_when_callback_sends_events() {
-        let owner = Owner::new();
-        owner.with(|| {
-            let machine = use_machine::<ToggleMachine>(ToggleProps {
-                id: String::from("toggle"),
-            });
+    fn with_api_snapshot_rejects_callback_sends_events() {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let owner = Owner::new();
+            owner.with(|| {
+                let machine = use_machine::<ToggleMachine>(ToggleProps {
+                    id: String::from("toggle"),
+                });
 
-            machine.with_api_snapshot(|api| api.trigger_toggle());
-        });
+                machine.with_api_snapshot(|api| api.trigger_toggle());
+            });
+        }));
+
+        #[cfg(debug_assertions)]
+        assert!(result.is_err());
+        #[cfg(not(debug_assertions))]
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -545,20 +551,26 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Cannot send events inside derive()")]
-    fn derive_panics_when_callback_sends_events() {
-        let owner = Owner::new();
-        owner.with(|| {
-            let machine = use_machine::<ToggleMachine>(ToggleProps {
-                id: String::from("toggle"),
-            });
-            let derived = machine.derive(|api| {
-                api.trigger_toggle();
-                api.is_on()
-            });
+    fn derive_rejects_callback_sends_events() {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let owner = Owner::new();
+            owner.with(|| {
+                let machine = use_machine::<ToggleMachine>(ToggleProps {
+                    id: String::from("toggle"),
+                });
+                let derived = machine.derive(|api| {
+                    api.trigger_toggle();
+                    api.is_on()
+                });
 
-            let _ = derived.get();
-        });
+                let _ = derived.get();
+            });
+        }));
+
+        #[cfg(debug_assertions)]
+        assert!(result.is_err());
+        #[cfg(not(debug_assertions))]
+        assert!(result.is_ok());
     }
 
     #[test]

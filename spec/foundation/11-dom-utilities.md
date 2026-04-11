@@ -1415,9 +1415,16 @@ pub fn document_contains(el: &web_sys::HtmlElement) -> bool {
         .unwrap_or(false)
 }
 
-/// Remove the `inert` attribute from all siblings of the element identified
-/// by `portal_id`. This reverses `set_background_inert()` when a modal
-/// dialog closes.
+/// Best-effort direct inert clearing for siblings of the element identified
+/// by `portal_id`.
+///
+/// This helper removes `inert` from sibling elements without access to the
+/// state captured by `set_background_inert()`. It is therefore suitable for
+/// stack recalculation and defensive cleanup, but it does NOT replace the
+/// cleanup closure returned by `set_background_inert()`. The returned cleanup
+/// closure remains the authoritative teardown path for restoring polyfill
+/// state such as `aria-hidden`, saved `tabindex` values, and document-level
+/// listeners.
 pub fn remove_inert_from_siblings(portal_id: &str) {
     let document = match web_sys::window().and_then(|w| w.document()) {
         Some(d) => d,
@@ -2543,6 +2550,42 @@ pub fn get_or_create_portal_root() -> web_sys::Element {
     root
 }
 
+/// Get or create the per-instance mount root under the shared portal root.
+///
+/// The returned mount node carries `data-ars-portal-owner="<owner_id>"` so
+/// outside-interaction detection can treat portalled descendants as inside
+/// the originating overlay boundary.
+///
+/// The mount node ID is stable for the owner and uses the format
+/// `ars-portal-<owner_id>`.
+pub fn ensure_portal_mount_root(owner_id: &str) -> web_sys::Element {
+    let portal_root = get_or_create_portal_root();
+    let mount_id = format!("ars-portal-{owner_id}");
+
+    if let Some(existing) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id(&mount_id))
+        .filter(|el| portal_root.contains(Some(el)))
+    {
+        return existing;
+    }
+
+    let document = web_sys::window()
+        .expect("window exists in browser context")
+        .document()
+        .expect("document exists");
+    let mount = document.create_element("div").expect("create div element");
+    mount.set_id(&mount_id);
+    mount.set_attribute("data-ars-managed", "").expect("set data-ars-managed attribute");
+    mount
+        .set_attribute("data-ars-portal-owner", owner_id)
+        .expect("set data-ars-portal-owner attribute");
+    portal_root
+        .append_child(&mount)
+        .expect("append portal mount to shared root");
+    mount
+}
+
 /// Set `inert` and `aria-hidden="true"` on all siblings of the portal root.
 /// Returns a cleanup function that removes the attributes.
 pub fn set_background_inert(portal_root_id: &str) -> Box<dyn FnOnce()> {
@@ -2590,10 +2633,11 @@ pub fn set_background_inert(portal_root_id: &str) -> Box<dyn FnOnce()> {
 Usage flow for a modal dialog:
 
 1. Dialog machine transitions to `Open` state.
-2. `TransitionPlan` includes a `PendingEffect` for `"background-inert"`.
-3. Adapter calls `set_background_inert("ars-portal-root")` during effect setup.
-4. The returned cleanup function is stored and called when the dialog closes.
-5. Scroll lock is applied separately via `prevent_scroll()` (§5.4).
+2. The adapter obtains a stable per-dialog mount node with `ensure_portal_mount_root(dialog_id)`.
+3. `TransitionPlan` includes a `PendingEffect` for `"background-inert"`.
+4. Adapter calls `set_background_inert("ars-portal-root")` during effect setup.
+5. The returned cleanup function is stored and called when the dialog closes.
+6. Scroll lock is applied separately via `prevent_scroll()` (§5.4).
 
 ---
 

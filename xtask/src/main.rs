@@ -3,7 +3,7 @@
 use std::{env, path::PathBuf, process, sync};
 
 use clap::{Parser, Subcommand};
-use xtask::{ci, coverage, manifest, mcp, spec};
+use xtask::{ci, coverage, manifest, mcp, spec, test};
 
 /// ars-ui workspace task runner.
 #[derive(Parser)]
@@ -51,10 +51,42 @@ enum Command {
         #[command(subcommand)]
         cmd: CoverageCommand,
     },
+    /// Run workspace tests through cargo-nextest.
+    Test {
+        #[command(subcommand)]
+        cmd: Option<TestCommand>,
+    },
 }
 
 #[derive(Subcommand)]
 enum CoverageCommand {
+    /// Generate experimental wasm lcov for a single package.
+    Wasm {
+        /// Crate name (e.g., "ars-dom").
+        #[arg(long)]
+        package: String,
+        /// Path to write the generated lcov file.
+        #[arg(long)]
+        file: PathBuf,
+        /// Cargo feature to enable. May be passed multiple times.
+        #[arg(long = "feature")]
+        features: Vec<String>,
+        /// Disable default features for the package.
+        #[arg(long)]
+        no_default_features: bool,
+        /// Extra arguments forwarded to `cargo test` after `--`.
+        #[arg(last = true)]
+        extra_test_args: Vec<String>,
+    },
+    /// Merge multiple lcov files without double-counting duplicate lines.
+    Merge {
+        /// Output lcov path.
+        #[arg(long)]
+        output: PathBuf,
+        /// Input lcov files to merge.
+        #[arg(long = "file", required = true)]
+        files: Vec<PathBuf>,
+    },
     /// Check a single crate's coverage against thresholds.
     Check {
         /// Path to lcov.info file.
@@ -76,6 +108,28 @@ enum CoverageCommand {
         #[arg(long)]
         file: PathBuf,
     },
+}
+
+#[derive(Subcommand)]
+enum TestCommand {
+    /// Run the workspace all-target test stage with ars-i18n backend splitting.
+    Unit,
+    /// Run the release verification test stage.
+    Release,
+    /// Run the integration test stage.
+    Integration,
+    /// Run the adapter and harness test stage.
+    Adapter,
+    /// Run the ars-core feature-matrix tests.
+    FeatureMatrixCore,
+    /// Run the ars-i18n feature-matrix tests.
+    FeatureMatrixI18n,
+    /// Run the subsystem feature-matrix tests.
+    FeatureMatrixSubsystems,
+    /// Run the ars-leptos feature-matrix tests.
+    FeatureMatrixLeptos,
+    /// Run the ars-dioxus feature-matrix tests.
+    FeatureMatrixDioxus,
 }
 
 #[derive(Subcommand)]
@@ -207,6 +261,20 @@ fn main() {
         // ── Coverage ──────────────────────────────────────────────────
         Command::Coverage { cmd } => {
             let result = match cmd {
+                CoverageCommand::Wasm {
+                    package,
+                    file,
+                    features,
+                    no_default_features,
+                    extra_test_args,
+                } => coverage::generate_wasm_lcov(&coverage::WasmCoverageOptions {
+                    package,
+                    output: file,
+                    features,
+                    no_default_features,
+                    extra_test_args,
+                }),
+                CoverageCommand::Merge { output, files } => coverage::merge_files(&files, &output),
                 CoverageCommand::Check {
                     file,
                     package,
@@ -222,6 +290,28 @@ fn main() {
                 Ok(output) => print!("{output}"),
                 Err(e) => {
                     eprintln!("{e}");
+                    process::exit(1);
+                }
+            }
+        }
+
+        // ── Test ──────────────────────────────────────────────────────
+        Command::Test { cmd } => {
+            let stage = cmd.map(|cmd| match cmd {
+                TestCommand::Unit => test::Stage::Unit,
+                TestCommand::Release => test::Stage::Release,
+                TestCommand::Integration => test::Stage::Integration,
+                TestCommand::Adapter => test::Stage::Adapter,
+                TestCommand::FeatureMatrixCore => test::Stage::FeatureMatrixCore,
+                TestCommand::FeatureMatrixI18n => test::Stage::FeatureMatrixI18n,
+                TestCommand::FeatureMatrixSubsystems => test::Stage::FeatureMatrixSubsystems,
+                TestCommand::FeatureMatrixLeptos => test::Stage::FeatureMatrixLeptos,
+                TestCommand::FeatureMatrixDioxus => test::Stage::FeatureMatrixDioxus,
+            });
+            match test::run(stage) {
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("error: {e}");
                     process::exit(1);
                 }
             }

@@ -12,3 +12,16 @@ pub struct LeptosHarnessBackend;
 impl HarnessBackend for LeptosHarnessBackend {
     fn flush(&mut self) {}
 }
+
+#[cfg(test)]
+mod tests {
+    use ars_test_harness::HarnessBackend;
+
+    use super::LeptosHarnessBackend;
+
+    #[test]
+    fn flush_is_a_no_op() {
+        let mut backend = LeptosHarnessBackend;
+        backend.flush();
+    }
+}

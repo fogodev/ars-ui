@@ -226,8 +226,15 @@ fallback strategy.
 /// Minimum browser versions: Chrome 102+, Firefox 112+, Safari 15.5+.
 pub fn supports_inert() -> bool {
     // Check if 'inert' property exists on HTMLElement.prototype
-    js_sys::Reflect::has(&web_sys::HtmlElement::prototype(), &"inert".into())
-        .unwrap_or(false)
+    let Ok(html_element_ctor) =
+        js_sys::Reflect::get(&js_sys::global(), &"HTMLElement".into())
+    else {
+        return false;
+    };
+    let Ok(prototype) = js_sys::Reflect::get(&html_element_ctor, &"prototype".into()) else {
+        return false;
+    };
+    js_sys::Reflect::has(&prototype, &"inert".into()).unwrap_or(false)
 }
 ```
 
@@ -247,7 +254,10 @@ dialog's portal root:
    tabbable element inside the dialog.
 
 **Cleanup**: The returned cleanup function restores all original `aria-hidden` and `tabindex`
-values and removes the document-level `keydown` listener.
+values and removes the document-level `keydown` listener. This cleanup closure is the
+authoritative teardown path for background inert state. Any direct helper such as
+`remove_inert_from_siblings()` is best-effort only and MUST NOT be treated as a full
+replacement for the stored `set_background_inert()` cleanup.
 
 ```rust
 pub fn set_background_inert(portal_id: &str) -> Box<dyn FnOnce()> {
@@ -479,6 +489,10 @@ impl ars_core::Machine for Machine {
                         let cleanup = platform.set_background_inert("ars-portal-root");
                         cleanup
                     }))
+                    // The cleanup returned by `set_background_inert()` is stored by the
+                    // adapter's PendingEffect lifecycle and runs automatically when this
+                    // effect is replaced or the dialog leaves `Open`. That cleanup is the
+                    // authoritative teardown path for native inert and polyfill state.
                     // ── Adapter-level static dialog stack specification ──
                     //
                     // Maintain a static `DIALOG_STACK: Vec<DialogId>` at the adapter level.
@@ -515,6 +529,9 @@ impl ars_core::Machine for Machine {
                     }))
                     .with_effect(PendingEffect::new("remove-background-inert", |ctx, _props, _send| {
                         let platform = use_platform_effects();
+                        // Best-effort direct clearing used for stack recalculation and
+                        // defensive close flows. This does not replace the stored cleanup
+                        // from `set_background_inert()`.
                         platform.remove_inert_from_siblings(&ctx.ids.part("portal"));
                         no_cleanup()
                     }))
