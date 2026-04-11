@@ -379,10 +379,13 @@ fn install_focus_trap(
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn warn_on_dom_error(context: &str, result: Result<(), JsValue>) {
+    #[cfg(feature = "debug")]
     if let Err(error) = result {
-        #[cfg(feature = "debug")]
         log::warn!("[ars-dom] {context} failed: {error:?}");
     }
+
+    #[cfg(not(feature = "debug"))]
+    drop((context, result));
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
