@@ -2539,7 +2539,7 @@ pub struct LiveAnnouncer {
 
 impl LiveAnnouncer {
     /// Create a new LiveAnnouncer. Call `ensure_dom()` in ars-dom before first use.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             queue: Vec::new(),
             announcing: false,

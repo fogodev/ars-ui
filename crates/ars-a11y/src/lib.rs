@@ -11,10 +11,12 @@ extern crate alloc;
 
 use alloc::{format, string::String};
 
+pub mod announcer;
 pub mod aria;
 /// Shared focus management contracts consumed by DOM and adapter layers.
 pub mod focus;
 
+pub use announcer::{Announcement, AnnouncementPriority, LiveAnnouncer};
 #[cfg(feature = "aria-drag-drop-compat")]
 pub use aria::attribute::AriaDropeffect;
 pub use aria::{
