@@ -8,7 +8,8 @@ Build `ars-ui` from a spec-only workspace into an implementation workspace with:
 - stable core contracts
 - reusable subsystem primitives
 - framework-agnostic test harnesses
-- the full agnostic component layer (111 components across 9 categories)
+- the full agnostic component layer (112 components across 9 categories)
+- the Leptos adapter component layer (112 components across 9 categories)
 
 ## Phase Order
 
@@ -322,6 +323,234 @@ Exit criteria:
 External deps: All depend on ars-i18n (Epic #54) for CalendarDate, DateFormatter, WeekInfo. Date fields and pickers depend on ars-forms (Epic #5) for form integration.
 
 Status (2026-04-10): Epic #224 created with 8 sub-issue tasks (#262–#292).
+
+### Phase 13: Leptos utility adapter components
+
+Scope:
+
+All 26 utility components defined in `spec/leptos-components/utility/`, implemented as Leptos 0.8.x reactive component shells wiring the agnostic core machines to props, slots, context, event mapping, and SSR:
+
+**Stateless (17):** AsChild, ArsProvider, ClientOnly, Dismissable, DownloadTrigger, Field, Fieldset, FocusRing, Form, Group, Heading, Highlight, Keyboard, Landmark, Separator, VisuallyHidden, ZIndexAllocator
+
+**Stateful (9):** ActionGroup, Button, DropZone, FocusScope, LiveRegion, Swap, Toggle, ToggleButton, ToggleGroup
+
+Decomposed into 20 tasks (40 story points) organized in 5 dependency waves. See [Epic #303](https://github.com/fogodev/ars-ui/issues/303) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 26 utility components have Leptos adapter implementations
+- each adapter component matches its spec in `spec/leptos-components/utility/`
+- props, events, context, and attr merge rules match the adapter spec contract
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+Status (2026-04-10): Epic #303 created with 20 sub-issue tasks as a sub-issue of Epic #8.
+
+### Phase 14: Leptos layout adapter components
+
+Scope:
+
+All 11 layout components defined in `spec/leptos-components/layout/`, implemented as Leptos adapter shells:
+
+**Stateless (5):** AspectRatio, Center, Frame, Grid, Stack
+
+**Stateful (6):** Carousel, Collapsible, Portal, ScrollArea, Splitter, Toolbar
+
+Decomposed into 8 tasks (21 story points) in a single wave — no intra-epic dependencies. See [Epic #310](https://github.com/fogodev/ars-ui/issues/310) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 11 layout components have Leptos adapter implementations
+- each adapter component matches its spec in `spec/leptos-components/layout/`
+- layout measurement and portal patterns match adapter spec
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+Status (2026-04-10): Epic #310 created with 8 sub-issue tasks as a sub-issue of Epic #8.
+
+### Phase 15: Leptos input adapter components
+
+Scope:
+
+All 14 input components defined in `spec/leptos-components/input/`, implemented as Leptos adapter shells:
+
+**Stateless (1):** FileTrigger
+
+**Stateful (11):** Checkbox, CheckboxGroup, Editable, NumberInput, PasswordInput, PinInput, RadioGroup, SearchInput, Switch, TextField, Textarea
+
+**Complex (2):** Slider, RangeSlider
+
+Decomposed into 12 tasks (34 story points) organized in 2 dependency waves. See [Epic #304](https://github.com/fogodev/ars-ui/issues/304) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 14 input components have Leptos adapter implementations
+- each adapter component matches its spec in `spec/leptos-components/input/`
+- form integration (hidden inputs, validation, field context) matches adapter spec
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+Status (2026-04-10): Epic #304 created with 12 sub-issue tasks as a sub-issue of Epic #8.
+
+### Phase 16: Leptos data-display adapter components
+
+Scope:
+
+All 11 data-display components defined in `spec/leptos-components/data-display/`, implemented as Leptos adapter shells:
+
+**Stateless (4):** Badge, Meter, Skeleton, Stat
+
+**Stateful (6):** Avatar, GridList, Marquee, Progress, RatingGroup, TagGroup
+
+**Complex (1):** Table
+
+Decomposed into 9 tasks (24 story points) organized in 3 dependency waves. See [Epic #309](https://github.com/fogodev/ars-ui/issues/309) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 11 data-display components have Leptos adapter implementations
+- each adapter component matches its spec in `spec/leptos-components/data-display/`
+- collection-dependent components use collection registration helpers
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+Status (2026-04-10): Epic #309 created with 9 sub-issue tasks as a sub-issue of Epic #8.
+
+### Phase 17: Leptos overlay adapter components
+
+Scope:
+
+All 10 overlay components defined in `spec/leptos-components/overlay/`, implemented as Leptos adapter shells:
+
+**Stateful (4):** AlertDialog, Popover, Presence, Tooltip
+
+**Complex (6):** Dialog, Drawer, FloatingPanel, HoverCard, Toast, Tour
+
+Decomposed into 10 tasks (29 story points) organized in 4 dependency waves. See [Epic #306](https://github.com/fogodev/ars-ui/issues/306) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 10 overlay components have Leptos adapter implementations
+- each adapter component matches its spec in `spec/leptos-components/overlay/`
+- portal, z-index, focus-scope, and dismissal patterns match adapter spec
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+Status (2026-04-10): Epic #306 created with 10 sub-issue tasks as a sub-issue of Epic #8.
+
+### Phase 18: Leptos navigation adapter components
+
+Scope:
+
+All 8 navigation components defined in `spec/leptos-components/navigation/`, implemented as Leptos adapter shells:
+
+**Stateless (1):** Breadcrumbs
+
+**Stateful (4):** Accordion, Link, Pagination, Steps
+
+**Complex (3):** NavigationMenu, Tabs, TreeView
+
+Decomposed into 7 tasks (21 story points) organized in 3 dependency waves. See [Epic #307](https://github.com/fogodev/ars-ui/issues/307) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 8 navigation components have Leptos adapter implementations
+- each adapter component matches its spec in `spec/leptos-components/navigation/`
+- roving focus and descendant registration match adapter spec
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+Status (2026-04-10): Epic #307 created with 7 sub-issue tasks as a sub-issue of Epic #8.
+
+### Phase 19: Leptos selection adapter components
+
+Scope:
+
+All 9 selection components defined in `spec/leptos-components/selection/`, implemented as Leptos adapter shells:
+
+**Stateful (2):** Autocomplete, SegmentGroup
+
+**Complex (7):** Combobox, ContextMenu, Listbox, Menu, MenuBar, Select, TagsInput
+
+Decomposed into 9 tasks (34 story points) organized in 4 dependency waves. See [Epic #305](https://github.com/fogodev/ars-ui/issues/305) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 9 selection components have Leptos adapter implementations
+- each adapter component matches its spec in `spec/leptos-components/selection/`
+- keyed item registration and typeahead bridging match adapter spec
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+Status (2026-04-10): Epic #305 created with 9 sub-issue tasks as a sub-issue of Epic #8.
+
+### Phase 20: Leptos specialized adapter components
+
+Scope:
+
+All 15 specialized components defined in `spec/leptos-components/specialized/`, implemented as Leptos adapter shells:
+
+**Stateless (3):** ColorSwatch, ContextualHelp, QrCode
+
+**Stateful (10):** AngleSlider, Clipboard, ColorArea, ColorField, ColorSlider, ColorSwatchPicker, ColorWheel, ImageCropper, SignaturePad, Timer
+
+**Complex (2):** ColorPicker, FileUpload
+
+Decomposed into 11 tasks (32 story points) organized in 4 dependency waves. See [Epic #311](https://github.com/fogodev/ars-ui/issues/311) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 15 specialized components have Leptos adapter implementations
+- each adapter component matches its spec in `spec/leptos-components/specialized/`
+- color components share ColorValue type; ColorPicker composes all color primitives
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+External deps: FileUpload depends on DnD interactions (#159–#161).
+
+Status (2026-04-10): Epic #311 created with 11 sub-issue tasks as a sub-issue of Epic #8.
+
+### Phase 21: Leptos date-time adapter components
+
+Scope:
+
+All 8 date-time components defined in `spec/leptos-components/date-time/`, implemented as Leptos adapter shells:
+
+**Stateful (5):** DateField, DateRangeField, DateRangePicker, RangeCalendar, TimeField
+
+**Complex (3):** Calendar, DatePicker, DateTimePicker
+
+Decomposed into 8 tasks (29 story points) organized in 4 dependency waves. See [Epic #308](https://github.com/fogodev/ars-ui/issues/308) for the full task breakdown with sub-issues.
+
+Exit criteria:
+
+- all 8 date-time components have Leptos adapter implementations
+- each adapter component matches its spec in `spec/leptos-components/date-time/`
+- segmented fields and calendar grids match adapter spec
+- SSR produces hydration-stable markup
+- all public types documented per workspace `missing_docs` lint
+- all adapter tests pass with zero warnings
+- spec and implementation remain aligned; any mismatch resolved in the same task
+
+External deps: All depend on ars-i18n (Epic #54) for CalendarDate, DateFormatter, WeekInfo. Date fields and pickers depend on ars-forms (Epic #5) for form integration.
+
+Status (2026-04-10): Epic #308 created with 8 sub-issue tasks as a sub-issue of Epic #8.
 
 ## Spec synchronization rules
 
