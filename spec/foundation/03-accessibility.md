@@ -2525,6 +2525,8 @@ pub struct LiveAnnouncer {
     queue: Vec<Announcement>,
     /// Whether an announcement is currently being processed.
     announcing: bool,
+    /// Priority of the currently active announcement, if any.
+    active_priority: Option<AnnouncementPriority>,
     /// Toggle bit for VoiceOver deduplication workaround.
     /// Only toggled when the current message is identical to `last_message`.
     voiceover_toggle: bool,
@@ -2539,10 +2541,11 @@ pub struct LiveAnnouncer {
 
 impl LiveAnnouncer {
     /// Create a new LiveAnnouncer. Call `ensure_dom()` in ars-dom before first use.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             queue: Vec::new(),
             announcing: false,
+            active_priority: None,
             voiceover_toggle: false,
             last_message: None,
             clear_delay_ms: 7000,
@@ -2573,6 +2576,14 @@ impl LiveAnnouncer {
         // Assertive messages clear the queue of pending polite messages.
         if priority == AnnouncementPriority::Assertive {
             self.queue.retain(|a| a.priority == AnnouncementPriority::Assertive);
+
+            // Assertive announcements also preempt an in-flight polite
+            // announcement so critical alerts are not delayed behind the
+            // current clear-delay window.
+            if self.active_priority == Some(AnnouncementPriority::Polite) {
+                self.announcing = false;
+                self.active_priority = None;
+            }
         }
 
         self.queue.push(announcement);
@@ -2592,6 +2603,7 @@ impl LiveAnnouncer {
 
         let next = self.queue.remove(0);
         self.announcing = true;
+        self.active_priority = Some(next.priority);
 
         // VoiceOver deduplication: only append a deduplication character when the
         // current message is identical to the last announced message. Uses U+200D
@@ -2599,16 +2611,17 @@ impl LiveAnnouncer {
         // artifacts on braille displays — ZWSP can render as an empty braille cell,
         // whereas ZWJ is reliably invisible.
         let is_repeat = self.last_message.as_deref() == Some(&next.message);
-        let content = if is_repeat && self.voiceover_toggle {
-            format!("{}\u{200D}", next.message)
-        } else {
-            next.message.clone()
-        };
-        if is_repeat {
+        let content = if is_repeat {
             self.voiceover_toggle = !self.voiceover_toggle;
+            if self.voiceover_toggle {
+                format!("{}\u{200D}", next.message)
+            } else {
+                next.message.clone()
+            }
         } else {
             self.voiceover_toggle = false;
-        }
+            next.message.clone()
+        };
         self.last_message = Some(next.message.clone());
 
         // ars-dom implementation (see §5.2 for rationale):
@@ -2627,6 +2640,7 @@ impl LiveAnnouncer {
     /// next queued announcement.
     pub fn notify_announced(&mut self) {
         self.announcing = false;
+        self.active_priority = None;
         self.process_queue();
     }
 
@@ -2680,6 +2694,7 @@ When updating live regions, the **method of DOM mutation** and **timing** critic
 **Priority Guidelines:**
 
 - Use `aria-live="assertive"` **only** for critical alerts that require immediate user attention (e.g., form validation errors that block submission, session timeout warnings).
+- When an assertive announcement arrives while a polite announcement is still in flight, the assertive announcement should preempt the polite one immediately rather than waiting for the polite clear-delay window to elapse.
 - Default to `aria-live="polite"` for all other announcements (selection changes, sort updates, filter results).
 
 **Screen Reader Timing Differences:**

@@ -70,17 +70,19 @@ Exit criteria:
 
 Status (2026-04-10): Phase 3 crate shells and CI tier split are done (#19, #20). The full harness API, ARIA helpers, snapshot setup, adapter backends, parity types, CI enforcement, mock infrastructure, and nightly pipeline remain as 11 open tasks (#178–#188, 34 pts). See [Epic #7](https://github.com/fogodev/ars-ui/issues/7).
 
-#### Adapter foundation audit (2026-04-10)
+#### Adapter foundation audit (2026-04-10 / 2026-04-11)
 
-An audit of Epic #8 (Leptos adapter) revealed that the original 3 tasks (#22, #55, #105) covered ~40% of the foundational spec sections in `08-adapter-leptos.md`. Two new tasks were added to close the gaps before component work begins:
+An audit of Epic #8 (Leptos adapter) revealed that the original 3 tasks (#22, #55, #105) covered ~40% of the foundational spec sections in `08-adapter-leptos.md`. Three new tasks were added to close the gaps before component work begins:
 
 - [#190](https://github.com/fogodev/ars-ui/issues/190) — ArsProvider context, reactive props, controlled value helper (5 pts)
 - [#191](https://github.com/fogodev/ars-ui/issues/191) — emit/emit_map, event mapping, nonce CSS collector, safe event listeners (3 pts)
+- [#513](https://github.com/fogodev/ars-ui/issues/513) — LiveAnnouncer context bridge owned by `ArsProvider` context (2 pts, depends on #190 and #73)
 
-A symmetric audit of Epic #9 (Dioxus adapter) confirmed the same gaps plus Dioxus-unique sections. Five new tasks were added (16 pts):
+A symmetric audit of Epic #9 (Dioxus adapter) confirmed the same gaps plus Dioxus-unique sections. A later `#73` follow-up also added the adapter-owned announcer bridge task. Six new tasks were added (18 pts):
 
 - [#193](https://github.com/fogodev/ars-ui/issues/193) — ArsProvider context, reactive props, controlled value helper (5 pts, symmetric with #190)
 - [#194](https://github.com/fogodev/ars-ui/issues/194) — emit/emit_map, event mapping, nonce CSS collector, safe event listeners (3 pts, symmetric with #191)
+- [#512](https://github.com/fogodev/ars-ui/issues/512) — LiveAnnouncer context bridge owned by `ArsProvider` context (2 pts, symmetric with #513)
 - [#195](https://github.com/fogodev/ars-ui/issues/195) — DioxusPlatform trait, WebPlatform, DesktopPlatform, NullPlatform, use_platform() (3 pts, Dioxus-unique)
 - [#196](https://github.com/fogodev/ars-ui/issues/196) — SSR Hydration: HydrationSnapshot, FocusScope hydration safety (3 pts)
 - [#197](https://github.com/fogodev/ars-ui/issues/197) — ArsErrorBoundary component (2 pts)

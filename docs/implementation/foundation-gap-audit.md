@@ -455,18 +455,31 @@ An audit of Epic #9 (Dioxus adapter) against `spec/foundation/09-adapter-dioxus.
 
 ### Replacement Tasks
 
-Five new tasks close all gaps. All are sub-issues of [Epic #9](https://github.com/fogodev/ars-ui/issues/9).
+Six tasks close all gaps. All are sub-issues of [Epic #9](https://github.com/fogodev/ars-ui/issues/9).
 
-| Issue                                                | Title                                                                    | Points | Deps | Parity                     |
-| ---------------------------------------------------- | ------------------------------------------------------------------------ | ------ | ---- | -------------------------- |
-| [#193](https://github.com/fogodev/ars-ui/issues/193) | ArsProvider context, reactive props, controlled value helper             | 5      | none | Symmetric with Leptos #190 |
-| [#194](https://github.com/fogodev/ars-ui/issues/194) | Adapter utilities — emit, event mapping, nonce collector, safe listeners | 3      | #193 | Symmetric with Leptos #191 |
-| [#195](https://github.com/fogodev/ars-ui/issues/195) | DioxusPlatform trait, platform implementations, use_platform()           | 3      | #193 | Dioxus-unique              |
-| [#196](https://github.com/fogodev/ars-ui/issues/196) | SSR Hydration support                                                    | 3      | #193 | Dioxus-unique              |
-| [#197](https://github.com/fogodev/ars-ui/issues/197) | ArsErrorBoundary component                                               | 2      | none | Dioxus-unique              |
+| Issue                                                | Title                                                                    | Points | Deps      | Parity                     |
+| ---------------------------------------------------- | ------------------------------------------------------------------------ | ------ | --------- | -------------------------- |
+| [#193](https://github.com/fogodev/ars-ui/issues/193) | ArsProvider context, reactive props, controlled value helper             | 5      | none      | Symmetric with Leptos #190 |
+| [#194](https://github.com/fogodev/ars-ui/issues/194) | Adapter utilities — emit, event mapping, nonce collector, safe listeners | 3      | #193      | Symmetric with Leptos #191 |
+| [#512](https://github.com/fogodev/ars-ui/issues/512) | LiveAnnouncer context bridge                                             | 2      | #193, #73 | Symmetric with Leptos #513 |
+| [#195](https://github.com/fogodev/ars-ui/issues/195) | DioxusPlatform trait, platform implementations, use_platform()           | 3      | #193      | Dioxus-unique              |
+| [#196](https://github.com/fogodev/ars-ui/issues/196) | SSR Hydration support                                                    | 3      | #193      | Dioxus-unique              |
+| [#197](https://github.com/fogodev/ars-ui/issues/197) | ArsErrorBoundary component                                               | 2      | none      | Dioxus-unique              |
 
 ### Updated Epic #9 totals
 
-- Point target revised from `8` to `24`.
+- Point target revised from `8` to `29`.
 - Closed: 2 tasks (#23, #56) = 6 pts
-- Open: #106 (5), #193 (5), #194 (3), #195 (3), #196 (3), #197 (2) = 6 tasks, 21 points remaining
+- Open: #106 (5), #193 (5), #194 (3), #512 (2), #195 (3), #196 (3), #197 (2) = 7 tasks, 23 points remaining
+
+## Adapter Announcement Follow-Up (2026-04-11)
+
+Reviewing the initial `#73` implementation showed that live announcement ownership belongs in
+adapter-provided context, not in `ars-dom` singleton state. Two follow-up adapter tasks were
+created so both frameworks wire announcements through the shared `ars_a11y::LiveAnnouncer`
+instance exposed by their provider layer.
+
+| Issue                                                | Title                        | Points | Deps      | Framework |
+| ---------------------------------------------------- | ---------------------------- | ------ | --------- | --------- |
+| [#513](https://github.com/fogodev/ars-ui/issues/513) | LiveAnnouncer context bridge | 2      | #190, #73 | Leptos    |
+| [#512](https://github.com/fogodev/ars-ui/issues/512) | LiveAnnouncer context bridge | 2      | #193, #73 | Dioxus    |

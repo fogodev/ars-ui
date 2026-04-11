@@ -13,6 +13,7 @@
     reason = "cfg-gated web impls prevent const fn"
 )]
 
+mod announcer;
 mod focus;
 pub mod modality;
 pub mod portal;
@@ -21,6 +22,8 @@ mod scroll;
 pub mod scroll_lock;
 pub mod z_index;
 
+#[cfg(feature = "web")]
+pub use announcer::ensure_dom;
 pub use focus::{
     FocusScope, FocusedElement, focus_body, focus_element_by_id, focus_first_tabbable,
 };
