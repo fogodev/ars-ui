@@ -120,7 +120,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
       - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "22"
+          directory: ${{ runner.temp }}/llvm
       - run: cargo install wasm-bindgen-cli --locked --version 0.2.118
+      - name: Configure wasm coverage clang
+        run: echo "WASM_COVERAGE_CLANG=${LLVM_PATH}/bin/clang" >> "$GITHUB_ENV"
       - uses: ./.github/actions/install-dioxus-desktop-deps
       - name: Coverage
         run: cargo xtask ci coverage
