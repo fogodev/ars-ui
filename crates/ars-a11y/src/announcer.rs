@@ -29,6 +29,8 @@ pub struct LiveAnnouncer {
     queue: Vec<Announcement>,
     /// Whether an announcement is currently being processed.
     announcing: bool,
+    /// Priority of the currently active announcement, if any.
+    active_priority: Option<AnnouncementPriority>,
     /// Toggle bit for `VoiceOver` deduplication workaround.
     voiceover_toggle: bool,
     /// Tracks the last announced message text.
@@ -44,6 +46,7 @@ impl LiveAnnouncer {
         Self {
             queue: Vec::new(),
             announcing: false,
+            active_priority: None,
             voiceover_toggle: false,
             last_message: None,
             clear_delay_ms: 7000,
@@ -78,6 +81,11 @@ impl LiveAnnouncer {
         if priority == AnnouncementPriority::Assertive {
             self.queue
                 .retain(|queued| queued.priority == AnnouncementPriority::Assertive);
+
+            if self.active_priority == Some(AnnouncementPriority::Polite) {
+                self.announcing = false;
+                self.active_priority = None;
+            }
         }
 
         self.queue.push(announcement);
@@ -99,19 +107,13 @@ impl LiveAnnouncer {
 
         let next = self.queue.remove(0);
         self.announcing = true;
+        self.active_priority = Some(next.priority);
 
-        let is_repeat = self.last_message.as_deref() == Some(next.message.as_str());
-        let content = if is_repeat && self.voiceover_toggle {
-            format!("{}\u{200D}", next.message)
-        } else {
-            next.message.clone()
-        };
-
-        if is_repeat {
-            self.voiceover_toggle = !self.voiceover_toggle;
-        } else {
-            self.voiceover_toggle = false;
-        }
+        let content = render_announcement_content(
+            next.message.as_str(),
+            self.last_message.as_deref(),
+            &mut self.voiceover_toggle,
+        );
 
         self.last_message = Some(next.message.clone());
 
@@ -121,6 +123,7 @@ impl LiveAnnouncer {
     /// Called by the ars-dom adapter after the live region update completes.
     pub fn notify_announced(&mut self) {
         self.announcing = false;
+        self.active_priority = None;
         self.process_queue();
     }
 
@@ -156,6 +159,26 @@ impl Default for LiveAnnouncer {
     }
 }
 
+fn render_announcement_content(
+    message: &str,
+    last_message: Option<&str>,
+    voiceover_toggle: &mut bool,
+) -> String {
+    let is_repeat = last_message == Some(message);
+
+    if is_repeat {
+        *voiceover_toggle = !*voiceover_toggle;
+        if *voiceover_toggle {
+            format!("{message}\u{200D}")
+        } else {
+            String::from(message)
+        }
+    } else {
+        *voiceover_toggle = false;
+        String::from(message)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::vec;
@@ -183,13 +206,9 @@ mod tests {
         announcer.announce_assertive("Critical alert");
 
         assert!(announcer.announcing);
-        assert_eq!(
-            announcer.queue,
-            vec![Announcement {
-                message: String::from("Critical alert"),
-                priority: AnnouncementPriority::Assertive,
-            }]
-        );
+        assert_eq!(announcer.active_priority, Some(AnnouncementPriority::Assertive));
+        assert_eq!(announcer.last_message.as_deref(), Some("Critical alert"));
+        assert!(announcer.queue.is_empty());
     }
 
     #[test]
@@ -233,32 +252,41 @@ mod tests {
         announcer.announce_assertive("Critical alert 1");
         announcer.announce_assertive("Critical alert 2");
 
-        assert_eq!(
-            announcer.queue,
-            vec![
-                Announcement {
-                    message: String::from("Critical alert 1"),
-                    priority: AnnouncementPriority::Assertive,
-                },
-                Announcement {
-                    message: String::from("Critical alert 2"),
-                    priority: AnnouncementPriority::Assertive,
-                },
-            ]
-        );
-
-        announcer.notify_announced();
+        assert_eq!(announcer.active_priority, Some(AnnouncementPriority::Assertive));
         assert_eq!(announcer.last_message.as_deref(), Some("Critical alert 1"));
         assert_eq!(
             announcer.queue,
             vec![Announcement {
                 message: String::from("Critical alert 2"),
                 priority: AnnouncementPriority::Assertive,
-            }]
+            },]
         );
 
         announcer.notify_announced();
+        assert_eq!(announcer.active_priority, Some(AnnouncementPriority::Assertive));
         assert_eq!(announcer.last_message.as_deref(), Some("Critical alert 2"));
+        assert!(announcer.queue.is_empty());
+
+        announcer.notify_announced();
+        assert_eq!(announcer.active_priority, None);
+        assert_eq!(
+            announcer.last_message.as_deref(),
+            Some("Critical alert 2")
+        );
+    }
+
+    #[test]
+    fn assertive_preempts_active_polite_announcement() {
+        let mut announcer = LiveAnnouncer::new();
+
+        announcer.announce("Background update");
+        assert_eq!(announcer.active_priority, Some(AnnouncementPriority::Polite));
+
+        announcer.announce_assertive("Critical alert");
+
+        assert!(announcer.announcing);
+        assert_eq!(announcer.active_priority, Some(AnnouncementPriority::Assertive));
+        assert_eq!(announcer.last_message.as_deref(), Some("Critical alert"));
         assert!(announcer.queue.is_empty());
     }
 
@@ -277,6 +305,19 @@ mod tests {
         announcer.announce("Test message");
 
         assert!(!announcer.voiceover_toggle);
+    }
+
+    #[test]
+    fn voiceover_dedup_marker_is_emitted_on_first_repeat() {
+        let mut toggle = false;
+
+        let first = render_announcement_content("Test message", None, &mut toggle);
+        let second = render_announcement_content("Test message", Some("Test message"), &mut toggle);
+        let third = render_announcement_content("Test message", Some("Test message"), &mut toggle);
+
+        assert_eq!(first, "Test message");
+        assert_eq!(second, "Test message\u{200D}");
+        assert_eq!(third, "Test message");
     }
 
     #[test]
@@ -343,6 +384,7 @@ mod tests {
         let announcer = LiveAnnouncer {
             queue: Vec::new(),
             announcing: false,
+            active_priority: None,
             voiceover_toggle: false,
             last_message: None,
             clear_delay_ms: 1200,
@@ -357,6 +399,7 @@ mod tests {
 
         assert_eq!(announcer.queue, Vec::<Announcement>::new());
         assert!(!announcer.announcing);
+        assert_eq!(announcer.active_priority, None);
         assert!(!announcer.voiceover_toggle);
         assert_eq!(announcer.last_message, None);
         assert_eq!(announcer.clear_delay_ms, 7000);
