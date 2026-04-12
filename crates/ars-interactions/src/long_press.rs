@@ -7,7 +7,7 @@
 
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use ars_core::{AttrMap, Callback, ComponentIds, HtmlAttr, MessageFn, SharedFlag, TimerHandle};
+use ars_core::{AttrMap, Callback, ComponentIds, HtmlAttr, MessageFn, SharedState, TimerHandle};
 use ars_i18n::Locale;
 
 use crate::{KeyModifiers, PointerType};
@@ -100,9 +100,13 @@ pub struct LongPressConfig {
     /// Called when the interaction is cancelled before reaching the threshold.
     pub on_long_press_cancel: Option<Callback<dyn Fn(LongPressEvent)>>,
 
-    /// Shared flag used to suppress the co-located `Press` activation after a
+    /// Shared state used to suppress the co-located `Press` activation after a
     /// completed long press.
-    pub long_press_cancel_flag: Option<SharedFlag>,
+    ///
+    /// The long-press threshold stores `Some(pointer_type)` for the modality
+    /// that fired. The matching `Press` release consumes that value and
+    /// suppresses only the originating activation.
+    pub long_press_cancel_flag: Option<SharedState<Option<PointerType>>>,
 }
 
 impl Default for LongPressConfig {
@@ -338,7 +342,7 @@ fn reduce_long_press(
             }
 
             if let Some(flag) = &config.long_press_cancel_flag {
-                flag.set(false);
+                flag.set(None);
             }
 
             *held_modifiers = modifiers;
@@ -376,7 +380,7 @@ fn reduce_long_press(
             *state = LongPressState::LongPressed { pointer_type };
 
             if let Some(flag) = &config.long_press_cancel_flag {
-                flag.set(true);
+                flag.set(Some(pointer_type));
             }
 
             let event = LongPressEvent {
@@ -762,7 +766,7 @@ mod tests {
     fn fire_long_press_public_method_returns_announcement_and_sets_cancel_flag() {
         let ids = ComponentIds::from_id("btn-5");
 
-        let shared_flag = SharedFlag::default();
+        let shared_flag = SharedState::new(None);
 
         let mut result = use_long_press(
             LongPressConfig {
@@ -795,7 +799,7 @@ mod tests {
             }
         );
         assert!(result.is_long_pressing);
-        assert!(shared_flag.get());
+        assert_eq!(shared_flag.get(), Some(PointerType::Keyboard));
         assert_eq!(result.pending_timer_handle(), None);
     }
 
@@ -1068,7 +1072,7 @@ mod tests {
     fn timer_fire_enters_long_pressed_sets_cancel_flag_and_returns_announcement() {
         let long_press_events = Arc::new(Mutex::new(Vec::<LongPressEvent>::new()));
 
-        let shared_flag = SharedFlag::default();
+        let shared_flag = SharedState::new(None);
 
         let config = LongPressConfig {
             long_press_cancel_flag: Some(shared_flag.clone()),
@@ -1109,7 +1113,7 @@ mod tests {
                 pointer_type: PointerType::Keyboard,
             }
         );
-        assert!(shared_flag.get());
+        assert_eq!(shared_flag.get(), Some(PointerType::Keyboard));
         assert_eq!(announcement.as_deref(), Some("Long press activated"));
         assert_eq!(
             *long_press_events.lock().expect("poisoned"),

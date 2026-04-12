@@ -124,7 +124,7 @@ Press is the fundamental activation interaction: the user intends to activate so
 // ars-interactions/src/press.rs
 
 use std::time::Duration;
-use ars_core::{AttrMap, Callback, SharedFlag};
+use ars_core::{AttrMap, Callback, SharedFlag, SharedState};
 use crate::PointerType;
 
 /// Configuration for press interaction behavior.
@@ -188,10 +188,12 @@ pub struct PressConfig {
     /// a new one. See §8 Interaction Composition for coordination rules.
     pub pointer_capture_timeout: Option<Duration>,
 
-    /// When set, the press handler checks this flag on `pointerup`. If `true`,
-    /// the press activation (`on_press`) is suppressed because a long-press
-    /// already fired. See §8.7 Cross-Interaction Cancellation Protocol.
-    pub long_press_cancel_flag: Option<SharedFlag>,
+    /// When set, the press handler checks this shared state on release.
+    /// `Some(pointer_type)` suppresses the matching modality's activation
+    /// because a long-press already fired for that press. `None` means no
+    /// pending long-press suppression. See §8.7 Cross-Interaction Cancellation
+    /// Protocol.
+    pub long_press_cancel_flag: Option<SharedState<Option<PointerType>>>,
 }
 
 impl Default for PressConfig {
@@ -754,8 +756,9 @@ impl PressResult {
     /// activation fired, and `cancel_press()` handles cancel/blur for a specific
     /// modality.
     /// `end_press()` MUST consult `config.long_press_cancel_flag` before firing
-    /// `on_press`, clearing the flag after consuming it so the suppression does
-    /// not leak into the next interaction.
+    /// `on_press`, consuming only the stored modality that matches the current
+    /// release so suppression does not leak into the next interaction or a
+    /// concurrent modality.
     pub fn begin_press(&mut self, pointer_type: PointerType, client_x: Option<f64>, client_y: Option<f64>, modifiers: KeyModifiers, within_element: bool) { /* ... */ }
 
     pub fn update_pressed_bounds(&mut self, pointer_type: PointerType, within_element: bool, client_x: Option<f64>, client_y: Option<f64>) { /* ... */ }
@@ -1433,7 +1436,7 @@ Accessibility: Elements with long press actions must communicate this to screen 
 
 use crate::{KeyModifiers, PointerType};
 use ars_core::{
-    AttrMap, Callback, ComponentIds, HtmlAttr, MessageFn, SharedFlag, TimerHandle,
+    AttrMap, Callback, ComponentIds, HtmlAttr, MessageFn, SharedState, TimerHandle,
 };
 use ars_i18n::Locale;
 use core::time::Duration;
@@ -1471,9 +1474,13 @@ pub struct LongPressConfig {
     /// Called when the long press is cancelled before the threshold fires.
     pub on_long_press_cancel: Option<Callback<dyn Fn(LongPressEvent)>>,
 
-    /// Shared flag used to suppress the co-located `Press` activation after a
+    /// Shared state used to suppress the co-located `Press` activation after a
     /// completed long press.
-    pub long_press_cancel_flag: Option<SharedFlag>,
+    ///
+    /// The threshold stores `Some(pointer_type)` for the modality that fired.
+    /// The matching `Press` release consumes that value and suppresses only the
+    /// originating activation.
+    pub long_press_cancel_flag: Option<SharedState<Option<PointerType>>>,
 }
 
 impl Default for LongPressConfig {
@@ -2805,29 +2812,29 @@ When multiple interactions are composed on the same element, some interactions m
 
 **Cancellation contract:**
 
-1. **Shared cancellation flag:** When Press and LongPress are both connected to the same element, they share a `long_press_fired: SharedFlag` flag. This flag is created by the composition layer and passed to both interaction configs.
+1. **Shared cancellation state:** When Press and LongPress are both connected to the same element, they share a `long_press_fired: SharedState<Option<PointerType>>` value. This state is created by the composition layer and passed to both interaction configs.
 
-2. **LongPress sets the flag:** When the long-press timer fires (transition from `Timing` to `LongPressed`), LongPress sets `long_press_fired = true`.
+2. **LongPress records the firing modality:** When the long-press timer fires (transition from `Timing` to `LongPressed`), LongPress sets `long_press_fired = Some(pointer_type)`.
 
-3. **Press checks the flag on `pointerup`:** In the `pointerup` handler, before firing `on_press`, Press checks `long_press_fired`. If `true`, Press transitions to `Idle` without calling `on_press` (but still calls `on_press_end`).
+3. **Press checks the state on release:** In the release handler, before firing `on_press`, Press checks `long_press_fired`. If it matches the releasing modality, Press consumes the stored value, transitions to `Idle`, and suppresses `on_press` (but still calls `on_press_end`).
 
-4. **Flag reset:** The flag is reset to `false` only when a new gesture begins from a fully idle press state, ensuring concurrent secondary modalities do not erase the suppression that still belongs to the pending `pointerup`.
+4. **State reset:** The shared state is reset to `None` when a new gesture begins from a fully idle press state, and it is also cleared when the matching release consumes the suppression. This prevents stale suppression from leaking across gestures while preserving the originating modality.
 
 ```rust
 // Shared cancellation state between Press and LongPress
-let long_press_fired = SharedFlag::default();
+let long_press_fired = SharedState::new(None);
 
-// Pass to LongPress — sets the flag when the threshold fires and
-// resets it on the next pointerdown / keydown.
+// Pass to LongPress — records the firing modality when the threshold fires
+// and resets to None on the next pointerdown / keydown.
 let long_press = use_long_press(LongPressConfig {
     long_press_cancel_flag: Some(long_press_fired.clone()),
     ..Default::default()
 }, &ids);
 
-// Pass to Press — checks the same flag on pointerup
+// Pass to Press — checks the same shared state on release
 let press = use_press(PressConfig {
     long_press_cancel_flag: Some(long_press_fired),
-    // When this flag is Some and its value is true on pointerup,
+    // When this state contains the releasing modality,
     // on_press is suppressed (only on_press_end fires).
     ..Default::default()
 });

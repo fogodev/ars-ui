@@ -7,7 +7,7 @@
 
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use ars_core::{AttrMap, Callback, HtmlAttr, SharedFlag};
+use ars_core::{AttrMap, Callback, HtmlAttr, SharedFlag, SharedState};
 
 use crate::{KeyModifiers, PointerType};
 
@@ -134,10 +134,13 @@ pub struct PressConfig {
     /// Defaults to 5000ms. Set to `None` to disable the timeout entirely.
     pub pointer_capture_timeout: Option<Duration>,
 
-    /// When set, the press handler checks this flag on `pointerup`. If `true`,
-    /// the press activation (`on_press`) is suppressed because a long-press
-    /// already fired. See spec §8.7 Cross-Interaction Cancellation Protocol.
-    pub long_press_cancel_flag: Option<SharedFlag>,
+    /// When set, the press handler checks this shared state on release.
+    ///
+    /// `Some(pointer_type)` suppresses the matching modality's activation
+    /// because a long press already fired for that press. `None` means no
+    /// pending long-press suppression. See spec §8.7 Cross-Interaction
+    /// Cancellation Protocol.
+    pub long_press_cancel_flag: Option<SharedState<Option<PointerType>>>,
 }
 
 impl Default for PressConfig {
@@ -330,7 +333,7 @@ impl PressResult {
 
             if active_presses.is_empty() {
                 if let Some(flag) = &self.config.long_press_cancel_flag {
-                    flag.set(false);
+                    flag.set(None);
                 }
             }
 
@@ -437,7 +440,7 @@ impl PressResult {
             let is_within_element = released_press.is_within_element;
             let activation_candidate = is_within_element
                 || (self.config.allow_press_on_exit && !released_press.is_within_element);
-            let long_press_canceled = self.consume_long_press_cancel_flag();
+            let long_press_canceled = self.consume_long_press_cancel_flag(pointer_type);
             let suppress_activation = activation_candidate && long_press_canceled;
             let next_state = derive_press_state(&active_presses);
             let pressed = active_presses.iter().any(|press| press.is_within_element);
@@ -527,14 +530,14 @@ impl PressResult {
         );
     }
 
-    fn consume_long_press_cancel_flag(&self) -> bool {
+    fn consume_long_press_cancel_flag(&self, pointer_type: PointerType) -> bool {
         let Some(flag) = &self.config.long_press_cancel_flag else {
             return false;
         };
 
-        let should_cancel = flag.get();
+        let should_cancel = flag.get() == Some(pointer_type);
         if should_cancel {
-            flag.set(false);
+            flag.set(None);
         }
         should_cancel
     }
@@ -709,13 +712,13 @@ mod tests {
                     change_calls.fetch_add(1, Ordering::SeqCst);
                 })
             }),
-            long_press_cancel_flag: Some(SharedFlag::new(true)),
+            long_press_cancel_flag: Some(SharedState::new(Some(PointerType::Touch))),
             ..PressConfig::default()
         };
         let debug = format!("{config:?}");
         assert!(debug.contains("on_press: Some(Callback(..))"));
         assert!(debug.contains("on_press_change: Some(Callback(..))"));
-        assert!(debug.contains("long_press_cancel_flag: Some(SharedFlag(true))"));
+        assert!(debug.contains("long_press_cancel_flag: Some(SharedState(Some(Touch)))"));
         let event = PressEvent {
             pointer_type: PointerType::Mouse,
             event_type: PressEventType::Press,
@@ -1257,7 +1260,7 @@ mod tests {
 
     #[test]
     fn begin_press_from_idle_clears_stale_long_press_flag() {
-        let shared_flag = SharedFlag::new(true);
+        let shared_flag = SharedState::new(Some(PointerType::Mouse));
         let mut result = use_press(PressConfig {
             long_press_cancel_flag: Some(shared_flag.clone()),
             ..PressConfig::default()
@@ -1271,7 +1274,7 @@ mod tests {
             true,
         );
 
-        assert!(!shared_flag.get());
+        assert_eq!(shared_flag.get(), None);
         assert!(result.pressed);
     }
 
@@ -1416,7 +1419,7 @@ mod tests {
     #[test]
     fn end_press_suppresses_activation_when_long_press_flag_is_set() {
         let activation_count = Arc::new(AtomicUsize::new(0));
-        let shared_flag = SharedFlag::new(true);
+        let shared_flag = SharedState::new(Some(PointerType::Touch));
         let config = PressConfig {
             long_press_cancel_flag: Some(shared_flag.clone()),
             on_press: Some({
@@ -1446,7 +1449,7 @@ mod tests {
 
         assert!(!activated);
         assert_eq!(activation_count.load(Ordering::SeqCst), 0);
-        assert!(!shared_flag.get());
+        assert_eq!(shared_flag.get(), None);
         assert_eq!(result.current_state(), PressState::Idle);
     }
 
@@ -1616,7 +1619,7 @@ mod tests {
     #[test]
     fn second_modality_begin_does_not_clear_pending_long_press_suppression() {
         let activation_count = Arc::new(AtomicUsize::new(0));
-        let shared_flag = SharedFlag::new(false);
+        let shared_flag = SharedState::new(None);
         let config = PressConfig {
             long_press_cancel_flag: Some(shared_flag.clone()),
             on_press: Some({
@@ -1635,7 +1638,7 @@ mod tests {
             KeyModifiers::default(),
             true,
         );
-        shared_flag.set(true);
+        shared_flag.set(Some(PointerType::Touch));
 
         result.begin_press(
             PointerType::Keyboard,
@@ -1654,7 +1657,7 @@ mod tests {
 
         assert!(!activated);
         assert_eq!(activation_count.load(Ordering::SeqCst), 0);
-        assert!(!shared_flag.get());
+        assert_eq!(shared_flag.get(), None);
         assert_eq!(
             result.current_state(),
             PressState::PressedInside {
@@ -1669,7 +1672,7 @@ mod tests {
     #[test]
     fn outside_release_consumes_long_press_suppression_before_other_modality_activates() {
         let activation_count = Arc::new(AtomicUsize::new(0));
-        let shared_flag = SharedFlag::new(false);
+        let shared_flag = SharedState::new(None);
         let config = PressConfig {
             long_press_cancel_flag: Some(shared_flag.clone()),
             on_press: Some({
@@ -1698,7 +1701,7 @@ mod tests {
         );
 
         result.update_pressed_bounds(PointerType::Touch, false, Some(40.0), Some(50.0));
-        shared_flag.set(true);
+        shared_flag.set(Some(PointerType::Touch));
 
         let touch_activated = result.end_press(
             PointerType::Touch,
@@ -1712,7 +1715,57 @@ mod tests {
         assert!(!touch_activated);
         assert!(keyboard_activated);
         assert_eq!(activation_count.load(Ordering::SeqCst), 1);
-        assert!(!shared_flag.get());
+        assert_eq!(shared_flag.get(), None);
+        assert_eq!(result.current_state(), PressState::Idle);
+        assert!(!result.pressed);
+    }
+
+    #[test]
+    fn long_press_suppression_is_consumed_only_by_matching_modality_release() {
+        let activation_count = Arc::new(AtomicUsize::new(0));
+        let shared_flag = SharedState::new(None);
+        let config = PressConfig {
+            long_press_cancel_flag: Some(shared_flag.clone()),
+            on_press: Some({
+                let activation_count = Arc::clone(&activation_count);
+                Callback::new(move |_: PressEvent| {
+                    activation_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+
+        result.begin_press(
+            PointerType::Touch,
+            Some(4.0),
+            Some(5.0),
+            KeyModifiers::default(),
+            true,
+        );
+        result.begin_press(
+            PointerType::Keyboard,
+            None,
+            None,
+            KeyModifiers::default(),
+            true,
+        );
+
+        shared_flag.set(Some(PointerType::Touch));
+
+        let keyboard_activated =
+            result.end_press(PointerType::Keyboard, None, None, KeyModifiers::default());
+        let touch_activated = result.end_press(
+            PointerType::Touch,
+            Some(4.0),
+            Some(5.0),
+            KeyModifiers::default(),
+        );
+
+        assert!(keyboard_activated);
+        assert!(!touch_activated);
+        assert_eq!(activation_count.load(Ordering::SeqCst), 1);
+        assert_eq!(shared_flag.get(), None);
         assert_eq!(result.current_state(), PressState::Idle);
         assert!(!result.pressed);
     }
