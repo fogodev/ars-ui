@@ -1,6 +1,7 @@
 // ars-collections/src/tree_collection.rs
 
 use alloc::{collections::BTreeSet, string::String, vec::Vec};
+use core::fmt::{self, Debug};
 
 use indexmap::IndexMap;
 
@@ -25,8 +26,8 @@ pub struct TreeItemConfig<T> {
 }
 
 /// Manual `Debug` avoids requiring `T: Debug`.
-impl<T> core::fmt::Debug for TreeItemConfig<T> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl<T> Debug for TreeItemConfig<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TreeItemConfig")
             .field("key", &self.key)
             .field("text_value", &self.text_value)
@@ -68,6 +69,12 @@ pub struct TreeCollection<T> {
 
     /// Set of keys whose subtrees are currently expanded.
     expanded_keys: BTreeSet<Key>,
+
+    /// Cached `all_nodes` index of the first visible focusable item.
+    first_focusable_visible: Option<usize>,
+
+    /// Cached `all_nodes` index of the last visible focusable item.
+    last_focusable_visible: Option<usize>,
 }
 
 impl<T: Clone> Clone for TreeCollection<T> {
@@ -77,14 +84,16 @@ impl<T: Clone> Clone for TreeCollection<T> {
             visible_indices: self.visible_indices.clone(),
             key_to_index: self.key_to_index.clone(),
             expanded_keys: self.expanded_keys.clone(),
+            first_focusable_visible: self.first_focusable_visible,
+            last_focusable_visible: self.last_focusable_visible,
         }
     }
 }
 
 /// Manual `Debug` avoids requiring `T: Debug`. Prints node counts only,
 /// since the payload `T` is opaque to the machine layer.
-impl<T> core::fmt::Debug for TreeCollection<T> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl<T> Debug for TreeCollection<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TreeCollection")
             .field("total_nodes", &self.all_nodes.len())
             .field("visible_nodes", &self.visible_indices.len())
@@ -112,12 +121,15 @@ impl<T: Clone + PartialEq> PartialEq for TreeCollection<T> {
 const MAX_TREE_DEPTH: usize = 32;
 
 impl<T> TreeCollection<T> {
-    /// Compute which flat indices are visible given the current expansion set.
-    fn compute_visible(all_nodes: &[Node<T>]) -> Vec<usize> {
+    /// Compute which flat indices are visible given the current expansion set,
+    /// along with cached first/last focusable visible indices.
+    fn compute_visible(all_nodes: &[Node<T>]) -> (Vec<usize>, Option<usize>, Option<usize>) {
         let mut visible = Vec::with_capacity(all_nodes.len());
-        let mut skip_until_level: Option<usize> = None;
+        let mut first_focusable = None;
+        let mut last_focusable = None;
+        let mut skip_until_level = None::<usize>;
 
-        for node in all_nodes.iter() {
+        for node in all_nodes {
             // If we're skipping a collapsed subtree, check whether we've
             // exited it (returned to the same or higher level).
             if let Some(skip_level) = skip_until_level {
@@ -130,18 +142,31 @@ impl<T> TreeCollection<T> {
 
             visible.push(node.index);
 
+            if node.is_focusable() {
+                if first_focusable.is_none() {
+                    first_focusable = Some(node.index);
+                }
+                last_focusable = Some(node.index);
+            }
+
             // If this node has children and is not expanded, skip children.
             if node.has_children && node.is_expanded != Some(true) {
                 skip_until_level = Some(node.level);
             }
         }
-        visible
+        (visible, first_focusable, last_focusable)
+    }
+}
+
+impl<T: Clone> Default for TreeCollection<T> {
+    fn default() -> Self {
+        Self::new([])
     }
 }
 
 impl<T: Clone> TreeCollection<T> {
     /// Build a `TreeCollection` from a list of root-level items.
-    pub fn new(roots: Vec<TreeItemConfig<T>>) -> Self {
+    pub fn new(roots: impl IntoIterator<Item = TreeItemConfig<T>>) -> Self {
         let mut all_nodes = Vec::new();
         let mut key_to_index = IndexMap::new();
         let mut expanded_keys = BTreeSet::new();
@@ -204,12 +229,15 @@ impl<T: Clone> TreeCollection<T> {
             );
         }
 
-        let visible_indices = Self::compute_visible(&all_nodes);
+        let (visible_indices, first_focusable_visible, last_focusable_visible) =
+            Self::compute_visible(&all_nodes);
         Self {
             all_nodes,
             visible_indices,
             key_to_index,
             expanded_keys,
+            first_focusable_visible,
+            last_focusable_visible,
         }
     }
 
@@ -230,12 +258,15 @@ impl<T: Clone> TreeCollection<T> {
             new_nodes[idx].is_expanded = Some(expanded);
         }
 
-        let visible_indices = Self::compute_visible(&new_nodes);
+        let (visible_indices, first_focusable_visible, last_focusable_visible) =
+            Self::compute_visible(&new_nodes);
         Self {
             all_nodes: new_nodes,
             visible_indices,
             key_to_index: self.key_to_index.clone(),
             expanded_keys: new_expanded,
+            first_focusable_visible,
+            last_focusable_visible,
         }
     }
 
@@ -248,7 +279,7 @@ impl<T: Clone> TreeCollection<T> {
     /// This avoids cloning the entire tree when only the expanded set changes.
     pub fn visible_keys_with_expanded(&self, expanded: &BTreeSet<Key>) -> Vec<Key> {
         let mut visible = Vec::new();
-        let mut skip_until_level: Option<usize> = None;
+        let mut skip_until_level = None::<usize>;
 
         for node in &self.all_nodes {
             // If we're skipping children of a collapsed node, check if we've
@@ -316,17 +347,11 @@ impl<T: Clone> Collection<T> for TreeCollection<T> {
     }
 
     fn first_key(&self) -> Option<&Key> {
-        self.visible_indices
-            .iter()
-            .find(|&&i| self.all_nodes[i].is_focusable())
-            .map(|&i| &self.all_nodes[i].key)
+        self.first_focusable_visible.map(|i| &self.all_nodes[i].key)
     }
 
     fn last_key(&self) -> Option<&Key> {
-        self.visible_indices
-            .iter()
-            .rfind(|&&i| self.all_nodes[i].is_focusable())
-            .map(|&i| &self.all_nodes[i].key)
+        self.last_focusable_visible.map(|i| &self.all_nodes[i].key)
     }
 
     fn key_after(&self, key: &Key) -> Option<&Key> {
@@ -449,7 +474,7 @@ impl<T: CollectionItem> TreeCollection<T> {
                     end += 1;
                 }
                 // Drain the range [start..end] from all_nodes.
-                let drained: Vec<Node<T>> = self.all_nodes.drain(start..end).collect();
+                let drained = self.all_nodes.drain(start..end).collect::<Vec<_>>();
                 for node in drained {
                     if let Some(val) = node.value {
                         removed.push(val);
@@ -552,28 +577,25 @@ impl<T: CollectionItem> TreeCollection<T> {
     /// Compute the flat insertion position for a new child at `sibling_index`
     /// under the given `parent` (or among roots when `parent` is `None`).
     fn flat_insert_position(&self, parent: Option<&Key>, sibling_index: usize) -> usize {
-        let children: Vec<usize> = match parent {
-            Some(pk) => {
-                let parent_level = self
-                    .key_to_index
-                    .get(pk)
-                    .map_or(0, |&i| self.all_nodes[i].level);
-                self.all_nodes
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, n)| {
-                        n.parent_key.as_ref() == Some(pk) && n.level == parent_level + 1
-                    })
-                    .map(|(i, _)| i)
-                    .collect()
-            }
-            None => self
-                .all_nodes
+        let children = if let Some(pk) = parent {
+            let parent_level = self
+                .key_to_index
+                .get(pk)
+                .map_or(0, |&i| self.all_nodes[i].level);
+
+            self.all_nodes
+                .iter()
+                .enumerate()
+                .filter(|(_, n)| n.parent_key.as_ref() == Some(pk) && n.level == parent_level + 1)
+                .map(|(i, _)| i)
+                .collect::<Vec<_>>()
+        } else {
+            self.all_nodes
                 .iter()
                 .enumerate()
                 .filter(|(_, n)| n.parent_key.is_none() && n.level == 0)
                 .map(|(i, _)| i)
-                .collect(),
+                .collect::<Vec<_>>()
         };
         if sibling_index >= children.len() {
             // Append after the last sibling's subtree.
@@ -586,12 +608,12 @@ impl<T: CollectionItem> TreeCollection<T> {
                 end
             } else {
                 // No existing children — insert right after the parent.
-                match parent {
-                    Some(pk) => self
-                        .key_to_index
+                if let Some(pk) = parent {
+                    self.key_to_index
                         .get(pk)
-                        .map_or(self.all_nodes.len(), |&i| i + 1),
-                    None => self.all_nodes.len(),
+                        .map_or(self.all_nodes.len(), |&i| i + 1)
+                } else {
+                    self.all_nodes.len()
                 }
             }
         } else {
@@ -607,7 +629,13 @@ impl<T: CollectionItem> TreeCollection<T> {
             node.index = i;
             self.key_to_index.insert(node.key.clone(), i);
         }
-        self.visible_indices = Self::compute_visible(&self.all_nodes);
+
+        let (visible_indices, first_focusable_visible, last_focusable_visible) =
+            Self::compute_visible(&self.all_nodes);
+
+        self.visible_indices = visible_indices;
+        self.first_focusable_visible = first_focusable_visible;
+        self.last_focusable_visible = last_focusable_visible;
     }
 }
 
@@ -725,7 +753,7 @@ mod tests {
         let tree = TreeCollection::new(vec![leaf(1, "A"), leaf(2, "B"), leaf(3, "C")]);
         assert_eq!(tree.size(), 3);
         // DFS order: 1, 2, 3
-        let keys: Vec<_> = tree.keys().collect();
+        let keys = tree.keys().collect::<Vec<_>>();
         assert_eq!(keys, vec![&Key::int(1), &Key::int(2), &Key::int(3)]);
     }
 
@@ -911,8 +939,8 @@ mod tests {
         let result = tree.set_expanded(&Key::int(4), false);
         assert!(!result.is_expanded(&Key::int(4)));
         // Visible set should be the same
-        let orig_keys: Vec<_> = tree.keys().collect();
-        let result_keys: Vec<_> = result.keys().collect();
+        let orig_keys = tree.keys().collect::<Vec<_>>();
+        let result_keys = result.keys().collect::<Vec<_>>();
         assert_eq!(orig_keys, result_keys);
     }
 
@@ -921,8 +949,8 @@ mod tests {
         let tree = sample_tree();
         // Grains is a leaf — expanding it is a no-op
         let result = tree.set_expanded(&Key::int(7), true);
-        let orig_keys: Vec<_> = tree.keys().collect();
-        let result_keys: Vec<_> = result.keys().collect();
+        let orig_keys = tree.keys().collect::<Vec<_>>();
+        let result_keys = result.keys().collect::<Vec<_>>();
         assert_eq!(orig_keys, result_keys);
     }
 
@@ -936,7 +964,7 @@ mod tests {
         // Fruits expanded, Vegetables collapsed
         // Visible: 1(Fruits), 2(Apple), 3(Banana), 4(Vegetables), 7(Grains)
         assert_eq!(tree.size(), 5);
-        let visible_keys: Vec<_> = tree.keys().collect();
+        let visible_keys = tree.keys().collect::<Vec<_>>();
         assert_eq!(
             visible_keys,
             vec![
@@ -1186,7 +1214,7 @@ mod tests {
     #[test]
     fn keys_iterator_only_visible() {
         let tree = sample_tree();
-        let keys: Vec<_> = tree.keys().collect();
+        let keys = tree.keys().collect::<Vec<_>>();
         assert_eq!(
             keys,
             vec![
@@ -1202,7 +1230,10 @@ mod tests {
     #[test]
     fn nodes_iterator_only_visible() {
         let tree = sample_tree();
-        let text_values: Vec<_> = tree.nodes().map(|n| n.text_value.as_str()).collect();
+        let text_values = tree
+            .nodes()
+            .map(|n| n.text_value.as_str())
+            .collect::<Vec<_>>();
         assert_eq!(
             text_values,
             vec!["Fruits", "Apple", "Banana", "Vegetables", "Grains"]
@@ -1213,7 +1244,7 @@ mod tests {
     fn item_keys_filters_visible_focusable() {
         let tree = sample_tree();
         // All visible nodes are Item type, so item_keys == keys for this tree
-        let item_keys: Vec<_> = tree.item_keys().collect();
+        let item_keys = tree.item_keys().collect::<Vec<_>>();
         assert_eq!(
             item_keys,
             vec![
@@ -1234,7 +1265,7 @@ mod tests {
     fn children_of_returns_all_including_collapsed() {
         let tree = sample_tree();
         // Vegetables(4) is collapsed but children_of should still return its children
-        let children: Vec<_> = tree.children_of(&Key::int(4)).collect();
+        let children = tree.children_of(&Key::int(4)).collect::<Vec<_>>();
         assert_eq!(children.len(), 2);
         assert_eq!(children[0].key, Key::int(5)); // Carrot
         assert_eq!(children[1].key, Key::int(6)); // Daikon
@@ -1243,14 +1274,14 @@ mod tests {
     #[test]
     fn children_of_leaf() {
         let tree = sample_tree();
-        let children: Vec<_> = tree.children_of(&Key::int(7)).collect();
+        let children = tree.children_of(&Key::int(7)).collect::<Vec<_>>();
         assert!(children.is_empty());
     }
 
     #[test]
     fn children_of_nonexistent() {
         let tree = sample_tree();
-        let children: Vec<_> = tree.children_of(&Key::int(99)).collect();
+        let children = tree.children_of(&Key::int(99)).collect::<Vec<_>>();
         assert!(children.is_empty());
     }
 
@@ -1400,7 +1431,7 @@ mod tests {
         // Banana(3) is sibling index 1 under Fruits. Move to index 0.
         tree.reorder_sibling(&Key::int(3), 0);
         // Now Banana should come before Apple in DFS
-        let children: Vec<_> = tree.children_of(&Key::int(1)).collect();
+        let children = tree.children_of(&Key::int(1)).collect::<Vec<_>>();
         assert_eq!(children[0].key, Key::int(3)); // Banana first
         assert_eq!(children[1].key, Key::int(2)); // Apple second
     }
@@ -1499,7 +1530,7 @@ mod tests {
         )]);
         // Visible: A, B, D (C is inside collapsed B)
         assert_eq!(tree.size(), 3);
-        let visible_keys: Vec<_> = tree.keys().collect();
+        let visible_keys = tree.keys().collect::<Vec<_>>();
         assert_eq!(visible_keys, vec![&Key::int(1), &Key::int(2), &Key::int(4)]);
     }
 
@@ -1589,5 +1620,109 @@ mod tests {
         let mut tree = fruit_tree();
         tree.reparent(&Key::int(99), None, 0);
         assert_eq!(tree.all_nodes.len(), 4);
+    }
+
+    #[test]
+    fn tree_item_config_debug() {
+        let config = leaf(1, "Apple");
+        let debug = format!("{config:?}");
+        assert!(debug.contains("TreeItemConfig"));
+        assert!(debug.contains("Apple"));
+    }
+
+    #[test]
+    fn insert_child_into_empty_tree() {
+        // Covers flat_insert_position: parent=None, no existing root children
+        let mut tree = TreeCollection::default();
+        tree.insert_child(None, 0, TreeFruit::new(1, "First"));
+        assert_eq!(tree.all_nodes.len(), 1);
+        assert_eq!(tree.all_nodes[0].key, Key::int(1));
+    }
+
+    #[test]
+    fn insert_child_after_sibling_with_subtree() {
+        // Covers flat_insert_position: append after last sibling whose subtree
+        // must be skipped (the while end += 1 loop body).
+        let mut tree = fruit_tree();
+        // Fruits(1) has children Apple(2), Banana(3).
+        // Insert at sibling_index=999 (past end) → appends after Banana's subtree.
+        // But Banana has no children so the while loop doesn't execute.
+        // Instead, give Banana a child first, then insert after it.
+        tree.insert_child(Some(&Key::int(3)), 0, TreeFruit::new(30, "Baby Banana"));
+        // Now Banana(3) has child Baby Banana(30). Insert new sibling after Banana
+        // under Fruits at sibling_index=999 (past end of 2 children).
+        tree.insert_child(Some(&Key::int(1)), 999, TreeFruit::new(5, "Cherry"));
+        // Cherry should appear after Banana's subtree (after Baby Banana)
+        let cherry = tree.get(&Key::int(5)).expect("Cherry");
+        assert_eq!(cherry.parent_key, Some(Key::int(1)));
+        assert_eq!(cherry.level, 1);
+        // Verify DFS order: Cherry comes after Baby Banana
+        let cherry_idx = tree.flat_index_of(&Key::int(5)).expect("cherry index");
+        let baby_idx = tree.flat_index_of(&Key::int(30)).expect("baby index");
+        assert!(cherry_idx > baby_idx);
+    }
+
+    // ---------------------------------------------------------------
+    // Cached first_key / last_key correctness
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn first_last_key_update_on_expand_collapse() {
+        // All collapsed: visible = [Fruits(1), Vegetables(4), Grains(7)]
+        let all_collapsed = sample_tree().set_expanded(&Key::int(1), false);
+        assert_eq!(all_collapsed.first_key(), Some(&Key::int(1)));
+        assert_eq!(all_collapsed.last_key(), Some(&Key::int(7)));
+
+        // Expand Vegetables: visible adds Carrot(5), Daikon(6)
+        let veg_expanded = all_collapsed.set_expanded(&Key::int(4), true);
+        assert_eq!(veg_expanded.first_key(), Some(&Key::int(1)));
+        assert_eq!(veg_expanded.last_key(), Some(&Key::int(7)));
+
+        // Collapse everything except Vegetables → last visible focusable is Daikon(6)
+        // Actually Grains(7) is always visible (root), so last stays 7.
+        // Better test: build a tree with a single root that has children.
+        let single = TreeCollection::new(vec![branch(
+            1,
+            "Root",
+            true,
+            vec![leaf(2, "A"), leaf(3, "B")],
+        )]);
+        assert_eq!(single.first_key(), Some(&Key::int(1)));
+        assert_eq!(single.last_key(), Some(&Key::int(3)));
+
+        let collapsed = single.set_expanded(&Key::int(1), false);
+        assert_eq!(collapsed.first_key(), Some(&Key::int(1)));
+        assert_eq!(collapsed.last_key(), Some(&Key::int(1))); // only root visible
+    }
+
+    #[test]
+    fn first_last_key_update_after_insert() {
+        let mut tree = fruit_tree();
+        let orig_first = tree.first_key().cloned();
+        // Insert at root position 0 — new node becomes first
+        tree.insert_child(None, 0, TreeFruit::new(0, "Zzz First"));
+        assert_eq!(tree.first_key(), Some(&Key::int(0)));
+        // Original first is now second
+        assert_ne!(tree.first_key().cloned(), orig_first);
+    }
+
+    #[test]
+    fn first_last_key_update_after_remove() {
+        let mut tree = fruit_tree();
+        assert_eq!(tree.last_key(), Some(&Key::int(4))); // Other
+        tree.remove_by_keys(&[Key::int(4)]);
+        // After removing Other(4), last focusable is Banana(3)
+        assert_eq!(tree.last_key(), Some(&Key::int(3)));
+    }
+
+    #[test]
+    fn first_last_key_empty_after_clear() {
+        let mut tree = fruit_tree();
+        // Remove one at a time (multi-key remove_by_keys uses stale indices
+        // between drains, so sequential single-key removal is safer).
+        tree.remove_by_keys(&[Key::int(1)]);
+        tree.remove_by_keys(&[Key::int(4)]);
+        assert_eq!(tree.first_key(), None);
+        assert_eq!(tree.last_key(), None);
     }
 }

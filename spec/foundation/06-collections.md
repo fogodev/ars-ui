@@ -1397,9 +1397,13 @@ use crate::{key::Key, node::{Node, NodeType}, collection::{Collection, Collectio
 
 /// Configuration for a single tree item during construction.
 pub struct TreeItemConfig<T> {
+    /// Stable identity of the tree item.
     pub key: Key,
+    /// Plain-text representation for type-ahead and ARIA fallback.
     pub text_value: String,
+    /// The user's data value.
     pub value: T,
+    /// Child items nested under this item.
     pub children: Vec<TreeItemConfig<T>>,
     /// Whether the item starts expanded. Default `false`.
     pub default_expanded: bool,
@@ -1449,6 +1453,12 @@ pub struct TreeCollection<T> {
 
     /// Set of keys whose subtrees are currently expanded.
     expanded_keys: BTreeSet<Key>,
+
+    /// Cached `all_nodes` index of the first visible focusable item.
+    first_focusable_visible: Option<usize>,
+
+    /// Cached `all_nodes` index of the last visible focusable item.
+    last_focusable_visible: Option<usize>,
 }
 
 impl<T: Clone> Clone for TreeCollection<T> {
@@ -1458,6 +1468,8 @@ impl<T: Clone> Clone for TreeCollection<T> {
             visible_indices: self.visible_indices.clone(),
             key_to_index: self.key_to_index.clone(),
             expanded_keys: self.expanded_keys.clone(),
+            first_focusable_visible: self.first_focusable_visible,
+            last_focusable_visible: self.last_focusable_visible,
         }
     }
 }
@@ -1493,12 +1505,17 @@ impl<T: Clone + PartialEq> PartialEq for TreeCollection<T> {
 const MAX_TREE_DEPTH: usize = 32;
 
 impl<T> TreeCollection<T> {
-    /// Compute which flat indices are visible given the current expansion set.
-    fn compute_visible(all_nodes: &[Node<T>]) -> Vec<usize> {
+    /// Compute which flat indices are visible given the current expansion set,
+    /// along with cached first/last focusable visible indices.
+    fn compute_visible(
+        all_nodes: &[Node<T>],
+    ) -> (Vec<usize>, Option<usize>, Option<usize>) {
         let mut visible = Vec::with_capacity(all_nodes.len());
+        let mut first_focusable = None;
+        let mut last_focusable = None;
         let mut skip_until_level: Option<usize> = None;
 
-        for node in all_nodes.iter() {
+        for node in all_nodes {
             // If we're skipping a collapsed subtree, check whether we've
             // exited it (returned to the same or higher level).
             if let Some(skip_level) = skip_until_level {
@@ -1511,18 +1528,31 @@ impl<T> TreeCollection<T> {
 
             visible.push(node.index);
 
+            if node.is_focusable() {
+                if first_focusable.is_none() {
+                    first_focusable = Some(node.index);
+                }
+                last_focusable = Some(node.index);
+            }
+
             // If this node has children and is not expanded, skip children.
             if node.has_children && node.is_expanded != Some(true) {
                 skip_until_level = Some(node.level);
             }
         }
-        visible
+        (visible, first_focusable, last_focusable)
+    }
+}
+
+impl<T: Clone> Default for TreeCollection<T> {
+    fn default() -> Self {
+        Self::new([])
     }
 }
 
 impl<T: Clone> TreeCollection<T> {
     /// Build a `TreeCollection` from a list of root-level items.
-    pub fn new(roots: Vec<TreeItemConfig<T>>) -> Self {
+    pub fn new(roots: impl IntoIterator<Item = TreeItemConfig<T>>) -> Self {
         let mut all_nodes = Vec::new();
         let mut key_to_index = IndexMap::new();
         let mut expanded_keys = BTreeSet::new();
@@ -1578,8 +1608,12 @@ impl<T: Clone> TreeCollection<T> {
             insert_item(root, 0, None, &mut all_nodes, &mut key_to_index, &mut expanded_keys);
         }
 
-        let visible_indices = Self::compute_visible(&all_nodes);
-        Self { all_nodes, visible_indices, key_to_index, expanded_keys }
+        let (visible_indices, first_focusable_visible, last_focusable_visible) =
+            Self::compute_visible(&all_nodes);
+        Self {
+            all_nodes, visible_indices, key_to_index, expanded_keys,
+            first_focusable_visible, last_focusable_visible,
+        }
     }
 
     /// Expand or collapse the subtree rooted at `key`.
@@ -1599,12 +1633,15 @@ impl<T: Clone> TreeCollection<T> {
             new_nodes[idx].is_expanded = Some(expanded);
         }
 
-        let visible_indices = Self::compute_visible(&new_nodes);
+        let (visible_indices, first_focusable_visible, last_focusable_visible) =
+            Self::compute_visible(&new_nodes);
         Self {
             all_nodes: new_nodes,
             visible_indices,
             key_to_index: self.key_to_index.clone(),
             expanded_keys: new_expanded,
+            first_focusable_visible,
+            last_focusable_visible,
         }
     }
 
@@ -1642,9 +1679,8 @@ impl<T: Clone> TreeCollection<T> {
     /// Check if a single key is visible given an external expanded-keys set.
     pub fn is_visible_with_expanded(&self, key: &Key, expanded: &BTreeSet<Key>) -> bool {
         // Find the node for this key
-        let node_index = match self.key_to_index.get(key) {
-            Some(&i) => i,
-            None => return false,
+        let Some(&node_index) = self.key_to_index.get(key) else {
+            return false;
         };
         let node = &self.all_nodes[node_index];
 
@@ -1686,17 +1722,13 @@ impl<T: Clone> Collection<T> for TreeCollection<T> {
     }
 
     fn first_key(&self) -> Option<&Key> {
-        self.visible_indices
-            .iter()
-            .find(|&&i| self.all_nodes[i].is_focusable())
-            .map(|&i| &self.all_nodes[i].key)
+        self.first_focusable_visible
+            .map(|i| &self.all_nodes[i].key)
     }
 
     fn last_key(&self) -> Option<&Key> {
-        self.visible_indices
-            .iter()
-            .rfind(|&&i| self.all_nodes[i].is_focusable())
-            .map(|&i| &self.all_nodes[i].key)
+        self.last_focusable_visible
+            .map(|i| &self.all_nodes[i].key)
     }
 
     fn key_after(&self, key: &Key) -> Option<&Key> {
@@ -1767,8 +1799,7 @@ impl<T: CollectionItem> TreeCollection<T> {
         let (level, parent_key_owned) = match parent {
             Some(pk) => {
                 let parent_level = self.key_to_index.get(pk)
-                    .map(|&i| self.all_nodes[i].level)
-                    .unwrap_or(0);
+                    .map_or(0, |&i| self.all_nodes[i].level);
                 (parent_level + 1, Some(pk.clone()))
             }
             None => (0, None),
@@ -1915,8 +1946,7 @@ impl<T: CollectionItem> TreeCollection<T> {
         let children: Vec<usize> = match parent {
             Some(pk) => {
                 let parent_level = self.key_to_index.get(pk)
-                    .map(|&i| self.all_nodes[i].level)
-                    .unwrap_or(0);
+                    .map_or(0, |&i| self.all_nodes[i].level);
                 self.all_nodes.iter()
                     .enumerate()
                     .filter(|(_, n)| n.parent_key.as_ref() == Some(pk) && n.level == parent_level + 1)
@@ -1941,7 +1971,7 @@ impl<T: CollectionItem> TreeCollection<T> {
             } else {
                 // No existing children — insert right after the parent.
                 match parent {
-                    Some(pk) => self.key_to_index.get(pk).map(|&i| i + 1).unwrap_or(self.all_nodes.len()),
+                    Some(pk) => self.key_to_index.get(pk).map_or(self.all_nodes.len(), |&i| i + 1),
                     None => self.all_nodes.len(),
                 }
             }
@@ -1958,7 +1988,11 @@ impl<T: CollectionItem> TreeCollection<T> {
             node.index = i;
             self.key_to_index.insert(node.key.clone(), i);
         }
-        self.visible_indices = Self::compute_visible(&self.all_nodes);
+        let (visible_indices, first_focusable_visible, last_focusable_visible) =
+            Self::compute_visible(&self.all_nodes);
+        self.visible_indices = visible_indices;
+        self.first_focusable_visible = first_focusable_visible;
+        self.last_focusable_visible = last_focusable_visible;
     }
 }
 ```
