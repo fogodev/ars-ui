@@ -1809,12 +1809,21 @@ impl<T: CollectionItem> TreeCollection<T> {
     /// `sibling_index` is the position among the parent's direct children
     /// (or among root nodes when `parent` is `None`). The node is inserted
     /// into `all_nodes` at the correct DFS position and indices are rebuilt.
+    ///
+    /// If `parent` is `Some` but the key does not exist in the tree, the
+    /// operation is a no-op to avoid creating dangling parent references.
     pub fn insert_child(&mut self, parent: Option<&Key>, sibling_index: usize, item: T) {
+        // Reject inserts under a nonexistent parent.
+        if let Some(pk) = parent {
+            if !self.key_to_index.contains_key(pk) {
+                return;
+            }
+        }
+
         let key = item.key().clone();
         let (level, parent_key_owned) = match parent {
             Some(pk) => {
-                let parent_level = self.key_to_index.get(pk)
-                    .map_or(0, |&i| self.all_nodes[i].level);
+                let parent_level = self.all_nodes[self.key_to_index[pk]].level;
                 (parent_level + 1, Some(pk.clone()))
             }
             None => (0, None),
@@ -1915,6 +1924,9 @@ impl<T: CollectionItem> TreeCollection<T> {
             }
         }
 
+        // Save old parent key before extraction for metadata cleanup.
+        let old_parent_key = self.parent_of(key).cloned();
+
         // Extract the subtree.
         let subtree = self.extract_subtree(key);
         if subtree.is_empty() { return; }
@@ -1929,6 +1941,21 @@ impl<T: CollectionItem> TreeCollection<T> {
                 }
                 self.rebuild_indices();
                 return;
+            }
+        }
+
+        // Reset old parent to leaf state if it has no remaining children.
+        if let Some(pk) = &old_parent_key {
+            if let Some(&pi) = self.key_to_index.get(pk) {
+                let still_has_children = self
+                    .all_nodes
+                    .iter()
+                    .any(|n| n.parent_key.as_ref() == Some(pk));
+                if !still_has_children {
+                    self.all_nodes[pi].has_children = false;
+                    self.all_nodes[pi].is_expanded = None;
+                    self.expanded_keys.remove(pk);
+                }
             }
         }
 

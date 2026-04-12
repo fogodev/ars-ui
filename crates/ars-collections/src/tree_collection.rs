@@ -430,14 +430,21 @@ impl<T: CollectionItem> TreeCollection<T> {
     /// `sibling_index` is the position among the parent's direct children
     /// (or among root nodes when `parent` is `None`). The node is inserted
     /// into `all_nodes` at the correct DFS position and indices are rebuilt.
+    ///
+    /// If `parent` is `Some` but the key does not exist in the tree, the
+    /// operation is a no-op to avoid creating dangling parent references.
     pub fn insert_child(&mut self, parent: Option<&Key>, sibling_index: usize, item: T) {
+        // Reject inserts under a nonexistent parent.
+        if let Some(pk) = parent {
+            if !self.key_to_index.contains_key(pk) {
+                return;
+            }
+        }
+
         let key = item.key().clone();
         let (level, parent_key_owned) = match parent {
             Some(pk) => {
-                let parent_level = self
-                    .key_to_index
-                    .get(pk)
-                    .map_or(0, |&i| self.all_nodes[i].level);
+                let parent_level = self.all_nodes[self.key_to_index[pk]].level;
                 (parent_level + 1, Some(pk.clone()))
             }
             None => (0, None),
@@ -542,6 +549,9 @@ impl<T: CollectionItem> TreeCollection<T> {
             }
         }
 
+        // Save old parent key before extraction for metadata cleanup.
+        let old_parent_key = self.parent_of(key).cloned();
+
         // Extract the subtree.
         let subtree = self.extract_subtree(key);
         if subtree.is_empty() {
@@ -560,6 +570,21 @@ impl<T: CollectionItem> TreeCollection<T> {
                 }
                 self.rebuild_indices();
                 return;
+            }
+        }
+
+        // Reset old parent to leaf state if it has no remaining children.
+        if let Some(pk) = &old_parent_key {
+            if let Some(&pi) = self.key_to_index.get(pk) {
+                let still_has_children = self
+                    .all_nodes
+                    .iter()
+                    .any(|n| n.parent_key.as_ref() == Some(pk));
+                if !still_has_children {
+                    self.all_nodes[pi].has_children = false;
+                    self.all_nodes[pi].is_expanded = None;
+                    self.expanded_keys.remove(pk);
+                }
             }
         }
 
@@ -1925,5 +1950,33 @@ mod tests {
         tree.remove_by_keys(&[Key::int(2)]);
         let fruits = tree.get(&Key::int(1)).expect("Fruits");
         assert!(fruits.has_children); // still has Banana
+    }
+
+    #[test]
+    fn insert_child_under_missing_parent_is_noop() {
+        let mut tree = fruit_tree();
+        let before_len = tree.all_nodes.len();
+        // Attempt to insert under nonexistent key 99
+        tree.insert_child(Some(&Key::int(99)), 0, TreeFruit::new(10, "Orphan"));
+        assert_eq!(tree.all_nodes.len(), before_len);
+        assert!(!tree.contains_key(&Key::int(10)));
+    }
+
+    #[test]
+    fn reparent_resets_old_parent_to_leaf() {
+        let mut tree = fruit_tree();
+        // Fruits(1) has Apple(2) and Banana(3)
+        assert!(tree.get(&Key::int(1)).expect("Fruits").has_children);
+
+        // Move Apple to root
+        tree.reparent(&Key::int(2), None, 0);
+        // Fruits still has Banana
+        assert!(tree.get(&Key::int(1)).expect("Fruits").has_children);
+
+        // Move Banana to root too — Fruits has no children left
+        tree.reparent(&Key::int(3), None, 0);
+        let fruits = tree.get(&Key::int(1)).expect("Fruits after");
+        assert!(!fruits.has_children);
+        assert_eq!(fruits.is_expanded, None);
     }
 }
