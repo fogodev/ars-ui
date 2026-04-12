@@ -437,7 +437,8 @@ impl PressResult {
             let is_within_element = released_press.is_within_element;
             let activation_candidate = is_within_element
                 || (self.config.allow_press_on_exit && !released_press.is_within_element);
-            let suppress_activation = activation_candidate && self.consume_long_press_cancel_flag();
+            let long_press_canceled = self.consume_long_press_cancel_flag();
+            let suppress_activation = activation_candidate && long_press_canceled;
             let next_state = derive_press_state(&active_presses);
             let pressed = active_presses.iter().any(|press| press.is_within_element);
 
@@ -1663,6 +1664,57 @@ mod tests {
             }
         );
         assert!(result.pressed);
+    }
+
+    #[test]
+    fn outside_release_consumes_long_press_suppression_before_other_modality_activates() {
+        let activation_count = Arc::new(AtomicUsize::new(0));
+        let shared_flag = SharedFlag::new(false);
+        let config = PressConfig {
+            long_press_cancel_flag: Some(shared_flag.clone()),
+            on_press: Some({
+                let activation_count = Arc::clone(&activation_count);
+                Callback::new(move |_: PressEvent| {
+                    activation_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+
+        result.begin_press(
+            PointerType::Touch,
+            Some(4.0),
+            Some(5.0),
+            KeyModifiers::default(),
+            true,
+        );
+        result.begin_press(
+            PointerType::Keyboard,
+            None,
+            None,
+            KeyModifiers::default(),
+            true,
+        );
+
+        result.update_pressed_bounds(PointerType::Touch, false, Some(40.0), Some(50.0));
+        shared_flag.set(true);
+
+        let touch_activated = result.end_press(
+            PointerType::Touch,
+            Some(40.0),
+            Some(50.0),
+            KeyModifiers::default(),
+        );
+        let keyboard_activated =
+            result.end_press(PointerType::Keyboard, None, None, KeyModifiers::default());
+
+        assert!(!touch_activated);
+        assert!(keyboard_activated);
+        assert_eq!(activation_count.load(Ordering::SeqCst), 1);
+        assert!(!shared_flag.get());
+        assert_eq!(result.current_state(), PressState::Idle);
+        assert!(!result.pressed);
     }
 
     #[test]
