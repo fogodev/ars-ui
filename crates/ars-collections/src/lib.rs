@@ -13,6 +13,8 @@
 //! - [`CollectionItem`] — trait for items stored in collections.
 //! - [`CollectionBuilder`] — fluent builder for constructing collections.
 //! - [`StaticCollection`] — in-memory `Collection` implementation.
+//! - [`TreeCollection`] — hierarchical `Collection` with expand/collapse.
+//! - [`TreeItemConfig`] — configuration for tree item construction.
 //! - [`selection`] — selection enums and state for collection-based components.
 //! - [`navigation`] — disabled-aware navigation helpers for collection widgets.
 //! - [`AsyncLoadingState`] — loading phase for async/paginated collections.
@@ -44,6 +46,8 @@ pub mod node;
 pub mod selection;
 /// In-memory collection backed by `Vec` and `IndexMap`.
 pub mod static_collection;
+/// Hierarchical collection with expand/collapse for tree-based components.
+pub mod tree_collection;
 
 pub use async_collection::{AsyncCollection, AsyncLoadingState};
 pub use async_loader::{AsyncLoader, CollectionError, LoadResult};
@@ -53,3 +57,4 @@ pub use key::Key;
 pub use node::{Node, NodeType};
 pub use selection::DisabledBehavior;
 pub use static_collection::StaticCollection;
+pub use tree_collection::{TreeCollection, TreeItemConfig};
