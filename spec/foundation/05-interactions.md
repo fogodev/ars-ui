@@ -461,11 +461,13 @@ pub enum PressState {
 }
 
 impl PressState {
-    /// Returns `true` when the element is in a committed pressed state.
+    /// Returns `true` when the element is actively pressed within its bounds.
     /// The transient `Pressing` state (which resolves within the same event tick
     /// before any render) returns `false` to prevent `data-ars-pressed` from flashing.
+    /// `PressedOutside` also returns `false`, matching the styling and activation
+    /// semantics for presses that have left the element.
     pub fn is_pressed(&self) -> bool {
-        matches!(self, PressState::PressedInside { .. } | PressState::PressedOutside { .. })
+        matches!(self, PressState::PressedInside { .. })
     }
 
     pub fn is_pressed_inside(&self) -> bool {
@@ -671,10 +673,10 @@ When ars-ui components are used inside Shadow DOM (e.g., web components wrapping
 /// Returns an AttrMap (data attributes only) plus typed handler methods that,
 /// when applied to an element, implement full press handling.
 pub fn use_press(config: PressConfig) -> PressResult {
-    let state = SharedState::new(PressState::Idle);
-    let _is_disabled = config.disabled;
+    let state = Rc::new(RefCell::new(PressState::Idle));
+    let active_presses = Rc::new(RefCell::new(Vec::new()));
 
-    let pressed = state.with(|s| s.is_pressed_inside());
+    let pressed = state.borrow().is_pressed_inside();
 
     // Event handlers are registered as typed methods on the component's Api struct:
     //   pointerdown  → Idle ──→ PressedInside (captures pointer)
@@ -686,7 +688,7 @@ pub fn use_press(config: PressConfig) -> PressResult {
     //   keyup(Enter|Space)   → PressedInside ──→ Idle (fires on_press, fires on_press_up)
     //   touch/pointercancel  → PressedInside|PressedOutside ──→ Idle (fires on_press_up)
 
-    PressResult { state, pressed }
+    PressResult { state, active_presses, config, pressed }
 }
 
 ///
@@ -703,12 +705,18 @@ pub fn use_press(config: PressConfig) -> PressResult {
 /// Alternatively, integrate press state into the component machine's `Context`:
 /// the machine derives `data-ars-pressed` from its own context state, ensuring
 /// reactivity through the normal state machine update cycle.
-/// **Note:** `PressResult` will migrate from `Rc<RefCell<PressState>>` to
-/// `SharedState<PressState>` for cross-platform compatibility. See `HoverResult`
-/// (§3.5) for the target pattern.
+struct ActivePress {
+    pointer_type: PointerType,
+    origin_x: Option<f64>,
+    origin_y: Option<f64>,
+    is_within_element: bool,
+}
+
 pub struct PressResult {
     /// Internal state handle — use `current_attrs()` to produce a live AttrMap.
-    state: SharedState<PressState>,
+    state: Rc<RefCell<PressState>>,
+    active_presses: Rc<RefCell<Vec<ActivePress>>>,
+    config: PressConfig,
 
     /// Whether the element is currently being pressed (reactive signal in adapter).
     pub pressed: bool,
@@ -719,12 +727,11 @@ impl PressResult {
     /// Call this inside `connect()` — not once at init time — to ensure
     /// the returned attributes are always up to date.
     pub fn current_attrs(&self, config: &PressConfig) -> AttrMap {
+        let state = self.state.borrow();
         let mut attrs = AttrMap::new();
-        self.state.with(|state| {
-            if state.is_pressed_inside() {
-                attrs.set_bool(HtmlAttr::Data("ars-pressed"), true);
-            }
-        });
+        if state.is_pressed_inside() {
+            attrs.set_bool(HtmlAttr::Data("ars-pressed"), true);
+        }
         if PressState::is_disabled(config) {
             attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
             // Disabled elements use aria-disabled="true" instead of HTML disabled
@@ -735,6 +742,27 @@ impl PressResult {
         // because it requires RAF-deferred removal after pointerup.
         attrs
     }
+
+    /// Returns the current press state snapshot.
+    pub fn current_state(&self) -> PressState { /* ... */ }
+
+    /// Adapter-facing transition helpers used by framework event handlers.
+    ///
+    /// `begin_press()` handles pointer/key down, `update_pressed_bounds()`
+    /// handles enter/leave or hit-tested move for a specific modality,
+    /// `end_press()` handles release for a specific modality and returns whether
+    /// activation fired, and `cancel_press()` handles cancel/blur for a specific
+    /// modality.
+    /// `end_press()` MUST consult `config.long_press_cancel_flag` before firing
+    /// `on_press`, clearing the flag after consuming it so the suppression does
+    /// not leak into the next interaction.
+    pub fn begin_press(&mut self, pointer_type: PointerType, client_x: Option<f64>, client_y: Option<f64>, modifiers: KeyModifiers, within_element: bool) { /* ... */ }
+
+    pub fn update_pressed_bounds(&mut self, pointer_type: PointerType, within_element: bool, client_x: Option<f64>, client_y: Option<f64>) { /* ... */ }
+
+    pub fn end_press(&mut self, pointer_type: PointerType, client_x: Option<f64>, client_y: Option<f64>, modifiers: KeyModifiers) -> bool { /* ... */ }
+
+    pub fn cancel_press(&mut self, pointer_type: PointerType, client_x: Option<f64>, client_y: Option<f64>, modifiers: KeyModifiers) { /* ... */ }
 }
 ```
 
@@ -785,10 +813,10 @@ Event listeners for `wheel`, `scroll`, `touchstart`, and `touchmove` must be reg
 
 Multiple input modalities can be active simultaneously. For example, a user may hold the mouse button down on an element while also pressing `Space` or `Enter` on the keyboard (e.g., assistive device or split-input scenarios). The press interaction tracks these independently:
 
-- **`pointer_down: bool`** — set on `pointerdown`, cleared on `pointerup` / `pointercancel`.
-- **`pressed_keys: HashSet<KeyboardKey>`** — entries added on `keydown`, removed on `keyup`.
+- **Per-modality active source bookkeeping** — the implementation keeps one active press record per current modality (`Mouse`, `Touch`, `Pen`, `Keyboard`, `Virtual`) and updates or releases them independently.
+- **Modality-targeted helper calls** — adapter event handlers MUST pass the originating `pointer_type` to `update_pressed_bounds()`, `end_press()`, and `cancel_press()` so the correct active source is updated or removed.
 
-The element is considered pressed if **either** `pointer_down` is true **or** `pressed_keys` is non-empty. The `data-ars-pressed` attribute and `is_pressed()` reflect this union. Each modality's release is processed independently: releasing the mouse while `Space` is still held does not clear the pressed state, and vice versa. Activation (`on_press`) fires once per completed press cycle per modality — a pointer release fires activation (if inside), and a key release fires activation, independently.
+The element is considered pressed if **any** active source is still within the element. The `data-ars-pressed` attribute and `is_pressed()` reflect this union. Each modality's release is processed independently: releasing the mouse while `Space` is still held does not clear the pressed state, and vice versa. Activation (`on_press`) fires once per completed press cycle per modality — a pointer release fires activation (if inside), and a key release fires activation, independently.
 
 #### 2.5.4 Press Cancellation by LongPress
 
@@ -1403,15 +1431,16 @@ Accessibility: Elements with long press actions must communicate this to screen 
 ```rust
 // ars-interactions/src/long_press.rs
 
-use crate::{PointerType, KeyModifiers};
-use ars_core::AttrMap;
-use ars_a11y::ComponentIds;
+use crate::{KeyModifiers, PointerType};
+use ars_core::{
+    AttrMap, Callback, ComponentIds, HtmlAttr, MessageFn, SharedFlag, TimerHandle,
+};
+use ars_i18n::Locale;
 use core::time::Duration;
 use std::{cell::RefCell, rc::Rc};
 
 /// Configuration for long press interaction.
-// Manual Debug impl omitted for brevity — prints closures as "<closure>"
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LongPressConfig {
     /// Whether the element is disabled.
     pub disabled: bool,
@@ -1429,11 +1458,22 @@ pub struct LongPressConfig {
     /// runtime-generated and localized descriptions.
     pub accessibility_description: Option<String>,
 
-    /// Called when a long press is detected (threshold elapsed while still pressed).
-    pub on_long_press: Option<Rc<dyn Fn(LongPressEvent)>>,
+    /// Localized live-announcement text emitted when the long press fires.
+    /// The adapter dispatches this with assertive priority.
+    pub long_press_announcement: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
 
-    /// Called when a long press is cancelled (pointer released before threshold).
-    pub on_long_press_cancel: Option<Rc<dyn Fn(LongPressEvent)>>,
+    /// Called when the hold begins and the interaction enters `Timing`.
+    pub on_long_press_start: Option<Callback<dyn Fn(LongPressEvent)>>,
+
+    /// Called when the threshold elapses while still pressed.
+    pub on_long_press: Option<Callback<dyn Fn(LongPressEvent)>>,
+
+    /// Called when the long press is cancelled before the threshold fires.
+    pub on_long_press_cancel: Option<Callback<dyn Fn(LongPressEvent)>>,
+
+    /// Shared flag used to suppress the co-located `Press` activation after a
+    /// completed long press.
+    pub long_press_cancel_flag: Option<SharedFlag>,
 }
 
 impl Default for LongPressConfig {
@@ -1442,8 +1482,11 @@ impl Default for LongPressConfig {
             disabled: false,
             threshold: Duration::from_millis(500),
             accessibility_description: None,
+            long_press_announcement: MessageFn::static_str("Long press activated"),
+            on_long_press_start: None,
             on_long_press: None,
             on_long_press_cancel: None,
+            long_press_cancel_flag: None,
         }
     }
 }
@@ -1469,6 +1512,7 @@ pub struct LongPressEvent {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LongPressEventType {
+    LongPressStart,
     LongPress,
     LongPressCancel,
 }
@@ -1486,11 +1530,11 @@ Transitions:
 
   Idle
     ─[PointerDown | KeyDown(Enter|Space), not disabled]──→ Timing
-        action: start timer(threshold), record pointer_type + coordinates
+        action: reset cancel flag, start timer(threshold), record pointer_type + coordinates, emit on_long_press_start
 
   Timing
     ─[TimerFired (threshold elapsed)]────────────────────→ LongPressed
-        action: emit on_long_press, prevent subsequent on_press
+        action: emit on_long_press, announce long_press_announcement, set shared cancel flag
     ─[PointerUp | KeyUp before threshold]────────────────→ Idle
         action: cancel timer, emit on_long_press_cancel
     ─[PointerLeave | PointerCancel | Blur]───────────────→ Idle
@@ -1512,18 +1556,13 @@ pub enum LongPressState {
         pointer_type: PointerType,
         origin_x: Option<f64>,
         origin_y: Option<f64>,
-        /// Opaque handle to the pending timer. Cleared on cancel.
-        timer_id: TimerId,
+        /// Opaque handle to the pending threshold timer.
+        timer_handle: TimerHandle,
     },
     LongPressed {
         pointer_type: PointerType,
     },
 }
-
-/// Opaque timer handle. Wraps the platform-specific timer ID.
-/// PartialEq compares by handle identity (not by timeout value).
-#[derive(Clone, Debug, PartialEq)]
-pub struct TimerId(u32);
 ```
 
 ### 5.5 Accessibility Integration
@@ -1567,6 +1606,25 @@ impl LongPressResult {
             desc
         })
     }
+
+    /// Returns the current long-press state snapshot.
+    pub fn current_state(&self) -> LongPressState { /* ... */ }
+
+    /// Returns the pending threshold timer while the interaction is timing.
+    pub fn pending_timer_handle(&self) -> Option<TimerHandle> { /* ... */ }
+
+    /// Adapter-facing transition helpers used by framework event handlers and timers.
+    ///
+    /// `begin_long_press()` enters `Timing`, `move_long_press()` applies the
+    /// move-dead-zone cancellation rule, `cancel_long_press()` handles cancel/blur,
+    /// `end_long_press()` handles release, and `fire_long_press()` handles the
+    /// threshold timer firing. `fire_long_press()` returns the live-announcement
+    /// string that the adapter must send with assertive priority.
+    pub fn begin_long_press(&mut self, pointer_type: PointerType, client_x: Option<f64>, client_y: Option<f64>, modifiers: KeyModifiers, timer_handle: TimerHandle) { /* ... */ }
+    pub fn move_long_press(&mut self, client_x: f64, client_y: f64) { /* ... */ }
+    pub fn cancel_long_press(&mut self, client_x: Option<f64>, client_y: Option<f64>) { /* ... */ }
+    pub fn end_long_press(&mut self, client_x: Option<f64>, client_y: Option<f64>) { /* ... */ }
+    pub fn fire_long_press(&mut self, locale: &Locale) -> Option<String> { /* ... */ }
 }
 
 /// When used standalone (without Press composition), the component connect function
@@ -1579,19 +1637,26 @@ pub fn use_long_press(config: LongPressConfig, ids: &ComponentIds) -> LongPressR
     // provides live state for attribute rendering.
     let is_long_pressing = matches!(*state.borrow(), LongPressState::Timing { .. } | LongPressState::LongPressed { .. });
 
-    // Event handlers are registered as typed methods on the component's Api struct:
-    //   pointerdown/keydown(Enter|Space) → Idle ──→ Timing (starts threshold timer)
-    //   timer fires                      → Timing ──→ LongPressed (emits on_long_press)
-    //   pointerup/keyup before threshold → Timing ──→ Idle (emits on_long_press_cancel)
-    //   pointerleave/cancel/blur         → Timing ──→ Idle (emits on_long_press_cancel)
-    //   touchmove > threshold_px         → Timing ──→ Idle (user is scrolling)
-    //   pointerup/keyup after threshold  → LongPressed ──→ Idle (no action)
+    // Event handlers are registered as typed methods on the component's Api struct
+    // and delegate into the adapter-facing helpers on LongPressResult:
+    //   begin_long_press()  → Idle ──→ Timing (starts threshold timer, emits on_long_press_start)
+    //   fire_long_press()   → Timing ──→ LongPressed (emits on_long_press, announces long_press_announcement)
+    //   end_long_press()    → Timing ──→ Idle (emits on_long_press_cancel)
+    //   cancel_long_press() → Timing ──→ Idle (emits on_long_press_cancel)
+    //   move_long_press()   → Timing ──→ Idle when move exceeds threshold_px
+    //   end_long_press()    → LongPressed ──→ Idle (no action)
 
     LongPressResult { is_long_pressing, state, config }
 }
 ```
 
 When `accessibility_description` is set, `description_attrs()` will include `id="{base_id}-long-press-desc"`. The description element should be rendered as a `VisuallyHidden` span adjacent to the interactive element. **The component's connect function must explicitly set `aria-describedby="{base_id}-long-press-desc"` on the target element** — `current_attrs()` does not set it automatically because the target element's AttrMap is managed by the component, not by `use_long_press`.
+
+When the long press fires, the adapter resolves `LongPressConfig::long_press_announcement`
+with the active locale and posts it through the provider's live announcer with
+assertive priority. This announcement is additive to the static
+`accessibility_description` guidance and exists to confirm that the long-press
+action actually triggered.
 
 Data attributes on the interactive element:
 
@@ -2746,26 +2811,22 @@ When multiple interactions are composed on the same element, some interactions m
 
 3. **Press checks the flag on `pointerup`:** In the `pointerup` handler, before firing `on_press`, Press checks `long_press_fired`. If `true`, Press transitions to `Idle` without calling `on_press` (but still calls `on_press_end`).
 
-4. **Flag reset:** The flag is reset to `false` on the next `pointerdown`, ensuring subsequent press gestures are not affected.
+4. **Flag reset:** The flag is reset to `false` only when a new gesture begins from a fully idle press state, ensuring concurrent secondary modalities do not erase the suppression that still belongs to the pending `pointerup`.
 
 ```rust
 // Shared cancellation state between Press and LongPress
-let long_press_fired = Rc::new(Cell::new(false));
+let long_press_fired = SharedFlag::default();
 
-// Pass to LongPress — sets flag when threshold fires
-let lp_flag = long_press_fired.clone();
+// Pass to LongPress — sets the flag when the threshold fires and
+// resets it on the next pointerdown / keydown.
 let long_press = use_long_press(LongPressConfig {
-    on_long_press: Some(Rc::new(move |e| {
-        lp_flag.set(true);
-        // ... handle long press action ...
-    })),
+    long_press_cancel_flag: Some(long_press_fired.clone()),
     ..Default::default()
 }, &ids);
 
-// Pass to Press — checks flag on pointerup
-let press_flag = long_press_fired.clone();
+// Pass to Press — checks the same flag on pointerup
 let press = use_press(PressConfig {
-    long_press_cancel_flag: Some(press_flag),
+    long_press_cancel_flag: Some(long_press_fired),
     // When this flag is Some and its value is true on pointerup,
     // on_press is suppressed (only on_press_end fires).
     ..Default::default()
