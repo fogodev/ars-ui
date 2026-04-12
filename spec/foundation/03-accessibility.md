@@ -1232,9 +1232,11 @@ pub fn set_invalid(attrs: &mut AttrMap, invalid: AriaInvalid, error_id: Option<&
 ARIA relationship attributes (`aria-labelledby`, `aria-describedby`, `aria-controls`, `aria-activedescendant`) require stable, unique IDs shared between DOM elements. ars-ui uses adapter-provided IDs that are hydration-safe and unique, delegating ID generation to each adapter's ID utility (e.g., `use_id()` in ars-leptos — an adapter-local `AtomicU32` counter; Dioxus scope ID).
 
 ```rust
-// ars-a11y/src/id.rs
+// ars-core/src/component_ids.rs
 
 /// Derives component part IDs from an adapter-provided base ID.
+/// Implemented in `ars-core` so any crate that receives framework IDs can
+/// derive stable part IDs without depending on `ars-a11y`.
 /// The base ID comes from the adapter's hydration-safe ID utility
 /// (e.g., `use_id()` in ars-leptos, scope ID in ars-dioxus).
 #[derive(Clone, Debug, PartialEq)]
@@ -1530,6 +1532,10 @@ pub enum FocusStrategy {
     ActiveDescendant,
 }
 ```
+
+`ComponentIds` is specified here because it exists to support ARIA relationship
+attributes, but the concrete implementation lives in `ars-core` so interaction,
+form, and adapter crates can use it without depending on `ars-a11y`.
 
 > **Adapter wiring by strategy:**
 >
@@ -3931,7 +3937,7 @@ crates/ars-a11y/
     announcements.rs        // Pre-built announcement string helpers
     visually_hidden.rs      // visually_hidden_attrs(), visually_hidden_focusable_attrs()
     label.rs                // LabelConfig, DescriptionConfig, FieldContext
-    id.rs                   // ComponentIds (adapter-provided IDs)
+    // `ComponentIds` now lives in `ars-core`; downstream crates import it from there.
     media.rs                // Re-export facade behind #[cfg(feature = "dom")]; canonical
                             // implementations live in ars-dom
     touch.rs                // touch_target_attrs(), InputMode, should_use_roving_tabindex

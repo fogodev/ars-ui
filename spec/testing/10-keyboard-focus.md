@@ -1692,7 +1692,7 @@ async fn long_press_element_has_keyboard_alternative_description() {
 ```rust
 #[test]
 fn long_press_description_attrs_returns_aria_describedby_link() {
-    let ids = ComponentIds::new("btn-1");
+    let ids = ComponentIds::from_id("btn-1");
     let config = LongPressConfig {
         accessibility_description: Some("Long press for more options".into()),
         ..Default::default()
@@ -1707,7 +1707,7 @@ fn long_press_description_attrs_returns_aria_describedby_link() {
 
 #[test]
 fn long_press_no_description_returns_none() {
-    let ids = ComponentIds::new("btn-2");
+    let ids = ComponentIds::from_id("btn-2");
     let config = LongPressConfig::default();
     let result = use_long_press(config, &ids);
 

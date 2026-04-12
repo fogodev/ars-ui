@@ -33,7 +33,7 @@ ars-ui/
       ars-collections  ars-forms      |
                 |          |          |
                 |   ars-forms --> ars-i18n  (date/time types: CalendarDate, Time, DateRange)
-                |   ars-forms --> ars-a11y  (ComponentIds)
+                |   ars-forms --> ars-core  (ComponentIds)
                 |          |          |
                 |     ars-a11y ──┐    |
                 |     ars-i18n ──┼──> ars-dom  (web-sys, wasm-bindgen)
@@ -182,7 +182,7 @@ Desktop adapters (Dioxus Desktop, Tauri) MUST ensure that each machine instance 
 | `ars-i18n`         |    —     |    Y    |    Y     | ICU4X or `Intl` require std-level features                                                                                       |
 | `ars-interactions` |    —     |    Y    |    Y     | Requires std via `ars-i18n` (DragAnnouncements uses `Locale`, `Direction`)                                                       |
 | `ars-collections`  |    Y     |    Y    | implicit | Collection trait and selection model (no `std` feature gate needed — `alloc` suffices)                                           |
-| `ars-forms`        |    —     |    Y    |    Y     | Depends on ars-a11y (ComponentIds), ars-i18n (CalendarDate, Time), indexmap 2.x                                                  |
+| `ars-forms`        |    —     |    Y    |    Y     | Depends on ars-core (ComponentIds), ars-i18n (CalendarDate, Time), indexmap 2.x                                                  |
 | `ars-dom`          |    —     |    —    |    Y     | Requires `web-sys` / `wasm-bindgen`                                                                                              |
 | `ars-leptos`       |    —     |    —    |    Y     | Framework adapter, requires DOM                                                                                                  |
 | `ars-dioxus`       |    —     |    —    |    Y     | Framework adapter, requires DOM                                                                                                  |
@@ -4500,7 +4500,7 @@ fn all() -> Vec<Self> {
 
 Adapters provide a hydration-safe base ID via `Props::id: String` (required field). The adapter obtains this from its own ID generation utility (e.g., `use_id()` in ars-leptos — an `AtomicU32` counter, NOT a Leptos built-in; Dioxus uses an equivalent scope/hook-based ID), ensuring deterministic SSR/hydration matching.
 
-Core derives part IDs using `ComponentIds` defined in `ars-a11y` (see `03-accessibility.md` §2.6 for the full API). This thin wrapper stores a base ID string and derives part/item names dynamically:
+Core derives part IDs using `ComponentIds` defined in `ars-core` (see `03-accessibility.md` §2.6 for the full API). This thin wrapper stores a base ID string and derives part/item names dynamically:
 
 - `ids.id()` — returns the base ID (for the root element)
 - `ids.part("trigger")` — returns `"{base}-trigger"` (for fixed structural parts)

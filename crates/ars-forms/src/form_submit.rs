@@ -9,10 +9,9 @@
 
 use std::{collections::BTreeMap, fmt};
 
-use ars_a11y::ComponentIds;
 use ars_core::{
-    AriaAttr, AttrMap, Callback, ComponentPart, ConnectApi, Env, HtmlAttr, PendingEffect,
-    TransitionPlan, WeakSend, no_cleanup,
+    AriaAttr, AttrMap, Callback, ComponentIds, ComponentPart, ConnectApi, Env, HtmlAttr,
+    PendingEffect, TransitionPlan, WeakSend, no_cleanup,
 };
 
 use crate::{

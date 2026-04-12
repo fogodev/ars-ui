@@ -14,6 +14,7 @@
 //! - [`TransitionPlan`] — declarative transition result with closures, effects, and follow-ups
 //! - [`PendingEffect`] — named side effect with setup closure and cleanup lifecycle
 //! - [`Callback`] — shared callback wrapper built on [`Arc`]
+//! - [`ComponentIds`] — adapter-provided base IDs expanded into stable part IDs
 //! - [`SharedState`] — shared interior-mutable state (`Rc<RefCell>` on wasm, `Arc<Mutex>` on native)
 //! - [`WeakSend`] — weak event sender for safe effect cleanup
 //! - [`SendResult`] — structured result from [`Service::send`]
@@ -29,6 +30,7 @@ use core::fmt::{self, Debug};
 
 mod callback;
 pub mod companion_css;
+mod component_ids;
 mod connect;
 mod i18n_registry;
 mod message_fn;
@@ -56,6 +58,7 @@ pub use ars_i18n::{
 };
 // ── Platform-conditional smart pointers (extracted modules) ─────────
 pub use callback::{Callback, callback};
+pub use component_ids::ComponentIds;
 // ── DOM attribute / connect primitives ──────────────────────────────
 pub use connect::{
     AriaAttr, AttrMap, AttrMapParts, AttrValue, CssProperty, EventOptions, HtmlAttr, HtmlEvent,

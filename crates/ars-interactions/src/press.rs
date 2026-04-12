@@ -7,7 +7,7 @@
 
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use ars_core::{AttrMap, Callback, HtmlAttr, SharedFlag};
+use ars_core::{AttrMap, Callback, HtmlAttr, SharedFlag, SharedState};
 
 use crate::{KeyModifiers, PointerType};
 
@@ -44,16 +44,15 @@ pub enum PressState {
 }
 
 impl PressState {
-    /// Returns `true` when the element is in a committed pressed state.
+    /// Returns `true` when the element is actively pressed within its bounds.
     ///
     /// The transient `Pressing` state (which resolves within the same event tick
     /// before any render) returns `false` to prevent `data-ars-pressed` from flashing.
+    /// `PressedOutside` also returns `false`, matching the styling and activation
+    /// semantics for presses that have left the element.
     #[must_use]
     pub const fn is_pressed(&self) -> bool {
-        matches!(
-            self,
-            PressState::PressedInside { .. } | PressState::PressedOutside { .. }
-        )
+        matches!(self, PressState::PressedInside { .. })
     }
 
     /// Returns `true` when pressed and the pointer is within element bounds.
@@ -70,6 +69,14 @@ impl PressState {
     pub const fn is_disabled(config: &PressConfig) -> bool {
         config.disabled
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ActivePress {
+    pointer_type: PointerType,
+    origin_x: Option<f64>,
+    origin_y: Option<f64>,
+    is_within_element: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -127,10 +134,13 @@ pub struct PressConfig {
     /// Defaults to 5000ms. Set to `None` to disable the timeout entirely.
     pub pointer_capture_timeout: Option<Duration>,
 
-    /// When set, the press handler checks this flag on `pointerup`. If `true`,
-    /// the press activation (`on_press`) is suppressed because a long-press
-    /// already fired. See spec §8.7 Cross-Interaction Cancellation Protocol.
-    pub long_press_cancel_flag: Option<SharedFlag>,
+    /// When set, the press handler checks this shared state on release.
+    ///
+    /// `Some(pointer_type)` suppresses the matching modality's activation
+    /// because a long press already fired for that press. `None` means no
+    /// pending long-press suppression. See spec §8.7 Cross-Interaction
+    /// Cancellation Protocol.
+    pub long_press_cancel_flag: Option<SharedState<Option<PointerType>>>,
 }
 
 impl Default for PressConfig {
@@ -257,6 +267,12 @@ pub struct PressResult {
     /// produce a live `AttrMap`.
     state: Rc<RefCell<PressState>>,
 
+    /// Per-modality active press bookkeeping used to support simultaneous inputs.
+    active_presses: Rc<RefCell<Vec<ActivePress>>>,
+
+    /// Stored press configuration used by the adapter-facing transition helpers.
+    config: PressConfig,
+
     /// Whether the element is currently being pressed (reactive signal in adapter).
     pub pressed: bool,
 }
@@ -283,6 +299,302 @@ impl PressResult {
         // because it requires RAF-deferred removal after pointerup.
         attrs
     }
+
+    /// Returns the current press state snapshot.
+    #[must_use]
+    pub fn current_state(&self) -> PressState {
+        self.state.borrow().clone()
+    }
+
+    /// Begins a press interaction and resolves the initial inside/outside state.
+    ///
+    /// Adapters call this from pointer-down, touch-start, keyboard-down, or
+    /// virtual activation handlers after filtering unsupported events.
+    pub fn begin_press(
+        &mut self,
+        pointer_type: PointerType,
+        client_x: Option<f64>,
+        client_y: Option<f64>,
+        modifiers: KeyModifiers,
+        within_element: bool,
+    ) {
+        if self.config.disabled {
+            return;
+        }
+
+        let (next_state, pressed) = {
+            let mut active_presses = self.active_presses.borrow_mut();
+            if active_presses
+                .iter()
+                .any(|press| press.pointer_type == pointer_type)
+            {
+                return;
+            }
+
+            if active_presses.is_empty() {
+                if let Some(flag) = &self.config.long_press_cancel_flag {
+                    flag.set(None);
+                }
+            }
+
+            *self.state.borrow_mut() = PressState::Pressing { pointer_type };
+
+            active_presses.push(ActivePress {
+                pointer_type,
+                origin_x: client_x,
+                origin_y: client_y,
+                is_within_element: within_element,
+            });
+
+            (
+                derive_press_state(&active_presses),
+                active_presses.iter().any(|press| press.is_within_element),
+            )
+        };
+
+        *self.state.borrow_mut() = next_state;
+        self.pressed = pressed;
+
+        if within_element {
+            self.fire_press_event(
+                PressEventType::PressStart,
+                pointer_type,
+                client_x,
+                client_y,
+                modifiers,
+                true,
+            );
+        } else if let Some(callback) = &self.config.on_press_change {
+            callback(false);
+        }
+    }
+
+    /// Updates whether the active press is currently inside the element bounds.
+    ///
+    /// Adapters call this from pointer-enter, pointer-leave, or hit-tested move
+    /// handlers while the press is active.
+    pub fn update_pressed_bounds(
+        &mut self,
+        pointer_type: PointerType,
+        within_element: bool,
+        client_x: Option<f64>,
+        client_y: Option<f64>,
+    ) {
+        let (changed, next_state, pressed) = {
+            let mut active_presses = self.active_presses.borrow_mut();
+            let Some(active_press) = active_presses
+                .iter_mut()
+                .find(|press| press.pointer_type == pointer_type)
+            else {
+                return;
+            };
+
+            let changed = active_press.is_within_element != within_element;
+            active_press.is_within_element = within_element;
+            if active_press.origin_x.is_none() {
+                active_press.origin_x = client_x;
+            }
+            if active_press.origin_y.is_none() {
+                active_press.origin_y = client_y;
+            }
+
+            (
+                changed,
+                derive_press_state(&active_presses),
+                active_presses.iter().any(|press| press.is_within_element),
+            )
+        };
+
+        *self.state.borrow_mut() = next_state;
+        self.pressed = pressed;
+
+        if changed {
+            if let Some(callback) = &self.config.on_press_change {
+                callback(within_element);
+            }
+        }
+    }
+
+    /// Ends the current press interaction.
+    ///
+    /// Returns `true` when activation fired (`on_press` ran) and `false`
+    /// otherwise. Adapters can use the boolean to suppress duplicate native
+    /// click synthesis after a completed long press.
+    #[must_use]
+    pub fn end_press(
+        &mut self,
+        pointer_type: PointerType,
+        client_x: Option<f64>,
+        client_y: Option<f64>,
+        modifiers: KeyModifiers,
+    ) -> bool {
+        let (is_within_element, activation_candidate, suppress_activation, next_state, pressed) = {
+            let mut active_presses = self.active_presses.borrow_mut();
+            let Some(index) = active_presses
+                .iter()
+                .position(|press| press.pointer_type == pointer_type)
+            else {
+                return false;
+            };
+            let released_press = active_presses.remove(index);
+            let is_within_element = released_press.is_within_element;
+            let activation_candidate = is_within_element
+                || (self.config.allow_press_on_exit && !released_press.is_within_element);
+            let long_press_canceled = self.consume_long_press_cancel_flag(pointer_type);
+            let suppress_activation = activation_candidate && long_press_canceled;
+            let next_state = derive_press_state(&active_presses);
+            let pressed = active_presses.iter().any(|press| press.is_within_element);
+
+            (
+                is_within_element,
+                activation_candidate,
+                suppress_activation,
+                next_state,
+                pressed,
+            )
+        };
+
+        *self.state.borrow_mut() = next_state;
+        self.pressed = pressed;
+
+        self.fire_press_event(
+            PressEventType::PressUp,
+            pointer_type,
+            client_x,
+            client_y,
+            modifiers,
+            is_within_element,
+        );
+        self.fire_press_event(
+            PressEventType::PressEnd,
+            pointer_type,
+            client_x,
+            client_y,
+            modifiers,
+            is_within_element,
+        );
+
+        if activation_candidate && !suppress_activation {
+            self.fire_press_event(
+                PressEventType::Press,
+                pointer_type,
+                client_x,
+                client_y,
+                modifiers,
+                is_within_element,
+            );
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Cancels the current press without firing activation.
+    ///
+    /// Adapters call this from pointer-cancel, blur, drag-start, or scroll
+    /// cancellation paths.
+    pub fn cancel_press(
+        &mut self,
+        pointer_type: PointerType,
+        client_x: Option<f64>,
+        client_y: Option<f64>,
+        modifiers: KeyModifiers,
+    ) {
+        let (is_within_element, next_state, pressed) = {
+            let mut active_presses = self.active_presses.borrow_mut();
+            let Some(index) = active_presses
+                .iter()
+                .position(|press| press.pointer_type == pointer_type)
+            else {
+                return;
+            };
+            let cancelled_press = active_presses.remove(index);
+
+            (
+                cancelled_press.is_within_element,
+                derive_press_state(&active_presses),
+                active_presses.iter().any(|press| press.is_within_element),
+            )
+        };
+
+        *self.state.borrow_mut() = next_state;
+        self.pressed = pressed;
+        self.clear_long_press_cancel_flag(pointer_type);
+
+        self.fire_press_event(
+            PressEventType::PressEnd,
+            pointer_type,
+            client_x,
+            client_y,
+            modifiers,
+            is_within_element,
+        );
+    }
+
+    fn consume_long_press_cancel_flag(&self, pointer_type: PointerType) -> bool {
+        let Some(flag) = &self.config.long_press_cancel_flag else {
+            return false;
+        };
+
+        let should_cancel = flag.get() == Some(pointer_type);
+        if should_cancel {
+            flag.set(None);
+        }
+        should_cancel
+    }
+
+    fn clear_long_press_cancel_flag(&self, pointer_type: PointerType) {
+        let Some(flag) = &self.config.long_press_cancel_flag else {
+            return;
+        };
+
+        if flag.get() == Some(pointer_type) {
+            flag.set(None);
+        }
+    }
+
+    fn fire_press_event(
+        &self,
+        event_type: PressEventType,
+        pointer_type: PointerType,
+        client_x: Option<f64>,
+        client_y: Option<f64>,
+        modifiers: KeyModifiers,
+        is_within_element: bool,
+    ) {
+        let event = PressEvent {
+            pointer_type,
+            event_type,
+            client_x,
+            client_y,
+            modifiers,
+            is_within_element,
+            continue_propagation: SharedFlag::new(false),
+        };
+
+        match event_type {
+            PressEventType::PressStart => {
+                if let Some(callback) = &self.config.on_press_start {
+                    callback(event);
+                }
+            }
+            PressEventType::PressEnd => {
+                if let Some(callback) = &self.config.on_press_end {
+                    callback(event);
+                }
+            }
+            PressEventType::Press => {
+                if let Some(callback) = &self.config.on_press {
+                    callback(event);
+                }
+            }
+            PressEventType::PressUp => {
+                if let Some(callback) = &self.config.on_press_up {
+                    callback(event);
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -295,16 +607,38 @@ impl PressResult {
 /// are registered as typed methods on the component's `Api` struct by the
 /// framework adapter — this factory only creates the core state container.
 #[must_use]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "spec API takes ownership; adapters will consume the config for event handler registration"
-)]
 pub fn use_press(config: PressConfig) -> PressResult {
     let state = Rc::new(RefCell::new(PressState::Idle));
-    let _is_disabled = config.disabled;
     let pressed = state.borrow().is_pressed_inside();
 
-    PressResult { state, pressed }
+    PressResult {
+        state,
+        active_presses: Rc::default(),
+        config,
+        pressed,
+    }
+}
+
+fn derive_press_state(active_presses: &[ActivePress]) -> PressState {
+    if let Some(active_press) = active_presses
+        .iter()
+        .rev()
+        .find(|press| press.is_within_element)
+    {
+        return PressState::PressedInside {
+            pointer_type: active_press.pointer_type,
+            origin_x: active_press.origin_x,
+            origin_y: active_press.origin_y,
+        };
+    }
+
+    if let Some(active_press) = active_presses.last() {
+        return PressState::PressedOutside {
+            pointer_type: active_press.pointer_type,
+        };
+    }
+
+    PressState::Idle
 }
 
 #[cfg(test)]
@@ -340,6 +674,15 @@ mod tests {
         };
         assert!(state.is_pressed());
         assert!(state.is_pressed_inside());
+    }
+
+    #[test]
+    fn press_state_pressed_outside_is_not_pressed() {
+        let state = PressState::PressedOutside {
+            pointer_type: PointerType::Touch,
+        };
+        assert!(!state.is_pressed());
+        assert!(!state.is_pressed_inside());
     }
 
     #[test]
@@ -380,13 +723,13 @@ mod tests {
                     change_calls.fetch_add(1, Ordering::SeqCst);
                 })
             }),
-            long_press_cancel_flag: Some(SharedFlag::new(true)),
+            long_press_cancel_flag: Some(SharedState::new(Some(PointerType::Touch))),
             ..PressConfig::default()
         };
         let debug = format!("{config:?}");
         assert!(debug.contains("on_press: Some(Callback(..))"));
         assert!(debug.contains("on_press_change: Some(Callback(..))"));
-        assert!(debug.contains("long_press_cancel_flag: Some(SharedFlag(true))"));
+        assert!(debug.contains("long_press_cancel_flag: Some(SharedState(Some(Touch)))"));
         let event = PressEvent {
             pointer_type: PointerType::Mouse,
             event_type: PressEventType::Press,
@@ -530,6 +873,8 @@ mod tests {
     fn press_result_current_attrs_idle_is_empty() {
         let result = PressResult {
             state: Rc::new(RefCell::new(PressState::Idle)),
+            active_presses: Rc::new(RefCell::new(Vec::new())),
+            config: PressConfig::default(),
             pressed: false,
         };
         let config = PressConfig::default();
@@ -546,6 +891,13 @@ mod tests {
                 origin_x: Some(10.0),
                 origin_y: Some(20.0),
             })),
+            active_presses: Rc::new(RefCell::new(vec![ActivePress {
+                pointer_type: PointerType::Mouse,
+                origin_x: Some(10.0),
+                origin_y: Some(20.0),
+                is_within_element: true,
+            }])),
+            config: PressConfig::default(),
             pressed: true,
         };
         let config = PressConfig::default();
@@ -561,6 +913,8 @@ mod tests {
     fn press_result_current_attrs_disabled_sets_data_ars_disabled() {
         let result = PressResult {
             state: Rc::new(RefCell::new(PressState::Idle)),
+            active_presses: Rc::new(RefCell::new(Vec::new())),
+            config: PressConfig::default(),
             pressed: false,
         };
         let config = PressConfig {
@@ -583,6 +937,13 @@ mod tests {
                 origin_x: None,
                 origin_y: None,
             })),
+            active_presses: Rc::new(RefCell::new(vec![ActivePress {
+                pointer_type: PointerType::Touch,
+                origin_x: None,
+                origin_y: None,
+                is_within_element: true,
+            }])),
+            config: PressConfig::default(),
             pressed: true,
         };
         let config = PressConfig {
@@ -600,6 +961,13 @@ mod tests {
             state: Rc::new(RefCell::new(PressState::PressedOutside {
                 pointer_type: PointerType::Mouse,
             })),
+            active_presses: Rc::new(RefCell::new(vec![ActivePress {
+                pointer_type: PointerType::Mouse,
+                origin_x: Some(0.0),
+                origin_y: Some(0.0),
+                is_within_element: false,
+            }])),
+            config: PressConfig::default(),
             pressed: false,
         };
         let config = PressConfig::default();
@@ -630,5 +998,886 @@ mod tests {
         let result = use_press(config);
         assert_eq!(*result.state.borrow(), PressState::Idle);
         assert!(!result.pressed);
+    }
+
+    #[test]
+    fn begin_press_enters_pressed_inside_and_fires_start_callback() {
+        let start_events = Arc::new(std::sync::Mutex::new(Vec::<PressEvent>::new()));
+        let config = PressConfig {
+            on_press_start: Some({
+                let start_events = Arc::clone(&start_events);
+                Callback::new(move |event: PressEvent| {
+                    start_events.lock().expect("poisoned").push(event);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+
+        result.begin_press(
+            PointerType::Mouse,
+            Some(12.0),
+            Some(24.0),
+            KeyModifiers {
+                shift: true,
+                ctrl: false,
+                alt: false,
+                meta: false,
+            },
+            true,
+        );
+
+        assert_eq!(
+            result.current_state(),
+            PressState::PressedInside {
+                pointer_type: PointerType::Mouse,
+                origin_x: Some(12.0),
+                origin_y: Some(24.0),
+            }
+        );
+        assert!(result.pressed);
+        assert_eq!(start_events.lock().expect("poisoned").len(), 1);
+        let start_events = start_events.lock().expect("poisoned");
+        let event = &start_events[0];
+        assert_eq!(event.pointer_type, PointerType::Mouse);
+        assert_eq!(event.event_type, PressEventType::PressStart);
+        assert_eq!(event.client_x, Some(12.0));
+        assert_eq!(event.client_y, Some(24.0));
+        assert_eq!(
+            event.modifiers,
+            KeyModifiers {
+                shift: true,
+                ctrl: false,
+                alt: false,
+                meta: false,
+            }
+        );
+        assert!(event.is_within_element);
+        assert!(!event.should_propagate());
+    }
+
+    #[test]
+    fn begin_press_disabled_is_ignored() {
+        let start_count = Arc::new(AtomicUsize::new(0));
+        let config = PressConfig {
+            disabled: true,
+            on_press_start: Some({
+                let start_count = Arc::clone(&start_count);
+                Callback::new(move |_: PressEvent| {
+                    start_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+
+        result.begin_press(
+            PointerType::Mouse,
+            Some(7.0),
+            Some(8.0),
+            KeyModifiers::default(),
+            true,
+        );
+
+        assert_eq!(result.current_state(), PressState::Idle);
+        assert!(!result.pressed);
+        assert_eq!(start_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn duplicate_begin_press_for_same_modality_is_ignored() {
+        let start_count = Arc::new(AtomicUsize::new(0));
+        let config = PressConfig {
+            on_press_start: Some({
+                let start_count = Arc::clone(&start_count);
+                Callback::new(move |_: PressEvent| {
+                    start_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+
+        result.begin_press(
+            PointerType::Touch,
+            Some(1.0),
+            Some(2.0),
+            KeyModifiers::default(),
+            true,
+        );
+        result.begin_press(
+            PointerType::Touch,
+            Some(9.0),
+            Some(10.0),
+            KeyModifiers::default(),
+            false,
+        );
+
+        assert_eq!(
+            result.current_state(),
+            PressState::PressedInside {
+                pointer_type: PointerType::Touch,
+                origin_x: Some(1.0),
+                origin_y: Some(2.0),
+            }
+        );
+        assert!(result.pressed);
+        assert_eq!(start_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn update_pressed_bounds_emits_change_events_for_leave_and_reenter() {
+        let changes = Arc::new(std::sync::Mutex::new(Vec::<bool>::new()));
+        let config = PressConfig {
+            on_press_change: Some({
+                let changes = Arc::clone(&changes);
+                Callback::new(move |inside: bool| {
+                    changes.lock().expect("poisoned").push(inside);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+        result.begin_press(
+            PointerType::Touch,
+            Some(1.0),
+            Some(2.0),
+            KeyModifiers::default(),
+            true,
+        );
+
+        result.update_pressed_bounds(PointerType::Touch, false, Some(10.0), Some(11.0));
+        assert_eq!(
+            result.current_state(),
+            PressState::PressedOutside {
+                pointer_type: PointerType::Touch,
+            }
+        );
+        assert!(!result.pressed);
+
+        result.update_pressed_bounds(PointerType::Touch, true, Some(12.0), Some(13.0));
+        assert_eq!(
+            result.current_state(),
+            PressState::PressedInside {
+                pointer_type: PointerType::Touch,
+                origin_x: Some(1.0),
+                origin_y: Some(2.0),
+            }
+        );
+        assert!(result.pressed);
+        assert_eq!(*changes.lock().expect("poisoned"), vec![false, true]);
+    }
+
+    #[test]
+    fn update_pressed_bounds_with_unknown_modality_is_noop() {
+        let changes = Arc::new(std::sync::Mutex::new(Vec::<bool>::new()));
+        let config = PressConfig {
+            on_press_change: Some({
+                let changes = Arc::clone(&changes);
+                Callback::new(move |inside: bool| {
+                    changes.lock().expect("poisoned").push(inside);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+        result.begin_press(
+            PointerType::Mouse,
+            Some(2.0),
+            Some(3.0),
+            KeyModifiers::default(),
+            true,
+        );
+
+        result.update_pressed_bounds(PointerType::Keyboard, false, None, None);
+
+        assert_eq!(
+            result.current_state(),
+            PressState::PressedInside {
+                pointer_type: PointerType::Mouse,
+                origin_x: Some(2.0),
+                origin_y: Some(3.0),
+            }
+        );
+        assert!(result.pressed);
+        assert!(changes.lock().expect("poisoned").is_empty());
+    }
+
+    #[test]
+    fn update_pressed_bounds_without_change_does_not_emit_callback() {
+        let changes = Arc::new(std::sync::Mutex::new(Vec::<bool>::new()));
+        let config = PressConfig {
+            on_press_change: Some({
+                let changes = Arc::clone(&changes);
+                Callback::new(move |inside: bool| {
+                    changes.lock().expect("poisoned").push(inside);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+        result.begin_press(
+            PointerType::Pen,
+            Some(3.0),
+            Some(4.0),
+            KeyModifiers::default(),
+            true,
+        );
+
+        result.update_pressed_bounds(PointerType::Pen, true, Some(8.0), Some(9.0));
+
+        assert_eq!(
+            result.current_state(),
+            PressState::PressedInside {
+                pointer_type: PointerType::Pen,
+                origin_x: Some(3.0),
+                origin_y: Some(4.0),
+            }
+        );
+        assert!(changes.lock().expect("poisoned").is_empty());
+    }
+
+    #[test]
+    fn begin_press_outside_emits_initial_press_change_false() {
+        let changes = Arc::new(std::sync::Mutex::new(Vec::<bool>::new()));
+        let config = PressConfig {
+            on_press_change: Some({
+                let changes = Arc::clone(&changes);
+                Callback::new(move |inside: bool| {
+                    changes.lock().expect("poisoned").push(inside);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+
+        result.begin_press(
+            PointerType::Mouse,
+            Some(9.0),
+            Some(10.0),
+            KeyModifiers::default(),
+            false,
+        );
+
+        assert_eq!(
+            result.current_state(),
+            PressState::PressedOutside {
+                pointer_type: PointerType::Mouse,
+            }
+        );
+        assert!(!result.pressed);
+        assert_eq!(*changes.lock().expect("poisoned"), vec![false]);
+    }
+
+    #[test]
+    fn begin_press_from_idle_clears_stale_long_press_flag() {
+        let shared_flag = SharedState::new(Some(PointerType::Mouse));
+        let mut result = use_press(PressConfig {
+            long_press_cancel_flag: Some(shared_flag.clone()),
+            ..PressConfig::default()
+        });
+
+        result.begin_press(
+            PointerType::Mouse,
+            Some(1.0),
+            Some(2.0),
+            KeyModifiers::default(),
+            true,
+        );
+
+        assert_eq!(shared_flag.get(), None);
+        assert!(result.pressed);
+    }
+
+    #[test]
+    fn end_press_fires_activation_when_inside() {
+        let end_events = Arc::new(std::sync::Mutex::new(Vec::<PressEvent>::new()));
+        let press_events = Arc::new(std::sync::Mutex::new(Vec::<PressEvent>::new()));
+        let up_events = Arc::new(std::sync::Mutex::new(Vec::<PressEvent>::new()));
+        let config = PressConfig {
+            on_press_end: Some({
+                let end_events = Arc::clone(&end_events);
+                Callback::new(move |event: PressEvent| {
+                    end_events.lock().expect("poisoned").push(event);
+                })
+            }),
+            on_press: Some({
+                let press_events = Arc::clone(&press_events);
+                Callback::new(move |event: PressEvent| {
+                    press_events.lock().expect("poisoned").push(event);
+                })
+            }),
+            on_press_up: Some({
+                let up_events = Arc::clone(&up_events);
+                Callback::new(move |event: PressEvent| {
+                    up_events.lock().expect("poisoned").push(event);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+        result.begin_press(
+            PointerType::Keyboard,
+            None,
+            None,
+            KeyModifiers::default(),
+            true,
+        );
+
+        let activated =
+            result.end_press(PointerType::Keyboard, None, None, KeyModifiers::default());
+
+        assert!(activated);
+        assert_eq!(result.current_state(), PressState::Idle);
+        assert_eq!(up_events.lock().expect("poisoned").len(), 1);
+        assert_eq!(end_events.lock().expect("poisoned").len(), 1);
+        assert_eq!(press_events.lock().expect("poisoned").len(), 1);
+        assert_eq!(
+            press_events.lock().expect("poisoned")[0].event_type,
+            PressEventType::Press
+        );
+    }
+
+    #[test]
+    fn end_press_outside_without_allow_press_on_exit_does_not_activate() {
+        let up_events = Arc::new(std::sync::Mutex::new(Vec::<PressEvent>::new()));
+        let end_events = Arc::new(std::sync::Mutex::new(Vec::<PressEvent>::new()));
+        let press_count = Arc::new(AtomicUsize::new(0));
+        let config = PressConfig {
+            on_press_up: Some({
+                let up_events = Arc::clone(&up_events);
+                Callback::new(move |event: PressEvent| {
+                    up_events.lock().expect("poisoned").push(event);
+                })
+            }),
+            on_press_end: Some({
+                let end_events = Arc::clone(&end_events);
+                Callback::new(move |event: PressEvent| {
+                    end_events.lock().expect("poisoned").push(event);
+                })
+            }),
+            on_press: Some({
+                let press_count = Arc::clone(&press_count);
+                Callback::new(move |_: PressEvent| {
+                    press_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+        result.begin_press(
+            PointerType::Mouse,
+            Some(5.0),
+            Some(6.0),
+            KeyModifiers::default(),
+            true,
+        );
+        result.update_pressed_bounds(PointerType::Mouse, false, Some(20.0), Some(21.0));
+
+        let activated = result.end_press(
+            PointerType::Mouse,
+            Some(20.0),
+            Some(21.0),
+            KeyModifiers::default(),
+        );
+
+        assert!(!activated);
+        assert_eq!(press_count.load(Ordering::SeqCst), 0);
+        assert_eq!(up_events.lock().expect("poisoned").len(), 1);
+        assert_eq!(end_events.lock().expect("poisoned").len(), 1);
+        assert!(!up_events.lock().expect("poisoned")[0].is_within_element);
+        assert!(!end_events.lock().expect("poisoned")[0].is_within_element);
+        assert_eq!(result.current_state(), PressState::Idle);
+        assert!(!result.pressed);
+    }
+
+    #[test]
+    fn end_press_outside_activates_when_allow_press_on_exit_is_enabled() {
+        let activation_count = Arc::new(AtomicUsize::new(0));
+        let config = PressConfig {
+            allow_press_on_exit: true,
+            on_press: Some({
+                let activation_count = Arc::clone(&activation_count);
+                Callback::new(move |_: PressEvent| {
+                    activation_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+        result.begin_press(
+            PointerType::Mouse,
+            Some(5.0),
+            Some(6.0),
+            KeyModifiers::default(),
+            true,
+        );
+        result.update_pressed_bounds(PointerType::Mouse, false, Some(20.0), Some(21.0));
+
+        let activated = result.end_press(
+            PointerType::Mouse,
+            Some(20.0),
+            Some(21.0),
+            KeyModifiers::default(),
+        );
+
+        assert!(activated);
+        assert_eq!(activation_count.load(Ordering::SeqCst), 1);
+        assert_eq!(result.current_state(), PressState::Idle);
+        assert!(!result.pressed);
+    }
+
+    #[test]
+    fn end_press_suppresses_activation_when_long_press_flag_is_set() {
+        let activation_count = Arc::new(AtomicUsize::new(0));
+        let shared_flag = SharedState::new(Some(PointerType::Touch));
+        let config = PressConfig {
+            long_press_cancel_flag: Some(shared_flag.clone()),
+            on_press: Some({
+                let activation_count = Arc::clone(&activation_count);
+                Callback::new(move |_: PressEvent| {
+                    activation_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+        result.active_presses.borrow_mut().push(ActivePress {
+            pointer_type: PointerType::Touch,
+            origin_x: Some(8.0),
+            origin_y: Some(9.0),
+            is_within_element: true,
+        });
+        *result.state.borrow_mut() = derive_press_state(&result.active_presses.borrow());
+        result.pressed = true;
+
+        let activated = result.end_press(
+            PointerType::Touch,
+            Some(8.0),
+            Some(9.0),
+            KeyModifiers::default(),
+        );
+
+        assert!(!activated);
+        assert_eq!(activation_count.load(Ordering::SeqCst), 0);
+        assert_eq!(shared_flag.get(), None);
+        assert_eq!(result.current_state(), PressState::Idle);
+    }
+
+    #[test]
+    fn end_press_with_unknown_modality_returns_false() {
+        let mut result = use_press(PressConfig::default());
+        result.begin_press(
+            PointerType::Touch,
+            Some(8.0),
+            Some(9.0),
+            KeyModifiers::default(),
+            true,
+        );
+
+        let activated =
+            result.end_press(PointerType::Keyboard, None, None, KeyModifiers::default());
+
+        assert!(!activated);
+        assert_eq!(
+            result.current_state(),
+            PressState::PressedInside {
+                pointer_type: PointerType::Touch,
+                origin_x: Some(8.0),
+                origin_y: Some(9.0),
+            }
+        );
+        assert!(result.pressed);
+    }
+
+    #[test]
+    fn cancel_press_resets_state_and_fires_end_without_activation() {
+        let end_count = Arc::new(AtomicUsize::new(0));
+        let press_count = Arc::new(AtomicUsize::new(0));
+        let config = PressConfig {
+            on_press_end: Some({
+                let end_count = Arc::clone(&end_count);
+                Callback::new(move |_: PressEvent| {
+                    end_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            on_press: Some({
+                let press_count = Arc::clone(&press_count);
+                Callback::new(move |_: PressEvent| {
+                    press_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+        result.begin_press(
+            PointerType::Pen,
+            Some(2.0),
+            Some(3.0),
+            KeyModifiers::default(),
+            true,
+        );
+
+        result.cancel_press(
+            PointerType::Pen,
+            Some(2.0),
+            Some(3.0),
+            KeyModifiers::default(),
+        );
+
+        assert_eq!(result.current_state(), PressState::Idle);
+        assert_eq!(end_count.load(Ordering::SeqCst), 1);
+        assert_eq!(press_count.load(Ordering::SeqCst), 0);
+        assert!(!result.pressed);
+    }
+
+    #[test]
+    fn cancel_press_with_unknown_modality_is_noop() {
+        let end_count = Arc::new(AtomicUsize::new(0));
+        let config = PressConfig {
+            on_press_end: Some({
+                let end_count = Arc::clone(&end_count);
+                Callback::new(move |_: PressEvent| {
+                    end_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+        result.begin_press(
+            PointerType::Pen,
+            Some(2.0),
+            Some(3.0),
+            KeyModifiers::default(),
+            true,
+        );
+
+        result.cancel_press(
+            PointerType::Mouse,
+            Some(9.0),
+            Some(10.0),
+            KeyModifiers::default(),
+        );
+
+        assert_eq!(end_count.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            result.current_state(),
+            PressState::PressedInside {
+                pointer_type: PointerType::Pen,
+                origin_x: Some(2.0),
+                origin_y: Some(3.0),
+            }
+        );
+        assert!(result.pressed);
+    }
+
+    #[test]
+    fn simultaneous_pointer_and_keyboard_presses_are_tracked_independently() {
+        let activation_count = Arc::new(AtomicUsize::new(0));
+        let config = PressConfig {
+            on_press: Some({
+                let activation_count = Arc::clone(&activation_count);
+                Callback::new(move |_: PressEvent| {
+                    activation_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+
+        result.begin_press(
+            PointerType::Mouse,
+            Some(5.0),
+            Some(6.0),
+            KeyModifiers::default(),
+            true,
+        );
+        result.begin_press(
+            PointerType::Keyboard,
+            None,
+            None,
+            KeyModifiers::default(),
+            true,
+        );
+
+        let mouse_activated = result.end_press(
+            PointerType::Mouse,
+            Some(5.0),
+            Some(6.0),
+            KeyModifiers::default(),
+        );
+
+        assert!(mouse_activated);
+        assert!(result.pressed);
+        assert_eq!(
+            result.current_state(),
+            PressState::PressedInside {
+                pointer_type: PointerType::Keyboard,
+                origin_x: None,
+                origin_y: None,
+            }
+        );
+
+        let keyboard_activated =
+            result.end_press(PointerType::Keyboard, None, None, KeyModifiers::default());
+
+        assert!(keyboard_activated);
+        assert_eq!(activation_count.load(Ordering::SeqCst), 2);
+        assert_eq!(result.current_state(), PressState::Idle);
+        assert!(!result.pressed);
+    }
+
+    #[test]
+    fn second_modality_begin_does_not_clear_pending_long_press_suppression() {
+        let activation_count = Arc::new(AtomicUsize::new(0));
+        let shared_flag = SharedState::new(None);
+        let config = PressConfig {
+            long_press_cancel_flag: Some(shared_flag.clone()),
+            on_press: Some({
+                let activation_count = Arc::clone(&activation_count);
+                Callback::new(move |_: PressEvent| {
+                    activation_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+        result.begin_press(
+            PointerType::Touch,
+            Some(4.0),
+            Some(5.0),
+            KeyModifiers::default(),
+            true,
+        );
+        shared_flag.set(Some(PointerType::Touch));
+
+        result.begin_press(
+            PointerType::Keyboard,
+            None,
+            None,
+            KeyModifiers::default(),
+            true,
+        );
+
+        let activated = result.end_press(
+            PointerType::Touch,
+            Some(4.0),
+            Some(5.0),
+            KeyModifiers::default(),
+        );
+
+        assert!(!activated);
+        assert_eq!(activation_count.load(Ordering::SeqCst), 0);
+        assert_eq!(shared_flag.get(), None);
+        assert_eq!(
+            result.current_state(),
+            PressState::PressedInside {
+                pointer_type: PointerType::Keyboard,
+                origin_x: None,
+                origin_y: None,
+            }
+        );
+        assert!(result.pressed);
+    }
+
+    #[test]
+    fn outside_release_consumes_long_press_suppression_before_other_modality_activates() {
+        let activation_count = Arc::new(AtomicUsize::new(0));
+        let shared_flag = SharedState::new(None);
+        let config = PressConfig {
+            long_press_cancel_flag: Some(shared_flag.clone()),
+            on_press: Some({
+                let activation_count = Arc::clone(&activation_count);
+                Callback::new(move |_: PressEvent| {
+                    activation_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+
+        result.begin_press(
+            PointerType::Touch,
+            Some(4.0),
+            Some(5.0),
+            KeyModifiers::default(),
+            true,
+        );
+        result.begin_press(
+            PointerType::Keyboard,
+            None,
+            None,
+            KeyModifiers::default(),
+            true,
+        );
+
+        result.update_pressed_bounds(PointerType::Touch, false, Some(40.0), Some(50.0));
+        shared_flag.set(Some(PointerType::Touch));
+
+        let touch_activated = result.end_press(
+            PointerType::Touch,
+            Some(40.0),
+            Some(50.0),
+            KeyModifiers::default(),
+        );
+        let keyboard_activated =
+            result.end_press(PointerType::Keyboard, None, None, KeyModifiers::default());
+
+        assert!(!touch_activated);
+        assert!(keyboard_activated);
+        assert_eq!(activation_count.load(Ordering::SeqCst), 1);
+        assert_eq!(shared_flag.get(), None);
+        assert_eq!(result.current_state(), PressState::Idle);
+        assert!(!result.pressed);
+    }
+
+    #[test]
+    fn long_press_suppression_is_consumed_only_by_matching_modality_release() {
+        let activation_count = Arc::new(AtomicUsize::new(0));
+        let shared_flag = SharedState::new(None);
+        let config = PressConfig {
+            long_press_cancel_flag: Some(shared_flag.clone()),
+            on_press: Some({
+                let activation_count = Arc::clone(&activation_count);
+                Callback::new(move |_: PressEvent| {
+                    activation_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+
+        result.begin_press(
+            PointerType::Touch,
+            Some(4.0),
+            Some(5.0),
+            KeyModifiers::default(),
+            true,
+        );
+        result.begin_press(
+            PointerType::Keyboard,
+            None,
+            None,
+            KeyModifiers::default(),
+            true,
+        );
+
+        shared_flag.set(Some(PointerType::Touch));
+
+        let keyboard_activated =
+            result.end_press(PointerType::Keyboard, None, None, KeyModifiers::default());
+        let touch_activated = result.end_press(
+            PointerType::Touch,
+            Some(4.0),
+            Some(5.0),
+            KeyModifiers::default(),
+        );
+
+        assert!(keyboard_activated);
+        assert!(!touch_activated);
+        assert_eq!(activation_count.load(Ordering::SeqCst), 1);
+        assert_eq!(shared_flag.get(), None);
+        assert_eq!(result.current_state(), PressState::Idle);
+        assert!(!result.pressed);
+    }
+
+    #[test]
+    fn cancel_press_clears_matching_long_press_suppression() {
+        let activation_count = Arc::new(AtomicUsize::new(0));
+        let shared_flag = SharedState::new(None);
+        let config = PressConfig {
+            long_press_cancel_flag: Some(shared_flag.clone()),
+            on_press: Some({
+                let activation_count = Arc::clone(&activation_count);
+                Callback::new(move |_: PressEvent| {
+                    activation_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+
+        result.begin_press(
+            PointerType::Touch,
+            Some(3.0),
+            Some(4.0),
+            KeyModifiers::default(),
+            true,
+        );
+        shared_flag.set(Some(PointerType::Touch));
+
+        result.cancel_press(
+            PointerType::Touch,
+            Some(3.0),
+            Some(4.0),
+            KeyModifiers::default(),
+        );
+
+        assert_eq!(shared_flag.get(), None);
+        assert_eq!(result.current_state(), PressState::Idle);
+        assert!(!result.pressed);
+
+        result.begin_press(
+            PointerType::Touch,
+            Some(7.0),
+            Some(8.0),
+            KeyModifiers::default(),
+            true,
+        );
+
+        let activated = result.end_press(
+            PointerType::Touch,
+            Some(7.0),
+            Some(8.0),
+            KeyModifiers::default(),
+        );
+
+        assert!(activated);
+        assert_eq!(activation_count.load(Ordering::SeqCst), 1);
+        assert_eq!(shared_flag.get(), None);
+        assert_eq!(result.current_state(), PressState::Idle);
+        assert!(!result.pressed);
+    }
+
+    #[test]
+    fn pointer_exit_does_not_clear_pressed_while_keyboard_press_remains_active() {
+        let changes = Arc::new(std::sync::Mutex::new(Vec::<bool>::new()));
+        let config = PressConfig {
+            on_press_change: Some({
+                let changes = Arc::clone(&changes);
+                Callback::new(move |inside: bool| {
+                    changes.lock().expect("poisoned").push(inside);
+                })
+            }),
+            ..PressConfig::default()
+        };
+        let mut result = use_press(config);
+        result.begin_press(
+            PointerType::Mouse,
+            Some(1.0),
+            Some(1.0),
+            KeyModifiers::default(),
+            true,
+        );
+        result.begin_press(
+            PointerType::Keyboard,
+            None,
+            None,
+            KeyModifiers::default(),
+            true,
+        );
+
+        result.update_pressed_bounds(PointerType::Mouse, false, Some(8.0), Some(9.0));
+
+        assert!(result.pressed);
+        assert_eq!(
+            result.current_state(),
+            PressState::PressedInside {
+                pointer_type: PointerType::Keyboard,
+                origin_x: None,
+                origin_y: None,
+            }
+        );
+        assert_eq!(*changes.lock().expect("poisoned"), vec![false]);
     }
 }

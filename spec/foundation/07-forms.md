@@ -2220,7 +2220,7 @@ template expressions (e.g., conditionally showing a "clear" button when
 
 ```rust
 use ars_core::{TransitionPlan, PendingEffect, WeakSend, ConnectApi, AttrMap, HtmlAttr, AriaAttr};
-use ars_a11y::ComponentIds;
+use ars_core::ComponentIds;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 #[cfg(target_arch = "wasm32")]
