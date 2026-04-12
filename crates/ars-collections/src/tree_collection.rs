@@ -102,7 +102,9 @@ impl<T> Debug for TreeCollection<T> {
 }
 
 /// Structural equality: two tree collections are equal when they contain the
-/// same nodes in the same order and have the same expansion state.
+/// same nodes in the same order with the same hierarchy and expansion state.
+/// Extends `Node::PartialEq` (which compares key, type, text, value) with
+/// hierarchy fields (`level`, `parent_key`) that are significant for trees.
 impl<T: Clone + PartialEq> PartialEq for TreeCollection<T> {
     fn eq(&self, other: &Self) -> bool {
         self.all_nodes.len() == other.all_nodes.len()
@@ -111,7 +113,7 @@ impl<T: Clone + PartialEq> PartialEq for TreeCollection<T> {
                 .all_nodes
                 .iter()
                 .zip(other.all_nodes.iter())
-                .all(|(a, b)| a == b)
+                .all(|(a, b)| a == b && a.level == b.level && a.parent_key == b.parent_key)
     }
 }
 
@@ -245,17 +247,28 @@ impl<T: Clone> TreeCollection<T> {
     /// Returns a new `TreeCollection` with updated visibility.
     #[must_use]
     pub fn set_expanded(&self, key: &Key, expanded: bool) -> Self {
+        // Only modify expansion state for nodes that have children.
+        // Leaf nodes use is_expanded == None and must not be altered.
+        let is_expandable = self
+            .key_to_index
+            .get(key)
+            .is_some_and(|&i| self.all_nodes[i].has_children);
+
         let mut new_expanded = self.expanded_keys.clone();
-        if expanded {
-            new_expanded.insert(key.clone());
-        } else {
-            new_expanded.remove(key);
+        if is_expandable {
+            if expanded {
+                new_expanded.insert(key.clone());
+            } else {
+                new_expanded.remove(key);
+            }
         }
 
         // Update the is_expanded field on the node.
         let mut new_nodes = self.all_nodes.clone();
-        if let Some(&idx) = self.key_to_index.get(key) {
-            new_nodes[idx].is_expanded = Some(expanded);
+        if is_expandable {
+            if let Some(&idx) = self.key_to_index.get(key) {
+                new_nodes[idx].is_expanded = Some(expanded);
+            }
         }
 
         let (visible_indices, first_focusable_visible, last_focusable_visible) =
@@ -475,14 +488,19 @@ impl<T: CollectionItem> TreeCollection<T> {
                 }
                 // Drain the range [start..end] from all_nodes.
                 let drained = self.all_nodes.drain(start..end).collect::<Vec<_>>();
+                for node in &drained {
+                    self.expanded_keys.remove(&node.key);
+                }
                 for node in drained {
                     if let Some(val) = node.value {
                         removed.push(val);
                     }
                 }
+                // Rebuild after each drain so subsequent key lookups use
+                // valid indices (drain shifts all_nodes in place).
+                self.rebuild_indices();
             }
         }
-        self.rebuild_indices();
         removed
     }
 
@@ -513,6 +531,16 @@ impl<T: CollectionItem> TreeCollection<T> {
         };
         let old_level = subtree[0].level;
         let level_delta = new_level as isize - old_level as isize;
+
+        // Mark the new parent as having children (if it was a leaf).
+        if let Some(pk) = new_parent {
+            if let Some(&pi) = self.key_to_index.get(pk) {
+                self.all_nodes[pi].has_children = true;
+                if self.all_nodes[pi].is_expanded.is_none() {
+                    self.all_nodes[pi].is_expanded = Some(false);
+                }
+            }
+        }
 
         let flat_pos = self.flat_insert_position(new_parent, sibling_index);
         for (offset, mut node) in subtree.into_iter().enumerate() {
@@ -1718,11 +1746,98 @@ mod tests {
     #[test]
     fn first_last_key_empty_after_clear() {
         let mut tree = fruit_tree();
-        // Remove one at a time (multi-key remove_by_keys uses stale indices
-        // between drains, so sequential single-key removal is safer).
-        tree.remove_by_keys(&[Key::int(1)]);
-        tree.remove_by_keys(&[Key::int(4)]);
+        // Multi-key removal is safe — rebuild_indices runs after each drain.
+        tree.remove_by_keys(&[Key::int(1), Key::int(4)]);
         assert_eq!(tree.first_key(), None);
         assert_eq!(tree.last_key(), None);
+    }
+
+    // ---------------------------------------------------------------
+    // PR review fixes
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn remove_by_keys_multi_key_safe() {
+        // Previously panicked due to stale key_to_index after first drain.
+        let mut tree = fruit_tree();
+        // Fruits(1) has children Apple(2), Banana(3); Other(4) is a root.
+        // Remove both roots in a single call.
+        let removed = tree.remove_by_keys(&[Key::int(1), Key::int(4)]);
+        assert_eq!(removed.len(), 4); // Fruits + Apple + Banana + Other
+        assert!(tree.is_empty());
+    }
+
+    #[test]
+    fn remove_by_keys_cleans_expanded_keys() {
+        let tree = sample_tree();
+        // Fruits(1) is expanded
+        assert!(tree.is_expanded(&Key::int(1)));
+
+        // Convert to mutable tree via CollectionItem
+        let mut tree = fruit_tree();
+        // Expand Fruits in fruit_tree (it's already default_expanded=true)
+        assert!(tree.is_expanded(&Key::int(1)));
+
+        tree.remove_by_keys(&[Key::int(1)]);
+        // Stale expanded key should be cleaned up
+        assert!(!tree.is_expanded(&Key::int(1)));
+    }
+
+    #[test]
+    fn reparent_marks_new_parent_has_children() {
+        let mut tree = fruit_tree();
+        // Other(4) is a leaf — has_children == false
+        assert!(!tree.get(&Key::int(4)).expect("Other").has_children);
+
+        // Reparent Apple(2) under Other(4)
+        tree.reparent(&Key::int(2), Some(&Key::int(4)), 0);
+        let other = tree.get(&Key::int(4)).expect("Other after reparent");
+        assert!(other.has_children);
+        assert_eq!(other.is_expanded, Some(false));
+    }
+
+    #[test]
+    fn reparent_collapse_new_parent_hides_children() {
+        let mut tree = fruit_tree();
+        // Reparent Apple(2) under Other(4)
+        tree.reparent(&Key::int(2), Some(&Key::int(4)), 0);
+        // Other is now a parent with is_expanded=Some(false), so Apple is hidden
+        assert!(!tree.keys().any(|k| k == &Key::int(2)));
+
+        // Expand Other — Apple becomes visible
+        let expanded = tree.set_expanded(&Key::int(4), true);
+        assert!(expanded.keys().any(|k| k == &Key::int(2)));
+    }
+
+    #[test]
+    fn set_expanded_on_leaf_is_noop() {
+        let tree = sample_tree();
+        // Grains(7) is a leaf
+        let node = tree.get(&Key::int(7)).expect("Grains");
+        assert_eq!(node.is_expanded, None);
+        assert!(!node.has_children);
+
+        // Attempting to expand a leaf should not change anything
+        let after = tree.set_expanded(&Key::int(7), true);
+        let node = after.get(&Key::int(7)).expect("Grains after");
+        assert_eq!(node.is_expanded, None); // still None, not Some(true)
+        assert!(!after.is_expanded(&Key::int(7))); // not in expanded_keys
+    }
+
+    #[test]
+    fn set_expanded_on_missing_key_is_noop() {
+        let tree = sample_tree();
+        let after = tree.set_expanded(&Key::int(99), true);
+        // Should not insert phantom key into expanded_keys
+        assert!(!after.is_expanded(&Key::int(99)));
+    }
+
+    #[test]
+    fn partial_eq_detects_hierarchy_change() {
+        let tree_a = fruit_tree();
+        let mut tree_b = fruit_tree();
+        // Reparent Apple(2) to root level — same nodes, different hierarchy
+        tree_b.reparent(&Key::int(2), None, 0);
+        assert_ne!(tree_a, tree_b);
     }
 }

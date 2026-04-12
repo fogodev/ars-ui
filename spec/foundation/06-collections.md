@@ -1486,7 +1486,9 @@ impl<T> core::fmt::Debug for TreeCollection<T> {
 }
 
 /// Structural equality: two tree collections are equal when they contain the
-/// same nodes in the same order and have the same expansion state.
+/// same nodes in the same order with the same hierarchy and expansion state.
+/// Extends `Node::PartialEq` (which compares key, type, text, value) with
+/// hierarchy fields (`level`, `parent_key`) that are significant for trees.
 impl<T: Clone + PartialEq> PartialEq for TreeCollection<T> {
     fn eq(&self, other: &Self) -> bool {
         self.all_nodes.len() == other.all_nodes.len()
@@ -1495,7 +1497,9 @@ impl<T: Clone + PartialEq> PartialEq for TreeCollection<T> {
                 .all_nodes
                 .iter()
                 .zip(other.all_nodes.iter())
-                .all(|(a, b)| a == b)
+                .all(|(a, b)| {
+                    a == b && a.level == b.level && a.parent_key == b.parent_key
+                })
     }
 }
 
@@ -1620,17 +1624,28 @@ impl<T: Clone> TreeCollection<T> {
     /// Returns a new `TreeCollection` with updated visibility.
     #[must_use]
     pub fn set_expanded(&self, key: &Key, expanded: bool) -> Self {
+        // Only modify expansion state for nodes that have children.
+        // Leaf nodes use is_expanded == None and must not be altered.
+        let is_expandable = self
+            .key_to_index
+            .get(key)
+            .is_some_and(|&i| self.all_nodes[i].has_children);
+
         let mut new_expanded = self.expanded_keys.clone();
-        if expanded {
-            new_expanded.insert(key.clone());
-        } else {
-            new_expanded.remove(key);
+        if is_expandable {
+            if expanded {
+                new_expanded.insert(key.clone());
+            } else {
+                new_expanded.remove(key);
+            }
         }
 
         // Update the is_expanded field on the node.
         let mut new_nodes = self.all_nodes.clone();
-        if let Some(&idx) = self.key_to_index.get(key) {
-            new_nodes[idx].is_expanded = Some(expanded);
+        if is_expandable {
+            if let Some(&idx) = self.key_to_index.get(key) {
+                new_nodes[idx].is_expanded = Some(expanded);
+            }
         }
 
         let (visible_indices, first_focusable_visible, last_focusable_visible) =
@@ -1850,12 +1865,17 @@ impl<T: CollectionItem> TreeCollection<T> {
                 }
                 // Drain the range [start..end] from all_nodes.
                 let drained: Vec<Node<T>> = self.all_nodes.drain(start..end).collect();
+                for node in &drained {
+                    self.expanded_keys.remove(&node.key);
+                }
                 for node in drained {
                     if let Some(val) = node.value { removed.push(val); }
                 }
+                // Rebuild after each drain so subsequent key lookups use
+                // valid indices (drain shifts all_nodes in place).
+                self.rebuild_indices();
             }
         }
-        self.rebuild_indices();
         removed
     }
 
@@ -1873,6 +1893,16 @@ impl<T: CollectionItem> TreeCollection<T> {
         // Rebuild indices after extraction so that parent lookups and
         // flat_insert_position operate on valid index state.
         self.rebuild_indices();
+
+        // Mark the new parent as having children (if it was a leaf).
+        if let Some(pk) = new_parent {
+            if let Some(&pi) = self.key_to_index.get(pk) {
+                self.all_nodes[pi].has_children = true;
+                if self.all_nodes[pi].is_expanded.is_none() {
+                    self.all_nodes[pi].is_expanded = Some(false);
+                }
+            }
+        }
 
         // Recompute levels relative to new parent.
         let new_level = match new_parent {
