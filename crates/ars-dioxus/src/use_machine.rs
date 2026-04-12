@@ -4,9 +4,13 @@
 //! reactive primitives, and returns a [`UseMachineReturn`] handle for reading
 //! state, sending events, and deriving fine-grained reactive values.
 
-use std::fmt;
+use std::{
+    collections::HashMap,
+    fmt,
+    sync::{Arc, Mutex},
+};
 
-use ars_core::{Env, HasId, Machine, Service};
+use ars_core::{CleanupFn, Env, HasId, Machine, Service};
 use dioxus::prelude::*;
 
 use crate::{
@@ -49,6 +53,32 @@ where
     /// Used by [`derive()`](Self::derive) to track context mutations even when
     /// state remains the same.
     pub context_version: ReadSignal<u64>,
+}
+
+struct MachineRuntime<M: Machine + 'static>
+where
+    M::State: Clone + PartialEq + 'static,
+{
+    service: Signal<Service<M>>,
+    state: Signal<M::State>,
+    context_version: Signal<u64>,
+    effect_cleanups: Signal<HashMap<&'static str, CleanupFn>>,
+    pending_events: Arc<Mutex<Vec<M::Event>>>,
+}
+
+impl<M: Machine + 'static> Clone for MachineRuntime<M>
+where
+    M::State: Clone + PartialEq + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            service: self.service,
+            state: self.state,
+            context_version: self.context_version,
+            effect_cleanups: self.effect_cleanups,
+            pending_events: Arc::clone(&self.pending_events),
+        }
+    }
 }
 
 // Manual Clone/Copy impls to avoid requiring M: Clone/Copy — all fields are
@@ -182,6 +212,7 @@ where
     M::State: Clone + PartialEq + 'static,
     M::Context: Clone + 'static,
     M::Props: Clone + PartialEq + 'static,
+    M::Event: Send + 'static,
     M::Messages: Send + Sync + 'static,
 {
     let (result, ..) = use_machine_inner::<M>(props);
@@ -201,6 +232,7 @@ where
     M::State: Clone + PartialEq + 'static,
     M::Context: Clone + 'static,
     M::Props: Clone + PartialEq + 'static,
+    M::Event: Send + 'static,
     M::Messages: Send + Sync + 'static,
 {
     use_machine::<M>(props_signal())
@@ -215,12 +247,14 @@ where
     M::State: Clone + PartialEq + 'static,
     M::Context: Clone + 'static,
     M::Props: Clone + PartialEq + 'static,
+    M::Event: Send + 'static,
     M::Messages: Send + Sync + 'static,
 {
+    let generated_id = use_hook(|| use_id("component"));
     let props = {
         let mut props = props;
         if props.id().is_empty() {
-            props.set_id(use_id("component"));
+            props.set_id(generated_id);
         }
         props
     };
@@ -235,23 +269,28 @@ where
     let props_for_sync = props.clone();
 
     // Create the service once — use_signal runs its closure only on first mount.
-    let mut service_signal = use_signal(move || Service::<M>::new(props, &env, &messages));
+    let service_signal = use_signal(move || Service::<M>::new(props, &env, &messages));
 
     // Create a signal tracking the current state.
     // Use .peek() to avoid subscribing the component to service_signal changes.
     let initial_state = service_signal.peek().state().clone();
-    let mut state_signal = use_signal::<M::State>(|| initial_state);
+    let state_signal = use_signal::<M::State>(|| initial_state);
 
     // Context version counter — incremented on every context change so that
     // derive() memos re-run even when state itself hasn't changed.
-    let mut context_version = use_signal(|| 0u64);
+    let context_version = use_signal(|| 0u64);
 
-    use_sync_props::<M>(
-        service_signal,
-        props_for_sync,
+    let effect_cleanups = use_signal(HashMap::<&'static str, CleanupFn>::new);
+    let pending_events = use_hook(|| Arc::new(Mutex::new(Vec::<M::Event>::new())));
+    let runtime = MachineRuntime {
+        service: service_signal,
+        state: state_signal,
         context_version,
-        state_signal,
-    );
+        effect_cleanups,
+        pending_events: Arc::clone(&pending_events),
+    };
+
+    use_sync_props::<M>(props_for_sync, runtime.clone());
 
     // Build the send callback. When an event is sent:
     // 1. Snapshot the old state for comparison
@@ -261,28 +300,18 @@ where
     // use_hook runs its closure once on mount and returns the cached value on
     // re-renders. Callback is Copy, so the handle is stable. The captured
     // signal handles are Copy indirections that always access current data.
+    let send_runtime = runtime.clone();
     let send = use_hook(|| {
         Callback::new(move |event: M::Event| {
-            // Write lock is held only for the send() call, then dropped.
-            let result = service_signal.write().send(event);
-
-            if result.state_changed {
-                let new_state = service_signal.peek().state().clone();
-                state_signal.set(new_state);
-            }
-
-            if result.context_changed {
-                *context_version.write() += 1;
-            }
-
-            // TODO: Dispatch result.pending_effects and handle result.cancel_effects
-            // when component implementations need effect lifecycle management.
+            dispatch_event::<M>(event, send_runtime.clone());
         })
     });
 
     // Clean up effects when the component unmounts.
+    let mut cleanup_runtime = runtime.clone();
     use_drop(move || {
-        service_signal.write().unmount(Vec::new());
+        let cleanups = drain_effect_cleanups(cleanup_runtime.effect_cleanups);
+        cleanup_runtime.service.write().unmount(cleanups);
     });
 
     let result = UseMachineReturn {
@@ -299,36 +328,167 @@ where
 ///
 /// Runs during the component body so the service observes new props in the same
 /// render pass, avoiding a stale frame after parent prop updates.
-fn use_sync_props<M: Machine + 'static>(
-    mut service: Signal<Service<M>>,
-    current_props: M::Props,
-    mut context_version: Signal<u64>,
-    mut state_signal: Signal<M::State>,
-) where
+fn use_sync_props<M: Machine + 'static>(current_props: M::Props, mut runtime: MachineRuntime<M>)
+where
     M::Props: Clone + PartialEq + 'static,
     M::State: Clone + PartialEq + 'static,
     M::Context: Clone + 'static,
+    M::Event: Send + 'static,
 {
     let mut prev_props = use_signal(|| None::<M::Props>);
     let previous = prev_props.peek().clone();
 
     if previous.as_ref() != Some(&current_props) {
         if previous.is_some() {
-            let send_result = service.write().set_props(current_props.clone());
-            if send_result.state_changed {
-                let new_state = service.peek().state().clone();
-                state_signal.set(new_state);
-            }
-            if send_result.context_changed {
-                *context_version.write() += 1;
-            }
+            let (send_result, ctx, props) = {
+                let mut service = runtime.service.write();
+                let send_result = service.set_props(current_props.clone());
+                if send_result.state_changed {
+                    runtime.state.set(service.state().clone());
+                }
+                if send_result.context_changed {
+                    *runtime.context_version.write() += 1;
+                }
+                let ctx = service.context().clone();
+                let props = service.props().clone();
+                (send_result, ctx, props)
+            };
+
+            #[cfg(feature = "ssr")]
+            handle_effects::<M>(&send_result, &ctx, &props, &runtime);
+            #[cfg(not(feature = "ssr"))]
+            handle_effects::<M>(send_result, &ctx, &props, runtime.clone());
         }
         prev_props.set(Some(current_props));
     }
 }
 
+fn dispatch_event<M: Machine + 'static>(event: M::Event, mut runtime: MachineRuntime<M>)
+where
+    M::State: Clone + PartialEq + 'static,
+    M::Context: Clone + 'static,
+    M::Props: Clone + PartialEq + 'static,
+    M::Event: Send + 'static,
+{
+    let (result, ctx, props) = {
+        let mut service = runtime.service.write();
+        let result = service.send(event);
+
+        if result.state_changed {
+            runtime.state.set(service.state().clone());
+        }
+
+        if result.context_changed {
+            *runtime.context_version.write() += 1;
+        }
+
+        let ctx = service.context().clone();
+        let props = service.props().clone();
+        (result, ctx, props)
+    };
+
+    #[cfg(feature = "ssr")]
+    handle_effects::<M>(&result, &ctx, &props, &runtime);
+    #[cfg(not(feature = "ssr"))]
+    handle_effects::<M>(result, &ctx, &props, runtime);
+}
+
+fn drain_effect_cleanups(
+    mut effect_cleanups: Signal<HashMap<&'static str, CleanupFn>>,
+) -> Vec<CleanupFn> {
+    let mut pending = Vec::new();
+    for (_, cleanup) in effect_cleanups.write().drain() {
+        pending.push(cleanup);
+    }
+    pending
+}
+
+#[cfg(feature = "ssr")]
+const fn handle_effects<M: Machine + 'static>(
+    send_result: &ars_core::SendResult<M>,
+    ctx: &M::Context,
+    props: &M::Props,
+    runtime: &MachineRuntime<M>,
+) {
+    let _ = send_result;
+    let _ = ctx;
+    let _ = props;
+    let _ = runtime;
+}
+
+#[cfg(not(feature = "ssr"))]
+fn handle_effects<M: Machine + 'static>(
+    send_result: ars_core::SendResult<M>,
+    ctx: &M::Context,
+    props: &M::Props,
+    mut runtime: MachineRuntime<M>,
+) where
+    M::State: Clone + PartialEq + 'static,
+    M::Context: Clone + 'static,
+    M::Props: Clone + PartialEq + 'static,
+    M::Event: Send + 'static,
+{
+    let mut cleanups_to_run = Vec::new();
+
+    if send_result.state_changed {
+        cleanups_to_run.extend(drain_effect_cleanups(runtime.effect_cleanups));
+    } else if !send_result.cancel_effects.is_empty() || !send_result.pending_effects.is_empty() {
+        {
+            let mut active_cleanups = runtime.effect_cleanups.write();
+            for name in send_result.cancel_effects.iter().copied() {
+                if let Some(cleanup) = active_cleanups.remove(name) {
+                    cleanups_to_run.push(cleanup);
+                }
+            }
+            for effect in &send_result.pending_effects {
+                if let Some(cleanup) = active_cleanups.remove(effect.name) {
+                    cleanups_to_run.push(cleanup);
+                }
+            }
+        }
+    }
+
+    for cleanup in cleanups_to_run {
+        cleanup();
+    }
+
+    if send_result.pending_effects.is_empty() {
+        return;
+    }
+
+    let send_handle: Arc<dyn Fn(M::Event) + Send + Sync> = Arc::new({
+        let pending_events = Arc::clone(&runtime.pending_events);
+        move |event| {
+            pending_events
+                .lock()
+                .expect("pending event queue mutex should not be poisoned")
+                .push(event);
+        }
+    });
+
+    for effect in send_result.pending_effects {
+        let name = effect.name;
+        let cleanup = effect.run(ctx, props, Arc::clone(&send_handle));
+        runtime.effect_cleanups.write().insert(name, cleanup);
+    }
+
+    let queued_events = {
+        let mut pending = runtime
+            .pending_events
+            .lock()
+            .expect("pending event queue mutex should not be poisoned");
+        pending.drain(..).collect::<Vec<_>>()
+    };
+
+    for event in queued_events {
+        dispatch_event::<M>(event, runtime.clone());
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[cfg(not(feature = "ssr"))]
+    use std::sync::Mutex;
     use std::{cell::RefCell, rc::Rc, sync::Arc};
 
     use ars_core::{
@@ -663,6 +823,203 @@ mod tests {
             }
             events
         }
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum EffectState {
+        Idle,
+        Active,
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum EffectEvent {
+        Start,
+        Replace,
+        Cancel,
+        Stop,
+        Notify,
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum EffectAction {
+        None,
+        Start,
+        Replace,
+        Cancel,
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    #[derive(Clone, Debug)]
+    struct EffectContext {
+        log: Arc<Mutex<Vec<&'static str>>>,
+        notify_count: u32,
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    impl PartialEq for EffectContext {
+        fn eq(&self, other: &Self) -> bool {
+            self.notify_count == other.notify_count && Arc::ptr_eq(&self.log, &other.log)
+        }
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    impl Eq for EffectContext {}
+
+    #[cfg(not(feature = "ssr"))]
+    #[derive(Clone, Debug)]
+    struct EffectProps {
+        id: String,
+        action: EffectAction,
+        log: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    impl PartialEq for EffectProps {
+        fn eq(&self, other: &Self) -> bool {
+            self.id == other.id && self.action == other.action
+        }
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    impl Eq for EffectProps {}
+
+    #[cfg(not(feature = "ssr"))]
+    impl HasId for EffectProps {
+        fn id(&self) -> &str {
+            &self.id
+        }
+
+        fn with_id(self, id: String) -> Self {
+            Self { id, ..self }
+        }
+
+        fn set_id(&mut self, id: String) {
+            self.id = id;
+        }
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    struct EffectApi;
+
+    #[cfg(not(feature = "ssr"))]
+    impl ConnectApi for EffectApi {
+        type Part = TogglePart;
+
+        fn part_attrs(&self, _part: Self::Part) -> AttrMap {
+            AttrMap::new()
+        }
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    struct EffectMachine;
+
+    #[cfg(not(feature = "ssr"))]
+    impl Machine for EffectMachine {
+        type State = EffectState;
+        type Event = EffectEvent;
+        type Context = EffectContext;
+        type Props = EffectProps;
+        type Messages = ();
+        type Api<'a> = EffectApi;
+
+        fn init(
+            props: &Self::Props,
+            _env: &Env,
+            _messages: &Self::Messages,
+        ) -> (Self::State, Self::Context) {
+            (
+                EffectState::Idle,
+                EffectContext {
+                    log: Arc::clone(&props.log),
+                    notify_count: 0,
+                },
+            )
+        }
+
+        fn transition(
+            _state: &Self::State,
+            event: &Self::Event,
+            _context: &Self::Context,
+            _props: &Self::Props,
+        ) -> Option<ars_core::TransitionPlan<Self>> {
+            match event {
+                EffectEvent::Start => {
+                    Some(
+                        ars_core::TransitionPlan::to(EffectState::Active)
+                            .with_effect(tracked_effect("timer", "setup:start", "cleanup:start")),
+                    )
+                }
+                EffectEvent::Replace => {
+                    Some(ars_core::TransitionPlan::new().with_effect(tracked_effect(
+                        "timer",
+                        "setup:replace",
+                        "cleanup:replace",
+                    )))
+                }
+                EffectEvent::Cancel => Some(ars_core::TransitionPlan::new().cancel_effect("timer")),
+                EffectEvent::Stop => Some(ars_core::TransitionPlan::to(EffectState::Idle)),
+                EffectEvent::Notify => Some(ars_core::TransitionPlan::new().apply(
+                    |ctx: &mut EffectContext| {
+                        ctx.notify_count += 1;
+                    },
+                )),
+            }
+        }
+
+        fn connect<'a>(
+            _state: &'a Self::State,
+            _context: &'a Self::Context,
+            _props: &'a Self::Props,
+            _send: &'a dyn Fn(Self::Event),
+        ) -> Self::Api<'a> {
+            EffectApi
+        }
+
+        fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+            if old.action == new.action {
+                return Vec::new();
+            }
+
+            match new.action {
+                EffectAction::None => Vec::new(),
+                EffectAction::Start => vec![EffectEvent::Start],
+                EffectAction::Replace => vec![EffectEvent::Replace],
+                EffectAction::Cancel => vec![EffectEvent::Cancel],
+            }
+        }
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    fn tracked_effect(
+        name: &'static str,
+        setup_label: &'static str,
+        cleanup_label: &'static str,
+    ) -> ars_core::PendingEffect<EffectMachine> {
+        ars_core::PendingEffect::new(
+            name,
+            move |ctx: &EffectContext, _props: &EffectProps, _send| {
+                ctx.log
+                    .lock()
+                    .expect("log mutex should not be poisoned")
+                    .push(setup_label);
+                let log = Arc::clone(&ctx.log);
+                Box::new(move || {
+                    log.lock()
+                        .expect("log mutex should not be poisoned")
+                        .push(cleanup_label);
+                })
+            },
+        )
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    fn effect_log(log: &Arc<Mutex<Vec<&'static str>>>) -> Vec<&'static str> {
+        log.lock()
+            .expect("log mutex should not be poisoned")
+            .clone()
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1106,6 +1463,45 @@ mod tests {
     }
 
     #[test]
+    fn generated_id_stays_stable_across_rerenders() {
+        let snapshots = Rc::new(RefCell::new(Vec::new()));
+
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "Dioxus root props are moved into the render function."
+        )]
+        fn app(snapshots: Rc<RefCell<Vec<String>>>) -> Element {
+            let mut phase = use_signal(|| 0u8);
+            let machine = use_machine::<ToggleMachine>(ToggleProps { id: String::new() });
+
+            snapshots
+                .borrow_mut()
+                .push(machine.service.peek().props().id().to_owned());
+
+            if phase() < 2 {
+                phase += 1;
+            }
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new_with_props(app, Rc::clone(&snapshots));
+        dom.rebuild_in_place();
+        dom.mark_dirty(ScopeId::APP);
+        dom.render_immediate(&mut NoOpMutations);
+        dom.mark_dirty(ScopeId::APP);
+        dom.render_immediate(&mut NoOpMutations);
+
+        let snapshots = snapshots.borrow();
+        assert_eq!(snapshots.len(), 3);
+        assert!(snapshots[0].starts_with("component-"));
+        assert_eq!(snapshots[0], snapshots[1]);
+        assert_eq!(snapshots[1], snapshots[2]);
+    }
+
+    #[test]
     fn use_machine_with_reactive_props_syncs_external_prop_changes() {
         let snapshots = Rc::new(RefCell::new(Vec::new()));
 
@@ -1165,6 +1561,111 @@ mod tests {
                 (PropState::On, 1, 1),
             ]
         );
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    #[test]
+    fn use_sync_props_processes_effect_setup_and_cancel() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "Dioxus root props are moved into the render function."
+        )]
+        fn app(log: Arc<Mutex<Vec<&'static str>>>) -> Element {
+            let mut props = use_signal(|| EffectProps {
+                id: String::from("effects"),
+                action: EffectAction::None,
+                log: Arc::clone(&log),
+            });
+            let mut phase = use_signal(|| 0u8);
+
+            let _machine = use_machine_with_reactive_props::<EffectMachine>(props);
+            if phase() == 0 {
+                phase.set(1);
+                props.set(EffectProps {
+                    id: String::from("effects"),
+                    action: EffectAction::Start,
+                    log: Arc::clone(&log),
+                });
+            } else if phase() == 1 {
+                phase.set(2);
+                props.set(EffectProps {
+                    id: String::from("effects"),
+                    action: EffectAction::Replace,
+                    log: Arc::clone(&log),
+                });
+            } else if phase() == 2 {
+                phase.set(3);
+                props.set(EffectProps {
+                    id: String::from("effects"),
+                    action: EffectAction::Cancel,
+                    log: Arc::clone(&log),
+                });
+            }
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new_with_props(app, Arc::clone(&log));
+        dom.rebuild_in_place();
+        dom.mark_dirty(ScopeId::APP);
+        dom.render_immediate(&mut NoOpMutations);
+        dom.mark_dirty(ScopeId::APP);
+        dom.render_immediate(&mut NoOpMutations);
+        dom.mark_dirty(ScopeId::APP);
+        dom.render_immediate(&mut NoOpMutations);
+
+        assert_eq!(
+            effect_log(&log),
+            vec![
+                "setup:start",
+                "cleanup:start",
+                "setup:replace",
+                "cleanup:replace",
+            ]
+        );
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    #[test]
+    fn send_effects_run_cleanup_on_state_change() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "Dioxus root props are moved into the render function."
+        )]
+        fn app(log: Arc<Mutex<Vec<&'static str>>>) -> Element {
+            let machine = use_machine::<EffectMachine>(EffectProps {
+                id: String::from("effects"),
+                action: EffectAction::None,
+                log: Arc::clone(&log),
+            });
+
+            let state = *machine.state.peek();
+            let notify_count = machine.service.peek().context().notify_count;
+            if state == EffectState::Idle && notify_count == 0 {
+                machine.send.call(EffectEvent::Start);
+            } else if state == EffectState::Active && notify_count == 0 {
+                machine.send.call(EffectEvent::Notify);
+                machine.send.call(EffectEvent::Stop);
+            }
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new_with_props(app, Arc::clone(&log));
+        dom.rebuild_in_place();
+        dom.mark_dirty(ScopeId::APP);
+        dom.render_immediate(&mut NoOpMutations);
+        drop(dom);
+
+        assert_eq!(effect_log(&log), vec!["setup:start", "cleanup:start"]);
     }
 }
 

@@ -255,6 +255,8 @@ where
     M::Context: Clone + 'static,
     M::Props: Clone + PartialEq + 'static,
 {
+    let generated_id = use_hook(|| format!("ars-{}", dioxus_id_counter()));
+
     // Auto-inject ID if not provided by the user.
     // Convention: all Props structs have an `id: String` field.
     let props = {
@@ -262,7 +264,7 @@ where
         if p.id().is_empty() {
             // Same counter as use_stable_id() — inlined here since use_machine_inner
             // has no prefix context. Component-level code should use use_stable_id().
-            p.set_id(format!("ars-{}", use_hook(|| dioxus_id_counter())));
+            p.set_id(generated_id);
         }
         p
     };
@@ -282,28 +284,28 @@ where
     // Clone props for use_sync_props before moving into use_signal.
     // use_signal's closure runs exactly once (first mount), consuming `props`.
     let props_for_sync = props.clone();
-    let mut service_signal = use_signal(|| Service::<M>::new(props, env, messages));
-    let mut context_version: Signal<u64> = use_signal(|| 0u64);
+    let service_signal = use_signal(|| Service::<M>::new(props, env, messages));
+    let context_version: Signal<u64> = use_signal(|| 0u64);
 
     // Create state_signal BEFORE use_sync_props to ensure it exists if sync triggers re-render.
     // Use .peek() to avoid subscribing the component to service_signal changes.
     let initial_state = service_signal.peek().state().clone();
-    let mut state_signal = use_signal(|| initial_state);
+    let state_signal = use_signal(|| initial_state);
 
     // Effect cleanups keyed by effect name. On new effects: only replace effects
     // with matching names, leaving other effects running. On state change: drain ALL.
-    let mut effect_cleanups: Signal<HashMap<&'static str, Box<dyn FnOnce()>>> = use_signal(HashMap::new);
-
-    // Two-phase send callback construction:
-    // The send callback needs to pass itself (as an Rc) into PendingEffect::setup,
-    // but a closure cannot reference itself during construction. We solve this by:
-    // 1. Creating a Signal slot for the callback
-    // 2. Building the callback that reads from the slot
-    // 3. Storing the callback into the slot
-    let mut send_slot: Signal<Option<Callback<M::Event>>> = use_signal(|| None);
+    let effect_cleanups: Signal<HashMap<&'static str, Box<dyn FnOnce()>>> = use_signal(HashMap::new);
+    let pending_events = use_hook(|| Arc::new(Mutex::new(Vec::<M::Event>::new())));
+    let runtime = MachineRuntime {
+        service: service_signal,
+        state: state_signal,
+        context_version,
+        effect_cleanups,
+        pending_events: Arc::clone(&pending_events),
+    };
 
     // Automatically sync props on re-render (no manual use_sync_props needed)
-    use_sync_props(service_signal, props_for_sync, context_version, state_signal, send_slot, effect_cleanups);
+    use_sync_props(props_for_sync, runtime.clone());
 
     // INVARIANT: Effect cleanup functions MUST NOT call `send()`. Doing so would
     // re-enter the send callback while the signal is being written, causing a panic.
@@ -319,66 +321,12 @@ where
     // setup to the next microtask to avoid interleaving setup and cleanup.
 
     let send = use_hook(|| Callback::new(move |event: M::Event| {
-        // Phase 1: Process event in a scoped write
-        let (result, ctx_clone, props_clone) = {
-            let mut svc = service_signal.write();
-            let result = svc.send(event);
-            if result.state_changed {
-                *state_signal.write() = svc.state().clone();
-            }
-            if result.context_changed {
-                *context_version.write() += 1;
-            }
-            let ctx_clone = svc.context().clone();
-            let props_clone = svc.props().clone();
-            (result, ctx_clone, props_clone)
-        }; // write lock dropped here
-
-        // Phase 2: Set up pending effects OUTSIDE the borrow
-        #[cfg(not(feature = "ssr"))]
-        {
-            if result.state_changed {
-                // Full state change: drain ALL effects
-                for (_, cleanup) in effect_cleanups.write().drain() {
-                    cleanup();
-                }
-            } else if !result.pending_effects.is_empty() {
-                // context_only transition: only replace effects with matching names
-                let mut cleanups = effect_cleanups.write();
-                for effect in &result.pending_effects {
-                    if let Some(old_cleanup) = cleanups.remove(effect.name) {
-                        old_cleanup();
-                    }
-                }
-            }
-
-            let send_cb = send_slot.peek().clone();
-            let send_arc: Arc<dyn Fn(M::Event) + Send + Sync> = if let Some(cb) = send_cb {
-                Arc::new(move |e| cb.call(e))
-            } else {
-                debug_assert!(false, "send() called before send_slot initialized — event dropped");
-                return; // Silently drop during initialization window
-            };
-
-            for effect in result.pending_effects {
-                let name = effect.name;
-                let cleanup = effect.run(
-                    &ctx_clone,
-                    &props_clone,
-                    Arc::clone(&send_arc),
-                );
-                effect_cleanups.write().insert(name, cleanup);
-            }
-        }
+        dispatch_event::<M>(event, runtime.clone());
     }));
 
-    // Complete the two-phase pattern: store the send callback so effects can use it
-    use_hook(|| send_slot.set(Some(send)));
-
     use_drop(move || {
-        for (_, cleanup) in effect_cleanups.write().drain() {
-            cleanup();
-        }
+        let cleanups = effect_cleanups.write().drain().map(|(_, cleanup)| cleanup).collect();
+        service_signal.write().unmount(cleanups);
     });
 
     let result = UseMachineReturn {
@@ -399,6 +347,7 @@ where
     M::State: Clone + PartialEq + 'static,
     M::Context: Clone + 'static,
     M::Props: Clone + PartialEq + 'static,
+    M::Event: Send + 'static,
     M::Messages: Send + Sync + 'static,
 {
     let (result, _) = use_machine_inner::<M>(props);
@@ -464,22 +413,25 @@ ad-hoc sync logic.
 /// changes, plus pending effects. This function processes the result fully: updating
 /// `state_signal`, bumping `context_version`, and running any pending effects.
 ///
+/// Dioxus callbacks are runtime-local and do not satisfy the core effect API's
+/// `Send + Sync` send-handle contract. The adapter therefore bridges effect-originated
+/// follow-up events through a thread-safe queue (`Arc<Mutex<Vec<M::Event>>>`):
+/// effect setup closures push events into the queue, and the adapter drains that
+/// queue back through `dispatch_event()` on the component thread.
+///
 /// # Deadlock prevention
 /// Uses `try_write()` as a fallback: if `service.write()` would block (e.g., a
 /// read lock is already held due to incorrect ordering), the prop sync is deferred
 /// to the next microtask via `spawn()`. This prevents a hard deadlock
 /// but emits a debug warning — the component author should fix the ordering.
 pub fn use_sync_props<M: Machine + 'static>(
-    service: Signal<Service<M>>,
     current_props: M::Props,
-    mut context_version: Signal<u64>,
-    mut state_signal: Signal<M::State>,
-    send_slot: Signal<Option<Callback<M::Event>>>,
-    mut effect_cleanups: Signal<HashMap<&'static str, Box<dyn FnOnce()>>>,
+    runtime: MachineRuntime<M>,
 ) where
     M::Props: Clone + PartialEq + 'static,
     M::State: Clone + PartialEq + 'static,
     M::Context: Clone + 'static,
+    M::Event: Send + 'static,
 {
     let mut prev_props: Signal<Option<M::Props>> = use_signal(|| None);
 
@@ -490,30 +442,29 @@ pub fn use_sync_props<M: Machine + 'static>(
         if prev.is_some() {
             // Only sync after first render — init already has correct props.
             // Use try_write() to avoid deadlock if a read lock is held.
-            match service.try_write() {
+            match runtime.service.try_write() {
                 Some(mut svc) => {
                     let send_result = svc.set_props(current_props.clone());
                     if send_result.state_changed {
-                        state_signal.set(svc.state().clone());
+                        runtime.state.set(svc.state().clone());
                     }
                     if send_result.context_changed {
-                        *context_version.write() += 1;
+                        *runtime.context_version.write() += 1;
                     }
                     #[cfg(not(feature = "ssr"))]
                     {
                         let ctx_clone = svc.context().clone();
                         let props_clone = svc.props().clone();
                         drop(svc); // release write lock before running effects
-                        let send_cb = send_slot.peek().clone();
-                        if let Some(cb) = send_cb {
-                            let send_arc: Arc<dyn Fn(M::Event) + Send + Sync> =
-                                Arc::new(move |e| cb.call(e));
-                            for effect in send_result.pending_effects {
-                                let name = effect.name;
-                                let cleanup =
-                                    effect.run(&ctx_clone, &props_clone, Arc::clone(&send_arc));
-                                effect_cleanups.write().insert(name, cleanup);
-                            }
+                        let send_arc: Arc<dyn Fn(M::Event) + Send + Sync> = Arc::new({
+                            let pending_events = Arc::clone(&runtime.pending_events);
+                            move |event| pending_events.lock().expect("pending events").push(event)
+                        });
+                        for effect in send_result.pending_effects {
+                            let name = effect.name;
+                            let cleanup =
+                                effect.run(&ctx_clone, &props_clone, Arc::clone(&send_arc));
+                            runtime.effect_cleanups.write().insert(name, cleanup);
                         }
                     }
                 }
@@ -527,23 +478,24 @@ pub fn use_sync_props<M: Machine + 'static>(
                          Ensure use_sync_props runs before any derive() calls."
                     );
                     let props_deferred = current_props.clone();
-                    let mut svc_signal = service;
-                    let mut ctx_ver = context_version;
+                    let mut runtime = runtime.clone();
                     spawn(async move {
-                        let send_result = svc_signal.write().set_props(props_deferred);
+                        let send_result = runtime.service.write().set_props(props_deferred);
                         if send_result.state_changed {
-                            state_signal.set(svc_signal.read().state().clone());
+                            runtime.state.set(runtime.service.read().state().clone());
                         }
                         if send_result.context_changed {
-                            *ctx_ver.write() += 1;
+                            *runtime.context_version.write() += 1;
                         }
                         // Run pending effects (matching the happy-path branch).
                         #[cfg(not(feature = "ssr"))]
                         for effect in send_result.pending_effects {
-                            let ctx_clone = svc_signal.read().context().clone();
-                            let props_clone = svc_signal.read().props().clone();
-                            let send_arc: Arc<dyn Fn(_) + Send + Sync> =
-                                Arc::new(move |_e| { /* adapter wires send */ });
+                            let ctx_clone = runtime.service.read().context().clone();
+                            let props_clone = runtime.service.read().props().clone();
+                            let send_arc: Arc<dyn Fn(_) + Send + Sync> = Arc::new({
+                                let pending_events = Arc::clone(&runtime.pending_events);
+                                move |event| pending_events.lock().expect("pending events").push(event)
+                            });
                             let _cleanup = effect.run(&ctx_clone, &props_clone, send_arc);
                         }
                     });

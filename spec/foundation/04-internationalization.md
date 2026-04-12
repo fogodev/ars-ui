@@ -2517,7 +2517,7 @@ impl<M: ComponentMessages> MessagesRegistry<M> {
 
     /// Retrieve messages for the given locale, falling back through
     /// the locale's tag hierarchy:
-    ///   full BCP 47 tag → language+script → language-only → default.
+    ///   exact language identifier (extensions stripped) → language+script → language-only → default.
     ///
     /// The language+script level is critical for CJK locales:
     /// `zh-Hant-TW` → `zh-Hant` → `zh` → default
@@ -2528,8 +2528,10 @@ impl<M: ComponentMessages> MessagesRegistry<M> {
     /// use `get_with_stack(&LocaleStack)` which follows the canonical
     /// locale resolution order.
     pub fn get(&self, locale: &Locale) -> &M {
-        // Level 1: Full BCP 47 tag (e.g., "zh-Hant-TW")
-        if let Some(m) = self.messages.get(&locale.to_bcp47()) {
+        // Level 1: Exact language identifier without Unicode/runtime extensions
+        // (e.g., "en-US-u-hc-h12" resolves through "en-US").
+        let exact_tag = locale.to_data_locale().to_string();
+        if let Some(m) = self.messages.get(&exact_tag) {
             return m;
         }
         // Level 2: Language + script (e.g., "zh-Hant") — critical for CJK

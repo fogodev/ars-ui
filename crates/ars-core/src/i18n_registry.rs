@@ -47,7 +47,8 @@ impl<M: ComponentMessages> MessagesRegistry<M> {
     /// Retrieves messages for `locale`, following the locale-tag fallback chain.
     #[must_use]
     pub fn get(&self, locale: &Locale) -> &M {
-        if let Some(messages) = self.messages.get(&locale.to_bcp47()) {
+        let exact_tag = locale.to_data_locale().to_string();
+        if let Some(messages) = self.messages.get(&exact_tag) {
             return messages;
         }
 
@@ -193,6 +194,26 @@ mod tests {
 
         let locale = Locale::parse("ja-JP").expect("locale should parse");
         assert_eq!((registry.get(&locale).close_label)(&locale), "Close");
+    }
+
+    #[test]
+    fn messages_registry_ignores_unicode_extensions_for_exact_match() {
+        let registry = MessagesRegistry::new(DialogMessages::default())
+            .register(
+                "en",
+                DialogMessages {
+                    close_label: MessageFn::static_str("Fallback"),
+                },
+            )
+            .register(
+                "en-US",
+                DialogMessages {
+                    close_label: MessageFn::static_str("Exact"),
+                },
+            );
+
+        let locale = Locale::parse("en-US-u-hc-h12").expect("locale should parse");
+        assert_eq!((registry.get(&locale).close_label)(&locale), "Exact");
     }
 
     #[test]
