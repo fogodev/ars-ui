@@ -102,7 +102,7 @@ pub struct Context {
     /// Resolved translatable messages.
     pub messages: Messages,
     /// ICU data provider for locale-dependent formatting (month/weekday names, etc.).
-    pub provider: ArsRc<dyn IcuProvider>,
+    pub provider: Arc<dyn IcuProvider>,
     /// Override for first day of week (falls back to locale default).
     pub first_day_of_week: Weekday,
     /// Right-to-left layout.

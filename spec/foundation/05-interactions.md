@@ -248,7 +248,7 @@ Adapters MUST filter pointer events to process only the primary pointer, ignorin
 /// cloned events share the same propagation flag. Calling `continue_propagation()`
 /// on any clone affects the original and all other clones. `SharedFlag` is
 /// thread-safe on native targets (`Arc<AtomicBool>`) and lightweight on wasm
-/// (`ArsRc<AtomicBool>`).
+/// (`Arc<AtomicBool>`).
 /// Calling [`continue_propagation()`](Self::continue_propagation) on any
 /// clone affects the original and all other clones.
 #[derive(Clone, Debug)]
@@ -322,7 +322,7 @@ impl PressEvent {
 > ```
 >
 > `SharedFlag` already handles the wasm/native split internally
-> (`ArsRc<AtomicBool>` on wasm32, `Arc<AtomicBool>` on native). No manual
+> (`Arc<AtomicBool>` on wasm32, `Arc<AtomicBool>` on native). No manual
 > `cfg` switching is needed.
 
 ```rust
@@ -1038,8 +1038,10 @@ Focus interaction provides normalized `focus` and `blur` events and, critically,
 ```rust
 // ars-interactions/src/focus.rs
 
-use std::{cell::RefCell, rc::Rc};
-use ars_core::{ArsRc, AttrMap, Callback, DefaultModalityContext, ModalityContext};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
+
+use ars_core::{AttrMap, Callback, DefaultModalityContext, ModalityContext};
+
 use crate::PointerType;
 
 /// Configuration for focus interaction on a single element.
@@ -1050,7 +1052,7 @@ pub struct FocusConfig {
     pub disabled: bool,
 
     /// Shared modality context for the current provider root.
-    pub modality: ArsRc<dyn ModalityContext>,
+    pub modality: Arc<dyn ModalityContext>,
 
     /// Called when the element receives focus.
     pub on_focus: Option<Callback<dyn Fn(FocusEvent)>>,
@@ -1070,7 +1072,7 @@ pub struct FocusWithinConfig {
     pub disabled: bool,
 
     /// Shared modality context for the current provider root.
-    pub modality: ArsRc<dyn ModalityContext>,
+    pub modality: Arc<dyn ModalityContext>,
 
     /// Called when focus enters the container (any descendant focused).
     pub on_focus_within: Option<Callback<dyn Fn(FocusEvent)>>,
@@ -1086,7 +1088,7 @@ impl Default for FocusConfig {
     fn default() -> Self {
         Self {
             disabled: false,
-            modality: ArsRc::from_modality(DefaultModalityContext::new()),
+            modality: Arc::new(DefaultModalityContext::new()),
             on_focus: None,
             on_blur: None,
             on_focus_visible_change: None,
@@ -1098,7 +1100,7 @@ impl Default for FocusWithinConfig {
     fn default() -> Self {
         Self {
             disabled: false,
-            modality: ArsRc::from_modality(DefaultModalityContext::new()),
+            modality: Arc::new(DefaultModalityContext::new()),
             on_focus_within: None,
             on_blur_within: None,
             on_focus_within_visible_change: None,
@@ -1192,11 +1194,13 @@ Transitions:
 The key to `focus-visible` is tracking the most recent input modality for the active provider root. `ars-core` owns the instance-scoped modality state and `ars-dom` owns the browser listener lifecycle:
 
 ```rust
+use std::sync::Arc;
+
 use ars_a11y::FocusRing;
-use ars_core::{ArsRc, KeyboardKey, KeyModifiers, ModalityContext, PointerType};
+use ars_core::{KeyboardKey, KeyModifiers, ModalityContext, PointerType};
 
 pub struct ModalityManager {
-    modality: ArsRc<dyn ModalityContext>,
+    modality: Arc<dyn ModalityContext>,
     focus_ring: FocusRing,
 }
 

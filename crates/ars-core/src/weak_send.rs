@@ -4,8 +4,6 @@
 //! effects (timers, observers) do not prevent the component from being garbage
 //! collected.
 
-extern crate alloc;
-
 use core::fmt::{self, Debug};
 
 /// Weak event sender for safe effect cleanup.
@@ -14,16 +12,6 @@ use core::fmt::{self, Debug};
 /// long-lived effects (timers, observers) do not prevent the component
 /// from being garbage collected. Use [`call_if_alive`](WeakSend::call_if_alive)
 /// to dispatch events — it is a no-op if the component has been unmounted.
-#[cfg(target_arch = "wasm32")]
-pub struct WeakSend<T>(alloc::rc::Weak<dyn Fn(T)>);
-
-/// Weak event sender for safe effect cleanup.
-///
-/// `WeakSend<T>` wraps a weak reference to the send function so that
-/// long-lived effects (timers, observers) do not prevent the component
-/// from being garbage collected. Use [`call_if_alive`](WeakSend::call_if_alive)
-/// to dispatch events — it is a no-op if the component has been unmounted.
-#[cfg(not(target_arch = "wasm32"))]
 pub struct WeakSend<T>(alloc::sync::Weak<dyn Fn(T) + Send + Sync>);
 
 impl<T> WeakSend<T> {
@@ -37,14 +25,6 @@ impl<T> WeakSend<T> {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-impl<T> Clone for WeakSend<T> {
-    fn clone(&self) -> Self {
-        WeakSend(alloc::rc::Weak::clone(&self.0))
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 impl<T> Clone for WeakSend<T> {
     fn clone(&self) -> Self {
         WeakSend(alloc::sync::Weak::clone(&self.0))
@@ -57,22 +37,6 @@ impl<T> Debug for WeakSend<T> {
     }
 }
 
-/// Convenience constructors for [`WeakSend`] on wasm targets.
-#[cfg(target_arch = "wasm32")]
-impl<T: 'static> WeakSend<T> {
-    /// Create a `WeakSend` by downgrading the given `Rc`.
-    pub fn from_rc(rc: &alloc::rc::Rc<dyn Fn(T)>) -> Self {
-        WeakSend(alloc::rc::Rc::downgrade(rc))
-    }
-
-    /// Alias for [`from_rc`](Self::from_rc) — more discoverable name.
-    pub fn downgrade(rc: &alloc::rc::Rc<dyn Fn(T)>) -> Self {
-        Self::from_rc(rc)
-    }
-}
-
-/// Convenience constructors for [`WeakSend`] on native targets.
-#[cfg(not(target_arch = "wasm32"))]
 impl<T: 'static> WeakSend<T> {
     /// Create a `WeakSend` by downgrading the given `Arc`.
     pub fn from_arc(arc: &alloc::sync::Arc<dyn Fn(T) + Send + Sync>) -> Self {
@@ -85,14 +49,6 @@ impl<T: 'static> WeakSend<T> {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-impl<T: 'static> From<&alloc::rc::Rc<dyn Fn(T)>> for WeakSend<T> {
-    fn from(rc: &alloc::rc::Rc<dyn Fn(T)>) -> Self {
-        WeakSend(alloc::rc::Rc::downgrade(rc))
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 impl<T: 'static> From<&alloc::sync::Arc<dyn Fn(T) + Send + Sync>> for WeakSend<T> {
     fn from(arc: &alloc::sync::Arc<dyn Fn(T) + Send + Sync>) -> Self {
         WeakSend(alloc::sync::Arc::downgrade(arc))
@@ -101,14 +57,60 @@ impl<T: 'static> From<&alloc::sync::Arc<dyn Fn(T) + Send + Sync>> for WeakSend<T
 
 /// The strong send handle passed to effect setup closures.
 ///
-/// Adapters hold the strong `Rc`/`Arc` and pass it to
+/// Adapters hold the strong `Arc` and pass it to
 /// [`PendingEffect::run`](crate::PendingEffect::run). The setup closure
 /// downgrades to [`WeakSend`] internally.
 #[doc(hidden)]
-#[cfg(target_arch = "wasm32")]
-pub type StrongSend<E> = alloc::rc::Rc<dyn Fn(E)>;
-
-/// The strong send handle passed to effect setup closures.
-#[doc(hidden)]
-#[cfg(not(target_arch = "wasm32"))]
 pub type StrongSend<E> = alloc::sync::Arc<dyn Fn(E) + Send + Sync>;
+
+#[cfg(test)]
+mod tests {
+    use alloc::{format, sync::Arc};
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    #[test]
+    fn weak_send_calls_when_strong_sender_is_alive() {
+        let total = Arc::new(AtomicUsize::new(0));
+        let send: StrongSend<usize> = {
+            let total = Arc::clone(&total);
+            Arc::new(move |value| {
+                total.fetch_add(value, Ordering::SeqCst);
+            })
+        };
+
+        let weak = WeakSend::from_arc(&send);
+        weak.call_if_alive(2);
+        weak.call_if_alive(3);
+
+        assert_eq!(total.load(Ordering::SeqCst), 5);
+    }
+
+    #[test]
+    fn weak_send_is_noop_after_strong_sender_drops() {
+        let total = Arc::new(AtomicUsize::new(0));
+        let weak = {
+            let send: StrongSend<usize> = {
+                let total = Arc::clone(&total);
+                Arc::new(move |value| {
+                    total.fetch_add(value, Ordering::SeqCst);
+                })
+            };
+            WeakSend::downgrade(&send)
+        };
+
+        weak.call_if_alive(7);
+        assert_eq!(total.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn weak_send_clone_and_debug_are_stable() {
+        let send: StrongSend<usize> = Arc::new(|_| {});
+        let weak = WeakSend::from(&send);
+        let cloned = weak.clone();
+
+        assert!(cloned.0.upgrade().is_some());
+        assert_eq!(format!("{cloned:?}"), "WeakSend(..)");
+    }
+}

@@ -5,7 +5,7 @@
 //! [`FormContext`](crate::FormContext) to support async validation (e.g.,
 //! server-side uniqueness checks).
 
-use core::{future::Future, pin::Pin};
+use core::pin::Pin;
 
 use super::{result::Result, validator::Context};
 use crate::field::Value;

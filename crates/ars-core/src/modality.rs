@@ -951,7 +951,7 @@ impl ModalitySnapshot {
 /// Shared, instance-scoped modality contract.
 ///
 /// Requires `Send + Sync` so implementations can be wrapped in
-/// [`ArsRc`](crate::ArsRc) and safely shared across threads on native targets.
+/// [`Arc`](alloc::sync::Arc) and safely shared across threads on native targets.
 /// On wasm (single-threaded), `Send + Sync` is trivially satisfied.
 pub trait ModalityContext: Send + Sync {
     /// Returns a copy of the current modality snapshot.
@@ -1104,27 +1104,6 @@ impl ModalityContext for NullModalityContext {
     fn set_global_press_active(&self, _active: bool) {}
 
     fn clear(&self) {}
-}
-
-// ── ArsRc<dyn ModalityContext> constructor ──────────────────────────
-
-impl crate::ArsRc<dyn ModalityContext> {
-    /// Creates a trait-object `ArsRc` from any [`ModalityContext`] implementation.
-    ///
-    /// This enables erased construction without requiring nightly `CoerceUnsized`:
-    /// ```ignore
-    /// let ctx: ArsRc<dyn ModalityContext> = ArsRc::from_modality(DefaultModalityContext::new());
-    /// ```
-    pub fn from_modality(value: impl ModalityContext + 'static) -> Self {
-        #[cfg(target_arch = "wasm32")]
-        {
-            Self(alloc::rc::Rc::new(value))
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            Self(alloc::sync::Arc::new(value))
-        }
-    }
 }
 
 #[cfg(test)]

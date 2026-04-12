@@ -102,3 +102,21 @@ mod tests {
         assert_ne!(id1, id2);
     }
 }
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod wasm_tests {
+    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+    use super::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test]
+    fn use_id_produces_monotonic_sequence_on_wasm() {
+        let id1 = use_id("component");
+        let id2 = use_id("component");
+        assert!(id1.starts_with("component-"));
+        assert!(id2.starts_with("component-"));
+        assert_ne!(id1, id2);
+    }
+}

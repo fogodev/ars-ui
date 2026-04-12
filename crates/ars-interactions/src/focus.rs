@@ -9,9 +9,14 @@
 //! elements: the container is marked as focus-containing when any descendant has
 //! focus, matching CSS `:focus-within` but exposed as a data attribute.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    fmt::{self, Debug},
+    rc::Rc,
+    sync::Arc,
+};
 
-use ars_core::{ArsRc, AttrMap, Callback, HtmlAttr, ModalityContext};
+use ars_core::{AttrMap, Callback, HtmlAttr, ModalityContext};
 
 use crate::PointerType;
 
@@ -97,13 +102,13 @@ pub struct FocusEvent {
 /// Callbacks use [`Callback`] for automatic platform-appropriate pointer
 /// type (`Rc` on wasm, `Arc` on native) and built-in `Clone`, `Debug`, and
 /// `PartialEq` (by pointer identity).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct FocusConfig {
     /// Whether the element is disabled. Disabled elements receive no focus events.
     pub disabled: bool,
 
     /// Shared modality context for the current provider root.
-    pub modality: ArsRc<dyn ModalityContext>,
+    pub modality: Arc<dyn ModalityContext>,
 
     /// Called when the element receives focus.
     pub on_focus: Option<Callback<dyn Fn(FocusEvent)>>,
@@ -115,11 +120,33 @@ pub struct FocusConfig {
     pub on_focus_visible_change: Option<Callback<dyn Fn(bool)>>,
 }
 
+impl Debug for FocusConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FocusConfig")
+            .field("disabled", &self.disabled)
+            .field("modality", &"Arc<dyn ModalityContext>")
+            .field("on_focus", &self.on_focus)
+            .field("on_blur", &self.on_blur)
+            .field("on_focus_visible_change", &self.on_focus_visible_change)
+            .finish()
+    }
+}
+
+impl PartialEq for FocusConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.disabled == other.disabled
+            && Arc::ptr_eq(&self.modality, &other.modality)
+            && self.on_focus == other.on_focus
+            && self.on_blur == other.on_blur
+            && self.on_focus_visible_change == other.on_focus_visible_change
+    }
+}
+
 impl Default for FocusConfig {
     fn default() -> Self {
         Self {
             disabled: false,
-            modality: ArsRc::from_modality(ars_core::DefaultModalityContext::new()),
+            modality: Arc::new(ars_core::DefaultModalityContext::new()),
             on_focus: None,
             on_blur: None,
             on_focus_visible_change: None,
@@ -136,13 +163,13 @@ impl Default for FocusConfig {
 /// Callbacks use [`Callback`] for automatic platform-appropriate pointer
 /// type (`Rc` on wasm, `Arc` on native) and built-in `Clone`, `Debug`, and
 /// `PartialEq` (by pointer identity).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct FocusWithinConfig {
     /// Whether the container is disabled.
     pub disabled: bool,
 
     /// Shared modality context for the current provider root.
-    pub modality: ArsRc<dyn ModalityContext>,
+    pub modality: Arc<dyn ModalityContext>,
 
     /// Called when focus enters the container (any descendant focused).
     pub on_focus_within: Option<Callback<dyn Fn(FocusEvent)>>,
@@ -154,11 +181,36 @@ pub struct FocusWithinConfig {
     pub on_focus_within_visible_change: Option<Callback<dyn Fn(bool)>>,
 }
 
+impl Debug for FocusWithinConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FocusWithinConfig")
+            .field("disabled", &self.disabled)
+            .field("modality", &"Arc(..)")
+            .field("on_focus_within", &self.on_focus_within)
+            .field("on_blur_within", &self.on_blur_within)
+            .field(
+                "on_focus_within_visible_change",
+                &self.on_focus_within_visible_change,
+            )
+            .finish()
+    }
+}
+
+impl PartialEq for FocusWithinConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.disabled == other.disabled
+            && Arc::ptr_eq(&self.modality, &other.modality)
+            && self.on_focus_within == other.on_focus_within
+            && self.on_blur_within == other.on_blur_within
+            && self.on_focus_within_visible_change == other.on_focus_within_visible_change
+    }
+}
+
 impl Default for FocusWithinConfig {
     fn default() -> Self {
         Self {
             disabled: false,
-            modality: ArsRc::from_modality(ars_core::DefaultModalityContext::new()),
+            modality: Arc::new(ars_core::DefaultModalityContext::new()),
             on_focus_within: None,
             on_blur_within: None,
             on_focus_within_visible_change: None,
@@ -301,14 +353,25 @@ pub fn use_focus_within(config: FocusWithinConfig) -> FocusWithinResult {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, rc::Rc};
+    use std::{
+        cell::RefCell,
+        rc::Rc,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
 
     use ars_core::{
-        ArsRc, AttrValue, Callback, DefaultModalityContext, HtmlAttr, KeyModifiers, KeyboardKey,
+        AttrValue, Callback, DefaultModalityContext, HtmlAttr, KeyModifiers, KeyboardKey,
         ModalityContext, NullModalityContext, PointerType,
     };
 
     use super::*;
+
+    fn observe_focus(_: FocusEvent) {}
+
+    fn observe_bool(_: bool) {}
 
     // ── FocusState tests ────────────────────────────────────────────
 
@@ -483,21 +546,41 @@ mod tests {
 
     #[test]
     fn focus_config_debug_with_callbacks_shows_callback() {
+        let focus_calls = Arc::new(AtomicUsize::new(0));
+        let blur_calls = Arc::new(AtomicUsize::new(0));
         let config = FocusConfig {
-            on_focus: Some(Callback::new(|_: FocusEvent| {})),
-            on_blur: Some(Callback::new(|_: FocusEvent| {})),
+            on_focus: Some({
+                let focus_calls = Arc::clone(&focus_calls);
+                Callback::new(move |_: FocusEvent| {
+                    focus_calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            on_blur: Some({
+                let blur_calls = Arc::clone(&blur_calls);
+                Callback::new(move |_: FocusEvent| {
+                    blur_calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
             ..FocusConfig::default()
         };
         let debug = format!("{config:?}");
         assert!(debug.contains("on_focus: Some(Callback(..))"));
         assert!(debug.contains("on_blur: Some(Callback(..))"));
+        let event = FocusEvent {
+            event_type: FocusEventType::Focus,
+            pointer_type: Some(PointerType::Mouse),
+        };
+        config.on_focus.as_ref().expect("callback")(event.clone());
+        config.on_blur.as_ref().expect("callback")(event);
+        assert_eq!(focus_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(blur_calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
     fn focus_config_clone_shares_modality() {
         let config = FocusConfig::default();
         let cloned = config.clone();
-        assert_eq!(config.modality, cloned.modality);
+        assert!(Arc::ptr_eq(&config.modality, &cloned.modality));
     }
 
     #[test]
@@ -511,10 +594,56 @@ mod tests {
     fn focus_config_partial_eq_different_modality() {
         let config1 = FocusConfig::default();
         let config2 = FocusConfig {
-            modality: ArsRc::from_modality(NullModalityContext),
+            modality: Arc::new(NullModalityContext),
             ..FocusConfig::default()
         };
         assert_ne!(config1, config2);
+    }
+
+    #[test]
+    fn focus_config_partial_eq_detects_disabled_mismatch() {
+        let left = FocusConfig::default();
+        let right = FocusConfig {
+            disabled: true,
+            ..FocusConfig::default()
+        };
+        assert_ne!(left, right);
+    }
+
+    #[test]
+    fn focus_config_partial_eq_detects_focus_callback_mismatch() {
+        let mut left = FocusConfig::default();
+        let mut right = left.clone();
+        left.on_focus = Some(Callback::new(observe_focus));
+        right.on_focus = Some(Callback::new(observe_focus));
+        assert_ne!(left, right);
+    }
+
+    #[test]
+    fn focus_config_partial_eq_detects_blur_callback_mismatch() {
+        let mut left = FocusConfig::default();
+        let mut right = left.clone();
+        let shared = Callback::new(observe_focus);
+        left.on_focus = Some(shared.clone());
+        right.on_focus = Some(shared);
+        left.on_blur = Some(Callback::new(observe_focus));
+        right.on_blur = Some(Callback::new(observe_focus));
+        assert_ne!(left, right);
+    }
+
+    #[test]
+    fn focus_config_partial_eq_detects_visible_change_callback_mismatch() {
+        let mut left = FocusConfig::default();
+        let mut right = left.clone();
+        let shared_focus = Callback::new(observe_focus);
+        left.on_focus = Some(shared_focus.clone());
+        right.on_focus = Some(shared_focus);
+        let shared_blur = Callback::new(observe_focus);
+        left.on_blur = Some(shared_blur.clone());
+        right.on_blur = Some(shared_blur);
+        left.on_focus_visible_change = Some(Callback::new(observe_bool));
+        right.on_focus_visible_change = Some(Callback::new(observe_bool));
+        assert_ne!(left, right);
     }
 
     // ── FocusWithinConfig tests ─────────────────────────────────────
@@ -534,6 +663,52 @@ mod tests {
         let debug = format!("{config:?}");
         assert!(debug.contains("disabled: false"));
         assert!(debug.contains("on_focus_within: None"));
+    }
+
+    #[test]
+    fn focus_within_config_partial_eq_detects_disabled_mismatch() {
+        let left = FocusWithinConfig::default();
+        let right = FocusWithinConfig {
+            disabled: true,
+            ..FocusWithinConfig::default()
+        };
+        assert_ne!(left, right);
+    }
+
+    #[test]
+    fn focus_within_config_partial_eq_detects_focus_callback_mismatch() {
+        let mut left = FocusWithinConfig::default();
+        let mut right = left.clone();
+        left.on_focus_within = Some(Callback::new(observe_focus));
+        right.on_focus_within = Some(Callback::new(observe_focus));
+        assert_ne!(left, right);
+    }
+
+    #[test]
+    fn focus_within_config_partial_eq_detects_blur_callback_mismatch() {
+        let mut left = FocusWithinConfig::default();
+        let mut right = left.clone();
+        let shared_focus = Callback::new(observe_focus);
+        left.on_focus_within = Some(shared_focus.clone());
+        right.on_focus_within = Some(shared_focus);
+        left.on_blur_within = Some(Callback::new(observe_focus));
+        right.on_blur_within = Some(Callback::new(observe_focus));
+        assert_ne!(left, right);
+    }
+
+    #[test]
+    fn focus_within_config_partial_eq_detects_visible_change_callback_mismatch() {
+        let mut left = FocusWithinConfig::default();
+        let mut right = left.clone();
+        let shared_focus = Callback::new(observe_focus);
+        left.on_focus_within = Some(shared_focus.clone());
+        right.on_focus_within = Some(shared_focus);
+        let shared_blur = Callback::new(observe_focus);
+        left.on_blur_within = Some(shared_blur.clone());
+        right.on_blur_within = Some(shared_blur);
+        left.on_focus_within_visible_change = Some(Callback::new(observe_bool));
+        right.on_focus_within_visible_change = Some(Callback::new(observe_bool));
+        assert_ne!(left, right);
     }
 
     // ── FocusResult / current_attrs tests ───────────────────────────
@@ -586,7 +761,7 @@ mod tests {
     #[test]
     fn focus_result_current_attrs_programmatic_visible_depends_on_modality() {
         let config = FocusConfig {
-            modality: ArsRc::from_modality(DefaultModalityContext::new()),
+            modality: Arc::new(DefaultModalityContext::new()),
             ..FocusConfig::default()
         };
 
@@ -762,7 +937,7 @@ mod tests {
     fn focus_within_config_clone_shares_modality() {
         let config = FocusWithinConfig::default();
         let cloned = config.clone();
-        assert_eq!(config.modality, cloned.modality);
+        assert!(Arc::ptr_eq(&config.modality, &cloned.modality));
     }
 
     #[test]
@@ -776,7 +951,7 @@ mod tests {
     fn focus_within_config_partial_eq_different_modality() {
         let config1 = FocusWithinConfig::default();
         let config2 = FocusWithinConfig {
-            modality: ArsRc::from_modality(NullModalityContext),
+            modality: Arc::new(NullModalityContext),
             ..FocusWithinConfig::default()
         };
         assert_ne!(config1, config2);

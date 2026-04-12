@@ -18,17 +18,21 @@ use alloc::string::String;
 
 mod bidi;
 mod locale;
+mod locale_stack;
 mod number;
+mod translate;
 mod weekday;
 
 pub use bidi::{IsolateDirection, isolate_text_safe};
 pub use locale::{Locale, LocaleParseError, locales};
+pub use locale_stack::LocaleStack;
 #[cfg(feature = "std")]
 pub use number::get_number_formatter;
 pub use number::{
     CurrencyCode, MeasureUnit, NumberFormatOptions, NumberFormatter, NumberStyle, RoundingMode,
     SignDisplay, UnitDisplay, decimal_and_group_separators, normalize_digits, parse_locale_number,
 };
+pub use translate::Translate;
 pub use weekday::Weekday;
 
 /// Text and layout direction.
@@ -93,23 +97,12 @@ pub enum Orientation {
 ///
 /// Production uses `Icu4xProvider` with CLDR data; tests and non-date-time
 /// components use [`StubIcuProvider`]. The trait is object-safe so it can be
-/// stored as `ArsRc<dyn IcuProvider>` in `Env`.
+/// stored as `Arc<dyn IcuProvider>` in `Env`.
 ///
-/// On native targets, requires `Send + Sync` for multi-threaded runtimes.
-/// On WASM (single-threaded), these bounds are omitted.
-#[cfg(not(target_arch = "wasm32"))]
+/// Requires `Send + Sync` on every target so adapters and shared ownership
+/// abstractions can treat ICU providers uniformly across native and wasm
+/// builds.
 pub trait IcuProvider: Send + Sync + 'static {}
-
-/// Trait abstracting ICU4X data provider for calendar/locale operations.
-///
-/// Production uses `Icu4xProvider` with CLDR data; tests and non-date-time
-/// components use [`StubIcuProvider`]. The trait is object-safe so it can be
-/// stored as `ArsRc<dyn IcuProvider>` in `Env`.
-///
-/// On native targets, requires `Send + Sync` for multi-threaded runtimes.
-/// On WASM (single-threaded), these bounds are omitted.
-#[cfg(target_arch = "wasm32")]
-pub trait IcuProvider: 'static {}
 
 /// English-only stub provider for tests and non-ICU4X builds.
 ///

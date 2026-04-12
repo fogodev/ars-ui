@@ -2656,12 +2656,12 @@ use ars_core::{KeyboardKey, KeyModifiers, ModalityContext, PointerType};
 /// stay in sync. Adapters MUST call these methods instead of updating the
 /// shared modality context or `FocusRing` independently.
 pub struct ModalityManager {
-    modality: ArsRc<dyn ModalityContext>,
+    modality: Arc<dyn ModalityContext>,
     focus_ring: FocusRing,
 }
 
 impl ModalityManager {
-    pub fn new(modality: ArsRc<dyn ModalityContext>) -> Self {
+    pub fn new(modality: Arc<dyn ModalityContext>) -> Self {
         Self { modality, focus_ring: FocusRing::new() }
     }
 

@@ -13,8 +13,7 @@
 //! - [`BindableValue`] — marker trait for values usable with [`Bindable`]
 //! - [`TransitionPlan`] — declarative transition result with closures, effects, and follow-ups
 //! - [`PendingEffect`] — named side effect with setup closure and cleanup lifecycle
-//! - [`ArsRc`] — platform-conditional shared pointer (`Rc` on wasm, `Arc` on native)
-//! - [`Callback`] — shared callback wrapper (`Rc` on wasm, `Arc` on native)
+//! - [`Callback`] — shared callback wrapper built on [`Arc`]
 //! - [`SharedState`] — shared interior-mutable state (`Rc<RefCell>` on wasm, `Arc<Mutex>` on native)
 //! - [`WeakSend`] — weak event sender for safe effect cleanup
 //! - [`SendResult`] — structured result from [`Service::send`]
@@ -25,18 +24,18 @@
 extern crate alloc;
 extern crate self as ars_core;
 
-use alloc::{boxed::Box, collections::VecDeque, string::String, vec::Vec};
+use alloc::{boxed::Box, collections::VecDeque, string::String, sync::Arc, vec::Vec};
 use core::fmt::{self, Debug};
 
 mod callback;
 pub mod companion_css;
 mod connect;
+mod i18n_registry;
 mod message_fn;
 pub mod modality;
 pub mod platform;
 pub mod provider;
 mod shared_flag;
-mod shared_ptr;
 mod shared_state;
 mod weak_send;
 
@@ -48,7 +47,6 @@ pub mod __private {
 }
 
 // ── Derive macros ───────────────────────────────────────────────────
-
 #[doc(inline)]
 pub use ars_derive::{ComponentPart, HasId};
 // ── External re-exports ─────────────────────────────────────────────
@@ -63,6 +61,7 @@ pub use connect::{
     AriaAttr, AttrMap, AttrMapParts, AttrValue, CssProperty, EventOptions, HtmlAttr, HtmlEvent,
     StyleStrategy, UserAttrs, data,
 };
+pub use i18n_registry::{I18nRegistries, MessagesRegistry, resolve_messages};
 pub use message_fn::{ComponentMessages, MessageFn};
 // ── Modality ────────────────────────────────────────────────────────
 pub use modality::{
@@ -76,7 +75,6 @@ pub use platform::{
 // ── Provider ────────────────────────────────────────────────────────
 pub use provider::{ArsContext, ColorMode};
 pub use shared_flag::SharedFlag;
-pub use shared_ptr::ArsRc;
 pub use shared_state::SharedState;
 pub use weak_send::{StrongSend, WeakSend};
 
@@ -221,7 +219,7 @@ impl<M: Machine> Default for TransitionPlan<M> {
 impl<M: Machine> TransitionPlan<M> {
     /// Creates a plan that transitions to a new state.
     #[must_use]
-    pub fn to(state: M::State) -> Self {
+    pub const fn to(state: M::State) -> Self {
         Self {
             target: Some(state),
             apply: None,
@@ -237,7 +235,7 @@ impl<M: Machine> TransitionPlan<M> {
     /// Useful as a builder starting point — chain `.apply()`, `.then()`,
     /// and `.with_effect()` to configure.
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             target: None,
             apply: None,
@@ -313,7 +311,7 @@ impl<M: Machine> TransitionPlan<M> {
 
     /// Returns a short string label for logging/debugging.
     #[must_use]
-    pub fn debug_summary(&self) -> &'static str {
+    pub const fn debug_summary(&self) -> &'static str {
         match (self.target.is_some(), self.apply.is_some()) {
             (true, _) => "to",
             (false, true) => "context_only",
@@ -517,41 +515,28 @@ pub trait ConnectApi {
 /// all environment values arrive through this struct.
 ///
 /// Non-date-time components ignore `icu_provider` (it defaults to [`StubIcuProvider`]).
-#[derive(Debug)]
 pub struct Env {
     /// The resolved locale from `ArsProvider`.
     pub locale: Locale,
     /// Calendar/locale data provider for date-time formatting.
     /// Defaults to [`StubIcuProvider`] (English-only, zero dependencies).
-    pub icu_provider: ArsRc<dyn IcuProvider>,
+    pub icu_provider: Arc<dyn IcuProvider>,
+}
+
+impl Debug for Env {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Env")
+            .field("locale", &self.locale)
+            .field("icu_provider", &"Arc(..)")
+            .finish()
+    }
 }
 
 impl Default for Env {
     fn default() -> Self {
         Self {
             locale: ars_i18n::locales::en_us(),
-            icu_provider: ArsRc::from_icu_provider(StubIcuProvider),
-        }
-    }
-}
-
-// ── ArsRc<dyn IcuProvider> constructor ─────────────────────────────
-
-impl ArsRc<dyn IcuProvider> {
-    /// Creates a trait-object `ArsRc` from any [`IcuProvider`] implementation.
-    ///
-    /// This enables erased construction without requiring nightly `CoerceUnsized`:
-    /// ```ignore
-    /// let provider: ArsRc<dyn IcuProvider> = ArsRc::from_icu_provider(StubIcuProvider);
-    /// ```
-    pub fn from_icu_provider(value: impl IcuProvider) -> Self {
-        #[cfg(target_arch = "wasm32")]
-        {
-            Self(alloc::rc::Rc::new(value))
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            Self(alloc::sync::Arc::new(value))
+            icu_provider: Arc::new(StubIcuProvider),
         }
     }
 }
@@ -2293,6 +2278,96 @@ mod tests {
         assert_eq!(
             b.get(),
             &vec![String::from("controlled"), String::from("pending")]
+        );
+    }
+
+    #[test]
+    fn pending_effect_new_bridges_strong_send_to_weak_send() {
+        use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+        let observed = Arc::new(AtomicBool::new(false));
+        let cleanup_calls = Arc::new(AtomicUsize::new(0));
+        let effect = PendingEffect::<ToggleMachine>::new("notify", {
+            let cleanup_calls = Arc::clone(&cleanup_calls);
+            move |_ctx, _props, send| {
+                send.call_if_alive(ToggleEvent::Toggle);
+                let cleanup_calls = Arc::clone(&cleanup_calls);
+                Box::new(move || {
+                    cleanup_calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }
+        });
+
+        let send: StrongSend<ToggleEvent> = {
+            let observed = Arc::clone(&observed);
+            Arc::new(move |_event| {
+                observed.store(true, Ordering::SeqCst);
+            })
+        };
+        let props = ToggleProps {
+            id: String::from("toggle"),
+        };
+        let (_state, context) = ToggleMachine::init(&props, &Env::default(), &());
+
+        let cleanup = effect.run(&context, &props, send);
+        assert!(observed.load(Ordering::SeqCst));
+
+        cleanup();
+        assert_eq!(cleanup_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn pending_effect_named_is_noop_and_debuggable() {
+        use alloc::format;
+
+        let effect = PendingEffect::<ToggleMachine>::named("focus");
+        assert_eq!(
+            format!("{effect:?}"),
+            "PendingEffect { name: \"focus\", target_state: None, setup: \"<closure>\" }"
+        );
+
+        let props = ToggleProps {
+            id: String::from("toggle"),
+        };
+        let (_state, context) = ToggleMachine::init(&props, &Env::default(), &());
+        let send: StrongSend<ToggleEvent> = Arc::new(|_| {});
+        let cleanup = effect.run(&context, &props, send);
+        cleanup();
+    }
+
+    #[test]
+    fn transition_plan_helpers_record_effects_and_debug_state() {
+        use alloc::format;
+
+        let plan = TransitionPlan::<ToggleMachine>::new()
+            .then(ToggleEvent::Toggle)
+            .with_named_effect("announce", |_ctx, _props, _send| no_cleanup())
+            .cancel_effect("timer");
+
+        assert_eq!(plan.debug_summary(), "none");
+        assert_eq!(plan.then_send, vec![ToggleEvent::Toggle]);
+        assert_eq!(plan.effects.len(), 1);
+        assert_eq!(plan.effects[0].name, "announce");
+        assert_eq!(plan.cancel_effects, vec!["timer"]);
+        assert_eq!(
+            format!("{plan:?}"),
+            "TransitionPlan { target: None, apply: \"None\", apply_description: None, then_send: [Toggle], effects: [\"announce\"], cancel_effects: [\"timer\"] }"
+        );
+    }
+
+    #[test]
+    fn transition_plan_debug_summary_distinguishes_plan_kinds() {
+        assert_eq!(
+            TransitionPlan::<ToggleMachine>::new().debug_summary(),
+            "none"
+        );
+        assert_eq!(
+            TransitionPlan::<ToggleMachine>::context_only(|_ctx| {}).debug_summary(),
+            "context_only"
+        );
+        assert_eq!(
+            TransitionPlan::<ToggleMachine>::to(ToggleState::On).debug_summary(),
+            "to"
         );
     }
 

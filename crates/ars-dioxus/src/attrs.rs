@@ -9,11 +9,11 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
-use ars_core::{
-    ArsContext, AttrMap, AttrMapParts, AttrValue, CssProperty, HtmlAttr, StyleStrategy,
-};
+use ars_core::{AttrMap, AttrMapParts, AttrValue, CssProperty, HtmlAttr, StyleStrategy};
 use dioxus::prelude::*;
 use dioxus_core::AttributeValue;
+
+use crate::provider::{ArsContext, warn_missing_provider};
 
 // ── Attribute name interning ────────────────────────────────────────
 
@@ -211,20 +211,6 @@ pub fn append_nonce_css(css: String) {
 }
 
 // ── Style strategy hook ─────────────────────────────────────────────
-
-/// Emit a debug-mode warning when a hook is called without an `ArsProvider`
-/// ancestor in the component tree.
-#[cfg(feature = "debug")]
-fn warn_missing_provider(hook: &str) {
-    log::warn!(
-        "[ars-ui] {hook}() called without ArsProvider. \
-         Returning default value. Wrap your app root in <ArsProvider>."
-    );
-}
-
-/// No-op in release builds.
-#[cfg(not(feature = "debug"))]
-const fn warn_missing_provider(_hook: &str) {}
 
 /// Read the current style strategy from Dioxus context.
 ///
@@ -535,9 +521,9 @@ mod tests {
     #[test]
     fn use_style_strategy_reads_context() {
         fn app() -> Element {
-            use ars_core::{
-                ArsContext, ArsRc, ColorMode, DefaultModalityContext, NullPlatformEffects,
-            };
+            use std::sync::Arc;
+
+            use ars_core::{ColorMode, I18nRegistries, NullPlatformEffects};
             use ars_i18n::{Direction, locales};
 
             let ctx = ArsContext::new(
@@ -549,8 +535,10 @@ mod tests {
                 None,
                 None,
                 None,
-                ArsRc::from_platform(NullPlatformEffects),
-                ArsRc::from_modality(DefaultModalityContext::new()),
+                Arc::new(NullPlatformEffects),
+                Arc::new(ars_i18n::StubIcuProvider),
+                Arc::new(I18nRegistries::new()),
+                Arc::new(crate::provider::NullPlatform),
                 StyleStrategy::Cssom,
             );
             use_context_provider(|| ctx);
@@ -564,5 +552,50 @@ mod tests {
 
         let mut dom = VirtualDom::new(app);
         dom.rebuild_in_place();
+    }
+}
+
+#[cfg(all(test, feature = "web", target_arch = "wasm32"))]
+mod wasm_tests {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+    use super::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    fn document() -> web_sys::Document {
+        web_sys::window()
+            .and_then(|window| window.document())
+            .expect("browser document should exist")
+    }
+
+    #[wasm_bindgen_test]
+    fn apply_styles_cssom_sets_style_properties() {
+        let element = document()
+            .create_element("div")
+            .expect("create_element should succeed")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("element should cast to HtmlElement");
+        let styles = vec![
+            (CssProperty::Width, String::from("120px")),
+            (CssProperty::Display, String::from("block")),
+        ];
+
+        apply_styles_cssom(&element, &styles);
+
+        let style = element.style();
+        assert_eq!(
+            style
+                .get_property_value("width")
+                .expect("width should be readable"),
+            "120px"
+        );
+        assert_eq!(
+            style
+                .get_property_value("display")
+                .expect("display should be readable"),
+            "block"
+        );
     }
 }

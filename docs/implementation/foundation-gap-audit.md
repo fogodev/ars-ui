@@ -334,7 +334,7 @@ The following spec sections are fully implemented and match the spec contract:
 
 - §1 Crate Structure (all 13 crates, dependency graph, feature flags, no_std compatibility)
 - §2.1 Machine trait, HasId, ComponentPart, ConnectApi, Env
-- §2.2 TransitionPlan, PendingEffect, CleanupFn, no_cleanup(), Callback, MessageFn, WeakSend, SharedState, SharedFlag, ArsRc
+- §2.2 TransitionPlan, PendingEffect, CleanupFn, no_cleanup(), Callback, MessageFn, WeakSend, SharedState, SharedFlag
 - §2.2.7 PlatformEffects trait, NullPlatformEffects, MissingProviderEffects, Rect, TimerHandle
 - §2.2.8 Context snapshot semantics (encoded in PendingEffect::run API)
 - §2.3 Service runtime (new, new_hydrated, send, set_props, unmount, drain_queue, SendResult)

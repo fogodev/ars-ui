@@ -204,12 +204,18 @@ Desktop adapters (Dioxus Desktop, Tauri) MUST ensure that each machine instance 
 - Enable LTO (`lto = true`) and `codegen-units = 1` in the workspace release profile.
 - ICU4X data tables are the largest contributor to binary size; WASM builds SHOULD use the `web-intl` feature (browser `Intl` API) instead of bundling ICU4X data.
 
-### 1.5 Platform-Specific Callback Constraints
+### 1.5 Shared Ownership and Callback Constraints
 
-`ars-core` uses `Rc` for shared ownership (callbacks, `send` closures, context values) because the primary target is single-threaded WASM. However, native desktop targets (Dioxus Desktop, Tauri) often require `Send + Sync` bounds on callbacks passed across thread boundaries. This creates a platform-specific constraint:
+`ars-core` standardizes on `Arc`-backed shared ownership and `Send + Sync` callback
+bounds across all targets, including WASM. This keeps the public API identical
+between web and native adapters, matches Leptos's context/storage requirements,
+and avoids per-target trait-bound drift in component props and provider state.
 
-- **WASM (`target_arch = "wasm32"`):** `Rc<dyn Fn(T)>` is sufficient. No `Send` or `Sync` bounds are needed because WASM is inherently single-threaded.
-- **Native (non-WASM):** Frameworks may require `Send + Sync` on closures and shared state. `Rc` does not implement `Send` or `Sync`, so closures capturing `Rc<RefCell<T>>` will fail to compile on native targets even though they compile on WASM.
+- **All targets:** shared callback/context resources use `Arc<T>` directly.
+- **All targets:** callback and message closure trait objects carry `Send + Sync + 'static`.
+- **Practical implication:** closures that capture `Rc<RefCell<T>>` are not valid in
+  ars-ui public APIs; use `Arc<Mutex<T>>`, atomics, or framework-owned signal types
+  that satisfy the stronger contract.
 
 **The problem in practice:**
 
@@ -270,7 +276,9 @@ mod platform_safety {
 
 This pattern surfaces platform incompatibilities at compile time on any target, rather than discovering them only when building for desktop.
 
-> **Design note:** The `cfg`-gated `Callback<T>` type (§1.4.1, "Thread Safety for Desktop Adapters") already switches between `Rc`-based and `Arc`-based implementations. The compile-time assertion above verifies that the concrete `Callback` type used by a given adapter satisfies the bounds required by its target platform.
+> **Design note:** `Callback<T>` already uses the project-wide `Arc`
+> contract. The compile-time assertion above verifies that closures captured by a
+> given adapter actually satisfy the required `Send + Sync` bounds.
 
 **`SharedState<T>` — interior-mutable shared state:**
 
@@ -451,14 +459,14 @@ pub struct Env {
     pub locale: Locale,
     /// Calendar/locale data provider for date-time formatting.
     /// Defaults to `StubIcuProvider` (English-only, zero dependencies).
-    pub icu_provider: ArsRc<dyn IcuProvider>,
+    pub icu_provider: Arc<dyn IcuProvider>,
 }
 
 impl Default for Env {
     fn default() -> Self {
         Self {
             locale: Locale::parse("en-US").expect("en-US is a valid BCP-47 tag"),
-            icu_provider: ArsRc::from_icu_provider(StubIcuProvider),
+            icu_provider: Arc::new(StubIcuProvider),
         }
     }
 }
@@ -542,9 +550,9 @@ pub trait Machine: Sized + 'static {
 >
 > **Compile-Time Enforcement**: `Api<'a>` does NOT implement `Clone` or `Copy`. Adapters MUST NOT store `Api` in reactive signals, contexts, or any container that outlives the current render cycle.
 >
-> **Violation**: Storing `Api<'a>` beyond its scope is undefined behavior and will cause use-after-free. If persistent access to machine operations is needed, store the `send: Rc<dyn Fn(Event)>` closure directly instead.
+> **Violation**: Storing `Api<'a>` beyond its scope is undefined behavior and will cause use-after-free. If persistent access to machine operations is needed, store the `send: Arc<dyn Fn(Event) + Send + Sync>` closure directly instead.
 >
-> **Ergonomic persistent access**: For cases where persistent access to machine operations is needed, store `send: Rc<dyn Fn(Event)>` directly (extractable from the `Service` via `Service::send_fn()`). Do not create ad-hoc wrapper types — the adapter's `use_machine` hook already provides the ergonomic access layer.
+> **Ergonomic persistent access**: For cases where persistent access to machine operations is needed, store `send: Arc<dyn Fn(Event) + Send + Sync>` directly (extractable from the `Service` via `Service::send_fn()`). Do not create ad-hoc wrapper types — the adapter's `use_machine` hook already provides the ergonomic access layer.
 
 Components SHOULD implement `fmt::Display` for their State and Event enums
 for debugging, logging, and `data-ars-state` attribute values. The architecture
@@ -642,7 +650,7 @@ impl<M: Machine> TransitionPlan<M> {
     /// Note: `Vec::new()` does not allocate until the first element is pushed.
     /// This is a Rust guarantee (`Vec::new()` creates a zero-capacity vector with
     /// no heap allocation), so `then_send` and `effects` are free when unused.
-    pub fn to(state: M::State) -> Self {
+    pub const fn to(state: M::State) -> Self {
         Self {
             target: Some(state),
             apply: None,
@@ -657,7 +665,7 @@ impl<M: Machine> TransitionPlan<M> {
     /// Useful as a builder starting point — chain `.apply()`, `.then_send()`,
     /// and `.with_effect()` to configure. Equivalent to `context_only` but
     /// without requiring an initial closure.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             target: None,
             apply: None,
@@ -818,7 +826,7 @@ impl<M: Machine> fmt::Debug for TransitionPlan<M> {
 
 impl<M: Machine> TransitionPlan<M> {
     /// Returns a short string label for logging/debugging without exposing closures.
-    pub fn debug_summary(&self) -> &'static str {
+    pub const fn debug_summary(&self) -> &'static str {
         match (self.target.is_some(), self.apply.is_some()) {
             (true, _) => "to",
             (false, true) => "context_only",
@@ -829,13 +837,13 @@ impl<M: Machine> TransitionPlan<M> {
 
 /// A side effect to be set up by the adapter after a transition.
 /// The setup function receives context, props, and a `WeakSend<M::Event>` callback
-/// (the adapter holds the strong `Rc`/`Arc` internally; effects receive the weak handle).
+/// (the adapter holds the strong `Arc` internally; effects receive the weak handle).
 /// Returns a cleanup function invoked when the effect must stop (state change or unmount).
 ///
-/// **Memory retention warning:** The `send: Rc<dyn Fn(M::Event)>` passed to effect
+/// **Memory retention warning:** The strong `send: Arc<dyn Fn(M::Event) + Send + Sync>` passed to effect
 /// setup closures holds a strong reference to the machine's event dispatch pipeline.
 /// If an effect captures `send` and lives longer than the component (e.g., a global
-/// event listener or a long-lived timer), the `Rc` prevents deallocation.
+/// event listener or a long-lived timer), the `Arc` prevents deallocation.
 ///
 /// **Best practice for long-lived effects:** Downgrade `send` to a `Weak` reference
 /// and attempt upgrade on each use:
@@ -881,14 +889,14 @@ pub fn no_cleanup() -> CleanupFn {
 }
 
 /// Shared callback wrapper for event handler closures in Props structs.
-/// Wraps closures in `ArsRc<T>` — `Rc` on WASM, `Arc` on native — so
+/// Wraps closures in `Arc<T>` on every target, so
 /// `Clone`, `PartialEq`, `Deref`, and `AsRef` need no cfg-gated code.
 /// This is distinct from `MessageFn<T>` (used for i18n message closures)
 /// and `CleanupFn` (used for effect cleanup).
-pub struct Callback<T: ?Sized>(pub(crate) ArsRc<T>);
+pub struct Callback<T: ?Sized>(pub(crate) Arc<T>);
 
 impl<T: ?Sized> Clone for Callback<T> {
-    fn clone(&self) -> Self { Callback(self.0.clone()) }
+    fn clone(&self) -> Self { Callback(Arc::clone(&self.0)) }
 }
 
 impl<T: ?Sized> core::fmt::Debug for Callback<T> {
@@ -899,7 +907,7 @@ impl<T: ?Sized> core::fmt::Debug for Callback<T> {
 
 // PartialEq by pointer identity — enables derive(PartialEq) on Props structs.
 impl<T: ?Sized> PartialEq for Callback<T> {
-    fn eq(&self, other: &Self) -> bool { self.0 == other.0 }
+    fn eq(&self, other: &Self) -> bool { Arc::ptr_eq(&self.0, &other.0) }
 }
 
 // Deref and AsRef impls for ergonomic invocation — avoids verbose `.0` access.
@@ -919,17 +927,11 @@ impl<T: ?Sized> AsRef<T> for Callback<T> {
 /// This mirrors the Leptos `Callback<In, Out = ()>` and Dioxus `Callback<Args, Ret = ()>`
 /// patterns, enabling callbacks that return values (e.g., adapter-provided async spawners).
 ///
-/// Constructors and `From` impls still need cfg gates because the `Send + Sync`
-/// bounds differ by platform, and raw `Rc`/`Arc` construction is needed for
-/// dyn trait object coercion (`ArsRc` lacks `CoerceUnsized`).
+/// Constructors and `From` impls use raw `Arc` construction for dyn trait object
+/// coercion (`Arc` lacks `CoerceUnsized`).
 impl<Args: 'static, Out: 'static> Callback<dyn Fn(Args) -> Out> {
-    #[cfg(target_arch = "wasm32")]
-    pub fn new(f: impl Fn(Args) -> Out + 'static) -> Self {
-        Self(ArsRc(alloc::rc::Rc::new(f)))
-    }
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(f: impl Fn(Args) -> Out + Send + Sync + 'static) -> Self {
-        Self(ArsRc(alloc::sync::Arc::new(f)))
+        Self(alloc::sync::Arc::new(f))
     }
 }
 
@@ -940,34 +942,19 @@ impl<Args: 'static, Out: 'static> Callback<dyn Fn(Args) -> Out> {
 /// cannot produce `Callback<dyn Fn()>`. This fills that gap for
 /// void callbacks (e.g. `on_dismiss`, `on_escape_key_down`).
 impl Callback<dyn Fn()> {
-    #[cfg(target_arch = "wasm32")]
-    pub fn new_void(f: impl Fn() + 'static) -> Self {
-        Self(ArsRc(alloc::rc::Rc::new(f)))
-    }
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn new_void(f: impl Fn() + Send + Sync + 'static) -> Self {
-        Self(ArsRc(alloc::sync::Arc::new(f)))
+        Self(alloc::sync::Arc::new(f))
     }
 }
 
 // From impls for ergonomic construction
-#[cfg(target_arch = "wasm32")]
-impl<F: Fn(Args) -> Out + 'static, Args: 'static, Out: 'static> From<F> for Callback<dyn Fn(Args) -> Out> {
-    fn from(f: F) -> Self { Callback(ArsRc(alloc::rc::Rc::new(f))) }
-}
-#[cfg(not(target_arch = "wasm32"))]
 impl<F: Fn(Args) -> Out + Send + Sync + 'static, Args: 'static, Out: 'static> From<F> for Callback<dyn Fn(Args) -> Out> {
-    fn from(f: F) -> Self { Callback(ArsRc(alloc::sync::Arc::new(f))) }
+    fn from(f: F) -> Self { Callback(alloc::sync::Arc::new(f)) }
 }
 
 // From impls for zero-argument closures (`dyn Fn()`)
-#[cfg(target_arch = "wasm32")]
-impl<F: Fn() + 'static> From<F> for Callback<dyn Fn()> {
-    fn from(f: F) -> Self { Callback(ArsRc(alloc::rc::Rc::new(f))) }
-}
-#[cfg(not(target_arch = "wasm32"))]
 impl<F: Fn() + Send + Sync + 'static> From<F> for Callback<dyn Fn()> {
-    fn from(f: F) -> Self { Callback(ArsRc(alloc::sync::Arc::new(f))) }
+    fn from(f: F) -> Self { Callback(alloc::sync::Arc::new(f)) }
 }
 
 // Usage examples:
@@ -986,11 +973,6 @@ A free function `callback()` is provided for ergonomic construction with better 
 /// Ergonomic constructor for `Callback<dyn Fn(Args) -> Out>`.
 /// Avoids the turbofish syntax required by `Callback::new()` in generic contexts.
 /// For void-return callbacks, `Out` infers to `()` automatically.
-#[cfg(target_arch = "wasm32")]
-pub fn callback<Args: 'static, Out: 'static>(f: impl Fn(Args) -> Out + 'static) -> Callback<dyn Fn(Args) -> Out> {
-    Callback::new(f)
-}
-#[cfg(not(target_arch = "wasm32"))]
 pub fn callback<Args: 'static, Out: 'static>(f: impl Fn(Args) -> Out + Send + Sync + 'static) -> Callback<dyn Fn(Args) -> Out> {
     Callback::new(f)
 }
@@ -1024,13 +1006,13 @@ let cb = Callback::<dyn Fn(String)>::new(|s| log::info!("{s}"));
 
 #### 2.2.3 Inner Field Privacy
 
-Both `Callback<T>` and `MessageFn<T>` wrap `ArsRc<T>` internally. The `ArsRc` field is `pub(crate)` to prevent external code from depending on the platform-specific pointer type (`Rc` on WASM, `Arc` on native). This ensures:
+Both `Callback<T>` and `MessageFn<T>` wrap `Arc<T>` internally. The `Arc` field is `pub(crate)` to prevent external code from depending on the concrete smart pointer type (`Arc`). This ensures:
 
-1. **Cross-platform safety**: Generic code cannot accidentally rely on `Rc`-specific or `Arc`-specific trait bounds (e.g., `Send`/`Sync` availability differs).
+1. **Cross-platform safety**: Generic code depends on a single ownership contract instead of duplicating `Rc`/`Arc` assumptions.
 2. **Encapsulation**: The smart pointer type is an implementation detail. External consumers interact through `Deref`-based invocation (`cb(value)`) and `Callback::new()` / `MessageFn::new()` only.
-3. **Reduced cfg duplication**: `Clone`, `PartialEq`, `Deref`, and `AsRef` all delegate to `ArsRc` with no cfg-gated code. Only constructors and `From` impls need cfg gates (for `Send + Sync` bound differences and dyn trait object coercion).
+3. **Reduced cfg duplication**: `Clone`, `PartialEq`, `Deref`, `AsRef`, constructors, and `From` impls all delegate to a single `Arc`-based implementation.
 
-**Platform-specific trait bound implications**: On native targets (`not(target_arch = "wasm32")`), `ArsRc<T>` wraps `Arc<T>`, which requires `T: Send + Sync`. On WASM, it wraps `Rc<T>`, which does not. Code that is generic over `Callback` or `MessageFn` MUST NOT assume `Send + Sync` bounds unless gated behind `#[cfg(not(target_arch = "wasm32"))]`.
+**Trait-bound implication**: Code that is generic over `Callback` or `MessageFn` should assume the stronger `Send + Sync + 'static` contract on every target.
 
 ````rust
 /// ## MessageFn Definition
@@ -1040,9 +1022,6 @@ Both `Callback<T>` and `MessageFn<T>` wrap `ArsRc<T>` internally. The `ArsRc` fi
 ///
 /// ```rust
 /// /// Wrapper for i18n message closures. Clones the smart pointer, not the closure.
-/// #[cfg(target_arch = "wasm32")]
-/// pub struct MessageFn<T: ?Sized>(pub(crate) Rc<T>);
-/// #[cfg(not(target_arch = "wasm32"))]
 /// pub struct MessageFn<T: ?Sized>(pub(crate) Arc<T>);
 ///
 /// impl<T: ?Sized> Clone for MessageFn<T> {
@@ -1166,27 +1145,25 @@ Code that previously used `impl SmartCallback<T>` bounds should instead accept `
 ///
 /// #### Callback Usage in Library Crates
 ///
-/// **Warning:** `Callback<T>` wraps `Rc<T>` on WASM and `Arc<T>` on native. This means
-/// generic Props containing `Callback` fields have different trait bounds per platform:
-/// `Rc<T>` is `!Send + !Sync`, while `Arc<T>` is `Send + Sync` (when `T: Send + Sync`).
+/// `Callback<T>` always wraps `Arc<T>` and requires `Send + Sync + 'static`
+/// captures on every target. That keeps the public API identical across web
+/// and native builds.
 ///
-/// **Impact for library authors:** If your crate defines generic functions or traits
-/// bounded on `Send` or `Sync` that accept Props with `Callback` fields, compilation
-/// will fail on WASM because `Rc` does not satisfy those bounds.
+/// **Impact for library authors:** Props containing `Callback` fields can be
+/// used in generic code with consistent thread-safety bounds on every target.
 ///
-/// **Recommendation:** When exposing `Callback`-bearing types across crate boundaries,
-/// use newtype wrappers that hide the platform-specific inner type:
+/// **Recommendation:** Keep the stronger bounds explicit when exposing
+/// `Callback`-bearing types across crate boundaries:
 ///
 /// ```rust
-/// // In your library crate — define a newtype that is always !Send
+/// // In your library crate — define a newtype around the callback.
 /// pub struct OnChange(pub Callback<dyn Fn(String)>);
 ///
-/// // Do NOT add Send/Sync bounds to types containing Callback.
-/// // Do NOT write: where T: Send + Sync when T may contain Callback.
+/// // It is valid to require Send + Sync when the captured state satisfies it.
 ///```
 ///
-/// This makes the platform difference explicit and prevents accidental
-/// `Send`/`Sync` bound failures when the crate is compiled for WASM.
+/// This preserves a single ownership contract instead of carrying separate
+/// wasm/native callback semantics through downstream crates.
 ````
 
 #### 2.2.5 Standard Debug Impl for Messages Structs
@@ -1215,7 +1192,7 @@ pub struct PendingEffect<M: Machine> {
     /// mutations within the same drain cycle.
     pub target_state: Option<M::State>,
     /// **Internal vs user-facing API:** The `setup` field accepts a strong
-    /// `Rc`/`Arc` send handle internally. `PendingEffect::new()` wraps user
+    /// `Arc` send handle internally. `PendingEffect::new()` wraps user
     /// closures to receive `WeakSend` instead, preventing retain cycles.
     /// See §2.2 (WeakSend) for the full bridging explanation.
     ///
@@ -1224,9 +1201,6 @@ pub struct PendingEffect<M: Machine> {
     /// Implementation note: these fields are `pub(crate)` to prevent external
     /// struct literal construction. Use `PendingEffect::run()` to invoke the setup closure
     /// from adapter crates.
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) setup: Box<dyn FnOnce(&M::Context, &M::Props, Rc<dyn Fn(M::Event)>) -> CleanupFn>,
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) setup: Box<dyn FnOnce(&M::Context, &M::Props, Arc<dyn Fn(M::Event) + Send + Sync>) -> CleanupFn>,
 }
 
@@ -1243,12 +1217,6 @@ impl<M: Machine> fmt::Debug for PendingEffect<M> {
 impl<M: Machine> PendingEffect<M> {
     /// Run the effect setup closure. This is the public API for adapter crates
     /// to invoke effects, since the `setup` field is `pub(crate)`.
-    #[cfg(target_arch = "wasm32")]
-    pub fn run(self, ctx: &M::Context, props: &M::Props, send: Rc<dyn Fn(M::Event)>) -> CleanupFn {
-        (self.setup)(ctx, props, send)
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn run(self, ctx: &M::Context, props: &M::Props, send: Arc<dyn Fn(M::Event) + Send + Sync>) -> CleanupFn {
         (self.setup)(ctx, props, send)
     }
@@ -1263,7 +1231,7 @@ impl<M: Machine> PendingEffect<M> {
 > values to remain valid after setup runs, adding overhead and weaker
 > guarantees for something that must happen exactly once.
 >
-> **Rc/Arc cycle prevention:** Cleanup closures returned by `PendingEffect::setup` MUST NOT capture the `send: Rc<dyn Fn(M::Event)>` (WASM) or `Arc<dyn Fn(M::Event) + Send + Sync>` (native) callback. If they do and the adapter stores both the cleanup list and the send callback in mutually-referencing structures, a reference cycle forms and neither is dropped. If cleanup needs to dispatch events, use a `Weak` reference instead.
+> **Arc cycle prevention:** Cleanup closures returned by `PendingEffect::setup` MUST NOT capture the strong `send: Arc<dyn Fn(M::Event) + Send + Sync>` callback. If they do and the adapter stores both the cleanup list and the send callback in mutually-referencing structures, a reference cycle forms and neither is dropped. If cleanup needs to dispatch events, use a `Weak` reference instead.
 
 #### 2.2.6 Closure Capture Guidelines
 
@@ -1298,27 +1266,17 @@ PendingEffect::new("auto-dismiss", |_ctx, _props, send| {
 
 ##### 2.2.6.1 WeakSend Newtype for Safe Effect Cleanup
 
-`WeakSend<T>` must only be constructed from a weak reference (`Weak<T>` or equivalent), never from an owned `Rc<T>`. The `PendingEffect::new` constructor enforces this at the type level by accepting `Weak<T>` (not `Rc<T>`). This prevents accidental strong-reference cycles where an effect holds a strong reference to the component that owns it, blocking cleanup.
+`WeakSend<T>` must only be constructed from a weak reference (`Weak<T>` or equivalent), never from an owned `Arc<T>`. The `PendingEffect::new` constructor enforces this at the type level by accepting a weak reference instead of the strong `Arc`. This prevents accidental strong-reference cycles where an effect holds a strong reference to the component that owns it, blocking cleanup.
 
-If a consumer needs to capture owned state, they must first wrap it in `Rc<T>`, store the `Rc`, then pass `Rc::downgrade(&rc)` to `PendingEffect::new`.
+If a consumer needs to capture owned state, they must first wrap it in `Arc<T>`, store the `Arc`, then pass `Arc::downgrade(&arc)` to `PendingEffect::new`.
 
 ```rust
-/// A weak reference to a send function that avoids Rc/Arc cycles in cleanup closures.
-/// Cleanup closures MUST capture `WeakSend<M::Event>` instead of `Rc`/`Arc<dyn Fn(M::Event)>`.
-
-#[cfg(target_arch = "wasm32")]
-pub struct WeakSend<T>(alloc::rc::Weak<dyn Fn(T)>);
-
-#[cfg(not(target_arch = "wasm32"))]
+/// A weak reference to a send function that avoids Arc cycles in cleanup closures.
+/// Cleanup closures MUST capture `WeakSend<M::Event>` instead of `Arc<dyn Fn(M::Event) + Send + Sync>`.
 pub struct WeakSend<T>(alloc::sync::Weak<dyn Fn(T) + Send + Sync>);
 
 impl<T> WeakSend<T> {
     /// Attempt to upgrade the weak reference. Returns `None` if the strong reference has been dropped.
-    #[cfg(target_arch = "wasm32")]
-    pub fn upgrade(&self) -> Option<Rc<dyn Fn(T)>> {
-        self.0.upgrade()
-    }
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn upgrade(&self) -> Option<Arc<dyn Fn(T) + Send + Sync>> {
         self.0.upgrade()
     }
@@ -1337,45 +1295,21 @@ impl<T> Clone for WeakSend<T> {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-impl<T> From<&Rc<dyn Fn(T)>> for WeakSend<T> {
-    fn from(rc: &Rc<dyn Fn(T)>) -> Self {
-        WeakSend(Rc::downgrade(rc))
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 impl<T> From<&Arc<dyn Fn(T) + Send + Sync>> for WeakSend<T> {
     fn from(arc: &Arc<dyn Fn(T) + Send + Sync>) -> Self {
         WeakSend(Arc::downgrade(arc))
     }
 }
 
-/// Convenience: create a WeakSend directly from an owned Rc/Arc without
-/// requiring the caller to manually call Rc::downgrade / Arc::downgrade.
+/// Convenience: create a WeakSend directly from an owned Arc without
+/// requiring the caller to manually call Arc::downgrade.
 impl<T> WeakSend<T> {
-    #[cfg(target_arch = "wasm32")]
-    /// Create a WeakSend by downgrading the given Rc.
-    /// Equivalent to `WeakSend::from(&rc)` but more discoverable.
-    pub fn from_rc(rc: &Rc<dyn Fn(T)>) -> Self {
-        WeakSend(Rc::downgrade(rc))
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    /// Downgrade an Rc into a WeakSend in one step.
-    /// Alias for `from_rc` — mirrors the `Rc::downgrade` naming convention.
-    pub fn downgrade(rc: &Rc<dyn Fn(T)>) -> Self {
-        Self::from_rc(rc)
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
     /// Create a WeakSend by downgrading the given Arc.
     /// Equivalent to `WeakSend::from(&arc)` but more discoverable.
     pub fn from_arc(arc: &Arc<dyn Fn(T) + Send + Sync>) -> Self {
         WeakSend(Arc::downgrade(arc))
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     /// Downgrade an Arc into a WeakSend in one step.
     /// Alias for `from_arc` — mirrors the `Arc::downgrade` naming convention.
     pub fn downgrade(arc: &Arc<dyn Fn(T) + Send + Sync>) -> Self {
@@ -1384,13 +1318,13 @@ impl<T> WeakSend<T> {
 }
 ```
 
-These convenience constructors complement the `From<&Rc<...>>` impl. `WeakSend::from_rc(&send)` and `WeakSend::downgrade(&send)` are more discoverable than the `From` trait conversion, reducing the likelihood that callers will accidentally capture a strong `Rc` instead of creating a weak reference.
+These convenience constructors complement the `From<&Arc<...>>` impl. `WeakSend::from_arc(&send)` and `WeakSend::downgrade(&send)` are more discoverable than the `From` trait conversion, reducing the likelihood that callers will accidentally capture a strong `Arc` instead of creating a weak reference.
 
-User closures passed to `PendingEffect::new()` MUST accept `send: WeakSend<M::Event>` rather than `Rc`/`Arc<dyn Fn(M::Event)>`. (The internal `setup` struct field uses a strong `Rc`/`Arc` — this is an implementation detail bridged by `PendingEffect::new()` which downgrades before forwarding.) This ensures cleanup closures cannot hold strong references to the send function, eliminating the most common source of memory leaks in effect lifecycles.
+User closures passed to `PendingEffect::new()` MUST accept `send: WeakSend<M::Event>` rather than `Arc<dyn Fn(M::Event) + Send + Sync>`. (The internal `setup` struct field uses a strong `Arc` — this is an implementation detail bridged by `PendingEffect::new()` which downgrades before forwarding.) This ensures cleanup closures cannot hold strong references to the send function, eliminating the most common source of memory leaks in effect lifecycles.
 
-**Mandate**: Adapters pass the strong `Rc`/`Arc` to the `setup` field closure. `PendingEffect::new()` internally downgrades to `WeakSend` before forwarding to the user-authored setup closure. User-authored setup closures receive `WeakSend<M::Event>` and MUST NOT capture the original strong `Rc`/`Arc`. Any cleanup closure that holds a strong reference to the send function is a specification violation.
+**Mandate**: Adapters pass the strong `Arc` to the `setup` field closure. `PendingEffect::new()` internally downgrades to `WeakSend` before forwarding to the user-authored setup closure. User-authored setup closures receive `WeakSend<M::Event>` and MUST NOT capture the original strong `Arc`. Any cleanup closure that holds a strong reference to the send function is a specification violation.
 
-`PendingEffect::setup` closures that need to dispatch events during cleanup MUST accept `WeakSend<M::Event>` instead of `Rc`/`Arc<dyn Fn(M::Event)>`:
+`PendingEffect::setup` closures that need to dispatch events during cleanup MUST accept `WeakSend<M::Event>` instead of `Arc<dyn Fn(M::Event) + Send + Sync>`:
 
 ```rust
 // ✅ Type-safe cycle prevention
@@ -1577,12 +1511,12 @@ impl TimerHandle {
 /// platform capabilities, i18n, and style strategy.
 /// Falls back to `NullPlatformEffects` with `log::warn!` diagnostics when
 /// the `ars-core/debug` feature is enabled and no ArsProvider is found.
-fn use_platform_effects() -> ArsRc<dyn PlatformEffects> {
+fn use_platform_effects() -> Arc<dyn PlatformEffects> {
     use_context::<ArsContext>()
         .map(|ctx| ctx.platform())
         .unwrap_or_else(|| {
             warn_missing_provider("use_platform_effects");
-            ArsRc::new(MissingProviderEffects)
+            Arc::new(MissingProviderEffects)
         })
 }
 ```
@@ -4731,9 +4665,9 @@ pub enum ColorMode {
 | `id_prefix`           | `Option<String>`                            | Optional prefix prepended to all generated IDs (for micro-frontend isolation). |
 | `portal_container_id` | `Option<String>`                            | ID of the container element for portal mounts. `None` means platform default.  |
 | `root_node_id`        | `Option<String>`                            | ID of the root node for focus scope and portal queries. `None` means default.  |
-| `platform`            | `ArsRc<dyn PlatformEffects>`                | Platform capabilities for side effects. Defaults to `NullPlatformEffects`.     |
-| `modality`            | `ArsRc<dyn ModalityContext>`                | Shared input-modality state for the current provider root.                     |
-| `icu_provider`        | `ArsRc<dyn IcuProvider>`                    | Calendar/locale data for date-time components. Defaults to `StubIcuProvider`.  |
+| `platform`            | `Arc<dyn PlatformEffects>`                  | Platform capabilities for side effects. Defaults to `NullPlatformEffects`.     |
+| `modality`            | `Arc<dyn ModalityContext>`                  | Shared input-modality state for the current provider root.                     |
+| `icu_provider`        | `Arc<dyn IcuProvider>`                      | Calendar/locale data for date-time components. Defaults to `StubIcuProvider`.  |
 | `i18n_registries`     | `Rc<I18nRegistries>`                        | Per-component translation registries. Defaults to empty (English fallbacks).   |
 | `style_strategy`      | `StyleStrategy`                             | CSS style injection strategy. Defaults to `StyleStrategy::Inline`.             |
 
@@ -4905,13 +4839,9 @@ if result.state_changed {
     }
 
     // 3. Set up effects for the new state.
-    // NOTE: This is internal adapter code — the Rc/Arc construction is an
+    // NOTE: This is internal adapter code — the Arc construction is an
     // implementation detail hidden from component authors, who receive
     // WeakSend<M::Event> via PendingEffect::new().
-    #[cfg(target_arch = "wasm32")]
-    // pseudocode — send_callback is provided by the adapter
-    let send_rc: Rc<dyn Fn(M::Event)> = Rc::new(move |e| send_callback(e));
-    #[cfg(not(target_arch = "wasm32"))]
     let send_rc: Arc<dyn Fn(M::Event) + Send + Sync> = Arc::new(move |e| send_callback(e));
     for effect in result.pending_effects {
         // Named effects auto-cancel previous effects with the same name.

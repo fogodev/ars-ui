@@ -1,34 +1,27 @@
 //! Shared closure wrapper for translatable component message strings.
 //!
-//! [`MessageFn`] wraps message closures in [`ArsRc`] (platform-conditional
-//! `Rc`/`Arc`), eliminating cfg-gated code in this module. It is distinct from
+//! [`MessageFn`] wraps message closures in [`Arc`] (`Arc`). It is distinct from
 //! [`Callback`](crate::Callback) (used for event handler closures) and
 //! [`CleanupFn`](crate::CleanupFn) (used for effect cleanup).
 
-extern crate alloc;
-
-use alloc::string::String;
+use alloc::{string::String, sync::Arc};
 use core::{fmt, ops::Deref};
 
 use ars_i18n::Locale;
 
-use crate::ArsRc;
-
 /// Shared function pointer for component message closure fields.
 ///
-/// Wraps closures in [`ArsRc`] — `Rc` on WASM (no atomic overhead), `Arc` on
-/// native (thread-safe). All `MessageFn` trait objects include `+ Send + Sync`
-/// on all targets so the public API is identical everywhere — closures must be
-/// thread-safe for native desktop runtimes (Dioxus Desktop, Tauri). The `Rc`
-/// wrapper satisfies WASM's single-threaded `Send`/`Sync` auto-impl.
+/// Wraps closures in [`Arc`] (`Arc`) on all targets. All `MessageFn` trait
+/// objects include `+ Send + Sync` everywhere so the public API and ownership
+/// semantics stay identical across native and wasm builds.
 ///
 /// `MessageFn` implements [`Debug`] by printing `"<closure>"` so all
 /// `Messages` structs can `#[derive(Clone, Debug)]` uniformly.
-pub struct MessageFn<T: ?Sized>(ArsRc<T>);
+pub struct MessageFn<T: ?Sized>(Arc<T>);
 
 impl<T: ?Sized> Clone for MessageFn<T> {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        Self(Arc::clone(&self.0))
     }
 }
 
@@ -40,7 +33,7 @@ impl<T: ?Sized> fmt::Debug for MessageFn<T> {
 
 impl<T: ?Sized> PartialEq for MessageFn<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
+        Arc::ptr_eq(&self.0, &other.0)
     }
 }
 
@@ -74,22 +67,11 @@ impl<T: ?Sized> MessageFn<T> {
 }
 
 /// `From` impl for `MessageFn<dyn Fn(&Locale) -> String + Send + Sync>`.
-#[cfg(target_arch = "wasm32")]
 impl<F: Fn(&Locale) -> String + Send + Sync + 'static> From<F>
     for MessageFn<dyn Fn(&Locale) -> String + Send + Sync>
 {
     fn from(f: F) -> Self {
-        MessageFn(ArsRc(alloc::rc::Rc::new(f)))
-    }
-}
-
-/// `From` impl for `MessageFn<dyn Fn(&Locale) -> String + Send + Sync>`.
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(&Locale) -> String + Send + Sync + 'static> From<F>
-    for MessageFn<dyn Fn(&Locale) -> String + Send + Sync>
-{
-    fn from(f: F) -> Self {
-        MessageFn(ArsRc(alloc::sync::Arc::new(f)))
+        MessageFn(Arc::new(f))
     }
 }
 

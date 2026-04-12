@@ -154,6 +154,11 @@ pub fn dismiss_button_attrs(locale: &Locale, messages: &Messages) -> AttrMap {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
     use ars_core::AttrValue;
     use ars_i18n::locales;
 
@@ -243,10 +248,28 @@ mod tests {
 
     #[test]
     fn props_debug_redacts_callbacks_when_some() {
+        let interact_calls = Arc::new(AtomicUsize::new(0));
+        let escape_calls = Arc::new(AtomicUsize::new(0));
+        let dismiss_calls = Arc::new(AtomicUsize::new(0));
         let props = Props {
-            on_interact_outside: Some(Callback::new(|_: InteractOutsideEvent| {})),
-            on_escape_key_down: Some(Callback::new_void(|| {})),
-            on_dismiss: Some(Callback::new_void(|| {})),
+            on_interact_outside: Some({
+                let interact_calls = Arc::clone(&interact_calls);
+                Callback::new(move |_: InteractOutsideEvent| {
+                    interact_calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            on_escape_key_down: Some({
+                let escape_calls = Arc::clone(&escape_calls);
+                Callback::new_void(move || {
+                    escape_calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            on_dismiss: Some({
+                let dismiss_calls = Arc::clone(&dismiss_calls);
+                Callback::new_void(move || {
+                    dismiss_calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
             ..Props::default()
         };
         let debug = format!("{props:?}");
@@ -254,6 +277,12 @@ mod tests {
         assert!(debug.contains("on_interact_outside: Some(\"<closure>\")"));
         assert!(debug.contains("on_escape_key_down: Some(\"<closure>\")"));
         assert!(debug.contains("on_dismiss: Some(\"<closure>\")"));
+        props.on_interact_outside.as_ref().expect("callback")(InteractOutsideEvent::EscapeKey);
+        props.on_escape_key_down.as_ref().expect("callback")();
+        props.on_dismiss.as_ref().expect("callback")();
+        assert_eq!(interact_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(escape_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(dismiss_calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -267,18 +296,32 @@ mod tests {
 
     #[test]
     fn props_clone_preserves_callback_pointer_identity() {
-        let cb = Callback::new(|_: InteractOutsideEvent| {});
+        let calls = Arc::new(AtomicUsize::new(0));
+        let cb = {
+            let calls = Arc::clone(&calls);
+            Callback::new(move |_: InteractOutsideEvent| {
+                calls.fetch_add(1, Ordering::SeqCst);
+            })
+        };
         let props = Props {
             on_interact_outside: Some(cb.clone()),
             ..Props::default()
         };
         let cloned = props.clone();
         assert_eq!(props.on_interact_outside, cloned.on_interact_outside);
+        cloned.on_interact_outside.as_ref().expect("callback")(InteractOutsideEvent::EscapeKey);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
     fn props_partial_eq_uses_callback_pointer_identity() {
-        let cb = Callback::new_void(|| {});
+        let shared_calls = Arc::new(AtomicUsize::new(0));
+        let cb = {
+            let shared_calls = Arc::clone(&shared_calls);
+            Callback::new_void(move || {
+                shared_calls.fetch_add(1, Ordering::SeqCst);
+            })
+        };
         let props1 = Props {
             on_dismiss: Some(cb.clone()),
             ..Props::default()
@@ -288,12 +331,22 @@ mod tests {
             ..Props::default()
         };
         assert_eq!(props1, props2);
+        props2.on_dismiss.as_ref().expect("callback")();
+        assert_eq!(shared_calls.load(Ordering::SeqCst), 1);
 
+        let different_calls = Arc::new(AtomicUsize::new(0));
         let props3 = Props {
-            on_dismiss: Some(Callback::new_void(|| {})),
+            on_dismiss: Some({
+                let different_calls = Arc::clone(&different_calls);
+                Callback::new_void(move || {
+                    different_calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
             ..Props::default()
         };
         assert_ne!(props1, props3);
+        props3.on_dismiss.as_ref().expect("callback")();
+        assert_eq!(different_calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -384,6 +437,11 @@ mod tests {
         assert_eq!(
             attrs.get(&HtmlAttr::Aria(AriaAttr::Label)),
             Some("Schlie\u{00df}en")
+        );
+        let fallback_attrs = dismiss_button_attrs(&default_locale(), &messages);
+        assert_eq!(
+            fallback_attrs.get(&HtmlAttr::Aria(AriaAttr::Label)),
+            Some("Dismiss")
         );
     }
 }

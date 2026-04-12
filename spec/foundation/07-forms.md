@@ -105,7 +105,7 @@ pub use ars_i18n::{plural_category, PluralCategory};
 **Error Message Pattern**: `MessageFn` closures for count-based validations MUST use `plural_category()` to select the correct message form:
 
 ```rust
-// MessageFn wraps Rc<dyn Fn(...) + Send + Sync> on WASM, Arc<...> on native.
+// MessageFn wraps Arc<dyn Fn(...) + Send + Sync> on every target.
 // The closure must return String and satisfy Send + Sync bounds.
 let min_length_message: MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync> =
     MessageFn::new(move |count: usize, locale: &Locale| -> String {
@@ -1106,7 +1106,6 @@ impl ChainValidator {
 ## 4. Async Validation
 
 ```rust
-use core::future::Future;
 use core::pin::Pin;
 use std::collections::BTreeMap;
 use ars_i18n::Locale;
