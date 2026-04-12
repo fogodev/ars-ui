@@ -45,10 +45,11 @@
 //! implementors inside this crate need it, keep it as a regular import.
 
 // -- User-facing configuration types --
-pub use ars_i18n::{Direction, Locale, Orientation};
-
 // -- User-facing traits --
-// (planned: `ars_i18n::Translate` once the trait lands)
+pub use ars_i18n::{Direction, Locale, Orientation, Translate};
+
+// -- User-facing helpers --
+pub use crate::t;
 
 // -- Component modules --
 // (none yet — added as components are implemented, e.g.:

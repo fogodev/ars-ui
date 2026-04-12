@@ -475,12 +475,12 @@ Date-time components need locale-aware calendar data (weekday names, month names
 
 ```rust
 // use_icu_provider() implementation (in adapter layer):
-fn use_icu_provider() -> ArsRc<dyn IcuProvider> {
+fn use_icu_provider() -> Arc<dyn IcuProvider> {
     use_context::<ArsContext>()
         .map(|ctx| ctx.icu_provider())
         .unwrap_or_else(|| {
             warn_missing_provider("use_icu_provider");
-            ArsRc::new(StubIcuProvider)
+            Arc::new(StubIcuProvider)
         })
 }
 ```
@@ -491,7 +491,7 @@ Core component code accesses the provider from `Env` during `init()`:
 ```rust
 // In Props: NO provider field — resolved by the adapter.
 // In Context:
-pub provider: ArsRc<dyn IcuProvider>,
+pub provider: Arc<dyn IcuProvider>,
 
 // In init():
 provider: env.icu_provider.clone(),
@@ -2325,25 +2325,23 @@ for the environment resolution rule.
 `MessageFn<T>` implements `Debug` by printing `"<closure>"`, so all Messages structs
 can `#[derive(Clone, Debug)]` uniformly — no manual `Debug` impls needed.
 
-`MessageFn` lives in `ars-core` (not `ars-i18n`) and wraps [`ArsRc`](01-architecture.md)
+`MessageFn` lives in `ars-core` (not `ars-i18n`) and wraps [`Arc`](01-architecture.md)
 internally, eliminating cfg-gated code in its trait impls. `Clone`, `PartialEq`, `Deref`,
-and `AsRef` all delegate to `ArsRc`; only `Debug` is custom (prints `"<closure>"`).
+and `AsRef` all delegate to `Arc`; only `Debug` is custom (prints `"<closure>"`).
 
 **`+ Send + Sync` bounds:** All `MessageFn` trait objects include `+ Send + Sync` on
-all targets as a deliberate project-wide convention. On WASM the `Rc` wrapper is
-non-atomic, but the trait object bounds remain `Send + Sync` so that the public API
-is identical across native and WASM — closures must be thread-safe for native desktop
-targets (multi-threaded runtimes in Dioxus Desktop, Tauri). The `Rc` wrapper satisfies
-WASM's single-threaded `Send`/`Sync` auto-impl. Do not remove these bounds.
+all targets as a deliberate project-wide convention. `Arc` is used directly on
+every target, so the public API and ownership model are identical across native
+and WASM builds. Do not remove these bounds.
 
 ```rust
 /// Shared function pointer for Messages closure fields.
-/// Wraps `ArsRc<T>` — `Rc` on WASM, `Arc` on native — so no cfg-gated
+/// Wraps `Arc<T>` on every target, so no cfg-gated
 /// trait impls are needed in this type. Only `Debug` is custom.
-pub struct MessageFn<T: ?Sized>(ArsRc<T>);
+pub struct MessageFn<T: ?Sized>(Arc<T>);
 
 impl<T: ?Sized> Clone for MessageFn<T> {
-    fn clone(&self) -> Self { Self(self.0.clone()) }
+    fn clone(&self) -> Self { Self(Arc::clone(&self.0)) }
 }
 
 impl<T: ?Sized> core::fmt::Debug for MessageFn<T> {
@@ -2354,7 +2352,7 @@ impl<T: ?Sized> core::fmt::Debug for MessageFn<T> {
 
 // PartialEq by pointer identity — enables derive(PartialEq) on Messages structs.
 impl<T: ?Sized> PartialEq for MessageFn<T> {
-    fn eq(&self, other: &Self) -> bool { self.0 == other.0 }
+    fn eq(&self, other: &Self) -> bool { Arc::ptr_eq(&self.0, &other.0) }
 }
 
 impl<T: ?Sized> core::ops::Deref for MessageFn<T> {
@@ -2370,118 +2368,58 @@ impl<T: ?Sized> MessageFn<T> {
     pub fn new(f: impl Into<Self>) -> Self { f.into() }
 }
 
-// From impls — each closure signature needs a cfg-gated pair because
-// they create ArsRc from raw Rc/Arc for dyn trait object coercion.
-// One pair per distinct MessageFn signature used across the component library.
+// From impls — each closure signature gets a dedicated impl because
+// dyn trait object coercion still requires constructing the inner Arc directly.
+// One impl per distinct MessageFn signature used across the component library.
 
-#[cfg(target_arch = "wasm32")]
 impl<F: Fn() -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn() -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn() -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn() -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
+    fn from(f: F) -> Self { Self(Arc::new(f)) }
 }
 
-#[cfg(target_arch = "wasm32")]
 impl<F: Fn(&Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(&Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(&Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(&Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
+    fn from(f: F) -> Self { Self(Arc::new(f)) }
 }
 
-#[cfg(target_arch = "wasm32")]
 impl<F: Fn(usize, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(usize, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
+    fn from(f: F) -> Self { Self(Arc::new(f)) }
 }
 
-#[cfg(target_arch = "wasm32")]
 impl<F: Fn(f64, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(f64, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(f64, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(f64, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
+    fn from(f: F) -> Self { Self(Arc::new(f)) }
 }
 
-#[cfg(target_arch = "wasm32")]
 impl<F: Fn(&str, SortDirection, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(&str, SortDirection, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(&str, SortDirection, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(&str, SortDirection, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
+    fn from(f: F) -> Self { Self(Arc::new(f)) }
 }
 
 // From impls for CalendarMessages (shared/date-time-types.md)
-#[cfg(target_arch = "wasm32")]
 impl<F: Fn(u8, u8, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(u8, u8, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(u8, u8, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(u8, u8, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
+    fn from(f: F) -> Self { Self(Arc::new(f)) }
 }
 
-#[cfg(target_arch = "wasm32")]
 impl<F: Fn(u8, u8, &str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(u8, u8, &str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(u8, u8, &str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(u8, u8, &str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
+    fn from(f: F) -> Self { Self(Arc::new(f)) }
 }
 
-#[cfg(target_arch = "wasm32")]
 impl<F: Fn(u8, i32, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(u8, i32, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(u8, i32, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(u8, i32, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
+    fn from(f: F) -> Self { Self(Arc::new(f)) }
 }
 
-#[cfg(target_arch = "wasm32")]
 impl<F: Fn(&str, &str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(&str, &str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(&str, &str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(&str, &str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
+    fn from(f: F) -> Self { Self(Arc::new(f)) }
 }
 
-#[cfg(target_arch = "wasm32")]
 impl<F: Fn(i32, &str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(i32, &str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(i32, &str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(i32, &str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
+    fn from(f: F) -> Self { Self(Arc::new(f)) }
 }
 
 // From impls for DragAnnouncements (05-interactions.md §7.8)
-#[cfg(target_arch = "wasm32")]
 impl<F: Fn(&str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(&str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
+    fn from(f: F) -> Self { Self(Arc::new(f)) }
 }
 
-#[cfg(target_arch = "wasm32")]
 impl<F: Fn(usize, &str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(usize, &str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Rc::new(f))) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<F: Fn(usize, &str, &Locale) -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn(usize, &str, &Locale) -> String + Send + Sync> {
-    fn from(f: F) -> Self { Self(ArsRc(Arc::new(f))) }
+    fn from(f: F) -> Self { Self(Arc::new(f)) }
 }
 
 impl MessageFn<dyn Fn(&Locale) -> String + Send + Sync> {
@@ -2579,7 +2517,7 @@ impl<M: ComponentMessages> MessagesRegistry<M> {
 
     /// Retrieve messages for the given locale, falling back through
     /// the locale's tag hierarchy:
-    ///   full BCP 47 tag → language+script → language-only → default.
+    ///   exact language identifier (extensions stripped) → language+script → language-only → default.
     ///
     /// The language+script level is critical for CJK locales:
     /// `zh-Hant-TW` → `zh-Hant` → `zh` → default
@@ -2590,8 +2528,10 @@ impl<M: ComponentMessages> MessagesRegistry<M> {
     /// use `get_with_stack(&LocaleStack)` which follows the canonical
     /// locale resolution order.
     pub fn get(&self, locale: &Locale) -> &M {
-        // Level 1: Full BCP 47 tag (e.g., "zh-Hant-TW")
-        if let Some(m) = self.messages.get(&locale.to_bcp47()) {
+        // Level 1: Exact language identifier without Unicode/runtime extensions
+        // (e.g., "en-US-u-hc-h12" resolves through "en-US").
+        let exact_tag = locale.to_data_locale().to_string();
+        if let Some(m) = self.messages.get(&exact_tag) {
             return m;
         }
         // Level 2: Language + script (e.g., "zh-Hant") — critical for CJK
@@ -2623,11 +2563,11 @@ The adapter resolves messages through a three-level chain — matching the local
 /// Keyed by `TypeId` of each component's `Messages` struct so components
 /// can look up their own translations without knowing about other components.
 pub struct I18nRegistries {
-    map: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+    map: BTreeMap<TypeId, Box<dyn Any + Send + Sync>>,
 }
 
 impl I18nRegistries {
-    pub fn new() -> Self { Self { map: HashMap::new() } }
+    pub fn new() -> Self { Self { map: BTreeMap::new() } }
 
     /// Register a `MessagesRegistry` for a specific component's Messages type.
     ///
@@ -2636,12 +2576,12 @@ impl I18nRegistries {
     /// registries.register::<dialog::Messages>(dialog_registry);
     /// registries.register::<select::Messages>(select_registry);
     /// ```
-    pub fn register<M: ComponentMessages + 'static>(&mut self, registry: MessagesRegistry<M>) {
+    pub fn register<M: ComponentMessages + Send + Sync + 'static>(&mut self, registry: MessagesRegistry<M>) {
         self.map.insert(TypeId::of::<M>(), Box::new(registry));
     }
 
     /// Look up the `MessagesRegistry` for a component's Messages type.
-    pub fn get<M: ComponentMessages + 'static>(&self) -> Option<&MessagesRegistry<M>> {
+    pub fn get<M: ComponentMessages + Send + Sync + 'static>(&self) -> Option<&MessagesRegistry<M>> {
         self.map.get(&TypeId::of::<M>())
             .and_then(|b| b.downcast_ref::<MessagesRegistry<M>>())
     }
@@ -3381,9 +3321,6 @@ use crate::shared::CalendarDate;
 /// Production uses `Icu4xProvider` with CLDR data; tests use `StubIcuProvider`.
 /// All date-time components accept `&dyn IcuProvider` so they remain
 /// backend-agnostic.
-// On native targets, IcuProvider must be Send + Sync for multi-threaded runtimes.
-// On WASM (single-threaded), these bounds are omitted to allow Rc-based components.
-#[cfg(not(target_arch = "wasm32"))]
 pub trait IcuProvider: Send + Sync + 'static {
     /// Short weekday label (abbreviated format): "Mo", "Tu", "We", …
     /// ICU4X: `DateSymbols::weekday_names(FieldLength::Abbreviated)`
@@ -3434,26 +3371,6 @@ pub trait IcuProvider: Send + Sync + 'static {
     /// `target` calendar system. Used by `CalendarDate::to_calendar()` for
     /// non-Gregorian conversions.
     /// ICU4X: `AnyCalendar::convert()` via `icu::calendar`.
-    fn convert_date(&self, date: &CalendarDate, target: CalendarSystem) -> CalendarDate;
-}
-
-#[cfg(target_arch = "wasm32")]
-pub trait IcuProvider: 'static {
-    // Same methods as above — duplicated via cfg. In implementation, use a macro
-    // to avoid maintaining two copies:
-    //   macro_rules! icu_provider_methods { ... }
-    //   #[cfg(not(wasm32))] pub trait IcuProvider: Send + Sync + 'static { icu_provider_methods!(); }
-    //   #[cfg(wasm32)]      pub trait IcuProvider: 'static { icu_provider_methods!(); }
-    fn weekday_short_label(&self, weekday: Weekday, locale: &Locale) -> String;
-    fn weekday_long_label(&self, weekday: Weekday, locale: &Locale) -> String;
-    fn month_long_name(&self, month: u8, locale: &Locale) -> String;
-    fn day_period_label(&self, is_pm: bool, locale: &Locale) -> String;
-    fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool>;
-    fn format_segment_digits(&self, value: u32, min_digits: NonZero<u8>, locale: &Locale) -> String;
-    fn max_months_in_year(&self, calendar: &CalendarSystem, year: i32, era: Option<&str>) -> u8;
-    fn days_in_month(&self, calendar: &CalendarSystem, year: i32, month: u8, era: Option<&str>) -> u8;
-    fn hour_cycle(&self, locale: &Locale) -> HourCycle;
-    fn first_day_of_week(&self, locale: &Locale) -> Weekday;
     fn convert_date(&self, date: &CalendarDate, target: CalendarSystem) -> CalendarDate;
 }
 ```

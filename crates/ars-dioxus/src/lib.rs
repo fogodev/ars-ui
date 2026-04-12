@@ -14,6 +14,7 @@ mod attrs;
 mod ephemeral;
 mod id;
 pub mod prelude;
+mod provider;
 mod use_machine;
 
 #[cfg(feature = "web")]
@@ -26,6 +27,14 @@ pub use ephemeral::EphemeralRef;
 #[cfg(feature = "ssr")]
 pub use id::reset_id_counter;
 pub use id::use_id;
+#[cfg(feature = "desktop")]
+pub use provider::DesktopPlatform;
+#[cfg(feature = "web")]
+pub use provider::WebPlatform;
+pub use provider::{
+    ArsContext, DioxusPlatform, DragData, FilePickerOptions, NullPlatform, t, use_icu_provider,
+    use_locale, use_messages, use_platform, warn_missing_provider,
+};
 pub use use_machine::{UseMachineReturn, use_machine, use_machine_with_reactive_props};
 
 /// The name of this framework adapter, used in diagnostic messages and feature gating.

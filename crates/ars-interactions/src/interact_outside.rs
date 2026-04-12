@@ -103,6 +103,11 @@ fn portal_owner_id_is_inside(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
     use ars_core::PointerType;
 
     use super::*;
@@ -160,8 +165,14 @@ mod tests {
 
     #[test]
     fn standalone_clone_preserves_fields_and_callback_identity() {
+        let calls = Arc::new(AtomicUsize::new(0));
         let standalone = InteractOutsideStandalone {
-            on_interact_outside: Some(Callback::new(|_: InteractOutsideEvent| {})),
+            on_interact_outside: Some({
+                let calls = Arc::clone(&calls);
+                Callback::new(move |_: InteractOutsideEvent| {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
             ..sample_standalone()
         };
 
@@ -172,12 +183,20 @@ mod tests {
         assert_eq!(standalone.enabled, cloned.enabled);
         assert_eq!(standalone.pointer_gracing, cloned.pointer_gracing);
         assert_eq!(standalone.on_interact_outside, cloned.on_interact_outside);
+        cloned.on_interact_outside.as_ref().expect("callback")(InteractOutsideEvent::EscapeKey);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
     fn standalone_debug_redacts_callback_body() {
+        let calls = Arc::new(AtomicUsize::new(0));
         let standalone = InteractOutsideStandalone {
-            on_interact_outside: Some(Callback::new(|_: InteractOutsideEvent| {})),
+            on_interact_outside: Some({
+                let calls = Arc::clone(&calls);
+                Callback::new(move |_: InteractOutsideEvent| {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
             ..sample_standalone()
         };
 
@@ -185,11 +204,21 @@ mod tests {
         assert!(debug.contains("target_id: \"popover-1\""));
         assert!(debug.contains("on_interact_outside: Some(Callback(..))"));
         assert!(debug.contains("pointer_gracing: Some(250)"));
+        standalone.on_interact_outside.as_ref().expect("callback")(
+            InteractOutsideEvent::FocusOutside,
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
     fn standalone_partial_eq_uses_callback_pointer_identity() {
-        let callback = Callback::new(|_: InteractOutsideEvent| {});
+        let shared_calls = Arc::new(AtomicUsize::new(0));
+        let callback = {
+            let shared_calls = Arc::clone(&shared_calls);
+            Callback::new(move |_: InteractOutsideEvent| {
+                shared_calls.fetch_add(1, Ordering::SeqCst);
+            })
+        };
         let left = InteractOutsideStandalone {
             on_interact_outside: Some(callback.clone()),
             ..sample_standalone()
@@ -198,13 +227,29 @@ mod tests {
             on_interact_outside: Some(callback),
             ..sample_standalone()
         };
+        let different_calls = Arc::new(AtomicUsize::new(0));
         let different = InteractOutsideStandalone {
-            on_interact_outside: Some(Callback::new(|_: InteractOutsideEvent| {})),
+            on_interact_outside: Some({
+                let different_calls = Arc::clone(&different_calls);
+                Callback::new(move |_: InteractOutsideEvent| {
+                    different_calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
             ..sample_standalone()
         };
 
         assert_eq!(left, right);
         assert_ne!(left, different);
+        right.on_interact_outside.as_ref().expect("callback")(InteractOutsideEvent::EscapeKey);
+        different.on_interact_outside.as_ref().expect("callback")(
+            InteractOutsideEvent::PointerOutside {
+                client_x: 1.0,
+                client_y: 2.0,
+                pointer_type: PointerType::Pen,
+            },
+        );
+        assert_eq!(shared_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(different_calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]

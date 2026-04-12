@@ -11,18 +11,25 @@
 //! - [`use_id`] — hydration-safe deterministic ID generation
 
 mod attrs;
+mod controlled;
 mod ephemeral;
 mod id;
 pub mod prelude;
+mod provider;
 mod use_machine;
 
 #[cfg(not(feature = "ssr"))]
 pub use attrs::apply_styles_cssom;
 pub use attrs::{LeptosAttrResult, attr_map_to_leptos, use_style_strategy};
+pub use controlled::use_controlled_prop;
 pub use ephemeral::EphemeralRef;
 #[cfg(feature = "ssr")]
 pub use id::reset_id_counter;
 pub use id::use_id;
+pub use provider::{
+    ArsContext, provide_ars_context, resolve_locale, t, use_icu_provider, use_locale, use_messages,
+    warn_missing_provider,
+};
 pub use use_machine::{UseMachineReturn, use_machine, use_machine_with_reactive_props};
 
 /// The name of this framework adapter, used in diagnostic messages and feature gating.

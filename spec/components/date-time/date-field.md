@@ -86,7 +86,7 @@ pub struct Context {
     /// The locale.
     pub locale: Locale,
     /// ICU data provider for locale-dependent formatting.
-    pub provider: ArsRc<dyn IcuProvider>,
+    pub provider: Arc<dyn IcuProvider>,
     /// Resolved translatable messages.
     pub messages: Messages,
     /// The calendar system.

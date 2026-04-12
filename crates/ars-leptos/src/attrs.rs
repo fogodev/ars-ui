@@ -3,8 +3,9 @@
 //! This module bridges the framework-agnostic connect output used across `ars-ui`
 //! to the stringly DOM attribute representation Leptos spreads onto elements.
 
-use ars_core::{ArsContext, AttrMap, AttrValue, CssProperty, StyleStrategy};
-use leptos::prelude::*;
+use ars_core::{AttrMap, AttrValue, CssProperty, StyleStrategy};
+
+use crate::provider::{current_ars_context, warn_missing_provider};
 
 /// Result of converting an [`AttrMap`] into Leptos-ready attributes.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -90,7 +91,7 @@ pub fn apply_styles_cssom(el: &leptos::web_sys::HtmlElement, styles: &[(CssPrope
 /// Falls back to [`StyleStrategy::Inline`] when no provider context is present.
 #[must_use]
 pub fn use_style_strategy() -> StyleStrategy {
-    use_context::<ArsContext>().map_or_else(
+    current_ars_context().map_or_else(
         || {
             warn_missing_provider("use_style_strategy");
             StyleStrategy::default()
@@ -108,20 +109,12 @@ fn styles_to_nonce_css(id: &str, styles: &[(CssProperty, String)]) -> String {
     format!("[data-ars-style-id=\"{id}\"] {{\n{declarations}\n}}")
 }
 
-#[cfg(feature = "debug")]
-fn warn_missing_provider(hook_name: &str) {
-    log::warn!(
-        "[ars-ui] {hook_name}: No ArsProvider found in the component tree. \
-        Falling back to defaults."
-    );
-}
-
-#[cfg(not(feature = "debug"))]
-const fn warn_missing_provider(_hook_name: &str) {}
-
 #[cfg(test)]
 mod tests {
-    use ars_core::{ArsRc, AttrMap, CssProperty, HtmlAttr, NullPlatformEffects};
+    use std::sync::Arc;
+
+    use ars_core::{AttrMap, CssProperty, HtmlAttr, I18nRegistries, NullPlatformEffects};
+    use leptos::prelude::Owner;
 
     use super::*;
 
@@ -261,7 +254,7 @@ mod tests {
     fn use_style_strategy_reads_configured_context_value() {
         let owner = Owner::new();
         owner.with(|| {
-            provide_context(ArsContext::new(
+            crate::provide_ars_context(crate::ArsContext::new(
                 ars_i18n::locales::en_us(),
                 ars_i18n::Direction::Ltr,
                 ars_core::ColorMode::System,
@@ -270,8 +263,9 @@ mod tests {
                 None,
                 None,
                 None,
-                ArsRc::from_platform(NullPlatformEffects),
-                ArsRc::from_modality(ars_core::DefaultModalityContext::new()),
+                Arc::new(NullPlatformEffects),
+                Arc::new(ars_i18n::StubIcuProvider),
+                Arc::new(I18nRegistries::new()),
                 StyleStrategy::Nonce(String::from("nonce-456")),
             ));
 
@@ -293,5 +287,50 @@ mod tests {
             &StyleStrategy::Nonce(String::from("nonce")),
             None,
         ));
+    }
+}
+
+#[cfg(all(test, not(feature = "ssr"), target_arch = "wasm32"))]
+mod wasm_tests {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+    use super::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    fn document() -> leptos::web_sys::Document {
+        leptos::web_sys::window()
+            .and_then(|window| window.document())
+            .expect("browser document should exist")
+    }
+
+    #[wasm_bindgen_test]
+    fn apply_styles_cssom_sets_style_properties() {
+        let element = document()
+            .create_element("div")
+            .expect("create_element should succeed")
+            .dyn_into::<leptos::web_sys::HtmlElement>()
+            .expect("element should cast to HtmlElement");
+        let styles = vec![
+            (CssProperty::Width, String::from("120px")),
+            (CssProperty::Display, String::from("block")),
+        ];
+
+        apply_styles_cssom(&element, &styles);
+
+        let style = element.style();
+        assert_eq!(
+            style
+                .get_property_value("width")
+                .expect("width should be readable"),
+            "120px"
+        );
+        assert_eq!(
+            style
+                .get_property_value("display")
+                .expect("display should be readable"),
+            "block"
+        );
     }
 }

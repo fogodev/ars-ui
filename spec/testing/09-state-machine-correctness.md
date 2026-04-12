@@ -286,9 +286,6 @@ fn effect_callback_fires_in_setup_not_cleanup() {
     }
 
     // Run the pending effects — setup fires on_value_complete, cleanup does not.
-    #[cfg(target_arch = "wasm32")]
-    let send_fn: Rc<dyn Fn(pin_input::Event)> = Rc::new(|_| {});
-    #[cfg(not(target_arch = "wasm32"))]
     let send_fn: Arc<dyn Fn(pin_input::Event) + Send + Sync> = Arc::new(|_| {});
 
     let result = svc.send(pin_input::Event::InputChar { index: svc.context().pin_count - 1, ch: '1' });
@@ -387,12 +384,7 @@ fn rapid_events_no_orphaned_timers() {
     let mut active_effects: Vec<Box<dyn FnOnce()>> = Vec::new();
 
     // Rapid sequence: open → close → open → close × 50
-    // PendingEffect::run() takes Rc<dyn Fn(M::Event)> on wasm32,
-    // Arc<dyn Fn(M::Event) + Send + Sync> on native.
-    // For testing on wasm32, a no-op Rc suffices.
-    #[cfg(target_arch = "wasm32")]
-    let send_fn: Rc<dyn Fn(tooltip::Event)> = Rc::new(|_| {});
-    #[cfg(not(target_arch = "wasm32"))]
+    // PendingEffect::run() takes Arc<dyn Fn(M::Event) + Send + Sync> on all targets.
     let send_fn: Arc<dyn Fn(tooltip::Event) + Send + Sync> = Arc::new(|_| {});
 
     for _ in 0..50 {
@@ -488,11 +480,7 @@ use ars_core::{Service, CleanupFn};
 fn rapid_transitions_clean_up_effects() {
     let props = tooltip::Props::new("t1");
     let mut svc = Service::new(props.clone(), Env::default(), Default::default());
-    // PendingEffect::run() takes Rc<dyn Fn(M::Event)> on wasm32,
-    // Arc<dyn Fn(M::Event) + Send + Sync> on native.
-    #[cfg(target_arch = "wasm32")]
-    let send_fn: Rc<dyn Fn(tooltip::Event)> = Rc::new(|_| {});
-    #[cfg(not(target_arch = "wasm32"))]
+    // PendingEffect::run() takes Arc<dyn Fn(M::Event) + Send + Sync> on all targets.
     let send_fn: Arc<dyn Fn(tooltip::Event) + Send + Sync> = Arc::new(|_| {});
     let mut active_cleanups: Vec<CleanupFn> = Vec::new();
 
@@ -578,7 +566,7 @@ which is not part of the TransitionPlan API. Must use `.with_effect()`.
 
 ### 1.14 PendingEffect Mutability Contract
 
-`PendingEffect::setup` receives `(&M::Context, &M::Props, Rc<dyn Fn(M::Event)>)` on wasm32 or `(&M::Context, &M::Props, Arc<dyn Fn(M::Event) + Send + Sync>)` on native.
+`PendingEffect::setup` receives `(&M::Context, &M::Props, Arc<dyn Fn(M::Event) + Send + Sync>)` on all targets.
 The Context and Props references are **immutable**. Effects MUST NOT attempt to
 write to Context fields. Side effects that need to store state (timer IDs,
 listener handles) must use the cleanup return or adapter-managed storage.
@@ -593,11 +581,7 @@ fn effect_setup_does_not_require_mut_context() {
     let mut svc = Service::new(props.clone(), Env::default(), Default::default());
 
     let result = svc.send(tooltip::Event::PointerEnter);
-    // PendingEffect::run() takes Rc<dyn Fn(M::Event)> on wasm32,
-    // Arc<dyn Fn(M::Event) + Send + Sync> on native.
-    #[cfg(target_arch = "wasm32")]
-    let send_fn: Rc<dyn Fn(tooltip::Event)> = Rc::new(|_| {});
-    #[cfg(not(target_arch = "wasm32"))]
+    // PendingEffect::run() takes Arc<dyn Fn(M::Event) + Send + Sync> on all targets.
     let send_fn: Arc<dyn Fn(tooltip::Event) + Send + Sync> = Arc::new(|_| {});
     for effect in result.pending_effects {
         // This must not panic — context is immutable

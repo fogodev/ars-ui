@@ -138,7 +138,7 @@ use ars_a11y::FocusRing;
 use ars_core::{KeyboardKey, KeyModifiers, ModalityContext, PointerType};
 
 pub struct ModalityManager {
-    modality: ArsRc<dyn ModalityContext>,
+    modality: Arc<dyn ModalityContext>,
     focus_ring: FocusRing,
 }
 

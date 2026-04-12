@@ -56,16 +56,16 @@ pub struct Props {
     /// Platform capabilities for side effects (focus, timers, scroll-lock, positioning).
     /// Adapters provide platform-specific implementations (e.g., `WebPlatformEffects`).
     /// Defaults to `NullPlatformEffects` (no-op) for tests and SSR.
-    pub platform: Option<ArsRc<dyn PlatformEffects>>,
+    pub platform: Option<Arc<dyn PlatformEffects>>,
 
     /// Shared input-modality state for this provider root.
     /// Defaults to `DefaultModalityContext`.
-    pub modality: Option<ArsRc<dyn ModalityContext>>,
+    pub modality: Option<Arc<dyn ModalityContext>>,
 
     /// Calendar/locale data provider for date-time components.
     /// Production uses `Icu4xProvider`; tests use `StubIcuProvider`.
     /// Defaults to `StubIcuProvider` (English-only).
-    pub icu_provider: Option<ArsRc<dyn IcuProvider>>,
+    pub icu_provider: Option<Arc<dyn IcuProvider>>,
 
     /// Per-component translation message registries.
     /// Defaults to empty (components use built-in English defaults).
@@ -93,10 +93,10 @@ pub struct ArsContext {
     id_prefix: Option<String>,
     portal_container_id: Option<String>,
     root_node_id: Option<String>,
-    platform: ArsRc<dyn PlatformEffects>,
-    modality: ArsRc<dyn ModalityContext>,
-    icu_provider: ArsRc<dyn IcuProvider>,
-    i18n_registries: ArsRc<I18nRegistries>,
+    platform: Arc<dyn PlatformEffects>,
+    modality: Arc<dyn ModalityContext>,
+    icu_provider: Arc<dyn IcuProvider>,
+    i18n_registries: Arc<I18nRegistries>,
     style_strategy: StyleStrategy,
 }
 
@@ -118,11 +118,11 @@ impl ArsContext {
     /// Returns the root node ID for focus/portal scoping, if set.
     pub fn root_node_id(&self) -> Option<&str> { self.root_node_id.as_deref() }
     /// Returns the platform capabilities trait object.
-    pub fn platform(&self) -> ArsRc<dyn PlatformEffects> { ArsRc::clone(&self.platform) }
+    pub fn platform(&self) -> Arc<dyn PlatformEffects> { Arc::clone(&self.platform) }
     /// Returns the provider-scoped modality context.
-    pub fn modality(&self) -> ArsRc<dyn ModalityContext> { ArsRc::clone(&self.modality) }
+    pub fn modality(&self) -> Arc<dyn ModalityContext> { Arc::clone(&self.modality) }
     /// Returns the ICU calendar/locale data provider.
-    pub fn icu_provider(&self) -> ArsRc<dyn IcuProvider> { ArsRc::clone(&self.icu_provider) }
+    pub fn icu_provider(&self) -> Arc<dyn IcuProvider> { Arc::clone(&self.icu_provider) }
     /// Returns the i18n translation registries.
     pub fn i18n_registries(&self) -> &I18nRegistries { &self.i18n_registries }
     /// Returns the active CSS style injection strategy.
@@ -140,8 +140,8 @@ impl Default for ArsContext {
             id_prefix: None,
             portal_container_id: None,
             root_node_id: None,
-            platform: ArsRc::new(NullPlatformEffects),
-            modality: ArsRc::new(DefaultModalityContext::new()),
+            platform: Arc::new(NullPlatformEffects),
+            modality: Arc::new(DefaultModalityContext::new()),
             icu_provider: Arc::new(StubIcuProvider),
             i18n_registries: Rc::new(I18nRegistries::new()),
             style_strategy: StyleStrategy::Inline,

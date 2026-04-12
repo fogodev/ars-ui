@@ -27,8 +27,9 @@ For implementation tasks:
 5. Implement only the scope required to make those tests pass.
 6. If implementation changes the intended contract, update the relevant spec in the same task.
 7. Present the final result for user review before any commit.
-8. After user approval, commit and push a PR targeting `main`. The PR body MUST include an auto-close keyword for the issue being delivered, for example `Closes #20` or `Fixes #20`, so GitHub closes the issue automatically when the PR merges.
-9. Only after CI passes and the PR is merged, close the issue.
+8. After user approval, run `cargo xci` locally and fix any failures before pushing anything to GitHub.
+9. After `cargo xci` passes, commit and push a PR targeting `main`. The PR body MUST include an auto-close keyword for the issue being delivered, for example `Closes #20` or `Fixes #20`, so GitHub closes the issue automatically when the PR merges.
+10. Only after CI passes and the PR is merged, close the issue.
 
 Never close a GitHub issue without a merged PR that passes CI. Never commit or push without explicit user approval. Keep the issue, PR, and Project board status aligned with the actual work state at every step.
 
@@ -38,6 +39,7 @@ Default delivery rules:
 - Keep task scope aligned with the issue. If the issue is too large or ambiguous, stop and split or clarify rather than freelancing a bigger change.
 - Prefer tasks sized `1`, `2`, `3`, or `5` points. `8` is exceptional. `13` must be decomposed before implementation.
 - Preserve the crate and dependency layering defined by the architecture and implementation plan.
+- Do not add a new dependency crate without explicit user approval first. If a task appears to need a new crate, stop, explain why, and get approval before editing any `Cargo.toml`.
 - When a task is complete, verify the exact tests and checks named by the issue before considering it done.
 
 ### Code Quality Standards

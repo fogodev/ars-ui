@@ -4,8 +4,6 @@
 //! container: `Rc<RefCell<T>>` on wasm/`no_std` and `Arc<Mutex<T>>` on
 //! native + `std`.
 
-extern crate alloc;
-
 use core::fmt::{self, Debug};
 
 /// Shared interior-mutable state container.

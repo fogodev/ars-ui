@@ -66,15 +66,15 @@ The central primitive. Creates a `Service<M>`, wraps it in a reactive signal, an
 ````rust
 use std::rc::Rc;
 use leptos::prelude::*;
-use ars_core::{Machine, Service, Env, ArsRc};
+use ars_core::{Machine, Service, Env, Arc};
 use ars_i18n::IcuProvider;
 
 /// Return type from `use_machine`.
 #[derive(Clone, Copy)]
 pub struct UseMachineReturn<M: Machine + 'static>
 where
-    M::State: Clone + PartialEq + 'static,
-    M::Context: Clone + 'static,
+    M::State: Clone + PartialEq + Send + Sync + 'static,
+    M::Context: Clone + Send + Sync + 'static,
 {
     /// Reactive signal for the current machine state.
     /// Reading it inside a reactive scope creates a dependency.
@@ -97,9 +97,11 @@ where
 
 impl<M: Machine + 'static> UseMachineReturn<M>
 where
-    M::State: Clone + PartialEq + 'static,
-    M::Context: Clone + 'static,
-    M::Props: Clone + PartialEq + 'static,
+    M::State: Clone + PartialEq + Send + Sync + 'static,
+    M::Event: Send + Sync + 'static,
+    M::Context: Clone + Send + Sync + 'static,
+    M::Props: Clone + PartialEq + Send + Sync + 'static,
+    M::Messages: Send + Sync + 'static,
 {
     /// Get a one-shot snapshot of the connect API.
     /// **Prefer `derive()` for reactive data** — this method does not track dependencies.
@@ -144,9 +146,9 @@ where
     /// let is_open = machine.derive(|api| api.is_open());
     /// let aria_label = machine.derive(|api| api.root_attrs().get(&HtmlAttr::Aria(AriaAttr::Label)).map(str::to_owned));
     /// ```
-    pub fn derive<T: Clone + PartialEq + 'static>(
+    pub fn derive<T: Clone + PartialEq + Send + Sync + 'static>(
         &self,
-        f: impl Fn(&M::Api<'_>) -> T + 'static,
+        f: impl Fn(&M::Api<'_>) -> T + Send + Sync + 'static,
     ) -> Memo<T> {
         let state = self.state;
         let context_version = self.context_version;
@@ -268,9 +270,11 @@ fn use_machine_inner<M: Machine + 'static>(
     StoredValue<std::collections::HashMap<&'static str, Box<dyn FnOnce()>>>,
 )
 where
-    M::State: Clone + PartialEq + 'static,
-    M::Context: Clone + 'static,
-    M::Props: Clone + PartialEq + 'static,
+    M::State: Clone + PartialEq + Send + Sync + 'static,
+    M::Context: Clone + Send + Sync + 'static,
+    M::Props: Clone + PartialEq + Send + Sync + 'static,
+    M::Event: Send + Sync + 'static,
+    M::Messages: Send + Sync + 'static,
 {
     // Auto-inject ID if not provided.
     // Convention: M::Props must have a public `id: String` field.
@@ -287,10 +291,7 @@ where
     // gets the locale/icu_provider/messages at mount time.
     let locale = resolve_locale(None);
     let icu_provider = use_icu_provider();
-    let registries = use_context::<ArsContext>()
-        .map(|ctx| ctx.i18n_registries.clone())
-        .unwrap_or_default();
-    let messages = resolve_messages::<M::Messages>(None, &registries, &locale);
+    let messages = use_messages::<M::Messages>(None, Some(&locale));
     let env = Env { locale, icu_provider };
 
     // Create the service once — runs only on component initialization.
@@ -390,8 +391,8 @@ where
             // before the component is mounted, and any framework-triggered events during init
             // are spurious. In debug mode, a debug_assert fires to catch unexpected early sends.
             let send_cb = send_ref.with_value(|opt| opt.clone());
-            let send_rc: Rc<dyn Fn(M::Event)> = if let Some(cb) = send_cb {
-                Rc::new(move |e| cb.run(e))
+            let send_arc: Arc<dyn Fn(M::Event) + Send + Sync> = if let Some(cb) = send_cb {
+                Arc::new(move |e| cb.run(e))
             } else {
                 debug_assert!(false, "send() called before send_ref initialized — event dropped");
                 return; // Silently drop during initialization window
@@ -402,7 +403,7 @@ where
                 let cleanup = effect.run(
                     &ctx_clone,
                     &props_clone,
-                    send_rc.clone(),
+                    Arc::clone(&send_arc),
                 );
                 effect_cleanups.update_value(|cleanups| { cleanups.insert(name, cleanup); });
             }
@@ -430,27 +431,45 @@ where
 
 pub fn use_machine<M: Machine + 'static>(props: M::Props) -> UseMachineReturn<M>
 where
-    M::State: Clone + PartialEq + 'static,
-    M::Context: Clone + 'static,
-    M::Props: Clone + PartialEq + 'static,
+    M::State: Clone + PartialEq + Send + Sync + 'static,
+    M::Context: Clone + Send + Sync + 'static,
+    M::Props: Clone + PartialEq + Send + Sync + 'static,
+    M::Event: Send + Sync + 'static,
+    M::Messages: Send + Sync + 'static,
 {
     let (result, _, _, _, _) = use_machine_inner::<M>(props);
     result
 }
 ```
 
+> **Storage contract:** These bounds are part of the Leptos adapter contract
+> because `UseMachineReturn` exposes `ReadSignal`, `Memo`, and `StoredValue`
+> backed by Leptos's default `SyncStorage`. As long as the adapter uses that
+> storage model, machine state, context, props, events, and derived values must
+> be `Send + Sync`.
+
 ### 3.3 Reactive Props Variant
 
-For components with externally controlled props (e.g., `checked` signal):
+For components with externally controlled props (e.g., `checked` signal), the
+Leptos adapter synchronizes prop changes via an **immediate isomorphic effect**.
+This intentionally differs from the older deferred `Effect::new` approach: the
+deferred model introduced a one-frame stale window where `connect()` observed the
+old prop value after the external signal had already changed. Immediate sync keeps
+the machine state, context, and derived attrs aligned with external props in the
+same reactive turn.
+
+This is the preferred contract. The previous deferred-effect design is superseded.
 
 ```rust
 pub fn use_machine_with_reactive_props<M: Machine + 'static>(
     props_signal: Signal<M::Props>,
 ) -> UseMachineReturn<M>
 where
-    M::State: Clone + PartialEq + 'static,
-    M::Context: Clone + 'static,
-    M::Props: Clone + PartialEq + 'static,
+    M::State: Clone + PartialEq + Send + Sync + 'static,
+    M::Context: Clone + Send + Sync + 'static,
+    M::Props: Clone + PartialEq + Send + Sync + 'static,
+    M::Event: Send + Sync + 'static,
+    M::Messages: Send + Sync + 'static,
 {
     let initial_props = props_signal.get();
 
@@ -466,12 +485,17 @@ where
     // StoredValue uses interior mutability — `set_value()` does not require `mut`.
     let prev_props: StoredValue<Option<M::Props>> = StoredValue::new(None);
 
-    // Watch for prop changes and sync to machine.
-    // Note: This effect writes to `context_version_write` — an intentional exception
-    // to the "never write signals inside effects" rule. This is safe because
-    // `props_signal` (the dependency) is an external input, not derived from
-    // `context_version`, so no reactive loop can form.
-    Effect::new(move |_| {
+    // Watch for prop changes and sync to machine immediately.
+    //
+    // This uses `ImmediateEffect::new_isomorphic` rather than deferred
+    // `Effect::new` so controlled props do not lag a frame behind the external
+    // signal. The effect is still safe because `props_signal` is an external
+    // input, not derived from `context_version`, so no reactive loop can form.
+    //
+    // The initial run is a no-op for machine sync: it records the current props
+    // into `prev_props`, but skips calling `set_props()` because the machine was
+    // already initialized with `initial_props`.
+    let sync_effect = ImmediateEffect::new_isomorphic(move || {
         let new_props = props_signal.get();
         let should_sync = prev_props.with_value(|prev| {
             prev.as_ref() != Some(&new_props)
@@ -497,10 +521,11 @@ where
                         let name = effect.name;
                         let send_cb = send_ref.with_value(|opt| opt.clone());
                         if let Some(cb) = send_cb {
-                            let send_rc: Rc<dyn Fn(M::Event)> = Rc::new(move |e| cb.run(e));
+                            let send_arc: Arc<dyn Fn(M::Event) + Send + Sync> =
+                                Arc::new(move |e| cb.run(e));
                             let ctx_clone = service.with_value(|s| s.context().clone());
                             let props_clone = service.with_value(|s| s.props().clone());
-                            let cleanup = effect.run(&ctx_clone, &props_clone, send_rc);
+                            let cleanup = effect.run(&ctx_clone, &props_clone, send_arc);
                             effect_cleanups.update_value(|cleanups| { cleanups.insert(name, cleanup); });
                         }
                     }
@@ -509,6 +534,7 @@ where
             prev_props.set_value(Some(new_props));
         }
     });
+    on_cleanup(move || drop(sync_effect));
 
     result
 }
@@ -535,7 +561,12 @@ fn ControlledCheckbox(checked: Signal<checkbox::State>) -> impl IntoView {
 }
 ```
 
-> **Adapter difference:** Leptos provides `use_machine_with_reactive_props` as a separate hook because Leptos effects are fine-grained and can watch individual signals. Dioxus integrates prop sync into `use_machine` via `use_sync_props` because Dioxus uses component-level re-rendering.
+> **Adapter difference:** Leptos provides `use_machine_with_reactive_props` as a
+> separate hook because Leptos components execute once and react through signals.
+> The adapter uses an immediate reactive watcher (`ImmediateEffect`) to keep the
+> service synchronized without a stale frame. Dioxus integrates prop sync into
+> `use_machine` via body-level `use_sync_props` because Dioxus uses
+> component-level re-rendering.
 
 ### 3.4 SSR Effect Behavior
 
@@ -1370,23 +1401,23 @@ The Clipboard component's `feedback_duration_ms` timeout resets the "copied" sta
 
 2. **Use CSS animation instead of state-based timeout for the "copied" indicator**: Rather than relying on the state machine's `ResetTimeout` event to remove the visual feedback, adapters SHOULD use a CSS animation on the indicator element that auto-hides after the feedback duration. This avoids the hydration race entirely:
 
-   ```css
-   [data-ars-scope="clipboard"][data-ars-state="copied"]
-     [data-ars-part="indicator"] {
-     animation: ars-clipboard-feedback var(--ars-clipboard-duration, 2000ms)
-       ease-out forwards;
-   }
+    ```css
+    [data-ars-scope="clipboard"][data-ars-state="copied"]
+        [data-ars-part="indicator"] {
+        animation: ars-clipboard-feedback var(--ars-clipboard-duration, 2000ms)
+            ease-out forwards;
+    }
 
-   @keyframes ars-clipboard-feedback {
-     0%,
-     90% {
-       opacity: 1;
-     }
-     100% {
-       opacity: 0;
-     }
-   }
-   ```
+    @keyframes ars-clipboard-feedback {
+        0%,
+        90% {
+            opacity: 1;
+        }
+        100% {
+            opacity: 0;
+        }
+    }
+    ```
 
 3. **Defer reset-timeout until after first interaction**: The `feedback-timer` effect MUST NOT run during hydration. The adapter gates the timer setup behind a `has_interacted` flag that is only set to `true` after the first `Event::Copy` is sent by user interaction. This prevents orphaned timers from the SSR→hydration transition.
 
@@ -1726,9 +1757,10 @@ wraps core `ArsContext` values in reactive signals and includes the platform cap
 trait object.
 
 ```rust
-use ars_i18n::{Locale, Direction};
-use ars_core::{ArsRc, ColorMode, PlatformEffects, StyleStrategy};
-use ars_i18n::IcuProvider;
+use std::sync::Arc;
+
+use ars_i18n::{Direction,IcuProvider, Locale};
+use ars_core::{ColorMode, PlatformEffects, StyleStrategy};
 
 /// Reactive environment context published by the Leptos ArsProvider adapter.
 #[derive(Clone)]
@@ -1741,9 +1773,9 @@ pub struct ArsContext {
     pub id_prefix: Signal<Option<String>>,
     pub portal_container_id: Signal<Option<String>>,
     pub root_node_id: Signal<Option<String>>,
-    pub platform: ArsRc<dyn PlatformEffects>,
-    pub icu_provider: ArsRc<dyn IcuProvider>,
-    pub i18n_registries: ArsRc<I18nRegistries>,
+    pub platform: Arc<dyn PlatformEffects>,
+    pub icu_provider: Arc<dyn IcuProvider>,
+    pub i18n_registries: Arc<I18nRegistries>,
     /// Non-reactive style strategy — set once at provider mount time.
     style_strategy: StyleStrategy,
 }
@@ -1754,12 +1786,23 @@ impl ArsContext {
         &self.style_strategy
     }
 }
+
+fn current_ars_context() -> Option<ArsContext> {
+    use_context::<ArsContext>()
+}
+
+/// Publish `ArsContext` into Leptos context.
+pub fn provide_ars_context(context: ArsContext) {
+    provide_context(context);
+}
 ```
 
 The `ArsProvider` component, its props, and rendering are specified in
 `spec/leptos-components/utility/ars-provider.md`. The component publishes
-`ArsContext` via `provide_context` and renders a `<div dir=dir_attr>` wrapper.
-The Leptos adapter defaults `platform` to `Rc::new(WebPlatformEffects)` on web targets.
+`ArsContext` via `provide_ars_context` and renders a `<div dir=dir_attr>` wrapper.
+The context value itself satisfies Leptos's `provide_context(T: Send + Sync + 'static)`
+contract because ars-ui standardizes on `Arc` ownership and `Send + Sync` trait
+bounds across native and wasm builds.
 
 ### 13.1 use_locale()
 
@@ -1772,7 +1815,7 @@ The Leptos adapter defaults `platform` to `Rc::new(WebPlatformEffects)` on web t
 /// Calling it inside a closure that re-runs would allocate a new `Signal::stored` on
 /// each invocation, causing unbounded allocations.
 pub fn use_locale() -> Signal<Locale> {
-    use_context::<ArsContext>()
+    current_ars_context()
         .map(|ctx| ctx.locale)
         .unwrap_or_else(|| {
             warn_missing_provider("use_locale");
@@ -1809,7 +1852,32 @@ fn resolve_locale(adapter_props_locale: Option<&Locale>) -> Locale {
 }
 ```
 
-### 13.3 t() — Translatable Text Resolver
+### 13.3 use_messages() — Adapter Message Resolution
+
+```rust
+use ars_core::resolve_messages as core_resolve_messages;
+
+/// Resolve per-component i18n messages from adapter props, ArsProvider context,
+/// or built-in defaults.
+///
+/// This adapter helper owns the hook-based part of message resolution:
+/// - `adapter_props_messages` wins when present
+/// - otherwise, locale comes from `resolve_locale()`
+/// - registries come from `ArsProvider` context when available
+/// - final fallback is `M::default()` via `ars_core::resolve_messages()`
+pub fn use_messages<M: ComponentMessages + Send + Sync + 'static>(
+    adapter_props_messages: Option<&M>,
+    adapter_props_locale: Option<&Locale>,
+) -> M {
+    let locale = resolve_locale(adapter_props_locale);
+    let registries = current_ars_context()
+        .map(|ctx| Arc::clone(&ctx.i18n_registries))
+        .unwrap_or_else(|| Arc::new(I18nRegistries::new()));
+    core_resolve_messages(adapter_props_messages, registries.as_ref(), &locale)
+}
+```
+
+### 13.4 t() — Translatable Text Resolver
 
 ```rust
 use ars_i18n::Translate;
@@ -1827,7 +1895,7 @@ use ars_i18n::Translate;
 /// and §7.5 for the `t()` function contract.
 #[inline]
 #[must_use]
-pub fn t<T: Translate>(msg: T) -> impl IntoView {
+pub fn t<T: Translate + Send + Sync + 'static>(msg: T) -> impl IntoView {
     let locale = use_locale();
     let icu = use_icu_provider();
     move || msg.translate(&locale.get(), &*icu)
@@ -1921,7 +1989,10 @@ mod dom_tests {
 
 ## 16. Controlled Value Helper
 
-All controlled prop watchers follow the same pattern: track previous value, skip initial, send event on change. This helper extracts the repeated logic:
+All controlled prop watchers follow the same pattern: track previous value, skip
+initial, send event on change. In Leptos, the preferred implementation uses an
+**immediate isomorphic effect** rather than deferred `Effect::new`, so controlled
+values do not lag a render behind their external signal.
 
 ````rust
 /// Watch a reactive signal and dispatch an event when its value changes.
@@ -1931,13 +2002,16 @@ All controlled prop watchers follow the same pattern: track previous value, skip
 /// ```rust
 /// use_controlled_prop(checked_sig, send, |v| checkbox::Event::SetChecked(v));
 /// ```
-pub fn use_controlled_prop<T: Clone + PartialEq + 'static, E: 'static>(
+pub fn use_controlled_prop<
+    T: Clone + PartialEq + Send + Sync + 'static,
+    E: Send + Sync + 'static,
+>(
     signal: Signal<T>,
     send: Callback<E>,
-    event_fn: impl Fn(T) -> E + 'static,
+    event_fn: impl Fn(T) -> E + Send + Sync + 'static,
 ) {
     let prev: StoredValue<Option<T>> = StoredValue::new(None);
-    Effect::new(move |_| {
+    let effect = ImmediateEffect::new_isomorphic(move || {
         let new_val = signal.get();
         let should_send = prev.with_value(|p| p.as_ref() != Some(&new_val));
         if should_send {
@@ -1948,10 +2022,17 @@ pub fn use_controlled_prop<T: Clone + PartialEq + 'static, E: 'static>(
             prev.set_value(Some(new_val));
         }
     });
+    on_cleanup(move || drop(effect));
 }
 ````
 
-> **Staleness note:** Because Leptos effects are deferred (via `Effect::new`), there is a guaranteed one-frame stale window: the first render after a controlled signal change uses the old value. The Dioxus adapter avoids this by using body-level synchronous sync (`use_controlled_prop_sync`). Body-level sync is not possible in Leptos because component functions execute only once (at mount). Subsequent signal changes are observed only through reactive subscriptions (Effect, Memo), which are inherently deferred. **Mitigation:** For components where one-frame staleness is unacceptable (e.g., rapidly-updated controlled values), consider migrating to `Memo::new` or inline body-level checks before the first render, matching the Dioxus approach.
+> **Immediate-sync note:** The older deferred-effect design (`Effect::new`) was
+> simpler but produced a one-frame stale window after controlled signal changes.
+> The adapter now standardizes on `ImmediateEffect::new_isomorphic` for controlled
+> value watchers so machine events are dispatched in the same reactive turn.
+> This gives Leptos parity with the stricter controlled-value guarantees expected
+> from the Dioxus adapter, while still fitting Leptos's one-time component
+> execution model.
 >
 > **Optional controlled props:** For optional controlled props (`Option<T>`), Leptos adapters use conditional effect creation: `if let Some(signal) = controlled_signal { use_controlled_prop(signal, ...) }`. This is safe in Leptos because effects can be conditionally created without violating hook ordering rules (unlike React). See Dioxus adapter section 19 for the Dioxus-specific `use_controlled_prop_sync_optional` helper.
 

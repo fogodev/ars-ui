@@ -4,16 +4,13 @@
 //! the root provider into descendant components, including platform effects and
 //! the shared instance-scoped modality context.
 
-extern crate alloc;
-
-use alloc::string::String;
+use alloc::{string::String, sync::Arc};
 use core::fmt;
 
 use ars_i18n::{Direction, Locale, locales};
 
 use crate::{
-    ArsRc, DefaultModalityContext, ModalityContext, NullPlatformEffects, PlatformEffects,
-    StyleStrategy,
+    DefaultModalityContext, ModalityContext, NullPlatformEffects, PlatformEffects, StyleStrategy,
 };
 
 /// Active color mode for theme-aware rendering.
@@ -42,8 +39,8 @@ pub struct ArsContext {
     id_prefix: Option<String>,
     portal_container_id: Option<String>,
     root_node_id: Option<String>,
-    platform: ArsRc<dyn PlatformEffects>,
-    modality: ArsRc<dyn ModalityContext>,
+    platform: Arc<dyn PlatformEffects>,
+    modality: Arc<dyn ModalityContext>,
     style_strategy: StyleStrategy,
 }
 
@@ -63,8 +60,8 @@ impl ArsContext {
         id_prefix: Option<String>,
         portal_container_id: Option<String>,
         root_node_id: Option<String>,
-        platform: ArsRc<dyn PlatformEffects>,
-        modality: ArsRc<dyn ModalityContext>,
+        platform: Arc<dyn PlatformEffects>,
+        modality: Arc<dyn ModalityContext>,
         style_strategy: StyleStrategy,
     ) -> Self {
         Self {
@@ -132,14 +129,14 @@ impl ArsContext {
 
     /// Returns the shared platform-effects handle.
     #[must_use]
-    pub fn platform(&self) -> ArsRc<dyn PlatformEffects> {
-        ArsRc::clone(&self.platform)
+    pub fn platform(&self) -> Arc<dyn PlatformEffects> {
+        Arc::clone(&self.platform)
     }
 
     /// Returns the shared modality context for this provider root.
     #[must_use]
-    pub fn modality(&self) -> ArsRc<dyn ModalityContext> {
-        ArsRc::clone(&self.modality)
+    pub fn modality(&self) -> Arc<dyn ModalityContext> {
+        Arc::clone(&self.modality)
     }
 
     /// Returns the active style strategy.
@@ -160,8 +157,8 @@ impl Default for ArsContext {
             id_prefix: None,
             portal_container_id: None,
             root_node_id: None,
-            platform: ArsRc::from_platform(NullPlatformEffects),
-            modality: ArsRc::from_modality(DefaultModalityContext::new()),
+            platform: Arc::new(NullPlatformEffects),
+            modality: Arc::new(DefaultModalityContext::new()),
             style_strategy: StyleStrategy::Inline,
         }
     }
@@ -230,8 +227,8 @@ mod tests {
             Some(String::from("prefix")),
             Some(String::from("portal-root")),
             Some(String::from("app-root")),
-            ArsRc::from_platform(NullPlatformEffects),
-            ArsRc::from_modality(NullModalityContext),
+            Arc::new(NullPlatformEffects),
+            Arc::new(NullModalityContext),
             StyleStrategy::Cssom,
         );
 

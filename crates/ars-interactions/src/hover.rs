@@ -183,6 +183,11 @@ pub fn use_hover(config: HoverConfig) -> HoverResult {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
     use ars_core::{AttrValue, DefaultModalityContext, HtmlAttr, PointerType};
 
     use super::*;
@@ -210,34 +215,79 @@ mod tests {
 
     #[test]
     fn hover_config_debug_with_callbacks_shows_callback() {
+        let start_calls = Arc::new(AtomicUsize::new(0));
+        let end_calls = Arc::new(AtomicUsize::new(0));
+        let change_calls = Arc::new(AtomicUsize::new(0));
         let config = HoverConfig {
-            on_hover_start: Some(Callback::new(|_: HoverEvent| {})),
-            on_hover_end: Some(Callback::new(|_: HoverEvent| {})),
-            on_hover_change: Some(Callback::new(|_: bool| {})),
+            on_hover_start: Some({
+                let start_calls = Arc::clone(&start_calls);
+                Callback::new(move |_: HoverEvent| {
+                    start_calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            on_hover_end: Some({
+                let end_calls = Arc::clone(&end_calls);
+                Callback::new(move |_: HoverEvent| {
+                    end_calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            on_hover_change: Some({
+                let change_calls = Arc::clone(&change_calls);
+                Callback::new(move |_: bool| {
+                    change_calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
             ..HoverConfig::default()
         };
         let debug = format!("{config:?}");
         assert!(debug.contains("on_hover_start: Some(Callback(..))"));
         assert!(debug.contains("on_hover_end: Some(Callback(..))"));
         assert!(debug.contains("on_hover_change: Some(Callback(..))"));
+        let event = HoverEvent {
+            pointer_type: PointerType::Mouse,
+            event_type: HoverEventType::HoverStart,
+        };
+        config.on_hover_start.as_ref().expect("callback")(event.clone());
+        config.on_hover_end.as_ref().expect("callback")(event);
+        config.on_hover_change.as_ref().expect("callback")(true);
+        assert_eq!(start_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(end_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(change_calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
     fn hover_config_clone_preserves_disabled_and_shares_callbacks() {
+        let calls = Arc::new(AtomicUsize::new(0));
         let config = HoverConfig {
             disabled: true,
-            on_hover_start: Some(Callback::new(|_: HoverEvent| {})),
+            on_hover_start: Some({
+                let calls = Arc::clone(&calls);
+                Callback::new(move |_: HoverEvent| {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
             ..HoverConfig::default()
         };
         let cloned = config.clone();
         assert!(cloned.disabled);
         // Callback clone shares the same allocation (pointer identity)
         assert_eq!(config.on_hover_start, cloned.on_hover_start);
+        cloned.on_hover_start.as_ref().expect("callback")(HoverEvent {
+            pointer_type: PointerType::Pen,
+            event_type: HoverEventType::HoverStart,
+        });
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
     fn hover_config_partial_eq_uses_pointer_identity_for_callbacks() {
-        let cb = Callback::new(|_: HoverEvent| {});
+        let shared_calls = Arc::new(AtomicUsize::new(0));
+        let cb = {
+            let shared_calls = Arc::clone(&shared_calls);
+            Callback::new(move |_: HoverEvent| {
+                shared_calls.fetch_add(1, Ordering::SeqCst);
+            })
+        };
         let config1 = HoverConfig {
             on_hover_start: Some(cb.clone()),
             ..HoverConfig::default()
@@ -248,13 +298,29 @@ mod tests {
         };
         // Same callback allocation → equal
         assert_eq!(config1, config2);
+        config2.on_hover_start.as_ref().expect("callback")(HoverEvent {
+            pointer_type: PointerType::Touch,
+            event_type: HoverEventType::HoverStart,
+        });
+        assert_eq!(shared_calls.load(Ordering::SeqCst), 1);
 
         // Different callback allocation → not equal (even if same closure body)
+        let different_calls = Arc::new(AtomicUsize::new(0));
         let config3 = HoverConfig {
-            on_hover_start: Some(Callback::new(|_: HoverEvent| {})),
+            on_hover_start: Some({
+                let different_calls = Arc::clone(&different_calls);
+                Callback::new(move |_: HoverEvent| {
+                    different_calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
             ..HoverConfig::default()
         };
         assert_ne!(config1, config3);
+        config3.on_hover_start.as_ref().expect("callback")(HoverEvent {
+            pointer_type: PointerType::Mouse,
+            event_type: HoverEventType::HoverStart,
+        });
+        assert_eq!(different_calls.load(Ordering::SeqCst), 1);
     }
 
     // --- HoverEventType tests ---

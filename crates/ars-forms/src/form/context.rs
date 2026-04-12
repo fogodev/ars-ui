@@ -1125,7 +1125,7 @@ mod tests {
 
     #[test]
     fn register_and_collect_async_validators() {
-        use core::{future::Future, pin::Pin};
+        use core::pin::Pin;
 
         use crate::validation::{AsyncValidator, BoxedAsyncValidator};
 

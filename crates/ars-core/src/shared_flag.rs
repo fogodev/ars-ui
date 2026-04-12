@@ -1,40 +1,42 @@
 //! Shared boolean flag for cross-interaction state coordination.
 //!
 //! [`SharedFlag`] wraps an [`AtomicBool`](core::sync::atomic::AtomicBool) in an
-//! [`ArsRc`](crate::ArsRc), providing a cloneable, shared boolean that is
+//! [`Arc`](alloc::sync::Arc), providing a cloneable, shared boolean that is
 //! thread-safe on native targets and zero-overhead on wasm.
 
-use core::fmt::{self, Debug};
-
-use crate::ArsRc;
+use alloc::sync::Arc;
+use core::{
+    fmt::{self, Debug},
+    sync::atomic::{self, AtomicBool},
+};
 
 /// Shared boolean flag for cross-interaction state coordination.
 ///
 /// Cloning shares the same underlying flag. Uses [`AtomicBool`](core::sync::atomic::AtomicBool)
-/// for the value (zero overhead on wasm) and [`ArsRc`] for shared ownership.
+/// for the value (zero overhead on wasm) and [`Arc`] for shared ownership.
 ///
 /// Primary uses:
 /// - `PressConfig::long_press_cancel_flag` — `LongPress` sets, `Press` reads
 /// - `PressEvent::continue_propagation` — shared across cloned events
 #[derive(Clone)]
-pub struct SharedFlag(ArsRc<core::sync::atomic::AtomicBool>);
+pub struct SharedFlag(Arc<AtomicBool>);
 
 impl SharedFlag {
     /// Creates a new shared flag with the given initial value.
     #[must_use]
     pub fn new(value: bool) -> Self {
-        Self(ArsRc::new(core::sync::atomic::AtomicBool::new(value)))
+        Self(Arc::new(AtomicBool::new(value)))
     }
 
     /// Reads the current flag value.
     #[must_use]
     pub fn get(&self) -> bool {
-        self.0.load(core::sync::atomic::Ordering::Acquire)
+        self.0.load(atomic::Ordering::Acquire)
     }
 
     /// Sets the flag value.
     pub fn set(&self, value: bool) {
-        self.0.store(value, core::sync::atomic::Ordering::Release);
+        self.0.store(value, atomic::Ordering::Release);
     }
 }
 
@@ -52,7 +54,7 @@ impl Debug for SharedFlag {
 
 impl PartialEq for SharedFlag {
     fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
+        Arc::ptr_eq(&self.0, &other.0)
     }
 }
 

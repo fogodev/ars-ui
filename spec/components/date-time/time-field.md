@@ -78,7 +78,7 @@ pub struct Context {
     /// Resolved translatable messages.
     pub messages: Messages,
     /// ICU data provider for locale-dependent formatting (day period labels, etc.).
-    pub provider: ArsRc<dyn IcuProvider>,
+    pub provider: Arc<dyn IcuProvider>,
     /// The granularity of the component.
     pub granularity: TimeGranularity,
     /// The hour cycle of the component.

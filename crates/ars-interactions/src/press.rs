@@ -179,8 +179,8 @@ pub enum PressEventType {
 ///
 /// **Clone semantics:** Uses [`SharedFlag`] for propagation control so that
 /// cloned events share the same propagation flag. `SharedFlag` uses
-/// [`AtomicBool`](core::sync::atomic::AtomicBool) for the value (zero overhead
-/// on wasm) and [`ArsRc`](ars_core::ArsRc) for shared ownership. Calling
+/// [`AtomicBool`](std::sync::atomic::AtomicBool) for the value (zero overhead
+/// on wasm) and [`Arc`](std::sync::Arc) for shared ownership. Calling
 /// [`continue_propagation()`](Self::continue_propagation) on any clone
 /// affects the original and all other clones.
 #[derive(Clone, Debug)]
@@ -309,7 +309,15 @@ pub fn use_press(config: PressConfig) -> PressResult {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, rc::Rc, time::Duration};
+    use std::{
+        cell::RefCell,
+        rc::Rc,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        time::Duration,
+    };
 
     use ars_core::{AttrValue, HtmlAttr};
 
@@ -357,9 +365,21 @@ mod tests {
 
     #[test]
     fn press_config_debug_with_callbacks_shows_callback() {
+        let press_calls = Arc::new(AtomicUsize::new(0));
+        let change_calls = Arc::new(AtomicUsize::new(0));
         let config = PressConfig {
-            on_press: Some(Callback::new(|_: PressEvent| {})),
-            on_press_change: Some(Callback::new(|_: bool| {})),
+            on_press: Some({
+                let press_calls = Arc::clone(&press_calls);
+                Callback::new(move |_: PressEvent| {
+                    press_calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            on_press_change: Some({
+                let change_calls = Arc::clone(&change_calls);
+                Callback::new(move |_: bool| {
+                    change_calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
             long_press_cancel_flag: Some(SharedFlag::new(true)),
             ..PressConfig::default()
         };
@@ -367,6 +387,19 @@ mod tests {
         assert!(debug.contains("on_press: Some(Callback(..))"));
         assert!(debug.contains("on_press_change: Some(Callback(..))"));
         assert!(debug.contains("long_press_cancel_flag: Some(SharedFlag(true))"));
+        let event = PressEvent {
+            pointer_type: PointerType::Mouse,
+            event_type: PressEventType::Press,
+            client_x: Some(1.0),
+            client_y: Some(2.0),
+            modifiers: KeyModifiers::default(),
+            is_within_element: true,
+            continue_propagation: SharedFlag::new(false),
+        };
+        config.on_press.as_ref().expect("callback")(event);
+        config.on_press_change.as_ref().expect("callback")(true);
+        assert_eq!(press_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(change_calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
