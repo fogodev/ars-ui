@@ -1858,6 +1858,7 @@ impl<T: CollectionItem> TreeCollection<T> {
         for key in keys {
             // Collect the subtree rooted at `key` (DFS order in all_nodes).
             if let Some(&start) = self.key_to_index.get(key) {
+                let parent_key = self.all_nodes[start].parent_key.clone();
                 let root_level = self.all_nodes[start].level;
                 let mut end = start + 1;
                 while end < self.all_nodes.len() && self.all_nodes[end].level > root_level {
@@ -1871,6 +1872,23 @@ impl<T: CollectionItem> TreeCollection<T> {
                 for node in drained {
                     if let Some(val) = node.value { removed.push(val); }
                 }
+
+                // If the removed node's former parent has no remaining children,
+                // reset it to leaf state (has_children = false, is_expanded = None).
+                if let Some(pk) = &parent_key {
+                    if let Some(&pi) = self.key_to_index.get(pk) {
+                        let still_has_children = self
+                            .all_nodes
+                            .iter()
+                            .any(|n| n.parent_key.as_ref() == Some(pk));
+                        if !still_has_children {
+                            self.all_nodes[pi].has_children = false;
+                            self.all_nodes[pi].is_expanded = None;
+                            self.expanded_keys.remove(pk);
+                        }
+                    }
+                }
+
                 // Rebuild after each drain so subsequent key lookups use
                 // valid indices (drain shifts all_nodes in place).
                 self.rebuild_indices();
@@ -1885,10 +1903,34 @@ impl<T: CollectionItem> TreeCollection<T> {
     }
 
     /// Move a node (and its subtree) to a new parent at the given child index.
+    ///
+    /// If `new_parent` is `Some` but the key does not exist in the tree
+    /// (or is a descendant of the node being moved), the operation is a
+    /// no-op to avoid creating dangling parent references.
     pub fn reparent(&mut self, key: &Key, new_parent: Option<&Key>, sibling_index: usize) {
+        // Validate new_parent exists before extraction.
+        if let Some(pk) = new_parent {
+            if !self.key_to_index.contains_key(pk) {
+                return;
+            }
+        }
+
         // Extract the subtree.
         let subtree = self.extract_subtree(key);
         if subtree.is_empty() { return; }
+
+        // Reject reparenting under a descendant of the moved node.
+        // After extraction the descendant is no longer in the tree.
+        if let Some(pk) = new_parent {
+            if !self.key_to_index.contains_key(pk) {
+                let insert_pos = self.all_nodes.len().min(subtree[0].index);
+                for (offset, node) in subtree.into_iter().enumerate() {
+                    self.all_nodes.insert(insert_pos + offset, node);
+                }
+                self.rebuild_indices();
+                return;
+            }
+        }
 
         // Rebuild indices after extraction so that parent lookups and
         // flat_insert_position operate on valid index state.

@@ -481,6 +481,7 @@ impl<T: CollectionItem> TreeCollection<T> {
         for key in keys {
             // Collect the subtree rooted at `key` (DFS order in all_nodes).
             if let Some(&start) = self.key_to_index.get(key) {
+                let parent_key = self.all_nodes[start].parent_key.clone();
                 let root_level = self.all_nodes[start].level;
                 let mut end = start + 1;
                 while end < self.all_nodes.len() && self.all_nodes[end].level > root_level {
@@ -496,6 +497,23 @@ impl<T: CollectionItem> TreeCollection<T> {
                         removed.push(val);
                     }
                 }
+
+                // If the removed node's former parent has no remaining children,
+                // reset it to leaf state (has_children = false, is_expanded = None).
+                if let Some(pk) = &parent_key {
+                    if let Some(&pi) = self.key_to_index.get(pk) {
+                        let still_has_children = self
+                            .all_nodes
+                            .iter()
+                            .any(|n| n.parent_key.as_ref() == Some(pk));
+                        if !still_has_children {
+                            self.all_nodes[pi].has_children = false;
+                            self.all_nodes[pi].is_expanded = None;
+                            self.expanded_keys.remove(pk);
+                        }
+                    }
+                }
+
                 // Rebuild after each drain so subsequent key lookups use
                 // valid indices (drain shifts all_nodes in place).
                 self.rebuild_indices();
@@ -510,11 +528,39 @@ impl<T: CollectionItem> TreeCollection<T> {
     }
 
     /// Move a node (and its subtree) to a new parent at the given child index.
+    ///
+    /// If `new_parent` is `Some` but the key does not exist in the tree
+    /// (or is a descendant of the node being moved), the operation is a
+    /// no-op to avoid creating dangling parent references.
     pub fn reparent(&mut self, key: &Key, new_parent: Option<&Key>, sibling_index: usize) {
+        // Validate new_parent exists before extraction. Checking after
+        // extraction is insufficient because the target might be a descendant
+        // of the moved node (and thus removed by extract_subtree).
+        if let Some(pk) = new_parent {
+            if !self.key_to_index.contains_key(pk) {
+                return;
+            }
+        }
+
         // Extract the subtree.
         let subtree = self.extract_subtree(key);
         if subtree.is_empty() {
             return;
+        }
+
+        // Reject reparenting under a descendant of the moved node.
+        // After extraction the descendant is no longer in the tree.
+        if let Some(pk) = new_parent {
+            if !self.key_to_index.contains_key(pk) {
+                // Descendant was part of the extracted subtree — re-insert
+                // at the original flat position to preserve tree integrity.
+                let insert_pos = self.all_nodes.len().min(subtree[0].index);
+                for (offset, node) in subtree.into_iter().enumerate() {
+                    self.all_nodes.insert(insert_pos + offset, node);
+                }
+                self.rebuild_indices();
+                return;
+            }
         }
 
         // Rebuild indices after extraction so that parent lookups and
@@ -1839,5 +1885,45 @@ mod tests {
         // Reparent Apple(2) to root level — same nodes, different hierarchy
         tree_b.reparent(&Key::int(2), None, 0);
         assert_ne!(tree_a, tree_b);
+    }
+
+    #[test]
+    fn reparent_to_nonexistent_parent_is_noop() {
+        let mut tree = fruit_tree();
+        let before_keys: Vec<_> = tree.keys().cloned().collect();
+        // Reparent Apple(2) under nonexistent key 99 — should be a no-op
+        tree.reparent(&Key::int(2), Some(&Key::int(99)), 0);
+        let after_keys: Vec<_> = tree.keys().cloned().collect();
+        // Tree should be unchanged
+        assert_eq!(before_keys, after_keys);
+        // Apple should still exist with original parent
+        let apple = tree.get(&Key::int(2)).expect("Apple");
+        assert_eq!(apple.parent_key, Some(Key::int(1)));
+    }
+
+    #[test]
+    fn remove_last_child_resets_parent_to_leaf() {
+        let mut tree = fruit_tree();
+        // Fruits(1) has children Apple(2) and Banana(3)
+        assert!(tree.get(&Key::int(1)).expect("Fruits").has_children);
+
+        // Remove both children
+        tree.remove_by_keys(&[Key::int(2)]);
+        tree.remove_by_keys(&[Key::int(3)]);
+
+        // Fruits should now be a leaf
+        let fruits = tree.get(&Key::int(1)).expect("Fruits after");
+        assert!(!fruits.has_children);
+        assert_eq!(fruits.is_expanded, None);
+        assert!(!tree.is_expanded(&Key::int(1)));
+    }
+
+    #[test]
+    fn remove_one_child_keeps_parent_as_branch() {
+        let mut tree = fruit_tree();
+        // Remove only Apple(2), Banana(3) still under Fruits
+        tree.remove_by_keys(&[Key::int(2)]);
+        let fruits = tree.get(&Key::int(1)).expect("Fruits");
+        assert!(fruits.has_children); // still has Banana
     }
 }
