@@ -601,6 +601,11 @@ impl DropResult {
             resolve_drop_operation(&self.config, &items, offered_operation, pointer_type);
 
         if operation == DropOperation::Cancel {
+            self.enter_count = 0;
+            self.drag_over = false;
+            self.drop_operation = None;
+            self.indicator_position = None;
+
             self.refresh_snapshot();
 
             return DropOperation::Cancel;
@@ -645,6 +650,7 @@ impl DropResult {
             resolve_drop_operation(&self.config, items, offered_operation, pointer_type);
 
         if operation == DropOperation::Cancel {
+            self.enter_count = 0;
             self.drag_over = false;
             self.drop_operation = None;
             self.indicator_position = None;
@@ -654,6 +660,8 @@ impl DropResult {
             return DropOperation::Cancel;
         }
 
+        let was_inactive = self.enter_count == 0 || !self.drag_over;
+
         if self.enter_count == 0 {
             self.enter_count = 1;
         }
@@ -661,6 +669,14 @@ impl DropResult {
         self.drag_over = true;
         self.drop_operation = Some(operation);
         self.indicator_position = Some(self.config.drop_indicator_position);
+
+        if was_inactive && let Some(on_drag_enter) = &self.config.on_drag_enter {
+            on_drag_enter(DropTargetEvent {
+                items: items.to_vec(),
+                operation,
+                pointer_type,
+            });
+        }
 
         self.refresh_snapshot();
 
@@ -1647,6 +1663,37 @@ mod tests {
     }
 
     #[test]
+    fn drop_result_drag_enter_cancel_clears_stale_active_snapshot() {
+        let mut result = use_drop(DropConfig {
+            accepted_operations: Some(vec![DropOperation::Copy]),
+            drop_indicator_position: DropIndicatorPosition::After,
+            ..DropConfig::default()
+        });
+
+        let initial = result.drag_enter(
+            vec![preview(DragItemKind::Text, &["text/plain"])],
+            DropOperation::Copy,
+            PointerType::Mouse,
+        );
+
+        let rejected = result.drag_enter(
+            vec![preview(DragItemKind::Text, &["text/plain"])],
+            DropOperation::Move,
+            PointerType::Mouse,
+        );
+
+        assert_eq!(initial, DropOperation::Copy);
+        assert_eq!(rejected, DropOperation::Cancel);
+        assert_eq!(result.enter_count, 0);
+        assert!(!result.drag_over);
+        assert!(result.drop_operation.is_none());
+        assert!(result.indicator_position.is_none());
+        assert!(!result.attrs.contains(&HtmlAttr::Data("ars-drag-over")));
+        assert!(!result.attrs.contains(&HtmlAttr::Data("ars-drop-operation")));
+        assert!(!result.attrs.contains(&HtmlAttr::Data("ars-drop-position")));
+    }
+
+    #[test]
     fn drop_result_drag_over_recovers_missing_drag_enter() {
         let mut result = use_drop(DropConfig {
             drop_indicator_position: DropIndicatorPosition::After,
@@ -1668,6 +1715,46 @@ mod tests {
             Some(DropIndicatorPosition::After)
         );
         assert!(result.attrs.contains(&HtmlAttr::Data("ars-drag-over")));
+    }
+
+    #[test]
+    fn drop_result_drag_over_recovery_fires_enter_callback_once() {
+        let enter_events = Arc::new(Mutex::new(Vec::<DropTargetEvent>::new()));
+
+        let observed_events = Arc::clone(&enter_events);
+
+        let mut result = use_drop(DropConfig {
+            on_drag_enter: Some(Callback::new(move |event: DropTargetEvent| {
+                observed_events
+                    .lock()
+                    .expect("enter events lock should succeed")
+                    .push(event);
+            })),
+            ..DropConfig::default()
+        });
+
+        let first = result.drag_over(
+            &[preview(DragItemKind::Text, &["text/plain"])],
+            DropOperation::Move,
+            PointerType::Mouse,
+        );
+
+        let second = result.drag_over(
+            &[preview(DragItemKind::Text, &["text/plain"])],
+            DropOperation::Move,
+            PointerType::Mouse,
+        );
+
+        let enter_events = enter_events
+            .lock()
+            .expect("enter events lock should succeed");
+
+        assert_eq!(first, DropOperation::Move);
+        assert_eq!(second, DropOperation::Move);
+        assert_eq!(result.enter_count, 1);
+        assert_eq!(enter_events.len(), 1);
+        assert_eq!(enter_events[0].operation, DropOperation::Move);
+        assert_eq!(enter_events[0].pointer_type, PointerType::Mouse);
     }
 
     #[test]
