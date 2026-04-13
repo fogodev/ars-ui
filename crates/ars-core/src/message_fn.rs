@@ -61,8 +61,18 @@ impl<T: ?Sized> MessageFn<T> {
     ///     format!("{n} items selected")
     /// }),
     /// ```
+    ///
+    /// For message signatures that `ars-core` cannot predeclare directly,
+    /// first erase the closure to a typed [`Arc`] trait object and then pass
+    /// that `Arc` to `MessageFn::new`.
     pub fn new(f: impl Into<Self>) -> Self {
         f.into()
+    }
+}
+
+impl<T: ?Sized> From<Arc<T>> for MessageFn<T> {
+    fn from(f: Arc<T>) -> Self {
+        MessageFn(f)
     }
 }
 
@@ -100,7 +110,7 @@ impl ComponentMessages for () {}
 
 #[cfg(test)]
 mod tests {
-    use alloc::format;
+    use alloc::{format, sync::Arc};
 
     use ars_i18n::locales;
 
@@ -158,5 +168,19 @@ mod tests {
         let mf = MessageFn::static_str("Dismiss");
         assert_eq!(mf(&locales::ja_jp()), "Dismiss");
         assert_eq!(mf(&locales::ar_eg()), "Dismiss");
+    }
+
+    #[test]
+    fn message_fn_new_accepts_typed_arc_for_custom_signature() {
+        type AnnouncementFn = dyn Fn(&str, &Locale) -> String + Send + Sync;
+
+        let inner: Arc<AnnouncementFn> =
+            Arc::new(|label: &str, locale: &Locale| format!("{label}: {}", locale.to_bcp47()));
+        let mf: MessageFn<AnnouncementFn> = MessageFn::new(Arc::clone(&inner));
+        let cloned = mf.clone();
+
+        assert_eq!(mf, cloned);
+        assert_eq!(mf("Drop", &locales::de_de()), "Drop: de-DE");
+        assert_eq!(mf.as_ref()("Drop", &locales::en_us()), "Drop: en-US");
     }
 }
