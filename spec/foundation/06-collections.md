@@ -2871,7 +2871,7 @@ Type-ahead allows users to jump to items by typing text matching item labels. It
 ```rust
 // ars-collections/src/typeahead.rs
 
-use alloc::string::String;
+use alloc::{collections::BTreeSet, string::String};
 use core::time::Duration;
 #[cfg(feature = "i18n")]
 use ars_i18n::Locale;
@@ -2917,6 +2917,7 @@ impl State {
         current_focus: Option<&Key>,
         collection: &C,
         locale: &Locale,
+        disabled_keys: &BTreeSet<Key>,
     ) -> (Self, Option<Key>) {
         // Determine whether to reset the accumulated search.
         let timed_out = Duration::from_millis(now_ms.saturating_sub(self.last_key_time_ms)) >= TYPEAHEAD_TIMEOUT;
@@ -2933,7 +2934,7 @@ impl State {
             self.search_start_key.clone()
         };
 
-        let found = Self::find_match(&search, current_focus, collection, locale);
+        let found = Self::find_match(&search, current_focus, collection, locale, disabled_keys);
 
         let new_state = Self {
             search,
@@ -2952,6 +2953,7 @@ impl State {
         now_ms: u64,
         current_focus: Option<&Key>,
         collection: &C,
+        disabled_keys: &BTreeSet<Key>,
     ) -> (Self, Option<Key>) {
         let timed_out = Duration::from_millis(now_ms.saturating_sub(self.last_key_time_ms)) >= TYPEAHEAD_TIMEOUT;
         let mut search = if timed_out {
@@ -2967,7 +2969,7 @@ impl State {
             self.search_start_key.clone()
         };
 
-        let found = Self::find_match(&search, current_focus, collection);
+        let found = Self::find_match(&search, current_focus, collection, disabled_keys);
 
         let new_state = Self {
             search,
@@ -2991,6 +2993,7 @@ impl State {
         current_focus: Option<&Key>,
         collection: &C,
         locale: &Locale,
+        disabled_keys: &BTreeSet<Key>,
     ) -> Option<Key> {
         // CaseMapper::new() returns CaseMapperBorrowed<'static> which is Copy —
         // no caching needed, can be constructed freely.
@@ -3001,7 +3004,7 @@ impl State {
 
         let all_item_keys: alloc::vec::Vec<Key> = collection
             .nodes()
-            .filter(|n| n.is_focusable())
+            .filter(|n| n.is_focusable() && !disabled_keys.contains(&n.key))
             .map(|n| n.key.clone())
             .collect();
 
@@ -3036,6 +3039,7 @@ impl State {
         search: &str,
         current_focus: Option<&Key>,
         collection: &C,
+        disabled_keys: &BTreeSet<Key>,
     ) -> Option<Key> {
         // single_char from raw input — case mapping can expand one char to many.
         let single_char = search.chars().count() == 1;
@@ -3043,7 +3047,7 @@ impl State {
 
         let all_item_keys: alloc::vec::Vec<Key> = collection
             .nodes()
-            .filter(|n| n.is_focusable())
+            .filter(|n| n.is_focusable() && !disabled_keys.contains(&n.key))
             .map(|n| n.key.clone())
             .collect();
 
@@ -3094,6 +3098,7 @@ Event::KeyDown(key_event) => {
     let now_ms = ctx.clock.now_ms();
     let (new_typeahead, found_key) = ctx.typeahead.process_char(
         ch, now_ms, ctx.focused_key.as_ref(), &ctx.collection, &ctx.locale,
+        &ctx.selection_state.disabled_keys,
     );
     if let Some(target_key) = found_key {
         Some(TransitionPlan::context_only(move |ctx| {

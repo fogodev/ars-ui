@@ -11,7 +11,7 @@
 //! [`TYPEAHEAD_TIMEOUT`](TYPEAHEAD_TIMEOUT), the buffer resets automatically on
 //! the next keystroke.
 
-use alloc::{string::String, vec::Vec};
+use alloc::{collections::BTreeSet, string::String, vec::Vec};
 use core::time::Duration;
 
 #[cfg(feature = "i18n")]
@@ -61,6 +61,7 @@ impl State {
         now_ms: u64,
         current_focus: Option<&Key>,
         collection: &C,
+        disabled_keys: &BTreeSet<Key>,
     ) -> (Self, Option<Key>) {
         let timed_out = Duration::from_millis(now_ms.saturating_sub(self.last_key_time_ms))
             >= TYPEAHEAD_TIMEOUT;
@@ -79,7 +80,7 @@ impl State {
             self.search_start_key.clone()
         };
 
-        let found = Self::find_match(&search, current_focus, collection);
+        let found = Self::find_match(&search, current_focus, collection, disabled_keys);
 
         let new_state = Self {
             search,
@@ -101,6 +102,7 @@ impl State {
         search: &str,
         current_focus: Option<&Key>,
         collection: &C,
+        disabled_keys: &BTreeSet<Key>,
     ) -> Option<Key> {
         // Determine single-char mode from the raw input, not the lowercased
         // query — one typed character can expand to multiple scalars after case
@@ -111,7 +113,7 @@ impl State {
 
         let all_item_keys: Vec<Key> = collection
             .nodes()
-            .filter(|n| n.is_focusable())
+            .filter(|n| n.is_focusable() && !disabled_keys.contains(&n.key))
             .map(|n| n.key.clone())
             .collect();
 
@@ -169,6 +171,7 @@ impl State {
         current_focus: Option<&Key>,
         collection: &C,
         locale: &Locale,
+        disabled_keys: &BTreeSet<Key>,
     ) -> (Self, Option<Key>) {
         let timed_out = Duration::from_millis(now_ms.saturating_sub(self.last_key_time_ms))
             >= TYPEAHEAD_TIMEOUT;
@@ -187,7 +190,7 @@ impl State {
             self.search_start_key.clone()
         };
 
-        let found = Self::find_match(&search, current_focus, collection, locale);
+        let found = Self::find_match(&search, current_focus, collection, locale, disabled_keys);
 
         let new_state = Self {
             search,
@@ -211,6 +214,7 @@ impl State {
         current_focus: Option<&Key>,
         collection: &C,
         locale: &Locale,
+        disabled_keys: &BTreeSet<Key>,
     ) -> Option<Key> {
         // CaseMapper::new() returns CaseMapperBorrowed<'static> which is Copy —
         // no caching needed, can be constructed freely.
@@ -227,7 +231,7 @@ impl State {
 
         let all_item_keys: Vec<Key> = collection
             .nodes()
-            .filter(|n| n.is_focusable())
+            .filter(|n| n.is_focusable() && !disabled_keys.contains(&n.key))
             .map(|n| n.key.clone())
             .collect();
 
@@ -282,8 +286,15 @@ impl State {
 
 #[cfg(all(test, not(feature = "i18n")))]
 mod tests {
+    use alloc::collections::BTreeSet;
+
     use super::*;
     use crate::{builder::CollectionBuilder, key::Key};
+
+    /// Empty disabled set for tests that don't need disabled-key filtering.
+    const fn no_disabled() -> BTreeSet<Key> {
+        BTreeSet::new()
+    }
 
     /// Build a simple fruit collection for testing.
     fn fruit_collection() -> crate::StaticCollection<&'static str> {
@@ -319,15 +330,15 @@ mod tests {
         let state = State::default();
 
         // Type 'b' at t=100
-        let (state, _) = state.process_char('b', 100, None, &c);
+        let (state, _) = state.process_char('b', 100, None, &c, &no_disabled());
         assert_eq!(state.search, "b");
 
         // Type 'a' at t=200 (within timeout)
-        let (state, _) = state.process_char('a', 200, None, &c);
+        let (state, _) = state.process_char('a', 200, None, &c, &no_disabled());
         assert_eq!(state.search, "ba");
 
         // Type 'n' at t=300 (within timeout)
-        let (state, _) = state.process_char('n', 300, None, &c);
+        let (state, _) = state.process_char('n', 300, None, &c, &no_disabled());
         assert_eq!(state.search, "ban");
     }
 
@@ -342,11 +353,11 @@ mod tests {
         let state = State::default();
 
         // Type 'a' at t=100
-        let (state, _) = state.process_char('a', 100, None, &c);
+        let (state, _) = state.process_char('a', 100, None, &c, &no_disabled());
         assert_eq!(state.search, "a");
 
         // Type 'b' at t=700 (600ms later, > 500ms timeout)
-        let (state, _) = state.process_char('b', 700, None, &c);
+        let (state, _) = state.process_char('b', 700, None, &c, &no_disabled());
         assert_eq!(state.search, "b");
     }
 
@@ -357,10 +368,10 @@ mod tests {
         let state = State::default();
 
         // Type 'a' at t=100
-        let (state, _) = state.process_char('a', 100, None, &c);
+        let (state, _) = state.process_char('a', 100, None, &c, &no_disabled());
 
         // Type 'p' at t=599 (499ms later, < 500ms timeout)
-        let (state, _) = state.process_char('p', 599, None, &c);
+        let (state, _) = state.process_char('p', 599, None, &c, &no_disabled());
         assert_eq!(state.search, "ap");
     }
 
@@ -375,9 +386,9 @@ mod tests {
         let state = State::default();
 
         // Type "ban" — should match "Banana"
-        let (state, _) = state.process_char('b', 100, None, &c);
-        let (state, _) = state.process_char('a', 200, None, &c);
-        let (_, found) = state.process_char('n', 300, None, &c);
+        let (state, _) = state.process_char('b', 100, None, &c, &no_disabled());
+        let (state, _) = state.process_char('a', 200, None, &c, &no_disabled());
+        let (_, found) = state.process_char('n', 300, None, &c, &no_disabled());
 
         assert_eq!(found, Some(Key::int(2))); // Banana
     }
@@ -389,7 +400,7 @@ mod tests {
         let state = State::default();
 
         // Type 'B' (uppercase) — should still match "Banana" or "Blueberry"
-        let (_, found) = state.process_char('B', 100, None, &c);
+        let (_, found) = state.process_char('B', 100, None, &c, &no_disabled());
         assert!(found.is_some());
     }
 
@@ -400,9 +411,9 @@ mod tests {
         let state = State::default();
 
         // Type "xyz" — no match
-        let (state, _) = state.process_char('x', 100, None, &c);
-        let (state, _) = state.process_char('y', 200, None, &c);
-        let (_, found) = state.process_char('z', 300, None, &c);
+        let (state, _) = state.process_char('x', 100, None, &c, &no_disabled());
+        let (state, _) = state.process_char('y', 200, None, &c, &no_disabled());
+        let (_, found) = state.process_char('z', 300, None, &c, &no_disabled());
 
         assert_eq!(found, None);
     }
@@ -418,7 +429,7 @@ mod tests {
         let state = State::default();
 
         // Focus on Cherry (key=4), type 'a' — should wrap to Apple (key=1)
-        let (_, found) = state.process_char('a', 100, Some(&Key::int(4)), &c);
+        let (_, found) = state.process_char('a', 100, Some(&Key::int(4)), &c, &no_disabled());
         assert_eq!(found, Some(Key::int(1)));
     }
 
@@ -435,8 +446,8 @@ mod tests {
         // Focus on Cherry (key=4, index=3). Multi-char starts AT focus, so
         // start_pos = 3, scan_len = 5-3 = 2 (Cherry, Date). "ap" doesn't
         // match either, and Apple (index 0) is behind the scan window.
-        let (state, _) = state.process_char('a', 100, Some(&Key::int(4)), &c);
-        let (_, found) = state.process_char('p', 200, Some(&Key::int(4)), &c);
+        let (state, _) = state.process_char('a', 100, Some(&Key::int(4)), &c, &no_disabled());
+        let (_, found) = state.process_char('p', 200, Some(&Key::int(4)), &c, &no_disabled());
 
         assert_eq!(found, None);
     }
@@ -454,11 +465,11 @@ mod tests {
         // Simulates real event loop: type 'b' → Banana, focus moves to Banana.
         // Then type 'a' within timeout → "ba" should still match Banana,
         // even though focus is now ON Banana.
-        let (state, found) = state.process_char('b', 100, None, &c);
+        let (state, found) = state.process_char('b', 100, None, &c, &no_disabled());
         assert_eq!(found, Some(Key::int(2))); // Banana
 
         // Component moved focus to Banana; pass it as current_focus.
-        let (_, found) = state.process_char('a', 200, Some(&Key::int(2)), &c);
+        let (_, found) = state.process_char('a', 200, Some(&Key::int(2)), &c, &no_disabled());
         assert_eq!(found, Some(Key::int(2))); // Still Banana — "ba" matches
     }
 
@@ -473,11 +484,11 @@ mod tests {
         let state = State::default();
 
         // Type 'b' — should match Banana (key=2, first 'b' item)
-        let (state, found) = state.process_char('b', 100, None, &c);
+        let (state, found) = state.process_char('b', 100, None, &c, &no_disabled());
         assert_eq!(found, Some(Key::int(2))); // Banana
 
         // Type 'b' again after timeout — should cycle to Blueberry (key=3)
-        let (_, found) = state.process_char('b', 700, Some(&Key::int(2)), &c);
+        let (_, found) = state.process_char('b', 700, Some(&Key::int(2)), &c, &no_disabled());
         assert_eq!(found, Some(Key::int(3))); // Blueberry
     }
 
@@ -489,7 +500,7 @@ mod tests {
 
         // Focus on Blueberry (key=3), type 'b' after timeout — should wrap
         // back to Banana (key=2)
-        let (_, found) = state.process_char('b', 100, Some(&Key::int(3)), &c);
+        let (_, found) = state.process_char('b', 100, Some(&Key::int(3)), &c, &no_disabled());
         assert_eq!(found, Some(Key::int(2)));
     }
 
@@ -505,7 +516,36 @@ mod tests {
 
         // Type 'f' — "Fruits" is a section header, should NOT match.
         // No focusable item starts with 'f', so result is None.
-        let (_, found) = state.process_char('f', 100, None, &c);
+        let (_, found) = state.process_char('f', 100, None, &c, &no_disabled());
+        assert_eq!(found, None);
+    }
+
+    // ------------------------------------------------------------------ //
+    // Disabled keys are skipped                                           //
+    // ------------------------------------------------------------------ //
+
+    #[test]
+    fn skips_disabled_keys() {
+        let c = fruit_collection();
+
+        let state = State::default();
+        let disabled = BTreeSet::from([Key::int(2)]); // Banana disabled
+
+        // Type 'b' — Banana is disabled, should skip to Blueberry
+        let (_, found) = state.process_char('b', 100, None, &c, &disabled);
+        assert_eq!(found, Some(Key::int(3))); // Blueberry, not Banana
+    }
+
+    #[test]
+    fn all_matches_disabled_returns_none() {
+        let c = fruit_collection();
+
+        let state = State::default();
+        // Disable both 'b' items
+        let disabled = BTreeSet::from([Key::int(2), Key::int(3)]);
+
+        // Type 'b' — both Banana and Blueberry disabled, no match
+        let (_, found) = state.process_char('b', 100, None, &c, &disabled);
         assert_eq!(found, None);
     }
 
@@ -519,7 +559,7 @@ mod tests {
 
         let state = State::default();
 
-        let (_, found) = state.process_char('a', 100, None, &c);
+        let (_, found) = state.process_char('a', 100, None, &c, &no_disabled());
         assert_eq!(found, None);
     }
 
@@ -548,11 +588,11 @@ mod tests {
         let state = State::default();
 
         // Type 'b' at t=100 with focus on Apple (key=1)
-        let (state, _) = state.process_char('b', 100, Some(&Key::int(1)), &c);
+        let (state, _) = state.process_char('b', 100, Some(&Key::int(1)), &c, &no_disabled());
         assert_eq!(state.search_start_key, Some(Key::int(1)));
 
         // Type 'a' at t=200 — same search session, start key preserved
-        let (state, _) = state.process_char('a', 200, Some(&Key::int(2)), &c);
+        let (state, _) = state.process_char('a', 200, Some(&Key::int(2)), &c, &no_disabled());
         assert_eq!(state.search_start_key, Some(Key::int(1)));
     }
 
@@ -563,21 +603,28 @@ mod tests {
         let state = State::default();
 
         // Type 'b' at t=100 with focus on Apple
-        let (state, _) = state.process_char('b', 100, Some(&Key::int(1)), &c);
+        let (state, _) = state.process_char('b', 100, Some(&Key::int(1)), &c, &no_disabled());
         assert_eq!(state.search_start_key, Some(Key::int(1)));
 
         // Type 'c' at t=700 (after timeout) with focus on Banana
-        let (state, _) = state.process_char('c', 700, Some(&Key::int(2)), &c);
+        let (state, _) = state.process_char('c', 700, Some(&Key::int(2)), &c, &no_disabled());
         assert_eq!(state.search_start_key, Some(Key::int(2)));
     }
 }
 
 #[cfg(all(test, feature = "i18n"))]
 mod tests_i18n {
+    use alloc::collections::BTreeSet;
+
     use ars_i18n::Locale;
 
     use super::*;
     use crate::{builder::CollectionBuilder, key::Key};
+
+    /// Empty disabled set for tests that don't need disabled-key filtering.
+    const fn no_disabled() -> BTreeSet<Key> {
+        BTreeSet::new()
+    }
 
     /// Build a simple fruit collection for testing.
     fn fruit_collection() -> crate::StaticCollection<&'static str> {
@@ -610,10 +657,10 @@ mod tests_i18n {
 
         let state = State::default();
 
-        let (state, _) = state.process_char('b', 100, None, &c, &locale);
+        let (state, _) = state.process_char('b', 100, None, &c, &locale, &no_disabled());
         assert_eq!(state.search, "b");
 
-        let (state, _) = state.process_char('a', 200, None, &c, &locale);
+        let (state, _) = state.process_char('a', 200, None, &c, &locale, &no_disabled());
         assert_eq!(state.search, "ba");
     }
 
@@ -625,11 +672,11 @@ mod tests_i18n {
 
         let state = State::default();
 
-        let (state, _) = state.process_char('a', 100, None, &c, &locale);
+        let (state, _) = state.process_char('a', 100, None, &c, &locale, &no_disabled());
         assert_eq!(state.search, "a");
 
         // 600ms later, > 500ms timeout
-        let (state, _) = state.process_char('b', 700, None, &c, &locale);
+        let (state, _) = state.process_char('b', 700, None, &c, &locale, &no_disabled());
         assert_eq!(state.search, "b");
     }
 
@@ -641,9 +688,9 @@ mod tests_i18n {
 
         let state = State::default();
 
-        let (state, _) = state.process_char('b', 100, None, &c, &locale);
-        let (state, _) = state.process_char('a', 200, None, &c, &locale);
-        let (_, found) = state.process_char('n', 300, None, &c, &locale);
+        let (state, _) = state.process_char('b', 100, None, &c, &locale, &no_disabled());
+        let (state, _) = state.process_char('a', 200, None, &c, &locale, &no_disabled());
+        let (_, found) = state.process_char('n', 300, None, &c, &locale, &no_disabled());
 
         assert_eq!(found, Some(Key::int(2))); // Banana
     }
@@ -657,7 +704,7 @@ mod tests_i18n {
         let state = State::default();
 
         // Uppercase 'B' should still match
-        let (_, found) = state.process_char('B', 100, None, &c, &locale);
+        let (_, found) = state.process_char('B', 100, None, &c, &locale, &no_disabled());
         assert!(found.is_some());
     }
 
@@ -670,7 +717,8 @@ mod tests_i18n {
         let state = State::default();
 
         // Focus on Cherry (key=4), type 'a' — wraps to Apple (key=1)
-        let (_, found) = state.process_char('a', 100, Some(&Key::int(4)), &c, &locale);
+        let (_, found) =
+            state.process_char('a', 100, Some(&Key::int(4)), &c, &locale, &no_disabled());
         assert_eq!(found, Some(Key::int(1)));
     }
 
@@ -683,10 +731,11 @@ mod tests_i18n {
         let state = State::default();
 
         // Type 'b' → Banana, then 'a' with focus on Banana → "ba" still matches
-        let (state, found) = state.process_char('b', 100, None, &c, &locale);
+        let (state, found) = state.process_char('b', 100, None, &c, &locale, &no_disabled());
         assert_eq!(found, Some(Key::int(2)));
 
-        let (_, found) = state.process_char('a', 200, Some(&Key::int(2)), &c, &locale);
+        let (_, found) =
+            state.process_char('a', 200, Some(&Key::int(2)), &c, &locale, &no_disabled());
         assert_eq!(found, Some(Key::int(2))); // Still Banana
     }
 
@@ -699,11 +748,25 @@ mod tests_i18n {
         let state = State::default();
 
         // Type "xyz" — no match
-        let (state, _) = state.process_char('x', 100, None, &c, &locale);
-        let (state, _) = state.process_char('y', 200, None, &c, &locale);
-        let (_, found) = state.process_char('z', 300, None, &c, &locale);
+        let (state, _) = state.process_char('x', 100, None, &c, &locale, &no_disabled());
+        let (state, _) = state.process_char('y', 200, None, &c, &locale, &no_disabled());
+        let (_, found) = state.process_char('z', 300, None, &c, &locale, &no_disabled());
 
         assert_eq!(found, None);
+    }
+
+    #[test]
+    fn i18n_skips_disabled_keys() {
+        let c = fruit_collection();
+
+        let locale = en_locale();
+
+        let state = State::default();
+        let disabled = BTreeSet::from([Key::int(2)]); // Banana disabled
+
+        // Type 'b' — Banana is disabled, should skip to Blueberry
+        let (_, found) = state.process_char('b', 100, None, &c, &locale, &disabled);
+        assert_eq!(found, Some(Key::int(3))); // Blueberry, not Banana
     }
 
     #[test]
@@ -714,7 +777,7 @@ mod tests_i18n {
 
         let state = State::default();
 
-        let (_, found) = state.process_char('a', 100, None, &c, &locale);
+        let (_, found) = state.process_char('a', 100, None, &c, &locale, &no_disabled());
         assert_eq!(found, None);
     }
 
@@ -727,11 +790,13 @@ mod tests_i18n {
         let state = State::default();
 
         // Type 'b' at t=100 with focus on Apple (key=1)
-        let (state, _) = state.process_char('b', 100, Some(&Key::int(1)), &c, &locale);
+        let (state, _) =
+            state.process_char('b', 100, Some(&Key::int(1)), &c, &locale, &no_disabled());
         assert_eq!(state.search_start_key, Some(Key::int(1)));
 
         // Type 'a' at t=200 — same search session, start key preserved
-        let (state, _) = state.process_char('a', 200, Some(&Key::int(2)), &c, &locale);
+        let (state, _) =
+            state.process_char('a', 200, Some(&Key::int(2)), &c, &locale, &no_disabled());
         assert_eq!(state.search_start_key, Some(Key::int(1)));
     }
 
@@ -761,7 +826,7 @@ mod tests_i18n {
         let state = State::default();
 
         // Under Turkish locale, 'I' lowercases to 'ı', matching "ılık"
-        let (_, found) = state.process_char('I', 100, None, &c, &locale);
+        let (_, found) = state.process_char('I', 100, None, &c, &locale, &no_disabled());
         assert_eq!(found, Some(Key::int(1))); // ılık, not igloo
     }
 
@@ -779,7 +844,7 @@ mod tests_i18n {
 
         // Under Turkish locale, 'İ' (dotted capital I) lowercases to 'i',
         // matching "igloo"
-        let (_, found) = state.process_char('İ', 100, None, &c, &locale);
+        let (_, found) = state.process_char('İ', 100, None, &c, &locale, &no_disabled());
         assert_eq!(found, Some(Key::int(1))); // igloo
     }
 }
