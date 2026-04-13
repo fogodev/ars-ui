@@ -3,9 +3,9 @@
 //! Logical properties (`InlineStart`, `InlineEnd`, `BlockStart`, `BlockEnd`) are
 //! independent of writing direction.  The [`LogicalSide::to_physical`] and
 //! [`LogicalRect::to_physical`] methods resolve them to concrete physical sides
-//! given a [`Direction`].
+//! given a [`ResolvedDirection`].
 
-use crate::Direction;
+use crate::ResolvedDirection;
 
 // ────────────────────────────────────────────────────────────────────
 // LogicalSide
@@ -25,24 +25,14 @@ pub enum LogicalSide {
 }
 
 impl LogicalSide {
-    /// Convert to a physical side given a writing direction.
-    ///
-    /// # Panics (debug only)
-    ///
-    /// Debug-asserts that `dir` is not [`Direction::Auto`]; callers must resolve
-    /// `Auto` to `Ltr` or `Rtl` before physical conversion.
+    /// Convert to a physical side given a resolved writing direction.
     #[must_use]
-    pub fn to_physical(self, dir: Direction) -> PhysicalSide {
-        debug_assert!(
-            dir != Direction::Auto,
-            "Direction::Auto must be resolved to Ltr or Rtl before physical conversion"
-        );
+    pub const fn to_physical(self, dir: ResolvedDirection) -> PhysicalSide {
         match (self, dir) {
-            (LogicalSide::InlineStart, Direction::Rtl) => PhysicalSide::Right,
-            (LogicalSide::InlineEnd, Direction::Rtl) | (LogicalSide::InlineStart, _) => {
-                PhysicalSide::Left
-            }
-            (LogicalSide::InlineEnd, _) => PhysicalSide::Right,
+            (LogicalSide::InlineEnd, ResolvedDirection::Rtl)
+            | (LogicalSide::InlineStart, ResolvedDirection::Ltr) => PhysicalSide::Left,
+            (LogicalSide::InlineStart, ResolvedDirection::Rtl)
+            | (LogicalSide::InlineEnd, ResolvedDirection::Ltr) => PhysicalSide::Right,
             (LogicalSide::BlockStart, _) => PhysicalSide::Top,
             (LogicalSide::BlockEnd, _) => PhysicalSide::Bottom,
         }
@@ -97,21 +87,12 @@ pub struct LogicalRect {
 }
 
 impl LogicalRect {
-    /// Convert to a physical rect given a writing direction.
+    /// Convert to a physical rect given a resolved writing direction.
     ///
     /// In RTL mode the inline-start and inline-end values are swapped so that
     /// `inline_start` maps to `right` and `inline_end` maps to `left`.
-    ///
-    /// # Panics (debug only)
-    ///
-    /// Debug-asserts that `dir` is not [`Direction::Auto`]; callers must resolve
-    /// `Auto` to `Ltr` or `Rtl` before physical conversion.
     #[must_use]
-    pub fn to_physical(&self, dir: Direction) -> PhysicalRect {
-        debug_assert!(
-            dir != Direction::Auto,
-            "Direction::Auto must be resolved to Ltr or Rtl before physical conversion"
-        );
+    pub const fn to_physical(&self, dir: ResolvedDirection) -> PhysicalRect {
         if dir.is_rtl() {
             PhysicalRect {
                 left: self.inline_end,
@@ -150,14 +131,14 @@ pub struct PhysicalRect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Direction;
+    use crate::ResolvedDirection;
 
     // ── LogicalSide::to_physical ───────────────────────────────────
 
     #[test]
     fn inline_start_ltr_is_left() {
         assert_eq!(
-            LogicalSide::InlineStart.to_physical(Direction::Ltr),
+            LogicalSide::InlineStart.to_physical(ResolvedDirection::Ltr),
             PhysicalSide::Left,
         );
     }
@@ -165,7 +146,7 @@ mod tests {
     #[test]
     fn inline_start_rtl_is_right() {
         assert_eq!(
-            LogicalSide::InlineStart.to_physical(Direction::Rtl),
+            LogicalSide::InlineStart.to_physical(ResolvedDirection::Rtl),
             PhysicalSide::Right,
         );
     }
@@ -173,7 +154,7 @@ mod tests {
     #[test]
     fn inline_end_ltr_is_right() {
         assert_eq!(
-            LogicalSide::InlineEnd.to_physical(Direction::Ltr),
+            LogicalSide::InlineEnd.to_physical(ResolvedDirection::Ltr),
             PhysicalSide::Right,
         );
     }
@@ -181,7 +162,7 @@ mod tests {
     #[test]
     fn inline_end_rtl_is_left() {
         assert_eq!(
-            LogicalSide::InlineEnd.to_physical(Direction::Rtl),
+            LogicalSide::InlineEnd.to_physical(ResolvedDirection::Rtl),
             PhysicalSide::Left,
         );
     }
@@ -189,11 +170,11 @@ mod tests {
     #[test]
     fn block_start_is_top_regardless_of_direction() {
         assert_eq!(
-            LogicalSide::BlockStart.to_physical(Direction::Ltr),
+            LogicalSide::BlockStart.to_physical(ResolvedDirection::Ltr),
             PhysicalSide::Top,
         );
         assert_eq!(
-            LogicalSide::BlockStart.to_physical(Direction::Rtl),
+            LogicalSide::BlockStart.to_physical(ResolvedDirection::Rtl),
             PhysicalSide::Top,
         );
     }
@@ -201,11 +182,11 @@ mod tests {
     #[test]
     fn block_end_is_bottom_regardless_of_direction() {
         assert_eq!(
-            LogicalSide::BlockEnd.to_physical(Direction::Ltr),
+            LogicalSide::BlockEnd.to_physical(ResolvedDirection::Ltr),
             PhysicalSide::Bottom,
         );
         assert_eq!(
-            LogicalSide::BlockEnd.to_physical(Direction::Rtl),
+            LogicalSide::BlockEnd.to_physical(ResolvedDirection::Rtl),
             PhysicalSide::Bottom,
         );
     }
@@ -230,7 +211,7 @@ mod tests {
             block_start: 5.0,
             block_end: 15.0,
         };
-        let physical = logical.to_physical(Direction::Ltr);
+        let physical = logical.to_physical(ResolvedDirection::Ltr);
 
         assert_eq!(physical.left, 10.0);
         assert_eq!(physical.right, 20.0);
@@ -246,7 +227,7 @@ mod tests {
             block_start: 5.0,
             block_end: 15.0,
         };
-        let physical = logical.to_physical(Direction::Rtl);
+        let physical = logical.to_physical(ResolvedDirection::Rtl);
 
         // RTL: inline_start -> right, inline_end -> left
         assert_eq!(physical.left, 20.0);
@@ -265,27 +246,11 @@ mod tests {
             block_end: 84.0,
         };
 
-        let ltr = logical.to_physical(Direction::Ltr);
-        let rtl = logical.to_physical(Direction::Rtl);
+        let ltr = logical.to_physical(ResolvedDirection::Ltr);
+        let rtl = logical.to_physical(ResolvedDirection::Rtl);
 
         assert_eq!(ltr.top, rtl.top);
         assert_eq!(ltr.bottom, rtl.bottom);
-    }
-
-    // ── debug_assert on Direction::Auto ─────────────────────────────
-
-    #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "Direction::Auto must be resolved")]
-    fn logical_side_to_physical_panics_on_auto() {
-        let _ = LogicalSide::InlineStart.to_physical(Direction::Auto);
-    }
-
-    #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "Direction::Auto must be resolved")]
-    fn logical_rect_to_physical_panics_on_auto() {
-        let _ = LogicalRect::default().to_physical(Direction::Auto);
     }
 
     // ── Default impls ──────────────────────────────────────────────

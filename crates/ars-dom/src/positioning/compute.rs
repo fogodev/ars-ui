@@ -1,6 +1,6 @@
 //! Core floating-position computation for overlays.
 
-use ars_i18n::Direction;
+use ars_i18n::ResolvedDirection;
 
 use super::{
     overflow::{
@@ -284,7 +284,7 @@ fn extend_unique(candidates: &mut Vec<Placement>, incoming: Vec<Placement>) {
 }
 
 #[must_use]
-fn expanded_placements(placement: Placement, dir: Direction) -> Vec<Placement> {
+fn expanded_placements(placement: Placement, dir: ResolvedDirection) -> Vec<Placement> {
     // Flip scoring only works on concrete physical placements. Auto variants
     // therefore expand into the exact family they would have searched during
     // initial auto placement, after logical start/end have been resolved.
@@ -823,15 +823,15 @@ mod tests {
     #[test]
     fn expanded_placements_resolve_auto_variants_into_expected_candidate_sets() {
         assert_eq!(
-            expanded_placements(Placement::Auto, Direction::Ltr),
+            expanded_placements(Placement::Auto, ResolvedDirection::Ltr),
             CENTER_AUTO_PLACEMENTS.to_vec()
         );
         assert_eq!(
-            expanded_placements(Placement::AutoStart, Direction::Ltr),
+            expanded_placements(Placement::AutoStart, ResolvedDirection::Ltr),
             START_AUTO_PLACEMENTS.to_vec()
         );
         assert_eq!(
-            expanded_placements(Placement::AutoEnd, Direction::Rtl),
+            expanded_placements(Placement::AutoEnd, ResolvedDirection::Rtl),
             END_AUTO_PLACEMENTS.to_vec()
         );
     }
@@ -885,7 +885,7 @@ mod tests {
     #[test]
     fn logical_placements_are_resolved_before_positioning() {
         let mut options = base_options(Placement::StartTop);
-        options.dir = Direction::Rtl;
+        options.dir = ResolvedDirection::Rtl;
 
         let result = compute_position(&anchor(), &floating(), &viewport(), &options);
         assert_eq!(result.actual_placement, Placement::RightStart);

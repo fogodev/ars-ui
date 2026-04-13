@@ -548,6 +548,70 @@ impl Direction {
     pub fn inline_start_is_right(&self) -> bool {
         self.is_rtl()
     }
+
+    /// Resolve `Auto` to a concrete direction using the given fallback.
+    ///
+    /// `Ltr` and `Rtl` pass through unchanged; `Auto` returns `fallback`.
+    #[must_use]
+    pub const fn resolve(self, fallback: ResolvedDirection) -> ResolvedDirection {
+        match self {
+            Direction::Ltr => ResolvedDirection::Ltr,
+            Direction::Rtl => ResolvedDirection::Rtl,
+            Direction::Auto => fallback,
+        }
+    }
+}
+
+/// A direction that has been resolved to a concrete value — only `Ltr` or `Rtl`.
+///
+/// Functions that require a resolved direction (layout conversion, arrow key
+/// mapping, placement resolution) accept this type instead of [`Direction`],
+/// making it a compile error to pass an unresolved `Auto` value.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ResolvedDirection {
+    /// Left-to-right.
+    #[default]
+    Ltr,
+    /// Right-to-left.
+    Rtl,
+}
+
+impl ResolvedDirection {
+    /// CSS `direction` value.
+    #[must_use]
+    pub const fn as_css(self) -> &'static str {
+        match self {
+            ResolvedDirection::Ltr => "ltr",
+            ResolvedDirection::Rtl => "rtl",
+        }
+    }
+
+    /// HTML `dir` attribute value.
+    #[must_use]
+    pub const fn as_html_attr(self) -> &'static str {
+        self.as_css()
+    }
+
+    /// Returns `true` if this direction is right-to-left.
+    #[must_use]
+    pub const fn is_rtl(self) -> bool {
+        matches!(self, ResolvedDirection::Rtl)
+    }
+
+    /// Returns `true` when inline-start maps to the right side.
+    #[must_use]
+    pub const fn inline_start_is_right(self) -> bool {
+        self.is_rtl()
+    }
+}
+
+impl From<ResolvedDirection> for Direction {
+    fn from(resolved: ResolvedDirection) -> Self {
+        match resolved {
+            ResolvedDirection::Ltr => Direction::Ltr,
+            ResolvedDirection::Rtl => Direction::Rtl,
+        }
+    }
 }
 ```
 
@@ -583,24 +647,14 @@ pub enum PhysicalSide {
 }
 
 impl LogicalSide {
-    /// Convert to a physical side given a writing direction.
-    ///
-    /// # Panics (debug only)
-    ///
-    /// Debug-asserts that `dir` is not [`Direction::Auto`]; callers must resolve
-    /// `Auto` to `Ltr` or `Rtl` before physical conversion.
+    /// Convert to a physical side given a resolved writing direction.
     #[must_use]
-    pub fn to_physical(self, dir: Direction) -> PhysicalSide {
-        debug_assert!(
-            dir != Direction::Auto,
-            "Direction::Auto must be resolved to Ltr or Rtl before physical conversion"
-        );
+    pub const fn to_physical(self, dir: ResolvedDirection) -> PhysicalSide {
         match (self, dir) {
-            (LogicalSide::InlineStart, Direction::Rtl) => PhysicalSide::Right,
-            (LogicalSide::InlineEnd, Direction::Rtl) | (LogicalSide::InlineStart, _) => {
-                PhysicalSide::Left
-            }
-            (LogicalSide::InlineEnd, _) => PhysicalSide::Right,
+            (LogicalSide::InlineEnd, ResolvedDirection::Rtl)
+            | (LogicalSide::InlineStart, ResolvedDirection::Ltr) => PhysicalSide::Left,
+            (LogicalSide::InlineStart, ResolvedDirection::Rtl)
+            | (LogicalSide::InlineEnd, ResolvedDirection::Ltr) => PhysicalSide::Right,
             (LogicalSide::BlockStart, _) => PhysicalSide::Top,
             (LogicalSide::BlockEnd, _) => PhysicalSide::Bottom,
         }
@@ -634,21 +688,12 @@ pub struct LogicalRect {
 }
 
 impl LogicalRect {
-    /// Convert to a physical rect given a writing direction.
+    /// Convert to a physical rect given a resolved writing direction.
     ///
     /// In RTL mode the inline-start and inline-end values are swapped so that
     /// `inline_start` maps to `right` and `inline_end` maps to `left`.
-    ///
-    /// # Panics (debug only)
-    ///
-    /// Debug-asserts that `dir` is not [`Direction::Auto`]; callers must resolve
-    /// `Auto` to `Ltr` or `Rtl` before physical conversion.
     #[must_use]
-    pub fn to_physical(&self, dir: Direction) -> PhysicalRect {
-        debug_assert!(
-            dir != Direction::Auto,
-            "Direction::Auto must be resolved to Ltr or Rtl before physical conversion"
-        );
+    pub const fn to_physical(&self, dir: ResolvedDirection) -> PhysicalRect {
         if dir.is_rtl() {
             PhysicalRect {
                 left: self.inline_end,
