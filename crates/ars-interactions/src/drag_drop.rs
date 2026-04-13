@@ -13,6 +13,7 @@ use std::{
     vec::Vec,
 };
 
+use ars_a11y::{AnnouncementPriority, LiveAnnouncer};
 use ars_core::{AttrMap, Callback, HtmlAttr, MessageFn};
 use ars_i18n::Locale;
 
@@ -22,6 +23,170 @@ type DragItemsFn = Arc<dyn Fn() -> Vec<DragItem> + Send + Sync>;
 type DragStartAnnouncementFn = MessageFn<dyn Fn(&[DragItem], &Locale) -> String + Send + Sync>;
 type DragEnterAnnouncementFn = MessageFn<dyn Fn(&DropTargetEvent, &Locale) -> String + Send + Sync>;
 type DropAnnouncementFn = MessageFn<dyn Fn(&DropEvent, &Locale) -> String + Send + Sync>;
+type DragStartDefaultAnnouncementFn = MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync>;
+type TargetAnnouncementFn = MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>;
+type DropDefaultAnnouncementFn = MessageFn<dyn Fn(usize, &str, &Locale) -> String + Send + Sync>;
+
+/// Screen reader announcements for keyboard and pointer drag-and-drop flows.
+#[derive(Clone)]
+pub struct DragAnnouncements {
+    /// Announces that a drag session has started.
+    pub drag_start: DragStartDefaultAnnouncementFn,
+    /// Announces that focus has moved onto a drop target.
+    pub drag_enter: TargetAnnouncementFn,
+    /// Announces that focus has moved off a drop target.
+    pub drag_leave: TargetAnnouncementFn,
+    /// Announces that a drop completed successfully.
+    pub drop: DropDefaultAnnouncementFn,
+    /// Announces that the drag session was cancelled.
+    pub drag_cancel: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+}
+
+impl Default for DragAnnouncements {
+    fn default() -> Self {
+        Self {
+            drag_start: MessageFn::new(|count: usize, _locale: &Locale| {
+                if count == 1 {
+                    String::from(
+                        "Started dragging 1 item. Press Tab or Shift+Tab to move between drop targets, Escape to cancel.",
+                    )
+                } else {
+                    format!(
+                        "Started dragging {count} items. Press Tab or Shift+Tab to move between drop targets, Escape to cancel."
+                    )
+                }
+            }),
+
+            drag_enter: MessageFn::new(|target: &str, _locale: &Locale| {
+                format!("Drop target: {target}. Press Enter to drop here, Escape to cancel.")
+            }),
+
+            drag_leave: MessageFn::new(|target: &str, _locale: &Locale| {
+                format!("Left drop target: {target}.")
+            }),
+
+            drop: MessageFn::new(|count: usize, target: &str, _locale: &Locale| {
+                if count == 1 {
+                    format!("Dropped 1 item into {target}.")
+                } else {
+                    format!("Dropped {count} items into {target}.")
+                }
+            }),
+
+            drag_cancel: MessageFn::new(|_locale: &Locale| String::from("Drag cancelled.")),
+        }
+    }
+}
+
+impl Debug for DragAnnouncements {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DragAnnouncements").finish_non_exhaustive()
+    }
+}
+
+/// Metadata for a drop target that participates in keyboard drag-and-drop.
+#[derive(Clone, Debug)]
+pub struct KeyboardDropTarget {
+    /// The DOM id or framework-stable identifier for the target element.
+    pub element_id: String,
+    /// Human-readable label announced to assistive technology users.
+    pub label: String,
+    /// Drop-target configuration cloned from the mounted target.
+    pub config: DropConfig,
+}
+
+/// Registry of active drop targets used for keyboard drag-and-drop navigation.
+#[derive(Clone, Debug, Default)]
+pub struct KeyboardDragRegistry {
+    targets: Vec<KeyboardDropTarget>,
+    current_index: Option<usize>,
+}
+
+impl KeyboardDragRegistry {
+    /// Creates an empty registry.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Registers a live drop target in document order.
+    pub fn register(&mut self, target: KeyboardDropTarget) {
+        self.targets.push(target);
+
+        if self.current_index.is_none() {
+            self.current_index = Some(0);
+        }
+    }
+
+    /// Unregisters a live drop target by element id.
+    pub fn unregister(&mut self, element_id: &str) {
+        let Some(index) = self
+            .targets
+            .iter()
+            .position(|target| target.element_id == element_id)
+        else {
+            return;
+        };
+
+        self.targets.remove(index);
+
+        self.current_index = if self.targets.is_empty() {
+            None
+        } else {
+            self.current_index
+                .map(|current| current.saturating_sub(usize::from(index < current)))
+                .map(|current| current.min(self.targets.len() - 1))
+        };
+    }
+
+    /// Advances to the next registered target, wrapping to the beginning.
+    #[must_use]
+    #[expect(
+        clippy::should_implement_trait,
+        reason = "The registry is not an iterator; next() is the spec-defined target-cycling API."
+    )]
+    pub fn next(&mut self) -> Option<&KeyboardDropTarget> {
+        if self.targets.is_empty() {
+            self.current_index = None;
+            return None;
+        }
+
+        self.current_index = Some(match self.current_index {
+            Some(index) => (index + 1) % self.targets.len(),
+            None => 0,
+        });
+
+        self.current()
+    }
+
+    /// Moves to the previous registered target, wrapping to the end.
+    #[must_use]
+    pub fn prev(&mut self) -> Option<&KeyboardDropTarget> {
+        if self.targets.is_empty() {
+            self.current_index = None;
+            return None;
+        }
+
+        self.current_index = Some(match self.current_index {
+            Some(0) | None => self.targets.len() - 1,
+            Some(index) => index - 1,
+        });
+
+        self.current()
+    }
+
+    /// Returns the currently selected target, if any.
+    #[must_use]
+    pub fn current(&self) -> Option<&KeyboardDropTarget> {
+        self.current_index.and_then(|index| self.targets.get(index))
+    }
+
+    /// Clears the registry and active selection.
+    pub fn clear(&mut self) {
+        self.targets.clear();
+        self.current_index = None;
+    }
+}
 
 /// The data associated with a drag operation.
 ///
@@ -389,6 +554,26 @@ impl DragResult {
         Some(event)
     }
 
+    /// Starts a keyboard drag session and dispatches the corresponding announcement.
+    #[must_use]
+    pub fn start_keyboard_drag(
+        &mut self,
+        locale: &Locale,
+        announcer: &mut LiveAnnouncer,
+        announcements: &DragAnnouncements,
+    ) -> Option<DragStartEvent> {
+        let event = self.start_drag(PointerType::Keyboard)?;
+
+        let message = self.config.drag_start_announcement.as_ref().map_or_else(
+            || (announcements.drag_start)(event.items.len(), locale),
+            |announcement| announcement(&event.items, locale),
+        );
+
+        announcer.announce_with_priority(message, AnnouncementPriority::Assertive);
+
+        Some(event)
+    }
+
     /// Transitions the active drag into the hovered-target state.
     ///
     /// Adapters should call this only after a drop target reports a valid
@@ -507,6 +692,19 @@ impl DragResult {
         Some(event)
     }
 
+    /// Completes a keyboard-driven drop and clears the keyboard target registry.
+    #[must_use]
+    pub fn complete_keyboard_drop(
+        &mut self,
+        registry: &mut KeyboardDragRegistry,
+    ) -> Option<DragEndEvent> {
+        let event = self.complete_drop()?;
+
+        registry.clear();
+
+        Some(event)
+    }
+
     /// Cancels the active drag and returns the emitted end event when one existed.
     ///
     /// This covers drag-end-without-drop, explicit cancel, and adapter-level
@@ -550,6 +748,27 @@ impl DragResult {
         }
 
         self.refresh_snapshot();
+
+        Some(event)
+    }
+
+    /// Cancels a keyboard drag session, clears the registry, and announces the cancellation.
+    #[must_use]
+    pub fn cancel_keyboard_drag(
+        &mut self,
+        registry: &mut KeyboardDragRegistry,
+        locale: &Locale,
+        announcer: &mut LiveAnnouncer,
+        announcements: &DragAnnouncements,
+    ) -> Option<DragEndEvent> {
+        let event = self.cancel_drag()?;
+
+        registry.clear();
+
+        announcer.announce_with_priority(
+            (announcements.drag_cancel)(locale),
+            AnnouncementPriority::Assertive,
+        );
 
         Some(event)
     }
@@ -640,6 +859,42 @@ impl DropResult {
         operation
     }
 
+    /// Handles keyboard focus moving onto this target and dispatches announcements.
+    #[must_use]
+    pub fn keyboard_drag_enter(
+        &mut self,
+        items: Vec<DragItemPreview>,
+        offered_operation: DropOperation,
+        target_label: &str,
+        locale: &Locale,
+        announcer: &mut LiveAnnouncer,
+        announcements: &DragAnnouncements,
+    ) -> DropOperation {
+        let preview_items = items.clone();
+
+        let operation = self.drag_enter(items, offered_operation, PointerType::Keyboard);
+
+        if operation != DropOperation::Cancel {
+            let message = self.config.drag_enter_announcement.as_ref().map_or_else(
+                || (announcements.drag_enter)(target_label, locale),
+                |announcement| {
+                    announcement(
+                        &DropTargetEvent {
+                            items: preview_items,
+                            operation,
+                            pointer_type: PointerType::Keyboard,
+                        },
+                        locale,
+                    )
+                },
+            );
+
+            announcer.announce_with_priority(message, AnnouncementPriority::Polite);
+        }
+
+        operation
+    }
+
     /// Handles a drag-over update and returns the operation currently accepted.
     #[must_use]
     pub fn drag_over(
@@ -725,6 +980,27 @@ impl DropResult {
         self.refresh_snapshot();
     }
 
+    /// Handles keyboard focus leaving this target and dispatches the leave announcement.
+    pub fn keyboard_drag_leave(
+        &mut self,
+        items: &[DragItemPreview],
+        target_label: &str,
+        locale: &Locale,
+        announcer: &mut LiveAnnouncer,
+        announcements: &DragAnnouncements,
+    ) {
+        let should_announce = !self.config.disabled && self.enter_count == 1;
+
+        self.drag_leave(items, PointerType::Keyboard);
+
+        if should_announce {
+            announcer.announce_with_priority(
+                (announcements.drag_leave)(target_label, locale),
+                AnnouncementPriority::Polite,
+            );
+        }
+    }
+
     /// Handles a completed drop and returns the emitted drop event when accepted.
     #[must_use]
     pub fn drop(&mut self, items: Vec<DragItem>, pointer_type: PointerType) -> Option<DropEvent> {
@@ -752,6 +1028,28 @@ impl DropResult {
         self.reset();
 
         event
+    }
+
+    /// Handles a keyboard drop and dispatches the corresponding announcement.
+    #[must_use]
+    pub fn keyboard_drop(
+        &mut self,
+        items: Vec<DragItem>,
+        target_label: &str,
+        locale: &Locale,
+        announcer: &mut LiveAnnouncer,
+        announcements: &DragAnnouncements,
+    ) -> Option<DropEvent> {
+        let event = self.drop(items, PointerType::Keyboard)?;
+
+        let message = self.config.drop_announcement.as_ref().map_or_else(
+            || (announcements.drop)(event.items.len(), target_label, locale),
+            |announcement| announcement(&event, locale),
+        );
+
+        announcer.announce_with_priority(message, AnnouncementPriority::Assertive);
+
+        Some(event)
     }
 
     /// Clears all drop-target state without emitting callbacks.
@@ -972,13 +1270,15 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
+    use ars_a11y::LiveAnnouncer;
     use ars_core::{AttrValue, Callback, HtmlAttr, MessageFn};
     use ars_i18n::{Locale, locales};
 
     use super::{
-        DirectoryHandle, DragConfig, DragEndEvent, DragItem, DragItemKind, DragItemPreview,
-        DragStartEvent, DragState, DropConfig, DropEvent, DropIndicatorPosition, DropOperation,
-        DropTargetEvent, FileHandle, build_drop_attrs, use_drag, use_drop,
+        DirectoryHandle, DragAnnouncements, DragConfig, DragEndEvent, DragItem, DragItemKind,
+        DragItemPreview, DragStartEvent, DragState, DropConfig, DropEvent, DropIndicatorPosition,
+        DropOperation, DropTargetEvent, FileHandle, KeyboardDragRegistry, KeyboardDropTarget,
+        build_drop_attrs, use_drag, use_drop,
     };
     use crate::PointerType;
 
@@ -1006,6 +1306,39 @@ mod tests {
     }
 
     fn ignore_drop_event(_: DropEvent) {}
+
+    fn keyboard_target(element_id: &str, label: &str, config: DropConfig) -> KeyboardDropTarget {
+        KeyboardDropTarget {
+            element_id: element_id.to_owned(),
+            label: label.to_owned(),
+            config,
+        }
+    }
+
+    fn preview_from_item(item: &DragItem) -> DragItemPreview {
+        match item {
+            DragItem::Text(_) => preview(DragItemKind::Text, &["text/plain"]),
+            DragItem::Uri(_) => preview(DragItemKind::Uri, &["text/uri-list"]),
+            DragItem::Html(_) => preview(DragItemKind::Html, &["text/html"]),
+            DragItem::File { mime_type, .. } => DragItemPreview {
+                kind: DragItemKind::File,
+                mime_types: vec![mime_type.clone()],
+            },
+            DragItem::Directory { .. } => preview(DragItemKind::Directory, &["inode/directory"]),
+            DragItem::Custom { mime_type, .. } => DragItemPreview {
+                kind: DragItemKind::Custom,
+                mime_types: vec![mime_type.clone()],
+            },
+        }
+    }
+
+    fn previews_from_items(items: &[DragItem]) -> Vec<DragItemPreview> {
+        items.iter().map(preview_from_item).collect()
+    }
+
+    fn announcer_debug(announcer: &LiveAnnouncer) -> String {
+        format!("{announcer:?}")
+    }
 
     #[test]
     fn drop_operation_as_drop_effect_returns_html5_values() {
@@ -1183,6 +1516,197 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_drag_registry_new_starts_empty() {
+        let registry = KeyboardDragRegistry::new();
+
+        assert!(registry.current().is_none());
+    }
+
+    #[test]
+    fn keyboard_drag_registry_register_and_clear_manage_current_target() {
+        let mut registry = KeyboardDragRegistry::new();
+
+        registry.register(keyboard_target("drop-a", "Alpha", DropConfig::default()));
+
+        let current = registry.current().expect("current target should exist");
+
+        assert_eq!(current.element_id, "drop-a");
+        assert_eq!(current.label, "Alpha");
+
+        registry.clear();
+
+        assert!(registry.current().is_none());
+    }
+
+    #[test]
+    fn keyboard_drag_registry_unregister_removes_target() {
+        let mut registry = KeyboardDragRegistry::new();
+
+        registry.register(keyboard_target("drop-a", "Alpha", DropConfig::default()));
+        registry.register(keyboard_target("drop-b", "Beta", DropConfig::default()));
+
+        registry.unregister("drop-a");
+
+        let current = registry.current().expect("remaining target should exist");
+
+        assert_eq!(current.element_id, "drop-b");
+    }
+
+    #[test]
+    fn keyboard_drag_registry_unregister_unknown_target_is_noop() {
+        let mut registry = KeyboardDragRegistry::new();
+
+        registry.register(keyboard_target("drop-a", "Alpha", DropConfig::default()));
+        registry.unregister("missing");
+
+        let current = registry.current().expect("registered target should remain");
+
+        assert_eq!(current.element_id, "drop-a");
+    }
+
+    #[test]
+    fn keyboard_drag_registry_empty_navigation_returns_none() {
+        let mut registry = KeyboardDragRegistry::new();
+
+        assert!(registry.next().is_none());
+        assert!(registry.prev().is_none());
+        assert!(registry.current().is_none());
+    }
+
+    #[test]
+    fn keyboard_drag_registry_next_wraps_across_targets() {
+        let mut registry = KeyboardDragRegistry::new();
+
+        registry.register(keyboard_target("drop-a", "Alpha", DropConfig::default()));
+        registry.register(keyboard_target("drop-b", "Beta", DropConfig::default()));
+        registry.register(keyboard_target("drop-c", "Gamma", DropConfig::default()));
+
+        assert_eq!(
+            registry.next().expect("first next should exist").element_id,
+            "drop-b"
+        );
+        assert_eq!(
+            registry
+                .next()
+                .expect("second next should exist")
+                .element_id,
+            "drop-c"
+        );
+        assert_eq!(
+            registry
+                .next()
+                .expect("wrapped next should exist")
+                .element_id,
+            "drop-a"
+        );
+    }
+
+    #[test]
+    fn keyboard_drag_registry_prev_wraps_across_targets() {
+        let mut registry = KeyboardDragRegistry::new();
+
+        registry.register(keyboard_target("drop-a", "Alpha", DropConfig::default()));
+        registry.register(keyboard_target("drop-b", "Beta", DropConfig::default()));
+        registry.register(keyboard_target("drop-c", "Gamma", DropConfig::default()));
+
+        assert_eq!(
+            registry
+                .prev()
+                .expect("wrapped prev should exist")
+                .element_id,
+            "drop-c"
+        );
+        assert_eq!(
+            registry
+                .prev()
+                .expect("second prev should exist")
+                .element_id,
+            "drop-b"
+        );
+        assert_eq!(
+            registry.prev().expect("third prev should exist").element_id,
+            "drop-a"
+        );
+    }
+
+    #[test]
+    fn keyboard_drag_registry_single_target_stays_stable() {
+        let mut registry = KeyboardDragRegistry::new();
+
+        registry.register(keyboard_target("drop-a", "Alpha", DropConfig::default()));
+
+        assert_eq!(
+            registry
+                .next()
+                .expect("single next should exist")
+                .element_id,
+            "drop-a"
+        );
+        assert_eq!(
+            registry
+                .prev()
+                .expect("single prev should exist")
+                .element_id,
+            "drop-a"
+        );
+    }
+
+    #[test]
+    fn drag_announcements_default_messages_are_non_empty() {
+        let announcements = DragAnnouncements::default();
+
+        let locale = locales::en_us();
+
+        assert!(!(announcements.drag_start)(1, &locale).is_empty());
+        assert!(!(announcements.drag_enter)("Inbox", &locale).is_empty());
+        assert!(!(announcements.drag_leave)("Inbox", &locale).is_empty());
+        assert!(!(announcements.drop)(1, "Inbox", &locale).is_empty());
+        assert!(!(announcements.drag_cancel)(&locale).is_empty());
+    }
+
+    #[test]
+    fn drag_announcements_default_drag_start_handles_singular_and_plural_counts() {
+        let announcements = DragAnnouncements::default();
+
+        let locale = locales::en_us();
+
+        assert!((announcements.drag_start)(1, &locale).contains("1 item"));
+        assert!((announcements.drag_start)(3, &locale).contains("3 items"));
+    }
+
+    #[test]
+    fn drag_announcements_default_enter_leave_and_drop_include_target_name() {
+        let announcements = DragAnnouncements::default();
+
+        let locale = locales::en_us();
+
+        assert!((announcements.drag_enter)("Inbox", &locale).contains("Inbox"));
+        assert!((announcements.drag_leave)("Inbox", &locale).contains("Inbox"));
+
+        let drop_message = (announcements.drop)(2, "Inbox", &locale);
+
+        assert!(drop_message.contains("2 items"));
+        assert!(drop_message.contains("Inbox"));
+    }
+
+    #[test]
+    fn drag_announcements_default_cancel_matches_spec_text() {
+        let announcements = DragAnnouncements::default();
+
+        assert_eq!(
+            (announcements.drag_cancel)(&locales::en_us()),
+            "Drag cancelled."
+        );
+    }
+
+    #[test]
+    fn drag_announcements_debug_is_non_exhaustive() {
+        let debug = format!("{:?}", DragAnnouncements::default());
+
+        assert_eq!(debug, "DragAnnouncements { .. }");
+    }
+
+    #[test]
     fn drop_config_without_accepted_types_accepts_any_preview_items() {
         let config = DropConfig::default();
 
@@ -1286,6 +1810,51 @@ mod tests {
     }
 
     #[test]
+    fn previews_from_items_preserve_kind_and_mime_types() {
+        let items = vec![
+            DragItem::Text("text".into()),
+            DragItem::Uri("https://example.com".into()),
+            DragItem::Html("<p>hi</p>".into()),
+            DragItem::File {
+                name: "photo.jpg".into(),
+                mime_type: "image/jpeg".into(),
+                size: 42,
+                handle: FileHandle(()),
+            },
+            DragItem::Directory {
+                name: "assets".into(),
+                handle: DirectoryHandle(()),
+            },
+            DragItem::Custom {
+                mime_type: "application/x-ars-demo".into(),
+                data: "payload".into(),
+            },
+        ];
+
+        let previews = previews_from_items(&items);
+
+        assert_eq!(previews.len(), 6);
+        assert_eq!(previews[0].kind, DragItemKind::Text);
+        assert_eq!(previews[0].mime_types, vec![String::from("text/plain")]);
+        assert_eq!(previews[1].kind, DragItemKind::Uri);
+        assert_eq!(previews[1].mime_types, vec![String::from("text/uri-list")]);
+        assert_eq!(previews[2].kind, DragItemKind::Html);
+        assert_eq!(previews[2].mime_types, vec![String::from("text/html")]);
+        assert_eq!(previews[3].kind, DragItemKind::File);
+        assert_eq!(previews[3].mime_types, vec![String::from("image/jpeg")]);
+        assert_eq!(previews[4].kind, DragItemKind::Directory);
+        assert_eq!(
+            previews[4].mime_types,
+            vec![String::from("inode/directory")]
+        );
+        assert_eq!(previews[5].kind, DragItemKind::Custom);
+        assert_eq!(
+            previews[5].mime_types,
+            vec![String::from("application/x-ars-demo")]
+        );
+    }
+
+    #[test]
     fn drop_event_is_constructible_with_pointer_type_and_position() {
         let event = DropEvent {
             items: vec![DragItem::Text("payload".into())],
@@ -1329,6 +1898,35 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_drag_start_transitions_to_dragging_and_announces_assertively() {
+        let announcements = DragAnnouncements::default();
+
+        let mut announcer = LiveAnnouncer::new();
+
+        let mut result = use_drag(DragConfig {
+            items: Some(Arc::new(|| vec![DragItem::Text("payload".into())])),
+            ..DragConfig::default()
+        });
+
+        let event = result
+            .start_keyboard_drag(&locales::en_us(), &mut announcer, &announcements)
+            .expect("keyboard drag should start");
+
+        assert_eq!(event.pointer_type, PointerType::Keyboard);
+
+        match result.current_state() {
+            DragState::Dragging { pointer_type, .. } => {
+                assert_eq!(pointer_type, PointerType::Keyboard);
+            }
+            state => panic!("unexpected state after keyboard drag start: {state:?}"),
+        }
+
+        let debug = announcer_debug(&announcer);
+        assert!(debug.contains("active_priority: Some(Assertive)"));
+        assert!(debug.contains("Started dragging 1 item"));
+    }
+
+    #[test]
     fn drag_result_start_drag_fires_callback_with_payload() {
         let start_events = Arc::new(Mutex::new(Vec::<DragStartEvent>::new()));
 
@@ -1356,6 +1954,31 @@ mod tests {
         assert_eq!(start_events.len(), 1);
         assert_eq!(start_events[0].pointer_type, event.pointer_type);
         assert_eq!(start_events[0].items.len(), event.items.len());
+    }
+
+    #[test]
+    fn keyboard_drag_start_prefers_per_element_override_message() {
+        type AnnouncementFn = dyn Fn(&[DragItem], &Locale) -> String + Send + Sync;
+
+        let announcements = DragAnnouncements::default();
+
+        let mut announcer = LiveAnnouncer::new();
+
+        let mut result = use_drag(DragConfig {
+            items: Some(Arc::new(|| vec![DragItem::Text("payload".into())])),
+            drag_start_announcement: Some(MessageFn::new(Arc::new(
+                |items: &[DragItem], _locale: &Locale| format!("override start {}", items.len()),
+            ) as Arc<AnnouncementFn>)),
+            ..DragConfig::default()
+        });
+
+        drop(
+            result
+                .start_keyboard_drag(&locales::en_us(), &mut announcer, &announcements)
+                .expect("keyboard drag should start"),
+        );
+
+        assert!(announcer_debug(&announcer).contains("override start 1"));
     }
 
     #[test]
@@ -1476,6 +2099,31 @@ mod tests {
     }
 
     #[test]
+    fn drag_result_enter_target_retargets_when_already_drag_over() {
+        let mut result = use_drag(DragConfig {
+            items: Some(Arc::new(|| vec![DragItem::Text("payload".into())])),
+            ..DragConfig::default()
+        });
+
+        drop(result.start_drag(PointerType::Mouse));
+
+        result.enter_target("target-1", DropOperation::Copy);
+        result.enter_target("target-2", DropOperation::Move);
+
+        match result.current_state() {
+            DragState::DragOver {
+                target_id,
+                current_operation,
+                ..
+            } => {
+                assert_eq!(target_id, "target-2");
+                assert_eq!(current_operation, DropOperation::Move);
+            }
+            state => panic!("unexpected state after retargeting drag over: {state:?}"),
+        }
+    }
+
+    #[test]
     fn drag_result_complete_drop_fires_end_callback_with_current_operation() {
         let end_events = Arc::new(Mutex::new(Vec::<DragEndEvent>::new()));
 
@@ -1581,6 +2229,26 @@ mod tests {
         assert_eq!(end_events[0].pointer_type, event.pointer_type);
         assert_eq!(end_events[0].items.len(), event.items.len());
         assert!(!end_events[0].was_dropped);
+    }
+
+    #[test]
+    fn drag_result_cancel_drag_from_drag_over_transitions_to_idle() {
+        let mut result = use_drag(DragConfig {
+            items: Some(Arc::new(|| vec![DragItem::Text("payload".into())])),
+            ..DragConfig::default()
+        });
+
+        drop(result.start_drag(PointerType::Touch));
+
+        result.enter_target("target-1", DropOperation::Move);
+
+        let event = result
+            .cancel_drag()
+            .expect("drag-over state should cancel cleanly");
+
+        assert_eq!(event.operation, DropOperation::Cancel);
+        assert_eq!(event.pointer_type, PointerType::Touch);
+        assert!(matches!(result.current_state(), DragState::Idle));
     }
 
     #[test]
@@ -1740,6 +2408,109 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_drag_navigation_triggers_enter_callback_and_polite_announcement() {
+        let enter_events = Arc::new(Mutex::new(Vec::<DropTargetEvent>::new()));
+
+        let observed_events = Arc::clone(&enter_events);
+
+        let announcements = DragAnnouncements::default();
+
+        let mut announcer = LiveAnnouncer::new();
+
+        let target_config = DropConfig {
+            on_drag_enter: Some(Callback::new(move |event: DropTargetEvent| {
+                observed_events
+                    .lock()
+                    .expect("enter events lock should succeed")
+                    .push(event);
+            })),
+            ..DropConfig::default()
+        };
+
+        let mut registry = KeyboardDragRegistry::new();
+
+        let mut drag = use_drag(DragConfig {
+            items: Some(Arc::new(|| vec![DragItem::Text("payload".into())])),
+            ..DragConfig::default()
+        });
+
+        let mut drop_result = use_drop(target_config.clone());
+
+        registry.register(keyboard_target("drop-a", "Inbox", target_config));
+
+        let start_event = drag
+            .start_keyboard_drag(&locales::en_us(), &mut announcer, &announcements)
+            .expect("keyboard drag should start");
+
+        announcer.notify_announced();
+
+        let target = registry.next().expect("next target should exist").clone();
+
+        let previews = previews_from_items(&start_event.items);
+
+        let operation = drop_result.keyboard_drag_enter(
+            previews,
+            DropOperation::Move,
+            &target.label,
+            &locales::en_us(),
+            &mut announcer,
+            &announcements,
+        );
+
+        drag.enter_target(target.element_id.clone(), operation);
+
+        assert_eq!(operation, DropOperation::Move);
+        assert_eq!(
+            enter_events
+                .lock()
+                .expect("enter events lock should succeed")
+                .len(),
+            1
+        );
+
+        match drag.current_state() {
+            DragState::DragOver {
+                target_id,
+                pointer_type,
+                ..
+            } => {
+                assert_eq!(target_id, "drop-a");
+                assert_eq!(pointer_type, PointerType::Keyboard);
+            }
+            state => panic!("unexpected state after keyboard enter: {state:?}"),
+        }
+
+        let debug = announcer_debug(&announcer);
+
+        assert!(debug.contains("active_priority: Some(Polite)"));
+        assert!(debug.contains("Drop target: Inbox"));
+    }
+
+    #[test]
+    fn keyboard_drag_enter_rejected_target_does_not_announce() {
+        let announcements = DragAnnouncements::default();
+
+        let mut announcer = LiveAnnouncer::new();
+
+        let mut result = use_drop(DropConfig {
+            accepted_types: Some(vec!["image/*".into()]),
+            ..DropConfig::default()
+        });
+
+        let operation = result.keyboard_drag_enter(
+            vec![preview(DragItemKind::Text, &["text/plain"])],
+            DropOperation::Move,
+            "Inbox",
+            &locales::en_us(),
+            &mut announcer,
+            &announcements,
+        );
+
+        assert_eq!(operation, DropOperation::Cancel);
+        assert!(!announcer_debug(&announcer).contains("Inbox"));
+    }
+
+    #[test]
     fn drop_result_drag_enter_sets_drag_over_and_indicator_snapshot() {
         let mut result = use_drop(DropConfig {
             drop_indicator_position: DropIndicatorPosition::Before,
@@ -1841,6 +2612,21 @@ mod tests {
         assert!(!result.attrs.contains(&HtmlAttr::Data("ars-drag-over")));
         assert!(!result.attrs.contains(&HtmlAttr::Data("ars-drop-operation")));
         assert!(!result.attrs.contains(&HtmlAttr::Data("ars-drop-position")));
+    }
+
+    #[test]
+    fn drop_result_drag_enter_cancel_operation_is_rejected() {
+        let mut result = use_drop(DropConfig::default());
+
+        let operation = result.drag_enter(
+            vec![preview(DragItemKind::Text, &["text/plain"])],
+            DropOperation::Cancel,
+            PointerType::Mouse,
+        );
+
+        assert_eq!(operation, DropOperation::Cancel);
+        assert_eq!(result.enter_count, 0);
+        assert!(!result.drag_over);
     }
 
     #[test]
@@ -2120,6 +2906,37 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_drag_leave_announces_polite_message_on_final_leave() {
+        let announcements = DragAnnouncements::default();
+        let mut announcer = LiveAnnouncer::new();
+        let mut result = use_drop(DropConfig::default());
+
+        let _ = result.keyboard_drag_enter(
+            vec![preview(DragItemKind::Text, &["text/plain"])],
+            DropOperation::Move,
+            "Inbox",
+            &locales::en_us(),
+            &mut announcer,
+            &announcements,
+        );
+
+        announcer.notify_announced();
+
+        result.keyboard_drag_leave(
+            &[preview(DragItemKind::Text, &["text/plain"])],
+            "Inbox",
+            &locales::en_us(),
+            &mut announcer,
+            &announcements,
+        );
+
+        let debug = announcer_debug(&announcer);
+
+        assert!(debug.contains("active_priority: Some(Polite)"));
+        assert!(debug.contains("Left drop target: Inbox."));
+    }
+
+    #[test]
     fn drop_result_drop_returns_event_and_resets_state() {
         let mut result = use_drop(DropConfig {
             drop_indicator_position: DropIndicatorPosition::OnTarget,
@@ -2200,6 +3017,264 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_drop_triggers_on_drop_announces_and_moves_source_to_dropped() {
+        let drop_events = Arc::new(Mutex::new(Vec::<DropEvent>::new()));
+
+        let observed_events = Arc::clone(&drop_events);
+
+        let announcements = DragAnnouncements::default();
+
+        let mut announcer = LiveAnnouncer::new();
+
+        let target_config = DropConfig {
+            on_drop: Some(Callback::new(move |event: DropEvent| {
+                observed_events
+                    .lock()
+                    .expect("drop events lock should succeed")
+                    .push(event);
+            })),
+            ..DropConfig::default()
+        };
+
+        let mut registry = KeyboardDragRegistry::new();
+
+        let mut drag = use_drag(DragConfig {
+            items: Some(Arc::new(|| vec![DragItem::Text("payload".into())])),
+            ..DragConfig::default()
+        });
+
+        let mut drop_result = use_drop(target_config.clone());
+
+        registry.register(keyboard_target("drop-a", "Inbox", target_config));
+
+        let start_event = drag
+            .start_keyboard_drag(&locales::en_us(), &mut announcer, &announcements)
+            .expect("keyboard drag should start");
+
+        let target = registry
+            .current()
+            .expect("current target should exist")
+            .clone();
+
+        let previews = previews_from_items(&start_event.items);
+
+        let operation = drop_result.keyboard_drag_enter(
+            previews,
+            DropOperation::Move,
+            &target.label,
+            &locales::en_us(),
+            &mut announcer,
+            &announcements,
+        );
+
+        drag.enter_target(target.element_id.clone(), operation);
+
+        announcer.notify_announced();
+
+        let drop_event = drop_result
+            .keyboard_drop(
+                start_event.items.clone(),
+                &target.label,
+                &locales::en_us(),
+                &mut announcer,
+                &announcements,
+            )
+            .expect("keyboard drop should succeed");
+
+        let drag_end = drag
+            .complete_keyboard_drop(&mut registry)
+            .expect("source should complete drop");
+
+        assert_eq!(drop_event.pointer_type, PointerType::Keyboard);
+        assert_eq!(drag_end.pointer_type, PointerType::Keyboard);
+        assert_eq!(
+            drop_events
+                .lock()
+                .expect("drop events lock should succeed")
+                .len(),
+            1
+        );
+        assert!(registry.current().is_none());
+        assert!(matches!(
+            drag.current_state(),
+            DragState::Dropped {
+                operation: DropOperation::Move
+            }
+        ));
+
+        let debug = announcer_debug(&announcer);
+
+        assert!(debug.contains("active_priority: Some(Assertive)"));
+        assert!(debug.contains("Dropped 1 item into Inbox."));
+    }
+
+    #[test]
+    fn keyboard_drop_prefers_per_element_override_message() {
+        type AnnouncementFn = dyn Fn(&DropEvent, &Locale) -> String + Send + Sync;
+
+        let announcements = DragAnnouncements::default();
+
+        let mut announcer = LiveAnnouncer::new();
+
+        let target_config = DropConfig {
+            drop_announcement: Some(MessageFn::new(Arc::new(
+                |event: &DropEvent, _locale: &Locale| {
+                    format!("override drop {:?}", event.operation)
+                },
+            ) as Arc<AnnouncementFn>)),
+            ..DropConfig::default()
+        };
+
+        let mut drag = use_drag(DragConfig {
+            items: Some(Arc::new(|| vec![DragItem::Text("payload".into())])),
+            ..DragConfig::default()
+        });
+
+        let mut drop_result = use_drop(target_config.clone());
+
+        let start_event = drag
+            .start_keyboard_drag(&locales::en_us(), &mut announcer, &announcements)
+            .expect("keyboard drag should start");
+
+        let previews = previews_from_items(&start_event.items);
+
+        let operation = drop_result.keyboard_drag_enter(
+            previews,
+            DropOperation::Move,
+            "Inbox",
+            &locales::en_us(),
+            &mut announcer,
+            &announcements,
+        );
+
+        drag.enter_target("drop-a", operation);
+
+        announcer.notify_announced();
+
+        drop(
+            drop_result
+                .keyboard_drop(
+                    start_event.items.clone(),
+                    "Inbox",
+                    &locales::en_us(),
+                    &mut announcer,
+                    &announcements,
+                )
+                .expect("keyboard drop should succeed"),
+        );
+
+        assert!(announcer_debug(&announcer).contains("override drop Move"));
+    }
+
+    #[test]
+    fn keyboard_drag_cancel_fires_end_callback_clears_registry_and_announces() {
+        let end_events = Arc::new(Mutex::new(Vec::<DragEndEvent>::new()));
+
+        let observed_events = Arc::clone(&end_events);
+
+        let announcements = DragAnnouncements::default();
+
+        let mut announcer = LiveAnnouncer::new();
+
+        let mut registry = KeyboardDragRegistry::new();
+
+        let mut drag = use_drag(DragConfig {
+            items: Some(Arc::new(|| vec![DragItem::Text("payload".into())])),
+            on_drag_end: Some(Callback::new(move |event: DragEndEvent| {
+                observed_events
+                    .lock()
+                    .expect("end events lock should succeed")
+                    .push(event);
+            })),
+            ..DragConfig::default()
+        });
+
+        registry.register(keyboard_target("drop-a", "Inbox", DropConfig::default()));
+
+        drop(
+            drag.start_keyboard_drag(&locales::en_us(), &mut announcer, &announcements)
+                .expect("keyboard drag should start"),
+        );
+
+        announcer.notify_announced();
+
+        let event = drag
+            .cancel_keyboard_drag(
+                &mut registry,
+                &locales::en_us(),
+                &mut announcer,
+                &announcements,
+            )
+            .expect("keyboard drag should cancel");
+
+        assert_eq!(event.pointer_type, PointerType::Keyboard);
+        assert!(!event.was_dropped);
+        assert!(registry.current().is_none());
+        assert!(matches!(drag.current_state(), DragState::Idle));
+        assert_eq!(
+            end_events
+                .lock()
+                .expect("end events lock should succeed")
+                .len(),
+            1
+        );
+
+        let debug = announcer_debug(&announcer);
+
+        assert!(debug.contains("active_priority: Some(Assertive)"));
+        assert!(debug.contains("Drag cancelled."));
+    }
+
+    #[test]
+    fn keyboard_drag_enter_prefers_per_element_override_message() {
+        type AnnouncementFn = dyn Fn(&DropTargetEvent, &Locale) -> String + Send + Sync;
+
+        let announcements = DragAnnouncements::default();
+
+        let mut announcer = LiveAnnouncer::new();
+
+        let mut result = use_drop(DropConfig {
+            drag_enter_announcement: Some(MessageFn::new(Arc::new(
+                |event: &DropTargetEvent, _locale: &Locale| {
+                    format!("override enter {:?}", event.operation)
+                },
+            ) as Arc<AnnouncementFn>)),
+            ..DropConfig::default()
+        });
+
+        let operation = result.keyboard_drag_enter(
+            vec![preview(DragItemKind::Text, &["text/plain"])],
+            DropOperation::Copy,
+            "Inbox",
+            &locales::en_us(),
+            &mut announcer,
+            &announcements,
+        );
+
+        assert_eq!(operation, DropOperation::Copy);
+        assert!(announcer_debug(&announcer).contains("override enter Copy"));
+    }
+
+    #[test]
+    fn drop_result_drag_over_rejects_callback_operation_outside_accepted_list() {
+        let mut result = use_drop(DropConfig {
+            accepted_operations: Some(vec![DropOperation::Copy]),
+            on_drag_over: Some(Callback::new(resolve_link_operation)),
+            ..DropConfig::default()
+        });
+
+        let operation = result.drag_over(
+            &[preview(DragItemKind::Text, &["text/plain"])],
+            DropOperation::Copy,
+            PointerType::Mouse,
+        );
+
+        assert_eq!(operation, DropOperation::Cancel);
+        assert!(!result.drag_over);
+        assert!(result.drop_operation.is_none());
+    }
+
+    #[test]
     fn drop_result_drop_skips_callback_when_operation_is_cancel() {
         let mut result = use_drop(DropConfig {
             on_drop: Some(Callback::new(ignore_drop_event)),
@@ -2218,6 +3293,82 @@ mod tests {
         assert!(!result.drag_over);
         assert!(result.drop_operation.is_none());
         assert!(result.indicator_position.is_none());
+    }
+
+    #[test]
+    fn keyboard_drop_without_active_target_returns_none_and_does_not_announce() {
+        let announcements = DragAnnouncements::default();
+
+        let mut announcer = LiveAnnouncer::new();
+
+        let mut result = use_drop(DropConfig::default());
+
+        assert!(
+            result
+                .keyboard_drop(
+                    vec![DragItem::Text("payload".into())],
+                    "Inbox",
+                    &locales::en_us(),
+                    &mut announcer,
+                    &announcements,
+                )
+                .is_none()
+        );
+        assert!(!announcer_debug(&announcer).contains("Dropped"));
+    }
+
+    #[test]
+    fn complete_keyboard_drop_without_drag_over_returns_none_and_keeps_registry() {
+        let mut registry = KeyboardDragRegistry::new();
+
+        let mut drag = use_drag(DragConfig {
+            items: Some(Arc::new(|| vec![DragItem::Text("payload".into())])),
+            ..DragConfig::default()
+        });
+
+        registry.register(keyboard_target("drop-a", "Inbox", DropConfig::default()));
+
+        drop(drag.start_drag(PointerType::Keyboard));
+
+        assert!(drag.complete_keyboard_drop(&mut registry).is_none());
+        assert_eq!(
+            registry
+                .current()
+                .expect("registry should remain intact")
+                .element_id,
+            "drop-a"
+        );
+    }
+
+    #[test]
+    fn cancel_keyboard_drag_without_active_drag_returns_none_and_keeps_registry() {
+        let announcements = DragAnnouncements::default();
+
+        let mut announcer = LiveAnnouncer::new();
+
+        let mut registry = KeyboardDragRegistry::new();
+
+        let mut drag = use_drag(DragConfig::default());
+
+        registry.register(keyboard_target("drop-a", "Inbox", DropConfig::default()));
+
+        assert!(
+            drag.cancel_keyboard_drag(
+                &mut registry,
+                &locales::en_us(),
+                &mut announcer,
+                &announcements,
+            )
+            .is_none()
+        );
+        assert_eq!(
+            registry
+                .current()
+                .expect("registry should remain intact")
+                .element_id,
+            "drop-a"
+        );
+        assert!(!announcer_debug(&announcer).contains("Drag cancelled."));
     }
 
     #[test]
