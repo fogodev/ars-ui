@@ -314,8 +314,6 @@ impl MoveResult {
     }
 
     fn finish_pointer_move(&mut self, modifiers: KeyModifiers) {
-        self.active_move_keys.clear();
-
         let pointer_type = {
             let mut state = self.state.borrow_mut();
 
@@ -328,6 +326,7 @@ impl MoveResult {
 
                 MoveState::Moving { pointer_type, .. } => {
                     *state = MoveState::Idle;
+                    self.active_move_keys.clear();
                     Some(pointer_type)
                 }
             }
@@ -1098,6 +1097,53 @@ mod tests {
             1.0,
             1.0,
         );
+
+        assert_eq!(
+            *result.state.borrow(),
+            MoveState::Moving {
+                pointer_type: PointerType::Keyboard,
+                last_x: 0.0,
+                last_y: 0.0,
+                scale_x: 1.0,
+                scale_y: 1.0,
+            },
+        );
+        assert!(!result.handle_key_up(KeyboardKey::ArrowRight, KeyModifiers::default()));
+        assert!(ends.lock().expect("ends").is_empty());
+        assert!(result.handle_key_up(KeyboardKey::ArrowUp, KeyModifiers::default()));
+        assert_eq!(*result.state.borrow(), MoveState::Idle);
+        assert_eq!(ends.lock().expect("ends").len(), 1);
+    }
+
+    #[test]
+    fn ignored_pointer_end_does_not_forget_active_keyboard_move_keys() {
+        let ends = Arc::new(Mutex::new(Vec::new()));
+
+        let config = MoveConfig {
+            on_move_end: Some({
+                let ends = Arc::clone(&ends);
+                Callback::new(move |event: MoveEvent| {
+                    ends.lock().expect("end events").push(event);
+                })
+            }),
+            ..MoveConfig::default()
+        };
+
+        let mut result = use_move(config);
+
+        assert!(result.handle_key_down(
+            KeyboardKey::ArrowRight,
+            ResolvedDirection::Ltr,
+            KeyModifiers::default(),
+        ));
+        assert!(result.handle_key_down(
+            KeyboardKey::ArrowUp,
+            ResolvedDirection::Ltr,
+            KeyModifiers::default(),
+        ));
+
+        result.end_pointer_move(KeyModifiers::default());
+        result.cancel_pointer_move(KeyModifiers::default());
 
         assert_eq!(
             *result.state.borrow(),
