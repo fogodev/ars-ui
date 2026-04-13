@@ -109,11 +109,11 @@ impl Locale {
     }
 
     /// Returns the text direction for this locale.
-    pub fn direction(&self) -> Direction {
+    pub fn direction(&self) -> ResolvedDirection {
         if RTL_SCRIPTS.contains(&self.script_or_default()) {
-            Direction::Rtl
+            ResolvedDirection::Rtl
         } else {
-            Direction::Ltr
+            ResolvedDirection::Ltr
         }
     }
 
@@ -368,7 +368,7 @@ pub trait LocaleProvider: Clone + 'static {
     fn locale(&self) -> &Locale;
 
     /// Get the current direction (derived from locale unless overridden).
-    fn direction(&self) -> Direction {
+    fn direction(&self) -> ResolvedDirection {
         self.locale().direction()
     }
 }
@@ -394,8 +394,10 @@ impl StaticLocaleProvider {
 impl LocaleProvider for StaticLocaleProvider {
     fn locale(&self) -> &Locale { &self.locale }
 
-    fn direction(&self) -> Direction {
-        self.direction_override.unwrap_or_else(|| self.locale.direction())
+    fn direction(&self) -> ResolvedDirection {
+        self.direction_override
+            .map(|d| d.resolve(self.locale.direction()))
+            .unwrap_or_else(|| self.locale.direction())
     }
 }
 ```
