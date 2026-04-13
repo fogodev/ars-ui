@@ -2455,9 +2455,11 @@ impl DragResult {
     ) -> Option<DragEndEvent> { /* ... */ }
     pub fn cancel_drag(&mut self) -> Option<DragEndEvent> { /* ... */ }
     /// Keyboard-specific convenience wrapper around `cancel_drag()`.
-    /// Clears the keyboard drop-target registry and dispatches the cancel announcement.
+    /// Resets the active keyboard drop target, clears the keyboard registry
+    /// selection, and dispatches the cancel announcement.
     pub fn cancel_keyboard_drag(
         &mut self,
+        drop_target: &mut DropResult,
         registry: &mut KeyboardDragRegistry,
         locale: &Locale,
         announcer: &mut LiveAnnouncer,

@@ -126,12 +126,11 @@ impl KeyboardDragRegistry {
 
         self.targets.remove(index);
 
-        self.current_index = if self.targets.is_empty() {
-            None
-        } else {
-            self.current_index
-                .map(|current| current.saturating_sub(usize::from(index < current)))
-                .map(|current| current.min(self.targets.len() - 1))
+        self.current_index = match self.current_index {
+            None => None,
+            Some(current) if self.targets.is_empty() || current == index => None,
+            Some(current) if index < current => Some(current - 1),
+            Some(current) => Some(current.min(self.targets.len() - 1)),
         };
     }
 
@@ -747,10 +746,12 @@ impl DragResult {
         Some(event)
     }
 
-    /// Cancels a keyboard drag session, resets keyboard target selection, and announces the cancellation.
+    /// Cancels a keyboard drag session, clears the active target snapshot, resets
+    /// keyboard target selection, and announces the cancellation.
     #[must_use]
     pub fn cancel_keyboard_drag(
         &mut self,
+        drop_target: &mut DropResult,
         registry: &mut KeyboardDragRegistry,
         locale: &Locale,
         announcer: &mut LiveAnnouncer,
@@ -758,6 +759,7 @@ impl DragResult {
     ) -> Option<DragEndEvent> {
         let event = self.cancel_drag()?;
 
+        drop_target.reset();
         registry.clear();
 
         announcer.announce_with_priority(
@@ -1558,6 +1560,33 @@ mod tests {
             registry
                 .next()
                 .expect("remaining target should still be reachable")
+                .element_id,
+            "drop-b"
+        );
+    }
+
+    #[test]
+    fn keyboard_drag_registry_unregister_selected_target_clears_selection() {
+        let mut registry = KeyboardDragRegistry::new();
+
+        registry.register(keyboard_target("drop-a", "Alpha", DropConfig::default()));
+        registry.register(keyboard_target("drop-b", "Beta", DropConfig::default()));
+
+        assert_eq!(
+            registry
+                .next()
+                .expect("first target should be selectable")
+                .element_id,
+            "drop-a"
+        );
+
+        registry.unregister("drop-a");
+
+        assert!(registry.current().is_none());
+        assert_eq!(
+            registry
+                .next()
+                .expect("remaining target should be reselected explicitly")
                 .element_id,
             "drop-b"
         );
@@ -3213,17 +3242,32 @@ mod tests {
             ..DragConfig::default()
         });
 
+        let mut drop_result = use_drop(DropConfig::default());
+
         registry.register(keyboard_target("drop-a", "Inbox", DropConfig::default()));
 
-        drop(
-            drag.start_keyboard_drag(&locales::en_us(), &mut announcer, &announcements)
-                .expect("keyboard drag should start"),
+        let start_event = drag
+            .start_keyboard_drag(&locales::en_us(), &mut announcer, &announcements)
+            .expect("keyboard drag should start");
+
+        let previews = previews_from_items(&start_event.items);
+
+        let operation = drop_result.keyboard_drag_enter(
+            previews,
+            DropOperation::Move,
+            "Inbox",
+            &locales::en_us(),
+            &mut announcer,
+            &announcements,
         );
+
+        drag.enter_target("drop-a", operation);
 
         announcer.notify_announced();
 
         let event = drag
             .cancel_keyboard_drag(
+                &mut drop_result,
                 &mut registry,
                 &locales::en_us(),
                 &mut announcer,
@@ -3234,6 +3278,18 @@ mod tests {
         assert_eq!(event.pointer_type, PointerType::Keyboard);
         assert!(!event.was_dropped);
         assert!(registry.current().is_none());
+        assert!(!drop_result.drag_over);
+        assert!(!drop_result.attrs.contains(&HtmlAttr::Data("ars-drag-over")));
+        assert!(
+            !drop_result
+                .attrs
+                .contains(&HtmlAttr::Data("ars-drop-operation"))
+        );
+        assert!(
+            !drop_result
+                .attrs
+                .contains(&HtmlAttr::Data("ars-drop-position"))
+        );
         assert_eq!(
             registry
                 .next()
@@ -3380,11 +3436,13 @@ mod tests {
         let mut registry = KeyboardDragRegistry::new();
 
         let mut drag = use_drag(DragConfig::default());
+        let mut drop_result = use_drop(DropConfig::default());
 
         registry.register(keyboard_target("drop-a", "Inbox", DropConfig::default()));
 
         assert!(
             drag.cancel_keyboard_drag(
+                &mut drop_result,
                 &mut registry,
                 &locales::en_us(),
                 &mut announcer,
