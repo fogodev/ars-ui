@@ -2918,6 +2918,7 @@ impl State {
         collection: &C,
         locale: &Locale,
         disabled_keys: &BTreeSet<Key>,
+        disabled_behavior: DisabledBehavior,
     ) -> (Self, Option<Key>) {
         // Determine whether to reset the accumulated search.
         let timed_out = Duration::from_millis(now_ms.saturating_sub(self.last_key_time_ms)) >= TYPEAHEAD_TIMEOUT;
@@ -2934,7 +2935,7 @@ impl State {
             self.search_start_key.clone()
         };
 
-        let found = Self::find_match(&search, current_focus, collection, locale, disabled_keys);
+        let found = Self::find_match(&search, current_focus, collection, locale, disabled_keys, disabled_behavior);
 
         let new_state = Self {
             search,
@@ -2954,6 +2955,7 @@ impl State {
         current_focus: Option<&Key>,
         collection: &C,
         disabled_keys: &BTreeSet<Key>,
+        disabled_behavior: DisabledBehavior,
     ) -> (Self, Option<Key>) {
         let timed_out = Duration::from_millis(now_ms.saturating_sub(self.last_key_time_ms)) >= TYPEAHEAD_TIMEOUT;
         let mut search = if timed_out {
@@ -2969,7 +2971,7 @@ impl State {
             self.search_start_key.clone()
         };
 
-        let found = Self::find_match(&search, current_focus, collection, disabled_keys);
+        let found = Self::find_match(&search, current_focus, collection, disabled_keys, disabled_behavior);
 
         let new_state = Self {
             search,
@@ -2994,6 +2996,7 @@ impl State {
         collection: &C,
         locale: &Locale,
         disabled_keys: &BTreeSet<Key>,
+        disabled_behavior: DisabledBehavior,
     ) -> Option<Key> {
         // CaseMapper::new() returns CaseMapperBorrowed<'static> which is Copy —
         // no caching needed, can be constructed freely.
@@ -3002,9 +3005,10 @@ impl State {
         let single_char = search.chars().count() == 1;
         let query = case_mapper.lowercase_to_string(search, &locale.language_identifier());
 
+        let skip_disabled = disabled_behavior == DisabledBehavior::Skip;
         let all_item_keys: alloc::vec::Vec<Key> = collection
             .nodes()
-            .filter(|n| n.is_focusable() && !disabled_keys.contains(&n.key))
+            .filter(|n| n.is_focusable() && (!skip_disabled || !disabled_keys.contains(&n.key)))
             .map(|n| n.key.clone())
             .collect();
 
@@ -3040,14 +3044,16 @@ impl State {
         current_focus: Option<&Key>,
         collection: &C,
         disabled_keys: &BTreeSet<Key>,
+        disabled_behavior: DisabledBehavior,
     ) -> Option<Key> {
         // single_char from raw input — case mapping can expand one char to many.
         let single_char = search.chars().count() == 1;
         let query = search.to_lowercase();
 
+        let skip_disabled = disabled_behavior == DisabledBehavior::Skip;
         let all_item_keys: alloc::vec::Vec<Key> = collection
             .nodes()
-            .filter(|n| n.is_focusable() && !disabled_keys.contains(&n.key))
+            .filter(|n| n.is_focusable() && (!skip_disabled || !disabled_keys.contains(&n.key)))
             .map(|n| n.key.clone())
             .collect();
 
@@ -3099,6 +3105,7 @@ Event::KeyDown(key_event) => {
     let (new_typeahead, found_key) = ctx.typeahead.process_char(
         ch, now_ms, ctx.focused_key.as_ref(), &ctx.collection, &ctx.locale,
         &ctx.selection_state.disabled_keys,
+        ctx.selection_state.disabled_behavior,
     );
     if let Some(target_key) = found_key {
         Some(TransitionPlan::context_only(move |ctx| {
