@@ -1685,28 +1685,28 @@ Move differs from drag-and-drop (§7): move is about controlling an element's ow
 // ars-interactions/src/move_interaction.rs
 
 use crate::{PointerType, KeyModifiers};
-use ars_core::AttrMap;
-use std::{cell::RefCell, rc::Rc};
+use ars_core::{AttrMap, Callback};
+use std::cell::RefCell;
 
 /// Configuration for move interaction.
 // Manual Debug impl omitted for brevity — prints closures as "<closure>"
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct MoveConfig {
     /// Whether the element is disabled.
     pub disabled: bool,
 
     /// Called when movement begins (pointer down or first arrow key).
-    pub on_move_start: Option<Rc<dyn Fn(MoveEvent)>>,
+    pub on_move_start: Option<Callback<dyn Fn(MoveEvent)>>,
 
     /// Called for each movement delta.
-    pub on_move: Option<Rc<dyn Fn(MoveEvent)>>,
+    pub on_move: Option<Callback<dyn Fn(MoveEvent)>>,
 
     /// Called when movement ends (pointer up or no more arrow keys).
-    pub on_move_end: Option<Rc<dyn Fn(MoveEvent)>>,
+    pub on_move_end: Option<Callback<dyn Fn(MoveEvent)>>,
 }
 
 /// A normalized move event describing a positional delta.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MoveEvent {
     /// How the movement was initiated.
     pub pointer_type: PointerType,
@@ -1758,13 +1758,14 @@ Transitions:
         action: emit on_move_end, release pointer capture
     ─[PointerCancel]────────────────────→ Idle
         action: emit on_move_end (cancelled)
-    ─[ArrowKey Released]────────────────→ Idle
+    ─[ArrowKey Released, no active move keys remain]→ Idle
         action: emit on_move_end
 ```
 
 ```rust
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum MoveState {
+    #[default]
     Idle,
     Moving {
         pointer_type: PointerType,
@@ -1772,6 +1773,10 @@ pub enum MoveState {
         last_x: f64,
         /// Last seen client Y for delta computation.
         last_y: f64,
+        /// Cached horizontal CSS scale factor for inverse delta correction.
+        scale_x: f64,
+        /// Cached vertical CSS scale factor for inverse delta correction.
+        scale_y: f64,
     },
 }
 ```
@@ -1822,7 +1827,7 @@ When a move interaction operates inside a container that has CSS `zoom` or `tran
 let rect = container.get_bounding_client_rect();
 let scale_x = rect.width() / container.offset_width() as f64;
 let scale_y = rect.height() / container.offset_height() as f64;
-// Store scale factors in MoveState::Moving for use during pointermove
+// Store scale factors in MoveState::Moving for use during pointermove.
 ```
 
 **On each `PointerMove`**, apply the inverse scale to pointer deltas:
@@ -1864,6 +1869,7 @@ pub fn use_move(config: MoveConfig) -> MoveResult {
 /// The static class `ars-touch-none` is always included.
 pub struct MoveResult {
     state: Rc<RefCell<MoveState>>,
+    // Private adapter bookkeeping for currently pressed keyboard move keys.
 }
 
 impl MoveResult {
@@ -1883,6 +1889,23 @@ impl MoveResult {
     pub fn is_moving(&self) -> bool {
         matches!(*self.state.borrow(), MoveState::Moving { .. })
     }
+
+    /// Adapter-facing transition helpers used by framework event handlers.
+    ///
+    /// `begin_pointer_move()` enters `Moving` and caches pointer scale factors
+    /// for subsequent inverse-scale correction. `update_pointer_move()` emits
+    /// scale-adjusted deltas while active. `end_pointer_move()` and
+    /// `cancel_pointer_move()` conclude pointer-driven movement.
+    ///
+    /// `handle_key_down()` starts keyboard-driven movement and emits deltas
+    /// from `key_to_delta()`. `handle_key_up()` ends the keyboard move session
+    /// only when no active move keys remain pressed.
+    pub fn begin_pointer_move(&mut self, pointer_type: PointerType, client_x: f64, client_y: f64, modifiers: KeyModifiers, scale_x: f64, scale_y: f64) { /* ... */ }
+    pub fn update_pointer_move(&mut self, client_x: f64, client_y: f64, modifiers: KeyModifiers) { /* ... */ }
+    pub fn end_pointer_move(&mut self, modifiers: KeyModifiers) { /* ... */ }
+    pub fn cancel_pointer_move(&mut self, modifiers: KeyModifiers) { /* ... */ }
+    pub fn handle_key_down(&mut self, key: KeyboardKey, direction: ResolvedDirection, modifiers: KeyModifiers) -> bool { /* ... */ }
+    pub fn handle_key_up(&mut self, key: KeyboardKey, modifiers: KeyModifiers) -> bool { /* ... */ }
 }
 ```
 

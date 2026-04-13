@@ -13,6 +13,7 @@ pub mod hover;
 pub mod interact_outside;
 pub mod keyboard;
 pub mod long_press;
+pub mod move_interaction;
 pub mod press;
 
 pub use ars_core::{
@@ -40,4 +41,5 @@ pub use long_press::{
     LongPressConfig, LongPressEvent, LongPressEventType, LongPressResult, LongPressState,
     use_long_press,
 };
+pub use move_interaction::{MoveConfig, MoveEvent, MoveEventType, MoveResult, MoveState, use_move};
 pub use press::{PressConfig, PressEvent, PressEventType, PressResult, PressState, use_press};
