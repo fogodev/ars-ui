@@ -2370,6 +2370,11 @@ impl DragConfig {
 
 The drag image should reflect the count: when dragging 3 selected items, the ghost image shows a badge "3 items" overlaid.
 
+Because `DragItem` may contain opaque handles without a stable equality
+contract, the payload ordering is defined as **`items()` followed by
+`get_items()`**. Implementations preserve duplicates rather than attempting
+set-style deduplication.
+
 ### 7.10 Drop Indicators and Positioning
 
 > **Design note:** DragResult and DropResult use a snapshot-based `attrs` field rather than the `current_attrs()` pattern used by Press/Hover/Focus/LongPress/Move. This is because drag operations span multiple event cycles and the attrs must remain stable during a drag sequence. Components using DnD should re-call `use_drag`/`use_drop` on each render to refresh the snapshot.
@@ -2398,6 +2403,37 @@ pub struct DragResult {
 
     /// Whether this element is currently being dragged.
     pub dragging: bool,
+}
+
+// Like PressResult and LongPressResult, DnD results expose adapter-facing
+// transition helpers. These methods mutate internal state and rebuild the
+// snapshot fields (`attrs`, `dragging`, `drag_over`, etc.) after each change.
+impl DragResult {
+    pub fn current_state(&self) -> DragState { /* ... */ }
+    pub fn start_drag(&mut self, pointer_type: PointerType) -> Option<DragStartEvent> { /* ... */ }
+    pub fn enter_target(&mut self, target_id: impl Into<String>, current_operation: DropOperation) { /* ... */ }
+    pub fn leave_target(&mut self) { /* ... */ }
+    pub fn complete_drop(&mut self) -> Option<DragEndEvent> { /* ... */ }
+    pub fn cancel_drag(&mut self) -> Option<DragEndEvent> { /* ... */ }
+    pub fn reset(&mut self) { /* ... */ }
+}
+
+impl DropResult {
+    pub fn drag_enter(
+        &mut self,
+        items: Vec<DragItemPreview>,
+        offered_operation: DropOperation,
+        pointer_type: PointerType,
+    ) -> DropOperation { /* ... */ }
+    pub fn drag_over(
+        &mut self,
+        items: &[DragItemPreview],
+        offered_operation: DropOperation,
+        pointer_type: PointerType,
+    ) -> DropOperation { /* ... */ }
+    pub fn drag_leave(&mut self, items: &[DragItemPreview], pointer_type: PointerType) { /* ... */ }
+    pub fn drop(&mut self, items: Vec<DragItem>, pointer_type: PointerType) -> Option<DropEvent> { /* ... */ }
+    pub fn reset(&mut self) { /* ... */ }
 }
 
 pub fn use_drag(config: DragConfig) -> DragResult {
@@ -2452,10 +2488,13 @@ pub fn use_drop(config: DropConfig) -> DropResult {
     }
 
     // Event handlers registered on the component's Api struct:
-    //   dragenter → prevent_default, increment enter_count, set drag_over = true,
-    //               validate accepted_types against DataTransfer.types
+    //   dragenter → prevent_default, validate accepted_types against DataTransfer.types;
+    //               only valid targets enter the active drag_over state
     //   dragleave → decrement enter_count; if 0, set drag_over = false
-    //   dragover  → prevent_default, set drop_effect, compute indicator position
+    //   dragover  → prevent_default, set drop_effect, compute indicator position;
+    //               if the target stops accepting the drop, clear the active snapshot.
+    //               For robustness, adapters may also re-activate the target from dragover
+    //               when native event ordering omits an expected dragenter.
     //   drop      → prevent_default, reset state, extract items, emit on_drop
 
     DropResult {
