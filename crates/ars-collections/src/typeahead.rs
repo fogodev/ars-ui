@@ -102,9 +102,12 @@ impl State {
         current_focus: Option<&Key>,
         collection: &C,
     ) -> Option<Key> {
-        let query = search.to_lowercase();
+        // Determine single-char mode from the raw input, not the lowercased
+        // query — one typed character can expand to multiple scalars after case
+        // mapping (e.g., İ → i + combining dot in non-Turkish locales).
+        let single_char = search.chars().count() == 1;
 
-        let single_char = query.chars().count() == 1;
+        let query = search.to_lowercase();
 
         let all_item_keys: Vec<Key> = collection
             .nodes()
@@ -215,9 +218,12 @@ impl State {
 
         let langid = locale.language_identifier();
 
-        let query = case_mapper.lowercase_to_string(search, langid);
+        // Determine single-char mode from the raw input, not the lowercased
+        // query — one typed character can expand to multiple scalars after case
+        // mapping (e.g., İ → i + combining dot in non-Turkish locales).
+        let single_char = search.chars().count() == 1;
 
-        let single_char = query.chars().count() == 1;
+        let query = case_mapper.lowercase_to_string(search, langid);
 
         let all_item_keys: Vec<Key> = collection
             .nodes()

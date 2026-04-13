@@ -2995,8 +2995,9 @@ impl State {
         // CaseMapper::new() returns CaseMapperBorrowed<'static> which is Copy —
         // no caching needed, can be constructed freely.
         let case_mapper = icu::casemap::CaseMapper::new();
+        // single_char from raw input — case mapping can expand one char to many.
+        let single_char = search.chars().count() == 1;
         let query = case_mapper.lowercase_to_string(search, &locale.language_identifier());
-        let single_char = query.chars().count() == 1;
 
         let all_item_keys: alloc::vec::Vec<Key> = collection
             .nodes()
@@ -3036,8 +3037,9 @@ impl State {
         current_focus: Option<&Key>,
         collection: &C,
     ) -> Option<Key> {
+        // single_char from raw input — case mapping can expand one char to many.
+        let single_char = search.chars().count() == 1;
         let query = search.to_lowercase();
-        let single_char = query.chars().count() == 1;
 
         let all_item_keys: alloc::vec::Vec<Key> = collection
             .nodes()
