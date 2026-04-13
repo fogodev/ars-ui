@@ -4230,6 +4230,12 @@ where
     /// Ordered list of visible indices for positional access in `get_by_index()`.
     visible_order: Vec<usize>,
 
+    /// Cached index of the first visible focusable item.
+    first_focusable: Option<usize>,
+
+    /// Cached index of the last visible focusable item.
+    last_focusable: Option<usize>,
+
     _phantom: core::marker::PhantomData<T>,
 }
 
@@ -4247,16 +4253,23 @@ impl<'a, T: Clone, C: Collection<T>> FilteredCollection<'a, T, C> {
             .map(|(i, _)| i)
             .collect();
 
-        // Second pass: include structural nodes only when they have passing children.
-        // (Structural nodes carry their index via node.index.)
+        // Second pass: include structural nodes whose section group has passing items.
+        // - Section nodes: included when at least one direct child passes.
+        // - Header/Separator nodes inside a section: included when their parent
+        //   section has at least one passing child (they have no children of their
+        //   own, so checking `children_of(&header_key)` would always be empty).
         let visible_order: Vec<usize> = inner
             .nodes()
             .filter(|n| {
                 if n.is_focusable() {
                     passing.contains(&n.index)
                 } else {
-                    // Include structural nodes that have at least one visible descendant.
+                    // Section nodes own the children — check directly.
                     inner.children_of(&n.key).any(|child| passing.contains(&child.index))
+                        // Header/Separator nodes: check their parent section's children.
+                        || n.parent_key.as_ref().is_some_and(|pk| {
+                            inner.children_of(pk).any(|child| passing.contains(&child.index))
+                        })
                 }
             })
             .map(|n| n.index)
@@ -4264,7 +4277,12 @@ impl<'a, T: Clone, C: Collection<T>> FilteredCollection<'a, T, C> {
 
         let visible_indices = visible_order.iter().copied().collect();
 
-        Self { inner, visible_indices, visible_order, _phantom: core::marker::PhantomData }
+        let first_focusable = visible_order.iter().copied()
+            .find(|&i| inner.get_by_index(i).is_some_and(|n| n.is_focusable()));
+        let last_focusable = visible_order.iter().rev().copied()
+            .find(|&i| inner.get_by_index(i).is_some_and(|n| n.is_focusable()));
+
+        Self { inner, visible_indices, visible_order, first_focusable, last_focusable, _phantom: core::marker::PhantomData }
     }
 }
 
@@ -4286,16 +4304,15 @@ impl<'a, T: Clone, C: Collection<T>> Collection<T> for FilteredCollection<'a, T,
     }
 
     fn first_key(&self) -> Option<&Key> {
-        self.visible_indices
-            .iter()
-            .find_map(|&i| self.inner.get_by_index(i).filter(|n| n.is_focusable()).map(|n| &n.key))
+        self.first_focusable
+            .and_then(|i| self.inner.get_by_index(i))
+            .map(|n| &n.key)
     }
 
     fn last_key(&self) -> Option<&Key> {
-        self.visible_indices
-            .iter()
-            .rev()
-            .find_map(|&i| self.inner.get_by_index(i).filter(|n| n.is_focusable()).map(|n| &n.key))
+        self.last_focusable
+            .and_then(|i| self.inner.get_by_index(i))
+            .map(|n| &n.key)
     }
 
     fn key_after(&self, key: &Key) -> Option<&Key> {
@@ -4348,12 +4365,14 @@ Sorting produces a view that presents nodes in a different order without modifyi
 // ars-collections/src/sorted_collection.rs
 
 use alloc::vec::Vec;
-use crate::{key::Key, node::Node, Collection};
+use crate::{key::Key, node::{Node, NodeType}, Collection};
 
 /// The direction of a sort.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SortDirection {
+    /// Sort in ascending order (smallest first).
     Ascending,
+    /// Sort in descending order (largest first).
     Descending,
 }
 
@@ -4367,9 +4386,14 @@ impl core::fmt::Display for SortDirection {
 }
 
 /// Unified sort state for table columns.
+///
+/// `K` is the column key type — typically the same `Key` used by the
+/// collection, but any type works (e.g., a string column identifier).
 #[derive(Clone, Debug, PartialEq)]
 pub struct SortDescriptor<K> {
+    /// The column (or field) being sorted.
     pub column: K,
+    /// Whether the sort is ascending or descending.
     pub direction: SortDirection,
 }
 
@@ -4394,6 +4418,10 @@ where
     inner: &'a C,
     /// Sorted flat indices of inner nodes in the new traversal order.
     sorted_indices: Vec<usize>,
+    /// Cached index of the first focusable item in sorted order.
+    first_focusable: Option<usize>,
+    /// Cached index of the last focusable item in sorted order.
+    last_focusable: Option<usize>,
     _phantom: core::marker::PhantomData<T>,
 }
 
@@ -4490,7 +4518,12 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
             result
         };
 
-        Self { inner, sorted_indices, _phantom: core::marker::PhantomData }
+        let first_focusable = sorted_indices.iter().copied()
+            .find(|&i| inner.get_by_index(i).is_some_and(|n| n.is_focusable()));
+        let last_focusable = sorted_indices.iter().rev().copied()
+            .find(|&i| inner.get_by_index(i).is_some_and(|n| n.is_focusable()));
+
+        Self { inner, sorted_indices, first_focusable, last_focusable, _phantom: core::marker::PhantomData }
     }
 }
 
@@ -4504,15 +4537,15 @@ impl<'a, T, C: Collection<T>> Collection<T> for SortedCollection<'a, T, C> {
     }
 
     fn first_key(&self) -> Option<&Key> {
-        self.sorted_indices.iter().find_map(|&i| {
-            self.inner.get_by_index(i).filter(|n| n.is_focusable()).map(|n| &n.key)
-        })
+        self.first_focusable
+            .and_then(|i| self.inner.get_by_index(i))
+            .map(|n| &n.key)
     }
 
     fn last_key(&self) -> Option<&Key> {
-        self.sorted_indices.iter().rev().find_map(|&i| {
-            self.inner.get_by_index(i).filter(|n| n.is_focusable()).map(|n| &n.key)
-        })
+        self.last_focusable
+            .and_then(|i| self.inner.get_by_index(i))
+            .map(|n| &n.key)
     }
 
     fn key_after(&self, key: &Key) -> Option<&Key> {
