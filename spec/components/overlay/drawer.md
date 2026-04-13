@@ -185,7 +185,7 @@ pub enum Placement {
 
 impl Placement {
     /// Converts the logical placement to the physical placement based on the direction.
-    pub fn to_physical(&self, dir: Direction) -> Self {
+    pub fn to_physical(&self, dir: ResolvedDirection) -> Self {
         match self {
             Self::Start => if dir.is_rtl() { Self::Right } else { Self::Left },
             Self::End => if dir.is_rtl() { Self::Left } else { Self::Right },
@@ -219,12 +219,12 @@ pub enum ResolvedPlacement {
 }
 
 /// Resolves the logical placement to the physical placement based on the direction.
-fn resolve_placement(placement: Placement, dir: Direction) -> ResolvedPlacement {
+fn resolve_placement(placement: Placement, dir: ResolvedDirection) -> ResolvedPlacement {
     match (placement, dir) {
-        (Placement::Start, Direction::Ltr) => ResolvedPlacement::Left,
-        (Placement::Start, Direction::Rtl) => ResolvedPlacement::Right,
-        (Placement::End, Direction::Ltr) => ResolvedPlacement::Right,
-        (Placement::End, Direction::Rtl) => ResolvedPlacement::Left,
+        (Placement::Start, ResolvedDirection::Ltr) => ResolvedPlacement::Left,
+        (Placement::Start, ResolvedDirection::Rtl) => ResolvedPlacement::Right,
+        (Placement::End, ResolvedDirection::Ltr) => ResolvedPlacement::Right,
+        (Placement::End, ResolvedDirection::Rtl) => ResolvedPlacement::Left,
         (Placement::Top, _) => ResolvedPlacement::Top,
         (Placement::Bottom, _) => ResolvedPlacement::Bottom,
         (Placement::Left, _) => ResolvedPlacement::Left,

@@ -1781,12 +1781,11 @@ pub enum MoveState {
 For keyboard-driven move, arrow key deltas are intentionally small (1 logical unit) to allow fine control. Components using `use_move` for keyboard should multiply the delta by a step size appropriate to their value range. Shift+Arrow produces a larger delta (10 units by convention) for faster adjustment.
 
 ```rust
-use ars_core::Direction;
+use ars_core::ResolvedDirection;
 
-// Direction (Ltr/Rtl) is re-exported from ars-core (canonical definition: ars-i18n,
+// ResolvedDirection (Ltr/Rtl) is re-exported from ars-core (canonical definition: ars-i18n,
 // see 04-internationalization.md §3.1). ars-interactions depends on ars-core, not ars-i18n directly.
-fn key_to_delta(key: KeyboardKey, dir: Direction, modifiers: KeyModifiers) -> Option<(f64, f64)> {
-    debug_assert!(dir != Direction::Auto, "key_to_delta requires a resolved direction");
+fn key_to_delta(key: KeyboardKey, dir: ResolvedDirection, modifiers: KeyModifiers) -> Option<(f64, f64)> {
     let step = if modifiers.shift { 10.0 } else { 1.0 };
     let h_step = if dir.is_rtl() { -step } else { step };
     match key {
