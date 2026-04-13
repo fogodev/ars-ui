@@ -827,7 +827,7 @@ impl From<&AriaAttribute> for AriaAttr {
 
 #[cfg(test)]
 mod tests {
-    use alloc::string::ToString;
+    use alloc::{string::ToString, vec};
 
     use super::*;
 
@@ -837,6 +837,126 @@ mod tests {
         list.push("a");
         list.push("b");
         assert_eq!(list.to_string(), "a b");
+    }
+
+    #[test]
+    fn aria_id_list_new_starts_empty() {
+        let list = AriaIdList::new();
+
+        assert!(list.is_empty());
+        assert_eq!(list.to_string(), "");
+    }
+
+    #[test]
+    fn aria_enum_string_tokens_match_spec() {
+        let autocomplete = [
+            (AriaAutocomplete::None, "none"),
+            (AriaAutocomplete::Inline, "inline"),
+            (AriaAutocomplete::List, "list"),
+            (AriaAutocomplete::Both, "both"),
+        ];
+        for (value, expected) in autocomplete {
+            assert_eq!(value.as_str(), expected);
+        }
+
+        let current = [
+            (AriaCurrent::False, "false"),
+            (AriaCurrent::True, "true"),
+            (AriaCurrent::Page, "page"),
+            (AriaCurrent::Step, "step"),
+            (AriaCurrent::Location, "location"),
+            (AriaCurrent::Date, "date"),
+            (AriaCurrent::Time, "time"),
+        ];
+        for (value, expected) in current {
+            assert_eq!(value.as_str(), expected);
+        }
+
+        let has_popup = [
+            (AriaHasPopup::False, "false"),
+            (AriaHasPopup::True, "true"),
+            (AriaHasPopup::Menu, "menu"),
+            (AriaHasPopup::Listbox, "listbox"),
+            (AriaHasPopup::Tree, "tree"),
+            (AriaHasPopup::Grid, "grid"),
+            (AriaHasPopup::Dialog, "dialog"),
+        ];
+        for (value, expected) in has_popup {
+            assert_eq!(value.as_str(), expected);
+        }
+
+        let invalid = [
+            (AriaInvalid::False, "false"),
+            (AriaInvalid::True, "true"),
+            (AriaInvalid::Grammar, "grammar"),
+            (AriaInvalid::Spelling, "spelling"),
+        ];
+        for (value, expected) in invalid {
+            assert_eq!(value.as_str(), expected);
+        }
+
+        let live = [
+            (AriaLive::Off, "off"),
+            (AriaLive::Polite, "polite"),
+            (AriaLive::Assertive, "assertive"),
+        ];
+        for (value, expected) in live {
+            assert_eq!(value.as_str(), expected);
+        }
+
+        let orientation = [
+            (AriaOrientation::Horizontal, "horizontal"),
+            (AriaOrientation::Vertical, "vertical"),
+            (AriaOrientation::Undefined, "undefined"),
+        ];
+        for (value, expected) in orientation {
+            assert_eq!(value.as_str(), expected);
+        }
+
+        let pressed = [
+            (AriaPressed::False, "false"),
+            (AriaPressed::True, "true"),
+            (AriaPressed::Mixed, "mixed"),
+        ];
+        for (value, expected) in pressed {
+            assert_eq!(value.as_str(), expected);
+        }
+
+        let checked = [
+            (AriaChecked::False, "false"),
+            (AriaChecked::True, "true"),
+            (AriaChecked::Mixed, "mixed"),
+        ];
+        for (value, expected) in checked {
+            assert_eq!(value.as_str(), expected);
+        }
+
+        let sort = [
+            (AriaSort::None, "none"),
+            (AriaSort::Ascending, "ascending"),
+            (AriaSort::Descending, "descending"),
+            (AriaSort::Other, "other"),
+        ];
+        for (value, expected) in sort {
+            assert_eq!(value.as_str(), expected);
+        }
+    }
+
+    #[cfg(feature = "aria-drag-drop-compat")]
+    #[test]
+    fn aria_dropeffect_string_tokens_match_spec() {
+        let dropeffect = [
+            (AriaDropeffect::None, "none"),
+            (AriaDropeffect::Copy, "copy"),
+            (AriaDropeffect::Execute, "execute"),
+            (AriaDropeffect::Link, "link"),
+            (AriaDropeffect::Move, "move"),
+            (AriaDropeffect::Popup, "popup"),
+        ];
+
+        for (value, expected) in dropeffect {
+            assert_eq!(value.as_str(), expected);
+        }
     }
 
     #[test]
@@ -864,8 +984,194 @@ mod tests {
     }
 
     #[test]
-    fn aria_checked_mixed() {
-        assert_eq!(AriaChecked::Mixed.as_str(), "mixed");
+    fn aria_relevant_serializes_all_combinations() {
+        assert_eq!(
+            AriaRelevant {
+                additions: false,
+                removals: false,
+                text: false,
+            }
+            .to_string(),
+            ""
+        );
+        assert_eq!(
+            AriaRelevant {
+                additions: true,
+                removals: false,
+                text: false,
+            }
+            .to_string(),
+            "additions"
+        );
+        assert_eq!(
+            AriaRelevant {
+                additions: false,
+                removals: true,
+                text: false,
+            }
+            .to_string(),
+            "removals"
+        );
+        assert_eq!(
+            AriaRelevant {
+                additions: false,
+                removals: false,
+                text: true,
+            }
+            .to_string(),
+            "text"
+        );
+        assert_eq!(
+            AriaRelevant {
+                additions: true,
+                removals: true,
+                text: true,
+            }
+            .to_string(),
+            "additions removals text"
+        );
+    }
+
+    #[test]
+    fn to_attr_value_serializes_representative_attributes() {
+        let mut ids = AriaIdList::new();
+        ids.push("item-1");
+        ids.push("item-2");
+
+        let cases = [
+            (
+                AriaAttribute::ActiveDescendant(Some(AriaIdRef("active".into()))),
+                Some("active"),
+            ),
+            (
+                AriaAttribute::AutoComplete(AriaAutocomplete::Both),
+                Some("both"),
+            ),
+            (AriaAttribute::Controls(ids.clone()), Some("item-1 item-2")),
+            (AriaAttribute::Current(AriaCurrent::Step), Some("step")),
+            (
+                AriaAttribute::DescribedBy(ids.clone()),
+                Some("item-1 item-2"),
+            ),
+            (
+                AriaAttribute::Description("described".into()),
+                Some("described"),
+            ),
+            (
+                AriaAttribute::Details(AriaIdRef("details".into())),
+                Some("details"),
+            ),
+            (AriaAttribute::Disabled(true), Some("true")),
+            (AriaAttribute::FlowTo(ids.clone()), Some("item-1 item-2")),
+            (AriaAttribute::HasPopup(AriaHasPopup::Grid), Some("grid")),
+            (AriaAttribute::Hidden(Some(false)), Some("false")),
+            (
+                AriaAttribute::Invalid(AriaInvalid::Spelling),
+                Some("spelling"),
+            ),
+            (AriaAttribute::Label("label".into()), Some("label")),
+            (
+                AriaAttribute::LabelledBy(ids.clone()),
+                Some("item-1 item-2"),
+            ),
+            (AriaAttribute::Level(3), Some("3")),
+            (AriaAttribute::Modal(true), Some("true")),
+            (AriaAttribute::MultiLine(true), Some("true")),
+            (AriaAttribute::MultiSelectable(true), Some("true")),
+            (
+                AriaAttribute::Orientation(AriaOrientation::Undefined),
+                Some("undefined"),
+            ),
+            (AriaAttribute::Owns(ids.clone()), Some("item-1 item-2")),
+            (
+                AriaAttribute::Placeholder("placeholder".into()),
+                Some("placeholder"),
+            ),
+            (AriaAttribute::PosInSet(4), Some("4")),
+            (
+                AriaAttribute::Pressed(Some(AriaPressed::True)),
+                Some("true"),
+            ),
+            (AriaAttribute::ReadOnly(true), Some("true")),
+            (AriaAttribute::Required(true), Some("true")),
+            (AriaAttribute::RoleDescription("chip".into()), Some("chip")),
+            (AriaAttribute::Selected(Some(true)), Some("true")),
+            (AriaAttribute::SetSize(-1), Some("-1")),
+            (
+                AriaAttribute::Sort(AriaSort::Descending),
+                Some("descending"),
+            ),
+            (AriaAttribute::ValueMax(9.5), Some("9.5")),
+            (AriaAttribute::ValueMin(1.5), Some("1.5")),
+            (AriaAttribute::ValueNow(4.5), Some("4.5")),
+            (
+                AriaAttribute::ValueText("four and a half".into()),
+                Some("four and a half"),
+            ),
+            (AriaAttribute::Atomic(true), Some("true")),
+            (AriaAttribute::Busy(true), Some("true")),
+            (AriaAttribute::Live(AriaLive::Assertive), Some("assertive")),
+            (
+                AriaAttribute::Relevant(AriaRelevant {
+                    additions: false,
+                    removals: true,
+                    text: true,
+                }),
+                Some("removals text"),
+            ),
+            (
+                AriaAttribute::ErrorMessage(AriaIdRef("error".into())),
+                Some("error"),
+            ),
+            (AriaAttribute::Checked(AriaChecked::True), Some("true")),
+            (AriaAttribute::Expanded(Some(true)), Some("true")),
+            (AriaAttribute::ColCount(-1), Some("-1")),
+            (AriaAttribute::ColIndex(2), Some("2")),
+            (AriaAttribute::ColSpan(3), Some("3")),
+            (AriaAttribute::RowCount(-1), Some("-1")),
+            (AriaAttribute::RowIndex(5), Some("5")),
+            (AriaAttribute::RowSpan(6), Some("6")),
+            (AriaAttribute::KeyShortcuts("Ctrl+K".into()), Some("Ctrl+K")),
+            (AriaAttribute::ActiveDescendant(None), None),
+            (AriaAttribute::Description(String::new()), None),
+            (AriaAttribute::DescribedBy(AriaIdList::new()), None),
+            (AriaAttribute::LabelledBy(AriaIdList::new()), None),
+            (AriaAttribute::Hidden(None), None),
+            (AriaAttribute::Pressed(None), None),
+            (AriaAttribute::Selected(None), None),
+            (AriaAttribute::Expanded(None), None),
+        ];
+
+        for (attr, expected) in cases {
+            assert_eq!(attr.to_attr_value().as_deref(), expected, "{attr:?}");
+        }
+    }
+
+    #[cfg(feature = "aria-drag-drop-compat")]
+    #[test]
+    fn compat_attributes_serialize_and_round_trip() {
+        let drop_effect = AriaAttribute::DropEffect(AriaDropeffect::Popup);
+        assert_eq!(drop_effect.to_attr_value().as_deref(), Some("popup"));
+        assert_eq!(
+            drop_effect.to_html_attr(),
+            HtmlAttr::Aria(AriaAttr::DropEffect)
+        );
+        assert_eq!(AriaAttr::from(&drop_effect), AriaAttr::DropEffect);
+
+        let grabbed_true = AriaAttribute::Grabbed(Some(true));
+        assert_eq!(grabbed_true.to_attr_value().as_deref(), Some("true"));
+        assert_eq!(
+            grabbed_true.to_html_attr(),
+            HtmlAttr::Aria(AriaAttr::Grabbed)
+        );
+        assert_eq!(AriaAttr::from(&grabbed_true), AriaAttr::Grabbed);
+
+        let grabbed_none = AriaAttribute::Grabbed(None);
+        assert_eq!(grabbed_none.to_attr_value(), None);
+
+        let mut attrs = AttrMap::new();
+        grabbed_none.apply_to(&mut attrs);
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Grabbed)));
     }
 
     // ── Bridge tests ─────────────────────────────────────────────────────────
@@ -976,6 +1282,136 @@ mod tests {
     }
 
     #[test]
+    fn from_aria_attr_covers_all_noncompat_variants() {
+        let cases = [
+            (
+                AriaAttr::ActiveDescendant,
+                AriaAttribute::ActiveDescendant(None),
+            ),
+            (
+                AriaAttr::AutoComplete,
+                AriaAttribute::AutoComplete(AriaAutocomplete::None),
+            ),
+            (
+                AriaAttr::Checked,
+                AriaAttribute::Checked(AriaChecked::False),
+            ),
+            (
+                AriaAttr::Controls,
+                AriaAttribute::Controls(AriaIdList::default()),
+            ),
+            (
+                AriaAttr::Current,
+                AriaAttribute::Current(AriaCurrent::False),
+            ),
+            (
+                AriaAttr::DescribedBy,
+                AriaAttribute::DescribedBy(AriaIdList::default()),
+            ),
+            (
+                AriaAttr::Description,
+                AriaAttribute::Description(String::new()),
+            ),
+            (
+                AriaAttr::Details,
+                AriaAttribute::Details(AriaIdRef(String::new())),
+            ),
+            (AriaAttr::Disabled, AriaAttribute::Disabled(false)),
+            (
+                AriaAttr::FlowTo,
+                AriaAttribute::FlowTo(AriaIdList::default()),
+            ),
+            (
+                AriaAttr::HasPopup,
+                AriaAttribute::HasPopup(AriaHasPopup::False),
+            ),
+            (AriaAttr::Hidden, AriaAttribute::Hidden(Some(true))),
+            (
+                AriaAttr::Invalid,
+                AriaAttribute::Invalid(AriaInvalid::False),
+            ),
+            (AriaAttr::Label, AriaAttribute::Label(String::new())),
+            (
+                AriaAttr::LabelledBy,
+                AriaAttribute::LabelledBy(AriaIdList::default()),
+            ),
+            (AriaAttr::Level, AriaAttribute::Level(1)),
+            (AriaAttr::Live, AriaAttribute::Live(AriaLive::Off)),
+            (AriaAttr::Modal, AriaAttribute::Modal(false)),
+            (AriaAttr::MultiLine, AriaAttribute::MultiLine(false)),
+            (
+                AriaAttr::MultiSelectable,
+                AriaAttribute::MultiSelectable(false),
+            ),
+            (
+                AriaAttr::Orientation,
+                AriaAttribute::Orientation(AriaOrientation::Horizontal),
+            ),
+            (AriaAttr::Owns, AriaAttribute::Owns(AriaIdList::default())),
+            (
+                AriaAttr::Placeholder,
+                AriaAttribute::Placeholder(String::new()),
+            ),
+            (AriaAttr::PosInSet, AriaAttribute::PosInSet(1)),
+            (
+                AriaAttr::Pressed,
+                AriaAttribute::Pressed(Some(AriaPressed::False)),
+            ),
+            (AriaAttr::ReadOnly, AriaAttribute::ReadOnly(false)),
+            (AriaAttr::Required, AriaAttribute::Required(false)),
+            (
+                AriaAttr::RoleDescription,
+                AriaAttribute::RoleDescription(String::new()),
+            ),
+            (AriaAttr::Selected, AriaAttribute::Selected(Some(false))),
+            (AriaAttr::SetSize, AriaAttribute::SetSize(0)),
+            (AriaAttr::Sort, AriaAttribute::Sort(AriaSort::None)),
+            (AriaAttr::ValueMax, AriaAttribute::ValueMax(0.0)),
+            (AriaAttr::ValueMin, AriaAttribute::ValueMin(0.0)),
+            (AriaAttr::ValueNow, AriaAttribute::ValueNow(0.0)),
+            (AriaAttr::ValueText, AriaAttribute::ValueText(String::new())),
+            (AriaAttr::Atomic, AriaAttribute::Atomic(false)),
+            (AriaAttr::Busy, AriaAttribute::Busy(false)),
+            (
+                AriaAttr::Relevant,
+                AriaAttribute::Relevant(AriaRelevant::default()),
+            ),
+            (
+                AriaAttr::ErrorMessage,
+                AriaAttribute::ErrorMessage(AriaIdRef(String::new())),
+            ),
+            (AriaAttr::Expanded, AriaAttribute::Expanded(Some(false))),
+            (
+                AriaAttr::KeyShortcuts,
+                AriaAttribute::KeyShortcuts(String::new()),
+            ),
+            (AriaAttr::ColCount, AriaAttribute::ColCount(-1)),
+            (AriaAttr::ColIndex, AriaAttribute::ColIndex(1)),
+            (AriaAttr::ColSpan, AriaAttribute::ColSpan(1)),
+            (AriaAttr::RowCount, AriaAttribute::RowCount(-1)),
+            (AriaAttr::RowIndex, AriaAttribute::RowIndex(1)),
+            (AriaAttr::RowSpan, AriaAttribute::RowSpan(1)),
+        ];
+
+        for (attr, expected) in cases {
+            assert_eq!(AriaAttribute::from(attr), expected, "{attr:?}");
+        }
+    }
+
+    #[cfg(feature = "aria-drag-drop-compat")]
+    #[test]
+    fn from_aria_attr_covers_compat_variants() {
+        assert_eq!(
+            AriaAttribute::from(AriaAttr::DropEffect),
+            AriaAttribute::DropEffect(AriaDropeffect::None)
+        );
+        assert_eq!(
+            AriaAttribute::from(AriaAttr::Grabbed),
+            AriaAttribute::Grabbed(None)
+        );
+    }
+
+    #[test]
     fn from_aria_attribute_ref_extracts_discriminant() {
         use ars_core::AriaAttr;
         assert_eq!(
@@ -1015,5 +1451,68 @@ mod tests {
         let typed = AriaAttribute::from(original);
         let back = AriaAttr::from(&typed);
         assert_eq!(original, back);
+    }
+
+    #[test]
+    fn representative_attributes_round_trip_to_discriminants() {
+        let attrs = [
+            AriaAttribute::ActiveDescendant(Some(AriaIdRef("active".into()))),
+            AriaAttribute::AutoComplete(AriaAutocomplete::Inline),
+            AriaAttribute::Checked(AriaChecked::Mixed),
+            AriaAttribute::Controls(AriaIdList(vec!["a".into(), "b".into()])),
+            AriaAttribute::Current(AriaCurrent::Page),
+            AriaAttribute::DescribedBy(AriaIdList(vec!["help".into()])),
+            AriaAttribute::Description("desc".into()),
+            AriaAttribute::Details(AriaIdRef("details".into())),
+            AriaAttribute::Disabled(true),
+            AriaAttribute::FlowTo(AriaIdList(vec!["next".into()])),
+            AriaAttribute::HasPopup(AriaHasPopup::Dialog),
+            AriaAttribute::Hidden(Some(true)),
+            AriaAttribute::Invalid(AriaInvalid::Grammar),
+            AriaAttribute::Label("label".into()),
+            AriaAttribute::LabelledBy(AriaIdList(vec!["label".into()])),
+            AriaAttribute::Level(2),
+            AriaAttribute::Live(AriaLive::Polite),
+            AriaAttribute::Modal(true),
+            AriaAttribute::MultiLine(true),
+            AriaAttribute::MultiSelectable(true),
+            AriaAttribute::Orientation(AriaOrientation::Vertical),
+            AriaAttribute::Owns(AriaIdList(vec!["child".into()])),
+            AriaAttribute::Placeholder("type here".into()),
+            AriaAttribute::PosInSet(7),
+            AriaAttribute::Pressed(Some(AriaPressed::Mixed)),
+            AriaAttribute::ReadOnly(true),
+            AriaAttribute::Required(true),
+            AriaAttribute::RoleDescription("switch".into()),
+            AriaAttribute::Selected(Some(true)),
+            AriaAttribute::SetSize(12),
+            AriaAttribute::Sort(AriaSort::Other),
+            AriaAttribute::ValueMax(10.0),
+            AriaAttribute::ValueMin(1.0),
+            AriaAttribute::ValueNow(4.0),
+            AriaAttribute::ValueText("four".into()),
+            AriaAttribute::Atomic(true),
+            AriaAttribute::Busy(true),
+            AriaAttribute::Relevant(AriaRelevant::default()),
+            AriaAttribute::ErrorMessage(AriaIdRef("error".into())),
+            AriaAttribute::Expanded(Some(true)),
+            AriaAttribute::KeyShortcuts("Ctrl+P".into()),
+            AriaAttribute::ColCount(3),
+            AriaAttribute::ColIndex(2),
+            AriaAttribute::ColSpan(2),
+            AriaAttribute::RowCount(5),
+            AriaAttribute::RowIndex(4),
+            AriaAttribute::RowSpan(3),
+        ];
+
+        for attr in attrs {
+            let key = AriaAttr::from(&attr);
+            assert_eq!(attr.to_html_attr(), HtmlAttr::Aria(key), "{attr:?}");
+            assert_eq!(
+                AriaAttribute::from(key).attr_name(),
+                attr.attr_name(),
+                "{attr:?}"
+            );
+        }
     }
 }

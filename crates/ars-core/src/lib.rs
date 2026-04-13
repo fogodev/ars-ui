@@ -2379,6 +2379,9 @@ mod tests {
         let css = include_str!("../ars-base.css");
 
         assert!(css.contains(".ars-visually-hidden"));
+        assert!(
+            css.contains("[data-ars-visually-hidden-focusable]:not(:focus):not(:focus-within)")
+        );
         assert!(css.contains(".ars-sr-input"));
         assert!(css.contains(".ars-touch-none"));
     }
