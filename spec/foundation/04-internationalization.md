@@ -2268,6 +2268,9 @@ visible trailing-zero precision such as `1` versus `1.0`. The ars-i18n API
 normalizes category names across backends, but precision-sensitive CLDR edge
 cases follow the capabilities of the active backend.
 
+Across all backends, non-finite numeric inputs (`NaN`, `+∞`, `-∞`) select
+`PluralCategory::Other` rather than being coerced into a numeric plural class.
+
 With neither `icu4x` nor wasm `web-intl` enabled, `select_plural()` falls back
 to English-only behavior. This also applies to non-wasm builds compiled with
 the `web-intl` feature flag, because the browser `Intl` backend is only

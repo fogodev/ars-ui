@@ -291,6 +291,10 @@ fn select_plural_with_backend(
     count: f64,
     rule_type: PluralRuleType,
 ) -> PluralCategory {
+    if !count.is_finite() {
+        return PluralCategory::Other;
+    }
+
     let rules = match rule_type {
         PluralRuleType::Cardinal => {
             PluralRules::try_new_cardinal(PluralRulesPreferences::from(locale.as_icu()))
@@ -508,6 +512,25 @@ mod tests {
         );
         assert_eq!(
             select_plural(&locale, 1.5, PluralRuleType::Cardinal),
+            PluralCategory::Other
+        );
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn select_plural_returns_other_for_non_finite_icu4x_inputs() {
+        let locale = locales::ar();
+
+        assert_eq!(
+            select_plural(&locale, f64::NAN, PluralRuleType::Cardinal),
+            PluralCategory::Other
+        );
+        assert_eq!(
+            select_plural(&locale, f64::INFINITY, PluralRuleType::Cardinal),
+            PluralCategory::Other
+        );
+        assert_eq!(
+            select_plural(&locale, f64::NEG_INFINITY, PluralRuleType::Cardinal),
             PluralCategory::Other
         );
     }
