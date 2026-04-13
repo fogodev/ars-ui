@@ -10,6 +10,7 @@ pub mod dismissable;
 pub mod focus;
 pub mod hover;
 pub mod interact_outside;
+pub mod keyboard;
 pub mod long_press;
 pub mod press;
 
@@ -28,6 +29,7 @@ pub use hover::{HoverConfig, HoverEvent, HoverEventType, HoverResult, HoverState
 pub use interact_outside::{
     InteractOutsideConfig, InteractOutsideEvent, InteractOutsideStandalone,
 };
+pub use keyboard::{ArsKeyboardEvent, KeyboardConfig, KeyboardEventData};
 pub use long_press::{
     LongPressConfig, LongPressEvent, LongPressEventType, LongPressResult, LongPressState,
     use_long_press,
