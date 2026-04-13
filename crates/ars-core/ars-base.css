@@ -17,6 +17,21 @@
   word-wrap: normal !important;
 }
 
+/* Visually hidden until focus, for skip-link style affordances.
+ * Used by: visually_hidden_focusable_attrs(). */
+[data-ars-visually-hidden-focusable]:not(:focus):not(:focus-within) {
+  position: absolute !important;
+  border: 0 !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  word-wrap: normal !important;
+}
+
 /* Screen-reader-only native input (hidden but participates in form submission).
  * Used by: RadioGroup hidden input, Switch hidden input, FileUpload hidden input. */
 .ars-sr-input {
