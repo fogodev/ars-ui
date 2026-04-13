@@ -15,6 +15,8 @@ pub mod aria;
 pub mod focus;
 /// Keyboard shortcut descriptors and platform-normalized modifier matching.
 pub mod keyboard;
+/// Field labelling, descriptions, and error wiring helpers for form controls.
+pub mod label;
 pub mod visually_hidden;
 
 pub use announcements::Announcements;
@@ -32,6 +34,7 @@ pub use aria::{
 };
 pub use focus::{FocusRing, FocusScopeBehavior, FocusScopeOptions, FocusStrategy, FocusTarget};
 pub use keyboard::{DomEvent, KeyModifiers, KeyboardShortcut, Platform};
+pub use label::{DescriptionConfig, FieldContext, LabelConfig};
 pub use visually_hidden::{
     VisuallyHiddenCssDoc, VisuallyHiddenFocusableCssDoc, visually_hidden_attrs,
     visually_hidden_focusable_attrs,
