@@ -4,7 +4,7 @@
 //! can translate physical arrow keys into logical "forward" / "backward"
 //! movement that respects the current text direction.
 
-use ars_i18n::Direction;
+use ars_i18n::ResolvedDirection;
 
 use crate::KeyboardKey;
 
@@ -21,23 +21,15 @@ pub enum LogicalDirection {
 ///
 /// Returns `None` for non-horizontal arrow keys (`ArrowUp`, `ArrowDown`) and
 /// any other key that is not `ArrowLeft` or `ArrowRight`.
-///
-/// # Panics
-///
-/// Debug-asserts that `direction` is not [`Direction::Auto`]. Callers must
-/// resolve `Auto` to a concrete `Ltr` or `Rtl` before calling this function.
-pub fn resolve_arrow_key(key: KeyboardKey, direction: Direction) -> Option<LogicalDirection> {
-    debug_assert!(
-        direction != Direction::Auto,
-        "resolve_arrow_key requires a resolved direction"
-    );
+pub const fn resolve_arrow_key(
+    key: KeyboardKey,
+    direction: ResolvedDirection,
+) -> Option<LogicalDirection> {
     match (key, direction) {
-        (KeyboardKey::ArrowRight, Direction::Ltr) | (KeyboardKey::ArrowLeft, Direction::Rtl) => {
-            Some(LogicalDirection::Forward)
-        }
-        (KeyboardKey::ArrowLeft, Direction::Ltr) | (KeyboardKey::ArrowRight, Direction::Rtl) => {
-            Some(LogicalDirection::Backward)
-        }
+        (KeyboardKey::ArrowRight, ResolvedDirection::Ltr)
+        | (KeyboardKey::ArrowLeft, ResolvedDirection::Rtl) => Some(LogicalDirection::Forward),
+        (KeyboardKey::ArrowLeft, ResolvedDirection::Ltr)
+        | (KeyboardKey::ArrowRight, ResolvedDirection::Rtl) => Some(LogicalDirection::Backward),
         _ => None,
     }
 }
@@ -51,7 +43,7 @@ mod tests {
     #[test]
     fn ltr_arrow_right_is_forward() {
         assert_eq!(
-            resolve_arrow_key(KeyboardKey::ArrowRight, Direction::Ltr),
+            resolve_arrow_key(KeyboardKey::ArrowRight, ResolvedDirection::Ltr),
             Some(LogicalDirection::Forward),
         );
     }
@@ -59,7 +51,7 @@ mod tests {
     #[test]
     fn ltr_arrow_left_is_backward() {
         assert_eq!(
-            resolve_arrow_key(KeyboardKey::ArrowLeft, Direction::Ltr),
+            resolve_arrow_key(KeyboardKey::ArrowLeft, ResolvedDirection::Ltr),
             Some(LogicalDirection::Backward),
         );
     }
@@ -69,7 +61,7 @@ mod tests {
     #[test]
     fn rtl_arrow_right_is_backward() {
         assert_eq!(
-            resolve_arrow_key(KeyboardKey::ArrowRight, Direction::Rtl),
+            resolve_arrow_key(KeyboardKey::ArrowRight, ResolvedDirection::Rtl),
             Some(LogicalDirection::Backward),
         );
     }
@@ -77,7 +69,7 @@ mod tests {
     #[test]
     fn rtl_arrow_left_is_forward() {
         assert_eq!(
-            resolve_arrow_key(KeyboardKey::ArrowLeft, Direction::Rtl),
+            resolve_arrow_key(KeyboardKey::ArrowLeft, ResolvedDirection::Rtl),
             Some(LogicalDirection::Forward),
         );
     }
@@ -87,11 +79,11 @@ mod tests {
     #[test]
     fn arrow_up_returns_none() {
         assert_eq!(
-            resolve_arrow_key(KeyboardKey::ArrowUp, Direction::Ltr),
+            resolve_arrow_key(KeyboardKey::ArrowUp, ResolvedDirection::Ltr),
             None
         );
         assert_eq!(
-            resolve_arrow_key(KeyboardKey::ArrowUp, Direction::Rtl),
+            resolve_arrow_key(KeyboardKey::ArrowUp, ResolvedDirection::Rtl),
             None
         );
     }
@@ -99,42 +91,24 @@ mod tests {
     #[test]
     fn arrow_down_returns_none() {
         assert_eq!(
-            resolve_arrow_key(KeyboardKey::ArrowDown, Direction::Ltr),
+            resolve_arrow_key(KeyboardKey::ArrowDown, ResolvedDirection::Ltr),
             None,
         );
         assert_eq!(
-            resolve_arrow_key(KeyboardKey::ArrowDown, Direction::Rtl),
+            resolve_arrow_key(KeyboardKey::ArrowDown, ResolvedDirection::Rtl),
             None,
         );
     }
 
     #[test]
     fn non_arrow_key_returns_none() {
-        assert_eq!(resolve_arrow_key(KeyboardKey::Tab, Direction::Ltr), None);
-        assert_eq!(resolve_arrow_key(KeyboardKey::Enter, Direction::Rtl), None);
-    }
-
-    // ---- Debug assertion on Direction::Auto ----
-
-    #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "resolve_arrow_key requires a resolved direction")]
-    fn auto_direction_panics_in_debug() {
-        let _ = resolve_arrow_key(KeyboardKey::ArrowRight, Direction::Auto);
-    }
-
-    /// In release builds the `debug_assert!` is a no-op, so `Auto` gracefully
-    /// falls through to `None` via the wildcard arm.
-    #[test]
-    #[cfg(not(debug_assertions))]
-    fn auto_direction_returns_none_in_release() {
         assert_eq!(
-            resolve_arrow_key(KeyboardKey::ArrowRight, Direction::Auto),
-            None,
+            resolve_arrow_key(KeyboardKey::Tab, ResolvedDirection::Ltr),
+            None
         );
         assert_eq!(
-            resolve_arrow_key(KeyboardKey::ArrowLeft, Direction::Auto),
-            None,
+            resolve_arrow_key(KeyboardKey::Enter, ResolvedDirection::Rtl),
+            None
         );
     }
 }

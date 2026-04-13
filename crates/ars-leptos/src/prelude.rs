@@ -46,7 +46,7 @@
 
 // -- User-facing configuration types --
 // -- User-facing traits --
-pub use ars_i18n::{Direction, Locale, Orientation, Translate};
+pub use ars_i18n::{Direction, Locale, Orientation, ResolvedDirection, Translate};
 
 // -- User-facing helpers --
 pub use crate::t;

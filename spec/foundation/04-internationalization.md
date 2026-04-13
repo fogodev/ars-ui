@@ -109,17 +109,17 @@ impl Locale {
     }
 
     /// Returns the text direction for this locale.
-    pub fn direction(&self) -> Direction {
+    pub fn direction(&self) -> ResolvedDirection {
         if RTL_SCRIPTS.contains(&self.script_or_default()) {
-            Direction::Rtl
+            ResolvedDirection::Rtl
         } else {
-            Direction::Ltr
+            ResolvedDirection::Ltr
         }
     }
 
     /// Returns true if this locale uses right-to-left text.
     pub fn is_rtl(&self) -> bool {
-        self.direction() == Direction::Rtl
+        self.direction().is_rtl()
     }
 
     /// BCP 47 string representation.
@@ -368,7 +368,7 @@ pub trait LocaleProvider: Clone + 'static {
     fn locale(&self) -> &Locale;
 
     /// Get the current direction (derived from locale unless overridden).
-    fn direction(&self) -> Direction {
+    fn direction(&self) -> ResolvedDirection {
         self.locale().direction()
     }
 }
@@ -394,8 +394,10 @@ impl StaticLocaleProvider {
 impl LocaleProvider for StaticLocaleProvider {
     fn locale(&self) -> &Locale { &self.locale }
 
-    fn direction(&self) -> Direction {
-        self.direction_override.unwrap_or_else(|| self.locale.direction())
+    fn direction(&self) -> ResolvedDirection {
+        self.direction_override
+            .map(|d| d.resolve(self.locale.direction()))
+            .unwrap_or_else(|| self.locale.direction())
     }
 }
 ```
@@ -548,6 +550,70 @@ impl Direction {
     pub fn inline_start_is_right(&self) -> bool {
         self.is_rtl()
     }
+
+    /// Resolve `Auto` to a concrete direction using the given fallback.
+    ///
+    /// `Ltr` and `Rtl` pass through unchanged; `Auto` returns `fallback`.
+    #[must_use]
+    pub const fn resolve(self, fallback: ResolvedDirection) -> ResolvedDirection {
+        match self {
+            Direction::Ltr => ResolvedDirection::Ltr,
+            Direction::Rtl => ResolvedDirection::Rtl,
+            Direction::Auto => fallback,
+        }
+    }
+}
+
+/// A direction that has been resolved to a concrete value — only `Ltr` or `Rtl`.
+///
+/// Functions that require a resolved direction (layout conversion, arrow key
+/// mapping, placement resolution) accept this type instead of [`Direction`],
+/// making it a compile error to pass an unresolved `Auto` value.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ResolvedDirection {
+    /// Left-to-right.
+    #[default]
+    Ltr,
+    /// Right-to-left.
+    Rtl,
+}
+
+impl ResolvedDirection {
+    /// CSS `direction` value.
+    #[must_use]
+    pub const fn as_css(self) -> &'static str {
+        match self {
+            ResolvedDirection::Ltr => "ltr",
+            ResolvedDirection::Rtl => "rtl",
+        }
+    }
+
+    /// HTML `dir` attribute value.
+    #[must_use]
+    pub const fn as_html_attr(self) -> &'static str {
+        self.as_css()
+    }
+
+    /// Returns `true` if this direction is right-to-left.
+    #[must_use]
+    pub const fn is_rtl(self) -> bool {
+        matches!(self, ResolvedDirection::Rtl)
+    }
+
+    /// Returns `true` when inline-start maps to the right side.
+    #[must_use]
+    pub const fn inline_start_is_right(self) -> bool {
+        self.is_rtl()
+    }
+}
+
+impl From<ResolvedDirection> for Direction {
+    fn from(resolved: ResolvedDirection) -> Self {
+        match resolved {
+            ResolvedDirection::Ltr => Direction::Ltr,
+            ResolvedDirection::Rtl => Direction::Rtl,
+        }
+    }
 }
 ```
 
@@ -557,32 +623,40 @@ impl Direction {
 
 ```rust
 /// A logical side in inline/block flow (independent of writing direction).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LogicalSide {
-    InlineStart,  // Left in LTR, Right in RTL
-    InlineEnd,    // Right in LTR, Left in RTL
-    BlockStart,   // Top in horizontal writing
-    BlockEnd,     // Bottom in horizontal writing
+    /// The start of the inline axis — left in LTR, right in RTL.
+    InlineStart,
+    /// The end of the inline axis — right in LTR, left in RTL.
+    InlineEnd,
+    /// The start of the block axis — top in horizontal writing modes.
+    BlockStart,
+    /// The end of the block axis — bottom in horizontal writing modes.
+    BlockEnd,
 }
 
 /// A physical side.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PhysicalSide {
+    /// The left edge.
     Left,
+    /// The right edge.
     Right,
+    /// The top edge.
     Top,
+    /// The bottom edge.
     Bottom,
 }
 
 impl LogicalSide {
-    /// Convert to physical side given a writing direction.
-    pub fn to_physical(self, dir: Direction) -> PhysicalSide {
-        debug_assert!(dir != Direction::Auto, "Direction::Auto must be resolved to Ltr or Rtl before physical conversion");
+    /// Convert to a physical side given a resolved writing direction.
+    #[must_use]
+    pub const fn to_physical(self, dir: ResolvedDirection) -> PhysicalSide {
         match (self, dir) {
-            (LogicalSide::InlineStart, Direction::Rtl) => PhysicalSide::Right,
-            (LogicalSide::InlineStart, _) => PhysicalSide::Left,
-            (LogicalSide::InlineEnd, Direction::Rtl) => PhysicalSide::Left,
-            (LogicalSide::InlineEnd, _) => PhysicalSide::Right,
+            (LogicalSide::InlineEnd, ResolvedDirection::Rtl)
+            | (LogicalSide::InlineStart, ResolvedDirection::Ltr) => PhysicalSide::Left,
+            (LogicalSide::InlineStart, ResolvedDirection::Rtl)
+            | (LogicalSide::InlineEnd, ResolvedDirection::Ltr) => PhysicalSide::Right,
             (LogicalSide::BlockStart, _) => PhysicalSide::Top,
             (LogicalSide::BlockEnd, _) => PhysicalSide::Bottom,
         }
@@ -590,7 +664,9 @@ impl LogicalSide {
 }
 
 impl PhysicalSide {
-    pub fn as_css(&self) -> &'static str {
+    /// Returns the CSS property-value string for this side.
+    #[must_use]
+    pub const fn as_css(&self) -> &'static str {
         match self {
             PhysicalSide::Left => "left",
             PhysicalSide::Right => "right",
@@ -603,15 +679,23 @@ impl PhysicalSide {
 /// A logical rectangle with inline-start/end and block-start/end edges.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LogicalRect {
+    /// Distance from the inline-start edge.
     pub inline_start: f64,
+    /// Distance from the inline-end edge.
     pub inline_end: f64,
+    /// Distance from the block-start edge.
     pub block_start: f64,
+    /// Distance from the block-end edge.
     pub block_end: f64,
 }
 
 impl LogicalRect {
-    /// Convert to physical rect (x, y, width, height) given direction.
-    pub fn to_physical(&self, dir: Direction) -> PhysicalRect {
+    /// Convert to a physical rect given a resolved writing direction.
+    ///
+    /// In RTL mode the inline-start and inline-end values are swapped so that
+    /// `inline_start` maps to `right` and `inline_end` maps to `left`.
+    #[must_use]
+    pub const fn to_physical(&self, dir: ResolvedDirection) -> PhysicalRect {
         if dir.is_rtl() {
             PhysicalRect {
                 left: self.inline_end,
@@ -630,11 +714,16 @@ impl LogicalRect {
     }
 }
 
+/// A physical rectangle with left, right, top, and bottom edges.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PhysicalRect {
+    /// Distance from the left edge.
     pub left: f64,
+    /// Distance from the right edge.
     pub right: f64,
+    /// Distance from the top edge.
     pub top: f64,
+    /// Distance from the bottom edge.
     pub bottom: f64,
 }
 ```

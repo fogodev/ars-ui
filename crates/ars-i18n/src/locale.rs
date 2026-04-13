@@ -4,7 +4,7 @@ use core::{cmp::Ordering, fmt};
 use icu::locale::{LanguageIdentifier, Locale as IcuLocale};
 use icu_provider::DataLocale;
 
-use crate::{Direction, Weekday};
+use crate::{ResolvedDirection, Weekday};
 
 /// A BCP 47 locale identifier.
 ///
@@ -34,18 +34,18 @@ impl Locale {
 
     /// Returns the text direction for this locale.
     #[must_use]
-    pub fn direction(&self) -> Direction {
+    pub fn direction(&self) -> ResolvedDirection {
         if RTL_SCRIPTS.contains(&self.script_or_default()) {
-            Direction::Rtl
+            ResolvedDirection::Rtl
         } else {
-            Direction::Ltr
+            ResolvedDirection::Ltr
         }
     }
 
     /// Returns `true` if this locale uses right-to-left text.
     #[must_use]
     pub fn is_rtl(&self) -> bool {
-        self.direction() == Direction::Rtl
+        self.direction().is_rtl()
     }
 
     /// Returns the locale's BCP 47 string representation.

@@ -16,7 +16,7 @@
 
 use alloc::{boxed::Box, string::String, vec::Vec};
 
-use ars_i18n::Direction;
+use ars_i18n::ResolvedDirection;
 
 /// Platform-agnostic interface for side effects triggered by [`PendingEffect`](crate::PendingEffect) closures.
 ///
@@ -69,7 +69,7 @@ pub trait PlatformEffects: Send + Sync {
     fn position_element_at(&self, id: &str, x: f64, y: f64);
 
     /// Resolve the computed text direction of an element. Returns `Ltr` or `Rtl`.
-    fn resolved_direction(&self, id: &str) -> Direction;
+    fn resolved_direction(&self, id: &str) -> ResolvedDirection;
 
     // -- Modal / Inert -------------------------------------------------------
 
@@ -240,8 +240,8 @@ impl PlatformEffects for NullPlatformEffects {
     fn position_element_at(&self, _id: &str, _x: f64, _y: f64) {}
 
     #[inline]
-    fn resolved_direction(&self, _id: &str) -> Direction {
-        Direction::Ltr
+    fn resolved_direction(&self, _id: &str) -> ResolvedDirection {
+        ResolvedDirection::Ltr
     }
 
     #[inline]
@@ -408,9 +408,9 @@ impl PlatformEffects for MissingProviderEffects {
     }
 
     #[inline]
-    fn resolved_direction(&self, _id: &str) -> Direction {
+    fn resolved_direction(&self, _id: &str) -> ResolvedDirection {
         Self::warn("resolved_direction");
-        Direction::Ltr
+        ResolvedDirection::Ltr
     }
 
     #[inline]
@@ -570,7 +570,7 @@ mod tests {
     fn null_resolved_direction_returns_ltr() {
         assert_eq!(
             NullPlatformEffects.resolved_direction("any"),
-            Direction::Ltr
+            ResolvedDirection::Ltr
         );
     }
 

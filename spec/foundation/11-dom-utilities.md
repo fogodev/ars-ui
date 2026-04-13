@@ -132,28 +132,20 @@ impl Placement {
     /// Logical variants resolve based on `dir` (LTR: Start->Left, RTL: Start->Right).
     /// Auto variants are resolved by the positioning engine based on available space
     /// and are not handled here — they pass through unchanged.
-    ///
-    /// # Panics (debug only)
-    /// Panics if `dir` is `Direction::Auto`. Callers must resolve `Auto` to a
-    /// concrete direction before calling this method.
-    pub fn resolve_logical(&self, dir: Direction) -> Placement {
-        debug_assert!(
-            !matches!(dir, Direction::Auto),
-            "resolve_logical requires a resolved direction (Ltr or Rtl), not Auto"
-        );
+    pub fn resolve_logical(&self, dir: ResolvedDirection) -> Placement {
         match (self, dir) {
-            (Placement::Start, Direction::Ltr)
-            | (Placement::End, Direction::Rtl) => Placement::Left,
-            (Placement::Start, Direction::Rtl)
-            | (Placement::End, Direction::Ltr) => Placement::Right,
-            (Placement::StartTop, Direction::Ltr)
-            | (Placement::EndTop, Direction::Rtl) => Placement::LeftStart,
-            (Placement::StartTop, Direction::Rtl)
-            | (Placement::EndTop, Direction::Ltr) => Placement::RightStart,
-            (Placement::StartBottom, Direction::Ltr)
-            | (Placement::EndBottom, Direction::Rtl) => Placement::LeftEnd,
-            (Placement::StartBottom, Direction::Rtl)
-            | (Placement::EndBottom, Direction::Ltr) => Placement::RightEnd,
+            (Placement::Start, ResolvedDirection::Ltr)
+            | (Placement::End, ResolvedDirection::Rtl) => Placement::Left,
+            (Placement::Start, ResolvedDirection::Rtl)
+            | (Placement::End, ResolvedDirection::Ltr) => Placement::Right,
+            (Placement::StartTop, ResolvedDirection::Ltr)
+            | (Placement::EndTop, ResolvedDirection::Rtl) => Placement::LeftStart,
+            (Placement::StartTop, ResolvedDirection::Rtl)
+            | (Placement::EndTop, ResolvedDirection::Ltr) => Placement::RightStart,
+            (Placement::StartBottom, ResolvedDirection::Ltr)
+            | (Placement::EndBottom, ResolvedDirection::Rtl) => Placement::LeftEnd,
+            (Placement::StartBottom, ResolvedDirection::Rtl)
+            | (Placement::EndBottom, ResolvedDirection::Ltr) => Placement::RightEnd,
             (other, _) => *other,
         }
     }
@@ -302,7 +294,7 @@ pub struct PositioningOptions {
 
     /// Layout direction for resolving logical placements (Start/End) to physical
     /// placements (Left/Right). Default: LTR.
-    pub dir: Direction,
+    pub dir: ResolvedDirection,
 
     /// Min distance from arrow to floating element edge.
     pub arrow_padding: f64,
@@ -343,7 +335,7 @@ impl Default for PositioningOptions {
             boundary: Boundary::default(),
             boundary_padding: 8.0,
             strategy: Strategy::default(),
-            dir: Direction::Ltr,
+            dir: ResolvedDirection::Ltr,
             arrow_padding: 8.0,
             auto_max_size: true,
             fallback_placements: Vec::new(),

@@ -1,11 +1,12 @@
-//! Internationalization types for locale, number formatting, text direction, and
-//! layout orientation.
+//! Internationalization types for locale, number formatting, text direction,
+//! layout orientation, and logical-to-physical layout geometry.
 //!
 //! This crate provides the core i18n primitives shared across all ars-ui components:
 //! a BCP 47 [`Locale`] wrapper, a locale-aware [`NumberFormatter`], a
 //! [`Direction`] enum for LTR/RTL text flow, an [`Orientation`] enum for
-//! horizontal/vertical layout axes, and the [`IcuProvider`] trait for
-//! calendar/locale data abstraction.
+//! horizontal/vertical layout axes, RTL-aware layout geometry types
+//! ([`LogicalSide`], [`PhysicalSide`], [`LogicalRect`], [`PhysicalRect`]),
+//! and the [`IcuProvider`] trait for calendar/locale data abstraction.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -17,6 +18,7 @@ extern crate alloc;
 use alloc::string::String;
 
 mod bidi;
+mod layout;
 mod locale;
 mod locale_stack;
 mod number;
@@ -24,6 +26,7 @@ mod translate;
 mod weekday;
 
 pub use bidi::{IsolateDirection, isolate_text_safe};
+pub use layout::{LogicalRect, LogicalSide, PhysicalRect, PhysicalSide};
 pub use locale::{Locale, LocaleParseError, locales};
 pub use locale_stack::LocaleStack;
 #[cfg(feature = "std")]
@@ -76,6 +79,70 @@ impl Direction {
     #[must_use]
     pub fn inline_start_is_right(&self) -> bool {
         self.is_rtl()
+    }
+
+    /// Resolve `Auto` to a concrete direction using the given fallback.
+    ///
+    /// `Ltr` and `Rtl` pass through unchanged; `Auto` returns `fallback`.
+    #[must_use]
+    pub const fn resolve(self, fallback: ResolvedDirection) -> ResolvedDirection {
+        match self {
+            Direction::Ltr => ResolvedDirection::Ltr,
+            Direction::Rtl => ResolvedDirection::Rtl,
+            Direction::Auto => fallback,
+        }
+    }
+}
+
+/// A direction that has been resolved to a concrete value — only `Ltr` or `Rtl`.
+///
+/// Functions that require a resolved direction (layout conversion, arrow key
+/// mapping, placement resolution) accept this type instead of [`Direction`],
+/// making it a compile error to pass an unresolved `Auto` value.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ResolvedDirection {
+    /// Left-to-right.
+    #[default]
+    Ltr,
+    /// Right-to-left.
+    Rtl,
+}
+
+impl ResolvedDirection {
+    /// CSS `direction` value.
+    #[must_use]
+    pub const fn as_css(self) -> &'static str {
+        match self {
+            ResolvedDirection::Ltr => "ltr",
+            ResolvedDirection::Rtl => "rtl",
+        }
+    }
+
+    /// HTML `dir` attribute value.
+    #[must_use]
+    pub const fn as_html_attr(self) -> &'static str {
+        self.as_css()
+    }
+
+    /// Returns `true` if this direction is right-to-left.
+    #[must_use]
+    pub const fn is_rtl(self) -> bool {
+        matches!(self, ResolvedDirection::Rtl)
+    }
+
+    /// Returns `true` when inline-start maps to the right side.
+    #[must_use]
+    pub const fn inline_start_is_right(self) -> bool {
+        self.is_rtl()
+    }
+}
+
+impl From<ResolvedDirection> for Direction {
+    fn from(resolved: ResolvedDirection) -> Self {
+        match resolved {
+            ResolvedDirection::Ltr => Direction::Ltr,
+            ResolvedDirection::Rtl => Direction::Rtl,
+        }
     }
 }
 
@@ -220,6 +287,67 @@ mod tests {
         assert!(!Direction::Auto.inline_start_is_right());
     }
 
+    // ── ResolvedDirection tests ──────────────────────────────────
+
+    #[test]
+    fn resolved_direction_default_is_ltr() {
+        assert_eq!(ResolvedDirection::default(), ResolvedDirection::Ltr);
+    }
+
+    #[test]
+    fn resolved_direction_is_rtl() {
+        assert!(!ResolvedDirection::Ltr.is_rtl());
+        assert!(ResolvedDirection::Rtl.is_rtl());
+    }
+
+    #[test]
+    fn resolved_direction_as_css() {
+        assert_eq!(ResolvedDirection::Ltr.as_css(), "ltr");
+        assert_eq!(ResolvedDirection::Rtl.as_css(), "rtl");
+    }
+
+    #[test]
+    fn resolved_direction_as_html_attr() {
+        assert_eq!(ResolvedDirection::Ltr.as_html_attr(), "ltr");
+        assert_eq!(ResolvedDirection::Rtl.as_html_attr(), "rtl");
+    }
+
+    #[test]
+    fn resolved_direction_inline_start_is_right() {
+        assert!(!ResolvedDirection::Ltr.inline_start_is_right());
+        assert!(ResolvedDirection::Rtl.inline_start_is_right());
+    }
+
+    #[test]
+    fn direction_resolve_passes_through_ltr_rtl() {
+        assert_eq!(
+            Direction::Ltr.resolve(ResolvedDirection::Rtl),
+            ResolvedDirection::Ltr,
+        );
+        assert_eq!(
+            Direction::Rtl.resolve(ResolvedDirection::Ltr),
+            ResolvedDirection::Rtl,
+        );
+    }
+
+    #[test]
+    fn direction_resolve_auto_uses_fallback() {
+        assert_eq!(
+            Direction::Auto.resolve(ResolvedDirection::Ltr),
+            ResolvedDirection::Ltr,
+        );
+        assert_eq!(
+            Direction::Auto.resolve(ResolvedDirection::Rtl),
+            ResolvedDirection::Rtl,
+        );
+    }
+
+    #[test]
+    fn direction_from_resolved() {
+        assert_eq!(Direction::from(ResolvedDirection::Ltr), Direction::Ltr);
+        assert_eq!(Direction::from(ResolvedDirection::Rtl), Direction::Rtl);
+    }
+
     // ── Locale tests ───────────────────────────────────────────────
 
     #[test]
@@ -320,7 +448,7 @@ mod tests {
             let locale = Locale::parse(locale).expect("locale should parse");
             assert_eq!(
                 locale.direction(),
-                Direction::Rtl,
+                ResolvedDirection::Rtl,
                 "{} should be RTL",
                 locale.to_bcp47()
             );
@@ -334,7 +462,7 @@ mod tests {
             let locale = Locale::parse(locale).expect("locale should parse");
             assert_eq!(
                 locale.direction(),
-                Direction::Rtl,
+                ResolvedDirection::Rtl,
                 "{} should be RTL",
                 locale.to_bcp47()
             );
@@ -345,7 +473,7 @@ mod tests {
     #[test]
     fn locale_direction_defaults_to_ltr_when_not_rtl() {
         let locale = Locale::parse("en-US").expect("en-US is valid");
-        assert_eq!(locale.direction(), Direction::Ltr);
+        assert_eq!(locale.direction(), ResolvedDirection::Ltr);
         assert!(!locale.is_rtl());
     }
 

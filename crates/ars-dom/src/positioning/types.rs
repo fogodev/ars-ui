@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::{any::Any, fmt};
 
-use ars_i18n::Direction;
+use ars_i18n::ResolvedDirection;
 
 // ---------------------------------------------------------------------------
 // Platform-conditional element reference
@@ -190,34 +190,21 @@ impl Placement {
     /// Auto variants are resolved by the positioning engine based on available space
     /// and are not handled here — they pass through unchanged.
     ///
-    /// # Panics (debug only)
-    /// Panics if `dir` is `Direction::Auto`. Callers must resolve `Auto` to a
-    /// concrete direction before calling this method.
     #[must_use]
-    pub fn resolve_logical(&self, dir: Direction) -> Placement {
-        debug_assert!(
-            !matches!(dir, Direction::Auto),
-            "resolve_logical requires a resolved direction (Ltr or Rtl), not Auto"
-        );
+    pub fn resolve_logical(&self, dir: ResolvedDirection) -> Placement {
         match (self, dir) {
-            (Placement::Start, Direction::Ltr) | (Placement::End, Direction::Rtl) => {
-                Placement::Left
-            }
-            (Placement::Start, Direction::Rtl) | (Placement::End, Direction::Ltr) => {
-                Placement::Right
-            }
-            (Placement::StartTop, Direction::Ltr) | (Placement::EndTop, Direction::Rtl) => {
-                Placement::LeftStart
-            }
-            (Placement::StartTop, Direction::Rtl) | (Placement::EndTop, Direction::Ltr) => {
-                Placement::RightStart
-            }
-            (Placement::StartBottom, Direction::Ltr) | (Placement::EndBottom, Direction::Rtl) => {
-                Placement::LeftEnd
-            }
-            (Placement::StartBottom, Direction::Rtl) | (Placement::EndBottom, Direction::Ltr) => {
-                Placement::RightEnd
-            }
+            (Placement::Start, ResolvedDirection::Ltr)
+            | (Placement::End, ResolvedDirection::Rtl) => Placement::Left,
+            (Placement::Start, ResolvedDirection::Rtl)
+            | (Placement::End, ResolvedDirection::Ltr) => Placement::Right,
+            (Placement::StartTop, ResolvedDirection::Ltr)
+            | (Placement::EndTop, ResolvedDirection::Rtl) => Placement::LeftStart,
+            (Placement::StartTop, ResolvedDirection::Rtl)
+            | (Placement::EndTop, ResolvedDirection::Ltr) => Placement::RightStart,
+            (Placement::StartBottom, ResolvedDirection::Ltr)
+            | (Placement::EndBottom, ResolvedDirection::Rtl) => Placement::LeftEnd,
+            (Placement::StartBottom, ResolvedDirection::Rtl)
+            | (Placement::EndBottom, ResolvedDirection::Ltr) => Placement::RightEnd,
             (other, _) => *other,
         }
     }
@@ -486,7 +473,7 @@ pub struct PositioningOptions {
 
     /// Layout direction for resolving logical placements (Start/End) to physical
     /// placements (Left/Right). Default: LTR.
-    pub dir: Direction,
+    pub dir: ResolvedDirection,
 
     /// Min distance from arrow to floating element edge.
     pub arrow_padding: f64,
@@ -524,7 +511,7 @@ impl Default for PositioningOptions {
             boundary: Boundary::default(),
             boundary_padding: 8.0,
             strategy: Strategy::default(),
-            dir: Direction::Ltr,
+            dir: ResolvedDirection::Ltr,
             arrow_padding: 8.0,
             auto_max_size: true,
             fallback_placements: Vec::new(),
@@ -767,27 +754,27 @@ mod tests {
     #[test]
     fn resolve_logical_ltr_maps_start_to_left_and_end_to_right() {
         assert_eq!(
-            Placement::Start.resolve_logical(Direction::Ltr),
+            Placement::Start.resolve_logical(ResolvedDirection::Ltr),
             Placement::Left
         );
         assert_eq!(
-            Placement::End.resolve_logical(Direction::Ltr),
+            Placement::End.resolve_logical(ResolvedDirection::Ltr),
             Placement::Right
         );
         assert_eq!(
-            Placement::StartTop.resolve_logical(Direction::Ltr),
+            Placement::StartTop.resolve_logical(ResolvedDirection::Ltr),
             Placement::LeftStart
         );
         assert_eq!(
-            Placement::StartBottom.resolve_logical(Direction::Ltr),
+            Placement::StartBottom.resolve_logical(ResolvedDirection::Ltr),
             Placement::LeftEnd
         );
         assert_eq!(
-            Placement::EndTop.resolve_logical(Direction::Ltr),
+            Placement::EndTop.resolve_logical(ResolvedDirection::Ltr),
             Placement::RightStart
         );
         assert_eq!(
-            Placement::EndBottom.resolve_logical(Direction::Ltr),
+            Placement::EndBottom.resolve_logical(ResolvedDirection::Ltr),
             Placement::RightEnd
         );
     }
@@ -795,27 +782,27 @@ mod tests {
     #[test]
     fn resolve_logical_rtl_maps_start_to_right_and_end_to_left() {
         assert_eq!(
-            Placement::Start.resolve_logical(Direction::Rtl),
+            Placement::Start.resolve_logical(ResolvedDirection::Rtl),
             Placement::Right
         );
         assert_eq!(
-            Placement::End.resolve_logical(Direction::Rtl),
+            Placement::End.resolve_logical(ResolvedDirection::Rtl),
             Placement::Left
         );
         assert_eq!(
-            Placement::StartTop.resolve_logical(Direction::Rtl),
+            Placement::StartTop.resolve_logical(ResolvedDirection::Rtl),
             Placement::RightStart
         );
         assert_eq!(
-            Placement::StartBottom.resolve_logical(Direction::Rtl),
+            Placement::StartBottom.resolve_logical(ResolvedDirection::Rtl),
             Placement::RightEnd
         );
         assert_eq!(
-            Placement::EndTop.resolve_logical(Direction::Rtl),
+            Placement::EndTop.resolve_logical(ResolvedDirection::Rtl),
             Placement::LeftStart
         );
         assert_eq!(
-            Placement::EndBottom.resolve_logical(Direction::Rtl),
+            Placement::EndBottom.resolve_logical(ResolvedDirection::Rtl),
             Placement::LeftEnd
         );
     }
@@ -838,12 +825,12 @@ mod tests {
         ];
         for p in physical {
             assert_eq!(
-                p.resolve_logical(Direction::Ltr),
+                p.resolve_logical(ResolvedDirection::Ltr),
                 p,
                 "{p:?} should pass through in LTR"
             );
             assert_eq!(
-                p.resolve_logical(Direction::Rtl),
+                p.resolve_logical(ResolvedDirection::Rtl),
                 p,
                 "{p:?} should pass through in RTL"
             );
@@ -855,23 +842,16 @@ mod tests {
         let auto = [Placement::Auto, Placement::AutoStart, Placement::AutoEnd];
         for p in auto {
             assert_eq!(
-                p.resolve_logical(Direction::Ltr),
+                p.resolve_logical(ResolvedDirection::Ltr),
                 p,
                 "{p:?} should pass through in LTR"
             );
             assert_eq!(
-                p.resolve_logical(Direction::Rtl),
+                p.resolve_logical(ResolvedDirection::Rtl),
                 p,
                 "{p:?} should pass through in RTL"
             );
         }
-    }
-
-    #[cfg(debug_assertions)]
-    #[test]
-    #[should_panic(expected = "resolve_logical requires a resolved direction")]
-    fn resolve_logical_panics_on_direction_auto_in_debug() {
-        let _ = Placement::Start.resolve_logical(Direction::Auto);
     }
 
     // -----------------------------------------------------------------------
@@ -1117,7 +1097,7 @@ mod tests {
         assert_eq!(opts.boundary, Boundary::Viewport);
         assert_eq!(opts.boundary_padding, 8.0);
         assert_eq!(opts.strategy, Strategy::Absolute);
-        assert_eq!(opts.dir, Direction::Ltr);
+        assert_eq!(opts.dir, ResolvedDirection::Ltr);
         assert_eq!(opts.arrow_padding, 8.0);
         assert!(opts.auto_max_size);
         assert!(opts.fallback_placements.is_empty());
