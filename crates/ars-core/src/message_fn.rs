@@ -85,6 +85,33 @@ impl<F: Fn(&Locale) -> String + Send + Sync + 'static> From<F>
     }
 }
 
+/// `From` impl for `MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync>`.
+impl<F: Fn(usize, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
+/// `From` impl for `MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>`.
+impl<F: Fn(&str, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
+/// `From` impl for `MessageFn<dyn Fn(usize, &str, &Locale) -> String + Send + Sync>`.
+impl<F: Fn(usize, &str, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(usize, &str, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
 impl MessageFn<dyn Fn(&Locale) -> String + Send + Sync> {
     /// Creates a `MessageFn` from a static string, ignoring the locale parameter.
     ///
@@ -115,6 +142,10 @@ mod tests {
     use ars_i18n::locales;
 
     use super::*;
+
+    type LabelLocaleMessageFn = dyn Fn(&str, &Locale) -> String + Send + Sync;
+    type CountLocaleMessageFn = dyn Fn(usize, &Locale) -> String + Send + Sync;
+    type CountLabelLocaleMessageFn = dyn Fn(usize, &str, &Locale) -> String + Send + Sync;
 
     #[test]
     fn message_fn_clone_shares_pointer_identity() {
@@ -172,15 +203,73 @@ mod tests {
 
     #[test]
     fn message_fn_new_accepts_typed_arc_for_custom_signature() {
-        type AnnouncementFn = dyn Fn(&str, &Locale) -> String + Send + Sync;
-
-        let inner: Arc<AnnouncementFn> =
+        let inner: Arc<LabelLocaleMessageFn> =
             Arc::new(|label: &str, locale: &Locale| format!("{label}: {}", locale.to_bcp47()));
-        let mf: MessageFn<AnnouncementFn> = MessageFn::new(Arc::clone(&inner));
+        let mf: MessageFn<LabelLocaleMessageFn> = MessageFn::new(Arc::clone(&inner));
         let cloned = mf.clone();
 
         assert_eq!(mf, cloned);
         assert_eq!(mf("Drop", &locales::de_de()), "Drop: de-DE");
         assert_eq!(mf.as_ref()("Drop", &locales::en_us()), "Drop: en-US");
+    }
+
+    #[test]
+    fn message_fn_usize_arity_from_closure() {
+        let mf: MessageFn<CountLocaleMessageFn> =
+            MessageFn::new(|count: usize, _locale: &Locale| format!("{count} items"));
+
+        assert_eq!(mf(3, &locales::en_us()), "3 items");
+    }
+
+    #[test]
+    fn message_fn_str_arity_from_closure() {
+        let mf: MessageFn<LabelLocaleMessageFn> =
+            MessageFn::new(|label: &str, _locale: &Locale| format!("Target: {label}"));
+
+        assert_eq!(mf("Inbox", &locales::en_us()), "Target: Inbox");
+    }
+
+    #[test]
+    fn message_fn_usize_str_arity_from_closure() {
+        let mf: MessageFn<CountLabelLocaleMessageFn> =
+            MessageFn::new(|count: usize, target: &str, _locale: &Locale| {
+                format!("{count} -> {target}")
+            });
+
+        assert_eq!(mf(2, "Library", &locales::en_us()), "2 -> Library");
+    }
+
+    #[test]
+    fn message_fn_usize_arity_clone_and_deref() {
+        let mf: MessageFn<CountLocaleMessageFn> =
+            MessageFn::new(|count: usize, locale: &Locale| {
+                format!("{count} {}", locale.to_bcp47())
+            });
+        let cloned = mf.clone();
+
+        assert_eq!(mf, cloned);
+        assert_eq!(cloned(4, &locales::br()), "4 pt-BR");
+    }
+
+    #[test]
+    fn message_fn_str_arity_clone_and_deref() {
+        let mf: MessageFn<LabelLocaleMessageFn> =
+            MessageFn::new(|label: &str, locale: &Locale| format!("{label} {}", locale.to_bcp47()));
+        let cloned = mf.clone();
+
+        assert_eq!(mf, cloned);
+        assert_eq!(cloned("Drop", &locales::fr()), "Drop fr-FR");
+    }
+
+    #[test]
+    fn message_fn_usize_str_arity_clone_and_deref() {
+        let mf: MessageFn<CountLabelLocaleMessageFn> =
+            MessageFn::new(|count: usize, target: &str, locale: &Locale| {
+                format!("{count} {target} {}", locale.to_bcp47())
+            });
+        let cloned = mf.clone();
+
+        assert_eq!(mf, cloned);
+        assert_eq!(cloned(1, "Drop", &locales::ja_jp()), "1 Drop ja-JP");
     }
 }

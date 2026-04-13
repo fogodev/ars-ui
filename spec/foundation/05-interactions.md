@@ -1789,7 +1789,8 @@ For keyboard-driven move, arrow key deltas are intentionally small (1 logical un
 use ars_core::ResolvedDirection;
 
 // ResolvedDirection (Ltr/Rtl) is re-exported from ars-core (canonical definition: ars-i18n,
-// see 04-internationalization.md §3.1). ars-interactions depends on ars-core, not ars-i18n directly.
+// see 04-internationalization.md §3.1). ars-interactions depends on ars-core, ars-i18n,
+// and ars-a11y, but components still consume the canonical type through ars-core.
 fn key_to_delta(key: KeyboardKey, dir: ResolvedDirection, modifiers: KeyModifiers) -> Option<(f64, f64)> {
     let step = if modifiers.shift { 10.0 } else { 1.0 };
     let h_step = if dir.is_rtl() { -step } else { step };
@@ -2285,8 +2286,9 @@ Keyboard DnD follows a modal interaction pattern:
 
 ```rust
 /// Keyboard DnD registry: tracks all live drop targets for Tab-cycling.
-/// Registered automatically by use_drop when keyboard DnD is active.
-/// Cleared when the drag ends.
+/// Registration is explicit and adapter-owned: adapters register targets in
+/// document order when they mount, unregister them when they unmount, and
+/// reset the active registry selection when the drag ends.
 pub struct KeyboardDragRegistry {
     targets: Vec<KeyboardDropTarget>,
     current_index: Option<usize>,
@@ -2434,10 +2436,35 @@ pub struct DragResult {
 impl DragResult {
     pub fn current_state(&self) -> DragState { /* ... */ }
     pub fn start_drag(&mut self, pointer_type: PointerType) -> Option<DragStartEvent> { /* ... */ }
+    /// Keyboard-specific convenience wrapper around `start_drag(PointerType::Keyboard)`.
+    /// Dispatches the drag-start live announcement through `LiveAnnouncer`.
+    pub fn start_keyboard_drag(
+        &mut self,
+        locale: &Locale,
+        announcer: &mut LiveAnnouncer,
+        announcements: &DragAnnouncements,
+    ) -> Option<DragStartEvent> { /* ... */ }
     pub fn enter_target(&mut self, target_id: impl Into<String>, current_operation: DropOperation) { /* ... */ }
     pub fn leave_target(&mut self) { /* ... */ }
     pub fn complete_drop(&mut self) -> Option<DragEndEvent> { /* ... */ }
+    /// Keyboard-specific convenience wrapper around `complete_drop()`.
+    /// Clears the keyboard drop-target registry after a successful drop.
+    pub fn complete_keyboard_drop(
+        &mut self,
+        registry: &mut KeyboardDragRegistry,
+    ) -> Option<DragEndEvent> { /* ... */ }
     pub fn cancel_drag(&mut self) -> Option<DragEndEvent> { /* ... */ }
+    /// Keyboard-specific convenience wrapper around `cancel_drag()`.
+    /// Resets the active keyboard drop target, clears the keyboard registry
+    /// selection, and dispatches the cancel announcement.
+    pub fn cancel_keyboard_drag(
+        &mut self,
+        drop_target: &mut DropResult,
+        registry: &mut KeyboardDragRegistry,
+        locale: &Locale,
+        announcer: &mut LiveAnnouncer,
+        announcements: &DragAnnouncements,
+    ) -> Option<DragEndEvent> { /* ... */ }
     pub fn reset(&mut self) { /* ... */ }
 }
 
@@ -2448,6 +2475,17 @@ impl DropResult {
         offered_operation: DropOperation,
         pointer_type: PointerType,
     ) -> DropOperation { /* ... */ }
+    /// Keyboard-specific convenience wrapper around `drag_enter(..., PointerType::Keyboard)`.
+    /// Dispatches the drag-enter live announcement through `LiveAnnouncer`.
+    pub fn keyboard_drag_enter(
+        &mut self,
+        items: Vec<DragItemPreview>,
+        offered_operation: DropOperation,
+        target_label: &str,
+        locale: &Locale,
+        announcer: &mut LiveAnnouncer,
+        announcements: &DragAnnouncements,
+    ) -> DropOperation { /* ... */ }
     pub fn drag_over(
         &mut self,
         items: &[DragItemPreview],
@@ -2455,7 +2493,27 @@ impl DropResult {
         pointer_type: PointerType,
     ) -> DropOperation { /* ... */ }
     pub fn drag_leave(&mut self, items: &[DragItemPreview], pointer_type: PointerType) { /* ... */ }
+    /// Keyboard-specific convenience wrapper around `drag_leave(..., PointerType::Keyboard)`.
+    /// Dispatches the drag-leave live announcement through `LiveAnnouncer`.
+    pub fn keyboard_drag_leave(
+        &mut self,
+        items: &[DragItemPreview],
+        target_label: &str,
+        locale: &Locale,
+        announcer: &mut LiveAnnouncer,
+        announcements: &DragAnnouncements,
+    ) { /* ... */ }
     pub fn drop(&mut self, items: Vec<DragItem>, pointer_type: PointerType) -> Option<DropEvent> { /* ... */ }
+    /// Keyboard-specific convenience wrapper around `drop(..., PointerType::Keyboard)`.
+    /// Dispatches the drop live announcement through `LiveAnnouncer`.
+    pub fn keyboard_drop(
+        &mut self,
+        items: Vec<DragItem>,
+        target_label: &str,
+        locale: &Locale,
+        announcer: &mut LiveAnnouncer,
+        announcements: &DragAnnouncements,
+    ) -> Option<DropEvent> { /* ... */ }
     pub fn reset(&mut self) { /* ... */ }
 }
 
