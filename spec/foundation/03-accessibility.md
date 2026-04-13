@@ -2765,9 +2765,13 @@ pub struct VisuallyHiddenCssDoc;
 /// Returns visually hidden attrs for an element that MUST remain visible
 /// when it receives focus (e.g., a "Skip to content" link).
 /// When focused, the element becomes visible.
+///
+/// This variant deliberately does not apply the unconditional
+/// `ars-visually-hidden` class because that class would keep the element
+/// clipped even while focused. The focusable behavior is driven entirely by the
+/// `data-ars-visually-hidden-focusable` CSS hook.
 pub fn visually_hidden_focusable_attrs() -> AttrMap {
-    // This is implemented via CSS; the data attribute provides the CSS hook.
-    let mut attrs = visually_hidden_attrs();
+    let mut attrs = AttrMap::new();
     attrs.set_bool(HtmlAttr::Data("ars-visually-hidden-focusable"), true);
     attrs
 }

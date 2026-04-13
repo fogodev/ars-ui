@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility]
 shared_deps: []
 related: []
 references:
-  radix-ui: VisuallyHidden
-  react-aria: VisuallyHidden
+    radix-ui: VisuallyHidden
+    react-aria: VisuallyHidden
 ---
 
 # VisuallyHidden
@@ -60,17 +60,20 @@ impl Api {
     }
 
     /// Props for the root <span> element (or child element when as_child=true).
-    /// Applies the ars-visually-hidden class from the companion stylesheet.
+    /// Applies the ars-visually-hidden class for the always-hidden variant, or
+    /// the focusable data hook for the focus-visible variant.
     pub fn root_attrs(&self) -> AttrMap {
         let mut p = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
         p.set(scope_attr, scope_val);
         p.set(part_attr, part_val);
-        p.set(HtmlAttr::Class, "ars-visually-hidden");
         if self.props.is_focusable {
             // Element is visible when focused, hidden otherwise.
-            // CSS: [data-ars-visually-hidden-focusable]:not(:focus):not(:focus-within) { /* clip styles */ }
+            // Do not also set `ars-visually-hidden`; that class hides
+            // unconditionally and would break the focus-visible behavior.
             p.set_bool(HtmlAttr::Data("ars-visually-hidden-focusable"), true);
+        } else {
+            p.set(HtmlAttr::Class, "ars-visually-hidden");
         }
         p
     }
@@ -95,9 +98,9 @@ VisuallyHidden
                   class="ars-visually-hidden"
 ```
 
-| Part | Element  | Key Attributes                                                                            |
-| ---- | -------- | ----------------------------------------------------------------------------------------- |
-| Root | `<span>` | `data-ars-scope="visually-hidden"`, `data-ars-part="root"`, `class="ars-visually-hidden"` |
+| Part | Element  | Key Attributes                                                                                                                                |
+| ---- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Root | `<span>` | `data-ars-scope="visually-hidden"`, `data-ars-part="root"`, plus either `class="ars-visually-hidden"` or `data-ars-visually-hidden-focusable` |
 
 ## 3. Accessibility
 
@@ -111,11 +114,11 @@ VisuallyHidden
 
 - By default, VisuallyHidden SHOULD NOT contain interactive elements. When `is_focusable` is `true`, the element becomes visible on focus — enabling skip-link and skip-navigation patterns. Example:
 
-  ```html
-  <VisuallyHidden is_focusable="true">
-    <a href="#main-content">Skip to main content</a>
-  </VisuallyHidden>
-  ```
+    ```html
+    <VisuallyHidden is_focusable="true">
+        <a href="#main-content">Skip to main content</a>
+    </VisuallyHidden>
+    ```
 
 ### 3.3 Position Note
 
@@ -127,34 +130,38 @@ For consumers who prefer a class-based approach, the equivalent CSS is:
 
 ```css
 .ars-visually-hidden {
-  position: absolute;
-  border: 0;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  word-wrap: normal;
+    position: absolute;
+    border: 0;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    word-wrap: normal;
 }
 
 /* Focusable variant: visible when focused, hidden otherwise */
 [data-ars-visually-hidden-focusable]:not(:focus):not(:focus-within) {
-  position: absolute;
-  border: 0;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  word-wrap: normal;
+    position: absolute;
+    border: 0;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    word-wrap: normal;
 }
 ```
+
+The focusable variant MUST NOT also include `.ars-visually-hidden`, because that
+class applies unconditional clipping rules and would prevent the element from
+becoming visible on focus.
 
 ## 5. Usage Patterns
 

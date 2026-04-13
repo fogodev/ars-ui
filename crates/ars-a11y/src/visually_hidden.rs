@@ -48,9 +48,13 @@ pub struct VisuallyHiddenCssDoc;
 /// Returns visually hidden attrs for an element that MUST remain visible
 /// when it receives focus (e.g., a "Skip to content" link).
 /// When focused, the element becomes visible.
+///
+/// This variant deliberately does not apply the unconditional
+/// `ars-visually-hidden` class because that class would keep the element
+/// clipped even while focused. The focusable behavior is driven entirely by the
+/// `data-ars-visually-hidden-focusable` CSS hook.
 pub fn visually_hidden_focusable_attrs() -> AttrMap {
-    // This is implemented via CSS; the data attribute provides the CSS hook.
-    let mut attrs = visually_hidden_attrs();
+    let mut attrs = AttrMap::new();
     attrs.set_bool(HtmlAttr::Data("ars-visually-hidden-focusable"), true);
     attrs
 }
@@ -90,7 +94,7 @@ mod tests {
     fn visually_hidden_focusable_attrs_adds_focusable_flag() {
         let attrs = visually_hidden_focusable_attrs();
 
-        assert_eq!(attrs.get(&HtmlAttr::Class), Some("ars-visually-hidden"));
+        assert!(!attrs.contains(&HtmlAttr::Class));
         assert_eq!(
             attrs.get_value(&HtmlAttr::Data("ars-visually-hidden-focusable")),
             Some(&AttrValue::Bool(true))
@@ -98,12 +102,9 @@ mod tests {
     }
 
     #[test]
-    fn visually_hidden_focusable_attrs_is_superset_of_hidden_attrs() {
-        let hidden = visually_hidden_attrs();
+    fn visually_hidden_focusable_attrs_does_not_apply_hidden_class() {
         let focusable = visually_hidden_focusable_attrs();
 
-        for (attr, value) in hidden.iter() {
-            assert_eq!(focusable.get_value(attr), Some(value));
-        }
+        assert_eq!(focusable.get(&HtmlAttr::Class), None);
     }
 }
