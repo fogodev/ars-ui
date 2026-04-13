@@ -2871,13 +2871,14 @@ Type-ahead allows users to jump to items by typing text matching item labels. It
 ```rust
 // ars-collections/src/typeahead.rs
 
-use alloc::string::String;
+use alloc::{collections::BTreeSet, string::String};
+use core::time::Duration;
 #[cfg(feature = "i18n")]
 use ars_i18n::Locale;
 use crate::{key::Key, Collection};
 
 /// Default time window for accumulating multi-character type-ahead queries.
-pub const TYPEAHEAD_TIMEOUT_MS: u64 = 500;
+pub const TYPEAHEAD_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// The accumulated type-ahead search state.
 ///
@@ -2905,7 +2906,7 @@ pub struct State {
 impl State {
     /// Process a new character from a keydown event.
     ///
-    /// - If `now_ms - last_key_time_ms >= TYPEAHEAD_TIMEOUT_MS`, the search
+    /// - If `now_ms - last_key_time_ms >= TYPEAHEAD_TIMEOUT`, the search
     ///   string is reset before appending the new character.
     /// - Returns `Some(key)` if a match was found, `None` otherwise.
     #[cfg(feature = "i18n")]
@@ -2916,9 +2917,11 @@ impl State {
         current_focus: Option<&Key>,
         collection: &C,
         locale: &Locale,
+        disabled_keys: &BTreeSet<Key>,
+        disabled_behavior: DisabledBehavior,
     ) -> (Self, Option<Key>) {
         // Determine whether to reset the accumulated search.
-        let timed_out = now_ms.saturating_sub(self.last_key_time_ms) >= TYPEAHEAD_TIMEOUT_MS;
+        let timed_out = Duration::from_millis(now_ms.saturating_sub(self.last_key_time_ms)) >= TYPEAHEAD_TIMEOUT;
         let mut search = if timed_out {
             String::new()
         } else {
@@ -2932,7 +2935,7 @@ impl State {
             self.search_start_key.clone()
         };
 
-        let found = Self::find_match(&search, &search_start, current_focus, collection, locale);
+        let found = Self::find_match(&search, current_focus, collection, locale, disabled_keys, disabled_behavior);
 
         let new_state = Self {
             search,
@@ -2951,8 +2954,10 @@ impl State {
         now_ms: u64,
         current_focus: Option<&Key>,
         collection: &C,
+        disabled_keys: &BTreeSet<Key>,
+        disabled_behavior: DisabledBehavior,
     ) -> (Self, Option<Key>) {
-        let timed_out = now_ms.saturating_sub(self.last_key_time_ms) >= TYPEAHEAD_TIMEOUT_MS;
+        let timed_out = Duration::from_millis(now_ms.saturating_sub(self.last_key_time_ms)) >= TYPEAHEAD_TIMEOUT;
         let mut search = if timed_out {
             String::new()
         } else {
@@ -2966,7 +2971,7 @@ impl State {
             self.search_start_key.clone()
         };
 
-        let found = Self::find_match(&search, &search_start, current_focus, collection);
+        let found = Self::find_match(&search, current_focus, collection, disabled_keys, disabled_behavior);
 
         let new_state = Self {
             search,
@@ -2979,28 +2984,31 @@ impl State {
 
     /// Find the first item whose `text_value` starts with `search`
     /// (locale-aware case folding via ICU4X `CaseMapper`), beginning the
-    /// search from the item *after* `current_focus` and wrapping around.
+    /// search from the item *after* `current_focus` (single-char, cycling)
+    /// or *at* `current_focus` (multi-char, refining).
     ///
     /// Single-character searches wrap; multi-character searches do not (they
     /// stay within the current alphabetical run to avoid disorienting jumps).
     #[cfg(feature = "i18n")]
     fn find_match<T, C: Collection<T>>(
         search: &str,
-        search_start_key: &Option<Key>,
         current_focus: Option<&Key>,
         collection: &C,
         locale: &Locale,
+        disabled_keys: &BTreeSet<Key>,
+        disabled_behavior: DisabledBehavior,
     ) -> Option<Key> {
         // CaseMapper::new() returns CaseMapperBorrowed<'static> which is Copy —
         // no caching needed, can be constructed freely.
         let case_mapper = icu::casemap::CaseMapper::new();
-        let query = case_mapper.lowercase_to_string(search, &locale.0.id);
-        let single_char = query.chars().count() == 1;
+        // single_char from raw input — case mapping can expand one char to many.
+        let single_char = search.chars().count() == 1;
+        let query = case_mapper.lowercase_to_string(search, &locale.language_identifier());
 
-        // Build the scan order: start after `current_focus`, wrap if needed.
+        let skip_disabled = disabled_behavior == DisabledBehavior::Skip;
         let all_item_keys: alloc::vec::Vec<Key> = collection
             .nodes()
-            .filter(|n| n.is_focusable())
+            .filter(|n| n.is_focusable() && (!skip_disabled || !disabled_keys.contains(&n.key)))
             .map(|n| n.key.clone())
             .collect();
 
@@ -3008,20 +3016,20 @@ impl State {
             return None;
         }
 
-        // Find the starting position.
+        // Single-char: start AFTER current_focus (cycling to next match).
+        // Multi-char: start AT current_focus (refining keeps current match viable).
         let start_pos = current_focus
             .and_then(|k| all_item_keys.iter().position(|ik| ik == k))
-            .map(|p| (p + 1) % all_item_keys.len())
-            .unwrap_or(0);
+            .map_or(0, |p| if single_char { (p + 1) % all_item_keys.len() } else { p });
 
-        // Scan in two passes for wrap-around (single char only).
+        // Single-char wraps around the full list; multi-char scans forward only.
         let scan_len = if single_char { all_item_keys.len() } else { all_item_keys.len().saturating_sub(start_pos) };
 
         for offset in 0..scan_len {
             let idx = (start_pos + offset) % all_item_keys.len();
             let key = &all_item_keys[idx];
             if let Some(text) = collection.text_value_of(key) {
-                if case_mapper.lowercase_to_string(text, &locale.0.id).starts_with(&query) {
+                if case_mapper.lowercase_to_string(text, &locale.language_identifier()).starts_with(&query) {
                     return Some(key.clone());
                 }
             }
@@ -3033,16 +3041,19 @@ impl State {
     #[cfg(not(feature = "i18n"))]
     fn find_match<T, C: Collection<T>>(
         search: &str,
-        search_start_key: &Option<Key>,
         current_focus: Option<&Key>,
         collection: &C,
+        disabled_keys: &BTreeSet<Key>,
+        disabled_behavior: DisabledBehavior,
     ) -> Option<Key> {
+        // single_char from raw input — case mapping can expand one char to many.
+        let single_char = search.chars().count() == 1;
         let query = search.to_lowercase();
-        let single_char = query.chars().count() == 1;
 
+        let skip_disabled = disabled_behavior == DisabledBehavior::Skip;
         let all_item_keys: alloc::vec::Vec<Key> = collection
             .nodes()
-            .filter(|n| n.is_focusable())
+            .filter(|n| n.is_focusable() && (!skip_disabled || !disabled_keys.contains(&n.key)))
             .map(|n| n.key.clone())
             .collect();
 
@@ -3050,11 +3061,13 @@ impl State {
             return None;
         }
 
+        // Single-char: start AFTER current_focus (cycling to next match).
+        // Multi-char: start AT current_focus (refining keeps current match viable).
         let start_pos = current_focus
             .and_then(|k| all_item_keys.iter().position(|ik| ik == k))
-            .map(|p| (p + 1) % all_item_keys.len())
-            .unwrap_or(0);
+            .map_or(0, |p| if single_char { (p + 1) % all_item_keys.len() } else { p });
 
+        // Single-char wraps around the full list; multi-char scans forward only.
         let scan_len = if single_char { all_item_keys.len() } else { all_item_keys.len().saturating_sub(start_pos) };
 
         for offset in 0..scan_len {
@@ -3072,6 +3085,7 @@ impl State {
 
     /// Reset the type-ahead state (e.g., when the user presses Escape or
     /// the component loses focus).
+    #[must_use]
     pub fn reset() -> Self {
         Self::default()
     }
@@ -3090,6 +3104,8 @@ Event::KeyDown(key_event) => {
     let now_ms = ctx.clock.now_ms();
     let (new_typeahead, found_key) = ctx.typeahead.process_char(
         ch, now_ms, ctx.focused_key.as_ref(), &ctx.collection, &ctx.locale,
+        &ctx.selection_state.disabled_keys,
+        ctx.selection_state.disabled_behavior,
     );
     if let Some(target_key) = found_key {
         Some(TransitionPlan::context_only(move |ctx| {
