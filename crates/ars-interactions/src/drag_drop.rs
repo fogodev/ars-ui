@@ -112,10 +112,6 @@ impl KeyboardDragRegistry {
     /// Registers a live drop target in document order.
     pub fn register(&mut self, target: KeyboardDropTarget) {
         self.targets.push(target);
-
-        if self.current_index.is_none() {
-            self.current_index = Some(0);
-        }
     }
 
     /// Unregisters a live drop target by element id.
@@ -181,9 +177,8 @@ impl KeyboardDragRegistry {
         self.current_index.and_then(|index| self.targets.get(index))
     }
 
-    /// Clears the registry and active selection.
-    pub fn clear(&mut self) {
-        self.targets.clear();
+    /// Clears the active keyboard target selection while preserving registrations.
+    pub const fn clear(&mut self) {
         self.current_index = None;
     }
 }
@@ -692,7 +687,7 @@ impl DragResult {
         Some(event)
     }
 
-    /// Completes a keyboard-driven drop and clears the keyboard target registry.
+    /// Completes a keyboard-driven drop and resets keyboard target selection.
     #[must_use]
     pub fn complete_keyboard_drop(
         &mut self,
@@ -752,7 +747,7 @@ impl DragResult {
         Some(event)
     }
 
-    /// Cancels a keyboard drag session, clears the registry, and announces the cancellation.
+    /// Cancels a keyboard drag session, resets keyboard target selection, and announces the cancellation.
     #[must_use]
     pub fn cancel_keyboard_drag(
         &mut self,
@@ -1523,19 +1518,30 @@ mod tests {
     }
 
     #[test]
-    fn keyboard_drag_registry_register_and_clear_manage_current_target() {
+    fn keyboard_drag_registry_register_and_clear_reset_selection_without_dropping_targets() {
         let mut registry = KeyboardDragRegistry::new();
 
         registry.register(keyboard_target("drop-a", "Alpha", DropConfig::default()));
 
-        let current = registry.current().expect("current target should exist");
-
-        assert_eq!(current.element_id, "drop-a");
-        assert_eq!(current.label, "Alpha");
+        assert!(registry.current().is_none());
+        assert_eq!(
+            registry
+                .next()
+                .expect("first next should select target")
+                .element_id,
+            "drop-a"
+        );
 
         registry.clear();
 
         assert!(registry.current().is_none());
+        assert_eq!(
+            registry
+                .next()
+                .expect("targets should remain registered after clear")
+                .element_id,
+            "drop-a"
+        );
     }
 
     #[test]
@@ -1547,9 +1553,14 @@ mod tests {
 
         registry.unregister("drop-a");
 
-        let current = registry.current().expect("remaining target should exist");
-
-        assert_eq!(current.element_id, "drop-b");
+        assert!(registry.current().is_none());
+        assert_eq!(
+            registry
+                .next()
+                .expect("remaining target should still be reachable")
+                .element_id,
+            "drop-b"
+        );
     }
 
     #[test]
@@ -1559,9 +1570,14 @@ mod tests {
         registry.register(keyboard_target("drop-a", "Alpha", DropConfig::default()));
         registry.unregister("missing");
 
-        let current = registry.current().expect("registered target should remain");
-
-        assert_eq!(current.element_id, "drop-a");
+        assert!(registry.current().is_none());
+        assert_eq!(
+            registry
+                .next()
+                .expect("registered target should remain reachable")
+                .element_id,
+            "drop-a"
+        );
     }
 
     #[test]
@@ -1583,13 +1599,17 @@ mod tests {
 
         assert_eq!(
             registry.next().expect("first next should exist").element_id,
-            "drop-b"
+            "drop-a"
         );
         assert_eq!(
             registry
                 .next()
                 .expect("second next should exist")
                 .element_id,
+            "drop-b"
+        );
+        assert_eq!(
+            registry.next().expect("third next should exist").element_id,
             "drop-c"
         );
         assert_eq!(
@@ -3051,10 +3071,7 @@ mod tests {
             .start_keyboard_drag(&locales::en_us(), &mut announcer, &announcements)
             .expect("keyboard drag should start");
 
-        let target = registry
-            .current()
-            .expect("current target should exist")
-            .clone();
+        let target = registry.next().expect("first target should exist").clone();
 
         let previews = previews_from_items(&start_event.items);
 
@@ -3095,6 +3112,13 @@ mod tests {
             1
         );
         assert!(registry.current().is_none());
+        assert_eq!(
+            registry
+                .next()
+                .expect("registered target should remain after drop")
+                .element_id,
+            "drop-a"
+        );
         assert!(matches!(
             drag.current_state(),
             DragState::Dropped {
@@ -3210,6 +3234,13 @@ mod tests {
         assert_eq!(event.pointer_type, PointerType::Keyboard);
         assert!(!event.was_dropped);
         assert!(registry.current().is_none());
+        assert_eq!(
+            registry
+                .next()
+                .expect("registered target should remain after cancel")
+                .element_id,
+            "drop-a"
+        );
         assert!(matches!(drag.current_state(), DragState::Idle));
         assert_eq!(
             end_events
@@ -3333,7 +3364,7 @@ mod tests {
         assert!(drag.complete_keyboard_drop(&mut registry).is_none());
         assert_eq!(
             registry
-                .current()
+                .next()
                 .expect("registry should remain intact")
                 .element_id,
             "drop-a"
@@ -3363,7 +3394,7 @@ mod tests {
         );
         assert_eq!(
             registry
-                .current()
+                .next()
                 .expect("registry should remain intact")
                 .element_id,
             "drop-a"

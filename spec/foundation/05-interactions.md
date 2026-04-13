@@ -2288,7 +2288,7 @@ Keyboard DnD follows a modal interaction pattern:
 /// Keyboard DnD registry: tracks all live drop targets for Tab-cycling.
 /// Registration is explicit and adapter-owned: adapters register targets in
 /// document order when they mount, unregister them when they unmount, and
-/// clear the registry when the drag ends.
+/// reset the active registry selection when the drag ends.
 pub struct KeyboardDragRegistry {
     targets: Vec<KeyboardDropTarget>,
     current_index: Option<usize>,
