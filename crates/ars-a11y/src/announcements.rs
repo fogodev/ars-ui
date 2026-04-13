@@ -61,6 +61,9 @@ pub struct Messages {
     /// Message used when a column is sorted descending.
     pub sorted_descending: MessageFn<LabelLocaleMessage>,
 
+    /// Message used when a column is sorted in a non-standard order.
+    pub sorted_other: MessageFn<LabelLocaleMessage>,
+
     /// Message used when a column is not sorted.
     pub not_sorted: MessageFn<LabelLocaleMessage>,
 
@@ -112,6 +115,10 @@ impl Default for Messages {
 
             sorted_descending: MessageFn::new(Arc::new(|column: &str, _locale: &Locale| {
                 format!("{column}, sorted descending.")
+            }) as Arc<LabelLocaleMessage>),
+
+            sorted_other: MessageFn::new(Arc::new(|column: &str, _locale: &Locale| {
+                format!("{column}, sorted.")
             }) as Arc<LabelLocaleMessage>),
 
             not_sorted: MessageFn::new(Arc::new(|column: &str, _locale: &Locale| {
@@ -217,7 +224,8 @@ impl Announcements {
         let message = match direction {
             AriaSort::Ascending => &messages.sorted_ascending,
             AriaSort::Descending => &messages.sorted_descending,
-            AriaSort::None | AriaSort::Other => &messages.not_sorted,
+            AriaSort::Other => &messages.sorted_other,
+            AriaSort::None => &messages.not_sorted,
         };
 
         message(column, locale)
@@ -281,6 +289,7 @@ mod tests {
             (messages.sorted_descending)("Name", &locale),
             "Name, sorted descending."
         );
+        assert_eq!((messages.sorted_other)("Name", &locale), "Name, sorted.");
         assert_eq!((messages.not_sorted)("Name", &locale), "Name, not sorted.");
         assert_eq!(
             (messages.tree_expanded)("Folder", &locale),
@@ -395,7 +404,7 @@ mod tests {
         );
         assert_eq!(
             Announcements::column_sorted("Name", AriaSort::Other, &locale, &messages),
-            "Name, not sorted."
+            "Name, sorted."
         );
     }
 
@@ -438,12 +447,12 @@ mod tests {
                 format!("Carregando ({})", locale.to_bcp47())
             }),
             loading_complete: MessageFn::new(|locale: &Locale| {
-                format!("Carregamento concluido ({})", locale.to_bcp47())
+                format!("Carregamento concluído ({})", locale.to_bcp47())
             }),
             item_moved: MessageFn::new(Arc::new(
                 |label: &str, position: usize, total: usize, locale: &Locale| {
                     format!(
-                        "{label} movido para a posicao {position} de {total} ({})",
+                        "{label} movido para a posição {position} de {total} ({})",
                         locale.to_bcp47()
                     )
                 },
@@ -457,8 +466,11 @@ mod tests {
             sorted_descending: MessageFn::new(Arc::new(|column: &str, locale: &Locale| {
                 format!("{column}, ordem decrescente ({})", locale.to_bcp47())
             }) as Arc<LabelLocaleMessage>),
+            sorted_other: MessageFn::new(Arc::new(|column: &str, locale: &Locale| {
+                format!("{column}, ordenado ({})", locale.to_bcp47())
+            }) as Arc<LabelLocaleMessage>),
             not_sorted: MessageFn::new(Arc::new(|column: &str, locale: &Locale| {
-                format!("{column}, sem ordenacao ({})", locale.to_bcp47())
+                format!("{column}, sem ordenação ({})", locale.to_bcp47())
             }) as Arc<LabelLocaleMessage>),
             tree_expanded: MessageFn::new(Arc::new(|label: &str, locale: &Locale| {
                 format!("{label}, expandido ({})", locale.to_bcp47())
@@ -477,12 +489,12 @@ mod tests {
             "Item A, selecionado (pt-BR)"
         );
         assert_eq!(
-            Announcements::validation_error("Email", "obrigatorio", &locale, &messages),
-            "Email: obrigatorio. Erro (pt-BR)"
+            Announcements::validation_error("Email", "obrigatório", &locale, &messages),
+            "Email: obrigatório. Erro (pt-BR)"
         );
         assert_eq!(
             Announcements::item_moved("Linha 3", 2, 10, &locale, &messages),
-            "Linha 3 movido para a posicao 2 de 10 (pt-BR)"
+            "Linha 3 movido para a posição 2 de 10 (pt-BR)"
         );
         assert_eq!(
             Announcements::column_sorted("Nome", AriaSort::Descending, &locale, &messages),

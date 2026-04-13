@@ -2984,6 +2984,18 @@ Patterns for specific dynamic content scenarios:
 ```rust
 // ars-a11y/src/announcements.rs
 
+use alloc::{format, string::String, sync::Arc};
+
+use ars_core::{ComponentMessages, Locale, MessageFn};
+
+use crate::aria::attribute::AriaSort;
+
+type LocaleMessage = dyn Fn(&Locale) -> String + Send + Sync;
+type CountLocaleMessage = dyn Fn(usize, &Locale) -> String + Send + Sync;
+type LabelLocaleMessage = dyn Fn(&str, &Locale) -> String + Send + Sync;
+type FieldErrorLocaleMessage = dyn Fn(&str, &str, &Locale) -> String + Send + Sync;
+type MoveLocaleMessage = dyn Fn(&str, usize, usize, &Locale) -> String + Send + Sync;
+
 /// Localizable announcement templates for common component state changes.
 ///
 /// Per §2.8: NO hardcoded English strings in ARIA labels or announcements.
@@ -2993,65 +3005,69 @@ Patterns for specific dynamic content scenarios:
 /// across components.
 #[derive(Clone, Debug)]
 pub struct Messages {
-    pub search_results: MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync>,
-    pub selected: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
-    pub deselected: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
-    pub validation_error: MessageFn<dyn Fn(&str, &str, &Locale) -> String + Send + Sync>,
-    pub loading: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
-    pub loading_complete: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
-    pub item_moved: MessageFn<dyn Fn(&str, usize, usize, &Locale) -> String + Send + Sync>,
-    pub item_removed: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
-    pub sorted_ascending: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
-    pub sorted_descending: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
-    pub not_sorted: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
-    pub tree_expanded: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
-    pub tree_collapsed: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
+    pub search_results: MessageFn<CountLocaleMessage>,
+    pub selected: MessageFn<LabelLocaleMessage>,
+    pub deselected: MessageFn<LabelLocaleMessage>,
+    pub validation_error: MessageFn<FieldErrorLocaleMessage>,
+    pub loading: MessageFn<LocaleMessage>,
+    pub loading_complete: MessageFn<LocaleMessage>,
+    pub item_moved: MessageFn<MoveLocaleMessage>,
+    pub item_removed: MessageFn<LabelLocaleMessage>,
+    pub sorted_ascending: MessageFn<LabelLocaleMessage>,
+    pub sorted_descending: MessageFn<LabelLocaleMessage>,
+    pub sorted_other: MessageFn<LabelLocaleMessage>,
+    pub not_sorted: MessageFn<LabelLocaleMessage>,
+    pub tree_expanded: MessageFn<LabelLocaleMessage>,
+    pub tree_collapsed: MessageFn<LabelLocaleMessage>,
 }
 
 impl Default for Messages {
     fn default() -> Self {
         Self {
-            search_results: MessageFn::new(|count: usize, _locale: &Locale| match count {
+            search_results: MessageFn::new(Arc::new(|count: usize, _locale: &Locale| match count {
                 0 => "No results found.".into(),
                 1 => "1 result found.".into(),
                 _ => format!("{count} results found."),
-            }),
-            selected: MessageFn::new(|label: &str, _locale: &Locale| {
+            }) as Arc<CountLocaleMessage>),
+            selected: MessageFn::new(Arc::new(|label: &str, _locale: &Locale| {
                 format!("{label}, selected.")
-            }),
-            deselected: MessageFn::new(|label: &str, _locale: &Locale| {
+            }) as Arc<LabelLocaleMessage>),
+            deselected: MessageFn::new(Arc::new(|label: &str, _locale: &Locale| {
                 format!("{label}, deselected.")
-            }),
-            validation_error: MessageFn::new(
+            }) as Arc<LabelLocaleMessage>),
+            validation_error: MessageFn::new(Arc::new(
                 |field: &str, error: &str, _locale: &Locale| {
                     format!("{field}: {error}. Error.")
                 },
-            ),
+            ) as Arc<FieldErrorLocaleMessage>),
             loading: MessageFn::static_str("Loading."),
             loading_complete: MessageFn::static_str("Loading complete."),
-            item_moved: MessageFn::new(
+            item_moved: MessageFn::new(Arc::new(
                 |label: &str, position: usize, total: usize, _locale: &Locale| {
                     format!("{label} moved to position {position} of {total}.")
                 },
-            ),
-            item_removed: MessageFn::new(|label: &str, _locale: &Locale| {
+            ) as Arc<MoveLocaleMessage>),
+            item_removed: MessageFn::new(Arc::new(|label: &str, _locale: &Locale| {
                 format!("{label} removed.")
-            }),
-            sorted_ascending: MessageFn::new(|column: &str, _locale: &Locale| {
+            }) as Arc<LabelLocaleMessage>),
+            sorted_ascending: MessageFn::new(Arc::new(|column: &str, _locale: &Locale| {
                 format!("{column}, sorted ascending.")
-            }),
-            sorted_descending: MessageFn::new(|column: &str, _locale: &Locale| {
+            }) as Arc<LabelLocaleMessage>),
+            sorted_descending: MessageFn::new(Arc::new(|column: &str, _locale: &Locale| {
                 format!("{column}, sorted descending.")
-            }),
-            not_sorted: MessageFn::new(|column: &str, _locale: &Locale| {
+            }) as Arc<LabelLocaleMessage>),
+            sorted_other: MessageFn::new(Arc::new(|column: &str, _locale: &Locale| {
+                format!("{column}, sorted.")
+            }) as Arc<LabelLocaleMessage>),
+            not_sorted: MessageFn::new(Arc::new(|column: &str, _locale: &Locale| {
                 format!("{column}, not sorted.")
-            }),
-            tree_expanded: MessageFn::new(|label: &str, _locale: &Locale| {
+            }) as Arc<LabelLocaleMessage>),
+            tree_expanded: MessageFn::new(Arc::new(|label: &str, _locale: &Locale| {
                 format!("{label}, expanded.")
-            }),
-            tree_collapsed: MessageFn::new(|label: &str, _locale: &Locale| {
+            }) as Arc<LabelLocaleMessage>),
+            tree_collapsed: MessageFn::new(Arc::new(|label: &str, _locale: &Locale| {
                 format!("{label}, collapsed.")
-            }),
+            }) as Arc<LabelLocaleMessage>),
         }
     }
 }
@@ -3101,7 +3117,8 @@ impl Announcements {
         let message = match direction {
             AriaSort::Ascending => &messages.sorted_ascending,
             AriaSort::Descending => &messages.sorted_descending,
-            _ => &messages.not_sorted,
+            AriaSort::Other => &messages.sorted_other,
+            AriaSort::None => &messages.not_sorted,
         };
         message(column, locale)
     }
