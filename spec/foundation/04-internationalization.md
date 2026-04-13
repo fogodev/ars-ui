@@ -1315,6 +1315,13 @@ pub fn plural_category(count: usize, locale: &Locale) -> PluralCategory {
 }
 ```
 
+When either plural backend is enabled, `plural_category()` uses locale-aware CLDR
+cardinal rules from that backend. With neither `icu4x` nor `web-intl` enabled,
+`ars-i18n` still exposes the function but falls back to English cardinal behavior:
+`1 => One`, all other integer counts => `Other`. This fallback exists so
+backend-free feature-matrix builds can compile without introducing a separate
+conditional public API.
+
 ---
 
 ## 5. Date and Time Formatting
@@ -2211,8 +2218,8 @@ pub fn select_plural(
     // rules depend on trailing zeros: "1.0" is "other" in English, not "one". Decimal
     // preserves the original precision from f64. In contrast, plural_category(usize)
     // (§4.3) can pass usize directly since integers have no trailing-zero ambiguity.
-    let fd = fixed_decimal::Decimal::try_from_f64(count, fixed_decimal::FloatPrecision::Floating).unwrap_or_default();
-    PluralCategory::from_icu(rules.category_for(fd))
+    let fd = fixed_decimal::Decimal::try_from_f64(count, fixed_decimal::FloatPrecision::RoundTrip).unwrap_or_default();
+    PluralCategory::from_icu(rules.category_for(&fd))
 }
 
 /// Format a count with the appropriate plural form.
@@ -2253,6 +2260,23 @@ fn interpolate(template: &str, args: &[(&str, &str)]) -> String {
     result
 }
 ````
+
+Under the `web-intl` backend on `wasm32`, `select_plural()` delegates to
+`Intl.PluralRules::select(number)`. That API observes the numeric value only,
+not the original source formatting, so browser builds cannot distinguish
+visible trailing-zero precision such as `1` versus `1.0`. The ars-i18n API
+normalizes category names across backends, but precision-sensitive CLDR edge
+cases follow the capabilities of the active backend.
+
+Across all backends, non-finite numeric inputs (`NaN`, `+∞`, `-∞`) select
+`PluralCategory::Other` rather than being coerced into a numeric plural class.
+
+With neither `icu4x` nor wasm `web-intl` enabled, `select_plural()` falls back
+to English-only behavior. This also applies to non-wasm builds compiled with
+the `web-intl` feature flag, because the browser `Intl` backend is only
+available on `wasm32`: cardinal rules use `One` for values whose magnitude is
+exactly `1.0` and `Other` otherwise, while ordinal rules use the standard English
+`1st`/`2nd`/`3rd` categories and map all other values to `Other`.
 
 ### 6.2 ICU MessageFormat Plural Syntax
 
@@ -3260,7 +3284,11 @@ pub fn get_number_formatter(locale: &Locale, options: &NumberFormatOptions) -> N
 
 ### 9.4 Browser Intl API Feature Flag (`web-intl`)
 
-For WASM client builds, the browser's `Intl` API provides the same formatting capabilities as ICU4X with zero bundle size overhead. The `web-intl` feature flag enables this backend.
+For WASM client builds, the browser's `Intl` API provides the same formatting
+capabilities as ICU4X with zero bundle size overhead. The `web-intl` feature
+flag enables this backend on `wasm32`; non-wasm builds that enable the feature
+continue to use the documented English fallback behavior for APIs that depend
+on browser `Intl`.
 
 #### 9.4.1 Feature-flagged type aliases
 
@@ -3282,7 +3310,7 @@ pub type DefaultDateFormatter = web_intl::JsIntlDateFormatter;
 // ── Plural rules ──
 #[cfg(feature = "icu4x")]
 pub type DefaultPluralRules = icu4x::Icu4xPluralRules;
-#[cfg(feature = "web-intl")]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 pub type DefaultPluralRules = web_intl::JsIntlPluralRules;
 
 // ── Collation ──
@@ -3390,6 +3418,10 @@ impl CollationFormat for StringCollator {
 | WASM client (offline) | `icu4x`    | Needs built-in ICU data                   |
 
 > **Note**: `parse()` (string -> number/date) is not available via the browser `Intl` API. Applications that need parsing must use the `icu4x` backend even on the client.
+>
+> For plural rules, omitting both `icu4x` and `web-intl` leaves the free-function
+> API available with an English-only fallback. That configuration is supported
+> for backend-free builds and tests, not for full locale-aware production i18n.
 
 ### 9.5 Calendar/Locale Provider Trait (`IcuProvider`)
 

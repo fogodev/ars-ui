@@ -294,14 +294,24 @@ pub struct WasmCoverageTarget {
     pub package: &'static str,
     /// Cargo features required for the browser test build.
     pub features: &'static [&'static str],
+    /// Whether CI coverage must disable the crate's default features.
+    pub no_default_features: bool,
 }
 
 /// Browser-test packages whose `web`/`wasm32` code paths are merged into CI coverage.
 pub const fn default_wasm_coverage_targets() -> &'static [WasmCoverageTarget] {
-    &[WasmCoverageTarget {
-        package: "ars-dom",
-        features: &["web"],
-    }]
+    &[
+        WasmCoverageTarget {
+            package: "ars-dom",
+            features: &["web"],
+            no_default_features: false,
+        },
+        WasmCoverageTarget {
+            package: "ars-i18n",
+            features: &["web-intl"],
+            no_default_features: true,
+        },
+    ]
 }
 
 /// Parse lcov content into per-file line/branch hit maps.
@@ -356,7 +366,12 @@ fn parse_lcov_records(content: &str) -> BTreeMap<String, FileCoverage> {
             let Some(taken) = parts.next() else {
                 continue;
             };
-            let hit = taken != "-" && taken.parse::<u64>().ok().is_some_and(|count| count > 0);
+            if taken == "-" {
+                // Some wasm lcov exporters emit branch records without taken counts.
+                // Treat those as "no branch data" instead of uncovered branches.
+                continue;
+            }
+            let hit = taken.parse::<u64>().ok().is_some_and(|count| count > 0);
             file.record_branch(
                 BranchKey {
                     line: line_no,
@@ -896,6 +911,15 @@ BRDA:2,0,1,0
 end_of_record
 ";
 
+    const NO_BRANCH_DATA_LCOV: &str = "\
+SF:crates/ars-i18n/src/plural.rs
+DA:1,1
+DA:2,1
+BRDA:2,0,0,-
+BRDA:2,0,1,-
+end_of_record
+";
+
     #[test]
     fn parse_stats_aggregates_across_files() {
         let stats = parse_package_stats(SAMPLE_LCOV, "ars-core");
@@ -938,6 +962,15 @@ end_of_record
         assert_eq!(stats.lines_hit, 1);
         assert_eq!(stats.branches_found, 2);
         assert_eq!(stats.branches_hit, 1);
+    }
+
+    #[test]
+    fn parse_stats_ignores_branch_records_without_taken_counts() {
+        let stats = parse_package_stats(NO_BRANCH_DATA_LCOV, "ars-i18n");
+        assert_eq!(stats.lines_found, 2);
+        assert_eq!(stats.lines_hit, 2);
+        assert_eq!(stats.branches_found, 0);
+        assert_eq!(stats.branches_hit, 0);
     }
 
     #[test]
@@ -1127,6 +1160,42 @@ version = "0.2.118"
         let flags = coverage_rustflags();
         assert!(flags.contains("-Cinstrument-coverage"));
         assert!(flags.contains("-Zcoverage-options=branch"));
+    }
+
+    #[test]
+    fn default_wasm_coverage_targets_include_web_intl_ars_i18n() {
+        let targets = default_wasm_coverage_targets();
+
+        assert!(targets.iter().any(|target| {
+            target.package == "ars-dom" && target.features == ["web"] && !target.no_default_features
+        }));
+        assert!(targets.iter().any(|target| {
+            target.package == "ars-i18n"
+                && target.features == ["web-intl"]
+                && target.no_default_features
+        }));
+    }
+
+    #[test]
+    fn base_wasm_cargo_args_respects_no_default_features_and_features() {
+        let args = base_wasm_cargo_args(&WasmCoverageOptions {
+            package: "ars-i18n".into(),
+            output: PathBuf::from("/tmp/ars-i18n-web-intl.lcov"),
+            features: vec!["web-intl".into()],
+            no_default_features: true,
+            extra_test_args: Vec::new(),
+        });
+        let args = args
+            .into_iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert!(args.windows(2).any(|pair| pair == ["-p", "ars-i18n"]));
+        assert!(args.contains(&"--no-default-features".to_owned()));
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--features", "web-intl"])
+        );
     }
 }
 

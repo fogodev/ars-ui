@@ -382,7 +382,7 @@ fn run_coverage() -> Result<(), Error> {
                 .iter()
                 .map(|feature| (*feature).to_owned())
                 .collect(),
-            no_default_features: false,
+            no_default_features: target.no_default_features,
             extra_test_args: Vec::new(),
         })
         .map_err(Error::Coverage)?;

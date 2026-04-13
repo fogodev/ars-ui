@@ -525,13 +525,12 @@ RatingGroup uses one of two ARIA patterns depending on whether half-ratings are 
 - Star labels use `PluralCategory` from `ars-i18n` for correct singular/plural forms:
 
 ```rust
-use ars_i18n::{PluralRules, PluralCategory};
+use ars_i18n::{select_plural, PluralCategory, PluralRuleType};
 
 /// Returns the default item label for the rating group.
-fn default_item_label(locale: &Locale) -> MessageFn<dyn Fn(f64) -> String + Send + Sync> {
-    let rules = PluralRules::new(locale, PluralType::Cardinal);
-    MessageFn::new(move |value: f64| {
-        let category = rules.category_for(value);
+fn default_item_label() -> MessageFn<dyn Fn(f64, &Locale) -> String + Send + Sync> {
+    MessageFn::new(move |value: f64, locale: &Locale| {
+        let category = select_plural(locale, value, PluralRuleType::Cardinal);
         match category {
             PluralCategory::One => format!("{} star", value),
             _                   => format!("{} stars", value),
