@@ -890,6 +890,10 @@ fn resolve_drag_over_operation(
         return DropOperation::Cancel;
     }
 
+    if offered_operation == DropOperation::Cancel {
+        return DropOperation::Cancel;
+    }
+
     let operation = config
         .on_drag_over
         .as_ref()
@@ -1937,6 +1941,44 @@ mod tests {
             result.attrs.get_value(&HtmlAttr::Data("ars-drop-position")),
             Some(AttrValue::String(value)) if value == "after"
         ));
+    }
+
+    #[test]
+    fn drop_result_drag_over_preserves_cancel_offered_operation() {
+        let drag_over_calls = Arc::new(Mutex::new(Vec::<DropTargetEvent>::new()));
+
+        let observed_calls = Arc::clone(&drag_over_calls);
+
+        let mut result = use_drop(DropConfig {
+            on_drag_over: Some(Callback::new(move |event: DropTargetEvent| {
+                observed_calls
+                    .lock()
+                    .expect("drag over calls lock should succeed")
+                    .push(event);
+
+                DropOperation::Link
+            })),
+            ..DropConfig::default()
+        });
+
+        let operation = result.drag_over(
+            &[preview(DragItemKind::Text, &["text/plain"])],
+            DropOperation::Cancel,
+            PointerType::Mouse,
+        );
+
+        assert_eq!(operation, DropOperation::Cancel);
+        assert_eq!(result.enter_count, 0);
+        assert!(!result.drag_over);
+        assert!(result.drop_operation.is_none());
+        assert!(result.indicator_position.is_none());
+        assert!(!result.attrs.contains(&HtmlAttr::Data("ars-drag-over")));
+        assert!(
+            drag_over_calls
+                .lock()
+                .expect("drag over calls lock should succeed")
+                .is_empty()
+        );
     }
 
     #[test]
