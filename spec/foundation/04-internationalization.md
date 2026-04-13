@@ -638,8 +638,17 @@ impl LogicalRect {
     ///
     /// In RTL mode the inline-start and inline-end values are swapped so that
     /// `inline_start` maps to `right` and `inline_end` maps to `left`.
+    ///
+    /// # Panics (debug only)
+    ///
+    /// Debug-asserts that `dir` is not [`Direction::Auto`]; callers must resolve
+    /// `Auto` to `Ltr` or `Rtl` before physical conversion.
     #[must_use]
     pub fn to_physical(&self, dir: Direction) -> PhysicalRect {
+        debug_assert!(
+            dir != Direction::Auto,
+            "Direction::Auto must be resolved to Ltr or Rtl before physical conversion"
+        );
         if dir.is_rtl() {
             PhysicalRect {
                 left: self.inline_end,
