@@ -147,10 +147,19 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
 
             for (pos, node) in inner.nodes().enumerate() {
                 match node.node_type {
-                    NodeType::Section => {
+                    NodeType::Section | NodeType::Separator => {
+                        // Section and Separator both act as hard run boundaries.
+                        // Items on opposite sides MUST NOT merge into one sorted group,
+                        // even when they share the same parent_key, or sorting would
+                        // pull items across the visual divider.
                         current_parent = None;
                     }
-                    NodeType::Header | NodeType::Separator => {}
+
+                    NodeType::Header => {
+                        // Headers appear immediately after their Section and are
+                        // never run boundaries — the Section already reset scope.
+                    }
+
                     NodeType::Item => {
                         let pk = node.parent_key.clone();
                         match &current_parent {
@@ -897,5 +906,43 @@ mod tests {
         assert_eq!(sorted.last_key(), Some(&Key::int(4))); // Date
         assert_eq!(sorted.key_after_no_wrap(&Key::int(3)), Some(&Key::int(1))); // Banana → Cherry
         assert_eq!(sorted.key_before_no_wrap(&Key::int(1)), Some(&Key::int(3))); // Cherry → Banana
+    }
+
+    #[test]
+    fn sort_respects_separator_as_run_boundary() {
+        // Top-level items with a separator between them must NOT merge into
+        // one group. Each side sorts within itself, separator stays put.
+        //
+        // Original order:
+        //   D, B, Separator, C, A  (all top-level)
+        let inner = CollectionBuilder::new()
+            .item(Key::int(4), "D", "d")
+            .item(Key::int(2), "B", "b")
+            .separator()
+            .item(Key::int(3), "C", "c")
+            .item(Key::int(1), "A", "a")
+            .build();
+
+        let sorted = SortedCollection::new(&inner, |a, b| a.text_value.cmp(&b.text_value));
+
+        let types = sorted.nodes().map(|n| n.node_type).collect::<Vec<_>>();
+        assert_eq!(
+            types,
+            vec![
+                NodeType::Item,      // run 1
+                NodeType::Item,      // run 1
+                NodeType::Separator, // stays in place
+                NodeType::Item,      // run 2
+                NodeType::Item,      // run 2
+            ]
+        );
+
+        let texts = sorted
+            .nodes()
+            .filter(|n| n.is_focusable())
+            .map(|n| n.text_value.as_str())
+            .collect::<Vec<_>>();
+        // Run 1 (D, B) sorted → [B, D]. Run 2 (C, A) sorted → [A, C].
+        assert_eq!(texts, vec!["B", "D", "A", "C"]);
     }
 }

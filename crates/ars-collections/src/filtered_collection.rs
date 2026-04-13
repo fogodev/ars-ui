@@ -9,7 +9,11 @@ use core::{
     marker::PhantomData,
 };
 
-use crate::{Collection, key::Key, node::Node};
+use crate::{
+    Collection,
+    key::Key,
+    node::{Node, NodeType},
+};
 
 /// A read-only view over another collection with a predicate applied.
 ///
@@ -81,26 +85,32 @@ impl<'a, T: Clone, C: Collection<T>> FilteredCollection<'a, T, C> {
             .collect::<BTreeSet<_>>();
 
         // Second pass: collect (wrapper_position, base_index) for visible nodes.
-        // - Section nodes: included when at least one direct child passes.
-        // - Header/Separator nodes inside a section: included when their parent
-        //   section has at least one passing child.
+        // Structural nodes are included based on the scope they belong to:
+        // - Section nodes: scope is their direct children.
+        // - Header/Separator inside a section: scope is the parent section's
+        //   children (they have no children of their own).
+        // - Top-level Header/Separator: scope is all top-level items. Without
+        //   this branch a no-op predicate (`|_| true`) would drop top-level
+        //   separators and silently change the collection shape.
         let visible_data = inner
             .nodes()
             .enumerate()
             .filter(|(_, n)| {
                 if n.is_focusable() {
-                    passing.contains(&n.index)
-                } else {
-                    // Section nodes own the children — check directly.
-                    inner
+                    return passing.contains(&n.index);
+                }
+                match (&n.parent_key, n.node_type) {
+                    (_, NodeType::Section) => inner
                         .children_of(&n.key)
-                        .any(|child| passing.contains(&child.index))
-                        // Header/Separator nodes: check their parent section's children.
-                        || n.parent_key.as_ref().is_some_and(|pk| {
-                            inner
-                                .children_of(pk)
-                                .any(|child| passing.contains(&child.index))
-                        })
+                        .any(|child| passing.contains(&child.index)),
+
+                    (Some(pk), _) => inner
+                        .children_of(pk)
+                        .any(|child| passing.contains(&child.index)),
+
+                    (None, _) => inner.nodes().any(|m| {
+                        m.is_focusable() && m.parent_key.is_none() && passing.contains(&m.index)
+                    }),
                 }
             })
             .map(|(wrapper_pos, n)| (wrapper_pos, n.index))
@@ -689,5 +699,56 @@ mod tests {
         assert_eq!(texts, vec!["Apple", "Banana", "Cherry"]);
 
         assert_eq!(filtered.size(), 3);
+    }
+
+    #[test]
+    fn no_op_filter_preserves_top_level_separator() {
+        // A no-op predicate must not change the collection's shape, including
+        // top-level separators (which have no children and no parent section).
+        let inner = CollectionBuilder::new()
+            .item(Key::int(1), "Apple", "a")
+            .separator()
+            .item(Key::int(2), "Banana", "b")
+            .build();
+
+        let filtered = FilteredCollection::new(&inner, |_| true);
+
+        assert_eq!(filtered.size(), 3);
+        let types = filtered.nodes().map(|n| n.node_type).collect::<Vec<_>>();
+        assert_eq!(
+            types,
+            vec![NodeType::Item, NodeType::Separator, NodeType::Item]
+        );
+    }
+
+    #[test]
+    fn top_level_separator_preserved_when_top_level_item_passes() {
+        let inner = CollectionBuilder::new()
+            .item(Key::int(1), "Apple", "a")
+            .separator()
+            .item(Key::int(2), "Banana", "b")
+            .build();
+
+        // Filter out Banana; Apple still passes — separator stays.
+        let filtered = FilteredCollection::new(&inner, |n| n.text_value == "Apple");
+
+        assert_eq!(filtered.size(), 2);
+        let types = filtered.nodes().map(|n| n.node_type).collect::<Vec<_>>();
+        assert_eq!(types, vec![NodeType::Item, NodeType::Separator]);
+    }
+
+    #[test]
+    fn top_level_separator_dropped_when_no_top_level_items_pass() {
+        // When no top-level items pass, the separator has no scope to belong
+        // to and is correctly excluded.
+        let inner = CollectionBuilder::new()
+            .item(Key::int(1), "Apple", "a")
+            .separator()
+            .item(Key::int(2), "Banana", "b")
+            .build();
+
+        let filtered = FilteredCollection::new(&inner, |_| false);
+
+        assert_eq!(filtered.size(), 0);
     }
 }

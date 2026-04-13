@@ -4198,7 +4198,7 @@ Filtering wraps an existing `Collection<T>` implementation and applies a predica
 // ars-collections/src/filtered_collection.rs
 
 use alloc::vec::Vec;
-use crate::{key::Key, node::Node, Collection};
+use crate::{key::Key, node::{Node, NodeType}, Collection};
 
 /// A read-only view over another collection with a predicate applied.
 ///
@@ -4259,20 +4259,32 @@ impl<'a, T: Clone, C: Collection<T>> FilteredCollection<'a, T, C> {
             .collect();
 
         // Second pass: collect (wrapper_position, base_index) for visible nodes.
-        // - Section nodes: included when at least one direct child passes.
-        // - Header/Separator nodes inside a section: included when their parent
-        //   section has at least one passing child.
+        // Structural nodes are included based on the scope they belong to:
+        // - Section nodes: scope is their direct children.
+        // - Header/Separator inside a section: scope is the parent section's
+        //   children (they have no children of their own).
+        // - Top-level Header/Separator: scope is all top-level items. Without
+        //   this branch a no-op predicate (`|_| true`) would drop top-level
+        //   separators and silently change the collection shape.
         let visible_data: Vec<(usize, usize)> = inner
             .nodes()
             .enumerate()
             .filter(|(_, n)| {
                 if n.is_focusable() {
-                    passing.contains(&n.index)
-                } else {
-                    inner.children_of(&n.key).any(|child| passing.contains(&child.index))
-                        || n.parent_key.as_ref().is_some_and(|pk| {
-                            inner.children_of(pk).any(|child| passing.contains(&child.index))
-                        })
+                    return passing.contains(&n.index);
+                }
+                match (&n.parent_key, n.node_type) {
+                    (_, NodeType::Section) => inner
+                        .children_of(&n.key)
+                        .any(|child| passing.contains(&child.index)),
+                    (Some(pk), _) => inner
+                        .children_of(pk)
+                        .any(|child| passing.contains(&child.index)),
+                    (None, _) => inner.nodes().any(|m| {
+                        m.is_focusable()
+                            && m.parent_key.is_none()
+                            && passing.contains(&m.index)
+                    }),
                 }
             })
             .map(|(wrapper_pos, n)| (wrapper_pos, n.index))
@@ -4488,8 +4500,17 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
 
             for (pos, node) in inner.nodes().enumerate() {
                 match node.node_type {
-                    NodeType::Section => { current_parent = None; }
-                    NodeType::Header | NodeType::Separator => {}
+                    NodeType::Section | NodeType::Separator => {
+                        // Section and Separator both act as hard run boundaries.
+                        // Items on opposite sides MUST NOT merge into one sorted
+                        // group, even when they share the same parent_key, or
+                        // sorting would pull items across the visual divider.
+                        current_parent = None;
+                    }
+                    NodeType::Header => {
+                        // Headers appear immediately after their Section and are
+                        // never run boundaries — the Section already reset scope.
+                    }
                     NodeType::Item => {
                         let pk = node.parent_key.clone();
                         match &current_parent {
