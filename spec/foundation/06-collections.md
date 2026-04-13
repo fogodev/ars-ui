@@ -4198,7 +4198,7 @@ Filtering wraps an existing `Collection<T>` implementation and applies a predica
 // ars-collections/src/filtered_collection.rs
 
 use alloc::vec::Vec;
-use crate::{key::Key, node::Node, Collection};
+use crate::{key::Key, node::{Node, NodeType}, Collection};
 
 /// A read-only view over another collection with a predicate applied.
 ///
@@ -4223,12 +4223,24 @@ where
 {
     inner: &'a C,
 
-    /// Flat indices of inner nodes that pass the predicate.
-    /// Uses `BTreeSet` for O(log n) `contains()` in `get()`.
-    visible_indices: alloc::collections::BTreeSet<usize>,
+    /// Base `node.index` values of visible nodes.
+    /// Used for O(log n) membership checks in `get()` and `children_of()`.
+    visible_base_indices: alloc::collections::BTreeSet<usize>,
 
-    /// Ordered list of visible indices for positional access in `get_by_index()`.
-    visible_order: Vec<usize>,
+    /// Wrapper positions (into `inner`) of visible nodes, in traversal order.
+    /// Used by `get_by_index()` and `nodes()` — these are the coordinates
+    /// that `inner.get_by_index()` expects.
+    visible_positions: Vec<usize>,
+
+    /// Maps base `node.index` → index into `visible_positions`, for O(log n)
+    /// lookup when navigating from a key.
+    base_to_visible_pos: alloc::collections::BTreeMap<usize, usize>,
+
+    /// Cached index into `visible_positions` of the first focusable item.
+    first_focusable: Option<usize>,
+
+    /// Cached index into `visible_positions` of the last focusable item.
+    last_focusable: Option<usize>,
 
     _phantom: core::marker::PhantomData<T>,
 }
@@ -4239,42 +4251,66 @@ impl<'a, T: Clone, C: Collection<T>> FilteredCollection<'a, T, C> {
     /// Section/Header/Separator nodes are included only when at least one of
     /// their children passes the predicate.
     pub fn new(inner: &'a C, predicate: impl Fn(&Node<T>) -> bool) -> Self {
-        // First pass: find all item nodes that pass.
+        // First pass: find all item nodes that pass, keyed by base index.
         let passing: alloc::collections::BTreeSet<usize> = inner
             .nodes()
-            .enumerate()
-            .filter(|(_, n)| n.is_focusable() && predicate(n))
-            .map(|(i, _)| i)
-            .collect();
-
-        // Second pass: include structural nodes only when they have passing children.
-        // (Structural nodes carry their index via node.index.)
-        let visible_order: Vec<usize> = inner
-            .nodes()
-            .filter(|n| {
-                if n.is_focusable() {
-                    passing.contains(&n.index)
-                } else {
-                    // Include structural nodes that have at least one visible descendant.
-                    inner.children_of(&n.key).any(|child| passing.contains(&child.index))
-                }
-            })
+            .filter(|n| n.is_focusable() && predicate(n))
             .map(|n| n.index)
             .collect();
 
-        let visible_indices = visible_order.iter().copied().collect();
+        // Second pass: collect (wrapper_position, base_index) for visible nodes.
+        // Structural nodes are included based on the scope they belong to:
+        // - Section nodes: scope is their direct children.
+        // - Header/Separator inside a section: scope is the parent section's
+        //   children (they have no children of their own).
+        // - Top-level Header/Separator: scope is all top-level items. Without
+        //   this branch a no-op predicate (`|_| true`) would drop top-level
+        //   separators and silently change the collection shape.
+        let visible_data: Vec<(usize, usize)> = inner
+            .nodes()
+            .enumerate()
+            .filter(|(_, n)| {
+                if n.is_focusable() {
+                    return passing.contains(&n.index);
+                }
+                match (&n.parent_key, n.node_type) {
+                    (_, NodeType::Section) => inner
+                        .children_of(&n.key)
+                        .any(|child| passing.contains(&child.index)),
+                    (Some(pk), _) => inner
+                        .children_of(pk)
+                        .any(|child| passing.contains(&child.index)),
+                    (None, _) => inner.nodes().any(|m| {
+                        m.is_focusable()
+                            && m.parent_key.is_none()
+                            && passing.contains(&m.index)
+                    }),
+                }
+            })
+            .map(|(wrapper_pos, n)| (wrapper_pos, n.index))
+            .collect();
 
-        Self { inner, visible_indices, visible_order, _phantom: core::marker::PhantomData }
+        let visible_positions: Vec<usize> = visible_data.iter().map(|&(wp, _)| wp).collect();
+        let visible_base_indices = visible_data.iter().map(|&(_, bi)| bi).collect();
+        let base_to_visible_pos = visible_data.iter().enumerate()
+            .map(|(vis_idx, &(_, base_idx))| (base_idx, vis_idx)).collect();
+
+        let first_focusable = visible_positions.iter().enumerate()
+            .find_map(|(vi, &wp)| inner.get_by_index(wp).filter(|n| n.is_focusable()).map(|_| vi));
+        let last_focusable = visible_positions.iter().enumerate().rev()
+            .find_map(|(vi, &wp)| inner.get_by_index(wp).filter(|n| n.is_focusable()).map(|_| vi));
+
+        Self { inner, visible_base_indices, visible_positions, base_to_visible_pos,
+               first_focusable, last_focusable, _phantom: core::marker::PhantomData }
     }
 }
 
 impl<'a, T: Clone, C: Collection<T>> Collection<T> for FilteredCollection<'a, T, C> {
-    fn size(&self) -> usize { self.visible_indices.len() }
+    fn size(&self) -> usize { self.visible_positions.len() }
 
     fn get(&self, key: &Key) -> Option<&Node<T>> {
-        // Only return nodes that are in the visible set.
         let node = self.inner.get(key)?;
-        if self.visible_indices.contains(&node.index) {
+        if self.visible_base_indices.contains(&node.index) {
             Some(node)
         } else {
             None
@@ -4282,20 +4318,21 @@ impl<'a, T: Clone, C: Collection<T>> Collection<T> for FilteredCollection<'a, T,
     }
 
     fn get_by_index(&self, index: usize) -> Option<&Node<T>> {
-        self.visible_order.get(index).and_then(|&i| self.inner.get_by_index(i))
+        self.visible_positions.get(index).and_then(|&wp| self.inner.get_by_index(wp))
     }
 
     fn first_key(&self) -> Option<&Key> {
-        self.visible_indices
-            .iter()
-            .find_map(|&i| self.inner.get_by_index(i).filter(|n| n.is_focusable()).map(|n| &n.key))
+        self.first_focusable
+            .and_then(|vi| self.visible_positions.get(vi))
+            .and_then(|&wp| self.inner.get_by_index(wp))
+            .map(|n| &n.key)
     }
 
     fn last_key(&self) -> Option<&Key> {
-        self.visible_indices
-            .iter()
-            .rev()
-            .find_map(|&i| self.inner.get_by_index(i).filter(|n| n.is_focusable()).map(|n| &n.key))
+        self.last_focusable
+            .and_then(|vi| self.visible_positions.get(vi))
+            .and_then(|&wp| self.inner.get_by_index(wp))
+            .map(|n| &n.key)
     }
 
     fn key_after(&self, key: &Key) -> Option<&Key> {
@@ -4307,20 +4344,20 @@ impl<'a, T: Clone, C: Collection<T>> Collection<T> for FilteredCollection<'a, T,
     }
 
     fn key_after_no_wrap(&self, key: &Key) -> Option<&Key> {
-        let current_index = self.inner.get(key)?.index;
-        let pos = self.visible_order.iter().position(|&i| i == current_index)?;
-        self.visible_order[pos + 1..]
+        let node = self.inner.get(key)?;
+        let &vis_pos = self.base_to_visible_pos.get(&node.index)?;
+        self.visible_positions[vis_pos + 1..]
             .iter()
-            .find_map(|&i| self.inner.get_by_index(i).filter(|n| n.is_focusable()).map(|n| &n.key))
+            .find_map(|&wp| self.inner.get_by_index(wp).filter(|n| n.is_focusable()).map(|n| &n.key))
     }
 
     fn key_before_no_wrap(&self, key: &Key) -> Option<&Key> {
-        let current_index = self.inner.get(key)?.index;
-        let pos = self.visible_order.iter().position(|&i| i == current_index)?;
-        self.visible_order[..pos]
+        let node = self.inner.get(key)?;
+        let &vis_pos = self.base_to_visible_pos.get(&node.index)?;
+        self.visible_positions[..vis_pos]
             .iter()
             .rev()
-            .find_map(|&i| self.inner.get_by_index(i).filter(|n| n.is_focusable()).map(|n| &n.key))
+            .find_map(|&wp| self.inner.get_by_index(wp).filter(|n| n.is_focusable()).map(|n| &n.key))
     }
 
     fn keys(&self) -> impl Iterator<Item = &Key> {
@@ -4328,14 +4365,14 @@ impl<'a, T: Clone, C: Collection<T>> Collection<T> for FilteredCollection<'a, T,
     }
 
     fn nodes(&self) -> impl Iterator<Item = &Node<T>> {
-        self.visible_indices
+        self.visible_positions
             .iter()
-            .filter_map(|&i| self.inner.get_by_index(i))
+            .filter_map(|&wp| self.inner.get_by_index(wp))
     }
 
     fn children_of(&self, parent_key: &Key) -> impl Iterator<Item = &Node<T>> {
         self.inner.children_of(parent_key)
-            .filter(|n| self.visible_indices.contains(&n.index))
+            .filter(|n| self.visible_base_indices.contains(&n.index))
     }
 }
 ```
@@ -4348,12 +4385,14 @@ Sorting produces a view that presents nodes in a different order without modifyi
 // ars-collections/src/sorted_collection.rs
 
 use alloc::vec::Vec;
-use crate::{key::Key, node::Node, Collection};
+use crate::{key::Key, node::{Node, NodeType}, Collection};
 
 /// The direction of a sort.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SortDirection {
+    /// Sort in ascending order (smallest first).
     Ascending,
+    /// Sort in descending order (largest first).
     Descending,
 }
 
@@ -4367,9 +4406,14 @@ impl core::fmt::Display for SortDirection {
 }
 
 /// Unified sort state for table columns.
+///
+/// `K` is the column key type — typically the same `Key` used by the
+/// collection, but any type works (e.g., a string column identifier).
 #[derive(Clone, Debug, PartialEq)]
 pub struct SortDescriptor<K> {
+    /// The column (or field) being sorted.
     pub column: K,
+    /// Whether the sort is ascending or descending.
     pub direction: SortDirection,
 }
 
@@ -4392,8 +4436,14 @@ where
     C: Collection<T>,
 {
     inner: &'a C,
-    /// Sorted flat indices of inner nodes in the new traversal order.
-    sorted_indices: Vec<usize>,
+    /// Wrapper positions (into `inner`) in sorted traversal order.
+    sorted_positions: Vec<usize>,
+    /// Maps base `node.index` → index into `sorted_positions`.
+    base_to_sorted_pos: alloc::collections::BTreeMap<usize, usize>,
+    /// Cached index into `sorted_positions` of the first focusable item.
+    first_focusable: Option<usize>,
+    /// Cached index into `sorted_positions` of the last focusable item.
+    last_focusable: Option<usize>,
     _phantom: core::marker::PhantomData<T>,
 }
 
@@ -4408,13 +4458,15 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
         inner: &'a C,
         comparator: impl Fn(&Node<T>, &Node<T>) -> core::cmp::Ordering,
     ) -> Self {
-        let mut item_indices: Vec<usize> = inner
+        // Collect item wrapper positions and sort them by comparator.
+        let mut item_positions: Vec<usize> = inner
             .nodes()
-            .filter(|n| n.is_focusable())
-            .map(|n| n.index)
+            .enumerate()
+            .filter(|(_, n)| n.is_focusable())
+            .map(|(pos, _)| pos)
             .collect();
 
-        item_indices.sort_by(|&a, &b| {
+        item_positions.sort_by(|&a, &b| {
             let na = inner.get_by_index(a)
                 .expect("sort index must be within collection bounds");
             let nb = inner.get_by_index(b)
@@ -4427,92 +4479,130 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
         // For flat (non-sectioned) collections: all nodes are Items, so
         // item_indices IS the final sorted order.
         //
-        // For sectioned collections: sort items within each section while
-        // preserving section order and structural node positions. Algorithm:
-        // 1. Group sorted items by parent_key (section membership).
-        // 2. Walk the original node order. Structural nodes (Section, Header,
-        //    Separator) are emitted in their original positions. When items
-        //    belonging to a section are encountered, emit the section's sorted
-        //    items instead, consuming from the group.
+        // For sectioned or mixed collections: items are sorted within each
+        // contiguous *run* of same-parent items. A new run starts when a
+        // Section node is encountered or an Item's parent_key differs from
+        // the previous Item's parent. Header and Separator nodes do not
+        // break runs — they are emitted in their original positions.
+        //
+        // This run-aware grouping prevents items from migrating across
+        // structural boundaries when top-level items appear in multiple
+        // runs separated by sections.
         let has_sections = inner.nodes().any(|n| n.is_structural());
 
-        let sorted_indices = if !has_sections {
-            // Fast path: flat collection — sorted items are the full order.
-            item_indices
-        } else {
-            // Group sorted item indices by parent_key.
-            let mut section_items: alloc::collections::BTreeMap<Option<Key>, Vec<usize>> =
+        let sorted_positions = if has_sections {
+            // Phase 1: assign each item to a contiguous-run group, keyed by
+            // wrapper position.
+            let mut item_to_group: alloc::collections::BTreeMap<usize, usize> =
                 alloc::collections::BTreeMap::new();
-            for &idx in &item_indices {
-                let node = inner.get_by_index(idx)
-                    .expect("sorted index must be within bounds");
-                section_items.entry(node.parent_key.clone()).or_default().push(idx);
-            }
-            // Track consumption position per section.
-            let mut section_cursors: alloc::collections::BTreeMap<Option<Key>, usize> =
-                alloc::collections::BTreeMap::new();
+            let mut next_group: usize = 0;
+            let mut current_parent: Option<Option<Key>> = None;
 
-            let mut result = Vec::with_capacity(inner.size());
-            let mut current_section: Option<Key> = None;
-            let mut items_emitted_for_section = false;
-
-            for node in inner.nodes() {
+            for (pos, node) in inner.nodes().enumerate() {
                 match node.node_type {
-                    NodeType::Section => {
-                        current_section = Some(node.key.clone());
-                        items_emitted_for_section = false;
-                        result.push(node.index);
+                    NodeType::Section | NodeType::Separator => {
+                        // Section and Separator both act as hard run boundaries.
+                        // Items on opposite sides MUST NOT merge into one sorted
+                        // group, even when they share the same parent_key, or
+                        // sorting would pull items across the visual divider.
+                        current_parent = None;
                     }
-                    NodeType::Header | NodeType::Separator => {
-                        // Emit structural nodes in their original position.
-                        result.push(node.index);
+                    NodeType::Header => {
+                        // Headers appear immediately after their Section and are
+                        // never run boundaries — the Section already reset scope.
                     }
                     NodeType::Item => {
-                        // On first item of this section, emit all sorted items for it.
-                        let section_key = node.parent_key.clone();
-                        if !items_emitted_for_section || section_key != current_section {
-                            if let Some(items) = section_items.get(&section_key) {
-                                let cursor = section_cursors.entry(section_key.clone()).or_insert(0);
-                                if *cursor == 0 {
-                                    // First encounter: emit all sorted items for this section.
-                                    result.extend_from_slice(items);
-                                    *cursor = items.len();
-                                }
+                        let pk = node.parent_key.clone();
+                        match &current_parent {
+                            Some(existing_pk) if *existing_pk == pk => {}
+                            _ => {
+                                next_group += 1;
+                                current_parent = Some(pk);
                             }
-                            items_emitted_for_section = true;
-                            current_section = section_key;
                         }
-                        // Skip original item indices — already emitted via sorted group.
+                        item_to_group.insert(pos, next_group);
+                    }
+                }
+            }
+
+            // Phase 2: distribute sorted item wrapper positions into per-group buckets.
+            // Every wrapper position in item_positions was added to item_to_group
+            // in Phase 1 (both iterate focusable items), so the map lookup always
+            // succeeds — `.expect` documents the invariant.
+            let mut groups: alloc::collections::BTreeMap<usize, Vec<usize>> =
+                alloc::collections::BTreeMap::new();
+            for &wp in &item_positions {
+                let group = *item_to_group.get(&wp)
+                    .expect("item position must have been assigned a group");
+                groups.entry(group).or_default().push(wp);
+            }
+
+            // Phase 3: walk original order, emit structural nodes in place,
+            // emit each group's sorted items on first encounter. Both map
+            // lookups are guaranteed by Phase 1/2 construction invariants.
+            let mut group_emitted: alloc::collections::BTreeSet<usize> =
+                alloc::collections::BTreeSet::new();
+            let mut result = Vec::with_capacity(inner.size());
+
+            for (pos, node) in inner.nodes().enumerate() {
+                match node.node_type {
+                    NodeType::Section | NodeType::Header | NodeType::Separator => {
+                        result.push(pos);
+                    }
+                    NodeType::Item => {
+                        let group = *item_to_group.get(&pos)
+                            .expect("item position must have been assigned a group");
+                        if group_emitted.insert(group) {
+                            let items = groups.get(&group)
+                                .expect("group must have been populated in Phase 2");
+                            result.extend_from_slice(items);
+                        }
                     }
                 }
             }
 
             result
+        } else {
+            // Fast path: flat collection — sorted items are the full order.
+            item_positions
         };
 
-        Self { inner, sorted_indices, _phantom: core::marker::PhantomData }
+        // Build reverse map: base node.index → position in sorted_positions.
+        let base_to_sorted_pos: alloc::collections::BTreeMap<usize, usize> = sorted_positions
+            .iter().enumerate()
+            .filter_map(|(sp_idx, &wp)| inner.get_by_index(wp).map(|n| (n.index, sp_idx)))
+            .collect();
+
+        let first_focusable = sorted_positions.iter().enumerate()
+            .find_map(|(si, &wp)| inner.get_by_index(wp).filter(|n| n.is_focusable()).map(|_| si));
+        let last_focusable = sorted_positions.iter().enumerate().rev()
+            .find_map(|(si, &wp)| inner.get_by_index(wp).filter(|n| n.is_focusable()).map(|_| si));
+
+        Self { inner, sorted_positions, base_to_sorted_pos, first_focusable, last_focusable, _phantom: core::marker::PhantomData }
     }
 }
 
 impl<'a, T, C: Collection<T>> Collection<T> for SortedCollection<'a, T, C> {
-    fn size(&self) -> usize { self.sorted_indices.len() }
+    fn size(&self) -> usize { self.sorted_positions.len() }
 
     fn get(&self, key: &Key) -> Option<&Node<T>> { self.inner.get(key) }
 
     fn get_by_index(&self, index: usize) -> Option<&Node<T>> {
-        self.sorted_indices.get(index).and_then(|&i| self.inner.get_by_index(i))
+        self.sorted_positions.get(index).and_then(|&wp| self.inner.get_by_index(wp))
     }
 
     fn first_key(&self) -> Option<&Key> {
-        self.sorted_indices.iter().find_map(|&i| {
-            self.inner.get_by_index(i).filter(|n| n.is_focusable()).map(|n| &n.key)
-        })
+        self.first_focusable
+            .and_then(|si| self.sorted_positions.get(si))
+            .and_then(|&wp| self.inner.get_by_index(wp))
+            .map(|n| &n.key)
     }
 
     fn last_key(&self) -> Option<&Key> {
-        self.sorted_indices.iter().rev().find_map(|&i| {
-            self.inner.get_by_index(i).filter(|n| n.is_focusable()).map(|n| &n.key)
-        })
+        self.last_focusable
+            .and_then(|si| self.sorted_positions.get(si))
+            .and_then(|&wp| self.inner.get_by_index(wp))
+            .map(|n| &n.key)
     }
 
     fn key_after(&self, key: &Key) -> Option<&Key> {
@@ -4524,18 +4614,18 @@ impl<'a, T, C: Collection<T>> Collection<T> for SortedCollection<'a, T, C> {
     }
 
     fn key_after_no_wrap(&self, key: &Key) -> Option<&Key> {
-        let current = self.inner.get(key)?.index;
-        let pos = self.sorted_indices.iter().position(|&i| i == current)?;
-        self.sorted_indices[pos + 1..].iter().find_map(|&i| {
-            self.inner.get_by_index(i).filter(|n| n.is_focusable()).map(|n| &n.key)
+        let node = self.inner.get(key)?;
+        let &sorted_pos = self.base_to_sorted_pos.get(&node.index)?;
+        self.sorted_positions[sorted_pos + 1..].iter().find_map(|&wp| {
+            self.inner.get_by_index(wp).filter(|n| n.is_focusable()).map(|n| &n.key)
         })
     }
 
     fn key_before_no_wrap(&self, key: &Key) -> Option<&Key> {
-        let current = self.inner.get(key)?.index;
-        let pos = self.sorted_indices.iter().position(|&i| i == current)?;
-        self.sorted_indices[..pos].iter().rev().find_map(|&i| {
-            self.inner.get_by_index(i).filter(|n| n.is_focusable()).map(|n| &n.key)
+        let node = self.inner.get(key)?;
+        let &sorted_pos = self.base_to_sorted_pos.get(&node.index)?;
+        self.sorted_positions[..sorted_pos].iter().rev().find_map(|&wp| {
+            self.inner.get_by_index(wp).filter(|n| n.is_focusable()).map(|n| &n.key)
         })
     }
 
@@ -4544,7 +4634,7 @@ impl<'a, T, C: Collection<T>> Collection<T> for SortedCollection<'a, T, C> {
     }
 
     fn nodes(&self) -> impl Iterator<Item = &Node<T>> {
-        self.sorted_indices.iter().filter_map(|&i| self.inner.get_by_index(i))
+        self.sorted_positions.iter().filter_map(|&wp| self.inner.get_by_index(wp))
     }
 
     fn children_of(&self, parent_key: &Key) -> impl Iterator<Item = &Node<T>> {
