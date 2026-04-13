@@ -2,7 +2,7 @@
 
 use alloc::{string::String, vec::Vec};
 
-use ars_core::{AttrMap, ComponentIds, HtmlAttr};
+use ars_core::{AriaAttr, AttrMap, AttrValue, ComponentIds, HtmlAttr};
 
 use crate::{
     aria::attribute::{AriaAttribute, AriaIdList, AriaIdRef, AriaInvalid, AriaLive},
@@ -30,6 +30,9 @@ pub struct LabelConfig {
 impl LabelConfig {
     /// Applies the highest-priority available accessible-name attributes.
     pub fn apply_to(&self, attrs: &mut AttrMap) {
+        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), AttrValue::None);
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), AttrValue::None);
+
         if !self.labelledby_ids.is_empty() {
             AriaAttribute::LabelledBy(AriaIdList(self.labelledby_ids.clone())).apply_to(attrs);
         } else if let Some(ref label) = self.label {
@@ -54,6 +57,9 @@ pub struct DescriptionConfig {
 impl DescriptionConfig {
     /// Applies description-related attributes to the given attribute map.
     pub fn apply_to(&self, attrs: &mut AttrMap) {
+        attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), AttrValue::None);
+        attrs.set(HtmlAttr::Aria(AriaAttr::Details), AttrValue::None);
+
         if !self.describedby_ids.is_empty() {
             AriaAttribute::DescribedBy(AriaIdList(self.describedby_ids.clone())).apply_to(attrs);
         }
@@ -121,20 +127,28 @@ impl FieldContext {
             .chain(self.description.describedby_ids.iter().cloned())
             .collect::<Vec<_>>();
 
-        if !description_ids.is_empty() {
+        if description_ids.is_empty() {
+            attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), AttrValue::None);
+        } else {
             AriaAttribute::DescribedBy(AriaIdList(description_ids)).apply_to(attrs);
         }
 
         if let Some(ref id) = self.description.details_id {
             AriaAttribute::Details(AriaIdRef(id.clone())).apply_to(attrs);
+        } else {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Details), AttrValue::None);
         }
 
         if self.is_required {
             AriaAttribute::Required(true).apply_to(attrs);
+        } else {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Required), AttrValue::None);
         }
 
         if self.is_readonly {
             AriaAttribute::ReadOnly(true).apply_to(attrs);
+        } else {
+            attrs.set(HtmlAttr::Aria(AriaAttr::ReadOnly), AttrValue::None);
         }
 
         set_disabled(attrs, self.is_disabled);
@@ -151,7 +165,13 @@ impl FieldContext {
     pub fn label_element_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         attrs.set(HtmlAttr::Id, self.ids.part("label"));
-        attrs.set(HtmlAttr::For, self.ids.part("input"));
+        attrs.set(
+            HtmlAttr::For,
+            self.label
+                .html_for_id
+                .clone()
+                .unwrap_or_else(|| self.ids.part("input")),
+        );
         attrs
     }
 
@@ -266,6 +286,8 @@ mod tests {
         let config = LabelConfig::default();
 
         let mut attrs = AttrMap::new();
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), "stale-label");
+        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), "stale-id");
 
         config.apply_to(&mut attrs);
 
@@ -299,6 +321,8 @@ mod tests {
         let config = DescriptionConfig::default();
 
         let mut attrs = AttrMap::new();
+        attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), "stale-help");
+        attrs.set(HtmlAttr::Aria(AriaAttr::Details), "stale-details");
 
         config.apply_to(&mut attrs);
 
@@ -449,6 +473,42 @@ mod tests {
     }
 
     #[test]
+    fn apply_input_attrs_clears_stale_managed_attrs_when_reused() {
+        let invalid_context = FieldContext {
+            ids: test_ids(),
+            label: LabelConfig {
+                labelledby_ids: vec![String::from("field-1-label")],
+                label: None,
+                html_for_id: None,
+            },
+            description: DescriptionConfig {
+                describedby_ids: vec![String::from("field-1-description")],
+                details_id: Some(String::from("field-1-details")),
+            },
+            is_required: true,
+            is_readonly: true,
+            is_disabled: false,
+            invalid: AriaInvalid::True,
+        };
+
+        let valid_context = FieldContext::new(test_ids());
+
+        let mut attrs = AttrMap::new();
+
+        invalid_context.apply_input_attrs(&mut attrs);
+        valid_context.apply_input_attrs(&mut attrs);
+
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Label)));
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::LabelledBy)));
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::DescribedBy)));
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Details)));
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Required)));
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::ReadOnly)));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Invalid)), Some("false"));
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::ErrorMessage)));
+    }
+
+    #[test]
     fn label_element_attrs_match_spec_ids() {
         let context = FieldContext::new(test_ids());
 
@@ -456,6 +516,18 @@ mod tests {
 
         assert_eq!(attrs.get(&HtmlAttr::Id), Some("field-1-label"));
         assert_eq!(attrs.get(&HtmlAttr::For), Some("field-1-input"));
+    }
+
+    #[test]
+    fn label_element_attrs_prefers_custom_html_for_id() {
+        let mut context = FieldContext::new(test_ids());
+
+        context.label.html_for_id = Some(String::from("custom-input"));
+
+        let attrs = context.label_element_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Id), Some("field-1-label"));
+        assert_eq!(attrs.get(&HtmlAttr::For), Some("custom-input"));
     }
 
     #[test]
