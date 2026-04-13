@@ -2261,16 +2261,19 @@ fn interpolate(template: &str, args: &[(&str, &str)]) -> String {
 }
 ````
 
-Under the `web-intl` backend, `select_plural()` delegates to `Intl.PluralRules::select(number)`.
-That API observes the numeric value only, not the original source formatting, so browser builds
-cannot distinguish visible trailing-zero precision such as `1` versus `1.0`. The ars-i18n API
-normalizes category names across backends, but precision-sensitive CLDR edge cases follow the
-capabilities of the active backend.
+Under the `web-intl` backend on `wasm32`, `select_plural()` delegates to
+`Intl.PluralRules::select(number)`. That API observes the numeric value only,
+not the original source formatting, so browser builds cannot distinguish
+visible trailing-zero precision such as `1` versus `1.0`. The ars-i18n API
+normalizes category names across backends, but precision-sensitive CLDR edge
+cases follow the capabilities of the active backend.
 
-With neither `icu4x` nor `web-intl` enabled, `select_plural()` falls back to
-English-only behavior: cardinal rules use `One` for exactly `1.0` and `Other`
-otherwise, while ordinal rules use the standard English `1st`/`2nd`/`3rd`
-categories and map all other values to `Other`.
+With neither `icu4x` nor wasm `web-intl` enabled, `select_plural()` falls back
+to English-only behavior. This also applies to non-wasm builds compiled with
+the `web-intl` feature flag, because the browser `Intl` backend is only
+available on `wasm32`: cardinal rules use `One` for exactly `1.0` and `Other`
+otherwise, while ordinal rules use the standard English
+`1st`/`2nd`/`3rd` categories and map all other values to `Other`.
 
 ### 6.2 ICU MessageFormat Plural Syntax
 
@@ -3278,7 +3281,11 @@ pub fn get_number_formatter(locale: &Locale, options: &NumberFormatOptions) -> N
 
 ### 9.4 Browser Intl API Feature Flag (`web-intl`)
 
-For WASM client builds, the browser's `Intl` API provides the same formatting capabilities as ICU4X with zero bundle size overhead. The `web-intl` feature flag enables this backend.
+For WASM client builds, the browser's `Intl` API provides the same formatting
+capabilities as ICU4X with zero bundle size overhead. The `web-intl` feature
+flag enables this backend on `wasm32`; non-wasm builds that enable the feature
+continue to use the documented English fallback behavior for APIs that depend
+on browser `Intl`.
 
 #### 9.4.1 Feature-flagged type aliases
 
@@ -3300,7 +3307,7 @@ pub type DefaultDateFormatter = web_intl::JsIntlDateFormatter;
 // ── Plural rules ──
 #[cfg(feature = "icu4x")]
 pub type DefaultPluralRules = icu4x::Icu4xPluralRules;
-#[cfg(feature = "web-intl")]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
 pub type DefaultPluralRules = web_intl::JsIntlPluralRules;
 
 // ── Collation ──
