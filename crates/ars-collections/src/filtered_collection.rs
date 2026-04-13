@@ -1,6 +1,9 @@
 // ars-collections/src/filtered_collection.rs
 
-use alloc::{collections::BTreeSet, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
 use core::{
     fmt::{self, Debug},
     marker::PhantomData,
@@ -23,7 +26,18 @@ use crate::{Collection, key::Key, node::Node};
 /// current highlight is not in the new visible set. This prevents
 /// `aria-activedescendant` from referencing a hidden DOM element.
 ///
-/// Clone: the struct stores only indices and a reference — no closures.
+/// ## Coordinate systems
+///
+/// This wrapper maintains two coordinate systems:
+/// - **Base indices** (`node.index`): the stable identity from the underlying
+///   base collection, used for O(log n) membership checks in [`get`] and
+///   [`children_of`].
+/// - **Wrapper positions**: positions into `inner`'s iteration order (i.e.,
+///   arguments to `inner.get_by_index()`), used for [`get_by_index`],
+///   [`nodes`], and navigation. This distinction is critical when `inner`
+///   is itself a wrapper (e.g., [`SortedCollection`]) whose traversal order
+///   differs from base index order.
+///
 /// The predicate is consumed during `new()` and not retained.
 pub struct FilteredCollection<'a, T, C>
 where
@@ -31,17 +45,23 @@ where
 {
     inner: &'a C,
 
-    /// Flat indices of inner nodes that pass the predicate.
-    /// Uses `BTreeSet` for O(log n) `contains()` in `get()`.
-    visible_indices: BTreeSet<usize>,
+    /// Base `node.index` values of visible nodes.
+    /// Used for O(log n) membership checks in `get()` and `children_of()`.
+    visible_base_indices: BTreeSet<usize>,
 
-    /// Ordered list of visible indices for positional access in `get_by_index()`.
-    visible_order: Vec<usize>,
+    /// Wrapper positions (into `inner`) of visible nodes, in traversal order.
+    /// Used by `get_by_index()` and `nodes()` — these are the coordinates
+    /// that `inner.get_by_index()` expects.
+    visible_positions: Vec<usize>,
 
-    /// Cached index of the first visible focusable item.
+    /// Maps base `node.index` → index into `visible_positions`, for O(log n)
+    /// lookup when navigating from a key.
+    base_to_visible_pos: BTreeMap<usize, usize>,
+
+    /// Cached index into `visible_positions` of the first focusable item.
     first_focusable: Option<usize>,
 
-    /// Cached index of the last visible focusable item.
+    /// Cached index into `visible_positions` of the last focusable item.
     last_focusable: Option<usize>,
 
     _phantom: PhantomData<T>,
@@ -53,25 +73,21 @@ impl<'a, T: Clone, C: Collection<T>> FilteredCollection<'a, T, C> {
     /// Section/Header/Separator nodes are included only when at least one of
     /// their children passes the predicate.
     pub fn new(inner: &'a C, predicate: impl Fn(&Node<T>) -> bool) -> Self {
-        // First pass: find all item nodes that pass.
-        // Uses node.index (the stable flat index from the inner collection)
-        // rather than iterator position, so this works correctly when the
-        // inner collection is itself a wrapper (e.g., SortedCollection) whose
-        // traversal order differs from index order.
+        // First pass: find all item nodes that pass, keyed by base index.
         let passing = inner
             .nodes()
             .filter(|n| n.is_focusable() && predicate(n))
             .map(|n| n.index)
             .collect::<BTreeSet<_>>();
 
-        // Second pass: include structural nodes whose section group has passing items.
+        // Second pass: collect (wrapper_position, base_index) for visible nodes.
         // - Section nodes: included when at least one direct child passes.
         // - Header/Separator nodes inside a section: included when their parent
-        //   section has at least one passing child (they have no children of their
-        //   own, so checking `children_of(&header_key)` would always be empty).
-        let visible_order = inner
+        //   section has at least one passing child.
+        let visible_data = inner
             .nodes()
-            .filter(|n| {
+            .enumerate()
+            .filter(|(_, n)| {
                 if n.is_focusable() {
                     passing.contains(&n.index)
                 } else {
@@ -87,26 +103,45 @@ impl<'a, T: Clone, C: Collection<T>> FilteredCollection<'a, T, C> {
                         })
                 }
             })
-            .map(|n| n.index)
+            .map(|(wrapper_pos, n)| (wrapper_pos, n.index))
             .collect::<Vec<_>>();
 
-        let visible_indices = visible_order.iter().copied().collect::<BTreeSet<_>>();
+        let visible_positions = visible_data.iter().map(|&(wp, _)| wp).collect::<Vec<_>>();
 
-        let first_focusable = visible_order
+        let visible_base_indices = visible_data
             .iter()
-            .copied()
-            .find(|&i| inner.get_by_index(i).is_some_and(Node::is_focusable));
+            .map(|&(_, bi)| bi)
+            .collect::<BTreeSet<_>>();
 
-        let last_focusable = visible_order
+        let base_to_visible_pos = visible_data
             .iter()
+            .enumerate()
+            .map(|(vis_idx, &(_, base_idx))| (base_idx, vis_idx))
+            .collect::<BTreeMap<_, _>>();
+
+        let first_focusable = visible_positions.iter().enumerate().find_map(|(vi, &wp)| {
+            inner
+                .get_by_index(wp)
+                .filter(|n| n.is_focusable())
+                .map(|_| vi)
+        });
+
+        let last_focusable = visible_positions
+            .iter()
+            .enumerate()
             .rev()
-            .copied()
-            .find(|&i| inner.get_by_index(i).is_some_and(Node::is_focusable));
+            .find_map(|(vi, &wp)| {
+                inner
+                    .get_by_index(wp)
+                    .filter(|n| n.is_focusable())
+                    .map(|_| vi)
+            });
 
         Self {
             inner,
-            visible_indices,
-            visible_order,
+            visible_base_indices,
+            visible_positions,
+            base_to_visible_pos,
             first_focusable,
             last_focusable,
             _phantom: PhantomData,
@@ -116,13 +151,12 @@ impl<'a, T: Clone, C: Collection<T>> FilteredCollection<'a, T, C> {
 
 impl<'a, T: Clone, C: Collection<T>> Collection<T> for FilteredCollection<'a, T, C> {
     fn size(&self) -> usize {
-        self.visible_indices.len()
+        self.visible_positions.len()
     }
 
     fn get(&self, key: &Key) -> Option<&Node<T>> {
-        // Only return nodes that are in the visible set.
         let node = self.inner.get(key)?;
-        if self.visible_indices.contains(&node.index) {
+        if self.visible_base_indices.contains(&node.index) {
             Some(node)
         } else {
             None
@@ -130,20 +164,22 @@ impl<'a, T: Clone, C: Collection<T>> Collection<T> for FilteredCollection<'a, T,
     }
 
     fn get_by_index(&self, index: usize) -> Option<&Node<T>> {
-        self.visible_order
+        self.visible_positions
             .get(index)
-            .and_then(|&i| self.inner.get_by_index(i))
+            .and_then(|&wp| self.inner.get_by_index(wp))
     }
 
     fn first_key(&self) -> Option<&Key> {
         self.first_focusable
-            .and_then(|i| self.inner.get_by_index(i))
+            .and_then(|vi| self.visible_positions.get(vi))
+            .and_then(|&wp| self.inner.get_by_index(wp))
             .map(|n| &n.key)
     }
 
     fn last_key(&self) -> Option<&Key> {
         self.last_focusable
-            .and_then(|i| self.inner.get_by_index(i))
+            .and_then(|vi| self.visible_positions.get(vi))
+            .and_then(|&wp| self.inner.get_by_index(wp))
             .map(|n| &n.key)
     }
 
@@ -156,35 +192,34 @@ impl<'a, T: Clone, C: Collection<T>> Collection<T> for FilteredCollection<'a, T,
     }
 
     fn key_after_no_wrap(&self, key: &Key) -> Option<&Key> {
-        let current_index = self.inner.get(key)?.index;
+        let node = self.inner.get(key)?;
 
-        let pos = self
-            .visible_order
+        let vis_pos = *self.base_to_visible_pos.get(&node.index)?;
+
+        self.visible_positions[vis_pos + 1..]
             .iter()
-            .position(|&i| i == current_index)?;
-
-        self.visible_order[pos + 1..].iter().find_map(|&i| {
-            self.inner
-                .get_by_index(i)
-                .filter(|n| n.is_focusable())
-                .map(|n| &n.key)
-        })
+            .find_map(|&wp| {
+                self.inner
+                    .get_by_index(wp)
+                    .filter(|n| n.is_focusable())
+                    .map(|n| &n.key)
+            })
     }
 
     fn key_before_no_wrap(&self, key: &Key) -> Option<&Key> {
-        let current_index = self.inner.get(key)?.index;
+        let node = self.inner.get(key)?;
 
-        let pos = self
-            .visible_order
+        let vis_pos = *self.base_to_visible_pos.get(&node.index)?;
+
+        self.visible_positions[..vis_pos]
             .iter()
-            .position(|&i| i == current_index)?;
-
-        self.visible_order[..pos].iter().rev().find_map(|&i| {
-            self.inner
-                .get_by_index(i)
-                .filter(|n| n.is_focusable())
-                .map(|n| &n.key)
-        })
+            .rev()
+            .find_map(|&wp| {
+                self.inner
+                    .get_by_index(wp)
+                    .filter(|n| n.is_focusable())
+                    .map(|n| &n.key)
+            })
     }
 
     fn keys<'b>(&'b self) -> impl Iterator<Item = &'b Key>
@@ -198,13 +233,9 @@ impl<'a, T: Clone, C: Collection<T>> Collection<T> for FilteredCollection<'a, T,
     where
         T: 'b,
     {
-        // Iterate visible_order (Vec) to preserve the inner collection's
-        // traversal order, not visible_indices (BTreeSet) which re-sorts by
-        // numeric index. This ensures nodes()/keys() agree with
-        // get_by_index()/key_after() when wrapping a SortedCollection.
-        self.visible_order
+        self.visible_positions
             .iter()
-            .filter_map(|&i| self.inner.get_by_index(i))
+            .filter_map(|&wp| self.inner.get_by_index(wp))
     }
 
     fn children_of<'b>(&'b self, parent_key: &Key) -> impl Iterator<Item = &'b Node<T>>
@@ -213,7 +244,7 @@ impl<'a, T: Clone, C: Collection<T>> Collection<T> for FilteredCollection<'a, T,
     {
         self.inner
             .children_of(parent_key)
-            .filter(|n| self.visible_indices.contains(&n.index))
+            .filter(|n| self.visible_base_indices.contains(&n.index))
     }
 }
 
@@ -221,7 +252,7 @@ impl<'a, T: Clone, C: Collection<T>> Collection<T> for FilteredCollection<'a, T,
 impl<T, C: Collection<T>> Debug for FilteredCollection<'_, T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FilteredCollection")
-            .field("visible", &self.visible_indices.len())
+            .field("visible", &self.visible_positions.len())
             .finish()
     }
 }
@@ -595,5 +626,68 @@ mod tests {
 
         assert!(debug.contains("FilteredCollection"));
         assert!(debug.contains("1"));
+    }
+
+    // ------------------------------------------------------------------ //
+    // Composition: FilteredCollection over SortedCollection               //
+    // ------------------------------------------------------------------ //
+
+    #[test]
+    fn filter_over_sorted_preserves_sorted_order() {
+        use crate::SortedCollection;
+
+        let base = CollectionBuilder::new()
+            .item(Key::int(1), "Cherry", "c")
+            .item(Key::int(2), "Apple", "a")
+            .item(Key::int(3), "Banana", "b")
+            .build();
+
+        let sorted = SortedCollection::new(&base, |a, b| a.text_value.cmp(&b.text_value));
+        // Sorted order: Apple(2), Banana(3), Cherry(1)
+
+        // Filter out Banana — should keep Apple, Cherry in sorted order.
+        let filtered = FilteredCollection::new(&sorted, |n| n.text_value != "Banana");
+
+        assert_eq!(filtered.size(), 2);
+
+        // Apple(2), Cherry(1) — Banana(3) was filtered out.
+        let keys = filtered.keys().collect::<Vec<_>>();
+        assert_eq!(keys, vec![&Key::int(2), &Key::int(1)]);
+
+        // Positional access follows filtered sorted order.
+        assert_eq!(filtered.get_by_index(0).expect("idx 0").text_value, "Apple");
+        assert_eq!(
+            filtered.get_by_index(1).expect("idx 1").text_value,
+            "Cherry"
+        );
+
+        // Navigation follows filtered sorted order.
+        assert_eq!(filtered.first_key(), Some(&Key::int(2))); // Apple
+        assert_eq!(filtered.last_key(), Some(&Key::int(1))); // Cherry
+        assert_eq!(filtered.key_after(&Key::int(2)), Some(&Key::int(1))); // Apple → Cherry
+        assert_eq!(filtered.key_after(&Key::int(1)), Some(&Key::int(2))); // Cherry wraps → Apple
+    }
+
+    #[test]
+    fn filter_all_pass_over_sorted_matches_sorted() {
+        use crate::SortedCollection;
+
+        let base = CollectionBuilder::new()
+            .item(Key::int(1), "Cherry", "c")
+            .item(Key::int(2), "Apple", "a")
+            .item(Key::int(3), "Banana", "b")
+            .build();
+
+        let sorted = SortedCollection::new(&base, |a, b| a.text_value.cmp(&b.text_value));
+        let filtered = FilteredCollection::new(&sorted, |_| true);
+
+        // Should produce identical order as sorted: Apple, Banana, Cherry
+        let texts = filtered
+            .nodes()
+            .map(|n| n.text_value.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(texts, vec!["Apple", "Banana", "Cherry"]);
+
+        assert_eq!(filtered.size(), 3);
     }
 }

@@ -59,18 +59,36 @@ pub struct SortDescriptor<K> {
 /// });
 /// ```
 ///
-/// Clone — this struct holds only a reference and sorted indices, no closures.
+/// ## Coordinate systems
+///
+/// This wrapper maintains two coordinate systems:
+/// - **Base indices** (`node.index`): the stable identity from the underlying
+///   base collection, used for key→position lookups during navigation.
+/// - **Wrapper positions**: positions into `inner`'s iteration order (i.e.,
+///   arguments to `inner.get_by_index()`), stored in `sorted_positions`.
+///   This distinction is critical when `inner` is itself a wrapper (e.g.,
+///   [`FilteredCollection`]) whose `get_by_index` expects dense positions,
+///   not sparse base indices.
+///
 /// The comparator is consumed at construction time and not retained.
 pub struct SortedCollection<'a, T, C>
 where
     C: Collection<T>,
 {
     inner: &'a C,
-    /// Sorted flat indices of inner nodes in the new traversal order.
-    sorted_indices: Vec<usize>,
-    /// Cached index of the first focusable item in sorted order.
+
+    /// Wrapper positions (into `inner`) in sorted traversal order.
+    /// These are the coordinates that `inner.get_by_index()` expects.
+    sorted_positions: Vec<usize>,
+
+    /// Maps base `node.index` → index into `sorted_positions`, for O(log n)
+    /// lookup when navigating from a key.
+    base_to_sorted_pos: BTreeMap<usize, usize>,
+
+    /// Cached index into `sorted_positions` of the first focusable item.
     first_focusable: Option<usize>,
-    /// Cached index of the last focusable item in sorted order.
+
+    /// Cached index into `sorted_positions` of the last focusable item.
     last_focusable: Option<usize>,
 
     _phantom: PhantomData<T>,
@@ -84,16 +102,19 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
     /// their grouping. For flat (non-sectioned) collections, all nodes are
     /// reordered.
     pub fn new(inner: &'a C, comparator: impl Fn(&Node<T>, &Node<T>) -> cmp::Ordering) -> Self {
-        let mut item_indices = inner
+        // Collect item wrapper positions and sort them by comparator.
+        let mut item_positions = inner
             .nodes()
-            .filter(|n| n.is_focusable())
-            .map(|n| n.index)
+            .enumerate()
+            .filter(|(_, n)| n.is_focusable())
+            .map(|(pos, _)| pos)
             .collect::<Vec<_>>();
 
-        item_indices.sort_by(|&a, &b| {
+        item_positions.sort_by(|&a, &b| {
             let node_a = inner
                 .get_by_index(a)
                 .expect("sort index must be within collection bounds");
+
             let node_b = inner
                 .get_by_index(b)
                 .expect("sort index must be within collection bounds");
@@ -104,7 +125,7 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
         // Interleave structural nodes back into sorted order.
         //
         // For flat (non-sectioned) collections: all nodes are Items, so
-        // item_indices IS the final sorted order.
+        // item_positions IS the final sorted order.
         //
         // For sectioned or mixed collections: items are sorted within each
         // contiguous *run* of same-parent items. A new run starts when a
@@ -117,64 +138,65 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
         // runs separated by sections.
         let has_sections = inner.nodes().any(Node::is_structural);
 
-        let sorted_indices = if has_sections {
-            // Phase 1: assign each item to a contiguous-run group.
+        let sorted_positions = if has_sections {
+            // Phase 1: assign each item to a contiguous-run group, keyed by
+            // wrapper position.
             let mut item_to_group = BTreeMap::<usize, usize>::new();
             let mut next_group = 0;
             let mut current_parent = None::<Option<Key>>;
 
-            for node in inner.nodes() {
+            for (pos, node) in inner.nodes().enumerate() {
                 match node.node_type {
                     NodeType::Section => {
-                        // Section always resets scope — next item starts a new group.
                         current_parent = None;
                     }
-                    NodeType::Header | NodeType::Separator => {
-                        // Structural leaf nodes do not break item groups.
-                    }
+                    NodeType::Header | NodeType::Separator => {}
                     NodeType::Item => {
                         let pk = node.parent_key.clone();
                         match &current_parent {
-                            Some(existing_pk) if *existing_pk == pk => {
-                                // Same group — no action needed.
-                            }
+                            Some(existing_pk) if *existing_pk == pk => {}
                             _ => {
-                                // Different parent or first item after reset — new group.
                                 next_group += 1;
                                 current_parent = Some(pk);
                             }
                         }
-                        item_to_group.insert(node.index, next_group);
+                        item_to_group.insert(pos, next_group);
                     }
                 }
             }
 
-            // Phase 2: distribute the globally-sorted item indices into per-group buckets.
+            // Phase 2: distribute sorted item wrapper positions into per-group buckets.
+            // Every wrapper position in item_positions was added to item_to_group
+            // in Phase 1 (both iterate focusable items), so the map lookup always
+            // succeeds — `.expect` documents the invariant.
             let mut groups = BTreeMap::<usize, Vec<usize>>::new();
-            for &idx in &item_indices {
-                if let Some(&group) = item_to_group.get(&idx) {
-                    groups.entry(group).or_default().push(idx);
-                }
+            for &wp in &item_positions {
+                let group = *item_to_group
+                    .get(&wp)
+                    .expect("item position must have been assigned a group");
+                groups.entry(group).or_default().push(wp);
             }
 
             // Phase 3: walk original order, emit structural nodes in place,
-            // emit each group's sorted items on first encounter.
+            // emit each group's sorted items on first encounter. Both map
+            // lookups are guaranteed by Phase 1/2 construction invariants.
             let mut group_emitted = BTreeSet::<usize>::new();
             let mut result = Vec::with_capacity(inner.size());
 
-            for node in inner.nodes() {
+            for (pos, node) in inner.nodes().enumerate() {
                 match node.node_type {
                     NodeType::Section | NodeType::Header | NodeType::Separator => {
-                        result.push(node.index);
+                        result.push(pos);
                     }
                     NodeType::Item => {
-                        if let Some(&group) = item_to_group.get(&node.index) {
-                            if group_emitted.insert(group) {
-                                // First encounter — emit all sorted items for this group.
-                                if let Some(items) = groups.get(&group) {
-                                    result.extend_from_slice(items);
-                                }
-                            }
+                        let group = *item_to_group
+                            .get(&pos)
+                            .expect("item position must have been assigned a group");
+                        if group_emitted.insert(group) {
+                            let items = groups
+                                .get(&group)
+                                .expect("group must have been populated in Phase 2");
+                            result.extend_from_slice(items);
                         }
                     }
                 }
@@ -183,23 +205,38 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
             result
         } else {
             // Fast path: flat collection — sorted items are the full order.
-            item_indices
+            item_positions
         };
 
-        let first_focusable = sorted_indices
+        // Build reverse map: base node.index → position in sorted_positions.
+        let base_to_sorted_pos = sorted_positions
             .iter()
-            .copied()
-            .find(|&i| inner.get_by_index(i).is_some_and(Node::is_focusable));
+            .enumerate()
+            .filter_map(|(sp_idx, &wp)| inner.get_by_index(wp).map(|n| (n.index, sp_idx)))
+            .collect::<BTreeMap<_, _>>();
 
-        let last_focusable = sorted_indices
+        let first_focusable = sorted_positions.iter().enumerate().find_map(|(si, &wp)| {
+            inner
+                .get_by_index(wp)
+                .filter(|n| n.is_focusable())
+                .map(|_| si)
+        });
+
+        let last_focusable = sorted_positions
             .iter()
+            .enumerate()
             .rev()
-            .copied()
-            .find(|&i| inner.get_by_index(i).is_some_and(Node::is_focusable));
+            .find_map(|(si, &wp)| {
+                inner
+                    .get_by_index(wp)
+                    .filter(|n| n.is_focusable())
+                    .map(|_| si)
+            });
 
         Self {
             inner,
-            sorted_indices,
+            sorted_positions,
+            base_to_sorted_pos,
             first_focusable,
             last_focusable,
             _phantom: PhantomData,
@@ -209,7 +246,7 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
 
 impl<'a, T, C: Collection<T>> Collection<T> for SortedCollection<'a, T, C> {
     fn size(&self) -> usize {
-        self.sorted_indices.len()
+        self.sorted_positions.len()
     }
 
     fn get(&self, key: &Key) -> Option<&Node<T>> {
@@ -217,20 +254,22 @@ impl<'a, T, C: Collection<T>> Collection<T> for SortedCollection<'a, T, C> {
     }
 
     fn get_by_index(&self, index: usize) -> Option<&Node<T>> {
-        self.sorted_indices
+        self.sorted_positions
             .get(index)
-            .and_then(|&i| self.inner.get_by_index(i))
+            .and_then(|&wp| self.inner.get_by_index(wp))
     }
 
     fn first_key(&self) -> Option<&Key> {
         self.first_focusable
-            .and_then(|i| self.inner.get_by_index(i))
+            .and_then(|si| self.sorted_positions.get(si))
+            .and_then(|&wp| self.inner.get_by_index(wp))
             .map(|n| &n.key)
     }
 
     fn last_key(&self) -> Option<&Key> {
         self.last_focusable
-            .and_then(|i| self.inner.get_by_index(i))
+            .and_then(|si| self.sorted_positions.get(si))
+            .and_then(|&wp| self.inner.get_by_index(wp))
             .map(|n| &n.key)
     }
 
@@ -243,25 +282,34 @@ impl<'a, T, C: Collection<T>> Collection<T> for SortedCollection<'a, T, C> {
     }
 
     fn key_after_no_wrap(&self, key: &Key) -> Option<&Key> {
-        let current = self.inner.get(key)?.index;
-        let pos = self.sorted_indices.iter().position(|&i| i == current)?;
-        self.sorted_indices[pos + 1..].iter().find_map(|&i| {
-            self.inner
-                .get_by_index(i)
-                .filter(|n| n.is_focusable())
-                .map(|n| &n.key)
-        })
+        let node = self.inner.get(key)?;
+
+        let sorted_pos = *self.base_to_sorted_pos.get(&node.index)?;
+
+        self.sorted_positions[sorted_pos + 1..]
+            .iter()
+            .find_map(|&wp| {
+                self.inner
+                    .get_by_index(wp)
+                    .filter(|n| n.is_focusable())
+                    .map(|n| &n.key)
+            })
     }
 
     fn key_before_no_wrap(&self, key: &Key) -> Option<&Key> {
-        let current = self.inner.get(key)?.index;
-        let pos = self.sorted_indices.iter().position(|&i| i == current)?;
-        self.sorted_indices[..pos].iter().rev().find_map(|&i| {
-            self.inner
-                .get_by_index(i)
-                .filter(|n| n.is_focusable())
-                .map(|n| &n.key)
-        })
+        let node = self.inner.get(key)?;
+
+        let sorted_pos = *self.base_to_sorted_pos.get(&node.index)?;
+
+        self.sorted_positions[..sorted_pos]
+            .iter()
+            .rev()
+            .find_map(|&wp| {
+                self.inner
+                    .get_by_index(wp)
+                    .filter(|n| n.is_focusable())
+                    .map(|n| &n.key)
+            })
     }
 
     fn keys<'b>(&'b self) -> impl Iterator<Item = &'b Key>
@@ -275,9 +323,9 @@ impl<'a, T, C: Collection<T>> Collection<T> for SortedCollection<'a, T, C> {
     where
         T: 'b,
     {
-        self.sorted_indices
+        self.sorted_positions
             .iter()
-            .filter_map(|&i| self.inner.get_by_index(i))
+            .filter_map(|&wp| self.inner.get_by_index(wp))
     }
 
     fn children_of<'b>(&'b self, parent_key: &Key) -> impl Iterator<Item = &'b Node<T>>
@@ -292,7 +340,7 @@ impl<'a, T, C: Collection<T>> Collection<T> for SortedCollection<'a, T, C> {
 impl<T, C: Collection<T>> Debug for SortedCollection<'_, T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SortedCollection")
-            .field("sorted_count", &self.sorted_indices.len())
+            .field("sorted_count", &self.sorted_positions.len())
             .finish()
     }
 }
@@ -808,5 +856,46 @@ mod tests {
 
         assert!(debug.contains("SortedCollection"));
         assert!(debug.contains("2"));
+    }
+
+    // ------------------------------------------------------------------ //
+    // Composition: SortedCollection over FilteredCollection               //
+    // ------------------------------------------------------------------ //
+
+    #[test]
+    fn sort_over_filtered_uses_wrapper_positions() {
+        use crate::FilteredCollection;
+
+        let base = CollectionBuilder::new()
+            .item(Key::int(1), "Cherry", "c")
+            .item(Key::int(2), "Apple", "a")
+            .item(Key::int(3), "Banana", "b")
+            .item(Key::int(4), "Date", "d")
+            .build();
+
+        // Filter out Apple — leaves Cherry(1), Banana(3), Date(4).
+        let filtered = FilteredCollection::new(&base, |n| n.text_value != "Apple");
+
+        // Sort the filtered view alphabetically.
+        let sorted = SortedCollection::new(&filtered, |a, b| a.text_value.cmp(&b.text_value));
+
+        assert_eq!(sorted.size(), 3);
+
+        let texts = sorted
+            .nodes()
+            .map(|n| n.text_value.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(texts, vec!["Banana", "Cherry", "Date"]);
+
+        // Positional access follows sorted order.
+        assert_eq!(sorted.get_by_index(0).expect("idx 0").text_value, "Banana");
+        assert_eq!(sorted.get_by_index(1).expect("idx 1").text_value, "Cherry");
+        assert_eq!(sorted.get_by_index(2).expect("idx 2").text_value, "Date");
+
+        // Navigation follows sorted order.
+        assert_eq!(sorted.first_key(), Some(&Key::int(3))); // Banana
+        assert_eq!(sorted.last_key(), Some(&Key::int(4))); // Date
+        assert_eq!(sorted.key_after_no_wrap(&Key::int(3)), Some(&Key::int(1))); // Banana → Cherry
+        assert_eq!(sorted.key_before_no_wrap(&Key::int(1)), Some(&Key::int(3))); // Cherry → Banana
     }
 }
