@@ -1404,7 +1404,7 @@ pub trait PlatformEffects {
     /// Position an element at absolute (x, y) coordinates.
     fn position_element_at(&self, id: &str, x: f64, y: f64);
     /// Resolve the computed text direction of an element. Returns `Ltr` or `Rtl`.
-    fn resolved_direction(&self, id: &str) -> Direction;
+    fn resolved_direction(&self, id: &str) -> ResolvedDirection;
 
     // ── Modal / Inert ───────────────────────────────────────────────
     /// Set `inert` on all siblings of the portal root. Returns a cleanup function
