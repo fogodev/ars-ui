@@ -2031,28 +2031,36 @@ pub struct DragConfig {
 
     /// The items this element exposes for dragging.
     /// Called when a drag begins; items are captured at that moment.
-    pub items: Option<Rc<dyn Fn() -> Vec<DragItem>>>,
+    ///
+    /// These zero-argument item suppliers use shared `Arc` ownership directly
+    /// rather than `Callback`, because they are value-producing resources
+    /// rather than event callbacks and must carry the normalized
+    /// `Send + Sync + 'static` contract from `01-architecture.md` §1.5.
+    pub items: Option<Arc<dyn Fn() -> Vec<DragItem> + Send + Sync>>,
 
     /// The set of drop operations this source allows.
     /// Defaults to all operations.
     pub allowed_operations: Option<Vec<DropOperation>>,
 
     /// Called when drag begins.
-    pub on_drag_start: Option<Rc<dyn Fn(DragStartEvent)>>,
+    pub on_drag_start: Option<Callback<dyn Fn(DragStartEvent)>>,
 
     /// Called when the drag ends (regardless of outcome).
-    pub on_drag_end: Option<Rc<dyn Fn(DragEndEvent)>>,
+    pub on_drag_end: Option<Callback<dyn Fn(DragEndEvent)>>,
 
     /// For multi-item drag: returns additional selected items to include.
     /// When both `items` and `get_items` are set, their results are **unioned**:
     /// the drag payload is `items() ∪ get_items()`. Use `items` for the primary
     /// dragged element and `get_items` for additional selected items.
     /// When None, only the dragged element's items are transferred.
-    pub get_items: Option<Rc<dyn Fn() -> Vec<DragItem>>>,
+    pub get_items: Option<Arc<dyn Fn() -> Vec<DragItem> + Send + Sync>>,
 
-    /// Screen reader announcement when drag starts.
+    /// Localized screen reader message override when drag starts.
     /// Example: "Started dragging {item_name}. Press Tab to navigate to a drop target."
-    pub drag_start_announcement: Option<Rc<dyn Fn(&[DragItem]) -> String>>,
+    ///
+    /// This is a `MessageFn` rather than a `Callback` because it produces a
+    /// translatable string and needs the active locale to do so.
+    pub drag_start_announcement: Option<MessageFn<dyn Fn(&[DragItem], &Locale) -> String + Send + Sync>>,
 }
 
 #[derive(Clone, Debug)]
@@ -2082,17 +2090,17 @@ pub struct DropConfig {
     pub disabled: bool,
 
     /// Called when dragged items enter this target.
-    pub on_drag_enter: Option<Rc<dyn Fn(DropTargetEvent)>>,
+    pub on_drag_enter: Option<Callback<dyn Fn(DropTargetEvent)>>,
 
     /// Called when dragged items leave this target.
-    pub on_drag_leave: Option<Rc<dyn Fn(DropTargetEvent)>>,
+    pub on_drag_leave: Option<Callback<dyn Fn(DropTargetEvent)>>,
 
     /// Called on each dragover tick; return the DropOperation to accept.
     /// Return DropOperation::Cancel to reject the drop.
-    pub on_drag_over: Option<Rc<dyn Fn(DropTargetEvent) -> DropOperation>>,
+    pub on_drag_over: Option<Callback<dyn Fn(DropTargetEvent) -> DropOperation>>,
 
     /// Called when items are dropped onto this target.
-    pub on_drop: Option<Rc<dyn Fn(DropEvent)>>,
+    pub on_drop: Option<Callback<dyn Fn(DropEvent)>>,
 
     /// The drop operations this target accepts.
     /// If None, accepts all operations offered by the source.
@@ -2105,16 +2113,16 @@ pub struct DropConfig {
     /// Where within the target the drop indicator should be shown.
     pub drop_indicator_position: DropIndicatorPosition,
 
-    /// Screen reader announcement when a dragged item enters.
-    pub drag_enter_announcement: Option<Rc<dyn Fn(&DropTargetEvent) -> String>>,
+    /// Localized screen reader message override when a dragged item enters.
+    pub drag_enter_announcement: Option<MessageFn<dyn Fn(&DropTargetEvent, &Locale) -> String + Send + Sync>>,
 
-    /// Screen reader announcement when drop succeeds.
-    pub drop_announcement: Option<Rc<dyn Fn(&DropEvent) -> String>>,
+    /// Localized screen reader message override when drop succeeds.
+    pub drop_announcement: Option<MessageFn<dyn Fn(&DropEvent, &Locale) -> String + Send + Sync>>,
 }
 
-/// **Announcement dispatch precedence:** Per-element announcement closures on
-/// `DragConfig` and `DropConfig` take precedence over the corresponding
-/// `DragAnnouncements` field. When a per-element closure is `None`, the
+/// **Announcement dispatch precedence:** Per-element localized message overrides
+/// on `DragConfig` and `DropConfig` take precedence over the corresponding
+/// `DragAnnouncements` field. When a per-element override is `None`, the
 /// `DragAnnouncements` default is used.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -2352,9 +2360,9 @@ impl DragConfig {
     /// `get_selected_items` returns all items in the current selection.
     pub fn with_selection(
         mut self,
-        get_selected_items: impl Fn() -> Vec<DragItem> + 'static,
+        get_selected_items: impl Fn() -> Vec<DragItem> + Send + Sync + 'static,
     ) -> Self {
-        self.get_items = Some(Rc::new(get_selected_items));
+        self.get_items = Some(Arc::new(get_selected_items));
         self
     }
 }

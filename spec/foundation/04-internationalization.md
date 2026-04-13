@@ -2461,6 +2461,10 @@ impl<T: ?Sized> MessageFn<T> {
 // dyn trait object coercion still requires constructing the inner Arc directly.
 // One impl per distinct MessageFn signature used across the component library.
 
+impl<T: ?Sized> From<Arc<T>> for MessageFn<T> {
+    fn from(f: Arc<T>) -> Self { Self(f) }
+}
+
 impl<F: Fn() -> String + Send + Sync + 'static> From<F> for MessageFn<dyn Fn() -> String + Send + Sync> {
     fn from(f: F) -> Self { Self(Arc::new(f)) }
 }
@@ -2524,6 +2528,7 @@ impl MessageFn<dyn Fn(&Locale) -> String + Send + Sync> {
 
 - `MessageFn<dyn Fn(&Locale) -> String + Send + Sync>` — for all label fields; every message receives the active locale so users can provide per-locale translations
 - `MessageFn<dyn Fn(param, &Locale) -> String + Send + Sync>` — for parameterized messages where additional arguments carry format data (e.g., `MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync>` for plural-aware counts, `MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>` for string interpolation)
+- For signatures outside the shared `ars-core` set, first coerce the closure into a typed `Arc<dyn Fn(...) + Send + Sync>` and then pass that `Arc` to `MessageFn::new`. This is the escape hatch for downstream crates that define their own event or domain-specific parameter types.
 
 > **Design note — All `MessageFn` trait objects include `+ Send + Sync`.**
 > This avoids cfg-gated dual struct definitions for every `*Messages` type. On WASM,
