@@ -2872,12 +2872,13 @@ Type-ahead allows users to jump to items by typing text matching item labels. It
 // ars-collections/src/typeahead.rs
 
 use alloc::string::String;
+use core::time::Duration;
 #[cfg(feature = "i18n")]
 use ars_i18n::Locale;
 use crate::{key::Key, Collection};
 
 /// Default time window for accumulating multi-character type-ahead queries.
-pub const TYPEAHEAD_TIMEOUT_MS: u64 = 500;
+pub const TYPEAHEAD_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// The accumulated type-ahead search state.
 ///
@@ -2905,7 +2906,7 @@ pub struct State {
 impl State {
     /// Process a new character from a keydown event.
     ///
-    /// - If `now_ms - last_key_time_ms >= TYPEAHEAD_TIMEOUT_MS`, the search
+    /// - If `now_ms - last_key_time_ms >= TYPEAHEAD_TIMEOUT`, the search
     ///   string is reset before appending the new character.
     /// - Returns `Some(key)` if a match was found, `None` otherwise.
     #[cfg(feature = "i18n")]
@@ -2918,7 +2919,7 @@ impl State {
         locale: &Locale,
     ) -> (Self, Option<Key>) {
         // Determine whether to reset the accumulated search.
-        let timed_out = now_ms.saturating_sub(self.last_key_time_ms) >= TYPEAHEAD_TIMEOUT_MS;
+        let timed_out = Duration::from_millis(now_ms.saturating_sub(self.last_key_time_ms)) >= TYPEAHEAD_TIMEOUT;
         let mut search = if timed_out {
             String::new()
         } else {
@@ -2932,7 +2933,7 @@ impl State {
             self.search_start_key.clone()
         };
 
-        let found = Self::find_match(&search, &search_start, current_focus, collection, locale);
+        let found = Self::find_match(&search, current_focus, collection, locale);
 
         let new_state = Self {
             search,
@@ -2952,7 +2953,7 @@ impl State {
         current_focus: Option<&Key>,
         collection: &C,
     ) -> (Self, Option<Key>) {
-        let timed_out = now_ms.saturating_sub(self.last_key_time_ms) >= TYPEAHEAD_TIMEOUT_MS;
+        let timed_out = Duration::from_millis(now_ms.saturating_sub(self.last_key_time_ms)) >= TYPEAHEAD_TIMEOUT;
         let mut search = if timed_out {
             String::new()
         } else {
@@ -2966,7 +2967,7 @@ impl State {
             self.search_start_key.clone()
         };
 
-        let found = Self::find_match(&search, &search_start, current_focus, collection);
+        let found = Self::find_match(&search, current_focus, collection);
 
         let new_state = Self {
             search,
@@ -2986,7 +2987,6 @@ impl State {
     #[cfg(feature = "i18n")]
     fn find_match<T, C: Collection<T>>(
         search: &str,
-        search_start_key: &Option<Key>,
         current_focus: Option<&Key>,
         collection: &C,
         locale: &Locale,
@@ -2994,7 +2994,7 @@ impl State {
         // CaseMapper::new() returns CaseMapperBorrowed<'static> which is Copy —
         // no caching needed, can be constructed freely.
         let case_mapper = icu::casemap::CaseMapper::new();
-        let query = case_mapper.lowercase_to_string(search, &locale.0.id);
+        let query = case_mapper.lowercase_to_string(search, &locale.language_identifier());
         let single_char = query.chars().count() == 1;
 
         // Build the scan order: start after `current_focus`, wrap if needed.
@@ -3011,8 +3011,7 @@ impl State {
         // Find the starting position.
         let start_pos = current_focus
             .and_then(|k| all_item_keys.iter().position(|ik| ik == k))
-            .map(|p| (p + 1) % all_item_keys.len())
-            .unwrap_or(0);
+            .map_or(0, |p| (p + 1) % all_item_keys.len());
 
         // Scan in two passes for wrap-around (single char only).
         let scan_len = if single_char { all_item_keys.len() } else { all_item_keys.len().saturating_sub(start_pos) };
@@ -3021,7 +3020,7 @@ impl State {
             let idx = (start_pos + offset) % all_item_keys.len();
             let key = &all_item_keys[idx];
             if let Some(text) = collection.text_value_of(key) {
-                if case_mapper.lowercase_to_string(text, &locale.0.id).starts_with(&query) {
+                if case_mapper.lowercase_to_string(text, &locale.language_identifier()).starts_with(&query) {
                     return Some(key.clone());
                 }
             }
@@ -3033,7 +3032,6 @@ impl State {
     #[cfg(not(feature = "i18n"))]
     fn find_match<T, C: Collection<T>>(
         search: &str,
-        search_start_key: &Option<Key>,
         current_focus: Option<&Key>,
         collection: &C,
     ) -> Option<Key> {
@@ -3052,8 +3050,7 @@ impl State {
 
         let start_pos = current_focus
             .and_then(|k| all_item_keys.iter().position(|ik| ik == k))
-            .map(|p| (p + 1) % all_item_keys.len())
-            .unwrap_or(0);
+            .map_or(0, |p| (p + 1) % all_item_keys.len());
 
         let scan_len = if single_char { all_item_keys.len() } else { all_item_keys.len().saturating_sub(start_pos) };
 
@@ -3072,6 +3069,7 @@ impl State {
 
     /// Reset the type-ahead state (e.g., when the user presses Escape or
     /// the component loses focus).
+    #[must_use]
     pub fn reset() -> Self {
         Self::default()
     }

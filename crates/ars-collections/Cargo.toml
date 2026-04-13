@@ -10,7 +10,7 @@ rust-version.workspace = true
 [features]
 default = ["std"]
 std     = ["indexmap/std"]
-i18n    = ["dep:ars-i18n"]
+i18n    = ["dep:ars-i18n", "dep:icu"]
 uuid    = ["dep:uuid"]
 serde   = []
 
@@ -18,6 +18,7 @@ serde   = []
 ars-a11y = { path = "../ars-a11y", default-features = false }
 ars-core = { path = "../ars-core", default-features = false }
 ars-i18n = { path = "../ars-i18n", optional = true }
+icu      = { version = "2.2", default-features = false, features = ["compiled_data"], optional = true }
 indexmap = { version = "2", default-features = false }
 uuid     = { version = "1", default-features = false, optional = true }
 

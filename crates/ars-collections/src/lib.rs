@@ -26,6 +26,7 @@
 //! - [`SortDirection`] — ascending or descending sort order.
 //! - [`SortDescriptor`] — column + direction for table sorting.
 //! - [`CollectionError`] — error from an async page load.
+//! - [`typeahead`] — type-ahead / type-select state machine for keyboard search.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::std_instead_of_core)]
@@ -56,6 +57,8 @@ pub mod sorted_collection;
 pub mod static_collection;
 /// Hierarchical collection with expand/collapse for tree-based components.
 pub mod tree_collection;
+/// Type-ahead / type-select state machine for keyboard search in collections.
+pub mod typeahead;
 
 pub use async_collection::{AsyncCollection, AsyncLoadingState};
 pub use async_loader::{AsyncLoader, CollectionError, LoadResult};

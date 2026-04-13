@@ -54,6 +54,15 @@ impl Locale {
         self.0.to_string()
     }
 
+    /// Returns the full language identifier (language + script + region subtags).
+    ///
+    /// Used by ICU4X APIs that require a `&LanguageIdentifier`, such as
+    /// `CaseMapper::lowercase_to_string`.
+    #[must_use]
+    pub const fn language_identifier(&self) -> &LanguageIdentifier {
+        &self.0.id
+    }
+
     /// Returns the language subtag.
     #[must_use]
     pub const fn language(&self) -> &str {
