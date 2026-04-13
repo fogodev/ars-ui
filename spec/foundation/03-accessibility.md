@@ -2390,7 +2390,7 @@ pub struct KeyboardShortcut {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct KeyModifiers {
     pub shift: bool,
-    /// The "action key" — Ctrl on Windows/Linux, Cmd (Meta) on macOS.
+    /// The "action key" — Ctrl on Windows/Linux, Cmd (Meta) on macOS and iOS.
     /// Use this instead of `ctrl` or `meta` for cross-platform shortcuts.
     pub action: bool,
     pub alt: bool,
@@ -2406,13 +2406,14 @@ impl KeyModifiers {
     /// Returns true if the event's modifier state matches this descriptor,
     /// accounting for platform differences (Cmd vs Ctrl).
     pub fn matches_event(&self, event: &dyn crate::DomEvent, platform: Platform) -> bool {
-        let action_pressed = match platform {
-            Platform::MacOs | Platform::IOS => event.meta_key(),
-            _ => event.ctrl_key(),
+        let (action_pressed, extra_modifier_pressed) = match platform {
+            Platform::MacOs | Platform::IOS => (event.meta_key(), event.ctrl_key()),
+            _ => (event.ctrl_key(), event.meta_key()),
         };
         self.shift == event.shift_key()
             && self.action == action_pressed
             && self.alt == event.alt_key()
+            && !extra_modifier_pressed
     }
 }
 
@@ -2434,7 +2435,10 @@ impl Platform {
     /// platform. We disambiguate by checking `navigator.maxTouchPoints > 1`, which
     /// is true on iPadOS but false (or 0) on actual macOS hardware.
     pub fn detect(navigator_platform: &str, max_touch_points: u32) -> Self {
-        if navigator_platform.contains("Mac") {
+        if navigator_platform.contains("iPhone") || navigator_platform.contains("iPad") {
+            Self::IOS
+        }
+        else if navigator_platform.contains("Mac") {
             if max_touch_points > 1 { Self::IOS } else { Self::MacOs }
         }
         else if navigator_platform.contains("Win") { Self::Windows }

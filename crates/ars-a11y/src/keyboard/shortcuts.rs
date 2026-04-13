@@ -97,14 +97,17 @@ impl KeyModifiers {
 
     /// Returns true if the event's modifier state matches this descriptor.
     pub fn matches_event(&self, event: &dyn DomEvent, platform: Platform) -> bool {
-        let action_pressed = match platform {
-            Platform::MacOs | Platform::IOS => event.meta_key(),
-            Platform::Windows | Platform::Linux | Platform::Unknown => event.ctrl_key(),
+        let (action_pressed, extra_modifier_pressed) = match platform {
+            Platform::MacOs | Platform::IOS => (event.meta_key(), event.ctrl_key()),
+            Platform::Windows | Platform::Linux | Platform::Unknown => {
+                (event.ctrl_key(), event.meta_key())
+            }
         };
 
         self.shift == event.shift_key()
             && self.action == action_pressed
             && self.alt == event.alt_key()
+            && !extra_modifier_pressed
     }
 }
 
@@ -130,7 +133,9 @@ impl Platform {
     /// `max_touch_points > 1` is used to distinguish it from actual macOS
     /// hardware.
     pub fn detect(navigator_platform: &str, max_touch_points: u32) -> Self {
-        if navigator_platform.contains("Mac") {
+        if navigator_platform.contains("iPhone") || navigator_platform.contains("iPad") {
+            Self::IOS
+        } else if navigator_platform.contains("Mac") {
             if max_touch_points > 1 {
                 Self::IOS
             } else {
@@ -224,6 +229,16 @@ mod tests {
     #[test]
     fn platform_detect_returns_ios_for_mac_with_touch_points() {
         assert_eq!(Platform::detect("MacIntel", 2), Platform::IOS);
+    }
+
+    #[test]
+    fn platform_detect_returns_ios_for_iphone() {
+        assert_eq!(Platform::detect("iPhone", 0), Platform::IOS);
+    }
+
+    #[test]
+    fn platform_detect_returns_ios_for_ipad() {
+        assert_eq!(Platform::detect("iPad", 0), Platform::IOS);
     }
 
     #[test]
@@ -337,6 +352,28 @@ mod tests {
         };
 
         assert!(!KeyModifiers::ACTION.matches_event(&event, Platform::IOS));
+    }
+
+    #[test]
+    fn action_rejects_ctrl_with_meta_on_macos() {
+        let event = TestEvent {
+            ctrl: true,
+            meta: true,
+            ..TestEvent::default()
+        };
+
+        assert!(!KeyModifiers::ACTION.matches_event(&event, Platform::MacOs));
+    }
+
+    #[test]
+    fn action_rejects_meta_with_ctrl_on_windows() {
+        let event = TestEvent {
+            ctrl: true,
+            meta: true,
+            ..TestEvent::default()
+        };
+
+        assert!(!KeyModifiers::ACTION.matches_event(&event, Platform::Windows));
     }
 
     #[test]
