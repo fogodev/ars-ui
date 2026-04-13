@@ -87,6 +87,7 @@ pub enum MoveState {
 pub struct MoveResult {
     state: Rc<RefCell<MoveState>>,
     config: MoveConfig,
+    active_move_keys: Vec<KeyboardKey>,
 }
 
 impl MoveResult {
@@ -129,6 +130,8 @@ impl MoveResult {
         if self.config.disabled {
             return;
         }
+
+        self.active_move_keys.clear();
 
         let started = {
             let mut state = self.state.borrow_mut();
@@ -246,6 +249,8 @@ impl MoveResult {
             }
         };
 
+        self.track_active_move_key(key);
+
         if should_emit_start {
             self.dispatch_event(
                 MoveEventType::MoveStart,
@@ -268,10 +273,15 @@ impl MoveResult {
 
     /// Handles keyboard-driven movement completion on keyup.
     ///
-    /// Returns `true` when the key ended an active keyboard move session.
+    /// Returns `true` when the released key ended an active keyboard move
+    /// session because no other move keys remain pressed.
     #[must_use]
     pub fn handle_key_up(&mut self, key: KeyboardKey, modifiers: KeyModifiers) -> bool {
         if !is_move_key(key) {
+            return false;
+        }
+
+        if !self.untrack_active_move_key(key) {
             return false;
         }
 
@@ -282,7 +292,7 @@ impl MoveResult {
                 MoveState::Moving {
                     pointer_type: PointerType::Keyboard,
                     ..
-                } => {
+                } if self.active_move_keys.is_empty() => {
                     *state = MoveState::Idle;
                     true
                 }
@@ -305,6 +315,8 @@ impl MoveResult {
     }
 
     fn finish_pointer_move(&mut self, modifiers: KeyModifiers) {
+        self.active_move_keys.clear();
+
         let pointer_type = {
             let mut state = self.state.borrow_mut();
 
@@ -361,6 +373,19 @@ impl MoveResult {
             callback(event);
         }
     }
+
+    fn track_active_move_key(&mut self, key: KeyboardKey) {
+        if !self.active_move_keys.contains(&key) {
+            self.active_move_keys.push(key);
+        }
+    }
+
+    fn untrack_active_move_key(&mut self, key: KeyboardKey) -> bool {
+        let original_len = self.active_move_keys.len();
+        self.active_move_keys
+            .retain(|active_key| *active_key != key);
+        self.active_move_keys.len() != original_len
+    }
 }
 
 /// Creates a move interaction state machine with the given configuration.
@@ -369,6 +394,7 @@ pub fn use_move(config: MoveConfig) -> MoveResult {
     MoveResult {
         state: Rc::new(RefCell::new(MoveState::Idle)),
         config,
+        active_move_keys: Vec::new(),
     }
 }
 
@@ -953,7 +979,8 @@ mod tests {
         assert_eq!(moves[1].delta_x, -1.0);
         drop(moves);
 
-        let _ = result.handle_key_up(KeyboardKey::ArrowLeft, KeyModifiers::default());
+        assert!(!result.handle_key_up(KeyboardKey::ArrowLeft, KeyModifiers::default()));
+        assert!(result.handle_key_up(KeyboardKey::ArrowRight, KeyModifiers::default()));
 
         result.begin_pointer_move(
             PointerType::Mouse,
@@ -969,6 +996,72 @@ mod tests {
             ResolvedDirection::Ltr,
             KeyModifiers::default(),
         ));
+    }
+
+    #[test]
+    fn keyboard_move_only_ends_when_last_active_move_key_is_released() {
+        let starts = Arc::new(Mutex::new(Vec::new()));
+        let moves = Arc::new(Mutex::new(Vec::new()));
+        let ends = Arc::new(Mutex::new(Vec::new()));
+
+        let config = MoveConfig {
+            on_move_start: Some({
+                let starts = Arc::clone(&starts);
+                Callback::new(move |event: MoveEvent| {
+                    starts.lock().expect("start events").push(event);
+                })
+            }),
+            on_move: Some({
+                let moves = Arc::clone(&moves);
+                Callback::new(move |event: MoveEvent| {
+                    moves.lock().expect("move events").push(event);
+                })
+            }),
+            on_move_end: Some({
+                let ends = Arc::clone(&ends);
+                Callback::new(move |event: MoveEvent| {
+                    ends.lock().expect("end events").push(event);
+                })
+            }),
+            ..MoveConfig::default()
+        };
+
+        let mut result = use_move(config);
+
+        assert!(result.handle_key_down(
+            KeyboardKey::ArrowRight,
+            ResolvedDirection::Ltr,
+            KeyModifiers::default(),
+        ));
+        assert!(result.handle_key_down(
+            KeyboardKey::ArrowUp,
+            ResolvedDirection::Ltr,
+            KeyModifiers::default(),
+        ));
+        assert!(!result.handle_key_up(KeyboardKey::ArrowRight, KeyModifiers::default()));
+        assert_eq!(
+            *result.state.borrow(),
+            MoveState::Moving {
+                pointer_type: PointerType::Keyboard,
+                last_x: 0.0,
+                last_y: 0.0,
+                scale_x: 1.0,
+                scale_y: 1.0,
+            },
+        );
+        assert!(ends.lock().expect("ends").is_empty());
+
+        assert!(result.handle_key_up(KeyboardKey::ArrowUp, KeyModifiers::default()));
+        assert_eq!(*result.state.borrow(), MoveState::Idle);
+
+        let starts = starts.lock().expect("starts");
+        let moves = moves.lock().expect("moves");
+        let ends = ends.lock().expect("ends");
+
+        assert_eq!(starts.len(), 1);
+        assert_eq!(moves.len(), 2);
+        assert_eq!(ends.len(), 1);
+        assert_eq!(ends[0].event_type, MoveEventType::MoveEnd);
     }
 
     #[test]

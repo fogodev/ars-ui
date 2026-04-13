@@ -1758,7 +1758,7 @@ Transitions:
         action: emit on_move_end, release pointer capture
     ─[PointerCancel]────────────────────→ Idle
         action: emit on_move_end (cancelled)
-    ─[ArrowKey Released]────────────────→ Idle
+    ─[ArrowKey Released, no active move keys remain]→ Idle
         action: emit on_move_end
 ```
 
@@ -1869,6 +1869,7 @@ pub fn use_move(config: MoveConfig) -> MoveResult {
 /// The static class `ars-touch-none` is always included.
 pub struct MoveResult {
     state: Rc<RefCell<MoveState>>,
+    // Private adapter bookkeeping for currently pressed keyboard move keys.
 }
 
 impl MoveResult {
@@ -1898,7 +1899,7 @@ impl MoveResult {
     ///
     /// `handle_key_down()` starts keyboard-driven movement and emits deltas
     /// from `key_to_delta()`. `handle_key_up()` ends the keyboard move session
-    /// when the active move key is released.
+    /// only when no active move keys remain pressed.
     pub fn begin_pointer_move(&mut self, pointer_type: PointerType, client_x: f64, client_y: f64, modifiers: KeyModifiers, scale_x: f64, scale_y: f64) { /* ... */ }
     pub fn update_pointer_move(&mut self, client_x: f64, client_y: f64, modifiers: KeyModifiers) { /* ... */ }
     pub fn end_pointer_move(&mut self, modifiers: KeyModifiers) { /* ... */ }
