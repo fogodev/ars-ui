@@ -12,6 +12,8 @@ pub mod announcer;
 pub mod aria;
 /// Shared focus management contracts consumed by DOM and adapter layers.
 pub mod focus;
+/// Keyboard shortcut descriptors and platform-normalized modifier matching.
+pub mod keyboard;
 pub mod visually_hidden;
 
 pub use announcer::{Announcement, AnnouncementPriority, LiveAnnouncer};
@@ -27,6 +29,7 @@ pub use aria::{
     state::{set_busy, set_checked, set_disabled, set_expanded, set_invalid, set_selected},
 };
 pub use focus::{FocusRing, FocusScopeBehavior, FocusScopeOptions, FocusStrategy, FocusTarget};
+pub use keyboard::{DomEvent, KeyModifiers, KeyboardShortcut, Platform};
 pub use visually_hidden::{
     VisuallyHiddenCssDoc, VisuallyHiddenFocusableCssDoc, visually_hidden_attrs,
     visually_hidden_focusable_attrs,

@@ -2407,7 +2407,7 @@ impl KeyModifiers {
     /// accounting for platform differences (Cmd vs Ctrl).
     pub fn matches_event(&self, event: &dyn crate::DomEvent, platform: Platform) -> bool {
         let action_pressed = match platform {
-            Platform::MacOs => event.meta_key(),
+            Platform::MacOs | Platform::IOS => event.meta_key(),
             _ => event.ctrl_key(),
         };
         self.shift == event.shift_key()
