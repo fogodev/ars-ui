@@ -2814,17 +2814,16 @@ pub struct VisuallyHiddenFocusableCssDoc;
 /// 5. `placeholder` attribute (last resort; discouraged)
 #[derive(Clone, Debug, Default)]
 pub struct LabelConfig {
-    /// IDs of elements that label this element (aria-labelledby).
+    /// IDs of elements that label this element via `aria-labelledby`.
     pub labelledby_ids: Vec<String>,
-    /// Inline string label (aria-label).
+    /// Inline string label applied through `aria-label`.
     pub label: Option<String>,
     /// ID of a <label> element associated with this input.
     pub html_for_id: Option<String>,
 }
 
 impl LabelConfig {
-    /// Apply label attributes to AttrMap.
-    /// Only one labelling mechanism is applied (priority order above).
+    /// Applies the highest-priority available accessible-name attributes.
     pub fn apply_to(&self, attrs: &mut AttrMap) {
         if !self.labelledby_ids.is_empty() {
             AriaAttribute::LabelledBy(AriaIdList(self.labelledby_ids.clone()))
@@ -2838,16 +2837,18 @@ impl LabelConfig {
 
 /// Associates a description with an element.
 ///
-/// Multiple description sources can be combined (aria-describedby accepts multiple IDs).
+/// Multiple description sources can be combined because `aria-describedby`
+/// accepts a space-separated list of IDs.
 #[derive(Clone, Debug, Default)]
 pub struct DescriptionConfig {
     /// IDs of elements describing this element.
     pub describedby_ids: Vec<String>,
-    /// Additional details element ID (aria-details).
+    /// Additional details element ID exposed through `aria-details`.
     pub details_id: Option<String>,
 }
 
 impl DescriptionConfig {
+    /// Applies description-related attributes to the given attribute map.
     pub fn apply_to(&self, attrs: &mut AttrMap) {
         if !self.describedby_ids.is_empty() {
             AriaAttribute::DescribedBy(AriaIdList(self.describedby_ids.clone()))
@@ -2859,20 +2860,32 @@ impl DescriptionConfig {
     }
 }
 
-/// A complete field context: label + description + error state.
-/// Used by form input components (TextField, Select, Combobox, Slider, etc.)
+/// Shared form-field accessibility state for labels, descriptions, and errors.
+///
+/// Components such as text fields, selects, comboboxes, and sliders use this
+/// context to derive the input element's accessible name, descriptions, and
+/// validation wiring from a single set of IDs and state flags.
 #[derive(Clone, Debug)]
 pub struct FieldContext {
+    /// Stable component IDs used to derive element relationships.
     pub ids: ComponentIds,
+    /// Accessible-name configuration for the input element.
     pub label: LabelConfig,
+    /// Description and details configuration for the input element.
     pub description: DescriptionConfig,
+    /// Whether the field is required.
     pub is_required: bool,
+    /// Whether the field is readonly.
     pub is_readonly: bool,
+    /// Whether the field is disabled.
     pub is_disabled: bool,
+    /// Validation state exposed through ARIA.
     pub invalid: AriaInvalid,
 }
 
 impl FieldContext {
+    /// Creates a field context with default accessibility state for the given IDs.
+    #[must_use]
     pub fn new(ids: ComponentIds) -> Self {
         Self {
             ids,
@@ -2900,7 +2913,7 @@ impl FieldContext {
 /// ```
 
 impl FieldContext {
-    /// Apply all field attributes to the input element's AttrMap.
+    /// Applies the input element's label, description, and validation attributes.
     pub fn apply_input_attrs(&self, attrs: &mut AttrMap) {
         self.label.apply_to(attrs);
 
@@ -2947,7 +2960,8 @@ impl FieldContext {
         }
     }
 
-    /// Returns AttrMap for the label element.
+    /// Returns attributes for the visible `<label>` element associated with the input.
+    #[must_use]
     pub fn label_element_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         attrs.set(HtmlAttr::Id, self.ids.part("label"));
@@ -2955,14 +2969,19 @@ impl FieldContext {
         attrs
     }
 
-    /// Returns AttrMap for the description element.
+    /// Returns attributes for the field description element.
+    #[must_use]
     pub fn description_element_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         attrs.set(HtmlAttr::Id, self.ids.part("description"));
         attrs
     }
 
-    /// Returns AttrMap for the error message element.
+    /// Returns attributes for the field error-message element.
+    ///
+    /// The error region always uses polite live-region semantics and is hidden
+    /// from assistive technology when no error is currently visible.
+    #[must_use]
     pub fn error_message_attrs(&self, is_visible: bool) -> AttrMap {
         let mut attrs = AttrMap::new();
         attrs.set(HtmlAttr::Id, self.ids.part("error-message"));
