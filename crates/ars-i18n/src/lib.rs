@@ -1,12 +1,13 @@
 //! Internationalization types for locale, number formatting, text direction,
-//! layout orientation, and logical-to-physical layout geometry.
+//! layout orientation, plural rules, and logical-to-physical layout geometry.
 //!
 //! This crate provides the core i18n primitives shared across all ars-ui components:
 //! a BCP 47 [`Locale`] wrapper, a locale-aware [`NumberFormatter`], a
 //! [`Direction`] enum for LTR/RTL text flow, an [`Orientation`] enum for
 //! horizontal/vertical layout axes, RTL-aware layout geometry types
 //! ([`LogicalSide`], [`PhysicalSide`], [`LogicalRect`], [`PhysicalRect`]),
-//! and the [`IcuProvider`] trait for calendar/locale data abstraction.
+//! plural and ordinal helpers, and the [`IcuProvider`] trait for
+//! calendar/locale data abstraction.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -22,6 +23,7 @@ mod layout;
 mod locale;
 mod locale_stack;
 mod number;
+mod plural;
 mod translate;
 mod weekday;
 
@@ -34,6 +36,14 @@ pub use number::get_number_formatter;
 pub use number::{
     CurrencyCode, MeasureUnit, NumberFormatOptions, NumberFormatter, NumberStyle, RoundingMode,
     SignDisplay, UnitDisplay, decimal_and_group_separators, normalize_digits, parse_locale_number,
+};
+#[cfg(feature = "icu4x")]
+pub use plural::{DefaultPluralRules, Icu4xPluralRules};
+#[cfg(feature = "web-intl")]
+pub use plural::{DefaultPluralRules, JsIntlPluralRules};
+pub use plural::{
+    Plural, PluralCategory, PluralRuleType, PluralRulesFormat, format_plural, plural_category,
+    select_plural,
 };
 pub use translate::Translate;
 pub use weekday::Weekday;

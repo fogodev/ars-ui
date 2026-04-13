@@ -264,4 +264,71 @@ pub mod locales {
     pub fn ko() -> Locale {
         Locale::parse("ko").unwrap_or_else(|_| fallback())
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{br, fallback};
+
+        #[test]
+        fn fallback_returns_en_us_locale() {
+            assert_eq!(fallback().to_bcp47(), "en-US");
+        }
+
+        #[test]
+        fn br_returns_pt_br_locale() {
+            assert_eq!(br().to_bcp47(), "pt-BR");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use icu::locale::LanguageIdentifier;
+
+    use super::{Locale, RTL_SCRIPTS};
+    use crate::{ResolvedDirection, Weekday};
+
+    #[test]
+    fn locale_accessors_roundtrip_with_extensions() {
+        let locale = Locale::parse("zh-Hans-CN-u-ca-japanese-fw-mon")
+            .expect("locale with extensions should parse");
+
+        assert_eq!(locale.language(), "zh");
+        assert_eq!(locale.script(), Some("Hans"));
+        assert_eq!(locale.region(), Some("CN"));
+        assert_eq!(locale.calendar_extension(), Some("japanese"));
+        assert_eq!(locale.first_day_of_week_extension(), Some(Weekday::Monday));
+    }
+
+    #[test]
+    fn locale_direction_infers_default_scripts_for_rtl_languages() {
+        for tag in ["dv", "nqo", "pa-PK", "ku-IQ", "yi"] {
+            let locale = Locale::parse(tag).expect("RTL locale should parse");
+            assert_eq!(locale.direction(), ResolvedDirection::Rtl);
+            assert!(locale.is_rtl());
+        }
+    }
+
+    #[test]
+    fn locale_direction_defaults_to_ltr_for_non_rtl_languages() {
+        let locale = Locale::parse("en-US").expect("en-US should parse");
+
+        assert_eq!(locale.direction(), ResolvedDirection::Ltr);
+        assert!(!locale.is_rtl());
+    }
+
+    #[test]
+    fn locale_from_langid_roundtrips_without_extensions() {
+        let langid = "fr-CA"
+            .parse::<LanguageIdentifier>()
+            .expect("language identifier should parse");
+
+        assert_eq!(Locale::from_langid(langid).to_bcp47(), "fr-CA");
+    }
+
+    #[test]
+    fn rtl_script_list_contains_core_scripts() {
+        assert!(RTL_SCRIPTS.contains(&"Arab"));
+        assert!(RTL_SCRIPTS.contains(&"Hebr"));
+    }
 }

@@ -759,6 +759,29 @@ mod tests {
     use super::*;
     use crate::locales;
 
+    #[test]
+    fn currency_code_rejects_invalid_text_and_roundtrips_valid_codes() {
+        assert_eq!(CurrencyCode::from_str("usd"), None);
+        assert_eq!(CurrencyCode::from_str("US"), None);
+        assert_eq!(CurrencyCode::from_str("US1"), None);
+        assert_eq!(
+            CurrencyCode::from_str("USD").map(|code| String::from(code.as_str())),
+            Some(String::from("USD"))
+        );
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn number_formatter_debug_includes_locale_and_separator_fields() {
+        let formatter = NumberFormatter::new(&locales::de_de(), NumberFormatOptions::default());
+        let debug = format!("{formatter:?}");
+
+        assert!(debug.contains("NumberFormatter"));
+        assert!(debug.contains("de-DE"));
+        assert!(debug.contains("decimal_separator"));
+        assert!(debug.contains("grouping_separator"));
+    }
+
     #[cfg(feature = "icu4x")]
     #[test]
     fn formats_en_us_integers_and_decimals() {
@@ -1019,5 +1042,70 @@ mod tests {
         assert_eq!(cached.format(1234.5), direct.format(1234.5));
         assert_eq!(cached.decimal_separator(), direct.decimal_separator());
         assert_eq!(cached.grouping_separator(), direct.grouping_separator());
+    }
+
+    #[cfg(all(feature = "std", feature = "icu4x"))]
+    #[test]
+    fn repeated_cached_formatter_lookups_reuse_existing_entries() {
+        let options = NumberFormatOptions {
+            use_grouping: false,
+            ..NumberFormatOptions::default()
+        };
+
+        let first = get_number_formatter(&locales::en_us(), &options);
+        let second = get_number_formatter(&locales::en_us(), &options);
+
+        assert_eq!(first.format(1234.56), second.format(1234.56));
+        assert_eq!(first.grouping_separator(), second.grouping_separator());
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn format_range_uses_locale_specific_separators() {
+        let formatter = NumberFormatter::new(&locales::en_us(), NumberFormatOptions::default());
+
+        assert_eq!(formatter.format_range(1.0, 2.5, &locales::en_us()), "1–2.5");
+        assert_eq!(formatter.format_range(1.0, 2.5, &locales::fr()), "1 – 2.5");
+        assert_eq!(formatter.format_range(1.0, 2.5, &locales::ja()), "1〜2.5");
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn prepare_decimal_defaults_non_finite_values() {
+        let formatter = NumberFormatter::new(&locales::en_us(), NumberFormatOptions::default());
+
+        assert_eq!(formatter.prepare_decimal(f64::INFINITY), Decimal::default());
+        assert_eq!(
+            formatter.prepare_decimal(f64::NEG_INFINITY),
+            Decimal::default()
+        );
+        assert_eq!(formatter.prepare_decimal(f64::NAN), Decimal::default());
+    }
+
+    #[test]
+    fn choose_decimal_separator_treats_grouping_marks_as_non_decimal() {
+        assert_eq!(choose_decimal_separator("1,234,567", '.', ','), None);
+        assert_eq!(choose_decimal_separator("1.234", ',', '.'), None);
+        assert_eq!(choose_decimal_separator("١٬٢٣٤", '٫', '٬'), None);
+        assert_eq!(choose_decimal_separator("1,234.5", '.', ','), Some('.'));
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn resolve_measure_unit_id_uses_embedded_cldr_id_when_present() {
+        let mut unit =
+            MeasureUnit::try_from_str("kilogram").expect("kilogram is a valid CLDR unit");
+        unit.id = Some("kilogram");
+
+        assert_eq!(
+            resolve_measure_unit_id(&unit),
+            Some(String::from("kilogram"))
+        );
+    }
+
+    #[test]
+    fn round_half_even_rounds_up_when_fraction_exceeds_half() {
+        assert_eq!(round_half_even(1.6), 2.0);
+        assert_eq!(round_half_even(-1.6), -2.0);
     }
 }
