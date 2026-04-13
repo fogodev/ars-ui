@@ -2980,7 +2980,8 @@ impl State {
 
     /// Find the first item whose `text_value` starts with `search`
     /// (locale-aware case folding via ICU4X `CaseMapper`), beginning the
-    /// search from the item *after* `current_focus` and wrapping around.
+    /// search from the item *after* `current_focus` (single-char, cycling)
+    /// or *at* `current_focus` (multi-char, refining).
     ///
     /// Single-character searches wrap; multi-character searches do not (they
     /// stay within the current alphabetical run to avoid disorienting jumps).
@@ -2997,7 +2998,6 @@ impl State {
         let query = case_mapper.lowercase_to_string(search, &locale.language_identifier());
         let single_char = query.chars().count() == 1;
 
-        // Build the scan order: start after `current_focus`, wrap if needed.
         let all_item_keys: alloc::vec::Vec<Key> = collection
             .nodes()
             .filter(|n| n.is_focusable())
@@ -3008,12 +3008,13 @@ impl State {
             return None;
         }
 
-        // Find the starting position.
+        // Single-char: start AFTER current_focus (cycling to next match).
+        // Multi-char: start AT current_focus (refining keeps current match viable).
         let start_pos = current_focus
             .and_then(|k| all_item_keys.iter().position(|ik| ik == k))
-            .map_or(0, |p| (p + 1) % all_item_keys.len());
+            .map_or(0, |p| if single_char { (p + 1) % all_item_keys.len() } else { p });
 
-        // Scan in two passes for wrap-around (single char only).
+        // Single-char wraps around the full list; multi-char scans forward only.
         let scan_len = if single_char { all_item_keys.len() } else { all_item_keys.len().saturating_sub(start_pos) };
 
         for offset in 0..scan_len {
@@ -3048,10 +3049,13 @@ impl State {
             return None;
         }
 
+        // Single-char: start AFTER current_focus (cycling to next match).
+        // Multi-char: start AT current_focus (refining keeps current match viable).
         let start_pos = current_focus
             .and_then(|k| all_item_keys.iter().position(|ik| ik == k))
-            .map_or(0, |p| (p + 1) % all_item_keys.len());
+            .map_or(0, |p| if single_char { (p + 1) % all_item_keys.len() } else { p });
 
+        // Single-char wraps around the full list; multi-char scans forward only.
         let scan_len = if single_char { all_item_keys.len() } else { all_item_keys.len().saturating_sub(start_pos) };
 
         for offset in 0..scan_len {

@@ -92,7 +92,7 @@ impl State {
 
     /// Find the first item whose `text_value` starts with `search` using ASCII
     /// case folding, beginning the search from the item *after* `current_focus`
-    /// and wrapping around.
+    /// (single-char, cycling) or *at* `current_focus` (multi-char, refining).
     ///
     /// Single-character searches wrap; multi-character searches do not (they
     /// stay within the current alphabetical run to avoid disorienting jumps).
@@ -116,12 +116,19 @@ impl State {
             return None;
         }
 
-        // Find the starting position.
+        // Single-char: start AFTER current_focus (cycling to next match).
+        // Multi-char: start AT current_focus (refining keeps current match viable).
         let start_pos = current_focus
             .and_then(|k| all_item_keys.iter().position(|ik| ik == k))
-            .map_or(0, |p| (p + 1) % all_item_keys.len());
+            .map_or(0, |p| {
+                if single_char {
+                    (p + 1) % all_item_keys.len()
+                } else {
+                    p
+                }
+            });
 
-        // Scan in two passes for wrap-around (single char only).
+        // Single-char wraps around the full list; multi-char scans forward only.
         let scan_len = if single_char {
             all_item_keys.len()
         } else {
@@ -190,7 +197,8 @@ impl State {
 
     /// Find the first item whose `text_value` starts with `search` using
     /// locale-aware case folding via ICU4X `CaseMapper`, beginning the search
-    /// from the item *after* `current_focus` and wrapping around.
+    /// from the item *after* `current_focus` (single-char, cycling) or *at*
+    /// `current_focus` (multi-char, refining).
     ///
     /// Single-character searches wrap; multi-character searches do not (they
     /// stay within the current alphabetical run to avoid disorienting jumps).
@@ -221,10 +229,17 @@ impl State {
             return None;
         }
 
-        // Find the starting position.
+        // Single-char: start AFTER current_focus (cycling to next match).
+        // Multi-char: start AT current_focus (refining keeps current match viable).
         let start_pos = current_focus
             .and_then(|k| all_item_keys.iter().position(|ik| ik == k))
-            .map_or(0, |p| (p + 1) % all_item_keys.len());
+            .map_or(0, |p| {
+                if single_char {
+                    (p + 1) % all_item_keys.len()
+                } else {
+                    p
+                }
+            });
 
         // Scan forward only; single-char wraps, multi-char does not.
         let scan_len = if single_char {
@@ -411,13 +426,34 @@ mod tests {
 
         let state = State::default();
 
-        // Focus on Cherry (key=4, index=3). start_pos = 4, scan_len = 5-4 = 1.
-        // Only Date is scanned. "ap" doesn't match Date, and Apple (index 0)
-        // is behind the scan window — multi-char must NOT wrap back to it.
+        // Focus on Cherry (key=4, index=3). Multi-char starts AT focus, so
+        // start_pos = 3, scan_len = 5-3 = 2 (Cherry, Date). "ap" doesn't
+        // match either, and Apple (index 0) is behind the scan window.
         let (state, _) = state.process_char('a', 100, Some(&Key::int(4)), &c);
         let (_, found) = state.process_char('p', 200, Some(&Key::int(4)), &c);
 
         assert_eq!(found, None);
+    }
+
+    // ------------------------------------------------------------------ //
+    // Multi-char refining includes current focus                          //
+    // ------------------------------------------------------------------ //
+
+    #[test]
+    fn multi_char_refine_includes_current_focus() {
+        let c = fruit_collection();
+
+        let state = State::default();
+
+        // Simulates real event loop: type 'b' → Banana, focus moves to Banana.
+        // Then type 'a' within timeout → "ba" should still match Banana,
+        // even though focus is now ON Banana.
+        let (state, found) = state.process_char('b', 100, None, &c);
+        assert_eq!(found, Some(Key::int(2))); // Banana
+
+        // Component moved focus to Banana; pass it as current_focus.
+        let (_, found) = state.process_char('a', 200, Some(&Key::int(2)), &c);
+        assert_eq!(found, Some(Key::int(2))); // Still Banana — "ba" matches
     }
 
     // ------------------------------------------------------------------ //
@@ -630,6 +666,22 @@ mod tests_i18n {
         // Focus on Cherry (key=4), type 'a' — wraps to Apple (key=1)
         let (_, found) = state.process_char('a', 100, Some(&Key::int(4)), &c, &locale);
         assert_eq!(found, Some(Key::int(1)));
+    }
+
+    #[test]
+    fn i18n_multi_char_refine_includes_current_focus() {
+        let c = fruit_collection();
+
+        let locale = en_locale();
+
+        let state = State::default();
+
+        // Type 'b' → Banana, then 'a' with focus on Banana → "ba" still matches
+        let (state, found) = state.process_char('b', 100, None, &c, &locale);
+        assert_eq!(found, Some(Key::int(2)));
+
+        let (_, found) = state.process_char('a', 200, Some(&Key::int(2)), &c, &locale);
+        assert_eq!(found, Some(Key::int(2))); // Still Banana
     }
 
     #[test]
