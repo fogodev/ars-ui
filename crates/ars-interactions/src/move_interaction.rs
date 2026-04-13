@@ -131,13 +131,12 @@ impl MoveResult {
             return;
         }
 
-        self.active_move_keys.clear();
-
         let started = {
             let mut state = self.state.borrow_mut();
 
             match *state {
                 MoveState::Idle => {
+                    self.active_move_keys.clear();
                     *state = MoveState::Moving {
                         pointer_type,
                         last_x: client_x,
@@ -1062,6 +1061,59 @@ mod tests {
         assert_eq!(moves.len(), 2);
         assert_eq!(ends.len(), 1);
         assert_eq!(ends[0].event_type, MoveEventType::MoveEnd);
+    }
+
+    #[test]
+    fn rejected_pointer_start_does_not_forget_active_keyboard_move_keys() {
+        let ends = Arc::new(Mutex::new(Vec::new()));
+
+        let config = MoveConfig {
+            on_move_end: Some({
+                let ends = Arc::clone(&ends);
+                Callback::new(move |event: MoveEvent| {
+                    ends.lock().expect("end events").push(event);
+                })
+            }),
+            ..MoveConfig::default()
+        };
+
+        let mut result = use_move(config);
+
+        assert!(result.handle_key_down(
+            KeyboardKey::ArrowRight,
+            ResolvedDirection::Ltr,
+            KeyModifiers::default(),
+        ));
+        assert!(result.handle_key_down(
+            KeyboardKey::ArrowUp,
+            ResolvedDirection::Ltr,
+            KeyModifiers::default(),
+        ));
+
+        result.begin_pointer_move(
+            PointerType::Mouse,
+            10.0,
+            10.0,
+            KeyModifiers::default(),
+            1.0,
+            1.0,
+        );
+
+        assert_eq!(
+            *result.state.borrow(),
+            MoveState::Moving {
+                pointer_type: PointerType::Keyboard,
+                last_x: 0.0,
+                last_y: 0.0,
+                scale_x: 1.0,
+                scale_y: 1.0,
+            },
+        );
+        assert!(!result.handle_key_up(KeyboardKey::ArrowRight, KeyModifiers::default()));
+        assert!(ends.lock().expect("ends").is_empty());
+        assert!(result.handle_key_up(KeyboardKey::ArrowUp, KeyModifiers::default()));
+        assert_eq!(*result.state.borrow(), MoveState::Idle);
+        assert_eq!(ends.lock().expect("ends").len(), 1);
     }
 
     #[test]
