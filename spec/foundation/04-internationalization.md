@@ -119,7 +119,7 @@ impl Locale {
 
     /// Returns true if this locale uses right-to-left text.
     pub fn is_rtl(&self) -> bool {
-        self.direction() == Direction::Rtl
+        self.direction().is_rtl()
     }
 
     /// BCP 47 string representation.
