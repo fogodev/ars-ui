@@ -226,8 +226,9 @@ pub const fn plural_category(count: usize, locale: &Locale) -> PluralCategory {
 ///
 /// With `icu4x` or wasm `web-intl`, this uses locale-aware CLDR plural rules.
 /// Without either backend feature, or on non-wasm builds with `web-intl`, it
-/// falls back to English-only behavior: cardinal rules use `One` for exactly
-/// `1.0`, and ordinal rules use the standard English `1st`/`2nd`/`3rd`
+/// falls back to English-only behavior: cardinal rules use `One` for values
+/// whose magnitude is exactly `1.0`, and ordinal rules use the standard English
+/// `1st`/`2nd`/`3rd`
 /// categories.
 #[must_use]
 pub fn select_plural(locale: &Locale, count: f64, rule_type: PluralRuleType) -> PluralCategory {
@@ -322,7 +323,7 @@ fn select_plural_with_backend(
 ) -> PluralCategory {
     match rule_type {
         PluralRuleType::Cardinal => {
-            if count == 1.0 {
+            if count.is_finite() && count.abs() == 1.0 {
                 PluralCategory::One
             } else {
                 PluralCategory::Other
@@ -610,17 +611,21 @@ mod tests {
         assert_eq!(rules.select(4.0), PluralCategory::Other);
     }
 
-    #[cfg(all(
-        feature = "web-intl",
-        not(target_arch = "wasm32"),
-        not(feature = "icu4x")
-    ))]
+    #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
     #[test]
-    fn native_web_intl_feature_uses_english_fallback_rules() {
+    fn fallback_rules_treat_negative_one_as_singular() {
         let locale = Locale::parse("pl").expect("pl should parse");
 
         assert_eq!(plural_category(1, &locale), PluralCategory::One);
         assert_eq!(plural_category(2, &locale), PluralCategory::Other);
+        assert_eq!(
+            select_plural(&locale, -1.0, PluralRuleType::Cardinal),
+            PluralCategory::One
+        );
+        assert_eq!(
+            select_plural(&locale, -2.0, PluralRuleType::Cardinal),
+            PluralCategory::Other
+        );
         assert_eq!(
             select_plural(&locale, 2.0, PluralRuleType::Ordinal),
             PluralCategory::Two

@@ -2271,8 +2271,8 @@ cases follow the capabilities of the active backend.
 With neither `icu4x` nor wasm `web-intl` enabled, `select_plural()` falls back
 to English-only behavior. This also applies to non-wasm builds compiled with
 the `web-intl` feature flag, because the browser `Intl` backend is only
-available on `wasm32`: cardinal rules use `One` for exactly `1.0` and `Other`
-otherwise, while ordinal rules use the standard English
+available on `wasm32`: cardinal rules use `One` for values whose magnitude is
+exactly `1.0` and `Other` otherwise, while ordinal rules use the standard English
 `1st`/`2nd`/`3rd` categories and map all other values to `Other`.
 
 ### 6.2 ICU MessageFormat Plural Syntax
