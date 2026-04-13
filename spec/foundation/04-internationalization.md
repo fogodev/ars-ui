@@ -3310,7 +3310,7 @@ pub type DefaultDateFormatter = web_intl::JsIntlDateFormatter;
 // ── Plural rules ──
 #[cfg(feature = "icu4x")]
 pub type DefaultPluralRules = icu4x::Icu4xPluralRules;
-#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 pub type DefaultPluralRules = web_intl::JsIntlPluralRules;
 
 // ── Collation ──

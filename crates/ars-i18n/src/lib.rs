@@ -39,7 +39,7 @@ pub use number::{
 };
 #[cfg(feature = "icu4x")]
 pub use plural::{DefaultPluralRules, Icu4xPluralRules};
-#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 pub use plural::{DefaultPluralRules, JsIntlPluralRules};
 pub use plural::{
     Plural, PluralCategory, PluralRuleType, PluralRulesFormat, format_plural, plural_category,

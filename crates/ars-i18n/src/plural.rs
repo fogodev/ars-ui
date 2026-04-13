@@ -13,7 +13,7 @@
 use alloc::{format, string::String};
 
 use icu::plurals::PluralCategory as IcuPluralCategory;
-#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 use {
     core::fmt::{self, Debug},
     js_sys::{Array, Intl::PluralRules as JsPluralRules, Object, Reflect},
@@ -156,7 +156,7 @@ impl PluralRulesFormat for Icu4xPluralRules {
 pub type DefaultPluralRules = Icu4xPluralRules;
 
 /// Browser `Intl.PluralRules` wrapper used by the `web-intl` backend.
-#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 #[derive(Clone)]
 pub struct JsIntlPluralRules {
     locale: Locale,
@@ -164,7 +164,7 @@ pub struct JsIntlPluralRules {
     inner: JsPluralRules,
 }
 
-#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 impl JsIntlPluralRules {
     /// Creates a new browser-backed plural rules handle.
     #[must_use]
@@ -177,7 +177,7 @@ impl JsIntlPluralRules {
     }
 }
 
-#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 impl Debug for JsIntlPluralRules {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("JsIntlPluralRules")
@@ -187,7 +187,7 @@ impl Debug for JsIntlPluralRules {
     }
 }
 
-#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 impl PluralRulesFormat for JsIntlPluralRules {
     fn select(&self, number: f64) -> PluralCategory {
         PluralCategory::from_js_category(&self.inner.select(number).as_string().unwrap_or_default())
@@ -195,7 +195,7 @@ impl PluralRulesFormat for JsIntlPluralRules {
 }
 
 /// Default plural-rules backend for the active feature set.
-#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 pub type DefaultPluralRules = JsIntlPluralRules;
 
 /// Returns the CLDR cardinal plural category for an integer count.
@@ -205,7 +205,10 @@ pub type DefaultPluralRules = JsIntlPluralRules;
 /// falls back to English cardinal behavior: `1 => One`, all other values =>
 /// `Other`.
 #[must_use]
-#[cfg(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32")))]
+#[cfg(any(
+    feature = "icu4x",
+    all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x"))
+))]
 pub fn plural_category(count: usize, locale: &Locale) -> PluralCategory {
     plural_category_with_backend(count, locale)
 }
@@ -217,7 +220,10 @@ pub fn plural_category(count: usize, locale: &Locale) -> PluralCategory {
 /// falls back to English cardinal behavior: `1 => One`, all other values =>
 /// `Other`.
 #[must_use]
-#[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
+#[cfg(not(any(
+    feature = "icu4x",
+    all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x"))
+)))]
 pub const fn plural_category(count: usize, locale: &Locale) -> PluralCategory {
     plural_category_with_backend(count, locale)
 }
@@ -269,12 +275,15 @@ fn plural_category_with_backend(count: usize, locale: &Locale) -> PluralCategory
     PluralCategory::from_icu(rules.category_for(count))
 }
 
-#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 fn plural_category_with_backend(count: usize, locale: &Locale) -> PluralCategory {
     select_plural_with_backend(locale, count as f64, PluralRuleType::Cardinal)
 }
 
-#[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
+#[cfg(not(any(
+    feature = "icu4x",
+    all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x"))
+)))]
 const fn plural_category_with_backend(count: usize, locale: &Locale) -> PluralCategory {
     let _ = locale;
 
@@ -310,7 +319,7 @@ fn select_plural_with_backend(
     PluralCategory::from_icu(rules.category_for(&decimal))
 }
 
-#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 fn select_plural_with_backend(
     locale: &Locale,
     count: f64,
@@ -319,7 +328,10 @@ fn select_plural_with_backend(
     JsIntlPluralRules::new(locale, rule_type).select(count)
 }
 
-#[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
+#[cfg(not(any(
+    feature = "icu4x",
+    all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x"))
+)))]
 fn select_plural_with_backend(
     _locale: &Locale,
     count: f64,
@@ -338,7 +350,7 @@ fn select_plural_with_backend(
     }
 }
 
-#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 fn build_js_plural_rules(locale: &Locale, rule_type: PluralRuleType) -> JsPluralRules {
     let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
 
@@ -354,7 +366,10 @@ fn build_js_plural_rules(locale: &Locale, rule_type: PluralRuleType) -> JsPlural
     JsPluralRules::new(&locales, &options)
 }
 
-#[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
+#[cfg(not(any(
+    feature = "icu4x",
+    all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x"))
+)))]
 fn fallback_english_ordinal_category(count: f64) -> PluralCategory {
     if !count.is_finite() || count.fract() != 0.0 {
         return PluralCategory::Other;
@@ -379,7 +394,7 @@ fn fallback_english_ordinal_category(count: f64) -> PluralCategory {
 }
 
 impl PluralCategory {
-    #[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+    #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
     fn from_js_category(category: &str) -> Self {
         match category {
             "zero" => Self::Zero,
@@ -393,7 +408,7 @@ impl PluralCategory {
 }
 
 impl PluralRuleType {
-    #[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+    #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
     const fn as_js_str(self) -> &'static str {
         match self {
             Self::Cardinal => "cardinal",
@@ -634,7 +649,10 @@ mod tests {
         assert_eq!(rules.select(4.0), PluralCategory::Other);
     }
 
-    #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
+    #[cfg(not(any(
+        feature = "icu4x",
+        all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x"))
+    )))]
     #[test]
     fn fallback_rules_treat_negative_one_as_singular() {
         let locale = Locale::parse("pl").expect("pl should parse");
@@ -656,7 +674,12 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "web-intl", target_arch = "wasm32"))]
+#[cfg(all(
+    test,
+    feature = "web-intl",
+    target_arch = "wasm32",
+    not(feature = "icu4x")
+))]
 mod web_intl_tests {
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
