@@ -2759,6 +2759,7 @@ pub fn visually_hidden_attrs() -> AttrMap {
 ///   border-width: 0;
 /// }
 /// ```
+#[derive(Debug)]
 pub struct VisuallyHiddenCssDoc;
 
 /// Returns visually hidden attrs for an element that MUST remain visible
@@ -2786,6 +2787,7 @@ pub fn visually_hidden_focusable_attrs() -> AttrMap {
 ///   border-width: 0;
 /// }
 /// ```
+#[derive(Debug)]
 pub struct VisuallyHiddenFocusableCssDoc;
 ````
 

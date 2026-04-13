@@ -12,6 +12,7 @@ pub mod announcer;
 pub mod aria;
 /// Shared focus management contracts consumed by DOM and adapter layers.
 pub mod focus;
+pub mod visually_hidden;
 
 pub use announcer::{Announcement, AnnouncementPriority, LiveAnnouncer};
 #[cfg(feature = "aria-drag-drop-compat")]
@@ -26,6 +27,10 @@ pub use aria::{
     state::{set_busy, set_checked, set_disabled, set_expanded, set_invalid, set_selected},
 };
 pub use focus::{FocusRing, FocusScopeBehavior, FocusScopeOptions, FocusStrategy, FocusTarget};
+pub use visually_hidden::{
+    VisuallyHiddenCssDoc, VisuallyHiddenFocusableCssDoc, visually_hidden_attrs,
+    visually_hidden_focusable_attrs,
+};
 
 /// Custom data attribute used to expose machine state on the root DOM element.
 ///
