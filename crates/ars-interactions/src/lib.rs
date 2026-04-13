@@ -23,9 +23,9 @@ pub use compose::merge_attrs;
 pub use direction::{LogicalDirection, resolve_arrow_key};
 pub use dismissable::dismiss_button_attrs;
 pub use drag_drop::{
-    DirectoryHandle, DragConfig, DragEndEvent, DragItem, DragItemKind, DragItemPreview,
-    DragStartEvent, DropConfig, DropEvent, DropIndicatorPosition, DropOperation, DropTargetEvent,
-    FileHandle,
+    DirectoryHandle, DragConfig, DragEndEvent, DragItem, DragItemKind, DragItemPreview, DragResult,
+    DragStartEvent, DragState, DropConfig, DropEvent, DropIndicatorPosition, DropOperation,
+    DropResult, DropTargetEvent, FileHandle, use_drag, use_drop,
 };
 pub use focus::{
     FocusConfig, FocusEvent, FocusEventType, FocusResult, FocusState, FocusWithinConfig,
