@@ -2056,9 +2056,12 @@ pub struct DragConfig {
     /// When None, only the dragged element's items are transferred.
     pub get_items: Option<Arc<dyn Fn() -> Vec<DragItem> + Send + Sync>>,
 
-    /// Screen reader announcement when drag starts.
+    /// Localized screen reader message override when drag starts.
     /// Example: "Started dragging {item_name}. Press Tab to navigate to a drop target."
-    pub drag_start_announcement: Option<Callback<dyn Fn(&[DragItem]) -> String>>,
+    ///
+    /// This is a `MessageFn` rather than a `Callback` because it produces a
+    /// translatable string and needs the active locale to do so.
+    pub drag_start_announcement: Option<MessageFn<dyn Fn(&[DragItem], &Locale) -> String + Send + Sync>>,
 }
 
 #[derive(Clone, Debug)]
@@ -2111,16 +2114,16 @@ pub struct DropConfig {
     /// Where within the target the drop indicator should be shown.
     pub drop_indicator_position: DropIndicatorPosition,
 
-    /// Screen reader announcement when a dragged item enters.
-    pub drag_enter_announcement: Option<Callback<dyn Fn(&DropTargetEvent) -> String>>,
+    /// Localized screen reader message override when a dragged item enters.
+    pub drag_enter_announcement: Option<MessageFn<dyn Fn(&DropTargetEvent, &Locale) -> String + Send + Sync>>,
 
-    /// Screen reader announcement when drop succeeds.
-    pub drop_announcement: Option<Callback<dyn Fn(&DropEvent) -> String>>,
+    /// Localized screen reader message override when drop succeeds.
+    pub drop_announcement: Option<MessageFn<dyn Fn(&DropEvent, &Locale) -> String + Send + Sync>>,
 }
 
-/// **Announcement dispatch precedence:** Per-element announcement closures on
-/// `DragConfig` and `DropConfig` take precedence over the corresponding
-/// `DragAnnouncements` field. When a per-element closure is `None`, the
+/// **Announcement dispatch precedence:** Per-element localized message overrides
+/// on `DragConfig` and `DropConfig` take precedence over the corresponding
+/// `DragAnnouncements` field. When a per-element override is `None`, the
 /// `DragAnnouncements` default is used.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]

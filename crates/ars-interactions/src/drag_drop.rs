@@ -11,14 +11,15 @@ use std::{
     vec::Vec,
 };
 
-use ars_core::Callback;
+use ars_core::{Callback, MessageFn};
+use ars_i18n::Locale;
 
 use crate::PointerType;
 
 type DragItemsFn = Arc<dyn Fn() -> Vec<DragItem> + Send + Sync>;
-type DragStartAnnouncementFn = Callback<dyn Fn(&[DragItem]) -> String>;
-type DragEnterAnnouncementFn = Callback<dyn Fn(&DropTargetEvent) -> String>;
-type DropAnnouncementFn = Callback<dyn Fn(&DropEvent) -> String>;
+type DragStartAnnouncementFn = MessageFn<dyn Fn(&[DragItem], &Locale) -> String + Send + Sync>;
+type DragEnterAnnouncementFn = MessageFn<dyn Fn(&DropTargetEvent, &Locale) -> String + Send + Sync>;
+type DropAnnouncementFn = MessageFn<dyn Fn(&DropEvent, &Locale) -> String + Send + Sync>;
 
 /// The data associated with a drag operation.
 ///
@@ -119,7 +120,7 @@ pub struct DragConfig {
     /// Additional selected items to include for multi-item drag.
     pub get_items: Option<DragItemsFn>,
 
-    /// Screen reader announcement when drag starts.
+    /// Localized screen reader message override when drag starts.
     pub drag_start_announcement: Option<DragStartAnnouncementFn>,
 }
 
@@ -201,10 +202,10 @@ pub struct DropConfig {
     /// Placement of the drop indicator within the target.
     pub drop_indicator_position: DropIndicatorPosition,
 
-    /// Screen reader announcement when dragged items enter this target.
+    /// Localized screen reader message override when dragged items enter this target.
     pub drag_enter_announcement: Option<DragEnterAnnouncementFn>,
 
-    /// Screen reader announcement when a drop succeeds.
+    /// Localized screen reader message override when a drop succeeds.
     pub drop_announcement: Option<DropAnnouncementFn>,
 }
 
@@ -334,11 +335,13 @@ fn normalize_mime_type(mime_type: &str) -> String {
 mod tests {
     use std::{fmt::Write as _, sync::Arc};
 
-    use ars_core::Callback;
+    use ars_core::{Callback, MessageFn};
+    use ars_i18n::{Locale, locales};
 
     use super::{
         DirectoryHandle, DragConfig, DragEndEvent, DragItem, DragItemKind, DragItemPreview,
-        DragStartEvent, DropConfig, DropEvent, DropIndicatorPosition, DropOperation, FileHandle,
+        DragStartEvent, DropConfig, DropEvent, DropIndicatorPosition, DropOperation,
+        DropTargetEvent, FileHandle,
     };
     use crate::PointerType;
 
@@ -435,6 +438,88 @@ mod tests {
         assert!(debug.contains("on_drag_end: Some(Callback(..))"));
         assert!(debug.contains("get_items: Some(\"<closure>\")"));
         assert!(debug.contains("drag_start_announcement: None"));
+    }
+
+    #[test]
+    fn drag_start_announcement_is_constructible_and_invokable() {
+        type AnnouncementFn = dyn Fn(&[DragItem], &Locale) -> String + Send + Sync;
+
+        let announcement: Arc<AnnouncementFn> = Arc::new(|items: &[DragItem], locale: &Locale| {
+            format!("{} @ {}", items.len(), locale.to_bcp47())
+        });
+        let config = DragConfig {
+            drag_start_announcement: Some(MessageFn::new(announcement)),
+            ..DragConfig::default()
+        };
+
+        let message = config
+            .drag_start_announcement
+            .as_ref()
+            .expect("announcement should be set")(
+            &[
+                DragItem::Text("payload".into()),
+                DragItem::Uri("urn:test".into()),
+            ],
+            &locales::en_us(),
+        );
+
+        assert_eq!(message, "2 @ en-US");
+    }
+
+    #[test]
+    fn drag_enter_announcement_is_constructible_and_invokable() {
+        type AnnouncementFn = dyn Fn(&DropTargetEvent, &Locale) -> String + Send + Sync;
+
+        let announcement: Arc<AnnouncementFn> =
+            Arc::new(|event: &DropTargetEvent, locale: &Locale| {
+                format!("{:?} @ {}", event.operation, locale.to_bcp47())
+            });
+        let config = DropConfig {
+            drag_enter_announcement: Some(MessageFn::new(announcement)),
+            ..DropConfig::default()
+        };
+
+        let message = config
+            .drag_enter_announcement
+            .as_ref()
+            .expect("announcement should be set")(
+            &DropTargetEvent {
+                items: vec![preview(DragItemKind::File, &["image/png"])],
+                operation: DropOperation::Copy,
+                pointer_type: PointerType::Mouse,
+            },
+            &locales::de_de(),
+        );
+
+        assert_eq!(message, "Copy @ de-DE");
+    }
+
+    #[test]
+    fn drop_announcement_is_constructible_and_invokable() {
+        type AnnouncementFn = dyn Fn(&DropEvent, &Locale) -> String + Send + Sync;
+
+        let announcement: Arc<AnnouncementFn> = Arc::new(|event: &DropEvent, locale: &Locale| {
+            format!("{:?} @ {}", event.drop_position, locale.to_bcp47())
+        });
+        let config = DropConfig {
+            drop_announcement: Some(MessageFn::new(announcement)),
+            ..DropConfig::default()
+        };
+
+        let message = config
+            .drop_announcement
+            .as_ref()
+            .expect("announcement should be set")(
+            &DropEvent {
+                items: vec![DragItem::Text("payload".into())],
+                operation: DropOperation::Move,
+                pointer_type: PointerType::Mouse,
+                drop_position: DropIndicatorPosition::After,
+            },
+            &locales::en_us(),
+        );
+
+        assert_eq!(message, "After @ en-US");
     }
 
     #[test]
