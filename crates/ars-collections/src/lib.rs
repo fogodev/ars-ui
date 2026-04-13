@@ -21,6 +21,10 @@
 //! - [`AsyncCollection`] — paginated collection that grows as pages are fetched.
 //! - [`AsyncLoader`] — trait for fetching pages of data from an async source.
 //! - [`LoadResult`] — result of a single page fetch.
+//! - [`FilteredCollection`] — predicate-based filtering view.
+//! - [`SortedCollection`] — comparator-based sorting view.
+//! - [`SortDirection`] — ascending or descending sort order.
+//! - [`SortDescriptor`] — column + direction for table sorting.
 //! - [`CollectionError`] — error from an async page load.
 
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -36,6 +40,8 @@ pub mod async_loader;
 pub mod builder;
 /// Core collection traits: [`Collection`] and [`CollectionItem`].
 pub mod collection;
+/// Predicate-based filtering view over a [`Collection`].
+pub mod filtered_collection;
 /// Stable node identifiers for collections.
 pub mod key;
 /// Disabled-aware navigation helpers for collection widgets.
@@ -44,6 +50,8 @@ pub mod navigation;
 pub mod node;
 /// Selection enums and state for collection-based components.
 pub mod selection;
+/// Comparator-based sorting view over a [`Collection`].
+pub mod sorted_collection;
 /// In-memory collection backed by `Vec` and `IndexMap`.
 pub mod static_collection;
 /// Hierarchical collection with expand/collapse for tree-based components.
@@ -53,8 +61,10 @@ pub use async_collection::{AsyncCollection, AsyncLoadingState};
 pub use async_loader::{AsyncLoader, CollectionError, LoadResult};
 pub use builder::CollectionBuilder;
 pub use collection::{Collection, CollectionItem};
+pub use filtered_collection::FilteredCollection;
 pub use key::Key;
 pub use node::{Node, NodeType};
 pub use selection::DisabledBehavior;
+pub use sorted_collection::{SortDescriptor, SortDirection, SortedCollection};
 pub use static_collection::StaticCollection;
 pub use tree_collection::{TreeCollection, TreeItemConfig};
