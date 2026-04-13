@@ -2987,72 +2987,89 @@ Patterns for specific dynamic content scenarios:
 /// Localizable announcement templates for common component state changes.
 ///
 /// Per §2.8: NO hardcoded English strings in ARIA labels or announcements.
-/// All announcement text is provided via the `AnnouncementMessages` struct,
-/// which implements `ComponentMessages` with English defaults. Consumers
-/// supply a locale-appropriate instance through the adapter's context provider.
-///
-/// **Design note — String vs MessageFn pattern:** This struct uses pre-localized `String`
-/// fields (with `{placeholder}` interpolation) rather than the `MessageFn` closure pattern
-/// used by `DragAnnouncements` (in `ars-interactions`). This is because `ars-a11y` depends
-/// only on `ars-core` and cannot reference `Locale` from `ars-i18n`. The adapter is
-/// responsible for constructing the correct locale-specific `AnnouncementMessages` instance.
+/// All announcement text follows the shared `ComponentMessages` pattern:
+/// each field is a `MessageFn` that receives the active locale, allowing
+/// adapters to resolve locale-aware strings and pluralization consistently
+/// across components.
 #[derive(Clone, Debug)]
-pub struct AnnouncementMessages {
-    pub search_results_zero: String,    // "No results found."
-    pub search_results_one: String,     // "1 result found."
-    pub search_results_other: String,   // "{count} results found."
-    pub selected: String,               // "{label}, selected."
-    pub deselected: String,             // "{label}, deselected."
-    pub validation_error: String,       // "{field}: {error}. Error."
-    pub loading: String,                // "Loading."
-    pub loading_complete: String,       // "Loading complete."
-    pub item_moved: String,             // "{label} moved to position {position} of {total}."
-    pub item_removed: String,           // "{label} removed."
-    pub sorted_ascending: String,       // "{column}, sorted ascending."
-    pub sorted_descending: String,      // "{column}, sorted descending."
-    pub not_sorted: String,             // "{column}, not sorted."
-    pub tree_expanded: String,          // "{label}, expanded."
-    pub tree_collapsed: String,         // "{label}, collapsed."
+pub struct Messages {
+    pub search_results: MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync>,
+    pub selected: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
+    pub deselected: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
+    pub validation_error: MessageFn<dyn Fn(&str, &str, &Locale) -> String + Send + Sync>,
+    pub loading: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    pub loading_complete: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    pub item_moved: MessageFn<dyn Fn(&str, usize, usize, &Locale) -> String + Send + Sync>,
+    pub item_removed: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
+    pub sorted_ascending: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
+    pub sorted_descending: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
+    pub not_sorted: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
+    pub tree_expanded: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
+    pub tree_collapsed: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
 }
 
-impl Default for AnnouncementMessages {
+impl Default for Messages {
     fn default() -> Self {
         Self {
-            search_results_zero: "No results found.".into(),
-            search_results_one: "1 result found.".into(),
-            search_results_other: "{count} results found.".into(),
-            selected: "{label}, selected.".into(),
-            deselected: "{label}, deselected.".into(),
-            validation_error: "{field}: {error}. Error.".into(),
-            loading: "Loading.".into(),
-            loading_complete: "Loading complete.".into(),
-            item_moved: "{label} moved to position {position} of {total}.".into(),
-            item_removed: "{label} removed.".into(),
-            sorted_ascending: "{column}, sorted ascending.".into(),
-            sorted_descending: "{column}, sorted descending.".into(),
-            not_sorted: "{column}, not sorted.".into(),
-            tree_expanded: "{label}, expanded.".into(),
-            tree_collapsed: "{label}, collapsed.".into(),
+            search_results: MessageFn::new(|count: usize, _locale: &Locale| match count {
+                0 => "No results found.".into(),
+                1 => "1 result found.".into(),
+                _ => format!("{count} results found."),
+            }),
+            selected: MessageFn::new(|label: &str, _locale: &Locale| {
+                format!("{label}, selected.")
+            }),
+            deselected: MessageFn::new(|label: &str, _locale: &Locale| {
+                format!("{label}, deselected.")
+            }),
+            validation_error: MessageFn::new(
+                |field: &str, error: &str, _locale: &Locale| {
+                    format!("{field}: {error}. Error.")
+                },
+            ),
+            loading: MessageFn::static_str("Loading."),
+            loading_complete: MessageFn::static_str("Loading complete."),
+            item_moved: MessageFn::new(
+                |label: &str, position: usize, total: usize, _locale: &Locale| {
+                    format!("{label} moved to position {position} of {total}.")
+                },
+            ),
+            item_removed: MessageFn::new(|label: &str, _locale: &Locale| {
+                format!("{label} removed.")
+            }),
+            sorted_ascending: MessageFn::new(|column: &str, _locale: &Locale| {
+                format!("{column}, sorted ascending.")
+            }),
+            sorted_descending: MessageFn::new(|column: &str, _locale: &Locale| {
+                format!("{column}, sorted descending.")
+            }),
+            not_sorted: MessageFn::new(|column: &str, _locale: &Locale| {
+                format!("{column}, not sorted.")
+            }),
+            tree_expanded: MessageFn::new(|label: &str, _locale: &Locale| {
+                format!("{label}, expanded.")
+            }),
+            tree_collapsed: MessageFn::new(|label: &str, _locale: &Locale| {
+                format!("{label}, collapsed.")
+            }),
         }
     }
 }
+
+impl ComponentMessages for Messages {}
 
 pub struct Announcements;
 
 impl Announcements {
     /// Announce the number of search results.
-    pub fn search_results(count: usize, messages: &AnnouncementMessages) -> String {
-        match count {
-            0 => messages.search_results_zero.clone(),
-            1 => messages.search_results_one.clone(),
-            n => messages.search_results_other.replace("{count}", &n.to_string()),
-        }
+    pub fn search_results(count: usize, locale: &Locale, messages: &Messages) -> String {
+        (messages.search_results)(count, locale)
     }
 
     /// Announce a selection change in a listbox.
-    pub fn selection_changed(label: &str, selected: bool, messages: &AnnouncementMessages) -> String {
-        let template = if selected { &messages.selected } else { &messages.deselected };
-        template.replace("{label}", label)
+    pub fn selection_changed(label: &str, selected: bool, locale: &Locale, messages: &Messages) -> String {
+        let message = if selected { &messages.selected } else { &messages.deselected };
+        message(label, locale)
     }
 
     /// Announce a toast notification.
@@ -3061,41 +3078,38 @@ impl Announcements {
     }
 
     /// Announce a form validation error.
-    pub fn validation_error(field_label: &str, error: &str, messages: &AnnouncementMessages) -> String {
-        messages.validation_error.replace("{field}", field_label).replace("{error}", error)
+    pub fn validation_error(field_label: &str, error: &str, locale: &Locale, messages: &Messages) -> String {
+        (messages.validation_error)(field_label, error, locale)
     }
 
     /// Announce loading state.
-    pub fn loading(messages: &AnnouncementMessages) -> String { messages.loading.clone() }
-    pub fn loading_complete(messages: &AnnouncementMessages) -> String { messages.loading_complete.clone() }
+    pub fn loading(locale: &Locale, messages: &Messages) -> String { (messages.loading)(locale) }
+    pub fn loading_complete(locale: &Locale, messages: &Messages) -> String { (messages.loading_complete)(locale) }
 
     /// Announce item moved in a drag-and-drop list.
-    pub fn item_moved(label: &str, position: usize, total: usize, messages: &AnnouncementMessages) -> String {
-        messages.item_moved
-            .replace("{label}", label)
-            .replace("{position}", &position.to_string())
-            .replace("{total}", &total.to_string())
+    pub fn item_moved(label: &str, position: usize, total: usize, locale: &Locale, messages: &Messages) -> String {
+        (messages.item_moved)(label, position, total, locale)
     }
 
     /// Announce item removed.
-    pub fn item_removed(label: &str, messages: &AnnouncementMessages) -> String {
-        messages.item_removed.replace("{label}", label)
+    pub fn item_removed(label: &str, locale: &Locale, messages: &Messages) -> String {
+        (messages.item_removed)(label, locale)
     }
 
     /// Announce sorted column.
-    pub fn column_sorted(column: &str, direction: AriaSort, messages: &AnnouncementMessages) -> String {
-        let template = match direction {
+    pub fn column_sorted(column: &str, direction: AriaSort, locale: &Locale, messages: &Messages) -> String {
+        let message = match direction {
             AriaSort::Ascending => &messages.sorted_ascending,
             AriaSort::Descending => &messages.sorted_descending,
             _ => &messages.not_sorted,
         };
-        template.replace("{column}", column)
+        message(column, locale)
     }
 
     /// Announce tree node expanded/collapsed.
-    pub fn tree_node_expanded(label: &str, expanded: bool, messages: &AnnouncementMessages) -> String {
-        let template = if expanded { &messages.tree_expanded } else { &messages.tree_collapsed };
-        template.replace("{label}", label)
+    pub fn tree_node_expanded(label: &str, expanded: bool, locale: &Locale, messages: &Messages) -> String {
+        let message = if expanded { &messages.tree_expanded } else { &messages.tree_collapsed };
+        message(label, locale)
     }
 }
 ```

@@ -8,6 +8,7 @@
 
 extern crate alloc;
 
+pub mod announcements;
 pub mod announcer;
 pub mod aria;
 /// Shared focus management contracts consumed by DOM and adapter layers.
@@ -16,6 +17,7 @@ pub mod focus;
 pub mod keyboard;
 pub mod visually_hidden;
 
+pub use announcements::Announcements;
 pub use announcer::{Announcement, AnnouncementPriority, LiveAnnouncer};
 #[cfg(feature = "aria-drag-drop-compat")]
 pub use aria::attribute::AriaDropeffect;
@@ -68,5 +70,21 @@ mod tests {
     #[test]
     fn data_ars_state_constant_value() {
         assert_eq!(DATA_ARS_STATE, "data-ars-state");
+    }
+
+    #[test]
+    fn announcements_messages_are_available_via_module_path() {
+        fn assert_component_messages<M: ars_core::ComponentMessages + Clone + Default>(
+            messages: &M,
+        ) -> M {
+            messages.clone()
+        }
+
+        let messages = announcements::Messages::default();
+        let cloned = assert_component_messages(&messages);
+        let locale = ars_core::Locale::parse("en-US").expect("test locale must parse");
+
+        assert_eq!((cloned.loading)(&locale), "Loading.");
+        assert_eq!(Announcements::loading(&locale, &messages), "Loading.");
     }
 }
