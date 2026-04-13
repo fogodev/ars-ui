@@ -1,6 +1,9 @@
 // ars-collections/src/sorted_collection.rs
 
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
 use core::{
     cmp,
     fmt::{self, Debug, Display},
@@ -103,62 +106,76 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
         // For flat (non-sectioned) collections: all nodes are Items, so
         // item_indices IS the final sorted order.
         //
-        // For sectioned collections: sort items within each section while
-        // preserving section order and structural node positions. Algorithm:
-        // 1. Group sorted items by parent_key (section membership).
-        // 2. Walk the original node order. Structural nodes (Section, Header,
-        //    Separator) are emitted in their original positions. When items
-        //    belonging to a section are encountered, emit the section's sorted
-        //    items instead, consuming from the group.
+        // For sectioned or mixed collections: items are sorted within each
+        // contiguous *run* of same-parent items. A new run starts when a
+        // Section node is encountered or an Item's parent_key differs from
+        // the previous Item's parent. Header and Separator nodes do not
+        // break runs — they are emitted in their original positions.
+        //
+        // This run-aware grouping prevents items from migrating across
+        // structural boundaries when top-level items appear in multiple
+        // runs separated by sections.
         let has_sections = inner.nodes().any(Node::is_structural);
 
         let sorted_indices = if has_sections {
-            // Group sorted item indices by parent_key.
-            let mut section_items = BTreeMap::<Option<Key>, Vec<usize>>::new();
-            for &idx in &item_indices {
-                let node = inner
-                    .get_by_index(idx)
-                    .expect("sorted index must be within bounds");
-                section_items
-                    .entry(node.parent_key.clone())
-                    .or_default()
-                    .push(idx);
-            }
-            // Track consumption position per section.
-            let mut section_cursors = BTreeMap::<Option<Key>, usize>::new();
-
-            let mut result = Vec::with_capacity(inner.size());
-            let mut current_section = None::<Key>;
-            let mut items_emitted_for_section = false;
+            // Phase 1: assign each item to a contiguous-run group.
+            let mut item_to_group = BTreeMap::<usize, usize>::new();
+            let mut next_group = 0;
+            let mut current_parent = None::<Option<Key>>;
 
             for node in inner.nodes() {
                 match node.node_type {
                     NodeType::Section => {
-                        current_section = Some(node.key.clone());
-                        items_emitted_for_section = false;
-                        result.push(node.index);
+                        // Section always resets scope — next item starts a new group.
+                        current_parent = None;
                     }
                     NodeType::Header | NodeType::Separator => {
-                        // Emit structural nodes in their original position.
+                        // Structural leaf nodes do not break item groups.
+                    }
+                    NodeType::Item => {
+                        let pk = node.parent_key.clone();
+                        match &current_parent {
+                            Some(existing_pk) if *existing_pk == pk => {
+                                // Same group — no action needed.
+                            }
+                            _ => {
+                                // Different parent or first item after reset — new group.
+                                next_group += 1;
+                                current_parent = Some(pk);
+                            }
+                        }
+                        item_to_group.insert(node.index, next_group);
+                    }
+                }
+            }
+
+            // Phase 2: distribute the globally-sorted item indices into per-group buckets.
+            let mut groups = BTreeMap::<usize, Vec<usize>>::new();
+            for &idx in &item_indices {
+                if let Some(&group) = item_to_group.get(&idx) {
+                    groups.entry(group).or_default().push(idx);
+                }
+            }
+
+            // Phase 3: walk original order, emit structural nodes in place,
+            // emit each group's sorted items on first encounter.
+            let mut group_emitted = BTreeSet::<usize>::new();
+            let mut result = Vec::with_capacity(inner.size());
+
+            for node in inner.nodes() {
+                match node.node_type {
+                    NodeType::Section | NodeType::Header | NodeType::Separator => {
                         result.push(node.index);
                     }
                     NodeType::Item => {
-                        // On first item of this section, emit all sorted items for it.
-                        let section_key = node.parent_key.clone();
-                        if !items_emitted_for_section || section_key != current_section {
-                            if let Some(items) = section_items.get(&section_key) {
-                                let cursor =
-                                    section_cursors.entry(section_key.clone()).or_insert(0);
-                                if *cursor == 0 {
-                                    // First encounter: emit all sorted items for this section.
+                        if let Some(&group) = item_to_group.get(&node.index) {
+                            if group_emitted.insert(group) {
+                                // First encounter — emit all sorted items for this group.
+                                if let Some(items) = groups.get(&group) {
                                     result.extend_from_slice(items);
-                                    *cursor = items.len();
                                 }
                             }
-                            items_emitted_for_section = true;
-                            current_section = section_key;
                         }
-                        // Skip original item indices — already emitted via sorted group.
                     }
                 }
             }
@@ -173,6 +190,7 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
             .iter()
             .copied()
             .find(|&i| inner.get_by_index(i).is_some_and(Node::is_focusable));
+
         let last_focusable = sorted_indices
             .iter()
             .rev()
@@ -503,6 +521,58 @@ mod tests {
                 NodeType::Item, // Banana (sorted)
                 NodeType::Separator,
                 NodeType::Item, // Standalone
+            ]
+        );
+    }
+
+    #[test]
+    fn sort_disjoint_top_level_runs_stay_in_place() {
+        // Top-level items separated by a section must NOT merge across
+        // the structural boundary. Each run is sorted independently.
+        //
+        // Original order:
+        //   Item D (top-level)   ← run 1
+        //   Item B (top-level)   ← run 1
+        //   Section "Fruits"
+        //     Item Cherry
+        //     Item Apple
+        //   Item C (top-level)   ← run 2
+        //   Item A (top-level)   ← run 2
+        let inner = CollectionBuilder::new()
+            .item(Key::int(4), "D", "d")
+            .item(Key::int(2), "B", "b")
+            .section(Key::str("fruits"), "Fruits")
+            .item(Key::int(13), "Cherry", "cherry")
+            .item(Key::int(11), "Apple", "apple")
+            .end_section()
+            .item(Key::int(3), "C", "c")
+            .item(Key::int(1), "A", "a")
+            .build();
+
+        let sorted = SortedCollection::new(&inner, |a, b| a.text_value.cmp(&b.text_value));
+
+        let texts = sorted
+            .nodes()
+            .filter(|n| n.is_focusable())
+            .map(|n| n.text_value.as_str())
+            .collect::<Vec<_>>();
+
+        // Run 1 sorted: B, D. Section items sorted: Apple, Cherry. Run 2 sorted: A, C.
+        assert_eq!(texts, vec!["B", "D", "Apple", "Cherry", "A", "C"]);
+
+        // Structural nodes stay in their original positions.
+        let types = sorted.nodes().map(|n| n.node_type).collect::<Vec<_>>();
+        assert_eq!(
+            types,
+            vec![
+                NodeType::Item,    // B (run 1)
+                NodeType::Item,    // D (run 1)
+                NodeType::Section, // Fruits
+                NodeType::Header,  // Fruits header
+                NodeType::Item,    // Apple (section)
+                NodeType::Item,    // Cherry (section)
+                NodeType::Item,    // A (run 2)
+                NodeType::Item,    // C (run 2)
             ]
         );
     }

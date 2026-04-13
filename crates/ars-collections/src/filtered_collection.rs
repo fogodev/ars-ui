@@ -54,11 +54,14 @@ impl<'a, T: Clone, C: Collection<T>> FilteredCollection<'a, T, C> {
     /// their children passes the predicate.
     pub fn new(inner: &'a C, predicate: impl Fn(&Node<T>) -> bool) -> Self {
         // First pass: find all item nodes that pass.
+        // Uses node.index (the stable flat index from the inner collection)
+        // rather than iterator position, so this works correctly when the
+        // inner collection is itself a wrapper (e.g., SortedCollection) whose
+        // traversal order differs from index order.
         let passing = inner
             .nodes()
-            .enumerate()
-            .filter(|(_, n)| n.is_focusable() && predicate(n))
-            .map(|(i, _)| i)
+            .filter(|n| n.is_focusable() && predicate(n))
+            .map(|n| n.index)
             .collect::<BTreeSet<_>>();
 
         // Second pass: include structural nodes whose section group has passing items.
@@ -195,7 +198,11 @@ impl<'a, T: Clone, C: Collection<T>> Collection<T> for FilteredCollection<'a, T,
     where
         T: 'b,
     {
-        self.visible_indices
+        // Iterate visible_order (Vec) to preserve the inner collection's
+        // traversal order, not visible_indices (BTreeSet) which re-sorts by
+        // numeric index. This ensures nodes()/keys() agree with
+        // get_by_index()/key_after() when wrapping a SortedCollection.
+        self.visible_order
             .iter()
             .filter_map(|&i| self.inner.get_by_index(i))
     }

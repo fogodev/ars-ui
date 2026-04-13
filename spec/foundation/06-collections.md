@@ -4246,11 +4246,14 @@ impl<'a, T: Clone, C: Collection<T>> FilteredCollection<'a, T, C> {
     /// their children passes the predicate.
     pub fn new(inner: &'a C, predicate: impl Fn(&Node<T>) -> bool) -> Self {
         // First pass: find all item nodes that pass.
+        // Uses node.index (the stable flat index from the inner collection)
+        // rather than iterator position, so this works correctly when the
+        // inner collection is itself a wrapper (e.g., SortedCollection) whose
+        // traversal order differs from index order.
         let passing: alloc::collections::BTreeSet<usize> = inner
             .nodes()
-            .enumerate()
-            .filter(|(_, n)| n.is_focusable() && predicate(n))
-            .map(|(i, _)| i)
+            .filter(|n| n.is_focusable() && predicate(n))
+            .map(|n| n.index)
             .collect();
 
         // Second pass: include structural nodes whose section group has passing items.
@@ -4345,7 +4348,11 @@ impl<'a, T: Clone, C: Collection<T>> Collection<T> for FilteredCollection<'a, T,
     }
 
     fn nodes(&self) -> impl Iterator<Item = &Node<T>> {
-        self.visible_indices
+        // Iterate visible_order (Vec) to preserve the inner collection's
+        // traversal order, not visible_indices (BTreeSet) which re-sorts by
+        // numeric index. This ensures nodes()/keys() agree with
+        // get_by_index()/key_after() when wrapping a SortedCollection.
+        self.visible_order
             .iter()
             .filter_map(|&i| self.inner.get_by_index(i))
     }
@@ -4455,67 +4462,84 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
         // For flat (non-sectioned) collections: all nodes are Items, so
         // item_indices IS the final sorted order.
         //
-        // For sectioned collections: sort items within each section while
-        // preserving section order and structural node positions. Algorithm:
-        // 1. Group sorted items by parent_key (section membership).
-        // 2. Walk the original node order. Structural nodes (Section, Header,
-        //    Separator) are emitted in their original positions. When items
-        //    belonging to a section are encountered, emit the section's sorted
-        //    items instead, consuming from the group.
+        // For sectioned or mixed collections: items are sorted within each
+        // contiguous *run* of same-parent items. A new run starts when a
+        // Section node is encountered or an Item's parent_key differs from
+        // the previous Item's parent. Header and Separator nodes do not
+        // break runs — they are emitted in their original positions.
+        //
+        // This run-aware grouping prevents items from migrating across
+        // structural boundaries when top-level items appear in multiple
+        // runs separated by sections.
         let has_sections = inner.nodes().any(|n| n.is_structural());
 
-        let sorted_indices = if !has_sections {
-            // Fast path: flat collection — sorted items are the full order.
-            item_indices
-        } else {
-            // Group sorted item indices by parent_key.
-            let mut section_items: alloc::collections::BTreeMap<Option<Key>, Vec<usize>> =
+        let sorted_indices = if has_sections {
+            // Phase 1: assign each item to a contiguous-run group.
+            let mut item_to_group: alloc::collections::BTreeMap<usize, usize> =
                 alloc::collections::BTreeMap::new();
-            for &idx in &item_indices {
-                let node = inner.get_by_index(idx)
-                    .expect("sorted index must be within bounds");
-                section_items.entry(node.parent_key.clone()).or_default().push(idx);
-            }
-            // Track consumption position per section.
-            let mut section_cursors: alloc::collections::BTreeMap<Option<Key>, usize> =
-                alloc::collections::BTreeMap::new();
-
-            let mut result = Vec::with_capacity(inner.size());
-            let mut current_section: Option<Key> = None;
-            let mut items_emitted_for_section = false;
+            let mut next_group: usize = 0;
+            let mut current_parent: Option<Option<Key>> = None;
 
             for node in inner.nodes() {
                 match node.node_type {
                     NodeType::Section => {
-                        current_section = Some(node.key.clone());
-                        items_emitted_for_section = false;
-                        result.push(node.index);
+                        // Section always resets scope — next item starts a new group.
+                        current_parent = None;
                     }
                     NodeType::Header | NodeType::Separator => {
-                        // Emit structural nodes in their original position.
+                        // Structural leaf nodes do not break item groups.
+                    }
+                    NodeType::Item => {
+                        let pk = node.parent_key.clone();
+                        match &current_parent {
+                            Some(existing_pk) if *existing_pk == pk => {}
+                            _ => {
+                                next_group += 1;
+                                current_parent = Some(pk);
+                            }
+                        }
+                        item_to_group.insert(node.index, next_group);
+                    }
+                }
+            }
+
+            // Phase 2: distribute the globally-sorted item indices into per-group buckets.
+            let mut groups: alloc::collections::BTreeMap<usize, Vec<usize>> =
+                alloc::collections::BTreeMap::new();
+            for &idx in &item_indices {
+                if let Some(&group) = item_to_group.get(&idx) {
+                    groups.entry(group).or_default().push(idx);
+                }
+            }
+
+            // Phase 3: walk original order, emit structural nodes in place,
+            // emit each group's sorted items on first encounter.
+            let mut group_emitted: alloc::collections::BTreeSet<usize> =
+                alloc::collections::BTreeSet::new();
+            let mut result = Vec::with_capacity(inner.size());
+
+            for node in inner.nodes() {
+                match node.node_type {
+                    NodeType::Section | NodeType::Header | NodeType::Separator => {
                         result.push(node.index);
                     }
                     NodeType::Item => {
-                        // On first item of this section, emit all sorted items for it.
-                        let section_key = node.parent_key.clone();
-                        if !items_emitted_for_section || section_key != current_section {
-                            if let Some(items) = section_items.get(&section_key) {
-                                let cursor = section_cursors.entry(section_key.clone()).or_insert(0);
-                                if *cursor == 0 {
-                                    // First encounter: emit all sorted items for this section.
+                        if let Some(&group) = item_to_group.get(&node.index) {
+                            if group_emitted.insert(group) {
+                                // First encounter — emit all sorted items for this group.
+                                if let Some(items) = groups.get(&group) {
                                     result.extend_from_slice(items);
-                                    *cursor = items.len();
                                 }
                             }
-                            items_emitted_for_section = true;
-                            current_section = section_key;
                         }
-                        // Skip original item indices — already emitted via sorted group.
                     }
                 }
             }
 
             result
+        } else {
+            // Fast path: flat collection — sorted items are the full order.
+            item_indices
         };
 
         let first_focusable = sorted_indices.iter().copied()
