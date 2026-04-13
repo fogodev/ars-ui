@@ -409,12 +409,21 @@ impl DragResult {
                 items,
                 pointer_type,
                 ..
-            } => Some(DragState::DragOver {
-                items,
-                pointer_type,
-                target_id: target_id.into(),
-                current_operation,
-            }),
+            } => {
+                if source_allows_operation(&self.config, current_operation) {
+                    Some(DragState::DragOver {
+                        items,
+                        pointer_type,
+                        target_id: target_id.into(),
+                        current_operation,
+                    })
+                } else {
+                    Some(DragState::Dragging {
+                        items,
+                        pointer_type,
+                    })
+                }
+            }
 
             DragState::Idle | DragState::Dropped { .. } => None,
         };
@@ -597,8 +606,7 @@ impl DropResult {
             return DropOperation::Cancel;
         }
 
-        let operation =
-            resolve_drop_operation(&self.config, &items, offered_operation, pointer_type);
+        let operation = resolve_enter_operation(&self.config, &items, offered_operation);
 
         if operation == DropOperation::Cancel {
             self.enter_count = 0;
@@ -647,7 +655,7 @@ impl DropResult {
         }
 
         let operation =
-            resolve_drop_operation(&self.config, items, offered_operation, pointer_type);
+            resolve_drag_over_operation(&self.config, items, offered_operation, pointer_type);
 
         if operation == DropOperation::Cancel {
             self.enter_count = 0;
@@ -850,7 +858,29 @@ fn build_drop_attrs(
     attrs
 }
 
-fn resolve_drop_operation(
+fn resolve_enter_operation(
+    config: &DropConfig,
+    items: &[DragItemPreview],
+    offered_operation: DropOperation,
+) -> DropOperation {
+    if config.disabled || !accepts_preview_items(config, items) {
+        return DropOperation::Cancel;
+    }
+
+    if offered_operation == DropOperation::Cancel {
+        return DropOperation::Cancel;
+    }
+
+    if let Some(accepted_operations) = &config.accepted_operations {
+        if !accepted_operations.contains(&offered_operation) {
+            return DropOperation::Cancel;
+        }
+    }
+
+    offered_operation
+}
+
+fn resolve_drag_over_operation(
     config: &DropConfig,
     items: &[DragItemPreview],
     offered_operation: DropOperation,
@@ -882,6 +912,14 @@ fn resolve_drop_operation(
     }
 
     operation
+}
+
+fn source_allows_operation(config: &DragConfig, operation: DropOperation) -> bool {
+    operation != DropOperation::Cancel
+        && config
+            .allowed_operations
+            .as_ref()
+            .is_none_or(|allowed_operations| allowed_operations.contains(&operation))
 }
 
 fn preview_matches_accepted_types(item: &DragItemPreview, accepted_types: &[String]) -> bool {
@@ -926,6 +964,7 @@ fn accepts_preview_items(config: &DropConfig, items: &[DragItemPreview]) -> bool
 mod tests {
     use std::{
         fmt::Write as _,
+        mem::discriminant,
         sync::{Arc, Mutex},
     };
 
@@ -935,7 +974,7 @@ mod tests {
     use super::{
         DirectoryHandle, DragConfig, DragEndEvent, DragItem, DragItemKind, DragItemPreview,
         DragStartEvent, DragState, DropConfig, DropEvent, DropIndicatorPosition, DropOperation,
-        DropTargetEvent, FileHandle, use_drag, use_drop,
+        DropTargetEvent, FileHandle, build_drop_attrs, use_drag, use_drop,
     };
     use crate::PointerType;
 
@@ -945,6 +984,24 @@ mod tests {
             mime_types: mime_types.iter().map(|mime| (*mime).to_owned()).collect(),
         }
     }
+
+    fn drag_state_is_idle(state: &DragState) -> bool {
+        discriminant(state) == discriminant(&DragState::Idle)
+    }
+
+    fn drag_state_is_dragging(state: &DragState) -> bool {
+        discriminant(state)
+            == discriminant(&DragState::Dragging {
+                items: Vec::new(),
+                pointer_type: PointerType::Mouse,
+            })
+    }
+
+    fn resolve_link_operation(_: DropTargetEvent) -> DropOperation {
+        DropOperation::Link
+    }
+
+    fn ignore_drop_event(_: DropEvent) {}
 
     #[test]
     fn drop_operation_as_drop_effect_returns_html5_values() {
@@ -1298,6 +1355,19 @@ mod tests {
     }
 
     #[test]
+    fn drag_result_start_drag_is_noop_when_already_active() {
+        let mut result = use_drag(DragConfig {
+            items: Some(Arc::new(|| vec![DragItem::Text("payload".into())])),
+            ..DragConfig::default()
+        });
+
+        drop(result.start_drag(PointerType::Mouse));
+
+        assert!(result.start_drag(PointerType::Touch).is_none());
+        assert!(drag_state_is_dragging(&result.current_state()));
+    }
+
+    #[test]
     fn drag_result_enter_target_transitions_dragging_to_drag_over() {
         let mut result = use_drag(DragConfig {
             items: Some(Arc::new(|| vec![DragItem::Text("payload".into())])),
@@ -1386,6 +1456,22 @@ mod tests {
     }
 
     #[test]
+    fn drag_result_enter_target_rejects_operations_outside_allowed_list() {
+        let mut result = use_drag(DragConfig {
+            items: Some(Arc::new(|| vec![DragItem::Text("payload".into())])),
+            allowed_operations: Some(vec![DropOperation::Copy]),
+            ..DragConfig::default()
+        });
+
+        drop(result.start_drag(PointerType::Mouse));
+
+        result.enter_target("target-1", DropOperation::Move);
+
+        assert!(drag_state_is_dragging(&result.current_state()));
+        assert!(result.complete_drop().is_none());
+    }
+
+    #[test]
     fn drag_result_complete_drop_fires_end_callback_with_current_operation() {
         let end_events = Arc::new(Mutex::new(Vec::<DragEndEvent>::new()));
 
@@ -1458,7 +1544,7 @@ mod tests {
         assert_eq!(event.operation, DropOperation::Cancel);
         assert_eq!(event.pointer_type, PointerType::Touch);
         assert!(!event.was_dropped);
-        assert!(matches!(result.current_state(), DragState::Idle));
+        assert!(drag_state_is_idle(&result.current_state()));
         assert!(!result.dragging);
         assert!(!result.attrs.contains(&HtmlAttr::Data("ars-dragging")));
     }
@@ -1508,7 +1594,7 @@ mod tests {
 
         result.reset();
 
-        assert!(matches!(result.current_state(), DragState::Idle));
+        assert!(drag_state_is_idle(&result.current_state()));
         assert!(!result.dragging);
         assert!(!result.attrs.contains(&HtmlAttr::Data("ars-dragging")));
     }
@@ -1570,10 +1656,28 @@ mod tests {
     }
 
     #[test]
+    fn drag_result_start_drag_uses_selected_items_when_primary_items_are_absent() {
+        let mut result = use_drag(DragConfig {
+            get_items: Some(Arc::new(|| vec![DragItem::Text("selected".into())])),
+            ..DragConfig::default()
+        });
+
+        let event = result
+            .start_drag(PointerType::Mouse)
+            .expect("drag should start");
+
+        assert_eq!(event.items.len(), 1);
+
+        match &event.items[0] {
+            DragItem::Text(text) => assert_eq!(text, "selected"),
+            other => panic!("unexpected drag item: {other:?}"),
+        }
+    }
+
+    #[test]
     fn drag_result_disabled_noops_all_transition_helpers() {
         let mut result = use_drag(DragConfig {
             disabled: true,
-            items: Some(Arc::new(|| vec![DragItem::Text("payload".into())])),
             ..DragConfig::default()
         });
 
@@ -1585,7 +1689,7 @@ mod tests {
         assert!(result.complete_drop().is_none());
         assert!(result.cancel_drag().is_none());
 
-        assert!(matches!(result.current_state(), DragState::Idle));
+        assert!(drag_state_is_idle(&result.current_state()));
         assert!(!result.dragging);
         assert!(result.attrs.contains(&HtmlAttr::Draggable));
         assert!(!result.attrs.contains(&HtmlAttr::Data("ars-dragging")));
@@ -1660,6 +1764,48 @@ mod tests {
             result.attrs.get_value(&HtmlAttr::Data("ars-drop-position")),
             Some(AttrValue::String(value)) if value == "before"
         ));
+    }
+
+    #[test]
+    fn drop_result_drag_enter_does_not_invoke_drag_over_callback() {
+        let mut result = use_drop(DropConfig {
+            on_drag_over: Some(Callback::new(resolve_link_operation)),
+            ..DropConfig::default()
+        });
+
+        let operation = result.drag_enter(
+            vec![preview(DragItemKind::Text, &["text/plain"])],
+            DropOperation::Copy,
+            PointerType::Mouse,
+        );
+
+        assert_eq!(operation, DropOperation::Copy);
+    }
+
+    #[test]
+    fn drop_result_drag_over_rejects_operations_outside_accepted_list() {
+        let mut result = use_drop(DropConfig {
+            accepted_operations: Some(vec![DropOperation::Copy]),
+            on_drag_over: Some(Callback::new(resolve_link_operation)),
+            ..DropConfig::default()
+        });
+
+        let _ = result.drag_enter(
+            vec![preview(DragItemKind::Text, &["text/plain"])],
+            DropOperation::Copy,
+            PointerType::Mouse,
+        );
+
+        let operation = result.drag_over(
+            &[preview(DragItemKind::Text, &["text/plain"])],
+            DropOperation::Copy,
+            PointerType::Mouse,
+        );
+
+        assert_eq!(operation, DropOperation::Cancel);
+        assert!(!result.drag_over);
+        assert!(result.drop_operation.is_none());
+        assert!(result.indicator_position.is_none());
     }
 
     #[test]
@@ -1760,7 +1906,7 @@ mod tests {
     #[test]
     fn drop_result_drag_over_updates_operation_and_position_snapshot() {
         let mut result = use_drop(DropConfig {
-            on_drag_over: Some(Callback::new(|_: DropTargetEvent| DropOperation::Link)),
+            on_drag_over: Some(Callback::new(resolve_link_operation)),
             drop_indicator_position: DropIndicatorPosition::After,
             ..DropConfig::default()
         });
@@ -1790,6 +1936,18 @@ mod tests {
         assert!(matches!(
             result.attrs.get_value(&HtmlAttr::Data("ars-drop-position")),
             Some(AttrValue::String(value)) if value == "after"
+        ));
+    }
+
+    #[test]
+    fn build_drop_attrs_omits_operation_when_snapshot_has_no_operation() {
+        let attrs = build_drop_attrs(true, None, Some(DropIndicatorPosition::Before));
+
+        assert!(attrs.contains(&HtmlAttr::Data("ars-drag-over")));
+        assert!(!attrs.contains(&HtmlAttr::Data("ars-drop-operation")));
+        assert!(matches!(
+            attrs.get_value(&HtmlAttr::Data("ars-drop-position")),
+            Some(AttrValue::String(value)) if value == "before"
         ));
     }
 
@@ -1997,6 +2155,27 @@ mod tests {
         assert_eq!(drop_events[0].pointer_type, event.pointer_type);
         assert_eq!(drop_events[0].drop_position, event.drop_position);
         assert_eq!(drop_events[0].items.len(), event.items.len());
+    }
+
+    #[test]
+    fn drop_result_drop_skips_callback_when_operation_is_cancel() {
+        let mut result = use_drop(DropConfig {
+            on_drop: Some(Callback::new(ignore_drop_event)),
+            ..DropConfig::default()
+        });
+
+        result.drag_over = true;
+        result.drop_operation = Some(DropOperation::Cancel);
+        result.indicator_position = Some(DropIndicatorPosition::OnTarget);
+
+        assert!(
+            result
+                .drop(vec![DragItem::Text("payload".into())], PointerType::Mouse)
+                .is_none()
+        );
+        assert!(!result.drag_over);
+        assert!(result.drop_operation.is_none());
+        assert!(result.indicator_position.is_none());
     }
 
     #[test]
