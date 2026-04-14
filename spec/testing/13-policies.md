@@ -206,6 +206,16 @@ fn drag_drop_aria_attributes_present() {
 fn axe_core_integration_available() {
     // Verify axe-core runner is importable and functional
 }
+
+#[cfg(feature = "testing")]
+#[test]
+fn aria_testing_helpers_available() {
+    use ars_a11y::testing::{AriaValidator, required_attributes_for_role};
+
+    let validator = AriaValidator::new();
+    assert!(!validator.has_errors());
+    assert!(required_attributes_for_role(ars_a11y::AriaRole::Combobox).contains(&"aria-expanded"));
+}
 ```
 
 #### ars-collections Feature Flags

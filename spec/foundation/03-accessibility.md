@@ -3711,6 +3711,10 @@ Consumers who need to override these defaults (e.g., to show a specific dialog i
 /// - Required owned elements missing
 /// - Attributes used on incompatible roles
 /// - ID references pointing to non-existent elements
+///
+/// This surface is exported from `ars-a11y::testing` and is available when
+/// compiling tests or when the crate's `testing` feature is enabled.
+#[derive(Debug, Default)]
 pub struct AriaValidator {
     errors: Vec<AriaValidationError>,
     warnings: Vec<AriaValidationWarning>,
@@ -3752,8 +3756,9 @@ pub enum AriaValidationWarning {
 }
 
 impl AriaValidator {
+    #[must_use]
     pub fn new() -> Self {
-        Self { errors: Vec::new(), warnings: Vec::new() }
+        Self::default()
     }
 
     /// Validate role usage.
@@ -3795,14 +3800,18 @@ impl AriaValidator {
         }
     }
 
+    #[must_use]
     pub fn has_errors(&self) -> bool { !self.errors.is_empty() }
+    #[must_use]
     pub fn errors(&self) -> &[AriaValidationError] { &self.errors }
+    #[must_use]
     pub fn warnings(&self) -> &[AriaValidationWarning] { &self.warnings }
 }
 
 /// Returns required ARIA attributes for a role, as per WAI-ARIA 1.2 spec.
 /// These attributes MUST be present when using the role.
-pub fn required_attributes_for_role(role: AriaRole) -> &'static [&'static str] {
+#[must_use]
+pub const fn required_attributes_for_role(role: AriaRole) -> &'static [&'static str] {
     match role {
         AriaRole::Checkbox | AriaRole::Radio | AriaRole::Switch
         | AriaRole::Menuitemcheckbox | AriaRole::Menuitemradio
@@ -3811,32 +3820,23 @@ pub fn required_attributes_for_role(role: AriaRole) -> &'static [&'static str] {
             => &["aria-expanded"],
         AriaRole::Scrollbar
             => &["aria-controls", "aria-valuenow", "aria-valuemin", "aria-valuemax"],
-        AriaRole::Slider
+        AriaRole::Slider | AriaRole::Separator
             => &["aria-valuenow", "aria-valuemin", "aria-valuemax"],
         // WAI-ARIA 1.2 formally requires only aria-valuenow for Spinbutton.
         // aria-valuemin/max are strongly recommended but not required.
-        AriaRole::Spinbutton
+        AriaRole::Spinbutton | AriaRole::Meter
             => &["aria-valuenow"],
         // WAI-ARIA 1.2 formally requires only aria-valuenow for Meter.
         // aria-valuemin/max are strongly recommended (default 0 and 100 if absent).
-        AriaRole::Meter
-            => &["aria-valuenow"],
-        // Focusable separator (widget role) requires value attributes.
-        // Non-focusable separators should use AriaRole::StructuralSeparator instead,
-        // which falls through to the wildcard and requires no attributes.
-        AriaRole::Separator
-            => &["aria-valuenow", "aria-valuemin", "aria-valuemax"],
         AriaRole::Heading
             => &["aria-level"],
-        AriaRole::Option
-            => &[], // aria-selected is required in some contexts but not globally
-        // Note: StructuralSeparator has no required attributes (covered by wildcard)
         _ => &[],
     }
 }
 
 /// Validate that an AttrMap produced by a connect() function is
 /// ARIA-conformant. Called in debug builds and in test infrastructure.
+#[must_use]
 pub fn validate_attr_map(role: Option<AriaRole>, attr_map: &AttrMap) -> AriaValidator {
     let mut validator = AriaValidator::new();
 
@@ -4125,7 +4125,8 @@ mod tests {
 ```text
 crates/ars-a11y/
   src/
-    lib.rs                  // Re-exports; feature flags
+    lib.rs                  // Re-exports; feature flags (`testing` gated behind
+                            // #[cfg(any(test, feature = "testing"))])
     aria/
       mod.rs
       role.rs               // AriaRole enum (all roles)
@@ -4150,7 +4151,7 @@ crates/ars-a11y/
     media.rs                // Re-export facade behind #[cfg(feature = "dom")]; canonical
                             // implementations live in ars-dom
     touch.rs                // touch_target_attrs(), InputMode, should_use_roving_tabindex
-    testing/
+    testing/                // Exported when compiling tests or with feature = "testing"
       mod.rs
       validator.rs          // AriaValidator, AriaValidationError, validate_attr_map()
       keyboard.rs           // SimulatedKeyEvent, NavigationRecorder, FocusZoneTestHarness

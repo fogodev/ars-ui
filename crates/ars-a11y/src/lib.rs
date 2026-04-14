@@ -17,6 +17,9 @@ pub mod focus;
 pub mod keyboard;
 /// Field labelling, descriptions, and error wiring helpers for form controls.
 pub mod label;
+/// Testing helpers for ARIA validation and keyboard-navigation assertions.
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 /// Touch-target sizing and mobile accessibility helpers.
 pub mod touch;
 pub mod visually_hidden;
@@ -40,6 +43,11 @@ pub use focus::{
 };
 pub use keyboard::{DomEvent, KeyModifiers, KeyboardShortcut, Platform};
 pub use label::{DescriptionConfig, FieldContext, LabelConfig};
+#[cfg(any(test, feature = "testing"))]
+pub use testing::{
+    AriaValidationError, AriaValidationWarning, AriaValidator, required_attributes_for_role,
+    validate_attr_map,
+};
 pub use touch::{
     InputMode, MIN_DRAG_TARGET_SIZE, MIN_TOUCH_TARGET_SIZE, should_use_roving_tabindex_for_mobile,
     touch_target_attrs, touch_target_attrs_with_min,

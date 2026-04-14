@@ -11,6 +11,7 @@ rust-version.workspace = true
 default               = ["aria-drag-drop-compat"]
 aria-drag-drop-compat = []
 axe                   = []
+testing               = []
 
 [dependencies]
 ars-core = { path = "../ars-core", default-features = false }
