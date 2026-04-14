@@ -4426,11 +4426,14 @@ The adapter MUST normalize `scrollLeft` to a consistent `0..maxScroll` range (me
 pub fn normalize_scroll_left_rtl(raw: f64, scroll_width: f64, client_width: f64) -> f64 {
     // Floor at 0 to prevent clamp panic when client_width > scroll_width.
     let max_scroll = (scroll_width - client_width).max(0.0);
-    if raw >= 0.0 {
-        // Safari: raw is 0..max (already inline-start-based)
-        raw.clamp(0.0, max_scroll)
+    if raw > 0.0 {
+        // Safari: raw is 0 (far-left / inline-end) to max (far-right /
+        // inline-start). Convert to inline-start distance: max - raw.
+        (max_scroll - raw).clamp(0.0, max_scroll)
     } else {
-        // Chrome/Firefox: raw is -max..0 (negate to get 0..max)
+        // Chrome/Firefox: raw is -max..0 (negate to get 0..max).
+        // raw == 0.0 means at inline-start (far-right) → distance 0,
+        // which is correct for both conventions.
         raw.abs().clamp(0.0, max_scroll)
     }
 }

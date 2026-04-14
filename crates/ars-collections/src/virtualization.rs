@@ -26,11 +26,14 @@ pub fn normalize_scroll_left_rtl(raw: f64, scroll_width: f64, client_width: f64)
     // (transient browser measurement or caller error).
     let max_scroll = (scroll_width - client_width).max(0.0);
 
-    if raw >= 0.0 {
-        // Safari: raw is 0..max (already inline-start-based)
-        raw.clamp(0.0, max_scroll)
+    if raw > 0.0 {
+        // Safari: raw is 0 (far-left / inline-end) to max (far-right /
+        // inline-start). Convert to inline-start distance: max - raw.
+        (max_scroll - raw).clamp(0.0, max_scroll)
     } else {
-        // Chrome/Firefox: raw is -max..0 (negate to get 0..max)
+        // Chrome/Firefox: raw is -max..0 (negate to get 0..max).
+        // raw == 0.0 means at inline-start (far-right) → distance 0,
+        // which is correct for both conventions.
         raw.abs().clamp(0.0, max_scroll)
     }
 }
@@ -386,14 +389,21 @@ impl Virtualizer {
             },
         };
 
+        // For horizontal TableLayout the range is in column-index space,
+        // so clamp against column_widths.len() instead of total_count.
+        let item_count = match (&self.layout, self.orientation) {
+            (LayoutStrategy::TableLayout { column_widths, .. }, Orientation::Horizontal) => {
+                column_widths.len()
+            }
+            _ => self.total_count,
+        };
+
         let mut start = first_visible.saturating_sub(self.overscan);
 
-        let mut end = last_visible
-            .saturating_add(self.overscan)
-            .min(self.total_count);
+        let mut end = last_visible.saturating_add(self.overscan).min(item_count);
 
         if let Some(focused_index) = self.focused_index {
-            if focused_index < self.total_count {
+            if focused_index < item_count {
                 start = start.min(focused_index);
                 end = end.max(focused_index + 1);
             }
@@ -1693,14 +1703,22 @@ mod tests {
     }
 
     #[test]
-    fn normalize_scroll_left_rtl_zero() {
+    fn normalize_scroll_left_rtl_zero_is_inline_start() {
+        // raw=0 is ambiguous (Chrome: at inline-start, Safari: at inline-end).
+        // We treat 0.0 as Chrome convention: inline-start → distance 0.
         assert_eq!(normalize_scroll_left_rtl(0.0, 1000.0, 600.0), 0.0);
     }
 
     #[test]
-    fn normalize_scroll_left_rtl_clamps_to_max() {
+    fn normalize_scroll_left_rtl_chrome_clamps_past_max() {
         // max_scroll = 400, |-500| = 500 → clamped to 400
         assert_eq!(normalize_scroll_left_rtl(-500.0, 1000.0, 600.0), 400.0);
+    }
+
+    #[test]
+    fn normalize_scroll_left_rtl_safari_at_inline_start() {
+        // Safari: raw=max_scroll means at far-right (inline-start) → 0
+        assert_eq!(normalize_scroll_left_rtl(400.0, 1000.0, 600.0), 0.0);
     }
 
     #[test]
@@ -1710,11 +1728,6 @@ mod tests {
         assert_eq!(normalize_scroll_left_rtl(-10.0, 100.0, 200.0), 0.0);
         assert_eq!(normalize_scroll_left_rtl(10.0, 100.0, 200.0), 0.0);
         assert_eq!(normalize_scroll_left_rtl(0.0, 100.0, 200.0), 0.0);
-    }
-
-    #[test]
-    fn normalize_scroll_left_rtl_max_value() {
-        assert_eq!(normalize_scroll_left_rtl(400.0, 1000.0, 600.0), 400.0);
     }
 
     // ── Direction field tests ────────────────────────────────────────
