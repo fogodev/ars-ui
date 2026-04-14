@@ -140,10 +140,48 @@ fn parse_tag(tag: &str) -> Option<PreferenceTag> {
 }
 
 fn parse_quality(value: &str) -> f32 {
-    match value.parse::<f32>() {
-        Ok(quality) if quality.is_finite() => quality,
-        _ => 1.0,
+    parse_qvalue(value).unwrap_or(1.0)
+}
+
+fn parse_qvalue(value: &str) -> Option<f32> {
+    if value == "0" || value == "0." {
+        return Some(0.0);
     }
+
+    if value == "1" || value == "1." {
+        return Some(1.0);
+    }
+
+    if let Some(fraction) = value.strip_prefix("0.") {
+        return parse_fraction(fraction).map(|fraction| f32::from(fraction) / 1_000.0);
+    }
+
+    if let Some(fraction) = value.strip_prefix("1.") {
+        let fraction = parse_fraction(fraction)?;
+
+        return (fraction == 0).then_some(1.0);
+    }
+
+    None
+}
+
+fn parse_fraction(fraction: &str) -> Option<u16> {
+    if fraction.len() > 3 || !fraction.as_bytes().iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+
+    let mut scaled = 0_u16;
+
+    for digit in fraction.bytes() {
+        scaled = scaled.checked_mul(10)?;
+        scaled = scaled.checked_add(u16::from(digit - b'0'))?;
+    }
+
+    for _ in fraction.len()..3 {
+        scaled = scaled.checked_mul(10)?;
+    }
+
+    Some(scaled)
 }
 
 #[cfg(test)]
@@ -204,6 +242,42 @@ mod tests {
         let supported = [locales::de(), locales::en_us()];
 
         let locale = locale_from_accept_language("de;q=abc,en-US;q=", &supported);
+
+        assert_eq!(locale, locales::de());
+    }
+
+    #[test]
+    fn out_of_range_quality_values_default_to_one() {
+        let supported = [locales::de(), locales::en_us()];
+
+        let locale = locale_from_accept_language("de;q=1,en-US;q=2", &supported);
+
+        assert_eq!(locale, locales::de());
+    }
+
+    #[test]
+    fn invalid_precision_quality_values_default_to_one() {
+        let supported = [locales::de(), locales::en_us()];
+
+        let locale = locale_from_accept_language("de;q=0.8,en-US;q=0.1234", &supported);
+
+        assert_eq!(locale, locales::en_us());
+    }
+
+    #[test]
+    fn accepts_boundary_qvalue_forms() {
+        let supported = [locales::de(), locales::en_us()];
+
+        let locale = locale_from_accept_language("de;q=1.000,en-US;q=0.", &supported);
+
+        assert_eq!(locale, locales::de());
+    }
+
+    #[test]
+    fn non_zero_fractional_one_qvalues_default_to_one() {
+        let supported = [locales::de(), locales::en_us()];
+
+        let locale = locale_from_accept_language("de;q=1,en-US;q=1.001", &supported);
 
         assert_eq!(locale, locales::de());
     }

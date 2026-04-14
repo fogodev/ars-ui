@@ -4363,6 +4363,47 @@ pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) 
             && !explicit_locale_ranges.iter().any(|tag| **tag == *supported_locale)
     }
 
+    fn parse_qvalue(value: &str) -> Option<f32> {
+        fn parse_fraction(fraction: &str) -> Option<u16> {
+            if fraction.len() > 3 || !fraction.as_bytes().iter().all(u8::is_ascii_digit) {
+                return None;
+            }
+
+            let mut scaled = 0_u16;
+
+            for digit in fraction.bytes() {
+                scaled = scaled.checked_mul(10)?;
+                scaled = scaled.checked_add(u16::from(digit - b'0'))?;
+            }
+
+            for _ in fraction.len()..3 {
+                scaled = scaled.checked_mul(10)?;
+            }
+
+            Some(scaled)
+        }
+
+        if value == "0" || value == "0." {
+            return Some(0.0);
+        }
+
+        if value == "1" || value == "1." {
+            return Some(1.0);
+        }
+
+        if let Some(fraction) = value.strip_prefix("0.") {
+            return parse_fraction(fraction).map(|fraction| fraction as f32 / 1_000.0);
+        }
+
+        if let Some(fraction) = value.strip_prefix("1.") {
+            let fraction = parse_fraction(fraction)?;
+
+            return (fraction == 0).then_some(1.0);
+        }
+
+        None
+    }
+
     let mut preferences: Vec<(PreferenceTag, f32)> = accept_language
         .split(',')
         .filter_map(|part| {
@@ -4377,7 +4418,7 @@ pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) 
                     let (name, value) = parameter.split_once('=')?;
 
                     if name.trim().eq_ignore_ascii_case("q") {
-                        value.trim().parse::<f32>().ok().filter(|value| value.is_finite())
+                        parse_qvalue(value.trim())
                     } else {
                         None
                     }
@@ -4401,9 +4442,7 @@ pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) 
         .collect();
 
     // Sort by quality descending
-    // Design decision: partial_cmp returns None for NaN quality values.
-    // Treating NaN as equal preserves original order (stable sort) — correct for
-    // malformed q= values. Using .expect() would panic on malformed input.
+    // Malformed or out-of-range q= values fall back to the default weight of 1.0.
     preferences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     let specific_ranges: Vec<_> = preferences
