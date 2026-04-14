@@ -209,6 +209,32 @@ impl Virtualizer {
         updated
     }
 
+    /// Applies a collection update that may have changed flat item indices.
+    ///
+    /// Because measured heights are keyed by flat index, any insert, removal,
+    /// filter, or reorder can make cached measurements point at the wrong
+    /// items. This method updates the tracked item count, clears the measured
+    /// height cache, and drops an out-of-bounds focused index.
+    pub fn apply_collection_change_mut(&mut self, total_count: usize) {
+        self.total_count = total_count;
+
+        self.measured_heights.clear();
+
+        if self.focused_index.is_some_and(|index| index >= total_count) {
+            self.focused_index = None;
+        }
+    }
+
+    /// Returns a cloned virtualizer with a collection update applied.
+    #[must_use]
+    pub fn apply_collection_change(&self, total_count: usize) -> Self {
+        let mut updated = self.clone();
+
+        updated.apply_collection_change_mut(total_count);
+
+        updated
+    }
+
     /// Returns the rendered range `[start, end)` including overscan.
     #[must_use]
     pub fn visible_range(&self) -> Range<usize> {
@@ -636,6 +662,59 @@ mod tests {
 
         assert_eq!(updated, mutated);
         assert_ne!(baseline, updated);
+    }
+
+    #[test]
+    fn apply_collection_change_mut_clears_index_based_measurements_even_when_count_is_unchanged() {
+        let mut virt = Virtualizer::new(
+            4,
+            LayoutStrategy::VariableHeight {
+                estimated_item_height: 40.0,
+            },
+        );
+
+        virt.report_item_height_mut(0, 60.0);
+        virt.report_item_height_mut(1, 50.0);
+
+        assert_eq!(virt.total_height_px(), 190.0);
+
+        virt.apply_collection_change_mut(4);
+
+        assert_eq!(virt.total_height_px(), 160.0);
+    }
+
+    #[test]
+    fn apply_collection_change_updates_total_count_and_focus() {
+        let mut virt = fixed_height_virt();
+
+        virt.focused_index = Some(8);
+        virt.apply_collection_change_mut(3);
+
+        assert_eq!(virt.total_count, 3);
+        assert_eq!(virt.focused_index, None);
+    }
+
+    #[test]
+    fn apply_collection_change_returns_new_virtualizer() {
+        let mut baseline = Virtualizer::new(
+            4,
+            LayoutStrategy::VariableHeight {
+                estimated_item_height: 40.0,
+            },
+        );
+
+        baseline.focused_index = Some(1);
+        baseline.report_item_height_mut(0, 60.0);
+
+        let updated = baseline.apply_collection_change(6);
+
+        assert_eq!(baseline.total_count, 4);
+        assert_eq!(baseline.focused_index, Some(1));
+        assert_eq!(baseline.total_height_px(), 180.0);
+
+        assert_eq!(updated.total_count, 6);
+        assert_eq!(updated.focused_index, Some(1));
+        assert_eq!(updated.total_height_px(), 240.0);
     }
 
     #[test]
