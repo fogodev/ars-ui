@@ -3681,18 +3681,18 @@ pub struct Virtualizer {
 
 #### 6.3.1 VirtualLayout Trait
 
-The `VirtualLayout` trait abstracts layout calculations so that components can swap between fixed-height, variable-height, and grid strategies without changing their scroll-handling logic. Custom layout implementations (e.g., masonry, sticky headers) implement this trait and plug into the `Virtualizer`.
+The `VirtualLayout` trait abstracts vertical layout calculations so that components can swap between fixed-height, variable-height, and grid strategies without changing their scroll-handling logic. Custom layout implementations (e.g., masonry, sticky headers) implement this trait and plug into the `Virtualizer`.
 
-> **Note:** The built-in `LayoutStrategy` enum variants use inline implementations within the `Virtualizer` methods. The `VirtualLayout` trait is an extension point for custom layouts that don't fit the built-in strategies.
+> **Note:** The built-in `LayoutStrategy` enum variants use inline implementations within the `Virtualizer` methods. The `VirtualLayout` trait is an extension point for custom vertical layouts that don't fit the built-in strategies. Layouts that also support horizontal virtualization implement the separate `HorizontalVirtualLayout` trait instead of relying on panic-prone default methods.
 
 ````rust
 // ars-collections/src/virtual_layout.rs
 
 use core::ops::Range;
 
-/// A layout algorithm that maps a flat collection of items to pixel positions
-/// within a scroll container. The `Virtualizer` delegates all geometric
-/// queries to its `VirtualLayout` implementation.
+/// A layout algorithm that maps a flat collection of items to vertical pixel
+/// positions within a scroll container. The `Virtualizer` delegates all
+/// vertical geometric queries to its `VirtualLayout` implementation.
 pub trait VirtualLayout {
     /// Returns the range of item indices `[start, end)` that are visible
     /// (or partially visible) given the current scroll state.
@@ -3744,34 +3744,26 @@ pub trait VirtualLayout {
     /// The total number of items known to the layout. Must match the
     /// collection size (or estimated total for async collections).
     fn item_count(&self) -> usize;
+}
 
-    // ── Horizontal layout methods ──────────────────────────────────────
-    // These mirror the vertical methods for horizontal virtualization.
-    // Default implementations panic — only layouts that support horizontal
-    // scrolling (e.g., Carousel) need to override them.
+/// Optional horizontal extension implemented by layouts that support
+/// inline-axis virtualization.
+pub trait HorizontalVirtualLayout: VirtualLayout {
 
     /// Returns the range of item indices visible given horizontal scroll state.
-    fn visible_range_horizontal(&self, scroll_offset: f64, viewport_width: f64) -> Range<usize> {
-        let _ = (scroll_offset, viewport_width);
-        unimplemented!("this layout does not support horizontal virtualization")
-    }
+    fn visible_range_horizontal(&self, scroll_offset: f64, viewport_width: f64) -> Range<usize>;
 
     /// Returns the X-axis pixel offset for the item at `index`, measured from
     /// the inline-start edge of the scroll content area.
-    fn item_offset_x(&self, index: usize) -> f64 {
-        let _ = index;
-        unimplemented!("this layout does not support horizontal virtualization")
-    }
+    fn item_offset_x(&self, index: usize) -> f64;
 
     /// Returns the total scrollable width of the content area.
-    fn total_width(&self) -> f64 {
-        unimplemented!("this layout does not support horizontal virtualization")
-    }
+    fn total_width(&self) -> f64;
 
     /// Reports the actual measured pixel width of the item at `index`.
     fn report_item_width(&mut self, index: usize, width: f64) {
         let _ = (index, width);
-        // No-op for layouts that don't support horizontal variable widths.
+        // No-op for layouts that don't use horizontal variable widths.
     }
 }
 ````

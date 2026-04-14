@@ -27,6 +27,11 @@
 //! - [`SortDescriptor`] — column + direction for table sorting.
 //! - [`CollectionError`] — error from an async page load.
 //! - [`typeahead`] — type-ahead / type-select state machine for keyboard search.
+//! - [`Virtualizer`] — visible-range and scroll math for virtualized rendering.
+//! - [`LayoutStrategy`] — sizing strategy used by [`Virtualizer`].
+//! - [`ScrollAlign`] — alignment mode for programmatic scrolling.
+//! - [`VirtualLayout`] — extension trait for custom vertical layout engines.
+//! - [`HorizontalVirtualLayout`] — optional extension trait for horizontal layout engines.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::std_instead_of_core)]
@@ -59,6 +64,10 @@ pub mod static_collection;
 pub mod tree_collection;
 /// Type-ahead / type-select state machine for keyboard search in collections.
 pub mod typeahead;
+/// Extension trait for custom virtualization layout engines.
+pub mod virtual_layout;
+/// Virtualized rendering range and scroll math.
+pub mod virtualization;
 
 pub use async_collection::{AsyncCollection, AsyncLoadingState};
 pub use async_loader::{AsyncLoader, CollectionError, LoadResult};
@@ -71,3 +80,5 @@ pub use selection::DisabledBehavior;
 pub use sorted_collection::{SortDescriptor, SortDirection, SortedCollection};
 pub use static_collection::StaticCollection;
 pub use tree_collection::{TreeCollection, TreeItemConfig};
+pub use virtual_layout::{HorizontalVirtualLayout, VirtualLayout};
+pub use virtualization::{LayoutStrategy, ScrollAlign, Virtualizer};
