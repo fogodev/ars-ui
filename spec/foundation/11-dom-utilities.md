@@ -2701,7 +2701,9 @@ impl ModalityManager {
 //
 // NOTE: These functions live in `ars-dom` (not `ars-a11y`) because they
 // depend on `web_sys::window()` which requires std and web_sys.
-// Components import these functions directly from ars-dom.
+// Components import directly from ars_dom::media.
+// (ars-a11y cannot re-export these because ars-dom depends on ars-a11y,
+// which would create a circular dependency.)
 
 /// Detects if the user has enabled forced colors (Windows High Contrast Mode).
 /// This value CAN change at runtime (user can toggle via Win+U or Settings).
@@ -2745,7 +2747,7 @@ pub fn prefers_color_scheme() -> ColorScheme {
 pub enum ColorScheme { Light, Dark }
 ```
 
-> **`matchMedia()` Caching:** Cache `matchMedia()` query results in a module-level variable (e.g., `static FORCED_COLORS: LazyCell<bool>`). Listen to the `change` event on the `MediaQueryList` object for runtime updates (e.g., user toggles High Contrast Mode). Avoid calling `window.matchMedia()` on every component render — the query string parsing has non-trivial cost. The same caching pattern applies to `prefers-reduced-motion`, `prefers-reduced-transparency`, and `prefers-color-scheme`.
+> **`matchMedia()` Caching:** Cache the `MediaQueryList` **object** (not the boolean result) in a `thread_local! { static MQL: OnceCell<Option<web_sys::MediaQueryList>> }`. On each call, read `.matches()` from the cached object — this is a live property that always reflects the current state, so no explicit `change` event listener is needed. Caching the object avoids re-parsing the query string on every call (the expensive part) while still tracking runtime changes (e.g., user toggles High Contrast Mode). The same caching pattern applies to all five media query functions.
 
 ---
 

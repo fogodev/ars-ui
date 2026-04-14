@@ -3195,7 +3195,9 @@ Windows High Contrast Mode (WHCM) and CSS `forced-colors` media feature apply a 
 > **Canonical location:** `11-dom-utilities.md` §9 — media query utilities including
 > `is_forced_colors_active()`, `prefers_reduced_motion()`, `prefers_reduced_transparency()`,
 > and `prefers_color_scheme()`. These live in `ars-dom` because they depend on `web_sys::window()`.
-> `ars-a11y` re-exports them behind `#[cfg(feature = "dom")]`.
+> Components import directly from `ars_dom::media`. (The `ars-a11y` re-export originally planned
+> here is not possible because `ars-dom` already depends on `ars-a11y`, which would create a
+> circular dependency.)
 
 ```css
 /* Recommended CSS pattern for forced-colors support (documented in spec, applied by users). */
