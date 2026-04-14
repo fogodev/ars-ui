@@ -90,6 +90,22 @@ impl LayoutStrategy {
             Self::TableLayout { row_height, .. } => *row_height,
         }
     }
+
+    fn estimated_item_extent(&self, orientation: Orientation) -> f64 {
+        match orientation {
+            Orientation::Vertical => self.estimated_item_height(),
+            Orientation::Horizontal => match self {
+                Self::GridLayout { min_item_width, .. }
+                | Self::WaterfallLayout { min_item_width, .. } => *min_item_width,
+                Self::TableLayout {
+                    row_height,
+                    column_widths,
+                    ..
+                } => column_widths.first().copied().unwrap_or(*row_height),
+                _ => self.estimated_item_height(),
+            },
+        }
+    }
 }
 
 /// Aligns a target item within the viewport during programmatic scrolling.
@@ -228,7 +244,7 @@ impl Virtualizer {
             }
 
             _ => {
-                let estimated = self.layout.estimated_item_height();
+                let estimated = self.layout.estimated_item_extent(self.orientation);
                 let first = (scroll_offset / estimated).floor() as usize;
                 let last = ((scroll_offset + viewport_extent) / estimated).ceil() as usize;
 
@@ -281,7 +297,7 @@ impl Virtualizer {
                 columns,
             } => (index / columns.get()) as f64 * item_height,
 
-            _ => index as f64 * self.layout.estimated_item_height(),
+            _ => index as f64 * self.layout.estimated_item_extent(self.orientation),
         }
     }
 
@@ -315,12 +331,12 @@ impl Virtualizer {
         }
     }
 
-    /// Returns the scroll top needed to bring `index` into view.
+    /// Returns the scroll offset needed to bring `index` into view.
     #[must_use]
     pub fn scroll_top_for_index(&self, index: usize, align: ScrollAlign) -> f64 {
         let offset = self.item_offset_px(index);
 
-        let height = match &self.layout {
+        let item_extent = match &self.layout {
             LayoutStrategy::FixedHeight { item_height }
             | LayoutStrategy::Grid { item_height, .. } => *item_height,
 
@@ -332,27 +348,29 @@ impl Virtualizer {
                 .copied()
                 .unwrap_or(*estimated_item_height),
 
-            _ => self.layout.estimated_item_height(),
+            _ => self.layout.estimated_item_extent(self.orientation),
         };
 
-        let item_bottom = offset + height;
+        let viewport_extent = self.viewport_extent();
+        let scroll_offset = self.scroll_offset();
+        let item_end = offset + item_extent;
 
         match align {
             ScrollAlign::Auto => {
-                if offset < self.scroll_top {
+                if offset < scroll_offset {
                     offset
-                } else if item_bottom > self.scroll_top + self.viewport_height {
-                    item_bottom - self.viewport_height
+                } else if item_end > scroll_offset + viewport_extent {
+                    item_end - viewport_extent
                 } else {
-                    self.scroll_top
+                    scroll_offset
                 }
             }
 
             ScrollAlign::Top => offset,
 
-            ScrollAlign::Bottom => (item_bottom - self.viewport_height).max(0.0),
+            ScrollAlign::Bottom => (item_end - viewport_extent).max(0.0),
 
-            ScrollAlign::Center => (offset - (self.viewport_height - height) / 2.0).max(0.0),
+            ScrollAlign::Center => (offset - (viewport_extent - item_extent) / 2.0).max(0.0),
         }
     }
 
@@ -388,9 +406,23 @@ impl Virtualizer {
     }
 
     fn clamped_scroll_offset(&self, viewport_extent: f64) -> f64 {
-        let max_scroll = (self.total_height_px() - viewport_extent).max(0.0);
+        let max_scroll = (self.total_main_axis_extent() - viewport_extent).max(0.0);
 
         self.scroll_offset().clamp(0.0, max_scroll)
+    }
+
+    fn total_main_axis_extent(&self) -> f64 {
+        match self.orientation {
+            Orientation::Vertical => self.total_height_px(),
+            Orientation::Horizontal => match &self.layout {
+                LayoutStrategy::GridLayout { .. }
+                | LayoutStrategy::WaterfallLayout { .. }
+                | LayoutStrategy::TableLayout { .. } => {
+                    self.total_count as f64 * self.layout.estimated_item_extent(self.orientation)
+                }
+                _ => self.total_height_px(),
+            },
+        }
     }
 
     fn variable_height_range(
@@ -720,6 +752,18 @@ mod tests {
     }
 
     #[test]
+    fn horizontal_scroll_to_index_uses_scroll_left_and_viewport_width() {
+        let mut virt = fixed_height_virt();
+
+        virt.orientation = Orientation::Horizontal;
+        virt.set_scroll_state_mut(400.0, 80.0, 40.0, 80.0);
+
+        assert_eq!(virt.scroll_to_index(4, ScrollAlign::Auto), 120.0);
+        assert_eq!(virt.scroll_to_index(4, ScrollAlign::Bottom), 120.0);
+        assert_eq!(virt.scroll_to_index(4, ScrollAlign::Center), 140.0);
+    }
+
+    #[test]
     fn fixed_height_visible_range_clamps_when_scrolled_past_end() {
         let mut virt = Virtualizer::new(4, LayoutStrategy::FixedHeight { item_height: 40.0 });
 
@@ -756,6 +800,27 @@ mod tests {
         assert_eq!(virt.item_offset_px(3), 150.0);
         assert_eq!(virt.total_height_px(), 1000.0);
         assert_eq!(virt.scroll_to_index(3, ScrollAlign::Top), 150.0);
+    }
+
+    #[test]
+    fn grid_layout_fallback_uses_inline_axis_estimate_when_horizontal() {
+        let mut virt = Virtualizer::new(
+            20,
+            LayoutStrategy::GridLayout {
+                min_item_width: 120.0,
+                max_item_width: 240.0,
+                min_item_height: 50.0,
+                max_item_height: Some(200.0),
+                gap: 12.0,
+            },
+        );
+
+        virt.orientation = Orientation::Horizontal;
+        virt.overscan = 0;
+        virt.set_scroll_state_mut(0.0, 240.0, 40.0, 120.0);
+
+        assert_eq!(virt.visible_range(), 2..3);
+        assert_eq!(virt.scroll_to_index(2, ScrollAlign::Top), 240.0);
     }
 
     #[test]

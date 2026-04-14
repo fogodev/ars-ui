@@ -3585,6 +3585,21 @@ impl LayoutStrategy {
             LayoutStrategy::TableLayout { row_height, .. }      => *row_height,
         }
     }
+
+    /// Estimated size of a single item along the active scroll axis.
+    pub fn estimated_item_extent(&self, orientation: Orientation) -> f64 {
+        match orientation {
+            Orientation::Vertical => self.estimated_item_height(),
+            Orientation::Horizontal => match self {
+                LayoutStrategy::GridLayout { min_item_width, .. }
+                | LayoutStrategy::WaterfallLayout { min_item_width, .. } => *min_item_width,
+                LayoutStrategy::TableLayout { row_height, column_widths, .. } => {
+                    column_widths.first().copied().unwrap_or(*row_height)
+                }
+                _ => self.estimated_item_height(),
+            },
+        }
+    }
 }
 ```
 
@@ -3848,7 +3863,7 @@ impl Virtualizer {
             return 0..0;
         }
 
-        let max_scroll = (self.total_height_px() - viewport_extent).max(0.0);
+        let max_scroll = (self.total_main_axis_extent() - viewport_extent).max(0.0);
         let scroll_offset = match self.orientation {
             Orientation::Vertical => self.scroll_top,
             Orientation::Horizontal => self.scroll_left,
@@ -3870,9 +3885,9 @@ impl Virtualizer {
                 (row_start * cols, (row_end * cols).min(self.total_count))
             }
             // GridLayout, WaterfallLayout, TableLayout: delegate to
-            // estimated_item_height() for uniform range estimation.
+            // an axis-specific estimate until specialized geometry lands.
             _ => {
-                let est = self.layout.estimated_item_height();
+                let est = self.layout.estimated_item_extent(self.orientation);
                 let first = (scroll_offset / est).floor() as usize;
                 let last  = ((scroll_offset + viewport_extent) / est).ceil() as usize;
                 (first, last)
@@ -3923,10 +3938,10 @@ impl Virtualizer {
                 (index / columns.get()) as f64 * item_height
             }
             // GridLayout, WaterfallLayout, TableLayout: estimate using
-            // uniform item height. Production layouts should override
+            // the active-axis item size. Production layouts should override
             // with measured positions.
             _ => {
-                index as f64 * self.layout.estimated_item_height()
+                index as f64 * self.layout.estimated_item_extent(self.orientation)
             }
         }
     }
@@ -3962,7 +3977,7 @@ impl Virtualizer {
         }
     }
 
-    /// Compute the `scroll_top` value needed to bring item `index` into view.
+    /// Compute the scroll offset needed to bring item `index` into view.
     /// Used by `scroll_to_index` and `scroll_to_key` (after resolving key →
     /// index via the collection).
     ///
@@ -3970,33 +3985,32 @@ impl Virtualizer {
     /// when the item is not already visible.
     pub fn scroll_top_for_index(&self, index: usize, align: ScrollAlign) -> f64 {
         let offset = self.item_offset_px(index);
-        let height = match &self.layout {
+        let extent = match &self.layout {
             LayoutStrategy::FixedHeight { item_height }              => *item_height,
             LayoutStrategy::Grid { item_height, .. }                 => *item_height,
             LayoutStrategy::VariableHeight { estimated_item_height } => {
                 self.measured_heights.get(&index).copied().unwrap_or(*estimated_item_height)
             }
-            // GridLayout, WaterfallLayout, TableLayout: use estimated height.
-            _ => self.layout.estimated_item_height(),
+            // GridLayout, WaterfallLayout, TableLayout: use active-axis estimate.
+            _ => self.layout.estimated_item_extent(self.orientation),
         };
-        let item_bottom = offset + height;
+        let viewport_extent = self.viewport_extent();
+        let scroll_offset = self.scroll_offset();
+        let item_end = offset + extent;
 
         match align {
             ScrollAlign::Auto => {
-                if offset < self.scroll_top {
-                    // Item is above viewport — scroll up.
+                if offset < scroll_offset {
                     offset
-                } else if item_bottom > self.scroll_top + self.viewport_height {
-                    // Item is below viewport — scroll down.
-                    item_bottom - self.viewport_height
+                } else if item_end > scroll_offset + viewport_extent {
+                    item_end - viewport_extent
                 } else {
-                    // Already visible.
-                    self.scroll_top
+                    scroll_offset
                 }
             }
             ScrollAlign::Top    => offset,
-            ScrollAlign::Bottom => (item_bottom - self.viewport_height).max(0.0),
-            ScrollAlign::Center => (offset - (self.viewport_height - height) / 2.0).max(0.0),
+            ScrollAlign::Bottom => (item_end - viewport_extent).max(0.0),
+            ScrollAlign::Center => (offset - (viewport_extent - extent) / 2.0).max(0.0),
         }
     }
 
@@ -4032,6 +4046,34 @@ impl Virtualizer {
         key_to_index: impl Fn(&Key) -> Option<usize>,
     ) -> Option<f64> {
         key_to_index(key).map(|index| self.scroll_to_index(index, align))
+    }
+
+    fn viewport_extent(&self) -> f64 {
+        match self.orientation {
+            Orientation::Vertical => self.viewport_height,
+            Orientation::Horizontal => self.viewport_width,
+        }
+    }
+
+    fn scroll_offset(&self) -> f64 {
+        match self.orientation {
+            Orientation::Vertical => self.scroll_top,
+            Orientation::Horizontal => self.scroll_left,
+        }
+    }
+
+    fn total_main_axis_extent(&self) -> f64 {
+        match self.orientation {
+            Orientation::Vertical => self.total_height_px(),
+            Orientation::Horizontal => match &self.layout {
+                LayoutStrategy::GridLayout { .. }
+                | LayoutStrategy::WaterfallLayout { .. }
+                | LayoutStrategy::TableLayout { .. } => {
+                    self.total_count as f64 * self.layout.estimated_item_extent(self.orientation)
+                }
+                _ => self.total_height_px(),
+            },
+        }
     }
 
     fn variable_height_range(
