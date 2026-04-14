@@ -4925,6 +4925,12 @@ The `CollationSupport` trait adds locale-aware sorting directly to collection ty
 ```rust
 /// Locale-aware sorting support for collection types.
 /// Requires `i18n` feature flag (depends on `ars-i18n` for `StringCollator`).
+///
+/// The collator is borrowed — callers may reuse a `CollatorCache` across
+/// repeated sort operations without reconstructing the collator each time.
+/// Both the collator and `text_fn` are only used during construction
+/// (sorting happens eagerly), so neither needs to outlive the returned
+/// collection.
 #[cfg(feature = "i18n")]
 pub trait CollationSupport: Sized + CollationTarget {
     /// The output type after applying collation (typically a SortedCollection wrapper).
@@ -4932,9 +4938,9 @@ pub trait CollationSupport: Sized + CollationTarget {
 
     /// Apply locale-aware sorting using the given collator and text extraction function.
     /// `text_fn` extracts the sortable text from each item.
-    fn with_collation<F>(self, collator: StringCollator, text_fn: F) -> Self::Output
+    fn with_collation<F>(self, collator: &StringCollator, text_fn: F) -> Self::Output
     where
-        F: Fn(&<Self as CollationTarget>::Item) -> &str + 'static;
+        F: Fn(&<Self as CollationTarget>::Item) -> &str;
 }
 
 /// Helper trait to associate the item type for CollationSupport.
@@ -4971,12 +4977,12 @@ impl<'a, T: CollectionItem + Clone, C: Collection<T>> CollationTarget
 impl<'a, T: CollectionItem + Clone> CollationSupport for &'a StaticCollection<T> {
     type Output = SortedCollection<'a, T, StaticCollection<T>>;
 
-    fn with_collation<F>(self, collator: StringCollator, text_fn: F) -> Self::Output
+    fn with_collation<F>(self, collator: &StringCollator, text_fn: F) -> Self::Output
     where
-        F: Fn(&T) -> &str + 'static,
+        F: Fn(&T) -> &str,
     {
         // SortedCollection::new comparator receives &Node<T>; extract &T via value.
-        SortedCollection::new(self, move |a, b| {
+        SortedCollection::new(self, |a, b| {
             let a_text = text_fn(a.value.as_ref().expect("item node"));
             let b_text = text_fn(b.value.as_ref().expect("item node"));
             collator.compare(a_text, b_text)
@@ -4990,11 +4996,11 @@ impl<'a, T: CollectionItem + Clone> CollationSupport for &'a TreeCollection<T> {
 
     /// Sorts the flattened iteration order. For per-level sibling sorting,
     /// use SortedCollection with a depth-aware comparator instead.
-    fn with_collation<F>(self, collator: StringCollator, text_fn: F) -> Self::Output
+    fn with_collation<F>(self, collator: &StringCollator, text_fn: F) -> Self::Output
     where
-        F: Fn(&T) -> &str + 'static,
+        F: Fn(&T) -> &str,
     {
-        SortedCollection::new(self, move |a, b| {
+        SortedCollection::new(self, |a, b| {
             let a_text = text_fn(a.value.as_ref().expect("item node"));
             let b_text = text_fn(b.value.as_ref().expect("item node"));
             collator.compare(a_text, b_text)
@@ -5008,11 +5014,11 @@ impl<'a, T: CollectionItem + Clone, C: Collection<T>> CollationSupport
 {
     type Output = SortedCollection<'a, T, FilteredCollection<'a, T, C>>;
 
-    fn with_collation<F>(self, collator: StringCollator, text_fn: F) -> Self::Output
+    fn with_collation<F>(self, collator: &StringCollator, text_fn: F) -> Self::Output
     where
-        F: Fn(&T) -> &str + 'static,
+        F: Fn(&T) -> &str,
     {
-        SortedCollection::new(self, move |a, b| {
+        SortedCollection::new(self, |a, b| {
             let a_text = text_fn(a.value.as_ref().expect("item node"));
             let b_text = text_fn(b.value.as_ref().expect("item node"));
             collator.compare(a_text, b_text)

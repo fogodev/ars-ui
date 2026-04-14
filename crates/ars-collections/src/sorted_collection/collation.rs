@@ -60,30 +60,34 @@ impl<'a, T: CollectionItem + Clone, C: Collection<T>> CollationTarget
 /// Requires the `i18n` feature flag (depends on `ars-i18n` for
 /// [`StringCollator`]). Wraps the collection in a [`SortedCollection`]
 /// using the provided collator for locale-correct string ordering.
+///
+/// The collator is borrowed — callers may reuse a [`CollatorCache`] across
+/// repeated sort operations without reconstructing the collator each time.
 pub trait CollationSupport: Sized + CollationTarget {
     /// The output type after applying collation (typically a [`SortedCollection`] wrapper).
     type Output;
 
     /// Apply locale-aware sorting using the given collator and text extraction function.
     ///
-    /// `text_fn` extracts the sortable text from each item.
-    fn with_collation<F>(self, collator: StringCollator, text_fn: F) -> Self::Output
+    /// `text_fn` extracts the sortable text from each item. The collator is
+    /// only used during construction (sorting happens eagerly), so neither
+    /// the collator nor `text_fn` need to outlive the returned collection.
+    fn with_collation<F>(self, collator: &StringCollator, text_fn: F) -> Self::Output
     where
-        F: Fn(&<Self as CollationTarget>::Item) -> &str + 'static;
+        F: Fn(&<Self as CollationTarget>::Item) -> &str;
 }
 
 impl<'a, T: CollectionItem + Clone> CollationSupport for &'a StaticCollection<T> {
     type Output = SortedCollection<'a, T, StaticCollection<T>>;
 
-    fn with_collation<F>(self, collator: StringCollator, text_fn: F) -> Self::Output
+    fn with_collation<F>(self, collator: &StringCollator, text_fn: F) -> Self::Output
     where
-        F: Fn(&T) -> &str + 'static,
+        F: Fn(&T) -> &str,
     {
         // SortedCollection::new comparator receives &Node<T>; extract &T via value.
-        SortedCollection::new(self, move |a, b| {
+        SortedCollection::new(self, |a, b| {
             let a_text = text_fn(a.value.as_ref().expect("item node"));
             let b_text = text_fn(b.value.as_ref().expect("item node"));
-
             collator.compare(a_text, b_text)
         })
     }
@@ -94,14 +98,13 @@ impl<'a, T: CollectionItem + Clone> CollationSupport for &'a TreeCollection<T> {
 
     /// Sorts the flattened iteration order. For per-level sibling sorting,
     /// use [`SortedCollection`] with a depth-aware comparator instead.
-    fn with_collation<F>(self, collator: StringCollator, text_fn: F) -> Self::Output
+    fn with_collation<F>(self, collator: &StringCollator, text_fn: F) -> Self::Output
     where
-        F: Fn(&T) -> &str + 'static,
+        F: Fn(&T) -> &str,
     {
-        SortedCollection::new(self, move |a, b| {
+        SortedCollection::new(self, |a, b| {
             let a_text = text_fn(a.value.as_ref().expect("item node"));
             let b_text = text_fn(b.value.as_ref().expect("item node"));
-
             collator.compare(a_text, b_text)
         })
     }
@@ -112,14 +115,13 @@ impl<'a, T: CollectionItem + Clone, C: Collection<T>> CollationSupport
 {
     type Output = SortedCollection<'a, T, FilteredCollection<'a, T, C>>;
 
-    fn with_collation<F>(self, collator: StringCollator, text_fn: F) -> Self::Output
+    fn with_collation<F>(self, collator: &StringCollator, text_fn: F) -> Self::Output
     where
-        F: Fn(&T) -> &str + 'static,
+        F: Fn(&T) -> &str,
     {
-        SortedCollection::new(self, move |a, b| {
+        SortedCollection::new(self, |a, b| {
             let a_text = text_fn(a.value.as_ref().expect("item node"));
             let b_text = text_fn(b.value.as_ref().expect("item node"));
-
             collator.compare(a_text, b_text)
         })
     }
@@ -241,7 +243,7 @@ mod tests {
         let locale = locales::de();
         let collator = StringCollator::new(&locale, Default::default());
 
-        let sorted = (&collection).with_collation(collator, |item: &TextItem| &item.label);
+        let sorted = (&collection).with_collation(&collator, |item: &TextItem| &item.label);
 
         let texts: Vec<_> = sorted
             .nodes()
@@ -289,7 +291,7 @@ mod tests {
         let locale = locales::en();
         let collator = StringCollator::new(&locale, Default::default());
 
-        let sorted = (&tree).with_collation(collator, |item: &TextItem| &item.label);
+        let sorted = (&tree).with_collation(&collator, |item: &TextItem| &item.label);
 
         let texts: Vec<_> = sorted
             .nodes()
@@ -319,7 +321,7 @@ mod tests {
         let locale = locales::en();
         let collator = StringCollator::new(&locale, Default::default());
 
-        let sorted = (&filtered).with_collation(collator, |item: &TextItem| &item.label);
+        let sorted = (&filtered).with_collation(&collator, |item: &TextItem| &item.label);
 
         let texts: Vec<_> = sorted
             .nodes()
@@ -401,7 +403,7 @@ mod tests {
         let locale = locales::en();
         let collator = StringCollator::new(&locale, Default::default());
 
-        let sorted = (&collection).with_collation(collator, |item: &TextItem| &item.label);
+        let sorted = (&collection).with_collation(&collator, |item: &TextItem| &item.label);
 
         assert_eq!(sorted.size(), 0);
         assert!(sorted.first_key().is_none());
@@ -423,7 +425,7 @@ mod tests {
         let locale = locales::en();
         let collator = StringCollator::new(&locale, Default::default());
 
-        let sorted = (&collection).with_collation(collator, |item: &TextItem| &item.label);
+        let sorted = (&collection).with_collation(&collator, |item: &TextItem| &item.label);
 
         // Items within each section are sorted independently.
         let item_texts: Vec<_> = sorted
@@ -433,5 +435,29 @@ mod tests {
             .collect();
 
         assert_eq!(item_texts, vec!["Apple", "Cherry", "Artichoke", "Carrot"]);
+    }
+
+    #[test]
+    fn collator_cache_composes_with_collation_support() {
+        let collection = CollectionBuilder::new()
+            .item(Key::int(1), "Cherry", TextItem::new(1, "Cherry"))
+            .item(Key::int(2), "Apple", TextItem::new(2, "Apple"))
+            .item(Key::int(3), "Banana", TextItem::new(3, "Banana"))
+            .build();
+
+        let mut cache = CollatorCache::new();
+        let locale = locales::en();
+
+        // Use cached collator with the convenience trait.
+        let collator = cache.get_or_create(&locale, CollationStrength::Tertiary);
+        let sorted = (&collection).with_collation(collator, |item: &TextItem| &item.label);
+
+        let texts: Vec<_> = sorted
+            .nodes()
+            .filter(|n: &&Node<TextItem>| n.is_focusable())
+            .map(|n| n.text_value.as_str())
+            .collect();
+
+        assert_eq!(texts, vec!["Apple", "Banana", "Cherry"]);
     }
 }
