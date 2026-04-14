@@ -762,11 +762,13 @@ impl Virtualizer {
             Orientation::Horizontal => self.viewport_height,
         };
 
-        if cross <= 0.0 || cross_item_size <= 0.0 {
+        let stride = cross_item_size + gap;
+
+        if cross <= 0.0 || stride <= 0.0 {
             return 1;
         }
 
-        ((cross + gap) / (cross_item_size + gap)).floor().max(1.0) as usize
+        ((cross + gap) / stride).floor().max(1.0) as usize
     }
 
     /// Computes the main-axis offset for every item in a waterfall (masonry)
