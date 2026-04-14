@@ -481,6 +481,14 @@ mod tests {
         };
 
         assert_eq!(
+            Announcements::search_results(0, &locale, &messages),
+            "Nenhum resultado (pt-BR)"
+        );
+        assert_eq!(
+            Announcements::search_results(1, &locale, &messages),
+            "1 resultado (pt-BR)"
+        );
+        assert_eq!(
             Announcements::search_results(3, &locale, &messages),
             "3 resultados (pt-BR)"
         );
@@ -489,16 +497,48 @@ mod tests {
             "Item A, selecionado (pt-BR)"
         );
         assert_eq!(
+            Announcements::selection_changed("Item A", false, &locale, &messages),
+            "Item A, desmarcado (pt-BR)"
+        );
+        assert_eq!(
             Announcements::validation_error("Email", "obrigatório", &locale, &messages),
             "Email: obrigatório. Erro (pt-BR)"
+        );
+        assert_eq!(
+            Announcements::loading(&locale, &messages),
+            "Carregando (pt-BR)"
+        );
+        assert_eq!(
+            Announcements::loading_complete(&locale, &messages),
+            "Carregamento concluído (pt-BR)"
         );
         assert_eq!(
             Announcements::item_moved("Linha 3", 2, 10, &locale, &messages),
             "Linha 3 movido para a posição 2 de 10 (pt-BR)"
         );
         assert_eq!(
+            Announcements::item_removed("Linha 3", &locale, &messages),
+            "Linha 3 removido (pt-BR)"
+        );
+        assert_eq!(
+            Announcements::column_sorted("Nome", AriaSort::Ascending, &locale, &messages),
+            "Nome, ordem crescente (pt-BR)"
+        );
+        assert_eq!(
             Announcements::column_sorted("Nome", AriaSort::Descending, &locale, &messages),
             "Nome, ordem decrescente (pt-BR)"
+        );
+        assert_eq!(
+            Announcements::column_sorted("Nome", AriaSort::Other, &locale, &messages),
+            "Nome, ordenado (pt-BR)"
+        );
+        assert_eq!(
+            Announcements::column_sorted("Nome", AriaSort::None, &locale, &messages),
+            "Nome, sem ordenação (pt-BR)"
+        );
+        assert_eq!(
+            Announcements::tree_node_expanded("Pasta", true, &locale, &messages),
+            "Pasta, expandido (pt-BR)"
         );
         assert_eq!(
             Announcements::tree_node_expanded("Pasta", false, &locale, &messages),

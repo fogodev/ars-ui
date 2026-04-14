@@ -1837,14 +1837,9 @@ pub enum FocusZoneDirection {
 }
 
 impl FocusZoneDirection {
-    /// Creates a `Grid` direction with the given column count.
-    ///
-    /// # Panics
-    /// Panics if `cols` is zero.
-    pub fn grid(cols: usize) -> Self {
-        Self::Grid {
-            cols: NonZero::new(cols).expect("grid must have at least one column"),
-        }
+    /// Creates a `Grid` direction with the given non-zero column count.
+    pub fn grid(cols: NonZero<usize>) -> Self {
+        Self::Grid { cols }
     }
 }
 
@@ -1879,14 +1874,7 @@ impl FocusZone {
             FocusZoneDirection::Horizontal => {
                 if is_rtl { (KeyboardKey::ArrowRight, KeyboardKey::ArrowLeft) } else { (KeyboardKey::ArrowLeft, KeyboardKey::ArrowRight) }
             }
-            FocusZoneDirection::Both => {
-                // Both axes: vertical uses Up/Down, horizontal uses Left/Right with RTL.
-                // Handled below in the extended match.
-                (KeyboardKey::ArrowUp, KeyboardKey::ArrowDown)
-            }
-            FocusZoneDirection::Grid { .. } => {
-                // Grid: vertical uses Up/Down, horizontal uses Left/Right with RTL.
-                // Handled below in the extended match.
+            FocusZoneDirection::Both | FocusZoneDirection::Grid { .. } => {
                 (KeyboardKey::ArrowUp, KeyboardKey::ArrowDown)
             }
         };
@@ -1920,45 +1908,29 @@ impl FocusZone {
                 self.navigate(1, &is_disabled)
             }
 
-            // Horizontal axis for Grid mode (Left/Right navigate ±1 within the row)
+            // Horizontal axis for Grid mode (Left/Right navigate within the row)
             k if matches!(self.options.direction, FocusZoneDirection::Grid { .. }) && k == h_prev_key => {
-                self.navigate(-1, &is_disabled)
+                if let FocusZoneDirection::Grid { cols } = self.options.direction {
+                    self.navigate_grid_horizontal(cols.get(), false, &is_disabled)
+                } else { None }
             }
             k if matches!(self.options.direction, FocusZoneDirection::Grid { .. }) && k == h_next_key => {
-                self.navigate(1, &is_disabled)
+                if let FocusZoneDirection::Grid { cols } = self.options.direction {
+                    self.navigate_grid_horizontal(cols.get(), true, &is_disabled)
+                } else { None }
             }
 
             // Grid: Up/Down navigate by ±cols to move between rows.
-            // Uses navigate_to_exact to land on the target or skip to next non-disabled.
+            // When wrapping is enabled, vertical navigation wraps within the
+            // current column instead of flattening into linear list order.
             KeyboardKey::ArrowUp if matches!(self.options.direction, FocusZoneDirection::Grid { .. }) => {
                 if let FocusZoneDirection::Grid { cols } = self.options.direction {
-                    let stride = cols.get();
-                    // Loop upward through rows until we find a non-disabled cell or run out
-                    let mut candidate = self.active_index.checked_sub(stride);
-                    while let Some(t) = candidate {
-                        if !self.options.skip_disabled || !is_disabled(t) {
-                            break;
-                        }
-                        candidate = t.checked_sub(stride);
-                    }
-                    candidate.filter(|&t| !self.options.skip_disabled || !is_disabled(t))
+                    self.navigate_grid_vertical(cols.get(), false, &is_disabled)
                 } else { None }
             }
             KeyboardKey::ArrowDown if matches!(self.options.direction, FocusZoneDirection::Grid { .. }) => {
                 if let FocusZoneDirection::Grid { cols } = self.options.direction {
-                    let stride = cols.get();
-                    // Loop downward through rows until we find a non-disabled cell or run out
-                    let mut target = self.active_index + stride;
-                    while target < self.item_count {
-                        if !self.options.skip_disabled || !is_disabled(target) {
-                            break;
-                        }
-                        target += stride;
-                    }
-                    if target < self.item_count
-                        && (!self.options.skip_disabled || !is_disabled(target)) {
-                        Some(target)
-                    } else { None }
+                    self.navigate_grid_vertical(cols.get(), true, &is_disabled)
                 } else { None }
             }
 
@@ -1976,13 +1948,13 @@ impl FocusZone {
                     .min(self.item_count.saturating_sub(1));
                 // Search forward (+1) from target (inclusive) to find nearest non-disabled item
                 // at or beyond the page target.
-                self.find_from_inclusive(target, 1, &is_disabled)
+                self.find_from_inclusive_no_wrap(target, 1, &is_disabled)
             }
             KeyboardKey::PageUp if self.options.page_navigation => {
                 let target = self.active_index.saturating_sub(self.options.page_size.get());
                 // Search backward (-1) from target (inclusive) to find nearest non-disabled item
                 // at or before the page target.
-                self.find_from_inclusive(target, -1, &is_disabled)
+                self.find_from_inclusive_no_wrap(target, -1, &is_disabled)
             }
             _ => None,
         };
@@ -2020,6 +1992,99 @@ impl FocusZone {
         None
     }
 
+    fn navigate_grid_vertical(
+        &self,
+        stride: usize,
+        forward: bool,
+        is_disabled: &impl Fn(usize) -> bool,
+    ) -> Option<usize> {
+        let column = self.active_index % stride;
+        let mut current = self.active_index;
+
+        for _ in 0..self.item_count {
+            let candidate = if forward {
+                let next = current + stride;
+                if next < self.item_count {
+                    Some(next)
+                } else if self.options.wrap {
+                    Some(column)
+                } else {
+                    None
+                }
+            } else if current >= stride {
+                Some(current - stride)
+            } else if self.options.wrap {
+                Some(self.last_index_in_column(column, stride))
+            } else {
+                None
+            };
+
+            let candidate = candidate?;
+
+            if !self.options.skip_disabled || !is_disabled(candidate) {
+                return Some(candidate);
+            }
+
+            current = candidate;
+        }
+
+        None
+    }
+
+    fn navigate_grid_horizontal(
+        &self,
+        stride: usize,
+        forward: bool,
+        is_disabled: &impl Fn(usize) -> bool,
+    ) -> Option<usize> {
+        let row_start = (self.active_index / stride) * stride;
+        let row_end = self.last_index_in_row(row_start, stride);
+        let mut current = self.active_index;
+
+        for _ in row_start..=row_end {
+            let candidate = if forward {
+                if current < row_end {
+                    Some(current + 1)
+                } else if self.options.wrap {
+                    Some(row_start)
+                } else {
+                    None
+                }
+            } else if current > row_start {
+                Some(current - 1)
+            } else if self.options.wrap {
+                Some(row_end)
+            } else {
+                None
+            };
+
+            let candidate = candidate?;
+
+            if !self.options.skip_disabled || !is_disabled(candidate) {
+                return Some(candidate);
+            }
+
+            current = candidate;
+        }
+
+        None
+    }
+
+    fn last_index_in_column(&self, column: usize, stride: usize) -> usize {
+        let mut index = column;
+
+        while index + stride < self.item_count {
+            index += stride;
+        }
+
+        index
+    }
+
+    fn last_index_in_row(&self, row_start: usize, stride: usize) -> usize {
+        let row_end = row_start + stride - 1;
+        if row_end < self.item_count { row_end } else { self.item_count - 1 }
+    }
+
     /// Like `find_from`, but tests `start` itself before stepping.
     /// Used by Home/End to ensure the boundary index is evaluated.
     fn find_from_inclusive(
@@ -2033,6 +2098,39 @@ impl FocusZone {
             return Some(start);
         }
         self.find_from(start, delta, is_disabled)
+    }
+
+    fn find_from_no_wrap(
+        &self,
+        start: usize,
+        delta: i32,
+        is_disabled: &impl Fn(usize) -> bool,
+    ) -> Option<usize> {
+        let count = i32::try_from(self.item_count).expect("FocusZone supports up to i32::MAX items");
+        let mut idx = start as i32 + delta;
+
+        while idx >= 0 && idx < count {
+            let candidate = idx as usize;
+            if !self.options.skip_disabled || !is_disabled(candidate) {
+                return Some(candidate);
+            }
+            idx += delta;
+        }
+
+        None
+    }
+
+    fn find_from_inclusive_no_wrap(
+        &self,
+        start: usize,
+        delta: i32,
+        is_disabled: &impl Fn(usize) -> bool,
+    ) -> Option<usize> {
+        if !self.options.skip_disabled || !is_disabled(start) {
+            return Some(start);
+        }
+
+        self.find_from_no_wrap(start, delta, is_disabled)
     }
 
     /// Generate tabindex value for an item at the given index.
