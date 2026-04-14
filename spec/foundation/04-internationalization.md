@@ -4347,34 +4347,172 @@ pub fn use_locale() -> Signal<Locale> {
 ///
 /// Returns the best matching locale from the accept header.
 pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) -> Locale {
-    // Parse "en-US,en;q=0.9,de;q=0.8" format
-    let mut preferences: Vec<(String, f32)> = accept_language
+    #[derive(Clone)]
+    enum PreferenceTag {
+        Wildcard,
+        Locale(Locale),
+        Language(String),
+    }
+
+    fn matches_locale_range(supported_locale: &Locale, locale_range: &Locale) -> bool {
+        if supported_locale == locale_range {
+            return true;
+        }
+
+        let supported_locale = supported_locale.to_bcp47();
+        let locale_range = locale_range.to_bcp47();
+
+        supported_locale
+            .strip_prefix(&locale_range)
+            .is_some_and(|suffix| suffix.starts_with('-'))
+    }
+
+    fn matches_language_fallback(
+        supported_locale: &Locale,
+        language: &str,
+        explicit_locale_ranges: &[&Locale],
+    ) -> bool {
+        supported_locale.language() == language
+            && !explicit_locale_ranges
+                .iter()
+                .any(|tag| matches_locale_range(supported_locale, tag))
+    }
+
+    fn parse_qvalue(value: &str) -> Option<f32> {
+        fn parse_fraction(fraction: &str) -> Option<u16> {
+            if fraction.len() > 3 || !fraction.as_bytes().iter().all(u8::is_ascii_digit) {
+                return None;
+            }
+
+            let mut scaled = 0_u16;
+
+            for digit in fraction.bytes() {
+                scaled = scaled.checked_mul(10)?;
+                scaled = scaled.checked_add(u16::from(digit - b'0'))?;
+            }
+
+            for _ in fraction.len()..3 {
+                scaled = scaled.checked_mul(10)?;
+            }
+
+            Some(scaled)
+        }
+
+        if value == "0" || value == "0." {
+            return Some(0.0);
+        }
+
+        if value == "1" || value == "1." {
+            return Some(1.0);
+        }
+
+        if let Some(fraction) = value.strip_prefix("0.") {
+            return parse_fraction(fraction).map(|fraction| fraction as f32 / 1_000.0);
+        }
+
+        if let Some(fraction) = value.strip_prefix("1.") {
+            let fraction = parse_fraction(fraction)?;
+
+            return (fraction == 0).then_some(1.0);
+        }
+
+        None
+    }
+
+    let mut preferences: Vec<(PreferenceTag, f32)> = accept_language
         .split(',')
         .filter_map(|part| {
-            let mut iter = part.trim().splitn(2, ";q=");
-            let tag = iter.next()?.trim().to_string();
-            let quality: f32 = iter.next()
-                .and_then(|q| q.parse().ok())
+            let mut segments = part.trim().split(';');
+            let tag = segments.next()?.trim();
+            if tag.is_empty() {
+                return None;
+            }
+
+            let quality = segments
+                .find_map(|parameter| {
+                    let (name, value) = parameter.split_once('=')?;
+
+                    if name.trim().eq_ignore_ascii_case("q") {
+                        parse_qvalue(value.trim())
+                    } else {
+                        None
+                    }
+                })
                 .unwrap_or(1.0);
+
+            let tag = if tag == "*" {
+                PreferenceTag::Wildcard
+            } else if let Ok(locale) = Locale::parse(tag) {
+                if tag.eq_ignore_ascii_case(locale.language()) {
+                    PreferenceTag::Language(locale.language().to_string())
+                } else {
+                    PreferenceTag::Locale(locale)
+                }
+            } else {
+                return None;
+            };
+
             Some((tag, quality))
         })
         .collect();
 
     // Sort by quality descending
-    // Design decision: partial_cmp returns None for NaN quality values.
-    // Treating NaN as equal preserves original order (stable sort) — correct for
-    // malformed q= values. Using .expect() would panic on malformed input.
+    // Malformed or out-of-range q= values fall back to the default weight of 1.0.
     preferences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
+    let specific_ranges: Vec<_> = preferences
+        .iter()
+        .filter_map(|(tag, _)| match tag {
+            PreferenceTag::Wildcard => None,
+            specific => Some(specific),
+        })
+        .collect();
+    let explicit_locale_ranges: Vec<_> = preferences
+        .iter()
+        .filter_map(|(tag, _)| match tag {
+            PreferenceTag::Locale(locale) => Some(locale),
+            PreferenceTag::Wildcard | PreferenceTag::Language(_) => None,
+        })
+        .collect();
+
     // Find first supported locale
-    for (tag, _) in &preferences {
-        if let Ok(locale) = Locale::parse(tag) {
-            if supported.contains(&locale) {
-                return locale;
+    for (tag, quality) in &preferences {
+        if *quality <= 0.0 {
+            continue;
+        }
+
+        match tag {
+            PreferenceTag::Wildcard => {
+                if let Some(matched) = supported.iter().find(|locale| {
+                    !specific_ranges.iter().any(|range| match range {
+                        PreferenceTag::Wildcard => false,
+                        PreferenceTag::Locale(tag) => matches_locale_range(locale, tag),
+                        PreferenceTag::Language(language) => locale.language() == *language,
+                    })
+                }) {
+                    return matched.clone();
+                }
             }
-            // Try language-only match
-            if let Ok(lang_locale) = Locale::parse(locale.language()) {
-                if let Some(matched) = supported.iter().find(|s| s.language() == lang_locale.language()) {
+            PreferenceTag::Locale(locale) => {
+                if supported.contains(locale) {
+                    return locale.clone();
+                }
+
+                if let Some(matched) = supported.iter().find(|s| matches_locale_range(s, locale)) {
+                    return matched.clone();
+                }
+
+                if let Some(matched) = supported.iter().find(|s| {
+                    matches_language_fallback(s, locale.language(), &explicit_locale_ranges)
+                }) {
+                    return matched.clone();
+                }
+            }
+            PreferenceTag::Language(language) => {
+                if let Some(matched) = supported
+                    .iter()
+                    .find(|s| matches_language_fallback(s, language, &explicit_locale_ranges))
+                {
                     return matched.clone();
                 }
             }

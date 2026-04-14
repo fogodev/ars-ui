@@ -23,6 +23,8 @@ use alloc::string::String;
 mod bidi;
 #[cfg(any(feature = "icu4x", feature = "web-intl"))]
 mod case;
+#[cfg(feature = "std")]
+mod detect;
 mod layout;
 mod locale;
 mod locale_stack;
@@ -34,6 +36,8 @@ mod weekday;
 pub use bidi::{IsolateDirection, isolate_text_safe};
 #[cfg(any(feature = "icu4x", feature = "web-intl"))]
 pub use case::{to_lowercase, to_uppercase};
+#[cfg(feature = "std")]
+pub use detect::locale_from_accept_language;
 pub use layout::{LogicalRect, LogicalSide, PhysicalRect, PhysicalSide};
 pub use locale::{Locale, LocaleParseError, locales};
 pub use locale_stack::LocaleStack;
