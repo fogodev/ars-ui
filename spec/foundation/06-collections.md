@@ -3895,7 +3895,9 @@ impl Virtualizer {
         };
 
         let mut start = first_visible.saturating_sub(self.overscan);
-        let mut end   = (last_visible + self.overscan).min(self.total_count);
+        let mut end   = last_visible
+            .saturating_add(self.overscan)
+            .min(self.total_count);
 
         // Ensure the focused item is always included in the rendered range,
         // even when scrolled out of view (see §6.2 Focused Element Persistence).

@@ -254,7 +254,9 @@ impl Virtualizer {
 
         let mut start = first_visible.saturating_sub(self.overscan);
 
-        let mut end = (last_visible + self.overscan).min(self.total_count);
+        let mut end = last_visible
+            .saturating_add(self.overscan)
+            .min(self.total_count);
 
         if let Some(focused_index) = self.focused_index {
             if focused_index < self.total_count {
@@ -771,6 +773,16 @@ mod tests {
         virt.overscan = 0;
 
         assert_eq!(virt.visible_range(), 2..4);
+    }
+
+    #[test]
+    fn visible_range_end_uses_saturating_add_for_large_overscan() {
+        let mut virt = fixed_height_virt();
+
+        virt.viewport_height = 50.0;
+        virt.overscan = usize::MAX;
+
+        assert_eq!(virt.visible_range(), 0..100);
     }
 
     #[test]
