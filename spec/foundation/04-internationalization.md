@@ -2984,7 +2984,10 @@ in the adapter specs for the concrete signatures.
 ## 8. Collation (Locale-Aware String Sorting)
 
 ```rust
-use icu::collator::{Collator as OwnedCollator, CollatorOptions as IcuCollatorOptions, Strength};
+use icu::collator::{
+    Collator as OwnedCollator,
+    options::{CollatorOptions as IcuCollatorOptions, Strength},
+};
 
 /// Options for locale-aware string comparison.
 #[derive(Clone, Debug)]
@@ -3042,8 +3045,9 @@ impl Default for CollationOptions {
 ///
 /// The struct layout and `compare()` implementation are feature-gated:
 /// - `icu4x`: backed by ICU4X `Collator` with CLDR data.
-/// - `web-intl`: backed by browser `Intl.Collator` via `js_sys`.
-/// - Neither: falls back to Rust's default `Ord` (byte-order) comparison.
+/// - `web-intl` on `wasm32`: backed by browser `Intl.Collator` via `js_sys`.
+/// - Neither, or `web-intl` on non-wasm targets: falls back to Rust's default
+///   `Ord` (byte-order) comparison.
 ///
 /// The `sort()` and `sort_by_key()` methods are generic over `compare()`
 /// and work identically under all backends.
@@ -3052,7 +3056,6 @@ impl Default for CollationOptions {
 
 #[cfg(feature = "icu4x")]
 pub struct StringCollator {
-    locale: Locale,
     collator: OwnedCollator,
 }
 
@@ -3089,7 +3092,7 @@ impl StringCollator {
             .expect("compiled_data guarantees collation data is available for all locales")
             .static_to_owned();
 
-        Self { locale: locale.clone(), collator }
+        Self { collator }
     }
 
     /// Compare two strings according to locale rules.
@@ -3100,13 +3103,12 @@ impl StringCollator {
 
 // ── web-intl backend (WASM client builds) ──
 
-#[cfg(feature = "web-intl")]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 pub struct StringCollator {
-    locale: Locale,
     collator: js_sys::Intl::Collator,
 }
 
-#[cfg(feature = "web-intl")]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 impl StringCollator {
     /// Create a new locale-aware string collator using `Intl.Collator`.
     ///
@@ -3116,53 +3118,65 @@ impl StringCollator {
     /// - `Tertiary` → `"case"` (respect accents and case)
     /// - `Quaternary` → `"variant"` (also respect punctuation)
     pub fn new(locale: &Locale, options: CollationOptions) -> Self {
-        use js_sys::{Array, Object, Reflect, Intl};
+        use js_sys::{Array, Function, Intl::{Collator as JsCollator, CollatorOptions as JsCollatorOptions}};
         use wasm_bindgen::JsValue;
 
         let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
-        let js_opts = Object::new();
-
-        let sensitivity = if options.case_insensitive {
-            "accent" // case_insensitive overrides strength to Secondary
+        let js_opts = JsCollatorOptions::new();
+        js_opts.set_sensitivity(if options.case_insensitive {
+            js_sys::Intl::CollatorSensitivity::Accent
         } else {
             match options.strength {
-                CollationStrength::Primary => "base",
-                CollationStrength::Secondary => "accent",
-                CollationStrength::Tertiary => "case",
-                CollationStrength::Quaternary => "variant",
+                CollationStrength::Primary => js_sys::Intl::CollatorSensitivity::Base,
+                CollationStrength::Secondary => js_sys::Intl::CollatorSensitivity::Accent,
+                CollationStrength::Tertiary => js_sys::Intl::CollatorSensitivity::Case,
+                CollationStrength::Quaternary => js_sys::Intl::CollatorSensitivity::Variant,
             }
-        };
-        Reflect::set(&js_opts, &"sensitivity".into(), &JsValue::from_str(sensitivity))
-            .expect("Reflect::set on JS object");
-        Reflect::set(&js_opts, &"numeric".into(), &JsValue::from_bool(options.numeric))
-            .expect("Reflect::set on JS object");
+        });
+        js_opts.set_numeric(options.numeric);
 
-        let collator = Intl::Collator::new(&locales, &js_opts);
-        Self { locale: locale.clone(), collator }
+        let collator = JsCollator::new(&locales, js_opts.as_ref());
+        Self { collator }
     }
 
     /// Compare two strings according to locale rules.
     pub fn compare(&self, a: &str, b: &str) -> core::cmp::Ordering {
-        let result = self.collator.compare(a, b);
-        if result < 0 { core::cmp::Ordering::Less }
-        else if result > 0 { core::cmp::Ordering::Greater }
+        // On stable `js-sys`, `Intl.Collator::compare` is exposed as a getter
+        // returning the bound JS comparison function.
+        let compare: Function = self.collator.compare();
+        let result = compare
+            .call2(
+                &JsValue::UNDEFINED,
+                &JsValue::from_str(a),
+                &JsValue::from_str(b),
+            )
+            .expect("Intl.Collator.compare should not throw for string inputs")
+            .as_f64()
+            .expect("Intl.Collator.compare should return a numeric ordering");
+
+        if result < 0.0 { core::cmp::Ordering::Less }
+        else if result > 0.0 { core::cmp::Ordering::Greater }
         else { core::cmp::Ordering::Equal }
     }
 }
 
 // ── Fallback (no ICU4X, no web-intl) ──
 
-#[cfg(not(any(feature = "icu4x", feature = "web-intl")))]
-pub struct StringCollator {
-    locale: Locale,
-}
+#[cfg(any(
+    not(any(feature = "icu4x", feature = "web-intl")),
+    all(feature = "web-intl", not(target_arch = "wasm32"), not(feature = "icu4x"))
+))]
+pub struct StringCollator {}
 
-#[cfg(not(any(feature = "icu4x", feature = "web-intl")))]
+#[cfg(any(
+    not(any(feature = "icu4x", feature = "web-intl")),
+    all(feature = "web-intl", not(target_arch = "wasm32"), not(feature = "icu4x"))
+))]
 impl StringCollator {
     /// Fallback collator using Rust's default byte-order comparison.
-    /// Locale-aware sorting is not available without a backend.
-    pub fn new(locale: &Locale, _options: CollationOptions) -> Self {
-        Self { locale: locale.clone() }
+    /// Locale-aware sorting is not available without a runtime backend.
+    pub fn new(_locale: &Locale, _options: CollationOptions) -> Self {
+        Self {}
     }
 
     pub fn compare(&self, a: &str, b: &str) -> core::cmp::Ordering {
@@ -3392,6 +3406,8 @@ impl NumberFormat for JsIntlNumberFormatter {
 // ICU4X backend. Both use the same public API (new, compare, sort, sort_by_key).
 // The web-intl backend maps CollationStrength to Intl.Collator sensitivity:
 //   Primary → "base", Secondary → "accent", Tertiary → "case", Quaternary → "variant".
+// On stable `js-sys`, `Intl.Collator::compare` is exposed as a getter returning
+// a bound JS comparison function rather than a direct Rust method.
 
 #[cfg(feature = "web-intl")]
 impl CollationFormat for StringCollator {
