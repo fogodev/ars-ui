@@ -1908,12 +1908,16 @@ impl FocusZone {
                 self.navigate(1, &is_disabled)
             }
 
-            // Horizontal axis for Grid mode (Left/Right navigate ±1 within the row)
+            // Horizontal axis for Grid mode (Left/Right navigate within the row)
             k if matches!(self.options.direction, FocusZoneDirection::Grid { .. }) && k == h_prev_key => {
-                self.navigate(-1, &is_disabled)
+                if let FocusZoneDirection::Grid { cols } = self.options.direction {
+                    self.navigate_grid_horizontal(cols.get(), false, &is_disabled)
+                } else { None }
             }
             k if matches!(self.options.direction, FocusZoneDirection::Grid { .. }) && k == h_next_key => {
-                self.navigate(1, &is_disabled)
+                if let FocusZoneDirection::Grid { cols } = self.options.direction {
+                    self.navigate_grid_horizontal(cols.get(), true, &is_disabled)
+                } else { None }
             }
 
             // Grid: Up/Down navigate by ±cols to move between rows.
@@ -2027,6 +2031,45 @@ impl FocusZone {
         None
     }
 
+    fn navigate_grid_horizontal(
+        &self,
+        stride: usize,
+        forward: bool,
+        is_disabled: &impl Fn(usize) -> bool,
+    ) -> Option<usize> {
+        let row_start = (self.active_index / stride) * stride;
+        let row_end = self.last_index_in_row(row_start, stride);
+        let mut current = self.active_index;
+
+        for _ in row_start..=row_end {
+            let candidate = if forward {
+                if current < row_end {
+                    Some(current + 1)
+                } else if self.options.wrap {
+                    Some(row_start)
+                } else {
+                    None
+                }
+            } else if current > row_start {
+                Some(current - 1)
+            } else if self.options.wrap {
+                Some(row_end)
+            } else {
+                None
+            };
+
+            let candidate = candidate?;
+
+            if !self.options.skip_disabled || !is_disabled(candidate) {
+                return Some(candidate);
+            }
+
+            current = candidate;
+        }
+
+        None
+    }
+
     fn last_index_in_column(&self, column: usize, stride: usize) -> usize {
         let mut index = column;
 
@@ -2035,6 +2078,11 @@ impl FocusZone {
         }
 
         index
+    }
+
+    fn last_index_in_row(&self, row_start: usize, stride: usize) -> usize {
+        let row_end = row_start + stride - 1;
+        if row_end < self.item_count { row_end } else { self.item_count - 1 }
     }
 
     /// Like `find_from`, but tests `start` itself before stepping.
