@@ -3852,17 +3852,15 @@ impl Virtualizer {
 
     /// Applies a collection update that may have changed flat item indices.
     ///
-    /// Because measured heights are keyed by flat index, adapters must call
-    /// this on inserts, removals, filtering, and reorders before reusing the
-    /// `Virtualizer` for the updated collection. The method updates
-    /// `total_count`, clears the measured-height cache, and drops an
-    /// out-of-bounds `focused_index`.
+    /// Because measured heights and focus are keyed by flat index, adapters
+    /// must call this on inserts, removals, filtering, and reorders before
+    /// reusing the `Virtualizer` for the updated collection. The method
+    /// updates `total_count`, clears the measured-height cache, and clears
+    /// `focused_index`.
     pub fn apply_collection_change_mut(&mut self, total_count: usize) {
         self.total_count = total_count;
         self.measured_heights.clear();
-        if self.focused_index.is_some_and(|i| i >= total_count) {
-            self.focused_index = None;
-        }
+        self.focused_index = None;
     }
 
     /// Immutable wrapper around `apply_collection_change_mut`.
@@ -4171,8 +4169,9 @@ TreeView, GridList) integrate the `Virtualizer` through these patterns:
 
 - Before reusing a `Virtualizer` after inserts, removals, filtering, or reorders,
   the adapter calls `virtualizer.apply_collection_change_mut(new_total_count)`.
-- This invalidates index-based measured heights so stale row measurements are
-  not applied to different items after flat indices shift.
+- This invalidates index-based measured heights and the stored focused index so
+  stale row measurements and stale focus targets are not applied to different
+  items after flat indices shift.
 
 **Scroll event handling:**
 

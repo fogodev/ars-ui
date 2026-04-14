@@ -213,16 +213,15 @@ impl Virtualizer {
     ///
     /// Because measured heights are keyed by flat index, any insert, removal,
     /// filter, or reorder can make cached measurements point at the wrong
-    /// items. This method updates the tracked item count, clears the measured
-    /// height cache, and drops an out-of-bounds focused index.
+    /// items. The tracked focused index is also invalid after any such update,
+    /// because it may now identify a different item even when it remains
+    /// in-bounds. This method updates the tracked item count, clears the
+    /// measured height cache, and clears the focused index.
     pub fn apply_collection_change_mut(&mut self, total_count: usize) {
         self.total_count = total_count;
 
         self.measured_heights.clear();
-
-        if self.focused_index.is_some_and(|index| index >= total_count) {
-            self.focused_index = None;
-        }
+        self.focused_index = None;
     }
 
     /// Returns a cloned virtualizer with a collection update applied.
@@ -715,7 +714,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_collection_change_updates_total_count_and_focus() {
+    fn apply_collection_change_updates_total_count_and_clears_focus() {
         let mut virt = fixed_height_virt();
 
         virt.focused_index = Some(8);
@@ -744,8 +743,18 @@ mod tests {
         assert_eq!(baseline.total_height_px(), 180.0);
 
         assert_eq!(updated.total_count, 6);
-        assert_eq!(updated.focused_index, Some(1));
+        assert_eq!(updated.focused_index, None);
         assert_eq!(updated.total_height_px(), 240.0);
+    }
+
+    #[test]
+    fn apply_collection_change_clears_focus_even_when_count_is_unchanged() {
+        let mut virt = fixed_height_virt();
+
+        virt.focused_index = Some(5);
+        virt.apply_collection_change_mut(100);
+
+        assert_eq!(virt.focused_index, None);
     }
 
     #[test]
