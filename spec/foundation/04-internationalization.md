@@ -3073,6 +3073,10 @@ impl StringCollator {
             CollationStrength::Tertiary => Strength::Tertiary,
             CollationStrength::Quaternary => Strength::Quaternary,
         });
+        // Shift punctuation to the quaternary level so punctuation differences
+        // are ignored below Quaternary and become observable at Quaternary.
+        icu_opts.alternate_handling = Some(icu::collator::options::AlternateHandling::Shifted);
+        icu_opts.max_variable = Some(icu::collator::options::MaxVariable::Punctuation);
         // case_insensitive = true forces strength to Secondary, overriding `strength`.
         // To set a specific strength, leave case_insensitive = false and set strength directly.
         if options.case_insensitive {
@@ -3121,6 +3125,10 @@ impl StringCollator {
     /// ECMAScript does not expose an exact "accent + case, but not punctuation"
     /// sensitivity. The `Tertiary` mapping above is the closest available
     /// browser approximation and preserves accent-sensitive comparison.
+    ///
+    /// Numeric ordering follows `CollationOptions::numeric` only when the locale
+    /// itself does not already specify a `u-kn-*` keyword. Explicit locale numeric
+    /// preferences are preserved across both backends.
     pub fn new(locale: &Locale, options: CollationOptions) -> Self {
         use js_sys::{Array, Function, Intl::{Collator as JsCollator, CollatorOptions as JsCollatorOptions}};
         use wasm_bindgen::JsValue;
@@ -3142,7 +3150,9 @@ impl StringCollator {
         } else {
             !matches!(options.strength, CollationStrength::Quaternary)
         });
-        js_opts.set_numeric(options.numeric);
+        if locale.numeric_ordering_extension().is_none() {
+            js_opts.set_numeric(options.numeric);
+        }
 
         let collator = JsCollator::new(&locales, js_opts.as_ref());
         Self { collator }
@@ -3413,11 +3423,14 @@ impl NumberFormat for JsIntlNumberFormatter {
 // ── web-intl collation ──
 // StringCollator's web-intl backend is defined inline in §8 alongside the
 // ICU4X backend. Both use the same public API (new, compare, sort, sort_by_key).
+// The ICU4X backend uses AlternateHandling::Shifted with MaxVariable::Punctuation
+// so punctuation differences are ignored below Quaternary and observable at Quaternary.
 // The web-intl backend maps CollationStrength to Intl.Collator options:
 //   Primary → "base" + ignorePunctuation, Secondary → "accent" + ignorePunctuation,
 //   Tertiary → "variant" + ignorePunctuation, Quaternary → "variant" without ignorePunctuation.
 // ECMAScript does not expose an exact tertiary mode that preserves accents and case
 // while still distinguishing punctuation, so Tertiary uses the closest browser approximation.
+// Both backends preserve explicit locale `u-kn-*` numeric-ordering preferences.
 // On stable `js-sys`, `Intl.Collator::compare` is exposed as a getter returning
 // a bound JS comparison function rather than a direct Rust method.
 

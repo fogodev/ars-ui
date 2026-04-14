@@ -15,7 +15,7 @@ use core::cmp::Ordering;
 #[cfg(feature = "icu4x")]
 use icu::collator::{
     Collator as OwnedCollator,
-    options::{CollatorOptions as IcuCollatorOptions, Strength},
+    options::{AlternateHandling, CollatorOptions as IcuCollatorOptions, MaxVariable, Strength},
     preferences::CollationNumericOrdering,
 };
 #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
@@ -117,6 +117,8 @@ impl StringCollator {
     pub fn new(locale: &Locale, options: CollationOptions) -> Self {
         let mut icu_options = IcuCollatorOptions::default();
         icu_options.strength = Some(icu_strength(options));
+        icu_options.alternate_handling = Some(AlternateHandling::Shifted);
+        icu_options.max_variable = Some(MaxVariable::Punctuation);
 
         let mut preferences = icu::collator::CollatorPreferences::from(locale.as_icu());
         if options.numeric && preferences.numeric_ordering.is_none() {
@@ -158,7 +160,9 @@ impl StringCollator {
         let js_options = JsCollatorOptions::new();
         js_options.set_sensitivity(js_sensitivity(options));
         js_options.set_ignore_punctuation(js_ignore_punctuation(options));
-        js_options.set_numeric(options.numeric);
+        if locale.numeric_ordering_extension().is_none() {
+            js_options.set_numeric(options.numeric);
+        }
 
         let collator = JsCollator::new(&locales, js_options.as_ref());
 
@@ -337,6 +341,20 @@ mod tests {
 
     #[cfg(feature = "icu4x")]
     #[test]
+    fn tertiary_strength_ignores_punctuation_differences() {
+        let options = CollationOptions {
+            strength: CollationStrength::Tertiary,
+            numeric: false,
+            ..Default::default()
+        };
+
+        let collator = StringCollator::new(&locales::en(), options);
+
+        assert_eq!(collator.compare("ab", "a-b"), Ordering::Equal);
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
     fn quaternary_strength_keeps_case_and_accent_differences() {
         let options = CollationOptions {
             strength: CollationStrength::Quaternary,
@@ -348,6 +366,7 @@ mod tests {
 
         assert_ne!(collator.compare("Cafe", "café"), Ordering::Equal);
         assert_ne!(collator.compare("Cafe", "cafe"), Ordering::Equal);
+        assert_ne!(collator.compare("ab", "a-b"), Ordering::Equal);
     }
 
     #[cfg(feature = "icu4x")]
@@ -591,6 +610,18 @@ mod web_intl_tests {
         collator.sort(&mut items);
 
         assert_eq!(items, vec!["file2", "file9", "file10"]);
+    }
+
+    #[wasm_bindgen_test]
+    fn web_intl_locale_numeric_extension_is_not_overridden() {
+        let locale = Locale::parse("en-u-kn-false").expect("locale should parse");
+        let options = CollationOptions {
+            numeric: true,
+            ..Default::default()
+        };
+        let collator = StringCollator::new(&locale, options);
+
+        assert_eq!(collator.compare("file10", "file9"), Ordering::Less);
     }
 
     #[wasm_bindgen_test]
