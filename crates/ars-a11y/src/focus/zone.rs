@@ -177,19 +177,7 @@ impl FocusZone {
                 if matches!(self.options.direction, FocusZoneDirection::Grid { .. }) =>
             {
                 if let FocusZoneDirection::Grid { cols } = self.options.direction {
-                    let stride = cols.get();
-
-                    let mut candidate = self.active_index.checked_sub(stride);
-
-                    while let Some(target) = candidate {
-                        if !self.options.skip_disabled || !is_disabled(target) {
-                            break;
-                        }
-
-                        candidate = target.checked_sub(stride);
-                    }
-
-                    candidate.filter(|&target| !self.options.skip_disabled || !is_disabled(target))
+                    self.navigate_grid_vertical(cols.get(), false, &is_disabled)
                 } else {
                     None
                 }
@@ -199,24 +187,7 @@ impl FocusZone {
                 if matches!(self.options.direction, FocusZoneDirection::Grid { .. }) =>
             {
                 if let FocusZoneDirection::Grid { cols } = self.options.direction {
-                    let stride = cols.get();
-
-                    let mut target = self.active_index + stride;
-
-                    while target < self.item_count {
-                        if !self.options.skip_disabled || !is_disabled(target) {
-                            break;
-                        }
-                        target += stride;
-                    }
-
-                    if target < self.item_count
-                        && (!self.options.skip_disabled || !is_disabled(target))
-                    {
-                        Some(target)
-                    } else {
-                        None
-                    }
+                    self.navigate_grid_vertical(cols.get(), true, &is_disabled)
                 } else {
                     None
                 }
@@ -283,6 +254,56 @@ impl FocusZone {
             idx += delta;
         }
         None
+    }
+
+    fn navigate_grid_vertical(
+        &self,
+        stride: usize,
+        forward: bool,
+        is_disabled: &impl Fn(usize) -> bool,
+    ) -> Option<usize> {
+        let column = self.active_index % stride;
+        let mut current = self.active_index;
+
+        for _ in 0..self.item_count {
+            let candidate = if forward {
+                let next = current + stride;
+
+                if next < self.item_count {
+                    Some(next)
+                } else if self.options.wrap {
+                    Some(column)
+                } else {
+                    None
+                }
+            } else if current >= stride {
+                Some(current - stride)
+            } else if self.options.wrap {
+                Some(self.last_index_in_column(column, stride))
+            } else {
+                None
+            };
+
+            let candidate = candidate?;
+
+            if !self.options.skip_disabled || !is_disabled(candidate) {
+                return Some(candidate);
+            }
+
+            current = candidate;
+        }
+
+        None
+    }
+
+    const fn last_index_in_column(&self, column: usize, stride: usize) -> usize {
+        let mut index = column;
+
+        while index + stride < self.item_count {
+            index += stride;
+        }
+
+        index
     }
 
     /// Like `find_from`, but tests `start` itself before stepping.
@@ -491,6 +512,68 @@ mod tests {
         assert_eq!(
             zone.handle_key(KeyboardKey::ArrowDown, false, disabled_items(&[])),
             Some(7)
+        );
+    }
+
+    #[test]
+    fn grid_vertical_wrap_navigation_cycles_at_edges() {
+        let downward_zone = FocusZone {
+            options: FocusZoneOptions {
+                direction: FocusZoneDirection::grid(NonZero::new(3).expect("hardcoded nonzero")),
+                ..FocusZoneOptions::default()
+            },
+            active_index: 7,
+            item_count: 9,
+        };
+
+        let upward_zone = FocusZone {
+            options: FocusZoneOptions {
+                direction: FocusZoneDirection::grid(NonZero::new(3).expect("hardcoded nonzero")),
+                ..FocusZoneOptions::default()
+            },
+            active_index: 1,
+            item_count: 9,
+        };
+
+        assert_eq!(
+            downward_zone.handle_key(KeyboardKey::ArrowDown, false, disabled_items(&[])),
+            Some(1)
+        );
+        assert_eq!(
+            upward_zone.handle_key(KeyboardKey::ArrowUp, false, disabled_items(&[])),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn grid_vertical_no_wrap_returns_none_at_boundary() {
+        let downward_zone = FocusZone {
+            options: FocusZoneOptions {
+                direction: FocusZoneDirection::grid(NonZero::new(3).expect("hardcoded nonzero")),
+                wrap: false,
+                ..FocusZoneOptions::default()
+            },
+            active_index: 7,
+            item_count: 9,
+        };
+
+        let upward_zone = FocusZone {
+            options: FocusZoneOptions {
+                direction: FocusZoneDirection::grid(NonZero::new(3).expect("hardcoded nonzero")),
+                wrap: false,
+                ..FocusZoneOptions::default()
+            },
+            active_index: 1,
+            item_count: 9,
+        };
+
+        assert_eq!(
+            downward_zone.handle_key(KeyboardKey::ArrowDown, false, disabled_items(&[])),
+            None
+        );
+        assert_eq!(
+            upward_zone.handle_key(KeyboardKey::ArrowUp, false, disabled_items(&[])),
+            None
         );
     }
 
@@ -706,6 +789,23 @@ mod tests {
         assert_eq!(
             upward_zone.handle_key(KeyboardKey::ArrowUp, false, disabled_items(&[3])),
             Some(0)
+        );
+    }
+
+    #[test]
+    fn grid_vertical_wrap_skips_disabled_rows_after_wrapping() {
+        let zone = FocusZone {
+            options: FocusZoneOptions {
+                direction: FocusZoneDirection::grid(NonZero::new(3).expect("hardcoded nonzero")),
+                ..FocusZoneOptions::default()
+            },
+            active_index: 7,
+            item_count: 9,
+        };
+
+        assert_eq!(
+            zone.handle_key(KeyboardKey::ArrowDown, false, disabled_items(&[1])),
+            Some(4)
         );
     }
 
