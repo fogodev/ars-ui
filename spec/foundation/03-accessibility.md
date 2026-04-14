@@ -1837,14 +1837,9 @@ pub enum FocusZoneDirection {
 }
 
 impl FocusZoneDirection {
-    /// Creates a `Grid` direction with the given column count.
-    ///
-    /// # Panics
-    /// Panics if `cols` is zero.
-    pub fn grid(cols: usize) -> Self {
-        Self::Grid {
-            cols: NonZero::new(cols).expect("grid must have at least one column"),
-        }
+    /// Creates a `Grid` direction with the given non-zero column count.
+    pub fn grid(cols: NonZero<usize>) -> Self {
+        Self::Grid { cols }
     }
 }
 
@@ -1879,14 +1874,7 @@ impl FocusZone {
             FocusZoneDirection::Horizontal => {
                 if is_rtl { (KeyboardKey::ArrowRight, KeyboardKey::ArrowLeft) } else { (KeyboardKey::ArrowLeft, KeyboardKey::ArrowRight) }
             }
-            FocusZoneDirection::Both => {
-                // Both axes: vertical uses Up/Down, horizontal uses Left/Right with RTL.
-                // Handled below in the extended match.
-                (KeyboardKey::ArrowUp, KeyboardKey::ArrowDown)
-            }
-            FocusZoneDirection::Grid { .. } => {
-                // Grid: vertical uses Up/Down, horizontal uses Left/Right with RTL.
-                // Handled below in the extended match.
+            FocusZoneDirection::Both | FocusZoneDirection::Grid { .. } => {
                 (KeyboardKey::ArrowUp, KeyboardKey::ArrowDown)
             }
         };

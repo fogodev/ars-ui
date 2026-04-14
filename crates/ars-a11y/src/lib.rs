@@ -32,7 +32,10 @@ pub use aria::{
     role::AriaRole,
     state::{set_busy, set_checked, set_disabled, set_expanded, set_invalid, set_selected},
 };
-pub use focus::{FocusRing, FocusScopeBehavior, FocusScopeOptions, FocusStrategy, FocusTarget};
+pub use focus::{
+    FocusRing, FocusScopeBehavior, FocusScopeOptions, FocusStrategy, FocusTarget, FocusZone,
+    FocusZoneDirection, FocusZoneOptions,
+};
 pub use keyboard::{DomEvent, KeyModifiers, KeyboardShortcut, Platform};
 pub use label::{DescriptionConfig, FieldContext, LabelConfig};
 pub use visually_hidden::{
