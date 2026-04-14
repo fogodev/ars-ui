@@ -3903,6 +3903,14 @@ fn is_known_id(id: &str, attr_map: &AttrMap, known_ids: &[&str]) -> bool {
     attr_map.get(&HtmlAttr::Id) == Some(id) || known_ids.contains(&id)
 }
 
+fn supported_aria_attribute(attr: AriaAttr) -> Option<AriaAttribute> {
+    match attr {
+        #[cfg(not(feature = "aria-drag-drop-compat"))]
+        AriaAttr::DropEffect | AriaAttr::Grabbed => None,
+        _ => Some(AriaAttribute::from(attr)),
+    }
+}
+
 fn idref_attr_name(attr: HtmlAttr) -> Option<&'static str> {
     match attr {
         HtmlAttr::Aria(AriaAttr::ActiveDescendant) => Some("aria-activedescendant"),
@@ -3930,7 +3938,10 @@ pub fn validate_attr_map(
     // Extract ARIA attributes from the AttrMap for analysis.
     // AttrMap::iter_attrs() yields &(HtmlAttr, AttrValue) — filter ARIA variants via TryFrom.
     let aria_attrs: Vec<AriaAttribute> = attr_map.iter_attrs()
-        .filter_map(|(k, _)| AriaAttribute::try_from(*k).ok())
+        .filter_map(|(k, _)| match k {
+            HtmlAttr::Aria(attr) => supported_aria_attribute(*attr),
+            _ => None,
+        })
         .collect();
 
     // Check role with actual ARIA attributes from the AttrMap
@@ -3956,11 +3967,7 @@ pub fn validate_attr_map(
             continue;
         };
 
-        let Some(raw_value) = value.as_str() else {
-            continue;
-        };
-
-        for id in raw_value.split_whitespace() {
+        for id in value.as_str().into_iter().flat_map(str::split_whitespace) {
             if !is_known_id(id, attr_map, context.known_ids) {
                 validator.errors.push(AriaValidationError::DanglingIdReference {
                     attribute,

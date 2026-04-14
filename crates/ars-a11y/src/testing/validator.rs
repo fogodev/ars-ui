@@ -239,6 +239,14 @@ fn is_known_id(id: &str, attr_map: &AttrMap, known_ids: &[&str]) -> bool {
     attr_map.get(&HtmlAttr::Id) == Some(id) || known_ids.contains(&id)
 }
 
+fn supported_aria_attribute(attr: AriaAttr) -> Option<AriaAttribute> {
+    match attr {
+        #[cfg(not(feature = "aria-drag-drop-compat"))]
+        AriaAttr::DropEffect | AriaAttr::Grabbed => None,
+        _ => Some(AriaAttribute::from(attr)),
+    }
+}
+
 const fn idref_attr_name(attr: HtmlAttr) -> Option<&'static str> {
     match attr {
         HtmlAttr::Aria(AriaAttr::ActiveDescendant) => Some("aria-activedescendant"),
@@ -265,7 +273,10 @@ pub fn validate_attr_map(
 
     let aria_attrs: Vec<AriaAttribute> = attr_map
         .iter_attrs()
-        .filter_map(|(key, _)| AriaAttribute::try_from(*key).ok())
+        .filter_map(|(key, _)| match key {
+            HtmlAttr::Aria(attr) => supported_aria_attribute(*attr),
+            _ => None,
+        })
         .collect();
 
     let has_tabindex = attr_map.contains(&HtmlAttr::TabIndex);
@@ -292,11 +303,7 @@ pub fn validate_attr_map(
             continue;
         };
 
-        let Some(raw_value) = value.as_str() else {
-            continue;
-        };
-
-        for id in raw_value.split_whitespace() {
+        for id in value.as_str().into_iter().flat_map(str::split_whitespace) {
             if !is_known_id(id, attr_map, context.known_ids) {
                 validator
                     .errors
@@ -692,13 +699,14 @@ mod tests {
 
         validator.check_role(AriaRole::Listbox, &[], false, &[AriaRole::Option]);
 
-        assert!(!validator.errors().iter().any(|error| matches!(
-            error,
-            AriaValidationError::MissingRequiredOwnedElement {
-                role: "listbox",
-                ..
-            }
-        )));
+        assert!(
+            !validator
+                .errors()
+                .contains(&AriaValidationError::MissingRequiredOwnedElement {
+                    role: "listbox",
+                    required_one_of: vec!["option", "group"],
+                })
+        );
     }
 
     #[test]
@@ -747,13 +755,14 @@ mod tests {
             },
         );
 
-        assert!(!validator.errors().iter().any(|error| matches!(
-            error,
-            AriaValidationError::DanglingIdReference {
-                attribute: "aria-describedby",
-                ..
-            }
-        )));
+        assert!(
+            !validator
+                .errors()
+                .contains(&AriaValidationError::DanglingIdReference {
+                    attribute: "aria-describedby",
+                    id: String::from("description-id"),
+                })
+        );
     }
 
     #[test]
@@ -801,6 +810,123 @@ mod tests {
                 .contains(&AriaValidationError::DanglingIdReference {
                     attribute: "aria-errormessage",
                     id: String::from("missing-id"),
+                })
+        );
+    }
+
+    #[test]
+    fn validate_attr_map_catches_dangling_ids_for_all_remaining_idref_attrs() {
+        let mut attr_map = AttrMap::new();
+
+        attr_map.set(
+            HtmlAttr::Aria(AriaAttr::Controls),
+            AttrValue::from("known-controls missing-controls"),
+        );
+        attr_map.set(
+            HtmlAttr::Aria(AriaAttr::Details),
+            AttrValue::from("missing-details"),
+        );
+        attr_map.set(
+            HtmlAttr::Aria(AriaAttr::FlowTo),
+            AttrValue::from("known-flow missing-flow"),
+        );
+        attr_map.set(
+            HtmlAttr::Aria(AriaAttr::Owns),
+            AttrValue::from("known-owns missing-owns"),
+        );
+
+        let validator = validate_attr_map(
+            None,
+            &attr_map,
+            AriaValidationContext {
+                known_ids: &["known-controls", "known-flow", "known-owns"],
+                owned_roles: &[],
+            },
+        );
+
+        assert!(
+            validator
+                .errors()
+                .contains(&AriaValidationError::DanglingIdReference {
+                    attribute: "aria-controls",
+                    id: String::from("missing-controls"),
+                })
+        );
+        assert!(
+            validator
+                .errors()
+                .contains(&AriaValidationError::DanglingIdReference {
+                    attribute: "aria-details",
+                    id: String::from("missing-details"),
+                })
+        );
+        assert!(
+            validator
+                .errors()
+                .contains(&AriaValidationError::DanglingIdReference {
+                    attribute: "aria-flowto",
+                    id: String::from("missing-flow"),
+                })
+        );
+        assert!(
+            validator
+                .errors()
+                .contains(&AriaValidationError::DanglingIdReference {
+                    attribute: "aria-owns",
+                    id: String::from("missing-owns"),
+                })
+        );
+    }
+
+    #[test]
+    fn validate_attr_map_ignores_non_string_idref_values() {
+        let mut attr_map = AttrMap::new();
+
+        attr_map.set(HtmlAttr::Aria(AriaAttr::Controls), AttrValue::None);
+
+        let validator = validate_attr_map(None, &attr_map, AriaValidationContext::new());
+
+        assert!(validator.errors().is_empty());
+        assert!(validator.warnings().is_empty());
+    }
+
+    #[test]
+    fn validate_attr_map_ignores_unsupported_drag_drop_compat_attrs() {
+        let mut attr_map = AttrMap::new();
+
+        attr_map.set(
+            HtmlAttr::Aria(AriaAttr::DropEffect),
+            AttrValue::from("copy"),
+        );
+        attr_map.set(HtmlAttr::Aria(AriaAttr::Grabbed), AttrValue::from("true"));
+
+        let validator = validate_attr_map(None, &attr_map, AriaValidationContext::new());
+
+        assert!(validator.errors().is_empty());
+        assert!(validator.warnings().is_empty());
+    }
+
+    #[test]
+    fn validate_attr_map_still_checks_role_requirements_with_unsupported_aria_keys() {
+        let mut attr_map = AttrMap::new();
+
+        attr_map.set(
+            HtmlAttr::Aria(AriaAttr::DropEffect),
+            AttrValue::from("move"),
+        );
+
+        let validator = validate_attr_map(
+            Some(AriaRole::Combobox),
+            &attr_map,
+            AriaValidationContext::new(),
+        );
+
+        assert!(
+            validator
+                .errors()
+                .contains(&AriaValidationError::MissingRequiredAttribute {
+                    role: "combobox",
+                    missing_attr: "aria-expanded",
                 })
         );
     }
