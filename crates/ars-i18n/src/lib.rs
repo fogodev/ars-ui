@@ -1,13 +1,15 @@
 //! Internationalization types for locale, number formatting, text direction,
-//! layout orientation, plural rules, and logical-to-physical layout geometry.
+//! layout orientation, plural rules, locale-aware case mapping, and
+//! logical-to-physical layout geometry.
 //!
 //! This crate provides the core i18n primitives shared across all ars-ui components:
 //! a BCP 47 [`Locale`] wrapper, a locale-aware [`NumberFormatter`], a
 //! [`Direction`] enum for LTR/RTL text flow, an [`Orientation`] enum for
 //! horizontal/vertical layout axes, RTL-aware layout geometry types
 //! ([`LogicalSide`], [`PhysicalSide`], [`LogicalRect`], [`PhysicalRect`]),
-//! plural and ordinal helpers, and the [`IcuProvider`] trait for
-//! calendar/locale data abstraction.
+//! plural and ordinal helpers, locale-aware [`to_uppercase`] and
+//! [`to_lowercase`] helpers, and the [`IcuProvider`] trait for calendar/locale
+//! data abstraction.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -19,6 +21,8 @@ extern crate alloc;
 use alloc::string::String;
 
 mod bidi;
+#[cfg(feature = "icu4x")]
+mod case;
 mod layout;
 mod locale;
 mod locale_stack;
@@ -28,6 +32,8 @@ mod translate;
 mod weekday;
 
 pub use bidi::{IsolateDirection, isolate_text_safe};
+#[cfg(feature = "icu4x")]
+pub use case::{to_lowercase, to_uppercase};
 pub use layout::{LogicalRect, LogicalSide, PhysicalRect, PhysicalSide};
 pub use locale::{Locale, LocaleParseError, locales};
 pub use locale_stack::LocaleStack;

@@ -927,6 +927,14 @@ mod tests {
 
     #[cfg(feature = "icu4x")]
     #[test]
+    fn parse_returns_none_when_numeric_core_is_missing() {
+        let formatter = NumberFormatter::new(&locales::en_us(), NumberFormatOptions::default());
+
+        assert_eq!(formatter.parse("not a number"), None);
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
     fn normalizes_arabic_indic_digits_during_parse() {
         let locale = locales::ar();
         let formatter = NumberFormatter::new(&locale, NumberFormatOptions::default());
@@ -1087,7 +1095,15 @@ mod tests {
         assert_eq!(choose_decimal_separator("1,234,567", '.', ','), None);
         assert_eq!(choose_decimal_separator("1.234", ',', '.'), None);
         assert_eq!(choose_decimal_separator("١٬٢٣٤", '٫', '٬'), None);
+        assert_eq!(choose_decimal_separator("1.234.567", ',', ' '), None);
         assert_eq!(choose_decimal_separator("1,234.5", '.', ','), Some('.'));
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn parse_separators_handles_suffixes_and_plain_digits() {
+        assert_eq!(parse_separators("37 kg"), ('.', ' '));
+        assert_eq!(parse_separators("1234"), ('.', ','));
     }
 
     #[cfg(feature = "icu4x")]
@@ -1107,5 +1123,11 @@ mod tests {
     fn round_half_even_rounds_up_when_fraction_exceeds_half() {
         assert_eq!(round_half_even(1.6), 2.0);
         assert_eq!(round_half_even(-1.6), -2.0);
+    }
+
+    #[test]
+    fn round_half_up_and_half_down_cover_non_tie_paths() {
+        assert_eq!(round_half_away_from_zero(1.4), 1.0);
+        assert_eq!(round_half_toward_zero(1.6), 2.0);
     }
 }
