@@ -13,8 +13,8 @@ pub(crate) enum Group {
     Core,
     /// `ars-i18n` feature combinations (11 combos + wasm32 cross-check).
     I18n,
-    /// `ars-interactions`, `ars-collections`, `ars-forms`, `ars-dom` combos
-    /// (12 combos + wasm32 cross-check).
+    /// `ars-a11y`, `ars-interactions`, `ars-collections`, `ars-forms`, `ars-dom`
+    /// combos (14 combos + wasm32 cross-check).
     Subsystems,
     /// `ars-leptos` render-mode combos (3 combos).
     Leptos,
@@ -154,6 +154,9 @@ static I18N_CROSS_CHECKS: &[CrossCheck] = &[CrossCheck {
 }];
 
 static SUBSYSTEMS_COMBOS: &[Combo] = &[
+    Combo {
+        args: &["-p", "ars-a11y", "--features", "testing"],
+    },
     Combo {
         args: &["-p", "ars-interactions", "--no-default-features"],
     },
@@ -357,8 +360,8 @@ mod tests {
     }
 
     #[test]
-    fn subsystems_has_13_combos_and_1_cross() {
-        assert_eq!(SUBSYSTEMS_COMBOS.len(), 13);
+    fn subsystems_has_14_combos_and_1_cross() {
+        assert_eq!(SUBSYSTEMS_COMBOS.len(), 14);
         assert_eq!(SUBSYSTEMS_CROSS_CHECKS.len(), 1);
     }
 
@@ -380,7 +383,7 @@ mod tests {
         let cases = &[
             (Group::Core, 15, 0),
             (Group::I18n, 11, 1),
-            (Group::Subsystems, 13, 1),
+            (Group::Subsystems, 14, 1),
             (Group::Leptos, 3, 0),
             (Group::Dioxus, 4, 1),
         ];

@@ -3711,6 +3711,26 @@ Consumers who need to override these defaults (e.g., to show a specific dialog i
 /// - Required owned elements missing
 /// - Attributes used on incompatible roles
 /// - ID references pointing to non-existent elements
+///
+/// This surface is exported from `ars-a11y::testing` and is available when
+/// compiling tests or when the crate's `testing` feature is enabled.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AriaValidationContext<'a> {
+    /// The DOM IDs currently present in the validated subtree.
+    pub known_ids: &'a [&'a str],
+    /// The direct owned child roles currently present under the validated role owner.
+    pub owned_roles: &'a [AriaRole],
+}
+
+impl<'a> AriaValidationContext<'a> {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { known_ids: &[], owned_roles: &[] }
+    }
+}
+
+/// A compile-time and runtime ARIA attribute validator.
+#[derive(Debug, Default)]
 pub struct AriaValidator {
     errors: Vec<AriaValidationError>,
     warnings: Vec<AriaValidationWarning>,
@@ -3752,12 +3772,19 @@ pub enum AriaValidationWarning {
 }
 
 impl AriaValidator {
+    #[must_use]
     pub fn new() -> Self {
-        Self { errors: Vec::new(), warnings: Vec::new() }
+        Self::default()
     }
 
     /// Validate role usage.
-    pub fn check_role(&mut self, role: AriaRole, attrs: &[AriaAttribute], has_tabindex: bool) {
+    pub fn check_role(
+        &mut self,
+        role: AriaRole,
+        attrs: &[AriaAttribute],
+        has_tabindex: bool,
+        owned_roles: &[AriaRole],
+    ) {
         // Check for abstract role usage
         if role.is_abstract() {
             self.errors.push(AriaValidationError::AbstractRoleUsed {
@@ -3767,19 +3794,28 @@ impl AriaValidator {
         }
 
         // Separator vs StructuralSeparator hint: AriaRole::Separator is the focusable
-        // widget variant and requires tabindex + value attributes. If the element is not
-        // focusable, the developer likely wants AriaRole::StructuralSeparator instead.
-        if matches!(role, AriaRole::Separator) {
-            if !has_tabindex {
-                self.warnings.push(AriaValidationWarning::Hint {
-                    message: "AriaRole::Separator requires tabindex for focusable separator. \
-                              Use AriaRole::StructuralSeparator for non-focusable separators.",
-                });
+        // widget variant and AriaRole::StructuralSeparator is the non-focusable variant.
+        if matches!(role, AriaRole::Separator | AriaRole::StructuralSeparator) {
+            let message = match role {
+                AriaRole::Separator if !has_tabindex => Some(
+                    "AriaRole::Separator requires tabindex for focusable separator. \
+                     Use AriaRole::StructuralSeparator for non-focusable separators.",
+                ),
+                AriaRole::StructuralSeparator if has_tabindex => Some(
+                    "AriaRole::StructuralSeparator is the non-focusable separator role. \
+                     Use AriaRole::Separator for focusable separators with tabindex.",
+                ),
+                _ => None,
+            };
+
+            if let Some(message) = message {
+                self.warnings.push(AriaValidationWarning::Hint { message });
             }
         }
 
         // Check required attributes per role
         self.check_required_attrs_for_role(role, attrs);
+        self.check_required_owned_elements_for_role(role, owned_roles);
     }
 
     fn check_required_attrs_for_role(&mut self, role: AriaRole, attrs: &[AriaAttribute]) {
@@ -3795,14 +3831,52 @@ impl AriaValidator {
         }
     }
 
+    fn check_required_owned_elements_for_role(
+        &mut self,
+        role: AriaRole,
+        owned_roles: &[AriaRole],
+    ) {
+        let required_groups = role.required_owned_elements();
+        if required_groups.is_empty() {
+            return;
+        }
+
+        let satisfies_required_owned_elements = required_groups.iter().any(|group| {
+            group.iter().all(|required_role| owned_roles.contains(required_role))
+        });
+
+        if satisfies_required_owned_elements {
+            return;
+        }
+
+        let mut required_one_of = Vec::new();
+        for group in required_groups {
+            for required_role in *group {
+                let role_name = required_role.name();
+                if !required_one_of.contains(&role_name) {
+                    required_one_of.push(role_name);
+                }
+            }
+        }
+
+        self.errors.push(AriaValidationError::MissingRequiredOwnedElement {
+            role: role.name(),
+            required_one_of,
+        });
+    }
+
+    #[must_use]
     pub fn has_errors(&self) -> bool { !self.errors.is_empty() }
+    #[must_use]
     pub fn errors(&self) -> &[AriaValidationError] { &self.errors }
+    #[must_use]
     pub fn warnings(&self) -> &[AriaValidationWarning] { &self.warnings }
 }
 
 /// Returns required ARIA attributes for a role, as per WAI-ARIA 1.2 spec.
 /// These attributes MUST be present when using the role.
-pub fn required_attributes_for_role(role: AriaRole) -> &'static [&'static str] {
+#[must_use]
+pub const fn required_attributes_for_role(role: AriaRole) -> &'static [&'static str] {
     match role {
         AriaRole::Checkbox | AriaRole::Radio | AriaRole::Switch
         | AriaRole::Menuitemcheckbox | AriaRole::Menuitemradio
@@ -3811,45 +3885,69 @@ pub fn required_attributes_for_role(role: AriaRole) -> &'static [&'static str] {
             => &["aria-expanded"],
         AriaRole::Scrollbar
             => &["aria-controls", "aria-valuenow", "aria-valuemin", "aria-valuemax"],
-        AriaRole::Slider
+        AriaRole::Slider | AriaRole::Separator
             => &["aria-valuenow", "aria-valuemin", "aria-valuemax"],
         // WAI-ARIA 1.2 formally requires only aria-valuenow for Spinbutton.
         // aria-valuemin/max are strongly recommended but not required.
-        AriaRole::Spinbutton
+        AriaRole::Spinbutton | AriaRole::Meter
             => &["aria-valuenow"],
         // WAI-ARIA 1.2 formally requires only aria-valuenow for Meter.
         // aria-valuemin/max are strongly recommended (default 0 and 100 if absent).
-        AriaRole::Meter
-            => &["aria-valuenow"],
-        // Focusable separator (widget role) requires value attributes.
-        // Non-focusable separators should use AriaRole::StructuralSeparator instead,
-        // which falls through to the wildcard and requires no attributes.
-        AriaRole::Separator
-            => &["aria-valuenow", "aria-valuemin", "aria-valuemax"],
         AriaRole::Heading
             => &["aria-level"],
-        AriaRole::Option
-            => &[], // aria-selected is required in some contexts but not globally
-        // Note: StructuralSeparator has no required attributes (covered by wildcard)
         _ => &[],
     }
 }
 
+fn is_known_id(id: &str, attr_map: &AttrMap, known_ids: &[&str]) -> bool {
+    attr_map.get(&HtmlAttr::Id) == Some(id) || known_ids.contains(&id)
+}
+
+fn supported_aria_attribute(attr: AriaAttr) -> Option<AriaAttribute> {
+    match attr {
+        #[cfg(not(feature = "aria-drag-drop-compat"))]
+        AriaAttr::DropEffect | AriaAttr::Grabbed => None,
+        _ => Some(AriaAttribute::from(attr)),
+    }
+}
+
+fn idref_attr_name(attr: HtmlAttr) -> Option<&'static str> {
+    match attr {
+        HtmlAttr::Aria(AriaAttr::ActiveDescendant) => Some("aria-activedescendant"),
+        HtmlAttr::Aria(AriaAttr::Controls) => Some("aria-controls"),
+        HtmlAttr::Aria(AriaAttr::DescribedBy) => Some("aria-describedby"),
+        HtmlAttr::Aria(AriaAttr::Details) => Some("aria-details"),
+        HtmlAttr::Aria(AriaAttr::ErrorMessage) => Some("aria-errormessage"),
+        HtmlAttr::Aria(AriaAttr::FlowTo) => Some("aria-flowto"),
+        HtmlAttr::Aria(AriaAttr::LabelledBy) => Some("aria-labelledby"),
+        HtmlAttr::Aria(AriaAttr::Owns) => Some("aria-owns"),
+        _ => None,
+    }
+}
+
 /// Validate that an AttrMap produced by a connect() function is
-/// ARIA-conformant. Called in debug builds and in test infrastructure.
-pub fn validate_attr_map(role: Option<AriaRole>, attr_map: &AttrMap) -> AriaValidator {
+/// ARIA-conformant within the provided subtree context.
+#[must_use]
+pub fn validate_attr_map(
+    role: Option<AriaRole>,
+    attr_map: &AttrMap,
+    context: AriaValidationContext<'_>,
+) -> AriaValidator {
     let mut validator = AriaValidator::new();
 
     // Extract ARIA attributes from the AttrMap for analysis.
     // AttrMap::iter_attrs() yields &(HtmlAttr, AttrValue) — filter ARIA variants via TryFrom.
     let aria_attrs: Vec<AriaAttribute> = attr_map.iter_attrs()
-        .filter_map(|(k, _)| AriaAttribute::try_from(*k).ok())
+        .filter_map(|(k, _)| match k {
+            HtmlAttr::Aria(attr) => supported_aria_attribute(*attr),
+            _ => None,
+        })
         .collect();
 
     // Check role with actual ARIA attributes from the AttrMap
     let has_tabindex = attr_map.contains(&HtmlAttr::TabIndex);
     if let Some(role) = role {
-        validator.check_role(role, &aria_attrs, has_tabindex);
+        validator.check_role(role, &aria_attrs, has_tabindex, context.owned_roles);
     }
 
     // Check for aria-activedescendant on incompatible roles
@@ -3864,7 +3962,21 @@ pub fn validate_attr_map(role: Option<AriaRole>, attr_map: &AttrMap) -> AriaVali
         }
     }
 
-    let _ = aria_attrs;
+    for (attr, value) in attr_map.iter() {
+        let Some(attribute) = idref_attr_name(*attr) else {
+            continue;
+        };
+
+        for id in value.as_str().into_iter().flat_map(str::split_whitespace) {
+            if !is_known_id(id, attr_map, context.known_ids) {
+                validator.errors.push(AriaValidationError::DanglingIdReference {
+                    attribute,
+                    id: String::from(id),
+                });
+            }
+        }
+    }
+
     validator
 }
 ```
@@ -4125,7 +4237,8 @@ mod tests {
 ```text
 crates/ars-a11y/
   src/
-    lib.rs                  // Re-exports; feature flags
+    lib.rs                  // Re-exports; feature flags (`testing` gated behind
+                            // #[cfg(any(test, feature = "testing"))])
     aria/
       mod.rs
       role.rs               // AriaRole enum (all roles)
@@ -4150,7 +4263,7 @@ crates/ars-a11y/
     media.rs                // Re-export facade behind #[cfg(feature = "dom")]; canonical
                             // implementations live in ars-dom
     touch.rs                // touch_target_attrs(), InputMode, should_use_roving_tabindex
-    testing/
+    testing/                // Exported when compiling tests or with feature = "testing"
       mod.rs
       validator.rs          // AriaValidator, AriaValidationError, validate_attr_map()
       keyboard.rs           // SimulatedKeyEvent, NavigationRecorder, FocusZoneTestHarness
