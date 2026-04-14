@@ -21,7 +21,7 @@ extern crate alloc;
 use alloc::string::String;
 
 mod bidi;
-#[cfg(feature = "icu4x")]
+#[cfg(any(feature = "icu4x", feature = "web-intl"))]
 mod case;
 mod layout;
 mod locale;
@@ -32,7 +32,7 @@ mod translate;
 mod weekday;
 
 pub use bidi::{IsolateDirection, isolate_text_safe};
-#[cfg(feature = "icu4x")]
+#[cfg(any(feature = "icu4x", feature = "web-intl"))]
 pub use case::{to_lowercase, to_uppercase};
 pub use layout::{LogicalRect, LogicalSide, PhysicalRect, PhysicalSide};
 pub use locale::{Locale, LocaleParseError, locales};
