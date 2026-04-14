@@ -9,11 +9,24 @@ enum PreferenceTag {
     Language(String),
 }
 
+fn matches_locale_range(supported_locale: &Locale, locale_range: &Locale) -> bool {
+    if supported_locale == locale_range {
+        return true;
+    }
+
+    let supported_locale = supported_locale.to_bcp47();
+    let locale_range = locale_range.to_bcp47();
+
+    supported_locale
+        .strip_prefix(&locale_range)
+        .is_some_and(|suffix| suffix.starts_with('-'))
+}
+
 impl PreferenceTag {
     fn matches_specific_locale(&self, locale: &Locale) -> bool {
         match self {
             Self::Wildcard => false,
-            Self::Locale(tag) => tag == locale,
+            Self::Locale(tag) => matches_locale_range(locale, tag),
             Self::Language(language) => locale.language() == language,
         }
     }
@@ -27,7 +40,7 @@ fn matches_language_fallback(
     supported_locale.language() == language
         && !explicit_locale_ranges
             .iter()
-            .any(|explicit_locale| **explicit_locale == *supported_locale)
+            .any(|explicit_locale| matches_locale_range(supported_locale, explicit_locale))
 }
 
 /// Detect locale from an HTTP `Accept-Language` header.
@@ -77,6 +90,13 @@ pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) 
             PreferenceTag::Locale(locale) => {
                 if supported.contains(locale) {
                     return locale.clone();
+                }
+
+                if let Some(matched) = supported
+                    .iter()
+                    .find(|supported_locale| matches_locale_range(supported_locale, locale))
+                {
+                    return matched.clone();
                 }
 
                 if let Some(matched) = supported.iter().find(|supported_locale| {
@@ -349,6 +369,21 @@ mod tests {
     }
 
     #[test]
+    fn wildcard_skips_supported_locales_with_more_specific_locale_ranges() {
+        let supported = [
+            Locale::parse("zh-Hant-TW").expect("zh-Hant-TW should parse"),
+            Locale::parse("zh-Hans-CN").expect("zh-Hans-CN should parse"),
+        ];
+
+        let locale = locale_from_accept_language("zh-Hant;q=0.1,*;q=0.8", &supported);
+
+        assert_eq!(
+            locale,
+            Locale::parse("zh-Hans-CN").expect("zh-Hans-CN should parse")
+        );
+    }
+
+    #[test]
     fn wildcard_does_not_override_specific_rejections() {
         let supported = [locales::de(), locales::en_us()];
 
@@ -379,6 +414,36 @@ mod tests {
         let locale = locale_from_accept_language("en-CA;q=0.9,en-US;q=0.1", &supported);
 
         assert_eq!(locale, Locale::parse("en-GB").expect("en-GB should parse"));
+    }
+
+    #[test]
+    fn locale_range_matches_more_specific_supported_locale() {
+        let supported = [
+            Locale::parse("zh-Hans-CN").expect("zh-Hans-CN should parse"),
+            Locale::parse("zh-Hant-TW").expect("zh-Hant-TW should parse"),
+        ];
+
+        let locale = locale_from_accept_language("zh-Hant", &supported);
+
+        assert_eq!(
+            locale,
+            Locale::parse("zh-Hant-TW").expect("zh-Hant-TW should parse")
+        );
+    }
+
+    #[test]
+    fn language_range_skips_supported_locales_covered_by_more_specific_locale_ranges() {
+        let supported = [
+            Locale::parse("zh-Hant-TW").expect("zh-Hant-TW should parse"),
+            Locale::parse("zh-Hans-CN").expect("zh-Hans-CN should parse"),
+        ];
+
+        let locale = locale_from_accept_language("zh;q=0.9,zh-Hant;q=0.1", &supported);
+
+        assert_eq!(
+            locale,
+            Locale::parse("zh-Hans-CN").expect("zh-Hans-CN should parse")
+        );
     }
 
     #[test]

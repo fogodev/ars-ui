@@ -4354,13 +4354,28 @@ pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) 
         Language(String),
     }
 
+    fn matches_locale_range(supported_locale: &Locale, locale_range: &Locale) -> bool {
+        if supported_locale == locale_range {
+            return true;
+        }
+
+        let supported_locale = supported_locale.to_bcp47();
+        let locale_range = locale_range.to_bcp47();
+
+        supported_locale
+            .strip_prefix(&locale_range)
+            .is_some_and(|suffix| suffix.starts_with('-'))
+    }
+
     fn matches_language_fallback(
         supported_locale: &Locale,
         language: &str,
         explicit_locale_ranges: &[&Locale],
     ) -> bool {
         supported_locale.language() == language
-            && !explicit_locale_ranges.iter().any(|tag| **tag == *supported_locale)
+            && !explicit_locale_ranges
+                .iter()
+                .any(|tag| matches_locale_range(supported_locale, tag))
     }
 
     fn parse_qvalue(value: &str) -> Option<f32> {
@@ -4471,7 +4486,7 @@ pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) 
                 if let Some(matched) = supported.iter().find(|locale| {
                     !specific_ranges.iter().any(|range| match range {
                         PreferenceTag::Wildcard => false,
-                        PreferenceTag::Locale(tag) => tag == *locale,
+                        PreferenceTag::Locale(tag) => matches_locale_range(locale, tag),
                         PreferenceTag::Language(language) => locale.language() == *language,
                     })
                 }) {
@@ -4481,6 +4496,10 @@ pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) 
             PreferenceTag::Locale(locale) => {
                 if supported.contains(locale) {
                     return locale.clone();
+                }
+
+                if let Some(matched) = supported.iter().find(|s| matches_locale_range(s, locale)) {
+                    return matched.clone();
                 }
 
                 if let Some(matched) = supported.iter().find(|s| {
