@@ -3772,14 +3772,22 @@ impl AriaValidator {
         }
 
         // Separator vs StructuralSeparator hint: AriaRole::Separator is the focusable
-        // widget variant and requires tabindex + value attributes. If the element is not
-        // focusable, the developer likely wants AriaRole::StructuralSeparator instead.
-        if matches!(role, AriaRole::Separator) {
-            if !has_tabindex {
-                self.warnings.push(AriaValidationWarning::Hint {
-                    message: "AriaRole::Separator requires tabindex for focusable separator. \
-                              Use AriaRole::StructuralSeparator for non-focusable separators.",
-                });
+        // widget variant and AriaRole::StructuralSeparator is the non-focusable variant.
+        if matches!(role, AriaRole::Separator | AriaRole::StructuralSeparator) {
+            let message = match role {
+                AriaRole::Separator if !has_tabindex => Some(
+                    "AriaRole::Separator requires tabindex for focusable separator. \
+                     Use AriaRole::StructuralSeparator for non-focusable separators.",
+                ),
+                AriaRole::StructuralSeparator if has_tabindex => Some(
+                    "AriaRole::StructuralSeparator is the non-focusable separator role. \
+                     Use AriaRole::Separator for focusable separators with tabindex.",
+                ),
+                _ => None,
+            };
+
+            if let Some(message) = message {
+                self.warnings.push(AriaValidationWarning::Hint { message });
             }
         }
 

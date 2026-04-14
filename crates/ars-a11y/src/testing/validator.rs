@@ -92,10 +92,21 @@ impl AriaValidator {
             return;
         }
 
-        if matches!(role, AriaRole::Separator) && !has_tabindex {
-            self.warnings.push(AriaValidationWarning::Hint {
-                message: "AriaRole::Separator requires tabindex for focusable separator. Use AriaRole::StructuralSeparator for non-focusable separators.",
-            });
+        if matches!(role, AriaRole::Separator | AriaRole::StructuralSeparator) {
+            let message = match role {
+                AriaRole::Separator if !has_tabindex => Some(
+                    "AriaRole::Separator requires tabindex for focusable separator. Use AriaRole::StructuralSeparator for non-focusable separators.",
+                ),
+                AriaRole::StructuralSeparator if has_tabindex => Some(
+                    "AriaRole::StructuralSeparator is the non-focusable separator role. Use AriaRole::Separator for focusable separators with tabindex.",
+                ),
+                _ => None,
+            };
+
+            if let Some(message) = message {
+                self.warnings
+                    .push(AriaValidationWarning::Hint { message });
+            }
         }
 
         self.check_required_attrs_for_role(role, attrs);
@@ -425,6 +436,21 @@ mod tests {
     }
 
     #[test]
+    fn structural_separator_with_tabindex_emits_hint_warning() {
+        let mut validator = AriaValidator::new();
+
+        validator.check_role(AriaRole::StructuralSeparator, &[], true);
+
+        assert_eq!(
+            validator.warnings(),
+            &[AriaValidationWarning::Hint {
+                message: "AriaRole::StructuralSeparator is the non-focusable separator role. Use AriaRole::Separator for focusable separators with tabindex.",
+            }]
+        );
+        assert!(validator.errors().is_empty());
+    }
+
+    #[test]
     fn option_has_no_globally_required_attributes() {
         assert!(required_attributes_for_role(AriaRole::Option).is_empty());
     }
@@ -494,6 +520,23 @@ mod tests {
 
         assert!(validator.errors().is_empty());
         assert!(validator.warnings().is_empty());
+    }
+
+    #[test]
+    fn validate_attr_map_structural_separator_with_tabindex_emits_hint_warning() {
+        let mut attr_map = AttrMap::new();
+
+        attr_map.set(HtmlAttr::TabIndex, AttrValue::from("0"));
+
+        let validator = validate_attr_map(Some(AriaRole::StructuralSeparator), &attr_map);
+
+        assert_eq!(
+            validator.warnings(),
+            &[AriaValidationWarning::Hint {
+                message: "AriaRole::StructuralSeparator is the non-focusable separator role. Use AriaRole::Separator for focusable separators with tabindex.",
+            }]
+        );
+        assert!(validator.errors().is_empty());
     }
 
     #[test]
