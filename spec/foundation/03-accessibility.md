@@ -3475,19 +3475,25 @@ The `touch_target_attrs` utility implements strategy #1:
 /// Minimum recommended touch target size in CSS pixels.
 pub const MIN_TOUCH_TARGET_SIZE: f64 = 44.0;
 
-/// Larger touch target for drag-based controls (Slider thumb).
+/// Larger touch target for drag-based controls in CSS pixels.
 pub const MIN_DRAG_TARGET_SIZE: f64 = 48.0;
 
-/// Returns inline styles that ensure a minimum touch target size
-/// while preserving the visual footprint of smaller elements.
+/// Returns inline styles that ensure a minimum touch target size while preserving
+/// the visual footprint of smaller elements.
 ///
-/// Uses padding to extend the tap area beyond the visual bounds.
-/// This technique is also known as "invisible hit area" or "touch target padding".
+/// This uses invisible hit-area padding so controls that render smaller than
+/// `44x44` CSS pixels still expose an accessible tap target.
+#[must_use]
 pub fn touch_target_attrs(visual_width: f64, visual_height: f64) -> AttrMap {
     touch_target_attrs_with_min(visual_width, visual_height, MIN_TOUCH_TARGET_SIZE)
 }
 
-/// Like `touch_target_attrs` but with a custom minimum size (e.g., 48px for drag targets).
+/// Returns inline styles that ensure a custom minimum touch target size while
+/// preserving the visual footprint of smaller elements.
+///
+/// This uses padding to extend the tap area and a matching negative margin to
+/// cancel the layout effect.
+#[must_use]
 pub fn touch_target_attrs_with_min(visual_width: f64, visual_height: f64, min: f64) -> AttrMap {
     let mut attrs = AttrMap::new();
 
@@ -3495,9 +3501,13 @@ pub fn touch_target_attrs_with_min(visual_width: f64, visual_height: f64, min: f
     let v_padding = ((min - visual_height) / 2.0).max(0.0);
 
     if h_padding > 0.0 || v_padding > 0.0 {
-        attrs.set_style(CssProperty::Padding, format!("{}px {}px", v_padding, h_padding));
-        // Negative margin to cancel out the padding's effect on layout.
-        attrs.set_style(CssProperty::Margin, format!("-{}px -{}px", v_padding, h_padding));
+        attrs.set_style(CssProperty::Padding, format!("{v_padding}px {h_padding}px"));
+        // Negative margin cancels the padding's layout footprint while keeping
+        // the hit area expanded for touch interaction.
+        attrs.set_style(
+            CssProperty::Margin,
+            format!("-{v_padding}px -{h_padding}px"),
+        );
     }
 
     attrs
@@ -3530,16 +3540,13 @@ VoiceOver (iOS) and TalkBack (Android) use touch-based navigation that differs f
 ```rust
 // ars-a11y/src/touch.rs (continued)
 
-/// For components that use aria-activedescendant strategy on desktop,
-/// this returns whether to fall back to roving tabindex based on
-/// the detected screen reader environment.
+/// Returns whether mobile screen-reader environments should prefer roving
+/// tabindex over `aria-activedescendant`.
 ///
-/// In practice this is determined by detecting touch-screen + screen reader,
-/// which in ars-dom maps to checking touch support combined with live region behavior.
-pub fn should_use_roving_tabindex_for_mobile(platform: Platform) -> bool {
-    // VoiceOver iOS does not support aria-activedescendant reliably.
-    // When the detected platform is iOS (including iPadOS, which Platform::detect
-    // identifies via maxTouchPoints > 1), fall back to roving tabindex.
+/// `VoiceOver` on iOS does not reliably support `aria-activedescendant`, so ars-ui
+/// falls back to roving tabindex when the detected platform is iOS or iPadOS.
+#[must_use]
+pub const fn should_use_roving_tabindex_for_mobile(platform: Platform) -> bool {
     matches!(platform, Platform::IOS)
 }
 ```
@@ -3553,14 +3560,31 @@ On mobile, the virtual keyboard can obscure form inputs. ars-ui components handl
 - Not using `position: fixed` elements that interfere with virtual keyboard display without special handling.
 
 ```rust
-/// inputmode values for different input types.
+/// `inputmode` values used to request mobile virtual keyboard layouts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputMode {
-    None, Text, Tel, Url, Email, Numeric, Decimal, Search,
+    /// Do not show a virtual keyboard automatically.
+    None,
+    /// Show the default text keyboard.
+    Text,
+    /// Show a telephone keypad.
+    Tel,
+    /// Show a URL-oriented keyboard.
+    Url,
+    /// Show an email-oriented keyboard.
+    Email,
+    /// Show a numeric keyboard.
+    Numeric,
+    /// Show a decimal keypad.
+    Decimal,
+    /// Show a keyboard optimized for search entry.
+    Search,
 }
 
 impl InputMode {
-    pub fn as_str(self) -> &'static str {
+    /// Returns the HTML `inputmode` token for this variant.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",
             Self::Text => "text",
@@ -3573,7 +3597,7 @@ impl InputMode {
         }
     }
 
-    /// Apply the inputmode attribute to AttrMap.
+    /// Applies this input mode to an [`AttrMap`] using [`HtmlAttr::InputMode`].
     pub fn apply_to(self, attrs: &mut AttrMap) {
         attrs.set(HtmlAttr::InputMode, self.as_str());
     }
