@@ -2,6 +2,23 @@ use std::cmp::Ordering;
 
 use crate::{Locale, locales};
 
+#[derive(Clone)]
+enum PreferenceTag {
+    Wildcard,
+    Locale(Locale),
+    Language(String),
+}
+
+impl PreferenceTag {
+    fn matches_specific_locale(&self, locale: &Locale) -> bool {
+        match self {
+            Self::Wildcard => false,
+            Self::Locale(tag) => tag == locale,
+            Self::Language(language) => locale.language() == language,
+        }
+    }
+}
+
 /// Detect locale from an HTTP `Accept-Language` header.
 ///
 /// Returns the best matching locale from `supported`, preferring exact matches,
@@ -16,20 +33,46 @@ pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) 
 
     preferences.sort_by(|(_, left), (_, right)| right.partial_cmp(left).unwrap_or(Ordering::Equal));
 
+    let specific_ranges = preferences
+        .iter()
+        .filter_map(|(tag, _)| match tag {
+            PreferenceTag::Wildcard => None,
+            specific => Some(specific),
+        })
+        .collect::<Vec<_>>();
+
     for (tag, quality) in &preferences {
         if *quality <= 0.0 {
             continue;
         }
 
-        if let Ok(locale) = Locale::parse(tag) {
-            if supported.contains(&locale) {
-                return locale;
-            }
-
-            if let Ok(language_locale) = Locale::parse(locale.language()) {
+        match tag {
+            PreferenceTag::Wildcard => {
                 if let Some(matched) = supported.iter().find(|supported_locale| {
-                    supported_locale.language() == language_locale.language()
+                    !specific_ranges
+                        .iter()
+                        .any(|range| range.matches_specific_locale(supported_locale))
                 }) {
+                    return matched.clone();
+                }
+            }
+            PreferenceTag::Locale(locale) => {
+                if supported.contains(locale) {
+                    return locale.clone();
+                }
+
+                if let Some(matched) = supported
+                    .iter()
+                    .find(|supported_locale| supported_locale.language() == locale.language())
+                {
+                    return matched.clone();
+                }
+            }
+            PreferenceTag::Language(language) => {
+                if let Some(matched) = supported
+                    .iter()
+                    .find(|supported_locale| supported_locale.language() == *language)
+                {
                     return matched.clone();
                 }
             }
@@ -39,7 +82,7 @@ pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) 
     supported.first().cloned().unwrap_or_else(locales::en_us)
 }
 
-fn parse_preference(part: &str) -> Option<(String, f32)> {
+fn parse_preference(part: &str) -> Option<(PreferenceTag, f32)> {
     let mut segments = part.trim().split(';');
     let tag = segments.next()?.trim();
 
@@ -59,7 +102,21 @@ fn parse_preference(part: &str) -> Option<(String, f32)> {
         })
         .unwrap_or(1.0);
 
-    Some((tag.to_string(), quality))
+    Some((parse_tag(tag)?, quality))
+}
+
+fn parse_tag(tag: &str) -> Option<PreferenceTag> {
+    if tag == "*" {
+        return Some(PreferenceTag::Wildcard);
+    }
+
+    let locale = Locale::parse(tag).ok()?;
+
+    if tag.eq_ignore_ascii_case(locale.language()) {
+        Some(PreferenceTag::Language(locale.language().to_string()))
+    } else {
+        Some(PreferenceTag::Locale(locale))
+    }
 }
 
 fn parse_quality(value: &str) -> f32 {
@@ -177,6 +234,33 @@ mod tests {
         let locale = locale_from_accept_language(" , ,de;q=0.8", &supported);
 
         assert_eq!(locale, locales::de());
+    }
+
+    #[test]
+    fn wildcard_matches_first_supported_locale_without_specific_range() {
+        let supported = [locales::de(), locales::en_us()];
+
+        let locale = locale_from_accept_language("en-US;q=0.4,*;q=0.8", &supported);
+
+        assert_eq!(locale, locales::de());
+    }
+
+    #[test]
+    fn wildcard_skips_supported_locales_with_specific_ranges() {
+        let supported = [locales::de(), locales::en_us()];
+
+        let locale = locale_from_accept_language("de;q=0.5,*;q=0.8", &supported);
+
+        assert_eq!(locale, locales::en_us());
+    }
+
+    #[test]
+    fn wildcard_does_not_override_specific_rejections() {
+        let supported = [locales::de(), locales::en_us()];
+
+        let locale = locale_from_accept_language("de;q=0,*;q=0.8", &supported);
+
+        assert_eq!(locale, locales::en_us());
     }
 
     #[test]

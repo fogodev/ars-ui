@@ -4347,15 +4347,46 @@ pub fn use_locale() -> Signal<Locale> {
 ///
 /// Returns the best matching locale from the accept header.
 pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) -> Locale {
-    // Parse "en-US,en;q=0.9,de;q=0.8" format
-    let mut preferences: Vec<(String, f32)> = accept_language
+    #[derive(Clone)]
+    enum PreferenceTag {
+        Wildcard,
+        Locale(Locale),
+        Language(String),
+    }
+
+    let mut preferences: Vec<(PreferenceTag, f32)> = accept_language
         .split(',')
         .filter_map(|part| {
-            let mut iter = part.trim().splitn(2, ";q=");
-            let tag = iter.next()?.trim().to_string();
-            let quality: f32 = iter.next()
-                .and_then(|q| q.parse().ok())
+            let mut segments = part.trim().split(';');
+            let tag = segments.next()?.trim();
+            if tag.is_empty() {
+                return None;
+            }
+
+            let quality = segments
+                .find_map(|parameter| {
+                    let (name, value) = parameter.split_once('=')?;
+
+                    if name.trim().eq_ignore_ascii_case("q") {
+                        value.trim().parse::<f32>().ok().filter(|value| value.is_finite())
+                    } else {
+                        None
+                    }
+                })
                 .unwrap_or(1.0);
+
+            let tag = if tag == "*" {
+                PreferenceTag::Wildcard
+            } else if let Ok(locale) = Locale::parse(tag) {
+                if tag.eq_ignore_ascii_case(locale.language()) {
+                    PreferenceTag::Language(locale.language().to_string())
+                } else {
+                    PreferenceTag::Locale(locale)
+                }
+            } else {
+                return None;
+            };
+
             Some((tag, quality))
         })
         .collect();
@@ -4366,15 +4397,43 @@ pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) 
     // malformed q= values. Using .expect() would panic on malformed input.
     preferences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
+    let specific_ranges: Vec<_> = preferences
+        .iter()
+        .filter_map(|(tag, _)| match tag {
+            PreferenceTag::Wildcard => None,
+            specific => Some(specific),
+        })
+        .collect();
+
     // Find first supported locale
-    for (tag, _) in &preferences {
-        if let Ok(locale) = Locale::parse(tag) {
-            if supported.contains(&locale) {
-                return locale;
+    for (tag, quality) in &preferences {
+        if *quality <= 0.0 {
+            continue;
+        }
+
+        match tag {
+            PreferenceTag::Wildcard => {
+                if let Some(matched) = supported.iter().find(|locale| {
+                    !specific_ranges.iter().any(|range| match range {
+                        PreferenceTag::Wildcard => false,
+                        PreferenceTag::Locale(tag) => tag == *locale,
+                        PreferenceTag::Language(language) => locale.language() == *language,
+                    })
+                }) {
+                    return matched.clone();
+                }
             }
-            // Try language-only match
-            if let Ok(lang_locale) = Locale::parse(locale.language()) {
-                if let Some(matched) = supported.iter().find(|s| s.language() == lang_locale.language()) {
+            PreferenceTag::Locale(locale) => {
+                if supported.contains(locale) {
+                    return locale.clone();
+                }
+
+                if let Some(matched) = supported.iter().find(|s| s.language() == locale.language()) {
+                    return matched.clone();
+                }
+            }
+            PreferenceTag::Language(language) => {
+                if let Some(matched) = supported.iter().find(|s| s.language() == *language) {
                     return matched.clone();
                 }
             }
