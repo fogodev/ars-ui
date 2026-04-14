@@ -380,10 +380,11 @@ impl Virtualizer {
         };
 
         let viewport_extent = self.viewport_extent();
+        let max_scroll = (self.total_main_axis_extent() - viewport_extent).max(0.0);
         let clamped_scroll_offset = self.clamped_scroll_offset(viewport_extent);
         let item_end = offset + item_extent;
 
-        match align {
+        let target_offset = match align {
             ScrollAlign::Auto => {
                 if offset < clamped_scroll_offset {
                     offset
@@ -399,7 +400,9 @@ impl Virtualizer {
             ScrollAlign::Bottom => (item_end - viewport_extent).max(0.0),
 
             ScrollAlign::Center => (offset - (viewport_extent - item_extent) / 2.0).max(0.0),
-        }
+        };
+
+        target_offset.clamp(0.0, max_scroll)
     }
 
     /// Convenience wrapper around [`Self::scroll_top_for_index`].
@@ -565,6 +568,24 @@ mod tests {
         let virt = fixed_height_virt();
 
         assert_eq!(virt.scroll_to_index(10, ScrollAlign::Center), 320.0);
+    }
+
+    #[test]
+    fn scroll_to_index_top_clamps_to_scrollable_extent() {
+        let mut virt = Virtualizer::new(4, LayoutStrategy::FixedHeight { item_height: 40.0 });
+
+        virt.set_scroll_state_mut(0.0, 0.0, 50.0, 0.0);
+
+        assert_eq!(virt.scroll_to_index(3, ScrollAlign::Top), 110.0);
+    }
+
+    #[test]
+    fn scroll_to_index_center_clamps_to_scrollable_extent() {
+        let mut virt = Virtualizer::new(4, LayoutStrategy::FixedHeight { item_height: 40.0 });
+
+        virt.set_scroll_state_mut(0.0, 0.0, 50.0, 0.0);
+
+        assert_eq!(virt.scroll_to_index(3, ScrollAlign::Center), 110.0);
     }
 
     #[test]
@@ -852,6 +873,16 @@ mod tests {
         assert_eq!(virt.scroll_to_index(4, ScrollAlign::Auto), 120.0);
         assert_eq!(virt.scroll_to_index(4, ScrollAlign::Bottom), 120.0);
         assert_eq!(virt.scroll_to_index(4, ScrollAlign::Center), 140.0);
+    }
+
+    #[test]
+    fn horizontal_scroll_to_index_top_clamps_to_scrollable_extent() {
+        let mut virt = Virtualizer::new(4, LayoutStrategy::FixedHeight { item_height: 40.0 });
+
+        virt.orientation = Orientation::Horizontal;
+        virt.set_scroll_state_mut(0.0, 0.0, 40.0, 50.0);
+
+        assert_eq!(virt.scroll_to_index(3, ScrollAlign::Top), 110.0);
     }
 
     #[test]

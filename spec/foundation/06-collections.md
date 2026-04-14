@@ -4019,11 +4019,11 @@ impl Virtualizer {
             _ => self.layout.estimated_item_extent(self.orientation),
         };
         let viewport_extent = self.viewport_extent();
-        let scroll_offset = self.scroll_offset();
+        let max_scroll = (self.total_main_axis_extent() - viewport_extent).max(0.0);
         let clamped_scroll_offset = self.clamped_scroll_offset(viewport_extent);
         let item_end = offset + extent;
 
-        match align {
+        let target_offset = match align {
             ScrollAlign::Auto => {
                 if offset < clamped_scroll_offset {
                     offset
@@ -4036,7 +4036,9 @@ impl Virtualizer {
             ScrollAlign::Top    => offset,
             ScrollAlign::Bottom => (item_end - viewport_extent).max(0.0),
             ScrollAlign::Center => (offset - (viewport_extent - extent) / 2.0).max(0.0),
-        }
+        };
+
+        target_offset.clamp(0.0, max_scroll)
     }
 
     /// Programmatically scroll to the item at `index` with the given alignment.
