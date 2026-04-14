@@ -329,7 +329,7 @@ impl Virtualizer {
         }
     }
 
-    /// Returns the total scrollable height for the current layout.
+    /// Returns the total scrollable extent for the current layout.
     #[must_use]
     pub fn total_height_px(&self) -> f64 {
         match &self.layout {
@@ -355,7 +355,7 @@ impl Virtualizer {
                 rows as f64 * item_height
             }
 
-            _ => self.total_count as f64 * self.layout.estimated_item_height(),
+            _ => self.total_count as f64 * self.layout.estimated_item_extent(self.orientation),
         }
     }
 
@@ -953,6 +953,7 @@ mod tests {
 
         assert_eq!(virt.visible_range(), 2..3);
         assert_eq!(virt.scroll_to_index(2, ScrollAlign::Top), 240.0);
+        assert_eq!(virt.total_height_px(), 2400.0);
     }
 
     #[test]
@@ -977,6 +978,23 @@ mod tests {
     }
 
     #[test]
+    fn waterfall_layout_fallback_uses_inline_axis_estimate_when_horizontal() {
+        let mut virt = Virtualizer::new(
+            20,
+            LayoutStrategy::WaterfallLayout {
+                min_item_width: 120.0,
+                max_item_width: 240.0,
+                min_item_height: 45.0,
+                gap: 12.0,
+            },
+        );
+
+        virt.orientation = Orientation::Horizontal;
+
+        assert_eq!(virt.total_height_px(), 2400.0);
+    }
+
+    #[test]
     fn table_layout_fallback_uses_estimated_height_math() {
         let mut virt = Virtualizer::new(
             8,
@@ -995,6 +1013,23 @@ mod tests {
         assert_eq!(virt.item_offset_px(3), 105.0);
         assert_eq!(virt.total_height_px(), 280.0);
         assert_eq!(virt.scroll_to_index(3, ScrollAlign::Bottom), 70.0);
+    }
+
+    #[test]
+    fn table_layout_fallback_uses_inline_axis_estimate_when_horizontal() {
+        let mut virt = Virtualizer::new(
+            8,
+            LayoutStrategy::TableLayout {
+                row_height: 35.0,
+                header_height: 24.0,
+                column_widths: vec![120.0, 160.0],
+                row_gap: 4.0,
+            },
+        );
+
+        virt.orientation = Orientation::Horizontal;
+
+        assert_eq!(virt.total_height_px(), 960.0);
     }
 
     #[test]

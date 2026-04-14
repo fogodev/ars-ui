@@ -3970,8 +3970,8 @@ impl Virtualizer {
         }
     }
 
-    /// Total scroll height of the list. Set as `height` on the inner scroll
-    /// container so the browser renders the correct scrollbar.
+    /// Total scroll extent of the list on the active axis. Adapters use this
+    /// to size the inner spacer so the browser renders the correct scrollbar.
     ///
     /// **Performance note:** For `VariableHeight`, this method iterates all items O(n).
     /// Callers in scroll handlers should cache the result rather than calling per-frame.
@@ -3994,9 +3994,9 @@ impl Virtualizer {
                 rows as f64 * item_height
             }
             // GridLayout, WaterfallLayout, TableLayout: estimate using
-            // uniform item height.
+            // the active-axis item size.
             _ => {
-                self.total_count as f64 * self.layout.estimated_item_height()
+                self.total_count as f64 * self.layout.estimated_item_extent(self.orientation)
             }
         }
     }
