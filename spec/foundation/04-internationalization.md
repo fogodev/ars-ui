@@ -3112,11 +3112,15 @@ pub struct StringCollator {
 impl StringCollator {
     /// Create a new locale-aware string collator using `Intl.Collator`.
     ///
-    /// Maps `CollationStrength` to `Intl.Collator` `sensitivity` option:
-    /// - `Primary` → `"base"` (ignore accents and case)
-    /// - `Secondary` → `"accent"` (ignore case, respect accents)
-    /// - `Tertiary` → `"case"` (respect accents and case)
-    /// - `Quaternary` → `"variant"` (also respect punctuation)
+    /// Maps `CollationStrength` to `Intl.Collator` options:
+    /// - `Primary` → `sensitivity = "base"`, `ignorePunctuation = true`
+    /// - `Secondary` → `sensitivity = "accent"`, `ignorePunctuation = true`
+    /// - `Tertiary` → `sensitivity = "variant"`, `ignorePunctuation = true`
+    /// - `Quaternary` → `sensitivity = "variant"`, `ignorePunctuation = false`
+    ///
+    /// ECMAScript does not expose an exact "accent + case, but not punctuation"
+    /// sensitivity. The `Tertiary` mapping above is the closest available
+    /// browser approximation and preserves accent-sensitive comparison.
     pub fn new(locale: &Locale, options: CollationOptions) -> Self {
         use js_sys::{Array, Function, Intl::{Collator as JsCollator, CollatorOptions as JsCollatorOptions}};
         use wasm_bindgen::JsValue;
@@ -3129,9 +3133,14 @@ impl StringCollator {
             match options.strength {
                 CollationStrength::Primary => js_sys::Intl::CollatorSensitivity::Base,
                 CollationStrength::Secondary => js_sys::Intl::CollatorSensitivity::Accent,
-                CollationStrength::Tertiary => js_sys::Intl::CollatorSensitivity::Case,
+                CollationStrength::Tertiary => js_sys::Intl::CollatorSensitivity::Variant,
                 CollationStrength::Quaternary => js_sys::Intl::CollatorSensitivity::Variant,
             }
+        });
+        js_opts.set_ignore_punctuation(if options.case_insensitive {
+            true
+        } else {
+            !matches!(options.strength, CollationStrength::Quaternary)
         });
         js_opts.set_numeric(options.numeric);
 
@@ -3404,8 +3413,11 @@ impl NumberFormat for JsIntlNumberFormatter {
 // ── web-intl collation ──
 // StringCollator's web-intl backend is defined inline in §8 alongside the
 // ICU4X backend. Both use the same public API (new, compare, sort, sort_by_key).
-// The web-intl backend maps CollationStrength to Intl.Collator sensitivity:
-//   Primary → "base", Secondary → "accent", Tertiary → "case", Quaternary → "variant".
+// The web-intl backend maps CollationStrength to Intl.Collator options:
+//   Primary → "base" + ignorePunctuation, Secondary → "accent" + ignorePunctuation,
+//   Tertiary → "variant" + ignorePunctuation, Quaternary → "variant" without ignorePunctuation.
+// ECMAScript does not expose an exact tertiary mode that preserves accents and case
+// while still distinguishing punctuation, so Tertiary uses the closest browser approximation.
 // On stable `js-sys`, `Intl.Collator::compare` is exposed as a getter returning
 // a bound JS comparison function rather than a direct Rust method.
 

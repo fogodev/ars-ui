@@ -157,6 +157,7 @@ impl StringCollator {
         let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
         let js_options = JsCollatorOptions::new();
         js_options.set_sensitivity(js_sensitivity(options));
+        js_options.set_ignore_punctuation(js_ignore_punctuation(options));
         js_options.set_numeric(options.numeric);
 
         let collator = JsCollator::new(&locales, js_options.as_ref());
@@ -270,9 +271,21 @@ const fn js_sensitivity(options: CollationOptions) -> js_sys::Intl::CollatorSens
         match options.strength {
             CollationStrength::Primary => js_sys::Intl::CollatorSensitivity::Base,
             CollationStrength::Secondary => js_sys::Intl::CollatorSensitivity::Accent,
-            CollationStrength::Tertiary => js_sys::Intl::CollatorSensitivity::Case,
-            CollationStrength::Quaternary => js_sys::Intl::CollatorSensitivity::Variant,
+            // `Intl.Collator` has no "accent + case, but not punctuation" mode.
+            // `Variant` + `ignorePunctuation = true` is the closest approximation.
+            CollationStrength::Tertiary | CollationStrength::Quaternary => {
+                js_sys::Intl::CollatorSensitivity::Variant
+            }
         }
+    }
+}
+
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
+const fn js_ignore_punctuation(options: CollationOptions) -> bool {
+    if options.case_insensitive {
+        true
+    } else {
+        !matches!(options.strength, CollationStrength::Quaternary)
     }
 }
 
@@ -534,12 +547,12 @@ mod web_intl_tests {
 
         let collator = StringCollator::new(&locales::en(), options);
 
-        assert_ne!(collator.compare("Cafe", "café"), Ordering::Equal);
+        assert_ne!(collator.compare("cafe", "café"), Ordering::Equal);
         assert_ne!(collator.compare("Cafe", "cafe"), Ordering::Equal);
     }
 
     #[wasm_bindgen_test]
-    fn web_intl_quaternary_strength_keeps_case_and_accent_differences() {
+    fn web_intl_quaternary_strength_keeps_case_accent_and_punctuation_differences() {
         let options = CollationOptions {
             strength: CollationStrength::Quaternary,
             numeric: false,
@@ -550,6 +563,20 @@ mod web_intl_tests {
 
         assert_ne!(collator.compare("Cafe", "café"), Ordering::Equal);
         assert_ne!(collator.compare("Cafe", "cafe"), Ordering::Equal);
+        assert_ne!(collator.compare("ab", "a-b"), Ordering::Equal);
+    }
+
+    #[wasm_bindgen_test]
+    fn web_intl_tertiary_strength_ignores_punctuation_differences() {
+        let options = CollationOptions {
+            strength: CollationStrength::Tertiary,
+            numeric: false,
+            ..Default::default()
+        };
+
+        let collator = StringCollator::new(&locales::en(), options);
+
+        assert_eq!(collator.compare("ab", "a-b"), Ordering::Equal);
     }
 
     #[wasm_bindgen_test]
