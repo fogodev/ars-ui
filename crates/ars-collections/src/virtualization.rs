@@ -307,8 +307,9 @@ impl Virtualizer {
                 gap,
                 ..
             } => {
-                let cols = self.responsive_columns(*min_item_width, *gap);
-                let row_stride = min_item_height + gap;
+                let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+                let cols = self.responsive_columns(cross_size, *gap);
+                let row_stride = main_size + gap;
                 let row_start = (scroll_offset / row_stride).floor() as usize;
                 let row_end = ((scroll_offset + viewport_extent) / row_stride).ceil() as usize;
 
@@ -321,16 +322,13 @@ impl Virtualizer {
                 gap,
                 ..
             } => {
-                let positions = self.waterfall_positions(*min_item_width, *min_item_height, *gap);
+                let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+                let positions = self.waterfall_positions(cross_size, main_size, *gap);
                 let mut first = self.total_count;
                 let mut last = 0;
 
                 for (i, &y) in positions.iter().enumerate() {
-                    let h = self
-                        .measured_heights
-                        .get(&i)
-                        .copied()
-                        .unwrap_or(*min_item_height);
+                    let h = self.measured_heights.get(&i).copied().unwrap_or(main_size);
 
                     let item_bottom = y + h;
 
@@ -441,9 +439,10 @@ impl Virtualizer {
                 gap,
                 ..
             } => {
-                let cols = self.responsive_columns(*min_item_width, *gap);
+                let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+                let cols = self.responsive_columns(cross_size, *gap);
 
-                (index / cols) as f64 * (min_item_height + gap)
+                (index / cols) as f64 * (main_size + gap)
             }
 
             LayoutStrategy::WaterfallLayout {
@@ -451,11 +450,13 @@ impl Virtualizer {
                 min_item_height,
                 gap,
                 ..
-            } => self
-                .waterfall_positions(*min_item_width, *min_item_height, *gap)
-                .get(index)
-                .copied()
-                .unwrap_or(0.0),
+            } => {
+                let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+                self.waterfall_positions(cross_size, main_size, *gap)
+                    .get(index)
+                    .copied()
+                    .unwrap_or(0.0)
+            }
 
             LayoutStrategy::TableLayout {
                 row_height,
@@ -505,10 +506,11 @@ impl Virtualizer {
                     return 0.0;
                 }
 
-                let cols = self.responsive_columns(*min_item_width, *gap);
+                let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+                let cols = self.responsive_columns(cross_size, *gap);
                 let rows = self.total_count.div_ceil(cols);
 
-                rows as f64 * (min_item_height + gap) - gap
+                rows as f64 * (main_size + gap) - gap
             }
 
             LayoutStrategy::WaterfallLayout {
@@ -516,7 +518,10 @@ impl Virtualizer {
                 min_item_height,
                 gap,
                 ..
-            } => self.waterfall_total_height(*min_item_width, *min_item_height, *gap),
+            } => {
+                let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+                self.waterfall_total_height(cross_size, main_size, *gap)
+            }
 
             LayoutStrategy::TableLayout {
                 row_height,
@@ -551,16 +556,22 @@ impl Virtualizer {
                 .unwrap_or(*estimated_item_height),
 
             LayoutStrategy::GridLayout {
-                min_item_height, ..
-            } => *min_item_height,
+                min_item_width,
+                min_item_height,
+                ..
+            } => self.axis_sizes(*min_item_width, *min_item_height).0,
 
             LayoutStrategy::WaterfallLayout {
-                min_item_height, ..
-            } => self
-                .measured_heights
-                .get(&index)
-                .copied()
-                .unwrap_or(*min_item_height),
+                min_item_width,
+                min_item_height,
+                ..
+            } => {
+                let main_size = self.axis_sizes(*min_item_width, *min_item_height).0;
+                self.measured_heights
+                    .get(&index)
+                    .copied()
+                    .unwrap_or(main_size)
+            }
 
             LayoutStrategy::TableLayout {
                 row_height,
@@ -697,27 +708,44 @@ impl Virtualizer {
         (first, last)
     }
 
+    /// Returns `(main_axis_item_size, cross_axis_item_size)` for a responsive
+    /// grid or waterfall layout based on the current orientation.
+    ///
+    /// Vertical: main = height, cross = width.
+    /// Horizontal: main = width, cross = height.
+    const fn axis_sizes(&self, min_item_width: f64, min_item_height: f64) -> (f64, f64) {
+        match self.orientation {
+            Orientation::Vertical => (min_item_height, min_item_width),
+            Orientation::Horizontal => (min_item_width, min_item_height),
+        }
+    }
+
     /// Computes the responsive column count for `GridLayout` and
     /// `WaterfallLayout` from the cross-axis viewport extent.
-    fn responsive_columns(&self, min_item_width: f64, gap: f64) -> usize {
+    ///
+    /// `cross_item_size` is the item dimension along the cross axis (width
+    /// for vertical scroll, height for horizontal scroll).
+    fn responsive_columns(&self, cross_item_size: f64, gap: f64) -> usize {
         let cross = match self.orientation {
             Orientation::Vertical => self.viewport_width,
             Orientation::Horizontal => self.viewport_height,
         };
 
-        if cross <= 0.0 || min_item_width <= 0.0 {
+        if cross <= 0.0 || cross_item_size <= 0.0 {
             return 1;
         }
 
-        ((cross + gap) / (min_item_width + gap)).floor().max(1.0) as usize
+        ((cross + gap) / (cross_item_size + gap)).floor().max(1.0) as usize
     }
 
-    /// Computes the Y offset for every item in a waterfall (masonry) layout.
+    /// Computes the main-axis offset for every item in a waterfall (masonry)
+    /// layout. Items are assigned to the shortest column. Returns a `Vec` of
+    /// length `self.total_count` where each element is the offset of that item.
     ///
-    /// Items are assigned to the shortest column. Returns a `Vec` of length
-    /// `self.total_count` where each element is the Y offset of that item.
-    fn waterfall_positions(&self, min_item_width: f64, min_item_height: f64, gap: f64) -> Vec<f64> {
-        let columns = self.responsive_columns(min_item_width, gap);
+    /// `cross_item_size` and `main_item_size` are the orientation-resolved
+    /// item dimensions (call [`Self::axis_sizes`] first).
+    fn waterfall_positions(&self, cross_item_size: f64, main_item_size: f64, gap: f64) -> Vec<f64> {
+        let columns = self.responsive_columns(cross_item_size, gap);
 
         let mut column_heights = vec![0.0_f64; columns];
         let mut positions = Vec::with_capacity(self.total_count);
@@ -732,26 +760,26 @@ impl Virtualizer {
             let y = column_heights[min_col];
             positions.push(y);
 
-            let item_height = self
+            let item_main = self
                 .measured_heights
                 .get(&i)
                 .copied()
-                .unwrap_or(min_item_height);
+                .unwrap_or(main_item_size);
 
-            column_heights[min_col] = y + item_height + gap;
+            column_heights[min_col] = y + item_main + gap;
         }
 
         positions
     }
 
-    /// Returns the total height of a waterfall layout (tallest column minus
-    /// trailing gap).
-    fn waterfall_total_height(&self, min_item_width: f64, min_item_height: f64, gap: f64) -> f64 {
+    /// Returns the total main-axis extent of a waterfall layout (tallest
+    /// column minus trailing gap).
+    fn waterfall_total_height(&self, cross_item_size: f64, main_item_size: f64, gap: f64) -> f64 {
         if self.total_count == 0 {
             return 0.0;
         }
 
-        let columns = self.responsive_columns(min_item_width, gap);
+        let columns = self.responsive_columns(cross_item_size, gap);
         let mut column_heights = vec![0.0_f64; columns];
 
         for i in 0..self.total_count {
@@ -761,13 +789,13 @@ impl Virtualizer {
                 .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
                 .unwrap_or((0, &0.0));
 
-            let item_height = self
+            let item_main = self
                 .measured_heights
                 .get(&i)
                 .copied()
-                .unwrap_or(min_item_height);
+                .unwrap_or(main_item_size);
 
-            column_heights[min_col] += item_height + gap;
+            column_heights[min_col] += item_main + gap;
         }
 
         let tallest = column_heights.iter().copied().fold(0.0_f64, f64::max);
@@ -1339,21 +1367,23 @@ mod tests {
             },
         );
 
-        // Horizontal: cross axis is viewport_height
+        // Horizontal: cross axis = viewport_height, cross item = min_item_height = 40
         virt.orientation = Orientation::Horizontal;
-        // columns = floor((300 + 10) / (100 + 10)) = floor(310/110) = 2
-        // row stride = 40 + 10 = 50
-        // rows = ceil(12/2) = 6
-        virt.set_scroll_state_mut(0.0, 50.0, 300.0, 200.0);
+        // cross_cols = floor((200 + 10) / (40 + 10)) = floor(210/50) = 4
+        // main stride = min_item_width + gap = 100 + 10 = 110
+        // rows (along main axis) = ceil(12/4) = 3
+        // total main = 3 * 110 - 10 = 320
+        virt.set_scroll_state_mut(0.0, 110.0, 200.0, 150.0);
         virt.overscan = 0;
 
-        // scroll_left=50, viewport_width=200, row_stride=50
-        // first = floor(50/50) = 1, last = ceil(250/50) = 5
-        // items: 1*2=2 .. min(5*2, 12)=10
+        // scroll_left=110, viewport_width=150, main_stride=110
+        // max_scroll = 320 - 150 = 170 → scroll_left clamped to 110
+        // first = floor(110/110) = 1, last = ceil(260/110) = ceil(2.36) = 3
+        // items: 1*4=4 .. min(3*4, 12)=12
         let range = virt.visible_range();
 
-        assert_eq!(range.start, 2);
-        assert_eq!(range.end, 10);
+        assert_eq!(range.start, 4);
+        assert_eq!(range.end, 12);
     }
 
     // ── WaterfallLayout specialized math ─────────────────────────────
