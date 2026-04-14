@@ -3909,6 +3909,7 @@ fn idref_attr_name(attr: HtmlAttr) -> Option<&'static str> {
         HtmlAttr::Aria(AriaAttr::Controls) => Some("aria-controls"),
         HtmlAttr::Aria(AriaAttr::DescribedBy) => Some("aria-describedby"),
         HtmlAttr::Aria(AriaAttr::Details) => Some("aria-details"),
+        HtmlAttr::Aria(AriaAttr::ErrorMessage) => Some("aria-errormessage"),
         HtmlAttr::Aria(AriaAttr::FlowTo) => Some("aria-flowto"),
         HtmlAttr::Aria(AriaAttr::LabelledBy) => Some("aria-labelledby"),
         HtmlAttr::Aria(AriaAttr::Owns) => Some("aria-owns"),

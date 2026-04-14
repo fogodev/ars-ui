@@ -245,6 +245,7 @@ const fn idref_attr_name(attr: HtmlAttr) -> Option<&'static str> {
         HtmlAttr::Aria(AriaAttr::Controls) => Some("aria-controls"),
         HtmlAttr::Aria(AriaAttr::DescribedBy) => Some("aria-describedby"),
         HtmlAttr::Aria(AriaAttr::Details) => Some("aria-details"),
+        HtmlAttr::Aria(AriaAttr::ErrorMessage) => Some("aria-errormessage"),
         HtmlAttr::Aria(AriaAttr::FlowTo) => Some("aria-flowto"),
         HtmlAttr::Aria(AriaAttr::LabelledBy) => Some("aria-labelledby"),
         HtmlAttr::Aria(AriaAttr::Owns) => Some("aria-owns"),
@@ -771,6 +772,27 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn validate_attr_map_catches_dangling_aria_errormessage_reference() {
+        let mut attr_map = AttrMap::new();
+
+        attr_map.set(
+            HtmlAttr::Aria(AriaAttr::ErrorMessage),
+            AttrValue::from("error-id"),
+        );
+
+        let validator = validate_attr_map(None, &attr_map, AriaValidationContext::new());
+
+        assert!(
+            validator
+                .errors()
+                .contains(&AriaValidationError::DanglingIdReference {
+                    attribute: "aria-errormessage",
+                    id: String::from("error-id"),
+                })
+        );
     }
 
     #[test]
