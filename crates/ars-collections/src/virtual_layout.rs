@@ -51,11 +51,14 @@ pub trait HorizontalVirtualLayout: VirtualLayout {
 
 #[cfg(test)]
 mod tests {
-    use core::ops::Range;
+    use core::{cell::Cell, ops::Range};
 
     use super::{HorizontalVirtualLayout, VirtualLayout};
 
-    struct DummyLayout;
+    #[derive(Default)]
+    struct DummyLayout {
+        last_height_report: Cell<Option<(usize, f64)>>,
+    }
 
     impl VirtualLayout for DummyLayout {
         fn visible_range(&self, scroll_offset: f64, viewport_height: f64) -> Range<usize> {
@@ -72,7 +75,7 @@ mod tests {
         }
 
         fn report_item_height(&mut self, index: usize, height: f64) {
-            let _ = (index, height);
+            self.last_height_report.set(Some((index, height)));
         }
 
         fn item_count(&self) -> usize {
@@ -80,7 +83,10 @@ mod tests {
         }
     }
 
-    struct DummyHorizontalLayout;
+    #[derive(Default)]
+    struct DummyHorizontalLayout {
+        last_width_report: Cell<Option<(usize, f64)>>,
+    }
 
     impl VirtualLayout for DummyHorizontalLayout {
         fn visible_range(&self, scroll_offset: f64, viewport_height: f64) -> Range<usize> {
@@ -97,7 +103,7 @@ mod tests {
         }
 
         fn report_item_height(&mut self, index: usize, height: f64) {
-            let _ = (index, height);
+            self.last_width_report.set(Some((index, height)));
         }
 
         fn item_count(&self) -> usize {
@@ -124,34 +130,129 @@ mod tests {
         }
     }
 
+    fn top_offset_for<T: VirtualLayout>(layout: &T, index: usize) -> f64 {
+        layout.scroll_to_index(index)
+    }
+
+    fn horizontal_window_for<T: HorizontalVirtualLayout>(
+        layout: &T,
+        scroll_offset: f64,
+        viewport_width: f64,
+    ) -> Range<usize> {
+        layout.visible_range_horizontal(scroll_offset, viewport_width)
+    }
+
+    fn vertical_window_for<T: VirtualLayout>(
+        layout: &T,
+        scroll_offset: f64,
+        viewport_height: f64,
+    ) -> Range<usize> {
+        layout.visible_range(scroll_offset, viewport_height)
+    }
+
     #[test]
     fn default_scroll_to_index_uses_item_offset() {
-        let layout = DummyLayout;
+        let layout = DummyLayout::default();
         assert_eq!(layout.scroll_to_index(4), 40.0);
     }
 
     #[test]
     fn default_report_item_width_is_no_op() {
-        let mut layout = DummyHorizontalLayout;
+        let mut layout = DummyHorizontalLayout::default();
         layout.report_item_width(2, 88.0);
         assert_eq!(layout.item_count(), 6);
+        assert_eq!(layout.last_width_report.get(), None);
+    }
+
+    #[test]
+    fn vertical_layout_reports_visible_range() {
+        let layout = DummyLayout::default();
+        assert_eq!(layout.visible_range(12.0, 48.0), 1..3);
+    }
+
+    #[test]
+    fn vertical_layout_reports_total_height() {
+        let layout = DummyLayout::default();
+        assert_eq!(layout.total_height(), 100.0);
+    }
+
+    #[test]
+    fn vertical_layout_reports_item_count() {
+        let layout = DummyLayout::default();
+        assert_eq!(layout.item_count(), 10);
+    }
+
+    #[test]
+    fn vertical_layout_records_reported_item_height() {
+        let mut layout = DummyLayout::default();
+        layout.report_item_height(3, 44.0);
+        assert_eq!(layout.last_height_report.get(), Some((3, 44.0)));
     }
 
     #[test]
     fn horizontal_layout_reports_visible_range() {
-        let layout = DummyHorizontalLayout;
+        let layout = DummyHorizontalLayout::default();
         assert_eq!(layout.visible_range_horizontal(16.0, 48.0), 2..5);
     }
 
     #[test]
+    fn horizontal_layout_also_reports_vertical_visible_range() {
+        let layout = DummyHorizontalLayout::default();
+        assert_eq!(layout.visible_range(10.0, 24.0), 0..2);
+    }
+
+    #[test]
     fn horizontal_layout_reports_item_offset_x() {
-        let layout = DummyHorizontalLayout;
+        let layout = DummyHorizontalLayout::default();
         assert_eq!(layout.item_offset_x(3), 36.0);
     }
 
     #[test]
+    fn horizontal_layout_also_reports_vertical_item_offset() {
+        let layout = DummyHorizontalLayout::default();
+        assert_eq!(layout.item_offset(4), 32.0);
+    }
+
+    #[test]
     fn horizontal_layout_reports_total_width() {
-        let layout = DummyHorizontalLayout;
+        let layout = DummyHorizontalLayout::default();
         assert_eq!(layout.total_width(), 120.0);
+    }
+
+    #[test]
+    fn horizontal_layout_also_reports_total_height() {
+        let layout = DummyHorizontalLayout::default();
+        assert_eq!(layout.total_height(), 80.0);
+    }
+
+    #[test]
+    fn horizontal_layout_records_reported_item_height() {
+        let mut layout = DummyHorizontalLayout::default();
+        layout.report_item_height(1, 22.0);
+        assert_eq!(layout.last_width_report.get(), Some((1, 22.0)));
+    }
+
+    #[test]
+    fn horizontal_layout_reports_item_count() {
+        let layout = DummyHorizontalLayout::default();
+        assert_eq!(layout.item_count(), 6);
+    }
+
+    #[test]
+    fn virtual_layout_trait_bound_uses_default_scroll_helper() {
+        let layout = DummyLayout::default();
+        assert_eq!(top_offset_for(&layout, 5), 50.0);
+    }
+
+    #[test]
+    fn horizontal_virtual_layout_trait_bound_uses_horizontal_range() {
+        let layout = DummyHorizontalLayout::default();
+        assert_eq!(horizontal_window_for(&layout, 24.0, 60.0), 2..5);
+    }
+
+    #[test]
+    fn horizontal_layout_also_satisfies_vertical_trait_bound() {
+        let layout = DummyHorizontalLayout::default();
+        assert_eq!(vertical_window_for(&layout, 12.0, 24.0), 0..2);
     }
 }
