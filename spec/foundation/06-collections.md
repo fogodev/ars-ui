@@ -4411,30 +4411,45 @@ The adapter MUST normalize `scrollLeft` to a consistent `0..maxScroll` range (me
 ```rust
 // ars-collections/src/virtualization.rs
 
+/// Browser convention for RTL `scrollLeft` values.
+///
+/// Adapters detect the convention once at startup (e.g., by writing a
+/// known `scrollLeft` to a hidden RTL element and reading back the sign)
+/// and reuse the result for all subsequent normalization calls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RtlScrollMode {
+    /// Chrome, Edge, Firefox: `scrollLeft` is `0` at inline-start
+    /// (far-right), negative toward inline-end (far-left).
+    /// Range: `-max..0`.
+    Negative,
+    /// Safari: `scrollLeft` is `0` at far-left (inline-end in RTL),
+    /// positive toward far-right (inline-start).
+    /// Range: `0..max`.
+    Positive,
+}
+
 /// Normalizes a browser's `scrollLeft` value for RTL content to a
 /// consistent `0..max_scroll` range measured from the inline-start edge.
 ///
-/// Browsers differ in how they report `scrollLeft` for RTL containers:
-/// - Chrome and Firefox use negative values (`-max..0`).
-/// - Safari uses positive values (`0..max`).
-///
-/// This function converts both conventions to `0..max_scroll` where
-/// `max_scroll = scroll_width - client_width`.
+/// `mode` identifies the browser's scroll convention (see `RtlScrollMode`).
+/// The adapter detects this once and passes it on every scroll event.
 ///
 /// For LTR content, `scrollLeft` is already `0..max` and does not need
 /// normalization.
-pub fn normalize_scroll_left_rtl(raw: f64, scroll_width: f64, client_width: f64) -> f64 {
-    // Floor at 0 to prevent clamp panic when client_width > scroll_width.
+pub fn normalize_scroll_left_rtl(
+    raw: f64, scroll_width: f64, client_width: f64, mode: RtlScrollMode,
+) -> f64 {
     let max_scroll = (scroll_width - client_width).max(0.0);
-    if raw > 0.0 {
-        // Safari: raw is 0 (far-left / inline-end) to max (far-right /
-        // inline-start). Convert to inline-start distance: max - raw.
-        (max_scroll - raw).clamp(0.0, max_scroll)
-    } else {
-        // Chrome/Firefox: raw is -max..0 (negate to get 0..max).
-        // raw == 0.0 means at inline-start (far-right) → distance 0,
-        // which is correct for both conventions.
-        raw.abs().clamp(0.0, max_scroll)
+    match mode {
+        RtlScrollMode::Negative => {
+            // Chrome/Firefox: raw is -max..0. Negate to get 0..max.
+            raw.abs().clamp(0.0, max_scroll)
+        }
+        RtlScrollMode::Positive => {
+            // Safari: raw is 0 (inline-end) to max (inline-start).
+            // Convert to inline-start distance: max - raw.
+            (max_scroll - raw).clamp(0.0, max_scroll)
+        }
     }
 }
 ```

@@ -8,33 +8,54 @@ use crate::key::Key;
 /// The number of items to render beyond the visible range on each side.
 pub const DEFAULT_OVERSCAN: usize = 5;
 
+/// Browser convention for RTL `scrollLeft` values.
+///
+/// Adapters detect the convention once at startup (e.g., by writing a
+/// known `scrollLeft` to a hidden RTL element and reading back the sign)
+/// and reuse the result for all subsequent normalization calls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RtlScrollMode {
+    /// Chrome, Edge, Firefox: `scrollLeft` is `0` at inline-start
+    /// (far-right), negative toward inline-end (far-left).
+    /// Range: `-max..0`.
+    Negative,
+
+    /// Safari: `scrollLeft` is `0` at far-left (inline-end in RTL),
+    /// positive toward far-right (inline-start).
+    /// Range: `0..max`.
+    Positive,
+}
+
 /// Normalizes a browser's `scrollLeft` value for RTL content to a
 /// consistent `0..max_scroll` range measured from the inline-start edge.
 ///
-/// Browsers differ in how they report `scrollLeft` for RTL containers:
-/// - Chrome and Firefox use negative values (`-max..0`).
-/// - Safari uses positive values (`0..max`).
-///
-/// This function converts both conventions to `0..max_scroll` where
-/// `max_scroll = scroll_width - client_width`.
+/// `mode` identifies the browser's scroll convention (see
+/// [`RtlScrollMode`]). The adapter detects this once and passes it on
+/// every scroll event.
 ///
 /// For LTR content, `scrollLeft` is already `0..max` and does not need
 /// normalization.
 #[must_use]
-pub fn normalize_scroll_left_rtl(raw: f64, scroll_width: f64, client_width: f64) -> f64 {
+pub fn normalize_scroll_left_rtl(
+    raw: f64,
+    scroll_width: f64,
+    client_width: f64,
+    mode: RtlScrollMode,
+) -> f64 {
     // Floor at 0 to prevent clamp panic when client_width > scroll_width
     // (transient browser measurement or caller error).
     let max_scroll = (scroll_width - client_width).max(0.0);
 
-    if raw > 0.0 {
-        // Safari: raw is 0 (far-left / inline-end) to max (far-right /
-        // inline-start). Convert to inline-start distance: max - raw.
-        (max_scroll - raw).clamp(0.0, max_scroll)
-    } else {
-        // Chrome/Firefox: raw is -max..0 (negate to get 0..max).
-        // raw == 0.0 means at inline-start (far-right) → distance 0,
-        // which is correct for both conventions.
-        raw.abs().clamp(0.0, max_scroll)
+    match mode {
+        RtlScrollMode::Negative => {
+            // Chrome/Firefox: raw is -max..0. Negate to get 0..max.
+            raw.abs().clamp(0.0, max_scroll)
+        }
+        RtlScrollMode::Positive => {
+            // Safari: raw is 0 (far-left / inline-end) to max (far-right /
+            // inline-start). Convert to inline-start distance: max - raw.
+            (max_scroll - raw).clamp(0.0, max_scroll)
+        }
     }
 }
 
@@ -1690,44 +1711,66 @@ mod tests {
 
     // ── RTL scroll normalization ─────────────────────────────────────
 
+    use super::RtlScrollMode;
+
     #[test]
-    fn normalize_scroll_left_rtl_chrome_firefox_negative() {
-        // Chrome/Firefox: raw is -max..0
-        assert_eq!(normalize_scroll_left_rtl(-200.0, 1000.0, 600.0), 200.0);
+    fn normalize_rtl_chrome_negative_value() {
+        // Chrome: -200 → abs → 200
+        let n = RtlScrollMode::Negative;
+
+        assert_eq!(normalize_scroll_left_rtl(-200.0, 1000.0, 600.0, n), 200.0);
     }
 
     #[test]
-    fn normalize_scroll_left_rtl_safari_positive() {
-        // Safari: raw is 0..max
-        assert_eq!(normalize_scroll_left_rtl(200.0, 1000.0, 600.0), 200.0);
+    fn normalize_rtl_chrome_zero_is_inline_start() {
+        // Chrome: 0 = at inline-start → distance 0
+        let n = RtlScrollMode::Negative;
+
+        assert_eq!(normalize_scroll_left_rtl(0.0, 1000.0, 600.0, n), 0.0);
     }
 
     #[test]
-    fn normalize_scroll_left_rtl_zero_is_inline_start() {
-        // raw=0 is ambiguous (Chrome: at inline-start, Safari: at inline-end).
-        // We treat 0.0 as Chrome convention: inline-start → distance 0.
-        assert_eq!(normalize_scroll_left_rtl(0.0, 1000.0, 600.0), 0.0);
-    }
-
-    #[test]
-    fn normalize_scroll_left_rtl_chrome_clamps_past_max() {
+    fn normalize_rtl_chrome_clamps_past_max() {
         // max_scroll = 400, |-500| = 500 → clamped to 400
-        assert_eq!(normalize_scroll_left_rtl(-500.0, 1000.0, 600.0), 400.0);
+        let n = RtlScrollMode::Negative;
+
+        assert_eq!(normalize_scroll_left_rtl(-500.0, 1000.0, 600.0, n), 400.0);
     }
 
     #[test]
-    fn normalize_scroll_left_rtl_safari_at_inline_start() {
-        // Safari: raw=max_scroll means at far-right (inline-start) → 0
-        assert_eq!(normalize_scroll_left_rtl(400.0, 1000.0, 600.0), 0.0);
+    fn normalize_rtl_safari_positive_value() {
+        // Safari: raw=200, max=400. inline-start distance = 400 - 200 = 200
+        let p = RtlScrollMode::Positive;
+
+        assert_eq!(normalize_scroll_left_rtl(200.0, 1000.0, 600.0, p), 200.0);
     }
 
     #[test]
-    fn normalize_scroll_left_rtl_negative_max_scroll_returns_zero() {
-        // client_width > scroll_width → max_scroll would be negative.
-        // Must not panic; returns 0.
-        assert_eq!(normalize_scroll_left_rtl(-10.0, 100.0, 200.0), 0.0);
-        assert_eq!(normalize_scroll_left_rtl(10.0, 100.0, 200.0), 0.0);
-        assert_eq!(normalize_scroll_left_rtl(0.0, 100.0, 200.0), 0.0);
+    fn normalize_rtl_safari_zero_is_inline_end() {
+        // Safari: 0 = at far-left (inline-end) → distance = max_scroll = 400
+        let p = RtlScrollMode::Positive;
+
+        assert_eq!(normalize_scroll_left_rtl(0.0, 1000.0, 600.0, p), 400.0);
+    }
+
+    #[test]
+    fn normalize_rtl_safari_max_is_inline_start() {
+        // Safari: raw=max_scroll = at far-right (inline-start) → distance 0
+        let p = RtlScrollMode::Positive;
+
+        assert_eq!(normalize_scroll_left_rtl(400.0, 1000.0, 600.0, p), 0.0);
+    }
+
+    #[test]
+    fn normalize_rtl_negative_max_scroll_returns_zero() {
+        // client_width > scroll_width → max_scroll floors to 0.
+        let n = RtlScrollMode::Negative;
+        let p = RtlScrollMode::Positive;
+
+        assert_eq!(normalize_scroll_left_rtl(-10.0, 100.0, 200.0, n), 0.0);
+        assert_eq!(normalize_scroll_left_rtl(10.0, 100.0, 200.0, p), 0.0);
+        assert_eq!(normalize_scroll_left_rtl(0.0, 100.0, 200.0, n), 0.0);
+        assert_eq!(normalize_scroll_left_rtl(0.0, 100.0, 200.0, p), 0.0);
     }
 
     // ── Direction field tests ────────────────────────────────────────

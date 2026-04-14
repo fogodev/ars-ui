@@ -33,6 +33,7 @@
 //! - [`VirtualLayout`] — extension trait for custom vertical layout engines.
 //! - [`HorizontalVirtualLayout`] — optional extension trait for horizontal layout engines.
 //! - [`normalize_scroll_left_rtl`] — RTL scroll normalization for cross-browser consistency.
+//! - [`RtlScrollMode`] — browser convention for RTL `scrollLeft` values.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::std_instead_of_core)]
@@ -82,4 +83,6 @@ pub use sorted_collection::{SortDescriptor, SortDirection, SortedCollection};
 pub use static_collection::StaticCollection;
 pub use tree_collection::{TreeCollection, TreeItemConfig};
 pub use virtual_layout::{HorizontalVirtualLayout, VirtualLayout};
-pub use virtualization::{LayoutStrategy, ScrollAlign, Virtualizer, normalize_scroll_left_rtl};
+pub use virtualization::{
+    LayoutStrategy, RtlScrollMode, ScrollAlign, Virtualizer, normalize_scroll_left_rtl,
+};
