@@ -22,7 +22,9 @@ pub const DEFAULT_OVERSCAN: usize = 5;
 /// normalization.
 #[must_use]
 pub fn normalize_scroll_left_rtl(raw: f64, scroll_width: f64, client_width: f64) -> f64 {
-    let max_scroll = scroll_width - client_width;
+    // Floor at 0 to prevent clamp panic when client_width > scroll_width
+    // (transient browser measurement or caller error).
+    let max_scroll = (scroll_width - client_width).max(0.0);
 
     if raw >= 0.0 {
         // Safari: raw is 0..max (already inline-start-based)
@@ -351,17 +353,39 @@ impl Virtualizer {
             LayoutStrategy::TableLayout {
                 row_height,
                 header_height,
+                column_widths,
                 row_gap,
-                ..
-            } => {
-                let row_stride = row_height + row_gap;
-                let data_offset = (scroll_offset - header_height).max(0.0);
-                let data_end = (scroll_offset + viewport_extent - header_height).max(0.0);
-                let first = (data_offset / row_stride).floor() as usize;
-                let last = (data_end / row_stride).ceil() as usize;
+            } => match self.orientation {
+                Orientation::Vertical => {
+                    let row_stride = row_height + row_gap;
+                    let data_offset = (scroll_offset - header_height).max(0.0);
+                    let data_end = (scroll_offset + viewport_extent - header_height).max(0.0);
+                    let first = (data_offset / row_stride).floor() as usize;
+                    let last = (data_end / row_stride).ceil() as usize;
 
-                (first, last.min(self.total_count))
-            }
+                    (first, last.min(self.total_count))
+                }
+                Orientation::Horizontal => {
+                    let mut cumulative = 0.0_f64;
+                    let mut first = column_widths.len();
+                    let mut found_first = false;
+                    let mut last = column_widths.len();
+
+                    for (i, &w) in column_widths.iter().enumerate() {
+                        if cumulative + w > scroll_offset && !found_first {
+                            first = i;
+                            found_first = true;
+                        }
+                        cumulative += w;
+                        if cumulative >= scroll_offset + viewport_extent {
+                            last = i + 1;
+                            break;
+                        }
+                    }
+
+                    (first, last.min(column_widths.len()))
+                }
+            },
         };
 
         let mut start = first_visible.saturating_sub(self.overscan);
@@ -436,9 +460,12 @@ impl Virtualizer {
             LayoutStrategy::TableLayout {
                 row_height,
                 header_height,
+                column_widths,
                 row_gap,
-                ..
-            } => header_height + index as f64 * (row_height + row_gap),
+            } => match self.orientation {
+                Orientation::Vertical => header_height + index as f64 * (row_height + row_gap),
+                Orientation::Horizontal => column_widths.iter().take(index).sum(),
+            },
         }
     }
 
@@ -535,7 +562,14 @@ impl Virtualizer {
                 .copied()
                 .unwrap_or(*min_item_height),
 
-            LayoutStrategy::TableLayout { row_height, .. } => *row_height,
+            LayoutStrategy::TableLayout {
+                row_height,
+                column_widths,
+                ..
+            } => match self.orientation {
+                Orientation::Vertical => *row_height,
+                Orientation::Horizontal => column_widths.get(index).copied().unwrap_or(*row_height),
+            },
         };
 
         let viewport_extent = self.viewport_extent();
@@ -1576,7 +1610,7 @@ mod tests {
     }
 
     #[test]
-    fn table_layout_horizontal_uses_column_width_sum() {
+    fn table_layout_horizontal_uses_column_widths() {
         let mut virt = Virtualizer::new(
             8,
             LayoutStrategy::TableLayout {
@@ -1588,22 +1622,30 @@ mod tests {
         );
 
         virt.orientation = Orientation::Horizontal;
+        // viewport_width = 200 for horizontal scroll
         virt.set_scroll_state_mut(0.0, 0.0, 300.0, 200.0);
 
         // total_height_px returns the vertical total regardless of orientation
         assert_eq!(virt.total_height_px(), 332.0);
 
-        // Horizontal scroll math uses total_main_axis_extent = sum(column_widths) = 360.
-        // max_scroll = 360 - 200 = 160, so scroll_to_index(7, Top) clamps to 160.
-        assert_eq!(virt.scroll_to_index(7, ScrollAlign::Top), 160.0);
+        // Horizontal item_offset_px uses cumulative column widths:
+        // col 0 offset = 0, col 1 offset = 120, col 2 offset = 280
+        assert_eq!(virt.item_offset_px(0), 0.0);
+        assert_eq!(virt.item_offset_px(1), 120.0);
+        assert_eq!(virt.item_offset_px(2), 280.0);
 
-        // visible_range exercises the horizontal TableLayout path too
+        // total_main_axis_extent = sum(column_widths) = 360
+        // max_scroll = 360 - 200 = 160
+        // scroll_to_index(1, Top) = min(120, 160) = 120
+        assert_eq!(virt.scroll_to_index(1, ScrollAlign::Top), 120.0);
+
+        // visible_range with scroll_left=0: columns 0 (0..120) and 1 (120..280) overlap [0, 200)
         virt.overscan = 0;
 
         let range = virt.visible_range();
 
-        assert!(range.start == 0);
-        assert!(range.end <= 8);
+        assert_eq!(range.start, 0);
+        assert_eq!(range.end, 2);
     }
 
     // ── RTL scroll normalization ─────────────────────────────────────
@@ -1629,6 +1671,15 @@ mod tests {
     fn normalize_scroll_left_rtl_clamps_to_max() {
         // max_scroll = 400, |-500| = 500 → clamped to 400
         assert_eq!(normalize_scroll_left_rtl(-500.0, 1000.0, 600.0), 400.0);
+    }
+
+    #[test]
+    fn normalize_scroll_left_rtl_negative_max_scroll_returns_zero() {
+        // client_width > scroll_width → max_scroll would be negative.
+        // Must not panic; returns 0.
+        assert_eq!(normalize_scroll_left_rtl(-10.0, 100.0, 200.0), 0.0);
+        assert_eq!(normalize_scroll_left_rtl(10.0, 100.0, 200.0), 0.0);
+        assert_eq!(normalize_scroll_left_rtl(0.0, 100.0, 200.0), 0.0);
     }
 
     #[test]

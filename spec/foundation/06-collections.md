@@ -3925,13 +3925,33 @@ impl Virtualizer {
                 if first > last { first = 0; last = 0; }
                 (first, last)
             }
-            LayoutStrategy::TableLayout { row_height, header_height, row_gap, .. } => {
-                let row_stride = row_height + row_gap;
-                let data_offset = (scroll_offset - header_height).max(0.0);
-                let data_end    = (scroll_offset + viewport_extent - header_height).max(0.0);
-                let first = (data_offset / row_stride).floor() as usize;
-                let last  = (data_end / row_stride).ceil() as usize;
-                (first, last.min(self.total_count))
+            LayoutStrategy::TableLayout { row_height, header_height, column_widths, row_gap } => {
+                match self.orientation {
+                    Orientation::Vertical => {
+                        let row_stride = row_height + row_gap;
+                        let data_offset = (scroll_offset - header_height).max(0.0);
+                        let data_end    = (scroll_offset + viewport_extent - header_height).max(0.0);
+                        let first = (data_offset / row_stride).floor() as usize;
+                        let last  = (data_end / row_stride).ceil() as usize;
+                        (first, last.min(self.total_count))
+                    }
+                    Orientation::Horizontal => {
+                        let mut cumulative = 0.0_f64;
+                        let mut first = column_widths.len();
+                        let mut found_first = false;
+                        let mut last = column_widths.len();
+                        for (i, &w) in column_widths.iter().enumerate() {
+                            if cumulative + w > scroll_offset && !found_first {
+                                first = i; found_first = true;
+                            }
+                            cumulative += w;
+                            if cumulative >= scroll_offset + viewport_extent {
+                                last = i + 1; break;
+                            }
+                        }
+                        (first, last.min(column_widths.len()))
+                    }
+                }
             }
         };
 
@@ -3988,8 +4008,11 @@ impl Virtualizer {
                 let positions = self.waterfall_positions(*min_item_width, *min_item_height, *gap);
                 positions.get(index).copied().unwrap_or(0.0)
             }
-            LayoutStrategy::TableLayout { row_height, header_height, row_gap, .. } => {
-                header_height + index as f64 * (row_height + row_gap)
+            LayoutStrategy::TableLayout { row_height, header_height, column_widths, row_gap } => {
+                match self.orientation {
+                    Orientation::Vertical => header_height + index as f64 * (row_height + row_gap),
+                    Orientation::Horizontal => column_widths.iter().take(index).sum(),
+                }
             }
         }
     }
@@ -4051,7 +4074,12 @@ impl Virtualizer {
             LayoutStrategy::WaterfallLayout { min_item_height, .. } => {
                 self.measured_heights.get(&index).copied().unwrap_or(*min_item_height)
             }
-            LayoutStrategy::TableLayout { row_height, .. }          => *row_height,
+            LayoutStrategy::TableLayout { row_height, column_widths, .. } => {
+                match self.orientation {
+                    Orientation::Vertical => *row_height,
+                    Orientation::Horizontal => column_widths.get(index).copied().unwrap_or(*row_height),
+                }
+            }
         };
         let viewport_extent = self.viewport_extent();
         let max_scroll = (self.total_main_axis_extent() - viewport_extent).max(0.0);
@@ -4376,7 +4404,8 @@ The adapter MUST normalize `scrollLeft` to a consistent `0..maxScroll` range (me
 /// For LTR content, `scrollLeft` is already `0..max` and does not need
 /// normalization.
 pub fn normalize_scroll_left_rtl(raw: f64, scroll_width: f64, client_width: f64) -> f64 {
-    let max_scroll = scroll_width - client_width;
+    // Floor at 0 to prevent clamp panic when client_width > scroll_width.
+    let max_scroll = (scroll_width - client_width).max(0.0);
     if raw >= 0.0 {
         // Safari: raw is 0..max (already inline-start-based)
         raw.clamp(0.0, max_scroll)
