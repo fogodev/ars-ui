@@ -34,6 +34,12 @@
 //! - [`HorizontalVirtualLayout`] — optional extension trait for horizontal layout engines.
 //! - [`normalize_scroll_left_rtl`] — RTL scroll normalization for cross-browser consistency.
 //! - [`RtlScrollMode`] — browser convention for RTL `scrollLeft` values.
+//!
+//! # Locale-aware collation (`i18n` feature)
+//!
+//! - [`CollationTarget`] — associates an item type with a collection for collation.
+//! - [`CollationSupport`] — adds [`CollationSupport::with_collation`] to collection references.
+//! - [`CollatorCache`] — caches `StringCollator` instances per `(Locale, CollationStrength)` pair.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::std_instead_of_core)]
@@ -79,6 +85,8 @@ pub use filtered_collection::FilteredCollection;
 pub use key::Key;
 pub use node::{Node, NodeType};
 pub use selection::DisabledBehavior;
+#[cfg(feature = "i18n")]
+pub use sorted_collection::{CollationSupport, CollationTarget, CollatorCache};
 pub use sorted_collection::{SortDescriptor, SortDirection, SortedCollection};
 pub use static_collection::StaticCollection;
 pub use tree_collection::{TreeCollection, TreeItemConfig};

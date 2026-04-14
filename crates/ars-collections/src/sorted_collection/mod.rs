@@ -1,5 +1,7 @@
-// ars-collections/src/sorted_collection.rs
+// ars-collections/src/sorted_collection/mod.rs
 
+#[cfg(feature = "i18n")]
+mod collation;
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     vec::Vec,
@@ -9,6 +11,9 @@ use core::{
     fmt::{self, Debug, Display},
     marker::PhantomData,
 };
+
+#[cfg(feature = "i18n")]
+pub use collation::{CollationSupport, CollationTarget, CollatorCache};
 
 use crate::{
     Collection,
@@ -21,6 +26,7 @@ use crate::{
 pub enum SortDirection {
     /// Sort in ascending order (smallest first).
     Ascending,
+
     /// Sort in descending order (largest first).
     Descending,
 }
@@ -42,6 +48,7 @@ impl Display for SortDirection {
 pub struct SortDescriptor<K> {
     /// The column (or field) being sorted.
     pub column: K,
+
     /// Whether the sort is ascending or descending.
     pub direction: SortDirection,
 }
@@ -162,6 +169,7 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
 
                     NodeType::Item => {
                         let pk = node.parent_key.clone();
+
                         match &current_parent {
                             Some(existing_pk) if *existing_pk == pk => {}
                             _ => {
@@ -169,6 +177,7 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
                                 current_parent = Some(pk);
                             }
                         }
+
                         item_to_group.insert(pos, next_group);
                     }
                 }
@@ -179,6 +188,7 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
             // in Phase 1 (both iterate focusable items), so the map lookup always
             // succeeds — `.expect` documents the invariant.
             let mut groups = BTreeMap::<usize, Vec<usize>>::new();
+
             for &wp in &item_positions {
                 let group = *item_to_group
                     .get(&wp)
@@ -197,14 +207,17 @@ impl<'a, T: Clone, C: Collection<T>> SortedCollection<'a, T, C> {
                     NodeType::Section | NodeType::Header | NodeType::Separator => {
                         result.push(pos);
                     }
+
                     NodeType::Item => {
                         let group = *item_to_group
                             .get(&pos)
                             .expect("item position must have been assigned a group");
+
                         if group_emitted.insert(group) {
                             let items = groups
                                 .get(&group)
                                 .expect("group must have been populated in Phase 2");
+
                             result.extend_from_slice(items);
                         }
                     }
