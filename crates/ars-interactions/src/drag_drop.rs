@@ -1593,6 +1593,46 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_drag_registry_unregister_before_selected_adjusts_index() {
+        let mut registry = KeyboardDragRegistry::new();
+
+        registry.register(keyboard_target("drop-a", "Alpha", DropConfig::default()));
+        registry.register(keyboard_target("drop-b", "Beta", DropConfig::default()));
+        registry.register(keyboard_target("drop-c", "Charlie", DropConfig::default()));
+
+        // Navigate to drop-c (index 2): next→0, next→1, next→2
+        let _ = registry.next();
+        let _ = registry.next();
+        let current = registry.next().expect("should reach drop-c");
+        assert_eq!(current.element_id, "drop-c");
+
+        // Unregister drop-a (index 0) which is before the selected target (index 2).
+        // The selected index should shift down by 1 to keep pointing at drop-c.
+        registry.unregister("drop-a");
+        let current = registry.current().expect("selection should be preserved");
+        assert_eq!(current.element_id, "drop-c");
+    }
+
+    #[test]
+    fn keyboard_drag_registry_unregister_after_selected_preserves_index() {
+        let mut registry = KeyboardDragRegistry::new();
+
+        registry.register(keyboard_target("drop-a", "Alpha", DropConfig::default()));
+        registry.register(keyboard_target("drop-b", "Beta", DropConfig::default()));
+        registry.register(keyboard_target("drop-c", "Charlie", DropConfig::default()));
+
+        // Navigate to drop-a (index 0)
+        let current = registry.next().expect("should reach drop-a");
+        assert_eq!(current.element_id, "drop-a");
+
+        // Unregister drop-c (index 2) which is after the selected target (index 0).
+        // The selected index should remain unchanged.
+        registry.unregister("drop-c");
+        let current = registry.current().expect("selection should be preserved");
+        assert_eq!(current.element_id, "drop-a");
+    }
+
+    #[test]
     fn keyboard_drag_registry_unregister_unknown_target_is_noop() {
         let mut registry = KeyboardDragRegistry::new();
 
@@ -3353,6 +3393,34 @@ mod tests {
         let operation = result.drag_over(
             &[preview(DragItemKind::Text, &["text/plain"])],
             DropOperation::Copy,
+            PointerType::Mouse,
+        );
+
+        assert_eq!(operation, DropOperation::Cancel);
+        assert!(!result.drag_over);
+        assert!(result.drop_operation.is_none());
+    }
+
+    #[test]
+    fn drop_result_drag_over_rejects_unaccepted_mime_types() {
+        let mut result = use_drop(DropConfig {
+            accepted_types: Some(vec!["image/png".into()]),
+            ..DropConfig::default()
+        });
+
+        // First activate via drag_enter with accepted types so the target is active.
+        let _ = result.drag_enter(
+            vec![preview(DragItemKind::Text, &["image/png"])],
+            DropOperation::Move,
+            PointerType::Mouse,
+        );
+        assert!(result.drag_over);
+
+        // Now send drag_over with a MIME type that does NOT match accepted_types.
+        // This hits resolve_drag_over_operation → !accepts_preview_items → Cancel.
+        let operation = result.drag_over(
+            &[preview(DragItemKind::Text, &["text/plain"])],
+            DropOperation::Move,
             PointerType::Mouse,
         );
 

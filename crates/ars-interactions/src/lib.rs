@@ -4,6 +4,7 @@
 //! components and provides [`compose::merge_attrs`] for merging attribute maps
 //! from multiple interaction sources into a single [`ars_core::AttrMap`].
 
+pub mod companion_css;
 pub mod compose;
 pub mod direction;
 pub mod dismissable;

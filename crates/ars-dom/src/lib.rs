@@ -15,6 +15,7 @@
 
 mod announcer;
 mod focus;
+pub mod media;
 pub mod modality;
 pub mod portal;
 pub mod positioning;
@@ -31,6 +32,10 @@ pub use focus::{
 pub use focus::{
     document_contains, focus_element, get_first_focusable, get_focusable_elements,
     get_html_element_by_id, get_last_focusable,
+};
+pub use media::{
+    ColorScheme, is_forced_colors_active, prefers_color_scheme, prefers_high_contrast,
+    prefers_reduced_motion, prefers_reduced_transparency,
 };
 pub use modality::ModalityManager;
 #[cfg(feature = "web")]

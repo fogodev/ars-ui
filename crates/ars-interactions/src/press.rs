@@ -1238,6 +1238,41 @@ mod tests {
     }
 
     #[test]
+    fn update_pressed_bounds_backfills_origin_when_begin_had_no_coordinates() {
+        let config = PressConfig::default();
+        let mut result = use_press(config);
+
+        // Begin press with no coordinates (keyboard-initiated press).
+        result.begin_press(
+            PointerType::Keyboard,
+            None,
+            None,
+            KeyModifiers::default(),
+            true,
+        );
+        assert_eq!(
+            result.current_state(),
+            PressState::PressedInside {
+                pointer_type: PointerType::Keyboard,
+                origin_x: None,
+                origin_y: None,
+            }
+        );
+
+        // Now update_pressed_bounds with coordinates — this backfills the origin.
+        result.update_pressed_bounds(PointerType::Keyboard, true, Some(42.0), Some(84.0));
+
+        assert_eq!(
+            result.current_state(),
+            PressState::PressedInside {
+                pointer_type: PointerType::Keyboard,
+                origin_x: Some(42.0),
+                origin_y: Some(84.0),
+            }
+        );
+    }
+
+    #[test]
     fn begin_press_outside_emits_initial_press_change_false() {
         let changes = Arc::new(std::sync::Mutex::new(Vec::<bool>::new()));
         let config = PressConfig {

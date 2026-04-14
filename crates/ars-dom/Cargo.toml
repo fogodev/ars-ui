@@ -37,6 +37,7 @@ features = [
     "HtmlElement",
     "KeyboardEvent",
     "KeyboardEventInit",
+    "MediaQueryList",
     "MouseEvent",
     "Navigator",
     "Node",
