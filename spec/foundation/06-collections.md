@@ -3839,31 +3839,42 @@ impl Virtualizer {
     /// including overscan. Components iterate `start..end` and render
     /// `collection.get_by_index(i)` for each `i`.
     pub fn visible_range(&self) -> core::ops::Range<usize> {
-        if self.total_count == 0 || self.viewport_height == 0.0 {
+        let viewport_extent = match self.orientation {
+            Orientation::Vertical => self.viewport_height,
+            Orientation::Horizontal => self.viewport_width,
+        };
+
+        if self.total_count == 0 || viewport_extent == 0.0 {
             return 0..0;
         }
 
+        let max_scroll = (self.total_height_px() - viewport_extent).max(0.0);
+        let scroll_offset = match self.orientation {
+            Orientation::Vertical => self.scroll_top,
+            Orientation::Horizontal => self.scroll_left,
+        }.clamp(0.0, max_scroll);
+
         let (first_visible, last_visible) = match &self.layout {
             LayoutStrategy::FixedHeight { item_height } => {
-                let first = (self.scroll_top / item_height).floor() as usize;
-                let last  = ((self.scroll_top + self.viewport_height) / item_height).ceil() as usize;
+                let first = (scroll_offset / item_height).floor() as usize;
+                let last  = ((scroll_offset + viewport_extent) / item_height).ceil() as usize;
                 (first, last)
             }
             LayoutStrategy::VariableHeight { estimated_item_height } => {
-                self.variable_height_range(*estimated_item_height)
+                self.variable_height_range(*estimated_item_height, scroll_offset, viewport_extent)
             }
             LayoutStrategy::Grid { item_height, columns } => {
                 let cols = columns.get();
-                let row_start = (self.scroll_top / item_height).floor() as usize;
-                let row_end   = ((self.scroll_top + self.viewport_height) / item_height).ceil() as usize;
+                let row_start = (scroll_offset / item_height).floor() as usize;
+                let row_end   = ((scroll_offset + viewport_extent) / item_height).ceil() as usize;
                 (row_start * cols, (row_end * cols).min(self.total_count))
             }
             // GridLayout, WaterfallLayout, TableLayout: delegate to
             // estimated_item_height() for uniform range estimation.
             _ => {
                 let est = self.layout.estimated_item_height();
-                let first = (self.scroll_top / est).floor() as usize;
-                let last  = ((self.scroll_top + self.viewport_height) / est).ceil() as usize;
+                let first = (scroll_offset / est).floor() as usize;
+                let last  = ((scroll_offset + viewport_extent) / est).ceil() as usize;
                 (first, last)
             }
         };
@@ -4023,7 +4034,12 @@ impl Virtualizer {
         key_to_index(key).map(|index| self.scroll_to_index(index, align))
     }
 
-    fn variable_height_range(&self, estimated: f64) -> (usize, usize) {
+    fn variable_height_range(
+        &self,
+        estimated: f64,
+        scroll_offset: f64,
+        viewport_extent: f64,
+    ) -> (usize, usize) {
         let mut cumulative = 0.0_f64;
         let mut first = 0;
         let mut found_first = false;
@@ -4031,12 +4047,12 @@ impl Virtualizer {
 
         for i in 0..self.total_count {
             let h = self.measured_heights.get(&i).copied().unwrap_or(estimated);
-            if cumulative + h > self.scroll_top && !found_first {
+            if cumulative + h > scroll_offset && !found_first {
                 first = i;
                 found_first = true;
             }
             cumulative += h;
-            if cumulative >= self.scroll_top + self.viewport_height {
+            if cumulative >= scroll_offset + viewport_extent {
                 last = i + 1;
                 break;
             }

@@ -196,36 +196,42 @@ impl Virtualizer {
     /// Returns the rendered range `[start, end)` including overscan.
     #[must_use]
     pub fn visible_range(&self) -> Range<usize> {
-        if self.total_count == 0 || self.viewport_height == 0.0 {
+        let viewport_extent = self.viewport_extent();
+
+        if self.total_count == 0 || viewport_extent == 0.0 {
             return 0..0;
         }
 
+        let scroll_offset = self.clamped_scroll_offset(viewport_extent);
+
         let (first_visible, last_visible) = match &self.layout {
             LayoutStrategy::FixedHeight { item_height } => {
-                let first = (self.scroll_top / item_height).floor() as usize;
-                let last = ((self.scroll_top + self.viewport_height) / item_height).ceil() as usize;
+                let first = (scroll_offset / item_height).floor() as usize;
+                let last = ((scroll_offset + viewport_extent) / item_height).ceil() as usize;
+
                 (first, last)
             }
 
             LayoutStrategy::VariableHeight {
                 estimated_item_height,
-            } => self.variable_height_range(*estimated_item_height),
+            } => self.variable_height_range(*estimated_item_height, scroll_offset, viewport_extent),
 
             LayoutStrategy::Grid {
                 item_height,
                 columns,
             } => {
-                let row_start = (self.scroll_top / item_height).floor() as usize;
-                let row_end =
-                    ((self.scroll_top + self.viewport_height) / item_height).ceil() as usize;
+                let row_start = (scroll_offset / item_height).floor() as usize;
+                let row_end = ((scroll_offset + viewport_extent) / item_height).ceil() as usize;
                 let cols = columns.get();
+
                 (row_start * cols, (row_end * cols).min(self.total_count))
             }
 
             _ => {
                 let estimated = self.layout.estimated_item_height();
-                let first = (self.scroll_top / estimated).floor() as usize;
-                let last = ((self.scroll_top + self.viewport_height) / estimated).ceil() as usize;
+                let first = (scroll_offset / estimated).floor() as usize;
+                let last = ((scroll_offset + viewport_extent) / estimated).ceil() as usize;
+
                 (first, last)
             }
         };
@@ -367,7 +373,32 @@ impl Virtualizer {
         key_to_index(key).map(|index| self.scroll_to_index(index, align))
     }
 
-    fn variable_height_range(&self, estimated: f64) -> (usize, usize) {
+    const fn viewport_extent(&self) -> f64 {
+        match self.orientation {
+            Orientation::Vertical => self.viewport_height,
+            Orientation::Horizontal => self.viewport_width,
+        }
+    }
+
+    const fn scroll_offset(&self) -> f64 {
+        match self.orientation {
+            Orientation::Vertical => self.scroll_top,
+            Orientation::Horizontal => self.scroll_left,
+        }
+    }
+
+    fn clamped_scroll_offset(&self, viewport_extent: f64) -> f64 {
+        let max_scroll = (self.total_height_px() - viewport_extent).max(0.0);
+
+        self.scroll_offset().clamp(0.0, max_scroll)
+    }
+
+    fn variable_height_range(
+        &self,
+        estimated: f64,
+        scroll_offset: f64,
+        viewport_extent: f64,
+    ) -> (usize, usize) {
         let mut cumulative = 0.0_f64;
 
         let mut first = 0;
@@ -383,14 +414,14 @@ impl Virtualizer {
                 .copied()
                 .unwrap_or(estimated);
 
-            if cumulative + height > self.scroll_top && !found_first {
+            if cumulative + height > scroll_offset && !found_first {
                 first = index;
                 found_first = true;
             }
 
             cumulative += height;
 
-            if cumulative >= self.scroll_top + self.viewport_height {
+            if cumulative >= scroll_offset + viewport_extent {
                 last = index + 1;
 
                 break;
@@ -612,11 +643,26 @@ mod tests {
             },
         );
 
-        virt.set_scroll_state_mut(70.0, 0.0, 500.0, 0.0);
+        virt.set_scroll_state_mut(70.0, 0.0, 100.0, 0.0);
         virt.overscan = 0;
         virt.report_item_height_mut(0, 60.0);
 
         assert_eq!(virt.visible_range(), 1..4);
+    }
+
+    #[test]
+    fn variable_height_visible_range_clamps_when_scrolled_past_end() {
+        let mut virt = Virtualizer::new(
+            4,
+            LayoutStrategy::VariableHeight {
+                estimated_item_height: 40.0,
+            },
+        );
+
+        virt.set_scroll_state_mut(500.0, 0.0, 50.0, 0.0);
+        virt.overscan = 0;
+
+        assert_eq!(virt.visible_range(), 2..4);
     }
 
     #[test]
@@ -660,6 +706,27 @@ mod tests {
         assert_eq!(virt.item_offset_px(7), 60.0);
         assert_eq!(virt.total_height_px(), 120.0);
         assert_eq!(virt.scroll_to_index(7, ScrollAlign::Top), 60.0);
+    }
+
+    #[test]
+    fn horizontal_visible_range_uses_scroll_left_and_viewport_width() {
+        let mut virt = fixed_height_virt();
+
+        virt.orientation = Orientation::Horizontal;
+        virt.overscan = 0;
+        virt.set_scroll_state_mut(400.0, 120.0, 40.0, 80.0);
+
+        assert_eq!(virt.visible_range(), 3..5);
+    }
+
+    #[test]
+    fn fixed_height_visible_range_clamps_when_scrolled_past_end() {
+        let mut virt = Virtualizer::new(4, LayoutStrategy::FixedHeight { item_height: 40.0 });
+
+        virt.set_scroll_state_mut(500.0, 0.0, 50.0, 0.0);
+        virt.overscan = 0;
+
+        assert_eq!(virt.visible_range(), 2..4);
     }
 
     #[test]
