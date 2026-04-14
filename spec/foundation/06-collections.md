@@ -3904,13 +3904,56 @@ impl Virtualizer {
                 let row_end   = ((scroll_offset + viewport_extent) / item_height).ceil() as usize;
                 (row_start * cols, (row_end * cols).min(self.total_count))
             }
-            // GridLayout, WaterfallLayout, TableLayout: delegate to
-            // an axis-specific estimate until specialized geometry lands.
-            _ => {
-                let est = self.layout.estimated_item_extent(self.orientation);
-                let first = (scroll_offset / est).floor() as usize;
-                let last  = ((scroll_offset + viewport_extent) / est).ceil() as usize;
+            LayoutStrategy::GridLayout { min_item_width, min_item_height, gap, .. } => {
+                let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+                let cols = self.responsive_columns(cross_size, *gap);
+                let row_stride = main_size + gap;
+                let row_start = (scroll_offset / row_stride).floor() as usize;
+                let row_end   = ((scroll_offset + viewport_extent) / row_stride).ceil() as usize;
+                (row_start * cols, (row_end * cols).min(self.total_count))
+            }
+            LayoutStrategy::WaterfallLayout { min_item_width, min_item_height, gap, .. } => {
+                let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+                let positions = self.waterfall_positions(cross_size, main_size, *gap);
+                let mut first = self.total_count;
+                let mut last  = 0;
+                for (i, &y) in positions.iter().enumerate() {
+                    let h = self.measured_heights.get(&i).copied().unwrap_or(main_size);
+                    if y + h > scroll_offset && y < scroll_offset + viewport_extent {
+                        first = first.min(i);
+                        last  = last.max(i + 1);
+                    }
+                }
+                if first > last { first = 0; last = 0; }
                 (first, last)
+            }
+            LayoutStrategy::TableLayout { row_height, header_height, column_widths, row_gap } => {
+                match self.orientation {
+                    Orientation::Vertical => {
+                        let row_stride = row_height + row_gap;
+                        let data_offset = (scroll_offset - header_height).max(0.0);
+                        let data_end    = (scroll_offset + viewport_extent - header_height).max(0.0);
+                        let first = (data_offset / row_stride).floor() as usize;
+                        let last  = (data_end / row_stride).ceil() as usize;
+                        (first, last.min(self.total_count))
+                    }
+                    Orientation::Horizontal => {
+                        let mut cumulative = 0.0_f64;
+                        let mut first = column_widths.len();
+                        let mut found_first = false;
+                        let mut last = column_widths.len();
+                        for (i, &w) in column_widths.iter().enumerate() {
+                            if cumulative + w > scroll_offset && !found_first {
+                                first = i; found_first = true;
+                            }
+                            cumulative += w;
+                            if cumulative >= scroll_offset + viewport_extent {
+                                last = i + 1; break;
+                            }
+                        }
+                        (first, last.min(column_widths.len()))
+                    }
+                }
             }
         };
 
@@ -3959,11 +4002,21 @@ impl Virtualizer {
             LayoutStrategy::Grid { item_height, columns } => {
                 (index / columns.get()) as f64 * item_height
             }
-            // GridLayout, WaterfallLayout, TableLayout: estimate using
-            // the active-axis item size. Production layouts should override
-            // with measured positions.
-            _ => {
-                index as f64 * self.layout.estimated_item_extent(self.orientation)
+            LayoutStrategy::GridLayout { min_item_width, min_item_height, gap, .. } => {
+                let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+                let cols = self.responsive_columns(cross_size, *gap);
+                (index / cols) as f64 * (main_size + gap)
+            }
+            LayoutStrategy::WaterfallLayout { min_item_width, min_item_height, gap, .. } => {
+                let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+                let positions = self.waterfall_positions(cross_size, main_size, *gap);
+                positions.get(index).copied().unwrap_or(0.0)
+            }
+            LayoutStrategy::TableLayout { row_height, header_height, column_widths, row_gap } => {
+                match self.orientation {
+                    Orientation::Vertical => header_height + index as f64 * (row_height + row_gap),
+                    Orientation::Horizontal => column_widths.iter().take(index).sum(),
+                }
             }
         }
     }
@@ -3991,10 +4044,20 @@ impl Virtualizer {
                 let rows = (self.total_count + cols - 1) / cols;
                 rows as f64 * item_height
             }
-            // GridLayout, WaterfallLayout, TableLayout: estimate using
-            // the active-axis item size.
-            _ => {
-                self.total_count as f64 * self.layout.estimated_item_extent(self.orientation)
+            LayoutStrategy::GridLayout { min_item_width, min_item_height, gap, .. } => {
+                if self.total_count == 0 { return 0.0; }
+                let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+                let cols = self.responsive_columns(cross_size, *gap);
+                let rows = (self.total_count + cols - 1) / cols;
+                rows as f64 * (main_size + gap) - gap
+            }
+            LayoutStrategy::WaterfallLayout { min_item_width, min_item_height, gap, .. } => {
+                let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+                self.waterfall_total_height(cross_size, main_size, *gap)
+            }
+            LayoutStrategy::TableLayout { row_height, header_height, row_gap, .. } => {
+                if self.total_count == 0 { return *header_height; }
+                header_height + self.total_count as f64 * (row_height + row_gap) - row_gap
             }
         }
     }
@@ -4013,8 +4076,19 @@ impl Virtualizer {
             LayoutStrategy::VariableHeight { estimated_item_height } => {
                 self.measured_heights.get(&index).copied().unwrap_or(*estimated_item_height)
             }
-            // GridLayout, WaterfallLayout, TableLayout: use active-axis estimate.
-            _ => self.layout.estimated_item_extent(self.orientation),
+            LayoutStrategy::GridLayout { min_item_width, min_item_height, .. } => {
+                self.axis_sizes(*min_item_width, *min_item_height).0
+            }
+            LayoutStrategy::WaterfallLayout { min_item_width, min_item_height, .. } => {
+                let main_size = self.axis_sizes(*min_item_width, *min_item_height).0;
+                self.measured_heights.get(&index).copied().unwrap_or(main_size)
+            }
+            LayoutStrategy::TableLayout { row_height, column_widths, .. } => {
+                match self.orientation {
+                    Orientation::Vertical => *row_height,
+                    Orientation::Horizontal => column_widths.get(index).copied().unwrap_or(*row_height),
+                }
+            }
         };
         let viewport_extent = self.viewport_extent();
         let max_scroll = (self.total_main_axis_extent() - viewport_extent).max(0.0);
@@ -4073,6 +4147,14 @@ impl Virtualizer {
         key_to_index(key).map(|index| self.scroll_to_index(index, align))
     }
 
+    /// Computes the scroll adjustment needed to keep `anchor_index` at the
+    /// same visual position after a layout change (see §6.6).
+    ///
+    /// `old_offset` is `item_offset_px(anchor_index)` recorded **before** the change.
+    pub fn scroll_adjustment_for_anchor(&self, anchor_index: usize, old_offset: f64) -> f64 {
+        self.item_offset_px(anchor_index) - old_offset
+    }
+
     fn viewport_extent(&self) -> f64 {
         match self.orientation {
             Orientation::Vertical => self.viewport_height,
@@ -4091,10 +4173,8 @@ impl Virtualizer {
         match self.orientation {
             Orientation::Vertical => self.total_height_px(),
             Orientation::Horizontal => match &self.layout {
-                LayoutStrategy::GridLayout { .. }
-                | LayoutStrategy::WaterfallLayout { .. }
-                | LayoutStrategy::TableLayout { .. } => {
-                    self.total_count as f64 * self.layout.estimated_item_extent(self.orientation)
+                LayoutStrategy::TableLayout { column_widths, .. } => {
+                    column_widths.iter().sum()
                 }
                 _ => self.total_height_px(),
             },
@@ -4125,6 +4205,69 @@ impl Virtualizer {
             }
         }
         (first, last)
+    }
+
+    /// Returns `(main_axis_item_size, cross_axis_item_size)` for a responsive
+    /// grid or waterfall layout based on the current orientation.
+    /// Vertical: main = height, cross = width.  Horizontal: main = width, cross = height.
+    const fn axis_sizes(&self, min_item_width: f64, min_item_height: f64) -> (f64, f64) {
+        match self.orientation {
+            Orientation::Vertical  => (min_item_height, min_item_width),
+            Orientation::Horizontal => (min_item_width, min_item_height),
+        }
+    }
+
+    /// Computes the responsive column count for `GridLayout` and
+    /// `WaterfallLayout` from the cross-axis viewport extent.
+    /// `cross_item_size` is the item dimension along the cross axis.
+    fn responsive_columns(&self, cross_item_size: f64, gap: f64) -> usize {
+        let cross = match self.orientation {
+            Orientation::Vertical => self.viewport_width,
+            Orientation::Horizontal => self.viewport_height,
+        };
+        let stride = cross_item_size + gap;
+        if cross <= 0.0 || stride <= 0.0 { return 1; }
+        ((cross + gap) / stride).floor().max(1.0) as usize
+    }
+
+    /// Computes the main-axis offset for every item in a waterfall (masonry)
+    /// layout. `cross_item_size` and `main_item_size` are the orientation-
+    /// resolved item dimensions (call `axis_sizes` first).
+    fn waterfall_positions(
+        &self, cross_item_size: f64, main_item_size: f64, gap: f64,
+    ) -> Vec<f64> {
+        let columns = self.responsive_columns(cross_item_size, gap);
+        let mut col_heights = vec![0.0_f64; columns];
+        let mut positions   = Vec::with_capacity(self.total_count);
+
+        for i in 0..self.total_count {
+            let (min_col, _) = col_heights.iter().enumerate()
+                .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
+                .unwrap_or((0, &0.0));
+            let y = col_heights[min_col];
+            positions.push(y);
+            let h = self.measured_heights.get(&i).copied().unwrap_or(main_item_size);
+            col_heights[min_col] = y + h + gap;
+        }
+        positions
+    }
+
+    /// Total main-axis extent of a waterfall layout (tallest column minus trailing gap).
+    fn waterfall_total_height(
+        &self, cross_item_size: f64, main_item_size: f64, gap: f64,
+    ) -> f64 {
+        if self.total_count == 0 { return 0.0; }
+        let columns = self.responsive_columns(cross_item_size, gap);
+        let mut col_heights = vec![0.0_f64; columns];
+        for i in 0..self.total_count {
+            let (min_col, _) = col_heights.iter().enumerate()
+                .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
+                .unwrap_or((0, &0.0));
+            let h = self.measured_heights.get(&i).copied().unwrap_or(main_item_size);
+            col_heights[min_col] += h + gap;
+        }
+        let tallest = col_heights.iter().copied().fold(0.0_f64, f64::max);
+        (tallest - gap).max(0.0)
     }
 }
 
@@ -4267,18 +4410,47 @@ Browser implementations of `scrollLeft` for RTL content are inconsistent:
 The adapter MUST normalize `scrollLeft` to a consistent `0..maxScroll` range (measuring from the inline-start edge) before passing it to `Virtualizer.scroll_left`:
 
 ```rust
-/// Normalize scrollLeft for RTL content to a consistent 0..max range.
-/// `raw` is the element's `scrollLeft` value.
-/// `scroll_width` is the element's `scrollWidth`.
-/// `client_width` is the element's `clientWidth`.
-fn normalize_scroll_left_rtl(raw: f64, scroll_width: f64, client_width: f64) -> f64 {
-    let max_scroll = scroll_width - client_width;
-    if raw >= 0.0 {
-        // Safari: raw is 0..max (already inline-start-based)
-        raw.clamp(0.0, max_scroll)
-    } else {
-        // Chrome/Firefox: raw is -max..0 (negate to get 0..max)
-        raw.abs().clamp(0.0, max_scroll)
+// ars-collections/src/virtualization.rs
+
+/// Browser convention for RTL `scrollLeft` values.
+///
+/// Adapters detect the convention once at startup (e.g., by writing a
+/// known `scrollLeft` to a hidden RTL element and reading back the sign)
+/// and reuse the result for all subsequent normalization calls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RtlScrollMode {
+    /// Chrome, Edge, Firefox: `scrollLeft` is `0` at inline-start
+    /// (far-right), negative toward inline-end (far-left).
+    /// Range: `-max..0`.
+    Negative,
+    /// Safari: `scrollLeft` is `0` at far-left (inline-end in RTL),
+    /// positive toward far-right (inline-start).
+    /// Range: `0..max`.
+    Positive,
+}
+
+/// Normalizes a browser's `scrollLeft` value for RTL content to a
+/// consistent `0..max_scroll` range measured from the inline-start edge.
+///
+/// `mode` identifies the browser's scroll convention (see `RtlScrollMode`).
+/// The adapter detects this once and passes it on every scroll event.
+///
+/// For LTR content, `scrollLeft` is already `0..max` and does not need
+/// normalization.
+pub fn normalize_scroll_left_rtl(
+    raw: f64, scroll_width: f64, client_width: f64, mode: RtlScrollMode,
+) -> f64 {
+    let max_scroll = (scroll_width - client_width).max(0.0);
+    match mode {
+        RtlScrollMode::Negative => {
+            // Chrome/Firefox: raw is -max..0. Negate to get 0..max.
+            raw.abs().clamp(0.0, max_scroll)
+        }
+        RtlScrollMode::Positive => {
+            // Safari: raw is 0 (inline-end) to max (inline-start).
+            // Convert to inline-start distance: max - raw.
+            (max_scroll - raw).clamp(0.0, max_scroll)
+        }
     }
 }
 ```

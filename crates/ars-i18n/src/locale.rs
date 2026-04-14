@@ -127,6 +127,25 @@ impl Locale {
         &self.0
     }
 
+    #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
+    pub(crate) fn numeric_ordering_extension(&self) -> Option<bool> {
+        let value = self
+            .0
+            .extensions
+            .unicode
+            .keywords
+            .get(&icu::locale::extensions::unicode::key!("kn"))?;
+
+        Some(if value.is_empty() {
+            true
+        } else {
+            matches!(
+                value.as_single_subtag(),
+                Some(subtag) if subtag.as_str() == "true"
+            )
+        })
+    }
+
     fn script_or_default(&self) -> &str {
         self.script().unwrap_or_else(|| match self.language() {
             "ar" | "fa" | "ur" | "ps" | "ug" | "sd" | "ks" => "Arab",
