@@ -3714,6 +3714,22 @@ Consumers who need to override these defaults (e.g., to show a specific dialog i
 ///
 /// This surface is exported from `ars-a11y::testing` and is available when
 /// compiling tests or when the crate's `testing` feature is enabled.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AriaValidationContext<'a> {
+    /// The DOM IDs currently present in the validated subtree.
+    pub known_ids: &'a [&'a str],
+    /// The direct owned child roles currently present under the validated role owner.
+    pub owned_roles: &'a [AriaRole],
+}
+
+impl<'a> AriaValidationContext<'a> {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { known_ids: &[], owned_roles: &[] }
+    }
+}
+
+/// A compile-time and runtime ARIA attribute validator.
 #[derive(Debug, Default)]
 pub struct AriaValidator {
     errors: Vec<AriaValidationError>,
@@ -3762,7 +3778,13 @@ impl AriaValidator {
     }
 
     /// Validate role usage.
-    pub fn check_role(&mut self, role: AriaRole, attrs: &[AriaAttribute], has_tabindex: bool) {
+    pub fn check_role(
+        &mut self,
+        role: AriaRole,
+        attrs: &[AriaAttribute],
+        has_tabindex: bool,
+        owned_roles: &[AriaRole],
+    ) {
         // Check for abstract role usage
         if role.is_abstract() {
             self.errors.push(AriaValidationError::AbstractRoleUsed {
@@ -3793,6 +3815,7 @@ impl AriaValidator {
 
         // Check required attributes per role
         self.check_required_attrs_for_role(role, attrs);
+        self.check_required_owned_elements_for_role(role, owned_roles);
     }
 
     fn check_required_attrs_for_role(&mut self, role: AriaRole, attrs: &[AriaAttribute]) {
@@ -3806,6 +3829,40 @@ impl AriaValidator {
                 });
             }
         }
+    }
+
+    fn check_required_owned_elements_for_role(
+        &mut self,
+        role: AriaRole,
+        owned_roles: &[AriaRole],
+    ) {
+        let required_groups = role.required_owned_elements();
+        if required_groups.is_empty() {
+            return;
+        }
+
+        let satisfies_required_owned_elements = required_groups.iter().any(|group| {
+            group.iter().all(|required_role| owned_roles.contains(required_role))
+        });
+
+        if satisfies_required_owned_elements {
+            return;
+        }
+
+        let mut required_one_of = Vec::new();
+        for group in required_groups {
+            for required_role in *group {
+                let role_name = required_role.name();
+                if !required_one_of.contains(&role_name) {
+                    required_one_of.push(role_name);
+                }
+            }
+        }
+
+        self.errors.push(AriaValidationError::MissingRequiredOwnedElement {
+            role: role.name(),
+            required_one_of,
+        });
     }
 
     #[must_use]
@@ -3842,10 +3899,42 @@ pub const fn required_attributes_for_role(role: AriaRole) -> &'static [&'static 
     }
 }
 
+fn is_known_id(id: &str, attr_map: &AttrMap, known_ids: &[&str]) -> bool {
+    attr_map.get(&HtmlAttr::Id) == Some(id) || known_ids.contains(&id)
+}
+
+fn idref_attr_name(attr: HtmlAttr) -> Option<&'static str> {
+    match attr {
+        HtmlAttr::Aria(AriaAttr::ActiveDescendant) => Some("aria-activedescendant"),
+        HtmlAttr::Aria(AriaAttr::Controls) => Some("aria-controls"),
+        HtmlAttr::Aria(AriaAttr::DescribedBy) => Some("aria-describedby"),
+        HtmlAttr::Aria(AriaAttr::Details) => Some("aria-details"),
+        HtmlAttr::Aria(AriaAttr::FlowTo) => Some("aria-flowto"),
+        HtmlAttr::Aria(AriaAttr::LabelledBy) => Some("aria-labelledby"),
+        HtmlAttr::Aria(AriaAttr::Owns) => Some("aria-owns"),
+        _ => None,
+    }
+}
+
+fn attr_value_contains_idrefs(attr: HtmlAttr) -> bool {
+    matches!(
+        attr,
+        HtmlAttr::Aria(AriaAttr::Controls)
+            | HtmlAttr::Aria(AriaAttr::DescribedBy)
+            | HtmlAttr::Aria(AriaAttr::FlowTo)
+            | HtmlAttr::Aria(AriaAttr::LabelledBy)
+            | HtmlAttr::Aria(AriaAttr::Owns)
+    )
+}
+
 /// Validate that an AttrMap produced by a connect() function is
-/// ARIA-conformant. Called in debug builds and in test infrastructure.
+/// ARIA-conformant within the provided subtree context.
 #[must_use]
-pub fn validate_attr_map(role: Option<AriaRole>, attr_map: &AttrMap) -> AriaValidator {
+pub fn validate_attr_map(
+    role: Option<AriaRole>,
+    attr_map: &AttrMap,
+    context: AriaValidationContext<'_>,
+) -> AriaValidator {
     let mut validator = AriaValidator::new();
 
     // Extract ARIA attributes from the AttrMap for analysis.
@@ -3857,7 +3946,7 @@ pub fn validate_attr_map(role: Option<AriaRole>, attr_map: &AttrMap) -> AriaVali
     // Check role with actual ARIA attributes from the AttrMap
     let has_tabindex = attr_map.contains(&HtmlAttr::TabIndex);
     if let Some(role) = role {
-        validator.check_role(role, &aria_attrs, has_tabindex);
+        validator.check_role(role, &aria_attrs, has_tabindex, context.owned_roles);
     }
 
     // Check for aria-activedescendant on incompatible roles
@@ -3872,7 +3961,31 @@ pub fn validate_attr_map(role: Option<AriaRole>, attr_map: &AttrMap) -> AriaVali
         }
     }
 
-    let _ = aria_attrs;
+    for (attr, value) in attr_map.iter() {
+        let Some(attribute) = idref_attr_name(*attr) else {
+            continue;
+        };
+
+        let Some(raw_value) = value.as_str() else {
+            continue;
+        };
+
+        let ids = if attr_value_contains_idrefs(*attr) {
+            raw_value.split_whitespace()
+        } else {
+            raw_value.split_whitespace().take(1)
+        };
+
+        for id in ids {
+            if !is_known_id(id, attr_map, context.known_ids) {
+                validator.errors.push(AriaValidationError::DanglingIdReference {
+                    attribute,
+                    id: String::from(id),
+                });
+            }
+        }
+    }
+
     validator
 }
 ```

@@ -45,8 +45,8 @@ pub use keyboard::{DomEvent, KeyModifiers, KeyboardShortcut, Platform};
 pub use label::{DescriptionConfig, FieldContext, LabelConfig};
 #[cfg(any(test, feature = "testing"))]
 pub use testing::{
-    AriaValidationError, AriaValidationWarning, AriaValidator, required_attributes_for_role,
-    validate_attr_map,
+    AriaValidationContext, AriaValidationError, AriaValidationWarning, AriaValidator,
+    required_attributes_for_role, validate_attr_map,
 };
 pub use touch::{
     InputMode, MIN_DRAG_TARGET_SIZE, MIN_TOUCH_TARGET_SIZE, should_use_roving_tabindex_for_mobile,

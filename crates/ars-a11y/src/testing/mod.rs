@@ -3,6 +3,6 @@
 mod validator;
 
 pub use validator::{
-    AriaValidationError, AriaValidationWarning, AriaValidator, required_attributes_for_role,
-    validate_attr_map,
+    AriaValidationContext, AriaValidationError, AriaValidationWarning, AriaValidator,
+    required_attributes_for_role, validate_attr_map,
 };

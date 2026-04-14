@@ -2,9 +2,29 @@
 
 use alloc::{string::String, vec::Vec};
 
-use ars_core::{AttrMap, HtmlAttr};
+use ars_core::{AriaAttr, AttrMap, HtmlAttr};
 
 use crate::{AriaAttribute, AriaRole};
+
+/// Additional subtree context used for ARIA validation beyond a single element's `AttrMap`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AriaValidationContext<'a> {
+    /// The DOM IDs currently present in the validated subtree.
+    pub known_ids: &'a [&'a str],
+    /// The direct owned child roles currently present under the validated role owner.
+    pub owned_roles: &'a [AriaRole],
+}
+
+impl<'a> AriaValidationContext<'a> {
+    /// Creates an empty validation context with no known IDs or owned roles.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            known_ids: &[],
+            owned_roles: &[],
+        }
+    }
+}
 
 /// A compile-time and runtime ARIA attribute validator.
 ///
@@ -83,8 +103,14 @@ impl AriaValidator {
         Self::default()
     }
 
-    /// Validate role usage against the provided ARIA attribute set.
-    pub fn check_role(&mut self, role: AriaRole, attrs: &[AriaAttribute], has_tabindex: bool) {
+    /// Validate role usage against the provided ARIA attribute set and subtree role context.
+    pub fn check_role(
+        &mut self,
+        role: AriaRole,
+        attrs: &[AriaAttribute],
+        has_tabindex: bool,
+        owned_roles: &[AriaRole],
+    ) {
         if role.is_abstract() {
             self.errors
                 .push(AriaValidationError::AbstractRoleUsed { role: role.name() });
@@ -104,12 +130,12 @@ impl AriaValidator {
             };
 
             if let Some(message) = message {
-                self.warnings
-                    .push(AriaValidationWarning::Hint { message });
+                self.warnings.push(AriaValidationWarning::Hint { message });
             }
         }
 
         self.check_required_attrs_for_role(role, attrs);
+        self.check_required_owned_elements_for_role(role, owned_roles);
     }
 
     fn check_required_attrs_for_role(&mut self, role: AriaRole, attrs: &[AriaAttribute]) {
@@ -124,6 +150,39 @@ impl AriaValidator {
                     });
             }
         }
+    }
+
+    fn check_required_owned_elements_for_role(&mut self, role: AriaRole, owned_roles: &[AriaRole]) {
+        let required_groups = role.required_owned_elements();
+        if required_groups.is_empty() {
+            return;
+        }
+
+        let satisfies_required_owned_elements = required_groups.iter().any(|group| {
+            group
+                .iter()
+                .all(|required_role| owned_roles.contains(required_role))
+        });
+
+        if satisfies_required_owned_elements {
+            return;
+        }
+
+        let mut required_one_of = Vec::new();
+        for group in required_groups {
+            for required_role in *group {
+                let role_name = required_role.name();
+                if !required_one_of.contains(&role_name) {
+                    required_one_of.push(role_name);
+                }
+            }
+        }
+
+        self.errors
+            .push(AriaValidationError::MissingRequiredOwnedElement {
+                role: role.name(),
+                required_one_of,
+            });
     }
 
     /// Returns `true` when validation has recorded any errors.
@@ -176,9 +235,42 @@ pub const fn required_attributes_for_role(role: AriaRole) -> &'static [&'static 
     }
 }
 
-/// Validate that an `AttrMap` produced by a connect surface is ARIA-conformant.
+fn is_known_id(id: &str, attr_map: &AttrMap, known_ids: &[&str]) -> bool {
+    attr_map.get(&HtmlAttr::Id) == Some(id) || known_ids.contains(&id)
+}
+
+const fn idref_attr_name(attr: HtmlAttr) -> Option<&'static str> {
+    match attr {
+        HtmlAttr::Aria(AriaAttr::ActiveDescendant) => Some("aria-activedescendant"),
+        HtmlAttr::Aria(AriaAttr::Controls) => Some("aria-controls"),
+        HtmlAttr::Aria(AriaAttr::DescribedBy) => Some("aria-describedby"),
+        HtmlAttr::Aria(AriaAttr::Details) => Some("aria-details"),
+        HtmlAttr::Aria(AriaAttr::FlowTo) => Some("aria-flowto"),
+        HtmlAttr::Aria(AriaAttr::LabelledBy) => Some("aria-labelledby"),
+        HtmlAttr::Aria(AriaAttr::Owns) => Some("aria-owns"),
+        _ => None,
+    }
+}
+
+const fn attr_value_contains_idrefs(attr: HtmlAttr) -> bool {
+    matches!(
+        attr,
+        HtmlAttr::Aria(AriaAttr::Controls)
+            | HtmlAttr::Aria(AriaAttr::DescribedBy)
+            | HtmlAttr::Aria(AriaAttr::FlowTo)
+            | HtmlAttr::Aria(AriaAttr::LabelledBy)
+            | HtmlAttr::Aria(AriaAttr::Owns)
+    )
+}
+
+/// Validate that an `AttrMap` produced by a connect surface is ARIA-conformant
+/// within the provided subtree context.
 #[must_use]
-pub fn validate_attr_map(role: Option<AriaRole>, attr_map: &AttrMap) -> AriaValidator {
+pub fn validate_attr_map(
+    role: Option<AriaRole>,
+    attr_map: &AttrMap,
+    context: AriaValidationContext<'_>,
+) -> AriaValidator {
     let mut validator = AriaValidator::new();
 
     let aria_attrs: Vec<AriaAttribute> = attr_map
@@ -189,7 +281,7 @@ pub fn validate_attr_map(role: Option<AriaRole>, attr_map: &AttrMap) -> AriaVali
     let has_tabindex = attr_map.contains(&HtmlAttr::TabIndex);
 
     if let Some(role) = role {
-        validator.check_role(role, &aria_attrs, has_tabindex);
+        validator.check_role(role, &aria_attrs, has_tabindex, context.owned_roles);
     }
 
     let has_active_descendant = aria_attrs
@@ -205,11 +297,41 @@ pub fn validate_attr_map(role: Option<AriaRole>, attr_map: &AttrMap) -> AriaVali
             .push(AriaValidationError::ActiveDescendantOnUnsupportedRole { role: role.name() });
     }
 
+    for (attr, value) in attr_map.iter() {
+        let Some(attribute) = idref_attr_name(*attr) else {
+            continue;
+        };
+
+        let Some(raw_value) = value.as_str() else {
+            continue;
+        };
+
+        let raw_ids = raw_value.split_whitespace();
+        let ids: Vec<&str> = if attr_value_contains_idrefs(*attr) {
+            raw_ids.collect()
+        } else {
+            raw_ids.take(1).collect()
+        };
+
+        for id in ids {
+            if !is_known_id(id, attr_map, context.known_ids) {
+                validator
+                    .errors
+                    .push(AriaValidationError::DanglingIdReference {
+                        attribute,
+                        id: String::from(id),
+                    });
+            }
+        }
+    }
+
     validator
 }
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use ars_core::{AriaAttr, AttrValue, HtmlAttr};
 
     use super::*;
@@ -243,7 +365,7 @@ mod tests {
         for role in abstract_roles {
             let mut validator = AriaValidator::new();
 
-            validator.check_role(role, &[], false);
+            validator.check_role(role, &[], false, &[]);
 
             assert_eq!(
                 validator.errors(),
@@ -256,7 +378,7 @@ mod tests {
     fn checkbox_requires_aria_checked() {
         let mut validator = AriaValidator::new();
 
-        validator.check_role(AriaRole::Checkbox, &[], false);
+        validator.check_role(AriaRole::Checkbox, &[], false, &[]);
 
         assert_eq!(
             validator.errors(),
@@ -279,7 +401,7 @@ mod tests {
         for (role, role_name) in roles {
             let mut validator = AriaValidator::new();
 
-            validator.check_role(role, &[], false);
+            validator.check_role(role, &[], false, &[]);
 
             assert_eq!(
                 validator.errors(),
@@ -295,7 +417,7 @@ mod tests {
     fn slider_requires_value_attributes() {
         let mut validator = AriaValidator::new();
 
-        validator.check_role(AriaRole::Slider, &[], false);
+        validator.check_role(AriaRole::Slider, &[], false, &[]);
 
         assert_eq!(
             validator.errors(),
@@ -326,7 +448,7 @@ mod tests {
         for (role, role_name) in roles {
             let mut validator = AriaValidator::new();
 
-            validator.check_role(role, &[], false);
+            validator.check_role(role, &[], false, &[]);
 
             assert_eq!(
                 validator.errors(),
@@ -349,7 +471,7 @@ mod tests {
     fn scrollbar_requires_all_required_attributes() {
         let mut validator = AriaValidator::new();
 
-        validator.check_role(AriaRole::Scrollbar, &[], false);
+        validator.check_role(AriaRole::Scrollbar, &[], false, &[]);
 
         assert_eq!(
             validator.errors(),
@@ -378,7 +500,7 @@ mod tests {
     fn heading_requires_aria_level() {
         let mut validator = AriaValidator::new();
 
-        validator.check_role(AriaRole::Heading, &[], false);
+        validator.check_role(AriaRole::Heading, &[], false, &[]);
 
         assert_eq!(
             validator.errors(),
@@ -393,7 +515,7 @@ mod tests {
     fn button_has_no_required_attributes() {
         let mut validator = AriaValidator::new();
 
-        validator.check_role(AriaRole::Button, &[], false);
+        validator.check_role(AriaRole::Button, &[], false, &[]);
 
         assert!(!validator.has_errors());
         assert!(validator.warnings().is_empty());
@@ -409,7 +531,7 @@ mod tests {
             AriaAttribute::ValueMax(10.0),
         ];
 
-        validator.check_role(AriaRole::Separator, &attrs, false);
+        validator.check_role(AriaRole::Separator, &attrs, false, &[]);
 
         assert_eq!(
             validator.warnings(),
@@ -429,7 +551,7 @@ mod tests {
             AriaAttribute::ValueMax(10.0),
         ];
 
-        validator.check_role(AriaRole::Separator, &attrs, true);
+        validator.check_role(AriaRole::Separator, &attrs, true, &[]);
 
         assert!(validator.errors().is_empty());
         assert!(validator.warnings().is_empty());
@@ -439,7 +561,7 @@ mod tests {
     fn structural_separator_with_tabindex_emits_hint_warning() {
         let mut validator = AriaValidator::new();
 
-        validator.check_role(AriaRole::StructuralSeparator, &[], true);
+        validator.check_role(AriaRole::StructuralSeparator, &[], true, &[]);
 
         assert_eq!(
             validator.warnings(),
@@ -459,7 +581,11 @@ mod tests {
     fn validate_attr_map_catches_missing_combobox_expanded() {
         let attr_map = AttrMap::new();
 
-        let validator = validate_attr_map(Some(AriaRole::Combobox), &attr_map);
+        let validator = validate_attr_map(
+            Some(AriaRole::Combobox),
+            &attr_map,
+            AriaValidationContext::new(),
+        );
 
         assert_eq!(
             validator.errors(),
@@ -479,7 +605,14 @@ mod tests {
             AttrValue::from("item-1"),
         );
 
-        let validator = validate_attr_map(Some(AriaRole::Button), &attr_map);
+        let validator = validate_attr_map(
+            Some(AriaRole::Button),
+            &attr_map,
+            AriaValidationContext {
+                known_ids: &["item-1"],
+                owned_roles: &[],
+            },
+        );
 
         assert!(
             validator
@@ -500,7 +633,14 @@ mod tests {
         );
         attr_map.set(HtmlAttr::Aria(AriaAttr::Expanded), AttrValue::from("true"));
 
-        let validator = validate_attr_map(Some(AriaRole::Combobox), &attr_map);
+        let validator = validate_attr_map(
+            Some(AriaRole::Combobox),
+            &attr_map,
+            AriaValidationContext {
+                known_ids: &["item-1"],
+                owned_roles: &[],
+            },
+        );
 
         assert!(!validator.errors().contains(
             &AriaValidationError::ActiveDescendantOnUnsupportedRole { role: "combobox" }
@@ -516,7 +656,11 @@ mod tests {
         attr_map.set(HtmlAttr::Aria(AriaAttr::ValueMin), AttrValue::from("0"));
         attr_map.set(HtmlAttr::Aria(AriaAttr::ValueMax), AttrValue::from("10"));
 
-        let validator = validate_attr_map(Some(AriaRole::Separator), &attr_map);
+        let validator = validate_attr_map(
+            Some(AriaRole::Separator),
+            &attr_map,
+            AriaValidationContext::new(),
+        );
 
         assert!(validator.errors().is_empty());
         assert!(validator.warnings().is_empty());
@@ -528,7 +672,11 @@ mod tests {
 
         attr_map.set(HtmlAttr::TabIndex, AttrValue::from("0"));
 
-        let validator = validate_attr_map(Some(AriaRole::StructuralSeparator), &attr_map);
+        let validator = validate_attr_map(
+            Some(AriaRole::StructuralSeparator),
+            &attr_map,
+            AriaValidationContext::new(),
+        );
 
         assert_eq!(
             validator.warnings(),
@@ -540,6 +688,112 @@ mod tests {
     }
 
     #[test]
+    fn listbox_requires_owned_option_or_group_role() {
+        let mut validator = AriaValidator::new();
+
+        validator.check_role(AriaRole::Listbox, &[], false, &[]);
+
+        assert!(
+            validator
+                .errors()
+                .contains(&AriaValidationError::MissingRequiredOwnedElement {
+                    role: "listbox",
+                    required_one_of: vec!["option", "group"],
+                })
+        );
+    }
+
+    #[test]
+    fn listbox_owned_roles_satisfy_required_owned_element_contract() {
+        let mut validator = AriaValidator::new();
+
+        validator.check_role(AriaRole::Listbox, &[], false, &[AriaRole::Option]);
+
+        assert!(!validator.errors().iter().any(|error| matches!(
+            error,
+            AriaValidationError::MissingRequiredOwnedElement {
+                role: "listbox",
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn validate_attr_map_catches_dangling_aria_labelledby_reference() {
+        let mut attr_map = AttrMap::new();
+
+        attr_map.set(
+            HtmlAttr::Aria(AriaAttr::LabelledBy),
+            AttrValue::from("missing-id"),
+        );
+
+        let validator = validate_attr_map(
+            None,
+            &attr_map,
+            AriaValidationContext {
+                known_ids: &[],
+                owned_roles: &[],
+            },
+        );
+
+        assert!(
+            validator
+                .errors()
+                .contains(&AriaValidationError::DanglingIdReference {
+                    attribute: "aria-labelledby",
+                    id: String::from("missing-id"),
+                })
+        );
+    }
+
+    #[test]
+    fn validate_attr_map_accepts_known_aria_describedby_references() {
+        let mut attr_map = AttrMap::new();
+
+        attr_map.set(
+            HtmlAttr::Aria(AriaAttr::DescribedBy),
+            AttrValue::from("description-id"),
+        );
+
+        let validator = validate_attr_map(
+            None,
+            &attr_map,
+            AriaValidationContext {
+                known_ids: &["description-id"],
+                owned_roles: &[],
+            },
+        );
+
+        assert!(!validator.errors().iter().any(|error| matches!(
+            error,
+            AriaValidationError::DanglingIdReference {
+                attribute: "aria-describedby",
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn validate_attr_map_catches_missing_required_owned_roles_from_context() {
+        let attr_map = AttrMap::new();
+
+        let validator = validate_attr_map(
+            Some(AriaRole::Listbox),
+            &attr_map,
+            AriaValidationContext::new(),
+        );
+
+        assert!(
+            validator
+                .errors()
+                .contains(&AriaValidationError::MissingRequiredOwnedElement {
+                    role: "listbox",
+                    required_one_of: vec!["option", "group"],
+                })
+        );
+    }
+
+    #[test]
     fn validate_attr_map_without_role_skips_role_checks() {
         let mut attr_map = AttrMap::new();
 
@@ -548,9 +802,16 @@ mod tests {
             AttrValue::from("item-1"),
         );
 
-        let validator = validate_attr_map(None, &attr_map);
+        let validator = validate_attr_map(
+            None,
+            &attr_map,
+            AriaValidationContext {
+                known_ids: &["item-1"],
+                owned_roles: &[],
+            },
+        );
 
-        assert!(!validator.has_errors());
+        assert!(validator.errors().is_empty());
         assert!(validator.warnings().is_empty());
     }
 }
