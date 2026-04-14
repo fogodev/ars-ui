@@ -4354,6 +4354,15 @@ pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) 
         Language(String),
     }
 
+    fn matches_language_fallback(
+        supported_locale: &Locale,
+        language: &str,
+        explicit_locale_ranges: &[&Locale],
+    ) -> bool {
+        supported_locale.language() == language
+            && !explicit_locale_ranges.iter().any(|tag| **tag == *supported_locale)
+    }
+
     let mut preferences: Vec<(PreferenceTag, f32)> = accept_language
         .split(',')
         .filter_map(|part| {
@@ -4404,6 +4413,13 @@ pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) 
             specific => Some(specific),
         })
         .collect();
+    let explicit_locale_ranges: Vec<_> = preferences
+        .iter()
+        .filter_map(|(tag, _)| match tag {
+            PreferenceTag::Locale(locale) => Some(locale),
+            PreferenceTag::Wildcard | PreferenceTag::Language(_) => None,
+        })
+        .collect();
 
     // Find first supported locale
     for (tag, quality) in &preferences {
@@ -4428,12 +4444,17 @@ pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) 
                     return locale.clone();
                 }
 
-                if let Some(matched) = supported.iter().find(|s| s.language() == locale.language()) {
+                if let Some(matched) = supported.iter().find(|s| {
+                    matches_language_fallback(s, locale.language(), &explicit_locale_ranges)
+                }) {
                     return matched.clone();
                 }
             }
             PreferenceTag::Language(language) => {
-                if let Some(matched) = supported.iter().find(|s| s.language() == *language) {
+                if let Some(matched) = supported
+                    .iter()
+                    .find(|s| matches_language_fallback(s, language, &explicit_locale_ranges))
+                {
                     return matched.clone();
                 }
             }

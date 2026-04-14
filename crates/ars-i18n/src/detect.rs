@@ -19,6 +19,17 @@ impl PreferenceTag {
     }
 }
 
+fn matches_language_fallback(
+    supported_locale: &Locale,
+    language: &str,
+    explicit_locale_ranges: &[&Locale],
+) -> bool {
+    supported_locale.language() == language
+        && !explicit_locale_ranges
+            .iter()
+            .any(|explicit_locale| **explicit_locale == *supported_locale)
+}
+
 /// Detect locale from an HTTP `Accept-Language` header.
 ///
 /// Returns the best matching locale from `supported`, preferring exact matches,
@@ -38,6 +49,13 @@ pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) 
         .filter_map(|(tag, _)| match tag {
             PreferenceTag::Wildcard => None,
             specific => Some(specific),
+        })
+        .collect::<Vec<_>>();
+    let explicit_locale_ranges = preferences
+        .iter()
+        .filter_map(|(tag, _)| match tag {
+            PreferenceTag::Locale(locale) => Some(locale),
+            PreferenceTag::Wildcard | PreferenceTag::Language(_) => None,
         })
         .collect::<Vec<_>>();
 
@@ -61,18 +79,20 @@ pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) 
                     return locale.clone();
                 }
 
-                if let Some(matched) = supported
-                    .iter()
-                    .find(|supported_locale| supported_locale.language() == locale.language())
-                {
+                if let Some(matched) = supported.iter().find(|supported_locale| {
+                    matches_language_fallback(
+                        supported_locale,
+                        locale.language(),
+                        &explicit_locale_ranges,
+                    )
+                }) {
                     return matched.clone();
                 }
             }
             PreferenceTag::Language(language) => {
-                if let Some(matched) = supported
-                    .iter()
-                    .find(|supported_locale| supported_locale.language() == *language)
-                {
+                if let Some(matched) = supported.iter().find(|supported_locale| {
+                    matches_language_fallback(supported_locale, language, &explicit_locale_ranges)
+                }) {
                     return matched.clone();
                 }
             }
@@ -261,6 +281,30 @@ mod tests {
         let locale = locale_from_accept_language("de;q=0,*;q=0.8", &supported);
 
         assert_eq!(locale, locales::en_us());
+    }
+
+    #[test]
+    fn language_range_skips_supported_locales_with_explicit_locale_ranges() {
+        let supported = [
+            locales::en_us(),
+            Locale::parse("en-GB").expect("en-GB should parse"),
+        ];
+
+        let locale = locale_from_accept_language("en;q=0.9,en-US;q=0.1", &supported);
+
+        assert_eq!(locale, Locale::parse("en-GB").expect("en-GB should parse"));
+    }
+
+    #[test]
+    fn locale_language_fallback_skips_supported_locales_with_explicit_locale_ranges() {
+        let supported = [
+            locales::en_us(),
+            Locale::parse("en-GB").expect("en-GB should parse"),
+        ];
+
+        let locale = locale_from_accept_language("en-CA;q=0.9,en-US;q=0.1", &supported);
+
+        assert_eq!(locale, Locale::parse("en-GB").expect("en-GB should parse"));
     }
 
     #[test]
