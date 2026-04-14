@@ -3585,6 +3585,21 @@ impl LayoutStrategy {
             LayoutStrategy::TableLayout { row_height, .. }      => *row_height,
         }
     }
+
+    /// Estimated size of a single item along the active scroll axis.
+    pub fn estimated_item_extent(&self, orientation: Orientation) -> f64 {
+        match orientation {
+            Orientation::Vertical => self.estimated_item_height(),
+            Orientation::Horizontal => match self {
+                LayoutStrategy::GridLayout { min_item_width, .. }
+                | LayoutStrategy::WaterfallLayout { min_item_width, .. } => *min_item_width,
+                LayoutStrategy::TableLayout { row_height, column_widths, .. } => {
+                    column_widths.first().copied().unwrap_or(*row_height)
+                }
+                _ => self.estimated_item_height(),
+            },
+        }
+    }
 }
 ```
 
@@ -3681,18 +3696,18 @@ pub struct Virtualizer {
 
 #### 6.3.1 VirtualLayout Trait
 
-The `VirtualLayout` trait abstracts layout calculations so that components can swap between fixed-height, variable-height, and grid strategies without changing their scroll-handling logic. Custom layout implementations (e.g., masonry, sticky headers) implement this trait and plug into the `Virtualizer`.
+The `VirtualLayout` trait abstracts vertical layout calculations so that components can swap between fixed-height, variable-height, and grid strategies without changing their scroll-handling logic. Custom layout implementations (e.g., masonry, sticky headers) implement this trait and plug into the `Virtualizer`.
 
-> **Note:** The built-in `LayoutStrategy` enum variants use inline implementations within the `Virtualizer` methods. The `VirtualLayout` trait is an extension point for custom layouts that don't fit the built-in strategies.
+> **Note:** The built-in `LayoutStrategy` enum variants use inline implementations within the `Virtualizer` methods. The `VirtualLayout` trait is an extension point for custom vertical layouts that don't fit the built-in strategies. Layouts that also support horizontal virtualization implement the separate `HorizontalVirtualLayout` trait instead of relying on panic-prone default methods.
 
 ````rust
 // ars-collections/src/virtual_layout.rs
 
 use core::ops::Range;
 
-/// A layout algorithm that maps a flat collection of items to pixel positions
-/// within a scroll container. The `Virtualizer` delegates all geometric
-/// queries to its `VirtualLayout` implementation.
+/// A layout algorithm that maps a flat collection of items to vertical pixel
+/// positions within a scroll container. The `Virtualizer` delegates all
+/// vertical geometric queries to its `VirtualLayout` implementation.
 pub trait VirtualLayout {
     /// Returns the range of item indices `[start, end)` that are visible
     /// (or partially visible) given the current scroll state.
@@ -3744,34 +3759,26 @@ pub trait VirtualLayout {
     /// The total number of items known to the layout. Must match the
     /// collection size (or estimated total for async collections).
     fn item_count(&self) -> usize;
+}
 
-    // ── Horizontal layout methods ──────────────────────────────────────
-    // These mirror the vertical methods for horizontal virtualization.
-    // Default implementations panic — only layouts that support horizontal
-    // scrolling (e.g., Carousel) need to override them.
+/// Optional horizontal extension implemented by layouts that support
+/// inline-axis virtualization.
+pub trait HorizontalVirtualLayout: VirtualLayout {
 
     /// Returns the range of item indices visible given horizontal scroll state.
-    fn visible_range_horizontal(&self, scroll_offset: f64, viewport_width: f64) -> Range<usize> {
-        let _ = (scroll_offset, viewport_width);
-        unimplemented!("this layout does not support horizontal virtualization")
-    }
+    fn visible_range_horizontal(&self, scroll_offset: f64, viewport_width: f64) -> Range<usize>;
 
     /// Returns the X-axis pixel offset for the item at `index`, measured from
     /// the inline-start edge of the scroll content area.
-    fn item_offset_x(&self, index: usize) -> f64 {
-        let _ = index;
-        unimplemented!("this layout does not support horizontal virtualization")
-    }
+    fn item_offset_x(&self, index: usize) -> f64;
 
     /// Returns the total scrollable width of the content area.
-    fn total_width(&self) -> f64 {
-        unimplemented!("this layout does not support horizontal virtualization")
-    }
+    fn total_width(&self) -> f64;
 
     /// Reports the actual measured pixel width of the item at `index`.
     fn report_item_width(&mut self, index: usize, width: f64) {
         let _ = (index, width);
-        // No-op for layouts that don't support horizontal variable widths.
+        // No-op for layouts that don't use horizontal variable widths.
     }
 }
 ````
@@ -3843,41 +3850,74 @@ impl Virtualizer {
         new
     }
 
+    /// Applies a collection update that may have changed flat item indices.
+    ///
+    /// Because measured heights and focus are keyed by flat index, adapters
+    /// must call this on inserts, removals, filtering, and reorders before
+    /// reusing the `Virtualizer` for the updated collection. The method
+    /// updates `total_count`, clears the measured-height cache, and clears
+    /// `focused_index`.
+    pub fn apply_collection_change_mut(&mut self, total_count: usize) {
+        self.total_count = total_count;
+        self.measured_heights.clear();
+        self.focused_index = None;
+    }
+
+    /// Immutable wrapper around `apply_collection_change_mut`.
+    pub fn apply_collection_change(&self, total_count: usize) -> Self {
+        let mut new = self.clone();
+        new.apply_collection_change_mut(total_count);
+        new
+    }
+
     /// The range of flat indices [start, end) that should be rendered,
     /// including overscan. Components iterate `start..end` and render
     /// `collection.get_by_index(i)` for each `i`.
     pub fn visible_range(&self) -> core::ops::Range<usize> {
-        if self.total_count == 0 || self.viewport_height == 0.0 {
+        let viewport_extent = match self.orientation {
+            Orientation::Vertical => self.viewport_height,
+            Orientation::Horizontal => self.viewport_width,
+        };
+
+        if self.total_count == 0 || viewport_extent == 0.0 {
             return 0..0;
         }
 
+        let max_scroll = (self.total_main_axis_extent() - viewport_extent).max(0.0);
+        let scroll_offset = match self.orientation {
+            Orientation::Vertical => self.scroll_top,
+            Orientation::Horizontal => self.scroll_left,
+        }.clamp(0.0, max_scroll);
+
         let (first_visible, last_visible) = match &self.layout {
             LayoutStrategy::FixedHeight { item_height } => {
-                let first = (self.scroll_top / item_height).floor() as usize;
-                let last  = ((self.scroll_top + self.viewport_height) / item_height).ceil() as usize;
+                let first = (scroll_offset / item_height).floor() as usize;
+                let last  = ((scroll_offset + viewport_extent) / item_height).ceil() as usize;
                 (first, last)
             }
             LayoutStrategy::VariableHeight { estimated_item_height } => {
-                self.variable_height_range(*estimated_item_height)
+                self.variable_height_range(*estimated_item_height, scroll_offset, viewport_extent)
             }
             LayoutStrategy::Grid { item_height, columns } => {
                 let cols = columns.get();
-                let row_start = (self.scroll_top / item_height).floor() as usize;
-                let row_end   = ((self.scroll_top + self.viewport_height) / item_height).ceil() as usize;
+                let row_start = (scroll_offset / item_height).floor() as usize;
+                let row_end   = ((scroll_offset + viewport_extent) / item_height).ceil() as usize;
                 (row_start * cols, (row_end * cols).min(self.total_count))
             }
             // GridLayout, WaterfallLayout, TableLayout: delegate to
-            // estimated_item_height() for uniform range estimation.
+            // an axis-specific estimate until specialized geometry lands.
             _ => {
-                let est = self.layout.estimated_item_height();
-                let first = (self.scroll_top / est).floor() as usize;
-                let last  = ((self.scroll_top + self.viewport_height) / est).ceil() as usize;
+                let est = self.layout.estimated_item_extent(self.orientation);
+                let first = (scroll_offset / est).floor() as usize;
+                let last  = ((scroll_offset + viewport_extent) / est).ceil() as usize;
                 (first, last)
             }
         };
 
         let mut start = first_visible.saturating_sub(self.overscan);
-        let mut end   = (last_visible + self.overscan).min(self.total_count);
+        let mut end   = last_visible
+            .saturating_add(self.overscan)
+            .min(self.total_count);
 
         // Ensure the focused item is always included in the rendered range,
         // even when scrolled out of view (see §6.2 Focused Element Persistence).
@@ -3920,16 +3960,16 @@ impl Virtualizer {
                 (index / columns.get()) as f64 * item_height
             }
             // GridLayout, WaterfallLayout, TableLayout: estimate using
-            // uniform item height. Production layouts should override
+            // the active-axis item size. Production layouts should override
             // with measured positions.
             _ => {
-                index as f64 * self.layout.estimated_item_height()
+                index as f64 * self.layout.estimated_item_extent(self.orientation)
             }
         }
     }
 
-    /// Total scroll height of the list. Set as `height` on the inner scroll
-    /// container so the browser renders the correct scrollbar.
+    /// Total scroll extent of the list on the active axis. Adapters use this
+    /// to size the inner spacer so the browser renders the correct scrollbar.
     ///
     /// **Performance note:** For `VariableHeight`, this method iterates all items O(n).
     /// Callers in scroll handlers should cache the result rather than calling per-frame.
@@ -3952,14 +3992,14 @@ impl Virtualizer {
                 rows as f64 * item_height
             }
             // GridLayout, WaterfallLayout, TableLayout: estimate using
-            // uniform item height.
+            // the active-axis item size.
             _ => {
-                self.total_count as f64 * self.layout.estimated_item_height()
+                self.total_count as f64 * self.layout.estimated_item_extent(self.orientation)
             }
         }
     }
 
-    /// Compute the `scroll_top` value needed to bring item `index` into view.
+    /// Compute the scroll offset needed to bring item `index` into view.
     /// Used by `scroll_to_index` and `scroll_to_key` (after resolving key →
     /// index via the collection).
     ///
@@ -3967,34 +4007,36 @@ impl Virtualizer {
     /// when the item is not already visible.
     pub fn scroll_top_for_index(&self, index: usize, align: ScrollAlign) -> f64 {
         let offset = self.item_offset_px(index);
-        let height = match &self.layout {
+        let extent = match &self.layout {
             LayoutStrategy::FixedHeight { item_height }              => *item_height,
             LayoutStrategy::Grid { item_height, .. }                 => *item_height,
             LayoutStrategy::VariableHeight { estimated_item_height } => {
                 self.measured_heights.get(&index).copied().unwrap_or(*estimated_item_height)
             }
-            // GridLayout, WaterfallLayout, TableLayout: use estimated height.
-            _ => self.layout.estimated_item_height(),
+            // GridLayout, WaterfallLayout, TableLayout: use active-axis estimate.
+            _ => self.layout.estimated_item_extent(self.orientation),
         };
-        let item_bottom = offset + height;
+        let viewport_extent = self.viewport_extent();
+        let max_scroll = (self.total_main_axis_extent() - viewport_extent).max(0.0);
+        let clamped_scroll_offset = self.clamped_scroll_offset(viewport_extent);
+        let item_end = offset + extent;
 
-        match align {
+        let target_offset = match align {
             ScrollAlign::Auto => {
-                if offset < self.scroll_top {
-                    // Item is above viewport — scroll up.
+                if offset < clamped_scroll_offset {
                     offset
-                } else if item_bottom > self.scroll_top + self.viewport_height {
-                    // Item is below viewport — scroll down.
-                    item_bottom - self.viewport_height
+                } else if item_end > clamped_scroll_offset + viewport_extent {
+                    item_end - viewport_extent
                 } else {
-                    // Already visible.
-                    self.scroll_top
+                    clamped_scroll_offset
                 }
             }
             ScrollAlign::Top    => offset,
-            ScrollAlign::Bottom => (item_bottom - self.viewport_height).max(0.0),
-            ScrollAlign::Center => (offset - (self.viewport_height - height) / 2.0).max(0.0),
-        }
+            ScrollAlign::Bottom => (item_end - viewport_extent).max(0.0),
+            ScrollAlign::Center => (offset - (viewport_extent - extent) / 2.0).max(0.0),
+        };
+
+        target_offset.clamp(0.0, max_scroll)
     }
 
     /// Programmatically scroll to the item at `index` with the given alignment.
@@ -4031,7 +4073,40 @@ impl Virtualizer {
         key_to_index(key).map(|index| self.scroll_to_index(index, align))
     }
 
-    fn variable_height_range(&self, estimated: f64) -> (usize, usize) {
+    fn viewport_extent(&self) -> f64 {
+        match self.orientation {
+            Orientation::Vertical => self.viewport_height,
+            Orientation::Horizontal => self.viewport_width,
+        }
+    }
+
+    fn scroll_offset(&self) -> f64 {
+        match self.orientation {
+            Orientation::Vertical => self.scroll_top,
+            Orientation::Horizontal => self.scroll_left,
+        }
+    }
+
+    fn total_main_axis_extent(&self) -> f64 {
+        match self.orientation {
+            Orientation::Vertical => self.total_height_px(),
+            Orientation::Horizontal => match &self.layout {
+                LayoutStrategy::GridLayout { .. }
+                | LayoutStrategy::WaterfallLayout { .. }
+                | LayoutStrategy::TableLayout { .. } => {
+                    self.total_count as f64 * self.layout.estimated_item_extent(self.orientation)
+                }
+                _ => self.total_height_px(),
+            },
+        }
+    }
+
+    fn variable_height_range(
+        &self,
+        estimated: f64,
+        scroll_offset: f64,
+        viewport_extent: f64,
+    ) -> (usize, usize) {
         let mut cumulative = 0.0_f64;
         let mut first = 0;
         let mut found_first = false;
@@ -4039,12 +4114,12 @@ impl Virtualizer {
 
         for i in 0..self.total_count {
             let h = self.measured_heights.get(&i).copied().unwrap_or(estimated);
-            if cumulative + h > self.scroll_top && !found_first {
+            if cumulative + h > scroll_offset && !found_first {
                 first = i;
                 found_first = true;
             }
             cumulative += h;
-            if cumulative >= self.scroll_top + self.viewport_height {
+            if cumulative >= scroll_offset + viewport_extent {
                 last = i + 1;
                 break;
             }
@@ -4089,6 +4164,14 @@ TreeView, GridList) integrate the `Virtualizer` through these patterns:
 - The adapter iterates `range.start..range.end` and renders
   `collection.get_by_index(i)` for each `i`, positioned at
   `virtualizer.item_offset_px(i)`.
+
+**Collection updates:**
+
+- Before reusing a `Virtualizer` after inserts, removals, filtering, or reorders,
+  the adapter calls `virtualizer.apply_collection_change_mut(new_total_count)`.
+- This invalidates index-based measured heights and the stored focused index so
+  stale row measurements and stale focus targets are not applied to different
+  items after flat indices shift.
 
 **Scroll event handling:**
 
