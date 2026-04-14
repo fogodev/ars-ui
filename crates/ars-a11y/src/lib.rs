@@ -17,6 +17,8 @@ pub mod focus;
 pub mod keyboard;
 /// Field labelling, descriptions, and error wiring helpers for form controls.
 pub mod label;
+/// Touch-target sizing and mobile accessibility helpers.
+pub mod touch;
 pub mod visually_hidden;
 
 pub use announcements::Announcements;
@@ -38,6 +40,10 @@ pub use focus::{
 };
 pub use keyboard::{DomEvent, KeyModifiers, KeyboardShortcut, Platform};
 pub use label::{DescriptionConfig, FieldContext, LabelConfig};
+pub use touch::{
+    InputMode, MIN_DRAG_TARGET_SIZE, MIN_TOUCH_TARGET_SIZE, should_use_roving_tabindex_for_mobile,
+    touch_target_attrs, touch_target_attrs_with_min,
+};
 pub use visually_hidden::{
     VisuallyHiddenCssDoc, VisuallyHiddenFocusableCssDoc, visually_hidden_attrs,
     visually_hidden_focusable_attrs,
