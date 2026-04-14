@@ -1948,13 +1948,13 @@ impl FocusZone {
                     .min(self.item_count.saturating_sub(1));
                 // Search forward (+1) from target (inclusive) to find nearest non-disabled item
                 // at or beyond the page target.
-                self.find_from_inclusive(target, 1, &is_disabled)
+                self.find_from_inclusive_no_wrap(target, 1, &is_disabled)
             }
             KeyboardKey::PageUp if self.options.page_navigation => {
                 let target = self.active_index.saturating_sub(self.options.page_size.get());
                 // Search backward (-1) from target (inclusive) to find nearest non-disabled item
                 // at or before the page target.
-                self.find_from_inclusive(target, -1, &is_disabled)
+                self.find_from_inclusive_no_wrap(target, -1, &is_disabled)
             }
             _ => None,
         };
@@ -2098,6 +2098,39 @@ impl FocusZone {
             return Some(start);
         }
         self.find_from(start, delta, is_disabled)
+    }
+
+    fn find_from_no_wrap(
+        &self,
+        start: usize,
+        delta: i32,
+        is_disabled: &impl Fn(usize) -> bool,
+    ) -> Option<usize> {
+        let count = i32::try_from(self.item_count).expect("FocusZone supports up to i32::MAX items");
+        let mut idx = start as i32 + delta;
+
+        while idx >= 0 && idx < count {
+            let candidate = idx as usize;
+            if !self.options.skip_disabled || !is_disabled(candidate) {
+                return Some(candidate);
+            }
+            idx += delta;
+        }
+
+        None
+    }
+
+    fn find_from_inclusive_no_wrap(
+        &self,
+        start: usize,
+        delta: i32,
+        is_disabled: &impl Fn(usize) -> bool,
+    ) -> Option<usize> {
+        if !self.options.skip_disabled || !is_disabled(start) {
+            return Some(start);
+        }
+
+        self.find_from_no_wrap(start, delta, is_disabled)
     }
 
     /// Generate tabindex value for an item at the given index.

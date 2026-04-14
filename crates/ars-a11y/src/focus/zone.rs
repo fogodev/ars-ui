@@ -215,7 +215,7 @@ impl FocusZone {
                 let target = (self.active_index + self.options.page_size.get())
                     .min(self.item_count.saturating_sub(1));
 
-                self.find_from_inclusive(target, 1, &is_disabled)
+                self.find_from_inclusive_no_wrap(target, 1, &is_disabled)
             }
 
             KeyboardKey::PageUp if self.options.page_navigation => {
@@ -223,7 +223,7 @@ impl FocusZone {
                     .active_index
                     .saturating_sub(self.options.page_size.get());
 
-                self.find_from_inclusive(target, -1, &is_disabled)
+                self.find_from_inclusive_no_wrap(target, -1, &is_disabled)
             }
             _ => None,
         };
@@ -376,6 +376,43 @@ impl FocusZone {
         }
 
         self.find_from(start, delta, is_disabled)
+    }
+
+    fn find_from_no_wrap(
+        &self,
+        start: usize,
+        delta: i32,
+        is_disabled: &impl Fn(usize) -> bool,
+    ) -> Option<usize> {
+        let count =
+            i32::try_from(self.item_count).expect("FocusZone supports up to i32::MAX items");
+
+        let mut idx = start as i32 + delta;
+
+        while idx >= 0 && idx < count {
+            let candidate = idx as usize;
+
+            if !self.options.skip_disabled || !is_disabled(candidate) {
+                return Some(candidate);
+            }
+
+            idx += delta;
+        }
+
+        None
+    }
+
+    fn find_from_inclusive_no_wrap(
+        &self,
+        start: usize,
+        delta: i32,
+        is_disabled: &impl Fn(usize) -> bool,
+    ) -> Option<usize> {
+        if !self.options.skip_disabled || !is_disabled(start) {
+            return Some(start);
+        }
+
+        self.find_from_no_wrap(start, delta, is_disabled)
     }
 
     /// Generate tabindex value for an item at the given index.
@@ -871,6 +908,38 @@ mod tests {
         assert_eq!(
             zone.handle_key(KeyboardKey::PageUp, false, disabled_items(&[])),
             Some(1)
+        );
+    }
+
+    #[test]
+    fn page_navigation_does_not_wrap_past_disabled_edges() {
+        let page_down_zone = FocusZone {
+            options: FocusZoneOptions {
+                page_navigation: true,
+                page_size: NonZero::new(3).expect("hardcoded nonzero"),
+                ..FocusZoneOptions::default()
+            },
+            active_index: 2,
+            item_count: 5,
+        };
+
+        let page_up_zone = FocusZone {
+            options: FocusZoneOptions {
+                page_navigation: true,
+                page_size: NonZero::new(3).expect("hardcoded nonzero"),
+                ..FocusZoneOptions::default()
+            },
+            active_index: 2,
+            item_count: 5,
+        };
+
+        assert_eq!(
+            page_down_zone.handle_key(KeyboardKey::PageDown, false, disabled_items(&[4])),
+            None
+        );
+        assert_eq!(
+            page_up_zone.handle_key(KeyboardKey::PageUp, false, disabled_items(&[0])),
+            None
         );
     }
 
