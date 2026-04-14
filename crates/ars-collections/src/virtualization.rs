@@ -380,17 +380,17 @@ impl Virtualizer {
         };
 
         let viewport_extent = self.viewport_extent();
-        let scroll_offset = self.scroll_offset();
+        let clamped_scroll_offset = self.clamped_scroll_offset(viewport_extent);
         let item_end = offset + item_extent;
 
         match align {
             ScrollAlign::Auto => {
-                if offset < scroll_offset {
+                if offset < clamped_scroll_offset {
                     offset
-                } else if item_end > scroll_offset + viewport_extent {
+                } else if item_end > clamped_scroll_offset + viewport_extent {
                     item_end - viewport_extent
                 } else {
-                    scroll_offset
+                    clamped_scroll_offset
                 }
             }
 
@@ -590,6 +590,16 @@ mod tests {
         virt.set_scroll_state_mut(360.0, 0.0, 200.0, 0.0);
 
         assert_eq!(virt.scroll_to_index(10, ScrollAlign::Auto), 360.0);
+    }
+
+    #[test]
+    fn scroll_to_index_auto_clamps_stale_scroll_before_visibility_check() {
+        let mut virt = Virtualizer::new(4, LayoutStrategy::FixedHeight { item_height: 40.0 });
+
+        virt.set_scroll_state_mut(500.0, 0.0, 50.0, 0.0);
+        virt.overscan = 0;
+
+        assert_eq!(virt.scroll_to_index(3, ScrollAlign::Auto), 110.0);
     }
 
     #[test]

@@ -4020,16 +4020,17 @@ impl Virtualizer {
         };
         let viewport_extent = self.viewport_extent();
         let scroll_offset = self.scroll_offset();
+        let clamped_scroll_offset = self.clamped_scroll_offset(viewport_extent);
         let item_end = offset + extent;
 
         match align {
             ScrollAlign::Auto => {
-                if offset < scroll_offset {
+                if offset < clamped_scroll_offset {
                     offset
-                } else if item_end > scroll_offset + viewport_extent {
+                } else if item_end > clamped_scroll_offset + viewport_extent {
                     item_end - viewport_extent
                 } else {
-                    scroll_offset
+                    clamped_scroll_offset
                 }
             }
             ScrollAlign::Top    => offset,
