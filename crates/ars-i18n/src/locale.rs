@@ -336,6 +336,13 @@ mod tests {
     }
 
     #[test]
+    fn locale_language_identifier_roundtrips() {
+        let locale = Locale::parse("sr-Latn-RS").expect("locale should parse");
+
+        assert_eq!(locale.language_identifier().to_string(), "sr-Latn-RS");
+    }
+
+    #[test]
     fn rtl_script_list_contains_core_scripts() {
         assert!(RTL_SCRIPTS.contains(&"Arab"));
         assert!(RTL_SCRIPTS.contains(&"Hebr"));

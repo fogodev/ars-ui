@@ -109,6 +109,14 @@ mod tests {
     }
 
     #[test]
+    fn locale_stack_builds_script_only_fallback_chain() {
+        let stack = LocaleStack::new(Locale::parse("zh-Hant").expect("locale should parse"));
+
+        let tags = stack.iter().map(Locale::to_bcp47).collect::<Vec<_>>();
+        assert_eq!(tags, vec!["zh-Hant", "zh"]);
+    }
+
+    #[test]
     fn locale_stack_keeps_single_language_locale() {
         let stack = LocaleStack::new(Locale::parse("en").expect("locale should parse"));
 
