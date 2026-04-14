@@ -253,17 +253,6 @@ const fn idref_attr_name(attr: HtmlAttr) -> Option<&'static str> {
     }
 }
 
-const fn attr_value_contains_idrefs(attr: HtmlAttr) -> bool {
-    matches!(
-        attr,
-        HtmlAttr::Aria(AriaAttr::Controls)
-            | HtmlAttr::Aria(AriaAttr::DescribedBy)
-            | HtmlAttr::Aria(AriaAttr::FlowTo)
-            | HtmlAttr::Aria(AriaAttr::LabelledBy)
-            | HtmlAttr::Aria(AriaAttr::Owns)
-    )
-}
-
 /// Validate that an `AttrMap` produced by a connect surface is ARIA-conformant
 /// within the provided subtree context.
 #[must_use]
@@ -307,14 +296,7 @@ pub fn validate_attr_map(
             continue;
         };
 
-        let raw_ids = raw_value.split_whitespace();
-        let ids: Vec<&str> = if attr_value_contains_idrefs(*attr) {
-            raw_ids.collect()
-        } else {
-            raw_ids.take(1).collect()
-        };
-
-        for id in ids {
+        for id in raw_value.split_whitespace() {
             if !is_known_id(id, attr_map, context.known_ids) {
                 validator
                     .errors
@@ -791,6 +773,34 @@ mod tests {
                 .contains(&AriaValidationError::DanglingIdReference {
                     attribute: "aria-errormessage",
                     id: String::from("error-id"),
+                })
+        );
+    }
+
+    #[test]
+    fn validate_attr_map_checks_all_tokens_for_single_idref_attributes() {
+        let mut attr_map = AttrMap::new();
+
+        attr_map.set(
+            HtmlAttr::Aria(AriaAttr::ErrorMessage),
+            AttrValue::from("known-id missing-id"),
+        );
+
+        let validator = validate_attr_map(
+            None,
+            &attr_map,
+            AriaValidationContext {
+                known_ids: &["known-id"],
+                owned_roles: &[],
+            },
+        );
+
+        assert!(
+            validator
+                .errors()
+                .contains(&AriaValidationError::DanglingIdReference {
+                    attribute: "aria-errormessage",
+                    id: String::from("missing-id"),
                 })
         );
     }

@@ -3917,17 +3917,6 @@ fn idref_attr_name(attr: HtmlAttr) -> Option<&'static str> {
     }
 }
 
-fn attr_value_contains_idrefs(attr: HtmlAttr) -> bool {
-    matches!(
-        attr,
-        HtmlAttr::Aria(AriaAttr::Controls)
-            | HtmlAttr::Aria(AriaAttr::DescribedBy)
-            | HtmlAttr::Aria(AriaAttr::FlowTo)
-            | HtmlAttr::Aria(AriaAttr::LabelledBy)
-            | HtmlAttr::Aria(AriaAttr::Owns)
-    )
-}
-
 /// Validate that an AttrMap produced by a connect() function is
 /// ARIA-conformant within the provided subtree context.
 #[must_use]
@@ -3971,13 +3960,7 @@ pub fn validate_attr_map(
             continue;
         };
 
-        let ids = if attr_value_contains_idrefs(*attr) {
-            raw_value.split_whitespace()
-        } else {
-            raw_value.split_whitespace().take(1)
-        };
-
-        for id in ids {
+        for id in raw_value.split_whitespace() {
             if !is_known_id(id, attr_map, context.known_ids) {
                 validator.errors.push(AriaValidationError::DanglingIdReference {
                     attribute,
