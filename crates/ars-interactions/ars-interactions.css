@@ -1,0 +1,61 @@
+/* ars-interactions.css -- companion stylesheet for ars-interactions
+ * Published alongside the ars-interactions crate. Include via a <link> element.
+ *
+ * This stylesheet provides forced-colors and high-contrast media query rules
+ * for interaction data attributes. See spec/foundation/05-interactions.md §10.
+ */
+
+/* === Forced Colors Mode (Windows High Contrast Mode) ==================== */
+
+@media (forced-colors: active) {
+    /* Focus indicators: use transparent outline that becomes visible in forced-colors */
+    [data-ars-focus-visible] {
+        outline: 3px solid Highlight;
+        outline-offset: 2px;
+    }
+
+    /* Pressed state: use ButtonText border */
+    [data-ars-pressed] {
+        outline: 3px solid ButtonText;
+    }
+
+    /* Combined focus + pressed: focus ring takes precedence */
+    [data-ars-focus-visible][data-ars-pressed] {
+        outline: 3px solid Highlight;
+        outline-offset: 2px;
+    }
+
+    /* Disabled elements */
+    [data-ars-disabled] {
+        color: GrayText;
+        border-color: GrayText;
+    }
+
+    /* Drag preview */
+    [data-ars-dragging] {
+        outline: 2px solid Highlight;
+    }
+
+    /* Selected items */
+    [data-ars-state~="selected"] {
+        outline: 2px solid Highlight;
+        color: HighlightText;
+        background-color: Highlight;
+    }
+}
+
+/* === High Contrast Preference =========================================== */
+
+/* High contrast preference (not necessarily forced-colors) */
+@media (prefers-contrast: more) {
+    :root {
+        --ars-focus-ring-width: 3px;
+        --ars-border-width: 2px;
+        --ars-focus-ring-offset: 3px;
+    }
+}
+
+/* Custom contrast preference (forced-colors active) */
+@media (prefers-contrast: custom) {
+    /* Same as forced-colors — system colors in use */
+}

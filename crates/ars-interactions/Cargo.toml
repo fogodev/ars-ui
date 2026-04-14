@@ -11,6 +11,7 @@ rust-version.workspace = true
 default               = ["aria-drag-drop-compat"]
 aria-drag-drop-compat = []
 debug                 = ["dep:log", "ars-core/debug"]
+embedded-css          = []
 
 [dependencies]
 ars-a11y = { path = "../ars-a11y", default-features = false }

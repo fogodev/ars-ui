@@ -3061,15 +3061,18 @@ The companion stylesheet (`ars-interactions.css`) MUST include a forced-colors b
 ### 10.4 Detection
 
 ```rust
-// Canonical implementation lives in ars-dom (re-exported by ars-a11y behind #[cfg(feature = "dom")]).
-// See 03-accessibility.md §6.1.
-#[cfg(feature = "dom")]
+// Canonical implementation lives in ars-dom.
+// Components import directly: use ars_dom::media::is_forced_colors_active;
+//
+// NOTE: The ars-a11y re-export described in 03-accessibility.md §6.1 is not
+// possible because ars-dom already depends on ars-a11y (circular dependency).
+// Consumers import from ars_dom::media instead.
 pub use ars_dom::media::is_forced_colors_active;
 ```
 
 Components that apply inline styles for visual feedback (e.g., drag preview opacity, hover background) SHOULD check `is_forced_colors_active()` and skip custom color overrides when forced colors are active, allowing the system colors to take effect.
 
-> **`matchMedia()` Caching:** Cache `matchMedia()` results in a module-level variable; listen to the `change` event on the `MediaQueryList` for runtime updates. See `03-accessibility.md` §6.1 for the full caching pattern. Do not call `window.matchMedia()` on every render or event handler invocation.
+> **`matchMedia()` Caching:** Cache the `MediaQueryList` **object** (not the boolean result) in a `thread_local! { static MQL: OnceCell<Option<web_sys::MediaQueryList>> }`. On each call, read `.matches()` from the cached object — this is a live property that always reflects the current state, so no explicit `change` event listener is needed. See `11-dom-utilities.md` §9 for the canonical caching pattern.
 
 ### 10.5 Forced-Colors Testing Requirements
 
