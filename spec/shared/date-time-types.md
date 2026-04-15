@@ -562,7 +562,7 @@ impl<C: CalendarKind> TypedCalendarDate<C> {
 }
 
 impl<C: DirectDayArithmetic> TypedCalendarDate<C> {
-    pub fn add_days(&self, n: i32) -> Self;
+    pub fn add_days(&self, n: i32) -> Option<Self>;
 }
 
 impl<C: DirectWeekdayComputation> TypedCalendarDate<C> {

@@ -511,10 +511,23 @@ fn typed_gregorian_date_exposes_compile_time_gated_methods() {
         NonZero::new(15).expect("day is non-zero"),
     );
 
-    let shifted = date.add_days(10);
+    let shifted = date
+        .add_days(10)
+        .expect("typed Gregorian arithmetic should succeed");
 
     assert_eq!(date.weekday(), Weekday::Friday);
     assert_eq!(shifted.into_raw().to_iso8601(), "2024-03-25");
+}
+
+#[test]
+fn typed_gregorian_date_add_days_propagates_lower_bound_failure() {
+    let minimum = TypedCalendarDate::<Gregorian>::new(
+        1,
+        NonZero::new(1).expect("month is non-zero"),
+        NonZero::new(1).expect("day is non-zero"),
+    );
+
+    assert_eq!(minimum.add_days(-1), None);
 }
 
 #[test]

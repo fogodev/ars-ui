@@ -1700,7 +1700,7 @@ impl<C: CalendarKind> TypedCalendarDate<C> {
 }
 
 impl<C: DirectDayArithmetic> TypedCalendarDate<C> {
-    pub fn add_days(&self, n: i32) -> Self;
+    pub fn add_days(&self, n: i32) -> Option<Self>;
 }
 
 impl<C: DirectWeekdayComputation> TypedCalendarDate<C> {
@@ -1714,7 +1714,8 @@ impl TypedCalendarDate<Gregorian> {
 
 This is the preferred surface for calendar-specific behavior:
 
-- `TypedCalendarDate<Gregorian>` exposes `weekday()` and direct `add_days()`.
+- `TypedCalendarDate<Gregorian>` exposes `weekday()` and direct `add_days()`,
+  but preserves the underlying `Option` result at supported date bounds.
 - Other typed calendars do not expose those methods unless they implement the
   relevant capability traits.
 - Dynamic `CalendarDate::weekday()` and `CalendarDate::add_days()` remain

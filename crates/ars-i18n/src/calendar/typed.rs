@@ -366,13 +366,8 @@ impl<C: CalendarKind> TypedCalendarDate<C> {
 impl<C: DirectDayArithmetic> TypedCalendarDate<C> {
     /// Adds whole days using direct arithmetic supported by this calendar kind.
     #[must_use]
-    pub fn add_days(&self, day_delta: i32) -> Self {
-        let shifted = self
-            .raw
-            .add_days(day_delta)
-            .expect("typed direct day arithmetic is only implemented for compatible calendars");
-
-        Self::from_raw_unchecked(shifted)
+    pub fn add_days(&self, day_delta: i32) -> Option<Self> {
+        self.raw.add_days(day_delta).map(Self::from_raw_unchecked)
     }
 }
 
