@@ -56,7 +56,7 @@ impl CalendarDate {
         }
         // If both have eras and they differ, raw comparison is unreliable
         if let (Some(ref a), Some(ref b)) = (&self.era, &other.era) {
-            if a != b {
+            if a.code != b.code {
                 return None; // caller must use IcuProvider epoch-day conversion
             }
         }
@@ -107,23 +107,33 @@ impl CalendarDate {
         if !(1..=max_month).contains(&month) {
             return None;
         }
+        let validated_month = NonZero::new(month)?;
+        let provisional = Self {
+            calendar,
+            era: era.clone(),
+            year,
+            month: validated_month,
+            day: NonZero::new(1).expect("one is non-zero"),
+        };
+        if let Some(max_year) = provider.years_in_era(&provisional) {
+            if provisional.year > max_year {
+                return None;
+            }
+        }
+        if month < provider.minimum_month_in_year(&provisional) {
+            return None;
+        }
         let max_day = days_in_month_for_calendar(provider, calendar, year, month, era_code);
         if !(1..=max_day).contains(&day) {
             return None;
         }
         let candidate = Self {
-            calendar, era, year,
-            month: NonZero::new(month).expect("validated 1-based"),
+            calendar,
+            era,
+            year,
+            month: validated_month,
             day: NonZero::new(day).expect("validated 1-based"),
         };
-        if let Some(max_year) = provider.years_in_era(&candidate) {
-            if candidate.year > max_year {
-                return None;
-            }
-        }
-        if month < provider.minimum_month_in_year(&candidate) {
-            return None;
-        }
         if day < provider.minimum_day_in_month(&candidate) {
             return None;
         }

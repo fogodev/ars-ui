@@ -325,6 +325,10 @@ pub trait IcuProvider: Send + Sync + 'static {
             return days;
         }
 
+        if matches!(_calendar, CalendarSystem::Japanese) {
+            return 0;
+        }
+
         if matches!(
             _calendar,
             CalendarSystem::Coptic | CalendarSystem::Ethiopic | CalendarSystem::EthiopicAmeteAlem

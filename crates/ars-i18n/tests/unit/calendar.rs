@@ -601,8 +601,23 @@ fn public_calendar_date_compare_within_calendar_respects_era_and_calendar() {
         day: NonZero::new(15).expect("day is non-zero"),
     };
 
+    let japanese_localized = CalendarDate {
+        calendar: CalendarSystem::Japanese,
+        era: Some(Era {
+            code: String::from("reiwa"),
+            display_name: String::from("令和"),
+        }),
+        year: 6,
+        month: NonZero::new(3).expect("month is non-zero"),
+        day: NonZero::new(15).expect("day is non-zero"),
+    };
+
     assert_eq!(base.compare_within_calendar(&later), Some(Ordering::Less));
     assert_eq!(base.compare_within_calendar(&japanese), None);
+    assert_eq!(
+        japanese.compare_within_calendar(&japanese_localized),
+        Some(Ordering::Equal)
+    );
 
     let heisei = CalendarDate {
         calendar: CalendarSystem::Japanese,
@@ -766,6 +781,17 @@ fn public_calendar_date_new_rejects_japanese_dates_outside_era_bounds() {
             2024,
             3,
             15,
+        )
+        .is_none()
+    );
+    assert!(
+        CalendarDate::new(
+            &provider,
+            CalendarSystem::Japanese,
+            reiwa.clone(),
+            i32::MAX,
+            5,
+            1,
         )
         .is_none()
     );
@@ -1157,6 +1183,10 @@ fn japanese_era_helper_functions_cover_bounded_and_fallback_paths() {
     assert_eq!(
         bounded_days_in_month(CalendarSystem::Japanese, 31, 4, Some("heisei")),
         Some(30)
+    );
+    assert_eq!(
+        bounded_days_in_month(CalendarSystem::Japanese, i32::MAX, 5, Some("reiwa")),
+        None
     );
     assert_eq!(
         bounded_days_in_month(CalendarSystem::Gregorian, 2024, 2, None),

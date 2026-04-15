@@ -58,6 +58,7 @@ impl CalendarDate {
     ) -> Option<Self> {
         let era = era.or_else(|| provider.default_era(&calendar));
         let era_code = era.as_ref().map(|value| value.code.as_str());
+        let validated_month = NonZero::new(month)?;
 
         if year < 1 || !era_code_is_valid(calendar, era_code) {
             return None;
@@ -66,6 +67,24 @@ impl CalendarDate {
         let max_month = max_months_in_year(provider, calendar, year, era_code);
 
         if !(1..=max_month).contains(&month) {
+            return None;
+        }
+
+        let provisional = Self {
+            calendar,
+            era: era.clone(),
+            year,
+            month: validated_month,
+            day: NonZero::new(1).expect("one is non-zero"),
+        };
+
+        if let Some(max_year) = provider.years_in_era(&provisional) {
+            if provisional.year > max_year {
+                return None;
+            }
+        }
+
+        if month < provider.minimum_month_in_year(&provisional) {
             return None;
         }
 
@@ -79,19 +98,9 @@ impl CalendarDate {
             calendar,
             era,
             year,
-            month: NonZero::new(month).expect("validated month is 1-based"),
+            month: validated_month,
             day: NonZero::new(day).expect("validated day is 1-based"),
         };
-
-        if let Some(max_year) = provider.years_in_era(&candidate) {
-            if candidate.year > max_year {
-                return None;
-            }
-        }
-
-        if month < provider.minimum_month_in_year(&candidate) {
-            return None;
-        }
 
         if day < provider.minimum_day_in_month(&candidate) {
             return None;
@@ -111,7 +120,7 @@ impl CalendarDate {
         }
 
         if let (Some(left), Some(right)) = (&self.era, &other.era) {
-            if left != right {
+            if left.code != right.code {
                 return None;
             }
         }

@@ -244,7 +244,7 @@ pub(crate) fn bounded_days_in_month(
             // Japanese public dates store `year` as year-in-era, so convert it
             // back to the underlying Gregorian year before using Gregorian
             // month-length rules.
-            let absolute_year = boundary.start_year + year - 1;
+            let absolute_year = boundary.start_year.checked_add(year)?.checked_sub(1)?;
 
             let mut max_day = gregorian_days_in_month(absolute_year, month);
 
