@@ -1367,39 +1367,44 @@ impl CalendarDate {
 
     /// Create from components in a specific calendar system.
     ///
-    /// Uses ICU4X `Date::try_new_from_codes()` with an `AnyCalendar` instance.
-    /// The `month` parameter is the 1-based month ordinal (not a month code).
-    /// Era is inferred from the year sign for era-based calendars.
+    /// For single-era calendars this constructs from an extended year. For
+    /// multi-era calendars, omitted eras default to the current era in the same
+    /// way React Aria's `CalendarDate` constructor defaults to
+    /// `calendar.getEras().last()`.
     pub(crate) fn from_calendar(
         year: i32,
         month: u8,
         day: u8,
         calendar: CalendarSystem,
     ) -> Result<Self, CalendarConversionError> {
-        use icu::calendar::{AnyCalendar, types::MonthCode};
-        use tinystr::tinystr;
+        let year = default_year_input(calendar, year);
+        Self::from_calendar_parts(year, month, day, calendar)
+    }
 
+    /// Create from components in a specific calendar system and an explicit era.
+    ///
+    /// This path is required for Japanese and other multi-era calendars when
+    /// round-tripping the public `shared::CalendarDate`, because raw
+    /// `(calendar, year, month, day)` fields are otherwise ambiguous.
+    pub(crate) fn from_calendar_with_era(
+        era: &str,
+        year: i32,
+        month: u8,
+        day: u8,
+        calendar: CalendarSystem,
+    ) -> Result<Self, CalendarConversionError> {
+        Self::from_calendar_parts(YearInput::EraYear(era, year), month, day, calendar)
+    }
+
+    fn from_calendar_parts(
+        year: YearInput<'_>,
+        month: u8,
+        day: u8,
+        calendar: CalendarSystem,
+    ) -> Result<Self, CalendarConversionError> {
         let any_cal = AnyCalendar::new(calendar.to_icu_kind());
-
-        // ICU4X 2.x: MonthCode::new_normal(ordinal) constructs "M01".."M13".
-        // For leap months (Chinese/Hebrew), use MonthCode::new_leap(ordinal) instead.
-        let month_code = MonthCode::new_normal(month)
-            .ok_or(CalendarConversionError::InvalidDate)?;
-
-        // For era-based calendars, infer era from the calendar kind.
-        // Gregorian: positive year → "ce", negative → "bce".
-        // Japanese: era must be resolved from the year; default to current era.
-        // Other calendars: pass None and let ICU4X infer.
-        let era: Option<&str> = match calendar {
-            CalendarSystem::Gregorian => {
-                if year >= 1 { Some("ce") } else { Some("bce") }
-            }
-            _ => None,
-        };
-
-        let date = Date::try_new_from_codes(era, year, month_code, day, any_cal)
+        let date = Date::try_new(year, icu::calendar::types::Month::new(month), day, any_cal)
             .map_err(|e| CalendarConversionError::Icu(e.to_string()))?;
-
         Ok(Self { inner: date })
     }
 
@@ -1670,6 +1675,53 @@ impl Weekday {
 }
 ```
 
+#### 5.1.1 Typed Calendar Views
+
+The public `shared::CalendarDate` remains the dynamic boundary type, but
+calendar-specific methods SHOULD be exposed through a typed wrapper:
+
+```rust
+use crate::{
+    CalendarDate, CalendarKind, CalendarTypeError, DirectDayArithmetic,
+    DirectWeekdayComputation, Gregorian, IcuProvider, TypedCalendarDate,
+};
+
+impl CalendarDate {
+    pub fn typed<C: CalendarKind>(&self) -> Result<TypedCalendarDate<C>, CalendarTypeError>;
+    pub fn into_typed<C: CalendarKind>(self) -> Result<TypedCalendarDate<C>, CalendarTypeError>;
+    pub fn to_calendar_type<C: CalendarKind>(&self, provider: &dyn IcuProvider) -> TypedCalendarDate<C>;
+}
+
+impl<C: CalendarKind> TypedCalendarDate<C> {
+    pub fn from_raw(raw: CalendarDate) -> Result<Self, CalendarTypeError>;
+    pub fn add_months(&self, provider: &dyn IcuProvider, n: i32) -> Option<Self>;
+    pub fn add_days_with_provider(&self, provider: &dyn IcuProvider, n: i32) -> Self;
+    pub fn to_calendar<T: CalendarKind>(&self, provider: &dyn IcuProvider) -> TypedCalendarDate<T>;
+}
+
+impl<C: DirectDayArithmetic> TypedCalendarDate<C> {
+    pub fn add_days(&self, n: i32) -> Option<Self>;
+}
+
+impl<C: DirectWeekdayComputation> TypedCalendarDate<C> {
+    pub fn weekday(&self) -> Weekday;
+}
+
+impl TypedCalendarDate<Gregorian> {
+    pub fn new(year: i32, month: NonZero<u8>, day: NonZero<u8>) -> Self;
+}
+```
+
+This is the preferred surface for calendar-specific behavior:
+
+- `TypedCalendarDate<Gregorian>` exposes `weekday()` and direct `add_days()`,
+  but preserves the underlying `Option` result at supported date bounds.
+- Other typed calendars do not expose those methods unless they implement the
+  relevant capability traits.
+- Dynamic `CalendarDate::weekday()` and `CalendarDate::add_days()` remain
+  compatibility shims over the same Gregorian-only behavior, but new code should
+  prefer the typed view.
+
 ### 5.2 Calendar Systems
 
 > `CalendarSystem` — defined in `shared/date-time-types.md`
@@ -1680,15 +1732,15 @@ The following extension methods are provided by `ars-i18n` on the canonical `Cal
 impl CalendarSystem {
     /// Get from BCP 47 calendar extension value.
     ///
-    /// All 16 variants are mapped from their CLDR/BCP-47 `ca` extension keys.
+    /// Public variants are mapped from their CLDR/BCP-47 `ca` extension keys,
+    /// with deprecated aliases normalized onto the supported surface.
     /// Reference: Unicode LDML §3.6 "Calendar Algorithm" and IANA BCP-47
     /// `u-ca` subtag registry.
     pub fn from_bcp47(s: &str) -> Option<Self> {
         match s {
             "gregory" | "gregorian" => Some(Self::Gregorian),
             "buddhist" => Some(Self::Buddhist),
-            "japanese" => Some(Self::Japanese),
-            "japanext" => Some(Self::JapaneseExtended),
+            "japanese" | "japanext" => Some(Self::Japanese),
             "hebrew" => Some(Self::Hebrew),
             "islamic" => Some(Self::Islamic),
             "islamic-civil" => Some(Self::IslamicCivil),
@@ -1723,7 +1775,6 @@ impl CalendarSystem {
             Self::Gregorian => Gregorian,
             Self::Buddhist => Buddhist,
             Self::Japanese => Japanese,
-            Self::JapaneseExtended => JapaneseExtended,
             Self::Hebrew => Hebrew,
             Self::Islamic => HijriSimulatedMecca,
             Self::IslamicCivil => HijriTabularTypeIIFriday,
@@ -1742,7 +1793,7 @@ impl CalendarSystem {
     /// Whether this calendar uses an era system other than AD/BC.
     pub fn has_custom_eras(&self) -> bool {
         matches!(self,
-            Self::Japanese | Self::JapaneseExtended
+            Self::Japanese
             | Self::Ethiopic | Self::EthiopicAmeteAlem
             | Self::Coptic
             | Self::Hebrew | Self::Persian
@@ -1999,17 +2050,25 @@ impl DateFormatter {
     }
 }
 
-impl From<&shared::CalendarDate> for CalendarDate {
-    fn from(shared: &shared::CalendarDate) -> Self {
+impl TryFrom<&shared::CalendarDate> for CalendarDate {
+    type Error = CalendarConversionError;
+
+    fn try_from(shared: &shared::CalendarDate) -> Result<Self, Self::Error> {
+        if let Some(era) = &shared.era {
+            return CalendarDate::from_calendar_with_era(
+                &era.code,
+                shared.year,
+                shared.month.get(),
+                shared.day.get(),
+                shared.calendar,
+            );
+        }
         match shared.calendar {
             CalendarSystem::Gregorian => {
                 CalendarDate::from_iso(shared.year, shared.month.get(), shared.day.get())
-                    .expect("shared::CalendarDate should contain valid date components")
+                    .map_err(|_| CalendarConversionError::InvalidDate)
             }
-            other => {
-                CalendarDate::from_calendar(shared.year, shared.month.get(), shared.day.get(), other)
-                    .expect("shared::CalendarDate should contain valid date components")
-            }
+            other => CalendarDate::from_calendar(shared.year, shared.month.get(), shared.day.get(), other),
         }
     }
 }
@@ -3241,7 +3300,7 @@ icu_provider = { version = "2.1", default-features = false }
 icu_datagen = { version = "2.1", optional = true }
 
 [features]
-default = ["std", "gregorian", "icu4x"]
+default = ["std", "icu4x"]
 # `icu4x` enables formatter backends and compiled CLDR data. ICU4X 2.1's
 # experimental measurement, currency, and percent formatters are provided by
 # the direct `icu_experimental` dependency rather than the umbrella crate.
@@ -3249,21 +3308,13 @@ default = ["std", "gregorian", "icu4x"]
 # not a public ars-i18n API distinction.
 icu4x = ["icu/compiled_data", "icu_experimental/compiled_data"]
 web-intl = ["dep:wasm-bindgen", "dep:js-sys"]
-
-# Calendar feature flags — include only what you need
-gregorian = []     # Always included
-buddhist = ["icu/icu_calendar_buddhist"]
-japanese = ["icu/icu_calendar_japanese"]
-hebrew = ["icu/icu_calendar_hebrew"]
-islamic = ["icu/icu_calendar_islamic"]
-persian = ["icu/icu_calendar_persian"]
-ethiopic = ["icu/icu_calendar_ethiopic"]
-indian = ["icu/icu_calendar_indian"]
-chinese = ["icu/icu_calendar_chinese"]
-dangi = ["icu/icu_calendar_dangi"]
-coptic = ["icu/icu_calendar_coptic"]
-all-calendars = ["buddhist", "japanese", "hebrew", "islamic", "persian", "ethiopic", "indian", "chinese", "dangi", "coptic"]
 ```
+
+Calendar support is part of the unconditional public API. `ars-i18n` does not
+expose one Cargo feature per calendar. If a product needs to trim binary size,
+that optimization happens by selecting the backend (`icu4x` vs `web-intl`) and,
+for ICU4X, by using a custom data build rather than by removing public calendar
+types from the crate.
 
 ### 9.2 Compiled Data for WASM
 
@@ -3277,11 +3328,9 @@ all-calendars = ["buddhist", "japanese", "hebrew", "islamic", "persian", "ethiop
 // Usage (automatically used when the `icu4x` feature enables compiled data):
 // ICU4X formatters use compiled baked data internally (via each crate's `compiled_data` feature).
 
-// Estimate WASM binary size impact:
-// - Gregorian calendar only: ~200KB
-// - All calendars: ~500KB
-// - Full CLDR data: ~2MB
-// Feature flags let users trade functionality for size.
+// Calendar support is not feature-gated at the public API layer.
+// To reduce binary size, use a custom ICU4X data build or the browser `Intl`
+// backend on wasm rather than toggling Cargo features per calendar.
 ```
 
 ### 9.3 Lazy-Loaded Formatters
@@ -3480,7 +3529,7 @@ than coupling directly to ICU4X types, all calendar/locale queries go through th
 ```rust
 // ars-i18n/src/provider.rs
 
-use crate::{CalendarSystem, HourCycle, Locale, Weekday};
+use crate::{CalendarSystem, Era, HourCycle, Locale, Weekday};
 use crate::shared::CalendarDate;
 
 /// Trait abstracting ICU4X data provider for calendar/locale operations.
@@ -3517,14 +3566,40 @@ pub trait IcuProvider: Send + Sync + 'static {
 
     /// Maximum number of months in a year for the given calendar and year.
     /// Most calendars return 12; Hebrew leap years return 13; Chinese/Dangi may return 13.
-    /// ICU4X: Constructs a date via `AnyCalendar::date_from_codes()` then calls `months_in_year()`.
-    /// `era` is required for multi-era calendars (Japanese, Ethiopic); pass `None` for others.
+    /// Multi-era calendars may return a smaller value in the final year of an era
+    /// (e.g. Japanese Heisei year 31 ends in month 4).
+    /// ICU4X: constructs a date in the requested calendar/era and queries the
+    /// calendar's year shape.
     fn max_months_in_year(&self, calendar: &CalendarSystem, year: i32, era: Option<&str>) -> u8;
 
     /// Days in a specific month for the given calendar, year, and month.
-    /// ICU4X: Constructs a date via `AnyCalendar::date_from_codes()` then calls `days_in_month()`.
-    /// `era` is required for multi-era calendars (Japanese, Ethiopic); pass `None` for others.
+    /// Multi-era calendars may return a smaller value in the final month of an era
+    /// (e.g. Japanese Heisei year 31 month 4 ends on day 30).
+    /// ICU4X: constructs a date in the requested calendar/era and queries the
+    /// calendar's month shape.
     fn days_in_month(&self, calendar: &CalendarSystem, year: i32, month: u8, era: Option<&str>) -> u8;
+
+    /// Default era when callers omit one for a multi-era calendar.
+    ///
+    /// This follows React Aria's `calendar.getEras().last()` behavior so
+    /// `CalendarDate::new(provider, CalendarSystem::Japanese, None, 6, 3, 15)`
+    /// resolves to Reiwa 6.
+    fn default_era(&self, calendar: &CalendarSystem) -> Option<Era>;
+
+    /// Maximum year value in the date's current era, if the era is bounded.
+    ///
+    /// Example: Heisei has 31 years; Reiwa is currently open-ended.
+    fn years_in_era(&self, date: &CalendarDate) -> Option<i32>;
+
+    /// Minimum month ordinal allowed in the date's current year.
+    ///
+    /// Example: Japanese Heisei year 1 starts in month 1; Reiwa year 1 starts in month 5.
+    fn minimum_month_in_year(&self, date: &CalendarDate) -> u8;
+
+    /// Minimum day ordinal allowed in the date's current month.
+    ///
+    /// Example: Japanese Heisei year 1 month 1 starts on day 8.
+    fn minimum_day_in_month(&self, date: &CalendarDate) -> u8;
 
     /// Preferred hour cycle for the locale (H12, H23, etc.).
     /// ICU4X: `HourCycle` preference from CLDR `timeData` via `icu::datetime`.
@@ -3612,11 +3687,10 @@ impl IcuProvider for StubIcuProvider {
         }
     }
 
-    fn max_months_in_year(&self, calendar: &CalendarSystem, year: i32, _era: Option<&str>) -> u8 {
-        // Simplified: only handles Gregorian-like (12) and Hebrew leap (13).
-        // Production Icu4xProvider handles all calendar systems precisely.
-        // Over-permissive: Chinese/Dangi have 13 months only in leap years.
-        // Stub accepts month 13 in all years for simplicity.
+    fn max_months_in_year(&self, calendar: &CalendarSystem, year: i32, era: Option<&str>) -> u8 {
+        if let Some(months) = default_bounded_months_in_year(calendar, year, era) {
+            return months;
+        }
         match calendar {
             // No cfg gates — CalendarSystem enum is always fully available (runtime dispatch).
             CalendarSystem::Gregorian => 12,
@@ -3634,15 +3708,28 @@ impl IcuProvider for StubIcuProvider {
         }
     }
 
-    fn days_in_month(&self, calendar: &CalendarSystem, year: i32, month: u8, _era: Option<&str>) -> u8 {
-        // Simplified: Gregorian-only logic. Production Icu4xProvider delegates
-        // to ICU4X AnyCalendar for all calendar systems.
-        // gregorian_days_in_month is defined in ars-core (shared/date-time-types.md §1.1)
-        use ars_core::date_time::gregorian_days_in_month;
-        match calendar {
-            CalendarSystem::Gregorian => gregorian_days_in_month(year, month),
-            _ => gregorian_days_in_month(year, month), // fallback
+    fn days_in_month(&self, calendar: &CalendarSystem, year: i32, month: u8, era: Option<&str>) -> u8 {
+        if let Some(days) = default_bounded_days_in_month(calendar, year, month, era) {
+            return days;
         }
+        use ars_core::date_time::gregorian_days_in_month;
+        gregorian_days_in_month(year, month)
+    }
+
+    fn default_era(&self, calendar: &CalendarSystem) -> Option<Era> {
+        default_era_for(calendar)
+    }
+
+    fn years_in_era(&self, date: &CalendarDate) -> Option<i32> {
+        default_years_in_era(date)
+    }
+
+    fn minimum_month_in_year(&self, date: &CalendarDate) -> u8 {
+        default_minimum_month_in_year(date)
+    }
+
+    fn minimum_day_in_month(&self, date: &CalendarDate) -> u8 {
+        default_minimum_day_in_month(date)
     }
 
     fn hour_cycle(&self, locale: &Locale) -> HourCycle {

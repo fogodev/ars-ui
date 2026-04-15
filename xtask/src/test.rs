@@ -615,7 +615,7 @@ mod tests {
 
     #[test]
     fn unit_stage_splits_workspace_and_i18n_backends() {
-        let invocations = unit_invocation_specs("std,gregorian,icu4x", "std,gregorian,web-intl");
+        let invocations = unit_invocation_specs("std,icu4x", "std,web-intl");
         assert_eq!(invocations.len(), 3);
         assert_eq!(invocations[0].label, "unit workspace");
         assert_eq!(
@@ -637,7 +637,7 @@ mod tests {
                 "--all-targets",
                 "--no-default-features",
                 "--features",
-                "std,gregorian,icu4x",
+                "std,icu4x",
             ]
         );
         assert_eq!(invocations[2].label, "unit i18n (web-intl)");
@@ -645,7 +645,7 @@ mod tests {
 
     #[test]
     fn release_stage_splits_workspace_and_i18n_backends() {
-        let invocations = release_invocation_specs("std,gregorian,icu4x", "std,gregorian,web-intl");
+        let invocations = release_invocation_specs("std,icu4x", "std,web-intl");
         assert_eq!(invocations.len(), 3);
         assert_eq!(invocations[0].label, "release workspace");
         assert_eq!(
@@ -668,7 +668,7 @@ mod tests {
                 "--all-targets",
                 "--no-default-features",
                 "--features",
-                "std,gregorian,icu4x",
+                "std,icu4x",
                 "--release",
             ]
         );

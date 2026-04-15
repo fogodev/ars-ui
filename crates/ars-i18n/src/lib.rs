@@ -18,9 +18,11 @@ compile_error!("features `icu4x` and `web-intl` are mutually exclusive");
 
 extern crate alloc;
 
-use alloc::string::String;
+use alloc::{format, string::String};
+use core::num::NonZero;
 
 mod bidi;
+mod calendar;
 #[cfg(any(feature = "icu4x", feature = "web-intl"))]
 mod case;
 mod collation;
@@ -35,6 +37,13 @@ mod translate;
 mod weekday;
 
 pub use bidi::{IsolateDirection, isolate_text_safe};
+pub use calendar::{
+    Buddhist, CalendarConversionError, CalendarDate, CalendarError, CalendarKind, CalendarMetadata,
+    CalendarSystem, CalendarTypeError, Chinese, Coptic, Dangi, DateError, DateRange,
+    DirectDayArithmetic, DirectWeekdayComputation, Era, Ethiopic, EthiopicAmeteAlem, Gregorian,
+    Hebrew, HourCycle, Indian, Islamic, IslamicCivil, IslamicUmmAlQura, Japanese, JapaneseEra,
+    Month, Persian, Roc, Time, TypedCalendarDate, WeekInfo,
+};
 #[cfg(any(feature = "icu4x", feature = "web-intl"))]
 pub use case::{to_lowercase, to_uppercase};
 pub use collation::{CollationFormat, CollationOptions, CollationStrength, StringCollator};
@@ -191,7 +200,189 @@ pub enum Orientation {
 /// Requires `Send + Sync` on every target so adapters and shared ownership
 /// abstractions can treat ICU providers uniformly across native and wasm
 /// builds.
-pub trait IcuProvider: Send + Sync + 'static {}
+pub trait IcuProvider: Send + Sync + 'static {
+    /// Short weekday label (abbreviated format): `Mo`, `Tu`, `We`, ...
+    fn weekday_short_label(&self, weekday: Weekday, _locale: &Locale) -> String {
+        match weekday {
+            Weekday::Sunday => String::from("Su"),
+            Weekday::Monday => String::from("Mo"),
+            Weekday::Tuesday => String::from("Tu"),
+            Weekday::Wednesday => String::from("We"),
+            Weekday::Thursday => String::from("Th"),
+            Weekday::Friday => String::from("Fr"),
+            Weekday::Saturday => String::from("Sa"),
+        }
+    }
+
+    /// Long weekday label (wide format): `Monday`, `Tuesday`, ...
+    fn weekday_long_label(&self, weekday: Weekday, _locale: &Locale) -> String {
+        match weekday {
+            Weekday::Sunday => String::from("Sunday"),
+            Weekday::Monday => String::from("Monday"),
+            Weekday::Tuesday => String::from("Tuesday"),
+            Weekday::Wednesday => String::from("Wednesday"),
+            Weekday::Thursday => String::from("Thursday"),
+            Weekday::Friday => String::from("Friday"),
+            Weekday::Saturday => String::from("Saturday"),
+        }
+    }
+
+    /// Full month name in the locale.
+    fn month_long_name(&self, month: u8, _locale: &Locale) -> String {
+        match month {
+            1 => String::from("January"),
+            2 => String::from("February"),
+            3 => String::from("March"),
+            4 => String::from("April"),
+            5 => String::from("May"),
+            6 => String::from("June"),
+            7 => String::from("July"),
+            8 => String::from("August"),
+            9 => String::from("September"),
+            10 => String::from("October"),
+            11 => String::from("November"),
+            12 => String::from("December"),
+            _ => String::from("Unknown"),
+        }
+    }
+
+    /// Localized day-period label.
+    fn day_period_label(&self, is_pm: bool, _locale: &Locale) -> String {
+        if is_pm {
+            String::from("PM")
+        } else {
+            String::from("AM")
+        }
+    }
+
+    /// Reverse-maps a typed character to AM/PM.
+    fn day_period_from_char(&self, ch: char, _locale: &Locale) -> Option<bool> {
+        match ch.to_ascii_lowercase() {
+            'a' => Some(false),
+            'p' => Some(true),
+            _ => None,
+        }
+    }
+
+    /// Formats a numeric segment with locale-appropriate zero-padding.
+    fn format_segment_digits(
+        &self,
+        value: u32,
+        min_digits: NonZero<u8>,
+        _locale: &Locale,
+    ) -> String {
+        format!("{value:0width$}", width = usize::from(min_digits.get()))
+    }
+
+    /// Maximum number of months in a year for the given calendar and year.
+    fn max_months_in_year(&self, calendar: &CalendarSystem, year: i32, _era: Option<&str>) -> u8 {
+        if let Some(months) = calendar::bounded_months_in_year(*calendar, year, _era) {
+            return months;
+        }
+
+        #[cfg(feature = "icu4x")]
+        if let Some(months) = calendar::internal::months_in_year(year, *calendar, _era) {
+            return months;
+        }
+
+        if matches!(calendar, CalendarSystem::Chinese | CalendarSystem::Dangi) {
+            // East Asian leap months require calendar data. Without ICU4X, use
+            // the non-leap baseline so we reject impossible month 13 values
+            // instead of accepting them in every year.
+            return 12;
+        }
+
+        match calendar {
+            CalendarSystem::Hebrew => {
+                let cycle_year = year.rem_euclid(19);
+                if [3, 6, 8, 11, 14, 17, 0].contains(&cycle_year) {
+                    13
+                } else {
+                    12
+                }
+            }
+            CalendarSystem::Ethiopic
+            | CalendarSystem::EthiopicAmeteAlem
+            | CalendarSystem::Coptic => 13,
+            _ => 12,
+        }
+    }
+
+    /// Days in a specific month for the given calendar, year, and month.
+    fn days_in_month(
+        &self,
+        _calendar: &CalendarSystem,
+        year: i32,
+        month: u8,
+        _era: Option<&str>,
+    ) -> u8 {
+        if let Some(days) = calendar::bounded_days_in_month(*_calendar, year, month, _era) {
+            return days;
+        }
+
+        #[cfg(feature = "icu4x")]
+        if let Some(days) = calendar::internal::days_in_month(year, month, *_calendar, _era) {
+            return days;
+        }
+
+        if matches!(_calendar, CalendarSystem::Japanese) {
+            return 0;
+        }
+
+        if matches!(
+            _calendar,
+            CalendarSystem::Coptic | CalendarSystem::Ethiopic | CalendarSystem::EthiopicAmeteAlem
+        ) {
+            return calendar::coptic_like_days_in_month(year, month);
+        }
+
+        calendar::gregorian_days_in_month(year, month)
+    }
+
+    /// Returns the calendar's default era when callers omit one.
+    fn default_era(&self, calendar: &CalendarSystem) -> Option<Era> {
+        calendar::default_era_for(*calendar)
+    }
+
+    /// Returns the maximum year value in the date's current era, if bounded.
+    fn years_in_era(&self, date: &CalendarDate) -> Option<i32> {
+        calendar::years_in_era(date)
+    }
+
+    /// Returns the minimum allowed month ordinal for the date's current year.
+    fn minimum_month_in_year(&self, date: &CalendarDate) -> u8 {
+        calendar::minimum_month_in_year(date)
+    }
+
+    /// Returns the minimum allowed day ordinal for the date's current month.
+    fn minimum_day_in_month(&self, date: &CalendarDate) -> u8 {
+        calendar::minimum_day_in_month(date)
+    }
+
+    /// Preferred hour cycle for the locale.
+    fn hour_cycle(&self, locale: &Locale) -> HourCycle {
+        match locale.language() {
+            "en" | "ko" => HourCycle::H12,
+            _ => HourCycle::H23,
+        }
+    }
+
+    /// First day of the week for the locale.
+    fn first_day_of_week(&self, locale: &Locale) -> Weekday {
+        WeekInfo::for_locale(locale).first_day
+    }
+
+    /// Converts a public calendar date into the target calendar system.
+    fn convert_date(&self, date: &CalendarDate, target: CalendarSystem) -> CalendarDate {
+        if date.calendar == target {
+            return date.clone();
+        }
+
+        panic!(
+            "StubIcuProvider does not support non-Gregorian calendar conversion; use Icu4xProvider"
+        );
+    }
+}
 
 /// English-only stub provider for tests and non-ICU4X builds.
 ///
@@ -202,77 +393,12 @@ pub struct StubIcuProvider;
 
 impl IcuProvider for StubIcuProvider {}
 
-// ────────────────────────────────────────────────────────────────────
-// Placeholder date/time types
-// ────────────────────────────────────────────────────────────────────
-
-/// A calendar date (year, month, day).
-///
-/// This is a placeholder type that will be backed by ICU4X when the full
-/// internationalization layer is implemented. Components use this in
-/// [`FieldValue::Date`](../ars_forms/enum.FieldValue.html) for date fields.
-#[derive(Clone, Debug, PartialEq)]
-pub struct CalendarDate {
-    _private: (),
-}
-
-impl CalendarDate {
-    /// Returns the date formatted as an ISO 8601 string (`"YYYY-MM-DD"`).
-    ///
-    /// Placeholder implementation — returns an empty string until the full
-    /// ICU4X-backed date type is available.
-    #[must_use]
-    pub const fn to_iso8601(&self) -> String {
-        String::new()
-    }
-}
-
-/// A time of day (hours, minutes, seconds).
-///
-/// This is a placeholder type that will be backed by ICU4X when the full
-/// internationalization layer is implemented. Components use this in
-/// [`FieldValue::Time`](../ars_forms/enum.FieldValue.html) for time fields.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Time {
-    _private: (),
-}
-
-impl Time {
-    /// Returns the time formatted as an ISO 8601 string (`"HH:MM:SS"`).
-    ///
-    /// Placeholder implementation — returns an empty string until the full
-    /// ICU4X-backed time type is available.
-    #[must_use]
-    pub const fn to_iso8601(&self) -> String {
-        String::new()
-    }
-}
-
-/// A range of two calendar dates (start and end).
-///
-/// This is a placeholder type that will be backed by ICU4X when the full
-/// internationalization layer is implemented. Components use this in
-/// [`FieldValue::DateRange`](../ars_forms/enum.FieldValue.html) for date range fields.
-#[derive(Clone, Debug, PartialEq)]
-pub struct DateRange {
-    _private: (),
-}
-
-impl DateRange {
-    /// Returns the date range formatted as an ISO 8601 interval string
-    /// (`"YYYY-MM-DD/YYYY-MM-DD"`).
-    ///
-    /// Placeholder implementation — returns an empty string until the full
-    /// ICU4X-backed date range type is available.
-    #[must_use]
-    pub const fn to_iso8601(&self) -> String {
-        String::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use alloc::{string::ToString, vec, vec::Vec};
+    use core::num::NonZero;
+    #[cfg(feature = "std")]
+    use std::panic::catch_unwind;
 
     use super::*;
 
@@ -533,6 +659,169 @@ mod tests {
         }
     }
 
+    #[test]
+    fn locale_wrapper_helpers_delegate_to_stub_provider_defaults() {
+        let locale = Locale::parse("en-US").expect("en-US is valid");
+        let provider = StubIcuProvider;
+
+        assert_eq!(locale.first_day_of_week(&provider), Weekday::Sunday);
+        assert_eq!(locale.hour_cycle(&provider), HourCycle::H12);
+    }
+
+    #[test]
+    fn orientation_default_is_horizontal() {
+        assert_eq!(Orientation::default(), Orientation::Horizontal);
+    }
+
+    #[test]
+    fn stub_icu_provider_default_helpers_cover_fallback_paths() {
+        let provider = StubIcuProvider;
+        let locale = Locale::parse("en-US").expect("en-US is valid");
+
+        for (weekday, short, long) in [
+            (Weekday::Sunday, "Su", "Sunday"),
+            (Weekday::Monday, "Mo", "Monday"),
+            (Weekday::Tuesday, "Tu", "Tuesday"),
+            (Weekday::Wednesday, "We", "Wednesday"),
+            (Weekday::Thursday, "Th", "Thursday"),
+            (Weekday::Friday, "Fr", "Friday"),
+            (Weekday::Saturday, "Sa", "Saturday"),
+        ] {
+            assert_eq!(provider.weekday_short_label(weekday, &locale), short);
+            assert_eq!(provider.weekday_long_label(weekday, &locale), long);
+        }
+
+        for (month, expected) in [
+            (1, "January"),
+            (2, "February"),
+            (3, "March"),
+            (4, "April"),
+            (5, "May"),
+            (6, "June"),
+            (7, "July"),
+            (8, "August"),
+            (9, "September"),
+            (10, "October"),
+            (11, "November"),
+            (12, "December"),
+            (13, "Unknown"),
+        ] {
+            assert_eq!(provider.month_long_name(month, &locale), expected);
+        }
+
+        assert_eq!(provider.day_period_label(false, &locale), "AM");
+        assert_eq!(provider.day_period_label(true, &locale), "PM");
+        assert_eq!(provider.day_period_from_char('a', &locale), Some(false));
+        assert_eq!(provider.day_period_from_char('A', &locale), Some(false));
+        assert_eq!(provider.day_period_from_char('p', &locale), Some(true));
+        assert_eq!(provider.day_period_from_char('P', &locale), Some(true));
+        assert_eq!(provider.day_period_from_char('x', &locale), None);
+
+        assert_eq!(
+            provider.format_segment_digits(7, NonZero::new(2).expect("nonzero"), &locale),
+            "07"
+        );
+
+        assert_eq!(
+            provider.max_months_in_year(&CalendarSystem::Hebrew, 5784, None),
+            13
+        );
+        assert_eq!(
+            provider.max_months_in_year(&CalendarSystem::Hebrew, 5785, None),
+            12
+        );
+        #[cfg(feature = "icu4x")]
+        assert_eq!(
+            provider.max_months_in_year(&CalendarSystem::Dangi, 2024, None),
+            calendar::internal::months_in_year(2024, CalendarSystem::Dangi, None)
+                .expect("ICU4X should resolve Dangi month counts")
+        );
+        #[cfg(not(feature = "icu4x"))]
+        assert_eq!(
+            provider.max_months_in_year(&CalendarSystem::Dangi, 2024, None),
+            12
+        );
+        assert_eq!(
+            provider.max_months_in_year(&CalendarSystem::Gregorian, 2024, None),
+            12
+        );
+
+        assert_eq!(
+            provider.days_in_month(&CalendarSystem::Gregorian, 2024, 2, None),
+            29
+        );
+        assert_eq!(
+            provider.days_in_month(&CalendarSystem::Gregorian, 2023, 2, None),
+            28
+        );
+        assert_eq!(
+            provider.days_in_month(&CalendarSystem::Japanese, 1, 5, Some("reiwa")),
+            31
+        );
+
+        assert_eq!(
+            provider.default_era(&CalendarSystem::Japanese),
+            Some(Era {
+                code: "reiwa".to_string(),
+                display_name: "Reiwa".to_string(),
+            })
+        );
+        assert_eq!(provider.default_era(&CalendarSystem::Gregorian), None);
+
+        let japanese = CalendarDate::new(
+            &provider,
+            CalendarSystem::Japanese,
+            Some(Era {
+                code: "heisei".to_string(),
+                display_name: "Heisei".to_string(),
+            }),
+            1,
+            1,
+            8,
+        )
+        .expect("Japanese date should validate");
+        assert_eq!(provider.years_in_era(&japanese), Some(31));
+        assert_eq!(provider.minimum_month_in_year(&japanese), 1);
+        assert_eq!(provider.minimum_day_in_month(&japanese), 8);
+
+        let gregorian = CalendarDate::new(&provider, CalendarSystem::Gregorian, None, 2024, 3, 15)
+            .expect("Gregorian date should validate");
+        assert_eq!(provider.minimum_month_in_year(&gregorian), 1);
+        assert_eq!(provider.minimum_day_in_month(&gregorian), 1);
+
+        assert_eq!(provider.hour_cycle(&locale), HourCycle::H12);
+        let german = Locale::parse("de-DE").expect("de-DE is valid");
+        assert_eq!(provider.hour_cycle(&german), HourCycle::H23);
+        assert_eq!(provider.first_day_of_week(&locale), Weekday::Sunday);
+        assert_eq!(provider.first_day_of_week(&german), Weekday::Monday);
+
+        assert_eq!(
+            provider.convert_date(&gregorian, CalendarSystem::Gregorian),
+            gregorian
+        );
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn stub_icu_provider_convert_date_panics_for_non_identity_conversions() {
+        let provider = StubIcuProvider;
+        let gregorian = CalendarDate::new(&provider, CalendarSystem::Gregorian, None, 2024, 3, 15)
+            .expect("Gregorian date should validate");
+
+        let panic = catch_unwind(|| provider.convert_date(&gregorian, CalendarSystem::Japanese))
+            .expect_err("stub provider should panic for unsupported conversion");
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&'static str>().copied())
+            .expect("panic payload should be a string");
+
+        assert_eq!(
+            message,
+            "StubIcuProvider does not support non-Gregorian calendar conversion; use Icu4xProvider"
+        );
+    }
+
     // ── Weekday tests ──────────────────────────────────────────────
 
     #[test]
@@ -603,17 +892,6 @@ mod tests {
         for (input, expected) in cases {
             assert_eq!(Weekday::from_icu_weekday(input), expected);
         }
-    }
-
-    #[test]
-    fn placeholder_iso_helpers_return_empty_strings() {
-        let date = CalendarDate { _private: () };
-        let time = Time { _private: () };
-        let range = DateRange { _private: () };
-
-        assert_eq!(date.to_iso8601(), "");
-        assert_eq!(time.to_iso8601(), "");
-        assert_eq!(range.to_iso8601(), "");
     }
 
     // ── BiDi isolation tests ───────────────────────────────────────

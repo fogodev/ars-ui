@@ -11,7 +11,7 @@ use super::Error;
 pub(crate) enum Group {
     /// `ars-core` feature combinations (15 combos).
     Core,
-    /// `ars-i18n` feature combinations (11 combos + wasm32 cross-check).
+    /// `ars-i18n` feature combinations (6 combos + wasm32 cross-check).
     I18n,
     /// `ars-a11y`, `ars-interactions`, `ars-collections`, `ars-forms`, `ars-dom`
     /// combos (14 combos + wasm32 cross-check).
@@ -96,49 +96,52 @@ static CORE_COMBOS: &[Combo] = &[
 
 static I18N_COMBOS: &[Combo] = &[
     Combo {
-        args: &[
-            "-p",
-            "ars-i18n",
-            "--no-default-features",
-            "--features",
-            "gregorian,icu4x",
-        ],
-    },
-    Combo {
-        args: &["-p", "ars-i18n", "--features", "gregorian,hebrew"],
-    },
-    Combo {
-        args: &["-p", "ars-i18n", "--features", "gregorian,islamic"],
-    },
-    Combo {
-        args: &["-p", "ars-i18n", "--features", "gregorian,hebrew,islamic"],
-    },
-    Combo {
-        args: &["-p", "ars-i18n", "--features", "all-calendars"],
-    },
-    Combo {
-        args: &["-p", "ars-i18n", "--features", "buddhist"],
-    },
-    Combo {
-        args: &["-p", "ars-i18n", "--features", "japanese"],
-    },
-    Combo {
-        args: &[
-            "-p",
-            "ars-i18n",
-            "--no-default-features",
-            "--features",
-            "japanese-extended,icu4x",
-        ],
-    },
-    Combo {
-        args: &["-p", "ars-i18n", "--features", "persian"],
-    },
-    Combo {
-        args: &["-p", "ars-i18n", "--features", "chinese"],
-    },
-    Combo {
         args: &["-p", "ars-i18n", "--no-default-features"],
+    },
+    Combo {
+        args: &[
+            "-p",
+            "ars-i18n",
+            "--no-default-features",
+            "--features",
+            "std",
+        ],
+    },
+    Combo {
+        args: &[
+            "-p",
+            "ars-i18n",
+            "--no-default-features",
+            "--features",
+            "icu4x",
+        ],
+    },
+    Combo {
+        args: &[
+            "-p",
+            "ars-i18n",
+            "--no-default-features",
+            "--features",
+            "std,icu4x",
+        ],
+    },
+    Combo {
+        args: &[
+            "-p",
+            "ars-i18n",
+            "--no-default-features",
+            "--features",
+            "web-intl",
+        ],
+    },
+    Combo {
+        args: &[
+            "-p",
+            "ars-i18n",
+            "--no-default-features",
+            "--features",
+            "std,web-intl",
+        ],
     },
 ];
 
@@ -354,8 +357,8 @@ mod tests {
     }
 
     #[test]
-    fn i18n_has_11_combos_and_1_cross() {
-        assert_eq!(I18N_COMBOS.len(), 11);
+    fn i18n_has_6_combos_and_1_cross() {
+        assert_eq!(I18N_COMBOS.len(), 6);
         assert_eq!(I18N_CROSS_CHECKS.len(), 1);
     }
 
@@ -382,7 +385,7 @@ mod tests {
     fn group_def_returns_correct_data() {
         let cases = &[
             (Group::Core, 15, 0),
-            (Group::I18n, 11, 1),
+            (Group::I18n, 6, 1),
             (Group::Subsystems, 14, 1),
             (Group::Leptos, 3, 0),
             (Group::Dioxus, 4, 1),

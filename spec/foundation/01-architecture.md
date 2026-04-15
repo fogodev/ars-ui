@@ -65,30 +65,17 @@ embedded-css = []                 # Opt-in embedded ars-base.css constant for as
 
 # ars-i18n/Cargo.toml
 [features]
-default = ["gregorian", "icu4x"]
-gregorian = []                    # Always included
-buddhist = []
-japanese = []
-japanese-extended = []
-hebrew = []
-islamic = []
-islamic-civil = []
-islamic-umm-al-qura = []
-persian = []
-ethiopic = []
-ethiopic-amete-alem = []
-indian = []
-chinese = []
-coptic = []
-dangi = []
-roc = []
-all-calendars = ["buddhist", "japanese", "japanese-extended", "hebrew", "islamic", "islamic-civil", "islamic-umm-al-qura", "persian", "ethiopic", "ethiopic-amete-alem", "indian", "chinese", "coptic", "dangi", "roc"]
+default = ["std", "icu4x"]
+std = []
 icu4x = ["dep:icu"]            # Rust-native ICU4X backend (default for non-WASM targets)
 web-intl = ["dep:js-sys"]      # Browser Intl API via wasm-bindgen (WASM-only)
 
 # Enforce mutual exclusion at compile time:
 # #[cfg(all(feature = "icu4x", feature = "web-intl"))]
 # compile_error!("features `icu4x` and `web-intl` are mutually exclusive");
+
+# Calendar support is unconditional at the public API layer.
+# Binary-size-sensitive builds prune backend data, not public calendar types.
 
 # ars-interactions/Cargo.toml
 [features]

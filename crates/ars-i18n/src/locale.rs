@@ -4,7 +4,7 @@ use core::{cmp::Ordering, fmt};
 use icu::locale::{LanguageIdentifier, Locale as IcuLocale};
 use icu_provider::DataLocale;
 
-use crate::{ResolvedDirection, Weekday};
+use crate::{HourCycle, IcuProvider, ResolvedDirection, Weekday};
 
 /// A BCP 47 locale identifier.
 ///
@@ -114,6 +114,18 @@ impl Locale {
             .get(&icu::locale::extensions::unicode::key!("fw"))
             .and_then(|value| value.as_single_subtag())
             .and_then(|subtag| Weekday::from_bcp47_fw(subtag.as_str()))
+    }
+
+    /// Returns the locale's first day of the week through the active provider.
+    #[must_use]
+    pub fn first_day_of_week(&self, provider: &dyn IcuProvider) -> Weekday {
+        provider.first_day_of_week(self)
+    }
+
+    /// Returns the locale's preferred hour cycle through the active provider.
+    #[must_use]
+    pub fn hour_cycle(&self, provider: &dyn IcuProvider) -> HourCycle {
+        provider.hour_cycle(self)
     }
 
     /// Converts this locale to the ICU4X provider locale type.
@@ -314,7 +326,19 @@ mod tests {
     use icu::locale::LanguageIdentifier;
 
     use super::{Locale, RTL_SCRIPTS};
-    use crate::{ResolvedDirection, Weekday};
+    use crate::{HourCycle, IcuProvider, ResolvedDirection, Weekday};
+
+    struct TestLocaleProvider;
+
+    impl IcuProvider for TestLocaleProvider {
+        fn first_day_of_week(&self, _locale: &Locale) -> Weekday {
+            Weekday::Thursday
+        }
+
+        fn hour_cycle(&self, _locale: &Locale) -> HourCycle {
+            HourCycle::H11
+        }
+    }
 
     #[test]
     fn locale_accessors_roundtrip_with_extensions() {
@@ -362,8 +386,42 @@ mod tests {
     }
 
     #[test]
+    fn locale_provider_backed_helpers_delegate() {
+        let locale = Locale::parse("en-US").expect("locale should parse");
+        let provider = TestLocaleProvider;
+
+        assert_eq!(locale.first_day_of_week(&provider), Weekday::Thursday);
+        assert_eq!(locale.hour_cycle(&provider), HourCycle::H11);
+    }
+
+    #[test]
     fn rtl_script_list_contains_core_scripts() {
         assert!(RTL_SCRIPTS.contains(&"Arab"));
         assert!(RTL_SCRIPTS.contains(&"Hebr"));
+    }
+}
+
+#[cfg(all(
+    test,
+    feature = "web-intl",
+    target_arch = "wasm32",
+    not(feature = "icu4x")
+))]
+mod web_intl_tests {
+    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+    use super::Locale;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test]
+    fn numeric_ordering_extension_handles_boolean_forms() {
+        let enabled = Locale::parse("en-u-kn").expect("locale should parse");
+        let disabled = Locale::parse("en-u-kn-false").expect("locale should parse");
+        let none = Locale::parse("en-US").expect("locale should parse");
+
+        assert_eq!(enabled.numeric_ordering_extension(), Some(true));
+        assert_eq!(disabled.numeric_ordering_extension(), Some(false));
+        assert_eq!(none.numeric_ordering_extension(), None);
     }
 }

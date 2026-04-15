@@ -55,10 +55,8 @@ mod tests {
     fn parse_i18n_feature_lists_splits_mutually_exclusive_backends() {
         let content = r#"
 [features]
-default = ["std", "gregorian", "icu4x"]
+default = ["std", "icu4x"]
 std = []
-gregorian = []
-buddhist = []
 icu4x = []
 web-intl = []
 "#;
@@ -67,8 +65,8 @@ web-intl = []
             parse_i18n_feature_lists(content, Path::new("crates/ars-i18n/Cargo.toml"))
                 .expect("feature parsing should succeed");
 
-        assert_eq!(icu4x, "buddhist,gregorian,std,icu4x");
-        assert_eq!(web_intl, "buddhist,gregorian,std,web-intl");
+        assert_eq!(icu4x, "std,icu4x");
+        assert_eq!(web_intl, "std,web-intl");
     }
 
     #[test]

@@ -56,7 +56,7 @@ impl CalendarDate {
         }
         // If both have eras and they differ, raw comparison is unreliable
         if let (Some(ref a), Some(ref b)) = (&self.era, &other.era) {
-            if a != b {
+            if a.code != b.code {
                 return None; // caller must use IcuProvider epoch-day conversion
             }
         }
@@ -69,6 +69,14 @@ impl CalendarDate {
     }
 
     pub fn new_gregorian(year: i32, month: NonZero<u8>, day: NonZero<u8>) -> Self {
+        let month_value = month.get();
+        let day_value = day.get();
+        assert!(year >= 1, "Gregorian dates require a year of at least 1");
+        assert!((1..=12).contains(&month_value), "Gregorian dates require a month in the range 1..=12");
+        assert!(
+            day_value <= gregorian_days_in_month(year, month_value),
+            "Gregorian dates require a valid day for the given month"
+        );
         Self {
             calendar: CalendarSystem::Gregorian,
             era: None,
@@ -78,8 +86,8 @@ impl CalendarDate {
         }
     }
 
-    /// Validated constructor. Returns `None` if month or day is out of range
-    /// for the given calendar system.
+    /// Validated constructor. Returns `None` if the date is outside the valid
+    /// range for the given calendar system and era.
     ///
     /// Non-Gregorian calendars have different month counts and day-per-month
     /// rules. For example:
@@ -96,21 +104,48 @@ impl CalendarDate {
         month: u8,
         day: u8,
     ) -> Option<Self> {
+        // Multi-era calendars follow the React Aria / Temporal-style model:
+        // when the caller omits the era, the provider resolves the current era.
+        let era = era.or_else(|| provider.default_era(&calendar));
         let era_code = era.as_ref().map(|e| e.code.as_str());
+        if year < 1 || !era_code_is_valid(calendar, era_code) {
+            return None;
+        }
         let max_month = max_months_in_year(provider, calendar, year, era_code);
         if !(1..=max_month).contains(&month) {
+            return None;
+        }
+        let validated_month = NonZero::new(month)?;
+        let provisional = Self {
+            calendar,
+            era: era.clone(),
+            year,
+            month: validated_month,
+            day: NonZero::new(1).expect("one is non-zero"),
+        };
+        if let Some(max_year) = provider.years_in_era(&provisional) {
+            if provisional.year > max_year {
+                return None;
+            }
+        }
+        if month < provider.minimum_month_in_year(&provisional) {
             return None;
         }
         let max_day = days_in_month_for_calendar(provider, calendar, year, month, era_code);
         if !(1..=max_day).contains(&day) {
             return None;
         }
-        // Validated: month ∈ [1, max_month], day ∈ [1, max_day]
-        Some(Self {
-            calendar, era, year,
-            month: NonZero::new(month).expect("validated 1-based"),
+        let candidate = Self {
+            calendar,
+            era,
+            year,
+            month: validated_month,
             day: NonZero::new(day).expect("validated 1-based"),
-        })
+        };
+        if day < provider.minimum_day_in_month(&candidate) {
+            return None;
+        }
+        Some(candidate)
     }
 
     /// String representation in `YYYY-MM-DD` format using raw field values.
@@ -139,45 +174,72 @@ impl CalendarDate {
         days_in_month_for_calendar(provider, self.calendar, self.year, self.month.get(), era_code)
     }
 
-    /// Add months to a date. Returns `None` if the result crosses a year boundary
-    /// on an era-based calendar (where the era may change). In that case, callers
-    /// should use `IcuProvider::convert_date()` to round-trip through ISO for correct
-    /// era resolution.
+    /// Add months to a date within the same calendar and era.
+    ///
+    /// React Aria-inspired behavior:
+    /// - omitted eras are resolved through `IcuProvider::default_era()`
+    /// - same-era year rollover is allowed (e.g. Heisei 1-12 -> Heisei 2-01)
+    /// - day clamping within a valid start-of-era month clamps forward to the
+    ///   minimum valid day
+    /// - cross-era rollover returns `None`; callers should use
+    ///   `IcuProvider::convert_date()` to round-trip through ISO and re-resolve era
     pub fn add_months(&self, provider: &dyn IcuProvider, n: i32) -> Option<CalendarDate> {
-        let mut year = self.year;
-        let mut month = self.month.get() as i32 + n;
-        loop {
-            // Use the original era code for max_months_in_year. If a year boundary crosses into
-            // a new era (e.g., Japanese calendar era transitions), we bail at line 152 below
-            // and require the caller to use IcuProvider::convert_date() instead.
-            let era_code = self.era.as_ref().map(|e| e.code.as_str());
-            let max = provider.max_months_in_year(&self.calendar, year, era_code) as i32;
-            if month <= max { break; }
-            month -= max;
-            year += 1;
-        }
-        while month < 1 {
-            year -= 1;
-            let era_code = self.era.as_ref().map(|e| e.code.as_str());
-            let max = provider.max_months_in_year(&self.calendar, year, era_code) as i32;
-            month += max;
-        }
-        let era_code = self.era.as_ref().map(|e| e.code.as_str());
-        // CalendarSystem::has_custom_eras() is defined in 04-internationalization.md §5.2
-        if self.calendar.has_custom_eras() && year != self.year {
-            // Era may have changed; caller must use IcuProvider::convert_date()
-            return None;
-        }
-        let month_u8 = month as u8;
-        let max_day = days_in_month_for_calendar(provider, self.calendar, year, month_u8, era_code);
-        let clamped_day = self.day.get().min(max_day);
-        Some(CalendarDate {
+        let era = self.era.clone().or_else(|| provider.default_era(&self.calendar));
+        let era_code = era.as_ref().map(|e| e.code.as_str());
+        let (year, month_u8) = if let Some(months_per_year) = fixed_months_per_year(self.calendar) {
+            let total_month_index = i64::from(self.year - 1)
+                .checked_mul(i64::from(months_per_year))?
+                .checked_add(i64::from(self.month.get() - 1))?
+                .checked_add(i64::from(n))?;
+            let normalized_year = total_month_index.div_euclid(i64::from(months_per_year)).checked_add(1)?;
+            let normalized_month = total_month_index.rem_euclid(i64::from(months_per_year));
+            if normalized_year < 1 {
+                return None;
+            }
+            (
+                i32::try_from(normalized_year).ok()?,
+                u8::try_from(normalized_month.checked_add(1)?).ok()?,
+            )
+        } else {
+            let mut year = i64::from(self.year);
+            let mut month = i64::from(self.month.get()).checked_add(i64::from(n))?;
+            loop {
+                let current_year = i32::try_from(year).ok()?;
+                let max = i64::from(provider.max_months_in_year(&self.calendar, current_year, era_code));
+                if month <= max { break; }
+                month -= max;
+                year = year.checked_add(1)?;
+            }
+            while month < 1 {
+                year = year.checked_sub(1)?;
+                let current_year = i32::try_from(year).ok()?;
+                let max = i64::from(provider.max_months_in_year(&self.calendar, current_year, era_code));
+                month += max;
+            }
+            (
+                i32::try_from(year).ok()?,
+                u8::try_from(month).expect("validated month count fits in u8"),
+            )
+        };
+        let mut candidate = CalendarDate {
             year,
             month: NonZero::new(month_u8).expect("month result is 1-based"),
-            day: NonZero::new(clamped_day).expect("day clamped to valid range"),
+            day: self.day,
             calendar: self.calendar,
-            era: self.era.clone(),
-        })
+            era: era.clone(),
+        };
+        let min_month = provider.minimum_month_in_year(&candidate);
+        if month_u8 < min_month {
+            return None;
+        }
+        let max_day = days_in_month_for_calendar(provider, self.calendar, year, month_u8, era_code);
+        let mut clamped_day = self.day.get().min(max_day);
+        candidate.day = NonZero::new(clamped_day).expect("day clamped to valid range");
+        let min_day = provider.minimum_day_in_month(&candidate);
+        if clamped_day < min_day {
+            clamped_day = min_day;
+        }
+        CalendarDate::new(provider, self.calendar, era, year, month_u8, clamped_day)
     }
 
     /// Add days (Gregorian-only). Returns None for non-Gregorian calendars.
@@ -187,7 +249,8 @@ impl CalendarDate {
             return None;
         }
         let jdn = self.to_jdn() + n as i64;
-        Some(Self::from_jdn(jdn, self.calendar))
+        let shifted = Self::from_jdn(jdn, self.calendar);
+        (shifted.year >= 1).then_some(shifted)
     }
 
     /// Add days for any calendar system, delegating to the ICU provider for
@@ -195,14 +258,15 @@ impl CalendarDate {
     /// `IcuProvider` for universal calendar support.
     pub fn add_days_with_provider(&self, provider: &dyn IcuProvider, n: i32) -> CalendarDate {
         if self.calendar == CalendarSystem::Gregorian {
-            // Fast path: direct JDN arithmetic
-            let jdn = self.to_jdn() + n as i64;
-            Self::from_jdn(jdn, self.calendar)
+            self
+                .add_days(n)
+                .expect("Gregorian day arithmetic must remain within the supported year range")
         } else {
             // Convert to Gregorian, add days, convert back
             let greg = provider.convert_date(self, CalendarSystem::Gregorian);
-            let jdn = greg.to_jdn() + n as i64;
-            let greg_result = Self::from_jdn(jdn, CalendarSystem::Gregorian);
+            let greg_result = greg
+                .add_days(n)
+                .expect("provider-backed day arithmetic must remain within the supported year range");
             provider.convert_date(&greg_result, self.calendar)
         }
     }
@@ -262,12 +326,13 @@ impl CalendarDate {
     pub fn weekday(&self) -> Weekday {
         debug_assert!(self.calendar == CalendarSystem::Gregorian, "weekday() is Gregorian-only");
         // Tomohiko Sakamoto's algorithm for Gregorian.
-        let y = if self.month.get() < 3 { self.year - 1 } else { self.year };
-        let m = self.month.get() as i32;
-        let d = self.day.get() as i32;
-        static OFFSETS: [i32; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
-        let w = (y + y.div_euclid(4) - y.div_euclid(100) + y.div_euclid(400) + OFFSETS[(m-1) as usize] + d) % 7;
-        Weekday::from_sunday_zero(((w + 7) % 7) as u8)
+        let year = if self.month.get() < 3 { self.year - 1 } else { self.year };
+        let month_index = usize::from(self.month.get() - 1);
+        let day = i64::from(self.day.get());
+        static OFFSETS: [i64; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+        let year = i64::from(year);
+        let weekday = year + year.div_euclid(4) - year.div_euclid(100) + year.div_euclid(400) + OFFSETS[month_index] + day;
+        Weekday::from_sunday_zero(weekday.rem_euclid(7) as u8)
     }
 }
 
@@ -315,6 +380,17 @@ fn gregorian_days_in_month(year: i32, month: u8) -> u8 {
 /// English-only logic (see `04-internationalization.md` §9.5).
 fn max_months_in_year(provider: &dyn IcuProvider, calendar: CalendarSystem, year: i32, era: Option<&str>) -> u8 {
     provider.max_months_in_year(&calendar, year, era)
+}
+
+fn era_code_is_valid(calendar: CalendarSystem, era: Option<&str>) -> bool {
+    match calendar {
+        CalendarSystem::Japanese => era.is_some_and(|era_code| {
+            CalendarSystem::japanese_eras()
+                .iter()
+                .any(|candidate| candidate.name.eq_ignore_ascii_case(era_code))
+        }),
+        _ => era.is_none(),
+    }
 }
 
 /// Days in a given month for the given calendar system.
@@ -384,7 +460,6 @@ pub enum CalendarSystem {
     Gregorian,
     Buddhist,
     Japanese,
-    JapaneseExtended,
     Hebrew,
     Islamic,          // Maps to ICU4X 2.x `HijriSimulatedMecca`
     IslamicCivil,     // Maps to ICU4X 2.x `HijriTabularTypeIIFriday`
@@ -400,7 +475,112 @@ pub enum CalendarSystem {
 }
 ```
 
-#### 1.1.1 Calendar System Validation
+#### 1.1.1 Typed Calendar Views
+
+`CalendarDate` remains the dynamic boundary type because locale resolution,
+formatting, serialization, and provider conversion all operate on runtime
+calendar values. Calendar-specific behavior is exposed through a typed wrapper
+that moves those constraints into Rust's type system instead of relying only on
+runtime checks.
+
+```rust
+use core::marker::PhantomData;
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+pub trait CalendarKind: sealed::Sealed + Copy + Clone + Default + 'static {
+    const SYSTEM: CalendarSystem;
+}
+
+pub trait DirectDayArithmetic: CalendarKind {}
+pub trait DirectWeekdayComputation: CalendarKind {}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Gregorian;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Buddhist;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Japanese;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Hebrew;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Islamic;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct IslamicCivil;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct IslamicUmmAlQura;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Persian;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Indian;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Chinese;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Coptic;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Dangi;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Ethiopic;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct EthiopicAmeteAlem;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Roc;
+
+pub struct CalendarTypeError {
+    pub expected: CalendarSystem,
+    pub found: CalendarSystem,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct TypedCalendarDate<C: CalendarKind> {
+    raw: CalendarDate,
+    marker: PhantomData<C>,
+}
+
+impl CalendarDate {
+    pub fn typed<C: CalendarKind>(&self) -> Result<TypedCalendarDate<C>, CalendarTypeError>;
+    pub fn into_typed<C: CalendarKind>(self) -> Result<TypedCalendarDate<C>, CalendarTypeError>;
+    pub fn to_calendar_type<C: CalendarKind>(&self, provider: &dyn IcuProvider) -> TypedCalendarDate<C>;
+}
+
+impl<C: CalendarKind> TypedCalendarDate<C> {
+    pub fn from_raw(raw: CalendarDate) -> Result<Self, CalendarTypeError>;
+    pub fn calendar_system() -> CalendarSystem;
+    pub fn as_raw(&self) -> &CalendarDate;
+    pub fn into_raw(self) -> CalendarDate;
+    pub fn era(&self) -> Option<&Era>;
+    pub fn year(&self) -> i32;
+    pub fn month(&self) -> NonZero<u8>;
+    pub fn day(&self) -> NonZero<u8>;
+    pub fn days_in_month(&self, provider: &dyn IcuProvider) -> u8;
+    pub fn add_months(&self, provider: &dyn IcuProvider, n: i32) -> Option<Self>;
+    pub fn add_days_with_provider(&self, provider: &dyn IcuProvider, n: i32) -> Self;
+    pub fn to_calendar<T: CalendarKind>(&self, provider: &dyn IcuProvider) -> TypedCalendarDate<T>;
+    pub fn compare_within_calendar(&self, other: &Self) -> Option<core::cmp::Ordering>;
+}
+
+impl<C: DirectDayArithmetic> TypedCalendarDate<C> {
+    pub fn add_days(&self, n: i32) -> Option<Self>;
+}
+
+impl<C: DirectWeekdayComputation> TypedCalendarDate<C> {
+    pub fn weekday(&self) -> Weekday;
+}
+
+impl TypedCalendarDate<Gregorian> {
+    pub fn new(year: i32, month: NonZero<u8>, day: NonZero<u8>) -> Self;
+}
+```
+
+`Gregorian` implements both `DirectDayArithmetic` and `DirectWeekdayComputation`.
+No other marker type implements those traits in this issue. This means
+`TypedCalendarDate<Gregorian>` exposes `add_days()` and `weekday()`, while
+other typed calendars must use `add_days_with_provider()` or convert through
+`to_calendar::<Gregorian>()`.
+
+#### 1.1.2 Calendar System Validation
 
 When validating dates against a specific calendar system, `CalendarDate` MUST enforce per-calendar month and day bounds:
 
@@ -484,7 +664,7 @@ When validating dates against a specific calendar system, `CalendarDate` MUST en
 // both dates formatted in the active calendar system for the error message.
 ```
 
-#### 1.1.2 Comprehensive Calendar Validation Reference
+#### 1.1.3 Comprehensive Calendar Validation Reference
 
 The following reference expands on the validation table above with per-calendar day ranges, leap year rules, era/epoch handling, and validation error message codes.
 
