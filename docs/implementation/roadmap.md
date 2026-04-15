@@ -50,6 +50,8 @@ Exit criteria:
 - each subsystem has a bounded set of unit and integration tests
 - adapter crates consume shared primitives instead of copy-pasting framework-local logic
 
+Status (2026-04-14): Collections foundation (ars-collections) is 90% complete — 464 tests, 99.47% line coverage. Core types, traits, selection, navigation, typeahead, async, virtualization, tree, filter/sort, and collation are implemented. Four tasks remain: mutable wrappers (#547), announcements + OnAction (#548), DnD integration (#549), and coverage hardening (#550) — 12 pts total under Epic #53 Wave 5.
+
 ### Phase 3: Testing platform
 
 Outcome:

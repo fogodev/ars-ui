@@ -10,18 +10,18 @@ The project needs a fully stable foundation before component work starts. Compon
 
 ### What is built (357 tests passing)
 
-| Crate              | LOC   | Status   | Key surface                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ------------------ | ----- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ars-core`         | 4,306 | Solid    | Machine, Service, TransitionPlan, PendingEffect, Bindable, ConnectApi, ComponentPart, AttrMap/AttrValue/UserAttrs, StyleStrategy, Callback, WeakSend, PlatformEffects, Provider (ColorMode), companion CSS                                                                                                                                                                                                                 |
-| `ars-derive`       | 535   | Complete | HasId, ComponentPart proc macros with error tests                                                                                                                                                                                                                                                                                                                                                                          |
-| `ars-a11y`         | 2,271 | Partial  | AriaRole, AriaAttribute, ComponentIds, ARIA state helpers, FocusScopeBehavior, FocusStrategy, FocusRing. Missing: FocusZone, DomEvent/KeyboardShortcut/Platform, VisuallyHidden, LabelConfig/FieldContext, Announcements, Touch/Mobile, AriaValidator, test helpers                                                                                                                                                        |
-| `ars-forms`        | 4,128 | Partial  | field::State/Value/Context/Descriptors/InputAria, validation::Error/Validator/AsyncValidator, form::Context/Data/Mode, hidden_input, form_submit machine. Missing: built-in validators, ValidatorsBuilder, FormMessages, DebouncedAsyncValidator, Fieldset/Field/Form machines                                                                                                                                             |
-| `ars-interactions` | 3,107 | Partial  | Press, Hover, Focus, FocusWithin, InteractOutside, Dismissable, compose::merge_attrs, LogicalDirection. Missing: LongPress, Move, DnD, Keyboard types                                                                                                                                                                                                                                                                      |
-| `ars-dom`          | 5,880 | Partial  | FocusScope, focus queries, ScrollLockManager, positioning engine (types + compute_position + overflow + VirtualElement), z-index allocator, scroll_into_view, modality manager. Missing: viewport/visualViewport, containing-block detection, auto_update, portal/inert, overlay stack, media queries, URL sanitization, ModalityManager listeners                                                                         |
-| `ars-leptos`       | 1,195 | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, attr_map_to_leptos, use_style_strategy, AdapterCapabilities. Missing: ArsProvider context (#190), reactive props (#190), controlled value helper (#190), emit/emit_map (#191), event mapping (#191), nonce CSS collector (#191), safe event listeners (#191), LiveAnnouncer context bridge (#513)                                                                     |
-| `ars-dioxus`       | 762   | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, attr_map_to_dioxus, use_style_strategy, AdapterCapabilities. Missing: ArsProvider context (#193), reactive props (#193), controlled value helper (#193), emit/emit_map (#194), event mapping (#194), nonce CSS collector (#194), safe event listeners (#194), LiveAnnouncer context bridge (#512), DioxusPlatform (#195), SSR hydration (#196), error boundary (#197) |
-| `ars-collections`  | 28    | Stub     | Selection\<T\> only                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `ars-i18n`         | 1,928 | Partial  | Locale (ICU4X-backed), Direction, Orientation, NumberFormatter, CurrencyCode, BiDi isolation, Weekday, IcuProvider trait (stub), placeholder date/time types                                                                                                                                                                                                                                                               |
+| Crate              | LOC   | Status   | Key surface                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------ | ----- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ars-core`         | 4,306 | Solid    | Machine, Service, TransitionPlan, PendingEffect, Bindable, ConnectApi, ComponentPart, AttrMap/AttrValue/UserAttrs, StyleStrategy, Callback, WeakSend, PlatformEffects, Provider (ColorMode), companion CSS                                                                                                                                                                                                                            |
+| `ars-derive`       | 535   | Complete | HasId, ComponentPart proc macros with error tests                                                                                                                                                                                                                                                                                                                                                                                     |
+| `ars-a11y`         | 2,271 | Partial  | AriaRole, AriaAttribute, ComponentIds, ARIA state helpers, FocusScopeBehavior, FocusStrategy, FocusRing. Missing: FocusZone, DomEvent/KeyboardShortcut/Platform, VisuallyHidden, LabelConfig/FieldContext, Announcements, Touch/Mobile, AriaValidator, test helpers                                                                                                                                                                   |
+| `ars-forms`        | 4,128 | Partial  | field::State/Value/Context/Descriptors/InputAria, validation::Error/Validator/AsyncValidator, form::Context/Data/Mode, hidden_input, form_submit machine. Missing: built-in validators, ValidatorsBuilder, FormMessages, DebouncedAsyncValidator, Fieldset/Field/Form machines                                                                                                                                                        |
+| `ars-interactions` | 3,107 | Partial  | Press, Hover, Focus, FocusWithin, InteractOutside, Dismissable, compose::merge_attrs, LogicalDirection. Missing: LongPress, Move, DnD, Keyboard types                                                                                                                                                                                                                                                                                 |
+| `ars-dom`          | 5,880 | Partial  | FocusScope, focus queries, ScrollLockManager, positioning engine (types + compute_position + overflow + VirtualElement), z-index allocator, scroll_into_view, modality manager. Missing: viewport/visualViewport, containing-block detection, auto_update, portal/inert, overlay stack, media queries, URL sanitization, ModalityManager listeners                                                                                    |
+| `ars-leptos`       | 1,195 | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, attr_map_to_leptos, use_style_strategy, AdapterCapabilities. Missing: ArsProvider context (#190), reactive props (#190), controlled value helper (#190), emit/emit_map (#191), event mapping (#191), nonce CSS collector (#191), safe event listeners (#191), LiveAnnouncer context bridge (#513)                                                                                |
+| `ars-dioxus`       | 762   | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, attr_map_to_dioxus, use_style_strategy, AdapterCapabilities. Missing: ArsProvider context (#193), reactive props (#193), controlled value helper (#193), emit/emit_map (#194), event mapping (#194), nonce CSS collector (#194), safe event listeners (#194), LiveAnnouncer context bridge (#512), DioxusPlatform (#195), SSR hydration (#196), error boundary (#197)            |
+| `ars-collections`  | 6,221 | 90%      | Key, Node, NodeType, Collection trait, StaticCollection, TreeCollection, CollectionBuilder, selection (Mode/Behavior/Set/State/DisabledBehavior), navigation helpers, typeahead, AsyncCollection/AsyncLoader, Virtualizer/LayoutStrategy/VirtualLayout, FilteredCollection, SortedCollection, CollationSupport (i18n). Missing: MutableListData/MutableTreeData, CollectionChangeAnnouncement/CollectionMessages, OnAction, DnD types |
+| `ars-i18n`         | 1,928 | Partial  | Locale (ICU4X-backed), Direction, Orientation, NumberFormatter, CurrencyCode, BiDi isolation, Weekday, IcuProvider trait (stub), placeholder date/time types                                                                                                                                                                                                                                                                          |
 
 ### Architecture spec (01-architecture.md) completion — 2026-04-10 audit
 
@@ -42,7 +42,7 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 | ------------------ | ---------------------------- | ------------------------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Architecture core  | `01-architecture.md`         | ~5000 lines, 10 sections | 95%              | 4 remaining gaps tracked above; core contract is stable                                                                                                                                                                                                                                     |
 | Interactions       | `05-interactions.md`         | ~4000 lines, 12 sections | 60%              | 8 tasks closed; 6 open (#76, #77, #159–#162). Blocks Slider, DnD components, custom keyboard handlers                                                                                                                                                                                       |
-| Collections        | `06-collections.md`          | ~400 lines, 6 sections   | 10%              | Blocks all list-based components                                                                                                                                                                                                                                                            |
+| Collections        | `06-collections.md`          | ~5700 lines, 10 sections | 90%              | 4 tasks remain (12 pts): mutable wrappers, announcements, DnD, coverage. Core collection/selection/tree/async/virtual complete.                                                                                                                                                             |
 | I18n               | `04-internationalization.md` | ~4000 lines, 16 sections | 25%              | Blocks number/date components, RTL. Locale + NumberFormatter done; 16 tasks remaining (48 pts ICU4X + web-intl parity)                                                                                                                                                                      |
 | DOM utilities      | `11-dom-utilities.md`        | ~2800 lines, 10 sections | 50%              | 8 tasks closed; 8 open (#69, #72, #85, #88, #112–#114, #176). Blocks all overlay components                                                                                                                                                                                                 |
 | Accessibility      | `03-accessibility.md`        | ~4000 lines, 14 sections | 30%              | FocusZone, keyboard shortcuts, VisuallyHidden, FieldContext, announcements, touch/mobile, testing infra all missing                                                                                                                                                                         |
@@ -849,52 +849,57 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 
 **Note:** Tasks sized at `8` points (#82) must be decomposed into ≤5-point subtasks before pickup. #80 (DateFormatter, 8pts) has been decomposed into #128, #129, #130. #78 (Drag and Drop, 8pts) has been decomposed into #159, #160, #161.
 
-| GitHub                                               | Title                                                                   | Points | Epic | Deps       |
-| ---------------------------------------------------- | ----------------------------------------------------------------------- | ------ | ---- | ---------- |
-| [#76](https://github.com/fogodev/ars-ui/issues/76)   | Implement LongPress interaction in ars-interactions                     | 3      | #4   | Wave 1     |
-| [#77](https://github.com/fogodev/ars-ui/issues/77)   | Implement Move interaction in ars-interactions                          | 3      | #4   | Wave 1     |
-| [#159](https://github.com/fogodev/ars-ui/issues/159) | Implement Drag and Drop core types in ars-interactions                  | 2      | #4   | #58        |
-| [#160](https://github.com/fogodev/ars-ui/issues/160) | Implement Drag/Drop state machines and use_drag/use_drop                | 3      | #4   | #159, #76  |
-| [#161](https://github.com/fogodev/ars-ui/issues/161) | Implement keyboard DnD protocol and screen reader announcements         | 3      | #4   | #160       |
-| [#162](https://github.com/fogodev/ars-ui/issues/162) | Implement Keyboard interaction types in ars-interactions                | 2      | #4   | —          |
-| [#79](https://github.com/fogodev/ars-ui/issues/79)   | Implement NumberFormatter trait with ICU4X backend in ars-i18n          | 5      | #54  | #75        |
-| [#128](https://github.com/fogodev/ars-ui/issues/128) | CalendarDate internal type, calendar system extensions, and error types | 5      | #54  | #75        |
-| [#129](https://github.com/fogodev/ars-ui/issues/129) | DateFormatter with ICU4X backend                                        | 3      | #54  | #128       |
-| [#130](https://github.com/fogodev/ars-ui/issues/130) | RelativeTimeFormatter with ICU4X backend                                | 3      | #54  | #75        |
-| [#131](https://github.com/fogodev/ars-ui/issues/131) | Plural and ordinal rules with ICU4X backend                             | 3      | #54  | #75        |
-| [#132](https://github.com/fogodev/ars-ui/issues/132) | Logical/Physical side and rect layout types                             | 2      | #54  | #75        |
-| [#133](https://github.com/fogodev/ars-ui/issues/133) | Locale-aware case transformation with ICU4X backend                     | 2      | #54  | #75        |
-| [#134](https://github.com/fogodev/ars-ui/issues/134) | LocaleStack fallback chain                                              | 2      | #54  | #75        |
-| [#135](https://github.com/fogodev/ars-ui/issues/135) | MessagesRegistry, I18nRegistries, and resolve_messages                  | 3      | #54  | #134       |
-| [#136](https://github.com/fogodev/ars-ui/issues/136) | StringCollator with ICU4X backend                                       | 3      | #54  | #75        |
-| [#137](https://github.com/fogodev/ars-ui/issues/137) | Translate trait                                                         | 2      | #54  | #75        |
-| [#138](https://github.com/fogodev/ars-ui/issues/138) | IcuProvider full trait + Icu4xProvider production implementation        | 5      | #54  | #128, #131 |
-| [#139](https://github.com/fogodev/ars-ui/issues/139) | locale_from_accept_language server utility                              | 2      | #54  | #75        |
-| [#140](https://github.com/fogodev/ars-ui/issues/140) | t() function for Leptos and Dioxus adapters                             | 3      | #54  | #137       |
-| [#81](https://github.com/fogodev/ars-ui/issues/81)   | Implement AsyncCollection with pagination support in ars-collections    | 5      | #53  | #63        |
-| [#82](https://github.com/fogodev/ars-ui/issues/82)   | Implement Virtualizer for large collection rendering                    | 8      | #53  | #63        |
-| [#83](https://github.com/fogodev/ars-ui/issues/83)   | Implement TreeCollection in ars-collections                             | 5      | #53  | #63        |
-| [#84](https://github.com/fogodev/ars-ui/issues/84)   | Implement FilteredCollection and SortedCollection in ars-collections    | 3      | #53  | #63        |
-| [#85](https://github.com/fogodev/ars-ui/issues/85)   | Implement media query utilities in ars-dom                              | 2      | #6   | —          |
-| [#176](https://github.com/fogodev/ars-ui/issues/176) | Implement URL sanitization utilities in ars-dom                         | 2      | #6   | —          |
-| [#150](https://github.com/fogodev/ars-ui/issues/150) | Implement FocusZone for arrow-key navigation in composite widgets       | 5      | #3   | —          |
-| [#151](https://github.com/fogodev/ars-ui/issues/151) | Implement DomEvent trait, KeyboardShortcut, and Platform detection      | 3      | #3   | —          |
-| [#152](https://github.com/fogodev/ars-ui/issues/152) | Implement VisuallyHidden utilities for screen-reader-only content       | 1      | #3   | —          |
-| [#153](https://github.com/fogodev/ars-ui/issues/153) | Implement LabelConfig, DescriptionConfig, and FieldContext              | 3      | #3   | —          |
-| [#154](https://github.com/fogodev/ars-ui/issues/154) | Implement AnnouncementMessages and Announcements helpers                | 2      | #3   | —          |
-| [#155](https://github.com/fogodev/ars-ui/issues/155) | Implement Touch and Mobile accessibility utilities                      | 2      | #3   | #151       |
-| [#156](https://github.com/fogodev/ars-ui/issues/156) | Implement ARIA Validation testing infrastructure                        | 3      | #3   | —          |
-| [#157](https://github.com/fogodev/ars-ui/issues/157) | Implement Keyboard Navigation test helpers                              | 3      | #3   | #150, #151 |
-| [#164](https://github.com/fogodev/ars-ui/issues/164) | Add MessageFn From impls for usize and f64 arity closures               | 1      | #5   | —          |
-| [#165](https://github.com/fogodev/ars-ui/issues/165) | Implement FormMessages, Error factory methods, DEFAULT_VALIDATOR_LOCALE | 3      | #5   | #164       |
-| [#166](https://github.com/fogodev/ars-ui/issues/166) | Implement built-in validators and FnValidator                           | 5      | #5   | #165       |
-| [#167](https://github.com/fogodev/ars-ui/issues/167) | Implement ChainValidator, ValidatorsBuilder, and Validators alias       | 3      | #5   | #166       |
-| [#168](https://github.com/fogodev/ars-ui/issues/168) | Implement AsyncFnValidator, DebouncedAsyncValidator, and TimerHandle    | 3      | #5   | —          |
-| [#169](https://github.com/fogodev/ars-ui/issues/169) | Implement Fieldset component machine in ars-forms                       | 3      | #5   | —          |
-| [#170](https://github.com/fogodev/ars-ui/issues/170) | Implement Field component machine in ars-forms                          | 3      | #5   | —          |
-| [#171](https://github.com/fogodev/ars-ui/issues/171) | Implement Form component machine in ars-forms                           | 5      | #5   | —          |
+| GitHub                                               | Title                                                                    | Points | Epic | Deps       |
+| ---------------------------------------------------- | ------------------------------------------------------------------------ | ------ | ---- | ---------- |
+| [#76](https://github.com/fogodev/ars-ui/issues/76)   | Implement LongPress interaction in ars-interactions                      | 3      | #4   | Wave 1     |
+| [#77](https://github.com/fogodev/ars-ui/issues/77)   | Implement Move interaction in ars-interactions                           | 3      | #4   | Wave 1     |
+| [#159](https://github.com/fogodev/ars-ui/issues/159) | Implement Drag and Drop core types in ars-interactions                   | 2      | #4   | #58        |
+| [#160](https://github.com/fogodev/ars-ui/issues/160) | Implement Drag/Drop state machines and use_drag/use_drop                 | 3      | #4   | #159, #76  |
+| [#161](https://github.com/fogodev/ars-ui/issues/161) | Implement keyboard DnD protocol and screen reader announcements          | 3      | #4   | #160       |
+| [#162](https://github.com/fogodev/ars-ui/issues/162) | Implement Keyboard interaction types in ars-interactions                 | 2      | #4   | —          |
+| [#79](https://github.com/fogodev/ars-ui/issues/79)   | Implement NumberFormatter trait with ICU4X backend in ars-i18n           | 5      | #54  | #75        |
+| [#128](https://github.com/fogodev/ars-ui/issues/128) | CalendarDate internal type, calendar system extensions, and error types  | 5      | #54  | #75        |
+| [#129](https://github.com/fogodev/ars-ui/issues/129) | DateFormatter with ICU4X backend                                         | 3      | #54  | #128       |
+| [#130](https://github.com/fogodev/ars-ui/issues/130) | RelativeTimeFormatter with ICU4X backend                                 | 3      | #54  | #75        |
+| [#131](https://github.com/fogodev/ars-ui/issues/131) | Plural and ordinal rules with ICU4X backend                              | 3      | #54  | #75        |
+| [#132](https://github.com/fogodev/ars-ui/issues/132) | Logical/Physical side and rect layout types                              | 2      | #54  | #75        |
+| [#133](https://github.com/fogodev/ars-ui/issues/133) | Locale-aware case transformation with ICU4X backend                      | 2      | #54  | #75        |
+| [#134](https://github.com/fogodev/ars-ui/issues/134) | LocaleStack fallback chain                                               | 2      | #54  | #75        |
+| [#135](https://github.com/fogodev/ars-ui/issues/135) | MessagesRegistry, I18nRegistries, and resolve_messages                   | 3      | #54  | #134       |
+| [#136](https://github.com/fogodev/ars-ui/issues/136) | StringCollator with ICU4X backend                                        | 3      | #54  | #75        |
+| [#137](https://github.com/fogodev/ars-ui/issues/137) | Translate trait                                                          | 2      | #54  | #75        |
+| [#138](https://github.com/fogodev/ars-ui/issues/138) | IcuProvider full trait + Icu4xProvider production implementation         | 5      | #54  | #128, #131 |
+| [#139](https://github.com/fogodev/ars-ui/issues/139) | locale_from_accept_language server utility                               | 2      | #54  | #75        |
+| [#140](https://github.com/fogodev/ars-ui/issues/140) | t() function for Leptos and Dioxus adapters                              | 3      | #54  | #137       |
+| [#81](https://github.com/fogodev/ars-ui/issues/81)   | Implement AsyncCollection with pagination support in ars-collections     | 5      | #53  | #63        |
+| [#82](https://github.com/fogodev/ars-ui/issues/82)   | Implement Virtualizer for large collection rendering                     | 8      | #53  | #63        |
+| [#83](https://github.com/fogodev/ars-ui/issues/83)   | Implement TreeCollection in ars-collections                              | 5      | #53  | #63        |
+| [#84](https://github.com/fogodev/ars-ui/issues/84)   | Implement FilteredCollection and SortedCollection in ars-collections     | 3      | #53  | #63        |
+| [#518](https://github.com/fogodev/ars-ui/issues/518) | Implement CollationSupport and CollatorCache in ars-collections          | 2      | #53  | #136, #84  |
+| [#547](https://github.com/fogodev/ars-ui/issues/547) | Implement MutableListData, MutableTreeData, and CollectionChange         | 3      | #53  | #63, #83   |
+| [#548](https://github.com/fogodev/ars-ui/issues/548) | Implement CollectionChangeAnnouncement, CollectionMessages, and OnAction | 2      | #53  | #84        |
+| [#549](https://github.com/fogodev/ars-ui/issues/549) | Implement DnD collection traits and types                                | 5      | #53  | #159, #64  |
+| [#550](https://github.com/fogodev/ars-ui/issues/550) | Improve ars-collections edge-case test coverage                          | 2      | #53  | —          |
+| [#85](https://github.com/fogodev/ars-ui/issues/85)   | Implement media query utilities in ars-dom                               | 2      | #6   | —          |
+| [#176](https://github.com/fogodev/ars-ui/issues/176) | Implement URL sanitization utilities in ars-dom                          | 2      | #6   | —          |
+| [#150](https://github.com/fogodev/ars-ui/issues/150) | Implement FocusZone for arrow-key navigation in composite widgets        | 5      | #3   | —          |
+| [#151](https://github.com/fogodev/ars-ui/issues/151) | Implement DomEvent trait, KeyboardShortcut, and Platform detection       | 3      | #3   | —          |
+| [#152](https://github.com/fogodev/ars-ui/issues/152) | Implement VisuallyHidden utilities for screen-reader-only content        | 1      | #3   | —          |
+| [#153](https://github.com/fogodev/ars-ui/issues/153) | Implement LabelConfig, DescriptionConfig, and FieldContext               | 3      | #3   | —          |
+| [#154](https://github.com/fogodev/ars-ui/issues/154) | Implement AnnouncementMessages and Announcements helpers                 | 2      | #3   | —          |
+| [#155](https://github.com/fogodev/ars-ui/issues/155) | Implement Touch and Mobile accessibility utilities                       | 2      | #3   | #151       |
+| [#156](https://github.com/fogodev/ars-ui/issues/156) | Implement ARIA Validation testing infrastructure                         | 3      | #3   | —          |
+| [#157](https://github.com/fogodev/ars-ui/issues/157) | Implement Keyboard Navigation test helpers                               | 3      | #3   | #150, #151 |
+| [#164](https://github.com/fogodev/ars-ui/issues/164) | Add MessageFn From impls for usize and f64 arity closures                | 1      | #5   | —          |
+| [#165](https://github.com/fogodev/ars-ui/issues/165) | Implement FormMessages, Error factory methods, DEFAULT_VALIDATOR_LOCALE  | 3      | #5   | #164       |
+| [#166](https://github.com/fogodev/ars-ui/issues/166) | Implement built-in validators and FnValidator                            | 5      | #5   | #165       |
+| [#167](https://github.com/fogodev/ars-ui/issues/167) | Implement ChainValidator, ValidatorsBuilder, and Validators alias        | 3      | #5   | #166       |
+| [#168](https://github.com/fogodev/ars-ui/issues/168) | Implement AsyncFnValidator, DebouncedAsyncValidator, and TimerHandle     | 3      | #5   | —          |
+| [#169](https://github.com/fogodev/ars-ui/issues/169) | Implement Fieldset component machine in ars-forms                        | 3      | #5   | —          |
+| [#170](https://github.com/fogodev/ars-ui/issues/170) | Implement Field component machine in ars-forms                           | 3      | #5   | —          |
+| [#171](https://github.com/fogodev/ars-ui/issues/171) | Implement Form component machine in ars-forms                            | 5      | #5   | —          |
 
-**Total:** 132 points
+**Total:** 146 points (132 original + 2 collation + 12 Wave 5-C collections)
 
 ---
 
@@ -1163,6 +1168,107 @@ See epic #54 for the full wave structure, dependency graph, and ICU4X ↔ web-in
   - `FilteredCollection<T>` wrapping a `Collection<T>` with predicate-based filtering.
   - `SortedCollection<T>` wrapping a `Collection<T>` with comparator-based sorting.
   - Both maintain key stability across filter/sort changes.
+- Spec impact: `No spec change required`.
+
+#### W5-C1: Implement MutableListData, MutableTreeData, and CollectionChange in ars-collections
+
+- Points: `3`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: #63, #83
+- Spec refs:
+  - `spec/foundation/06-collections.md` §1.8.1 "Change Events" (L757)
+  - `spec/foundation/06-collections.md` §1.8.2 "MutableListData" (L780)
+  - `spec/foundation/06-collections.md` §1.8.3 "MutableTreeData" (L865)
+- Goal: implement mutable collection wrappers with change tracking for DOM reconciliation.
+- Files to create/modify: `crates/ars-collections/src/mutable.rs` (new), `crates/ars-collections/src/lib.rs`
+- Tests to add first:
+  - `MutableListData` push/insert/remove/move/replace/clear emit correct `CollectionChange` variants.
+  - `drain_changes()` returns pending changes and clears the buffer.
+  - `Collection<T>` delegation to inner `StaticCollection`.
+  - `MutableTreeData` insert_child/remove/reparent/reorder/replace emit correct changes.
+  - `MutableTreeData` `Collection<T>` delegation to inner `TreeCollection`.
+- Acceptance criteria:
+  - `CollectionChange<K: Clone>` enum (Insert/Remove/Move/Replace/Reset).
+  - `MutableListData<T>` wrapping `StaticCollection<T>` with mutation + change tracking.
+  - `MutableTreeData<T>` wrapping `TreeCollection<T>` with mutation + change tracking.
+  - Both implement `Collection<T>` via delegation.
+  - `drain_changes()` via `core::mem::take`.
+- Spec impact: `No spec change required`.
+
+#### W5-C2: Implement CollectionChangeAnnouncement, CollectionMessages, and OnAction in ars-collections
+
+- Points: `2`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: #84
+- Spec refs:
+  - `spec/foundation/06-collections.md` §1.6.1 "Collection Change Announcements" (L610)
+  - `spec/foundation/06-collections.md` §3.1 "OnAction" (L2163)
+- Goal: implement accessibility announcement types for collection mutations and the OnAction callback alias.
+- Files to create/modify: `crates/ars-collections/src/announcements.rs` (new), `crates/ars-collections/src/selection.rs`, `crates/ars-collections/src/lib.rs`
+- Tests to add first:
+  - Construct each `CollectionChangeAnnouncement` variant.
+  - `CollectionMessages::default()` closures return correct English text.
+  - `CollectionMessages` Debug output.
+  - `OnAction` type alias compiles on current target.
+- Acceptance criteria:
+  - `CollectionChangeAnnouncement` enum (6 variants).
+  - `CollectionMessages` struct with 6 `MessageFn` closure fields + Default + Debug.
+  - `OnAction` cfg-gated type alias (Rc on wasm32, Arc on native).
+  - No new crate dependencies (`MessageFn` from `ars_core`, `Locale` from `ars_core`).
+- Spec impact: `No spec change required`.
+
+#### W5-C3: Implement DnD collection traits and types in ars-collections
+
+- Points: `5`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: #159, #64
+- Spec refs:
+  - `spec/foundation/06-collections.md` §10.2 "Drop Position" (L5319)
+  - `spec/foundation/06-collections.md` §10.3 "Collection DnD Events" (L5366)
+  - `spec/foundation/06-collections.md` §10.4 "DraggableCollection Trait" (L5432)
+  - `spec/foundation/06-collections.md` §10.5 "DroppableCollection Trait" (L5484)
+  - `spec/foundation/06-collections.md` §10.9 "I18n — CollectionDndMessages" (L5590)
+- Goal: implement collection-level drag-and-drop integration types and traits.
+- Files to create/modify: `crates/ars-collections/src/dnd.rs` (new), `crates/ars-collections/src/lib.rs`, `crates/ars-collections/Cargo.toml` (add `ars-interactions` dep)
+- New dependency: `ars-interactions = { path = "../ars-interactions", default-features = false }`
+- Tests to add first:
+  - `DropPosition` Display output and trait derives.
+  - `CollectionDropTarget` construction.
+  - `CollectionDndEvent` all 5 variants.
+  - `DraggableCollection` default methods.
+  - `DroppableCollection` default methods.
+  - `CollectionDndMessages::default()` English text for all 8 fields.
+  - `DndAnnouncements` and `DndAnnouncementData` construction.
+- Acceptance criteria:
+  - 8 types: DropPosition, CollectionDropTarget, CollectionDndEvent, DraggableCollection, DroppableCollection, CollectionDndMessages, DndAnnouncements, DndAnnouncementData.
+  - All re-exported from `lib.rs`.
+- Spec impact: Fix §10.4 `DraggableCollection::drag_data` default impl — `DragItem` is an enum, not a struct.
+
+#### W5-C4: Improve ars-collections edge-case test coverage
+
+- Points: `2`
+- Layer: `Subsystem`
+- Framework: `None`
+- Test tier: `Unit`
+- Depends on: none
+- Spec refs:
+  - `spec/foundation/06-collections.md` (general)
+- Goal: cover 4 identified edge-case gaps in existing code (99.47% → ~99.7% line coverage).
+- Files to modify: `crates/ars-collections/src/selection.rs`, `crates/ars-collections/src/tree_collection.rs`, `crates/ars-collections/src/virtualization.rs` (add tests only)
+- Tests to add:
+    1. `selection::State::select()` with `Mode::None` — verify state unchanged.
+    2. `selection::State::deselect_from_all()` with `Set::Multiple` — verify delegates to deselect.
+    3. `TreeCollection::reparent()` circular ancestor guard — verify tree stays valid.
+    4. `Virtualizer::visible_range()` grid range inversion — verify empty range returned.
+- Acceptance criteria:
+  - All 4 new tests pass.
+  - `cargo llvm-cov` shows fewer missed lines than current 33.
 - Spec impact: `No spec change required`.
 
 #### W4-10: Implement media query utilities in ars-dom
@@ -1829,9 +1935,10 @@ are symmetric with Leptos #190/#191/#513; the remaining three cover Dioxus-uniqu
 | Wave 1    | 7      | 19      | Button, VisuallyHidden, Separator                        |
 | Wave 2    | 12     | 43      | Select, Combobox, Menu, Listbox, Dialog, Popover         |
 | Wave 3    | 9      | 29      | Tooltip, DatePicker prerequisites, accessibility         |
-| Wave 4    | 33     | 106     | All remaining components (Slider, TreeView, Table, etc.) |
+| Wave 4    | 34     | 108     | All remaining components (Slider, TreeView, Table, etc.) |
+| Wave 5-C  | 4      | 12      | Mutable collections, announcements, DnD, coverage        |
 | Wave 5    | 6      | 23      | Browser Intl backends for WASM client builds             |
 | Post-F IO | 3      | 13      | Dismissable for overlays                                 |
 | Post-F LA | 2      | 8       | Leptos adapter foundation completion                     |
 | Post-F DA | 5      | 16      | Dioxus adapter foundation completion                     |
-| **Total** | **77** | **257** | **Complete foundation for all 112 components**           |
+| **Total** | **82** | **271** | **Complete foundation for all 112 components**           |
