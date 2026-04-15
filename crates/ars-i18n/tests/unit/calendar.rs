@@ -414,6 +414,40 @@ fn public_calendar_date_replaces_placeholder_shape() {
 }
 
 #[test]
+fn public_calendar_date_new_gregorian_validates_bounds() {
+    #[cfg(feature = "std")]
+    {
+        let invalid_month = std::panic::catch_unwind(|| {
+            CalendarDate::new_gregorian(
+                2024,
+                NonZero::new(13).expect("month is non-zero"),
+                NonZero::new(1).expect("day is non-zero"),
+            )
+        });
+
+        let invalid_day = std::panic::catch_unwind(|| {
+            CalendarDate::new_gregorian(
+                2024,
+                NonZero::new(4).expect("month is non-zero"),
+                NonZero::new(31).expect("day is non-zero"),
+            )
+        });
+
+        let invalid_year = std::panic::catch_unwind(|| {
+            CalendarDate::new_gregorian(
+                0,
+                NonZero::new(1).expect("month is non-zero"),
+                NonZero::new(1).expect("day is non-zero"),
+            )
+        });
+
+        assert!(invalid_month.is_err());
+        assert!(invalid_day.is_err());
+        assert!(invalid_year.is_err());
+    }
+}
+
+#[test]
 fn typed_calendar_date_wraps_matching_dynamic_date() {
     let raw = CalendarDate::new_gregorian(
         2024,
@@ -858,6 +892,26 @@ fn public_calendar_date_arithmetic_helpers_match_shared_spec_shape() {
 }
 
 #[test]
+fn public_calendar_date_add_months_handles_large_gregorian_deltas_without_overflow() {
+    let provider = StubIcuProvider;
+
+    let date = CalendarDate::new_gregorian(
+        2024,
+        NonZero::new(1).expect("month should be non-zero"),
+        NonZero::new(31).expect("day should be non-zero"),
+    );
+
+    assert_eq!(
+        date.add_months(&provider, i32::MAX),
+        Some(CalendarDate::new_gregorian(
+            178_958_994,
+            NonZero::new(8).expect("month should be non-zero"),
+            NonZero::new(31).expect("day should be non-zero"),
+        ))
+    );
+}
+
+#[test]
 fn public_calendar_date_add_months_respects_era_boundaries() {
     let provider = StubIcuProvider;
 
@@ -1063,6 +1117,21 @@ fn public_calendar_date_weekday_handles_january_and_february() {
 
     assert_eq!(january.weekday(), Weekday::Monday);
     assert_eq!(february.weekday(), Weekday::Thursday);
+}
+
+#[test]
+fn public_calendar_date_weekday_handles_large_gregorian_years_without_overflow() {
+    let large = CalendarDate::new_gregorian(
+        i32::MAX,
+        NonZero::new(12).expect("month should be non-zero"),
+        NonZero::new(31).expect("day should be non-zero"),
+    );
+
+    let epoch_days = iso_to_epoch_days(i32::MAX, 12, 31);
+    let expected =
+        Weekday::from_sunday_zero(epoch_days.checked_add(1).unwrap().rem_euclid(7) as u8);
+
+    assert_eq!(large.weekday(), expected);
 }
 
 #[test]

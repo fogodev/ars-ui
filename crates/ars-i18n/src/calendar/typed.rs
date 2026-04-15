@@ -387,7 +387,7 @@ impl<C: DirectWeekdayComputation> TypedCalendarDate<C> {
 impl TypedCalendarDate<Gregorian> {
     /// Creates a typed Gregorian date from validated month and day components.
     #[must_use]
-    pub const fn new(year: i32, month: NonZero<u8>, day: NonZero<u8>) -> Self {
+    pub fn new(year: i32, month: NonZero<u8>, day: NonZero<u8>) -> Self {
         Self {
             raw: CalendarDate::new_gregorian(year, month, day),
             marker: PhantomData,

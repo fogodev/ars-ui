@@ -69,6 +69,14 @@ impl CalendarDate {
     }
 
     pub fn new_gregorian(year: i32, month: NonZero<u8>, day: NonZero<u8>) -> Self {
+        let month_value = month.get();
+        let day_value = day.get();
+        assert!(year >= 1, "Gregorian dates require a year of at least 1");
+        assert!((1..=12).contains(&month_value), "Gregorian dates require a month in the range 1..=12");
+        assert!(
+            day_value <= gregorian_days_in_month(year, month_value),
+            "Gregorian dates require a valid day for the given month"
+        );
         Self {
             calendar: CalendarSystem::Gregorian,
             era: None,
@@ -178,20 +186,41 @@ impl CalendarDate {
     pub fn add_months(&self, provider: &dyn IcuProvider, n: i32) -> Option<CalendarDate> {
         let era = self.era.clone().or_else(|| provider.default_era(&self.calendar));
         let era_code = era.as_ref().map(|e| e.code.as_str());
-        let mut year = self.year;
-        let mut month = self.month.get() as i32 + n;
-        loop {
-            let max = provider.max_months_in_year(&self.calendar, year, era_code) as i32;
-            if month <= max { break; }
-            month -= max;
-            year += 1;
-        }
-        while month < 1 {
-            year -= 1;
-            let max = provider.max_months_in_year(&self.calendar, year, era_code) as i32;
-            month += max;
-        }
-        let mut month_u8 = month as u8;
+        let (year, month_u8) = if let Some(months_per_year) = fixed_months_per_year(self.calendar) {
+            let total_month_index = i64::from(self.year - 1)
+                .checked_mul(i64::from(months_per_year))?
+                .checked_add(i64::from(self.month.get() - 1))?
+                .checked_add(i64::from(n))?;
+            let normalized_year = total_month_index.div_euclid(i64::from(months_per_year)).checked_add(1)?;
+            let normalized_month = total_month_index.rem_euclid(i64::from(months_per_year));
+            if normalized_year < 1 {
+                return None;
+            }
+            (
+                i32::try_from(normalized_year).ok()?,
+                u8::try_from(normalized_month.checked_add(1)?).ok()?,
+            )
+        } else {
+            let mut year = i64::from(self.year);
+            let mut month = i64::from(self.month.get()).checked_add(i64::from(n))?;
+            loop {
+                let current_year = i32::try_from(year).ok()?;
+                let max = i64::from(provider.max_months_in_year(&self.calendar, current_year, era_code));
+                if month <= max { break; }
+                month -= max;
+                year = year.checked_add(1)?;
+            }
+            while month < 1 {
+                year = year.checked_sub(1)?;
+                let current_year = i32::try_from(year).ok()?;
+                let max = i64::from(provider.max_months_in_year(&self.calendar, current_year, era_code));
+                month += max;
+            }
+            (
+                i32::try_from(year).ok()?,
+                u8::try_from(month).expect("validated month count fits in u8"),
+            )
+        };
         let mut candidate = CalendarDate {
             year,
             month: NonZero::new(month_u8).expect("month result is 1-based"),
@@ -297,12 +326,13 @@ impl CalendarDate {
     pub fn weekday(&self) -> Weekday {
         debug_assert!(self.calendar == CalendarSystem::Gregorian, "weekday() is Gregorian-only");
         // Tomohiko Sakamoto's algorithm for Gregorian.
-        let y = if self.month.get() < 3 { self.year - 1 } else { self.year };
-        let m = self.month.get() as i32;
-        let d = self.day.get() as i32;
-        static OFFSETS: [i32; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
-        let w = (y + y.div_euclid(4) - y.div_euclid(100) + y.div_euclid(400) + OFFSETS[(m-1) as usize] + d) % 7;
-        Weekday::from_sunday_zero(((w + 7) % 7) as u8)
+        let year = if self.month.get() < 3 { self.year - 1 } else { self.year };
+        let month_index = usize::from(self.month.get() - 1);
+        let day = i64::from(self.day.get());
+        static OFFSETS: [i64; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+        let year = i64::from(year);
+        let weekday = year + year.div_euclid(4) - year.div_euclid(100) + year.div_euclid(400) + OFFSETS[month_index] + day;
+        Weekday::from_sunday_zero(weekday.rem_euclid(7) as u8)
     }
 }
 

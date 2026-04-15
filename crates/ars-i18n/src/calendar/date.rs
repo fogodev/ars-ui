@@ -5,7 +5,7 @@ use super::{
     CalendarSystem, Era,
     helpers::{
         GREGORIAN_JDN_OFFSET, days_in_month_for_calendar, epoch_days_to_iso, era_code_is_valid,
-        iso_to_epoch_days, max_months_in_year,
+        gregorian_days_in_month, iso_to_epoch_days, max_months_in_year,
     },
 };
 use crate::{IcuProvider, Weekday};
@@ -36,7 +36,20 @@ pub struct CalendarDate {
 impl CalendarDate {
     /// Creates a Gregorian date from validated month and day components.
     #[must_use]
-    pub const fn new_gregorian(year: i32, month: NonZero<u8>, day: NonZero<u8>) -> Self {
+    pub fn new_gregorian(year: i32, month: NonZero<u8>, day: NonZero<u8>) -> Self {
+        let month_value = month.get();
+        let day_value = day.get();
+
+        assert!(year >= 1, "Gregorian dates require a year of at least 1");
+        assert!(
+            (1..=12).contains(&month_value),
+            "Gregorian dates require a month in the range 1..=12",
+        );
+        assert!(
+            day_value <= gregorian_days_in_month(year, month_value),
+            "Gregorian dates require a valid day for the given month",
+        );
+
         Self {
             calendar: CalendarSystem::Gregorian,
             era: None,
@@ -184,29 +197,55 @@ impl CalendarDate {
             .or_else(|| provider.default_era(&self.calendar));
 
         let era_code = era.as_ref().map(|value| value.code.as_str());
-        let mut year = self.year;
-        let mut month = i32::from(self.month.get()) + month_delta;
+        let (year, month) = if let Some(months_per_year) = fixed_months_per_year(self.calendar) {
+            let total_month_index = i64::from(self.year - 1)
+                .checked_mul(i64::from(months_per_year))?
+                .checked_add(i64::from(self.month.get() - 1))?
+                .checked_add(i64::from(month_delta))?;
+            let normalized_year = total_month_index
+                .div_euclid(i64::from(months_per_year))
+                .checked_add(1)?;
+            let normalized_month = total_month_index.rem_euclid(i64::from(months_per_year));
 
-        loop {
-            let max = i32::from(provider.max_months_in_year(&self.calendar, year, era_code));
-
-            if month <= max {
-                break;
+            if normalized_year < 1 {
+                return None;
             }
 
-            month -= max;
-            year += 1;
-        }
+            (
+                i32::try_from(normalized_year).ok()?,
+                u8::try_from(normalized_month.checked_add(1)?).ok()?,
+            )
+        } else {
+            let mut year = i64::from(self.year);
+            let mut month = i64::from(self.month.get()).checked_add(i64::from(month_delta))?;
 
-        while month < 1 {
-            year -= 1;
+            loop {
+                let current_year = i32::try_from(year).ok()?;
+                let max =
+                    i64::from(provider.max_months_in_year(&self.calendar, current_year, era_code));
 
-            let max = i32::from(provider.max_months_in_year(&self.calendar, year, era_code));
+                if month <= max {
+                    break;
+                }
 
-            month += max;
-        }
+                month -= max;
+                year = year.checked_add(1)?;
+            }
 
-        let month = u8::try_from(month).expect("validated month count fits in u8");
+            while month < 1 {
+                year = year.checked_sub(1)?;
+                let current_year = i32::try_from(year).ok()?;
+                let max =
+                    i64::from(provider.max_months_in_year(&self.calendar, current_year, era_code));
+
+                month += max;
+            }
+
+            (
+                i32::try_from(year).ok()?,
+                u8::try_from(month).expect("validated month count fits in u8"),
+            )
+        };
 
         let mut candidate = Self {
             calendar: self.calendar,
@@ -300,7 +339,10 @@ impl CalendarDate {
         // Sakamoto month offsets for a Sunday-zero Gregorian weekday
         // calculation. Jan/Feb use the previous year, which is why the branch
         // above adjusts `year` first.
-        const OFFSETS: [i32; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+        const OFFSETS: [i64; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+
+        let year = i64::from(year);
+        let day = i64::from(day);
 
         let weekday = year + year.div_euclid(4) - year.div_euclid(100)
             + year.div_euclid(400)
@@ -338,5 +380,23 @@ impl CalendarDate {
             month: NonZero::new(month).expect("JDN yields a 1-based month"),
             day: NonZero::new(day).expect("JDN yields a 1-based day"),
         }
+    }
+}
+
+const fn fixed_months_per_year(calendar: CalendarSystem) -> Option<u8> {
+    match calendar {
+        CalendarSystem::Gregorian
+        | CalendarSystem::Buddhist
+        | CalendarSystem::Japanese
+        | CalendarSystem::Islamic
+        | CalendarSystem::IslamicCivil
+        | CalendarSystem::IslamicUmmAlQura
+        | CalendarSystem::Persian
+        | CalendarSystem::Indian
+        | CalendarSystem::Roc => Some(12),
+        CalendarSystem::Coptic | CalendarSystem::Ethiopic | CalendarSystem::EthiopicAmeteAlem => {
+            Some(13)
+        }
+        CalendarSystem::Hebrew | CalendarSystem::Chinese | CalendarSystem::Dangi => None,
     }
 }
