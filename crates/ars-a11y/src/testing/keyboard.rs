@@ -237,9 +237,12 @@ impl FocusZoneTestHarness {
     /// not handled.
     pub fn send_key(&mut self, key: KeyboardKey) -> bool {
         let is_disabled = |index: usize| self.disabled_indices.contains(&index);
+        let from = self.zone.active_index;
+
+        self.current_index = from;
 
         if let Some(next) = self.zone.handle_key(key, false, is_disabled) {
-            self.recorder.record_focus_move(self.current_index, next);
+            self.recorder.record_focus_move(from, next);
             self.current_index = next;
             self.zone.active_index = next;
 
@@ -433,6 +436,17 @@ mod tests {
         assert!(harness.send_key(KeyboardKey::ArrowDown));
         harness.assert_at(1);
         harness.recorder.assert_focus_sequence(&[(0, 1)]);
+    }
+
+    #[test]
+    fn send_key_records_from_seeded_zone_active_index() {
+        let mut harness = FocusZoneTestHarness::new(FocusZoneOptions::default(), 5);
+
+        harness.zone.active_index = 2;
+
+        assert!(harness.send_key(KeyboardKey::ArrowDown));
+        harness.assert_at(3);
+        harness.recorder.assert_focus_sequence(&[(2, 3)]);
     }
 
     #[test]
