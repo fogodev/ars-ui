@@ -17,7 +17,7 @@ pub mod focus;
 pub mod keyboard;
 /// Field labelling, descriptions, and error wiring helpers for form controls.
 pub mod label;
-/// Testing helpers for ARIA validation and keyboard-navigation assertions.
+/// Testing helpers for ARIA validation, attribute assertions, and keyboard navigation.
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 /// Touch-target sizing and mobile accessibility helpers.
@@ -35,7 +35,9 @@ pub use aria::{
         AriaIdRef, AriaInvalid, AriaLive, AriaOrientation, AriaPressed, AriaRelevant, AriaSort,
     },
     role::AriaRole,
-    state::{set_busy, set_checked, set_disabled, set_expanded, set_invalid, set_selected},
+    state::{
+        set_busy, set_checked, set_disabled, set_expanded, set_invalid, set_readonly, set_selected,
+    },
 };
 pub use focus::{
     FocusRing, FocusScopeBehavior, FocusScopeOptions, FocusStrategy, FocusTarget, FocusZone,
@@ -46,6 +48,16 @@ pub use label::{DescriptionConfig, FieldContext, LabelConfig};
 #[cfg(any(test, feature = "testing"))]
 pub use testing::{
     AriaValidationContext, AriaValidationError, AriaValidationWarning, AriaValidator,
+    assert_aria_activedescendant, assert_aria_atomic, assert_aria_autocomplete, assert_aria_busy,
+    assert_aria_checked, assert_aria_colcount, assert_aria_colindex, assert_aria_controls,
+    assert_aria_current, assert_aria_describedby, assert_aria_disabled, assert_aria_errormessage,
+    assert_aria_expanded, assert_aria_haspopup, assert_aria_hidden, assert_aria_invalid,
+    assert_aria_label, assert_aria_labelledby, assert_aria_level, assert_aria_live,
+    assert_aria_modal, assert_aria_multiselectable, assert_aria_orientation, assert_aria_owns,
+    assert_aria_posinset, assert_aria_pressed, assert_aria_readonly, assert_aria_required,
+    assert_aria_roledescription, assert_aria_rowcount, assert_aria_rowindex, assert_aria_selected,
+    assert_aria_setsize, assert_aria_sort, assert_aria_valuemax, assert_aria_valuemin,
+    assert_aria_valuenow, assert_aria_valuetext, assert_data_state, assert_role, assert_tabindex,
     required_attributes_for_role, validate_attr_map,
 };
 pub use touch::{
@@ -62,6 +74,12 @@ pub use visually_hidden::{
 /// Components set `data-ars-state` to the current state name, enabling CSS selectors
 /// like `[data-ars-state="open"]` for styling and test assertions.
 pub const DATA_ARS_STATE: &str = "data-ars-state";
+
+/// Custom data attribute used to expose readonly state on rendered DOM elements.
+///
+/// Components set `data-ars-readonly` as a presence attribute alongside
+/// `aria-readonly="true"` for styling hooks and test assertions.
+pub const DATA_ARS_READONLY: &str = "data-ars-readonly";
 
 #[cfg(test)]
 mod tests {
@@ -90,6 +108,11 @@ mod tests {
     #[test]
     fn data_ars_state_constant_value() {
         assert_eq!(DATA_ARS_STATE, "data-ars-state");
+    }
+
+    #[test]
+    fn data_ars_readonly_constant_value() {
+        assert_eq!(DATA_ARS_READONLY, "data-ars-readonly");
     }
 
     #[test]

@@ -521,6 +521,27 @@ mod tests {
     }
 
     #[test]
+    fn horizontal_zone_does_not_handle_vertical_arrow_keys() {
+        let zone = FocusZone {
+            options: FocusZoneOptions {
+                direction: FocusZoneDirection::Horizontal,
+                ..FocusZoneOptions::default()
+            },
+            active_index: 1,
+            item_count: 4,
+        };
+
+        assert_eq!(
+            zone.handle_key(KeyboardKey::ArrowUp, false, disabled_items(&[])),
+            None
+        );
+        assert_eq!(
+            zone.handle_key(KeyboardKey::ArrowDown, false, disabled_items(&[])),
+            None
+        );
+    }
+
+    #[test]
     fn handle_key_returns_none_for_unhandled_key() {
         let zone = FocusZone::new(FocusZoneOptions::default(), 4);
 

@@ -1270,12 +1270,39 @@ If `popover='auto'` is desired, the state machine MUST be the follower, not the 
 ### 3.1 Element Querying
 
 ```rust
+/// Raw selector used to collect focusable DOM candidates before filtering.
+/// Includes elements with `tabindex="-1"` because they remain programmatically focusable.
+pub const FOCUSABLE_SELECTOR: &str = concat!(
+    "button:not([disabled]):not([aria-hidden='true']),",
+    "input:not([disabled]):not([aria-hidden='true']),",
+    "select:not([disabled]):not([aria-hidden='true']),",
+    "textarea:not([disabled]):not([aria-hidden='true']),",
+    "a[href]:not([aria-hidden='true']),",
+    "area[href]:not([aria-hidden='true']),",
+    "[tabindex]:not([disabled]):not([aria-hidden='true']),",
+    "[contenteditable]:not([contenteditable='false']):not([aria-hidden='true'])",
+);
+
+/// Raw selector used to collect tabbable DOM candidates before filtering.
+pub const TABBABLE_SELECTOR: &str = concat!(
+    "button:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
+    "input:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
+    "select:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
+    "textarea:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
+    "a[href]:not([tabindex='-1']):not([aria-hidden='true']),",
+    "area[href]:not([tabindex='-1']):not([aria-hidden='true']),",
+    "[tabindex]:not([tabindex='-1']):not([disabled]):not([aria-hidden='true']),",
+    "[contenteditable]:not([contenteditable='false']):not([tabindex='-1']):not([aria-hidden='true'])",
+);
+
+/// Return the selector used to collect tabbable DOM candidates.
+pub fn get_tabbable_elements_selector() -> &'static str {
+    TABBABLE_SELECTOR
+}
+
 /// Query focusable elements within a container.
 pub fn get_focusable_elements(container: &web_sys::Element) -> Vec<web_sys::HtmlElement> {
-    let selector = "a[href], button:not([disabled]), input:not([disabled]), \
-                    select:not([disabled]), textarea:not([disabled]), \
-                    [tabindex]:not([tabindex=\"-1\"]), [contenteditable]";
-    let nodes = container.query_selector_all(selector)
+    let nodes = container.query_selector_all(FOCUSABLE_SELECTOR)
         .expect("valid hardcoded CSS selector");
 
     let window = web_sys::window().expect("window exists in browser context");

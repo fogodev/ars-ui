@@ -1,6 +1,6 @@
 # ARIA Assertion Helpers
 
-Reusable helper functions for validating ARIA contracts. These live in `ars-core/src/test_helpers.rs` (or a dedicated `ars-test-utils` crate).
+Reusable helper functions for validating ARIA contracts. These live in `ars-a11y/src/testing/asserts.rs` and are exported behind the `ars-a11y` `testing` feature.
 
 ```rust
 use crate::AttrMap;

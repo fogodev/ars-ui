@@ -53,6 +53,21 @@ pub fn set_disabled(attrs: &mut AttrMap, disabled: bool) {
     }
 }
 
+/// Sets `aria-readonly` and the `data-ars-readonly` presence attribute.
+///
+/// This implements the spec's disabled-vs-readonly contract: readonly elements
+/// remain focusable and operable for navigation, but their value is not editable.
+#[inline]
+pub fn set_readonly(attrs: &mut AttrMap, readonly: bool) {
+    if readonly {
+        AriaAttribute::ReadOnly(true).apply_to(attrs);
+        attrs.set(HtmlAttr::Data("ars-readonly"), true);
+    } else {
+        attrs.set(HtmlAttr::Aria(AriaAttr::ReadOnly), AttrValue::None);
+        attrs.set(HtmlAttr::Data("ars-readonly"), AttrValue::None);
+    }
+}
+
 /// Sets `aria-busy` for loading states.
 #[inline]
 pub fn set_busy(attrs: &mut AttrMap, busy: bool) {
@@ -157,6 +172,39 @@ mod tests {
         assert!(attrs.contains(&HtmlAttr::Aria(AriaAttr::Disabled)));
         set_disabled(&mut attrs, false);
         assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Disabled)));
+    }
+
+    #[test]
+    fn set_readonly_true_sets_aria_and_data_attrs() {
+        let mut attrs = AttrMap::new();
+        set_readonly(&mut attrs, true);
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ReadOnly)), Some("true"));
+        assert!(attrs.contains(&HtmlAttr::Data("ars-readonly")));
+    }
+
+    #[test]
+    fn set_readonly_false_removes_aria_and_data_attrs() {
+        let mut attrs = AttrMap::new();
+        set_readonly(&mut attrs, true);
+
+        set_readonly(&mut attrs, false);
+
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::ReadOnly)));
+        assert!(!attrs.contains(&HtmlAttr::Data("ars-readonly")));
+    }
+
+    #[test]
+    fn set_readonly_round_trip_cleans_up_state() {
+        let mut attrs = AttrMap::new();
+        set_readonly(&mut attrs, true);
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ReadOnly)), Some("true"));
+
+        set_readonly(&mut attrs, false);
+
+        assert_eq!(crate::DATA_ARS_READONLY, "data-ars-readonly");
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::ReadOnly)));
+        assert!(!attrs.contains(&HtmlAttr::Data("ars-readonly")));
     }
 
     #[test]

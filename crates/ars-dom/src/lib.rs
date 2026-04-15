@@ -14,7 +14,7 @@
 )]
 
 mod announcer;
-mod focus;
+pub mod focus;
 pub mod media;
 pub mod modality;
 pub mod portal;

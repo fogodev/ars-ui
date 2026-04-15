@@ -6,19 +6,28 @@ use std::{cell::RefCell, collections::HashMap, string::String};
 
 use ars_a11y::{FocusScopeBehavior, FocusScopeOptions, FocusTarget};
 
-#[cfg(any(test, all(feature = "web", target_arch = "wasm32")))]
-const FOCUSABLE_SELECTOR: &str = concat!(
+/// CSS selector used to query focusable candidate elements before visibility and
+/// inert-state filtering are applied.
+///
+/// This selector includes elements with an explicit `tabindex`, including `-1`,
+/// which means the resulting candidate set may include elements that are
+/// programmatically focusable but not tabbable.
+pub const FOCUSABLE_SELECTOR: &str = concat!(
     "button:not([disabled]):not([aria-hidden='true']),",
     "input:not([disabled]):not([aria-hidden='true']),",
     "select:not([disabled]):not([aria-hidden='true']),",
     "textarea:not([disabled]):not([aria-hidden='true']),",
     "a[href]:not([aria-hidden='true']),",
     "area[href]:not([aria-hidden='true']),",
-    "[tabindex]:not([tabindex='-1']):not([disabled]):not([aria-hidden='true']),",
+    "[tabindex]:not([disabled]):not([aria-hidden='true']),",
     "[contenteditable]:not([contenteditable='false']):not([aria-hidden='true'])",
 );
-#[cfg(any(test, all(feature = "web", target_arch = "wasm32")))]
-const TABBABLE_SELECTOR: &str = concat!(
+/// CSS selector used to query tabbable candidate elements before visibility and
+/// inert-state filtering are applied.
+///
+/// This selector excludes `tabindex="-1"` candidates so the result set maps to
+/// the tab order rather than the broader focusable set.
+pub const TABBABLE_SELECTOR: &str = concat!(
     "button:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
     "input:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
     "select:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
@@ -28,6 +37,12 @@ const TABBABLE_SELECTOR: &str = concat!(
     "[tabindex]:not([tabindex='-1']):not([disabled]):not([aria-hidden='true']),",
     "[contenteditable]:not([contenteditable='false']):not([tabindex='-1']):not([aria-hidden='true'])",
 );
+
+/// Returns the raw selector string used to locate tabbable DOM candidates.
+#[must_use]
+pub fn get_tabbable_elements_selector() -> &'static str {
+    TABBABLE_SELECTOR
+}
 
 /// Platform-agnostic reference to an element captured for later focus restoration.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -868,7 +883,13 @@ mod tests {
     fn tabbable_selector_keeps_focusable_ordering_contract() {
         assert!(TABBABLE_SELECTOR.contains("button:not([disabled])"));
         assert!(TABBABLE_SELECTOR.contains("[tabindex]:not([tabindex='-1'])"));
-        assert!(FOCUSABLE_SELECTOR.contains("[tabindex]:not([tabindex='-1'])"));
+        assert!(FOCUSABLE_SELECTOR.contains("[tabindex]:not([disabled])"));
+        assert!(!FOCUSABLE_SELECTOR.contains("[tabindex]:not([tabindex='-1'])"));
+    }
+
+    #[test]
+    fn get_tabbable_elements_selector_returns_public_constant() {
+        assert_eq!(get_tabbable_elements_selector(), TABBABLE_SELECTOR);
     }
 
     #[test]

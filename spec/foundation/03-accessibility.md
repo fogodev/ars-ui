@@ -1551,8 +1551,22 @@ form, and adapter crates can use it without depending on `ars-a11y`.
 ///   - Is not hidden (visibility: hidden, display: none, or hidden ancestor)
 ///   - Has tabindex >= 0 (or no explicit tabindex, which defaults to 0)
 ///
+/// Unlike the broader focusable selector, this excludes `tabindex="-1"` so the
+/// result models the tab order rather than all programmatically focusable elements.
+///
 /// The ordering is: elements with explicit tabindex > 0 (sorted numerically),
 /// then elements with tabindex = 0 (sorted by DOM order).
+pub const TABBABLE_SELECTOR: &str = concat!(
+    "button:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
+    "input:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
+    "select:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
+    "textarea:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
+    "a[href]:not([tabindex='-1']):not([aria-hidden='true']),",
+    "area[href]:not([tabindex='-1']):not([aria-hidden='true']),",
+    "[tabindex]:not([tabindex='-1']):not([disabled]):not([aria-hidden='true']),",
+    "[contenteditable]:not([contenteditable='false']):not([tabindex='-1']):not([aria-hidden='true'])",
+);
+
 pub fn get_tabbable_elements_selector() -> &'static str {
     // Note: CSS selectors cannot test computed visibility (display: none,
     // visibility: hidden). Post-query filtering via computed styles is
@@ -1564,16 +1578,7 @@ pub fn get_tabbable_elements_selector() -> &'static str {
     // Negative tabindex: We only exclude `tabindex="-1"` (not arbitrary negative
     // values like `-2`) because ars-ui components exclusively use `-1` to remove
     // elements from the tab order. Other negative tabindex values are a user error.
-    concat!(
-        "button:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
-        "input:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
-        "select:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
-        "textarea:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
-        "a[href]:not([tabindex='-1']):not([aria-hidden='true']),",
-        "area[href]:not([tabindex='-1']):not([aria-hidden='true']),",
-        "[tabindex]:not([tabindex='-1']):not([disabled]):not([aria-hidden='true']),",
-        "[contenteditable]:not([contenteditable='false']):not([tabindex='-1']):not([aria-hidden='true'])",
-    )
+    TABBABLE_SELECTOR
 }
 ```
 
