@@ -14,7 +14,7 @@ The project needs a fully stable foundation before component work starts. Compon
 | ------------------ | ----- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ars-core`         | 4,306 | Solid    | Machine, Service, TransitionPlan, PendingEffect, Bindable, ConnectApi, ComponentPart, AttrMap/AttrValue/UserAttrs, StyleStrategy, Callback, WeakSend, PlatformEffects, Provider (ColorMode), companion CSS                                                                                                                                                                                                                            |
 | `ars-derive`       | 535   | Complete | HasId, ComponentPart proc macros with error tests                                                                                                                                                                                                                                                                                                                                                                                     |
-| `ars-a11y`         | 2,271 | Partial  | AriaRole, AriaAttribute, ComponentIds, ARIA state helpers, FocusScopeBehavior, FocusStrategy, FocusRing. Missing: FocusZone, DomEvent/KeyboardShortcut/Platform, VisuallyHidden, LabelConfig/FieldContext, Announcements, Touch/Mobile, AriaValidator, test helpers                                                                                                                                                                   |
+| `ars-a11y`         | 5,800+ | 95%     | AriaRole (88 variants), AriaAttribute (55+ variants), ComponentIds, ARIA state helpers (`set_expanded`/`set_selected`/`set_checked`/`set_disabled`/`set_busy`/`set_invalid`), FocusScopeBehavior, FocusStrategy, FocusRing, FocusZone, DomEvent/KeyboardShortcut/Platform, VisuallyHidden, LabelConfig/DescriptionConfig/FieldContext, LiveAnnouncer, Announcements/Messages (14 fields), Touch/Mobile, AriaValidator, FocusZoneTestHarness. Missing: ARIA assertion test helpers (#554), `set_readonly` (#555), public focus selectors (#556) |
 | `ars-forms`        | 4,128 | Partial  | field::State/Value/Context/Descriptors/InputAria, validation::Error/Validator/AsyncValidator, form::Context/Data/Mode, hidden_input, form_submit machine. Missing: built-in validators, ValidatorsBuilder, FormMessages, DebouncedAsyncValidator, Fieldset/Field/Form machines                                                                                                                                                        |
 | `ars-interactions` | 3,107 | Partial  | Press, Hover, Focus, FocusWithin, InteractOutside, Dismissable, compose::merge_attrs, LogicalDirection. Missing: LongPress, Move, DnD, Keyboard types                                                                                                                                                                                                                                                                                 |
 | `ars-dom`          | 5,880 | Partial  | FocusScope, focus queries, ScrollLockManager, positioning engine (types + compute_position + overflow + VirtualElement), z-index allocator, scroll_into_view, modality manager. Missing: viewport/visualViewport, containing-block detection, auto_update, portal/inert, overlay stack, media queries, URL sanitization, ModalityManager listeners                                                                                    |
@@ -45,7 +45,7 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 | Collections        | `06-collections.md`          | ~5700 lines, 10 sections | 90%              | 4 tasks remain (12 pts): mutable wrappers, announcements, DnD, coverage. Core collection/selection/tree/async/virtual complete.                                                                                                                                                             |
 | I18n               | `04-internationalization.md` | ~4000 lines, 16 sections | 25%              | Blocks number/date components, RTL. Locale + NumberFormatter done; 16 tasks remaining (48 pts ICU4X + web-intl parity)                                                                                                                                                                      |
 | DOM utilities      | `11-dom-utilities.md`        | ~2800 lines, 10 sections | 50%              | 8 tasks closed; 8 open (#69, #72, #85, #88, #112–#114, #176). Blocks all overlay components                                                                                                                                                                                                 |
-| Accessibility      | `03-accessibility.md`        | ~4000 lines, 14 sections | 30%              | FocusZone, keyboard shortcuts, VisuallyHidden, FieldContext, announcements, touch/mobile, testing infra all missing                                                                                                                                                                         |
+| Accessibility      | `03-accessibility.md`        | ~4340 lines, 14 sections | 95%              | Wave 4 complete (13 tasks closed). 3 audit follow-up tasks remain (5 pts): ARIA assertion helpers (#554, 3pts), `set_readonly` (#555, 1pt), public focus selectors (#556, 1pt)                                                                                                              |
 | Forms              | `07-forms.md`                | ~4300 lines, 15 sections | 50%              | 3 tasks closed; 8 open (#164–#171, 26 pts). Blocks Field, Fieldset, Form components and validator builder API                                                                                                                                                                               |
 | Adapter conversion | `08/09-adapter-*.md` §4/§3   | ~200 lines               | 40%              | AttrMap conversion done (#55/#56). Leptos: ArsProvider (#190), utilities (#191), LiveAnnouncer bridge (#513). Dioxus: ArsProvider (#193), utilities (#194), LiveAnnouncer bridge (#512), DioxusPlatform (#195), SSR hydration (#196), error boundary (#197). Blocks ALL component rendering |
 
@@ -890,6 +890,9 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 | [#155](https://github.com/fogodev/ars-ui/issues/155) | Implement Touch and Mobile accessibility utilities                       | 2      | #3   | #151       |
 | [#156](https://github.com/fogodev/ars-ui/issues/156) | Implement ARIA Validation testing infrastructure                         | 3      | #3   | —          |
 | [#157](https://github.com/fogodev/ars-ui/issues/157) | Implement Keyboard Navigation test helpers                               | 3      | #3   | #150, #151 |
+| [#554](https://github.com/fogodev/ars-ui/issues/554) | Implement ARIA assertion test helpers for component testing               | 3      | #3   | —          |
+| [#555](https://github.com/fogodev/ars-ui/issues/555) | Add set_readonly helper and DATA_ARS_READONLY constant                   | 1      | #3   | —          |
+| [#556](https://github.com/fogodev/ars-ui/issues/556) | Export TABBABLE_SELECTOR and FOCUSABLE_SELECTOR as public constants      | 1      | #6   | —          |
 | [#164](https://github.com/fogodev/ars-ui/issues/164) | Add MessageFn From impls for usize and f64 arity closures                | 1      | #5   | —          |
 | [#165](https://github.com/fogodev/ars-ui/issues/165) | Implement FormMessages, Error factory methods, DEFAULT_VALIDATOR_LOCALE  | 3      | #5   | #164       |
 | [#166](https://github.com/fogodev/ars-ui/issues/166) | Implement built-in validators and FnValidator                            | 5      | #5   | #165       |
@@ -899,7 +902,7 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 | [#170](https://github.com/fogodev/ars-ui/issues/170) | Implement Field component machine in ars-forms                           | 3      | #5   | —          |
 | [#171](https://github.com/fogodev/ars-ui/issues/171) | Implement Form component machine in ars-forms                            | 5      | #5   | —          |
 
-**Total:** 146 points (132 original + 2 collation + 12 Wave 5-C collections)
+**Total:** 151 points (132 original + 2 collation + 12 Wave 5-C collections + 5 a11y audit follow-up)
 
 ---
 
@@ -1520,7 +1523,7 @@ Wave 4 (72 pts)            ┌─── Wave 3 complete
   #84 (filter/sort, 3)     │
   #85 (media query, 2)     │
   #176 (url sanitize, 2)   │
-  #150 (focus zone, 5)     │  A11y audit additions
+  #150 (focus zone, 5)     │  A11y Wave 4 (all complete)
   #151 (dom event, 3)      │
   #152 (visually hidden, 1)│
   #153 (field context, 3)  │
@@ -1528,6 +1531,9 @@ Wave 4 (72 pts)            ┌─── Wave 3 complete
   #156 (aria validator, 3) │
     ├─→ #155 (touch, 2)    │  depends on #151
     └─→ #157 (kbd test, 3) │  depends on #150, #151
+  #554 (aria asserts, 3)   │  A11y Wave 5 (audit follow-up)
+  #555 (set_readonly, 1)   │
+  #556 (focus selectors, 1)│
                            ▼
 Wave 5 (13 pts)            ┌─── Wave 4 i18n tasks available
   #124 (web number, 5)     │
@@ -1548,7 +1554,8 @@ Wave 5 (13 pts)            ┌─── Wave 4 i18n tasks available
 | DOM utilities       | #6    | #66, #67, #68, #69, #72, #74, #85, #88, #112, #113, #114, #115, #176 |
 | Leptos adapter      | #8    | #55, #105, #190, #191, #513                                          |
 | Dioxus adapter      | #9    | #56, #106, #193, #194, #195, #196, #197, #512                        |
-| A11y                | #3    | #73, #89, #150, #151, #152, #153, #154, #155, #156, #157             |
+| A11y                | #3    | #73, #89, #150, #151, #152, #153, #154, #155, #156, #157, #554, #555 |
+| DOM utilities (a11y) | #6   | #556                                                                  |
 | Collections         | #53   | #62, #63, #64, #70, #71, #81, #82, #83, #84                          |
 | I18n                | #54   | #75, #79, #80, #124, #125, #126                                      |
 | First utility slice | #10   | #104                                                                 |
@@ -1935,10 +1942,10 @@ are symmetric with Leptos #190/#191/#513; the remaining three cover Dioxus-uniqu
 | Wave 1    | 7      | 19      | Button, VisuallyHidden, Separator                        |
 | Wave 2    | 12     | 43      | Select, Combobox, Menu, Listbox, Dialog, Popover         |
 | Wave 3    | 9      | 29      | Tooltip, DatePicker prerequisites, accessibility         |
-| Wave 4    | 34     | 108     | All remaining components (Slider, TreeView, Table, etc.) |
+| Wave 4    | 37     | 113     | All remaining components (Slider, TreeView, Table, etc.) |
 | Wave 5-C  | 4      | 12      | Mutable collections, announcements, DnD, coverage        |
 | Wave 5    | 6      | 23      | Browser Intl backends for WASM client builds             |
 | Post-F IO | 3      | 13      | Dismissable for overlays                                 |
 | Post-F LA | 2      | 8       | Leptos adapter foundation completion                     |
 | Post-F DA | 5      | 16      | Dioxus adapter foundation completion                     |
-| **Total** | **82** | **271** | **Complete foundation for all 112 components**           |
+| **Total** | **85** | **276** | **Complete foundation for all 112 components**           |

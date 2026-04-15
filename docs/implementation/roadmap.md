@@ -52,6 +52,8 @@ Exit criteria:
 
 Status (2026-04-14): Collections foundation (ars-collections) is 90% complete — 464 tests, 99.47% line coverage. Core types, traits, selection, navigation, typeahead, async, virtualization, tree, filter/sort, and collation are implemented. Four tasks remain: mutable wrappers (#547), announcements + OnAction (#548), DnD integration (#549), and coverage hardening (#550) — 12 pts total under Epic #53 Wave 5.
 
+Status (2026-04-15): Accessibility foundation (ars-a11y) is 95% complete — Epic #3 Wave 4 fully delivered (13 tasks closed, 25 pts). A spec-vs-code audit identified 3 follow-up tasks (5 pts): ARIA assertion test helpers (#554, 3pts), `set_readonly` helper (#555, 1pt), public focus selectors (#556, 1pt). These are tracked as Wave 5 sub-issues of Epic #3.
+
 ### Phase 3: Testing platform
 
 Outcome:
@@ -66,7 +68,7 @@ Exit criteria:
 
 - test-harness API is stable enough for the first component slice
 - CI failures identify the failing tier
-- `ars-core/src/test_helpers.rs` exports 35+ ARIA assertion functions
+- `ars-a11y/src/testing/asserts.rs` exports 41 ARIA assertion functions (tracked as #554 under Epic #3)
 - `insta` snapshot tests compile and CI rejects unapproved changes
 - Both adapter backends can mount, query, and interact with components
 
