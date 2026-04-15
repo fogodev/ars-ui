@@ -196,12 +196,12 @@ pub fn assert_aria_required(attrs: &AttrMap, expected: bool) {
     }
 }
 
-pub fn assert_aria_invalid(attrs: &AttrMap, expected: bool) {
+pub fn assert_aria_invalid(attrs: &AttrMap, expected: &str) {
     let val = attrs.get(&HtmlAttr::Aria(AriaAttr::Invalid));
-    if expected {
-        assert_eq!(val, Some("true"), "expected aria-invalid=\"true\"");
-    } else {
+    if expected == "false" {
         assert!(val.is_none() || val == Some("false"));
+    } else {
+        assert_eq!(val, Some(expected), "expected aria-invalid=\"{expected}\"");
     }
 }
 

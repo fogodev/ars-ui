@@ -55,6 +55,25 @@ fn assert_optional_false_bool_attr(attrs: &AttrMap, attr: HtmlAttr, name: &str, 
     }
 }
 
+fn assert_optional_false_token_attr(attrs: &AttrMap, attr: HtmlAttr, name: &str, expected: &str) {
+    let actual = attrs.get(&attr);
+
+    if expected == "false" {
+        match actual {
+            None | Some("false") => {}
+            Some(other) => {
+                panic!("expected {name} to be absent or \"false\", got \"{other}\"")
+            }
+        }
+    } else {
+        assert_eq!(
+            actual,
+            Some(expected),
+            "expected {name}=\"{expected}\", got {actual:?}"
+        );
+    }
+}
+
 fn assert_integer_attr<T>(attrs: &AttrMap, attr: HtmlAttr, name: &str, expected: &T)
 where
     T: Copy + FromStr + Debug + Display + PartialEq,
@@ -280,9 +299,13 @@ pub fn assert_aria_required(attrs: &AttrMap, expected: bool) {
     );
 }
 
-/// Assert `aria-invalid` matches the expected boolean contract.
-pub fn assert_aria_invalid(attrs: &AttrMap, expected: bool) {
-    assert_optional_false_bool_attr(
+/// Assert `aria-invalid` matches the expected token.
+///
+/// Passing `"false"` accepts either an absent attribute or an explicit
+/// `aria-invalid="false"`, matching the optional-false contract used by the
+/// state helpers.
+pub fn assert_aria_invalid(attrs: &AttrMap, expected: &str) {
+    assert_optional_false_token_attr(
         attrs,
         HtmlAttr::Aria(AriaAttr::Invalid),
         "aria-invalid",
@@ -853,15 +876,67 @@ mod tests {
         HtmlAttr::Aria(AriaAttr::Required),
         "required-ish"
     );
-    optional_false_bool_assert_tests!(
-        assert_aria_invalid_accepts_true,
-        assert_aria_invalid_accepts_absent_false,
-        assert_aria_invalid_accepts_explicit_false,
-        assert_aria_invalid_panics_on_invalid_false,
-        assert_aria_invalid,
-        HtmlAttr::Aria(AriaAttr::Invalid),
-        "grammar"
-    );
+    #[test]
+    fn assert_aria_invalid_accepts_true() {
+        let mut attrs = AttrMap::new();
+        attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
+
+        assert_aria_invalid(&attrs, "true");
+    }
+
+    #[test]
+    fn assert_aria_invalid_accepts_absent_false() {
+        let attrs = AttrMap::new();
+
+        assert_aria_invalid(&attrs, "false");
+    }
+
+    #[test]
+    fn assert_aria_invalid_accepts_explicit_false() {
+        let mut attrs = AttrMap::new();
+        attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "false");
+
+        assert_aria_invalid(&attrs, "false");
+    }
+
+    #[test]
+    fn assert_aria_invalid_accepts_grammar() {
+        let mut attrs = AttrMap::new();
+        attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "grammar");
+
+        assert_aria_invalid(&attrs, "grammar");
+    }
+
+    #[test]
+    fn assert_aria_invalid_accepts_spelling() {
+        let mut attrs = AttrMap::new();
+        attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "spelling");
+
+        assert_aria_invalid(&attrs, "spelling");
+    }
+
+    #[test]
+    fn assert_aria_invalid_panics_when_token_mismatches() {
+        let mut attrs = AttrMap::new();
+        attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "spelling");
+
+        let panic =
+            catch_panic_silently(AssertUnwindSafe(|| assert_aria_invalid(&attrs, "grammar")))
+                .expect_err("mismatched aria-invalid token should panic");
+
+        assert!(panic_message(panic).contains("expected"));
+    }
+
+    #[test]
+    fn assert_aria_invalid_panics_when_false_is_other_token() {
+        let mut attrs = AttrMap::new();
+        attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "grammar");
+
+        let panic = catch_panic_silently(AssertUnwindSafe(|| assert_aria_invalid(&attrs, "false")))
+            .expect_err("non-false aria-invalid token should panic when false is expected");
+
+        assert!(panic_message(panic).contains("absent or \"false\""));
+    }
     string_assert_tests!(
         assert_aria_live_succeeds,
         assert_aria_live_panics_when_missing,
