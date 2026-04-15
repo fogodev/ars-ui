@@ -3,12 +3,16 @@ use core::{cmp::Ordering, num::NonZero};
 
 #[cfg(feature = "icu4x")]
 use super::internal::CalendarDate as InternalCalendarDate;
+#[cfg(feature = "icu4x")]
+use super::internal::{
+    days_in_month as internal_days_in_month, months_in_year as internal_months_in_year,
+};
 use super::{
     CalendarConversionError, CalendarDate, CalendarError, CalendarSystem, CalendarTypeError,
     DateError, DateRange, Era, Gregorian, HourCycle, Japanese, JapaneseEra, Month, Time,
-    TypedCalendarDate, WeekInfo, bounded_days_in_month, bounded_months_in_year, default_era_for,
-    epoch_days_to_iso, gregorian_days_in_month, iso_to_epoch_days, minimum_day_in_month,
-    minimum_month_in_year, years_in_era,
+    TypedCalendarDate, WeekInfo, bounded_days_in_month, bounded_months_in_year,
+    coptic_like_days_in_month, default_era_for, epoch_days_to_iso, gregorian_days_in_month,
+    iso_to_epoch_days, minimum_day_in_month, minimum_month_in_year, years_in_era,
 };
 use crate::{IcuProvider, Locale, StubIcuProvider, Weekday};
 
@@ -227,6 +231,71 @@ fn calendar_system_helpers_cover_remaining_mappings() {
     assert!(!CalendarSystem::Gregorian.has_custom_eras());
     assert!(!CalendarSystem::Chinese.has_custom_eras());
     assert_eq!(CalendarSystem::supported_calendars().len(), 15);
+}
+
+#[test]
+fn calendar_system_metadata_and_japanese_names_cover_remaining_variants() {
+    let calendars = CalendarSystem::supported_calendars();
+
+    let chinese = calendars
+        .iter()
+        .find(|metadata| metadata.system == CalendarSystem::Chinese)
+        .expect("Chinese metadata should exist");
+    let dangi = calendars
+        .iter()
+        .find(|metadata| metadata.system == CalendarSystem::Dangi)
+        .expect("Dangi metadata should exist");
+    let coptic = calendars
+        .iter()
+        .find(|metadata| metadata.system == CalendarSystem::Coptic)
+        .expect("Coptic metadata should exist");
+    let roc = calendars
+        .iter()
+        .find(|metadata| metadata.system == CalendarSystem::Roc)
+        .expect("Roc metadata should exist");
+
+    assert_eq!(chinese.month_range, 1..=13);
+    assert!(chinese.has_leap_months);
+    assert_eq!(dangi.month_range, 1..=13);
+    assert!(dangi.has_leap_months);
+    assert_eq!(coptic.month_range, 1..=13);
+    assert!(!coptic.has_leap_months);
+    assert_eq!(roc.month_range, 1..=12);
+    assert!(!roc.era_required);
+
+    for (era, expected_native) in [
+        (
+            JapaneseEra {
+                name: "Meiji",
+                start_year: 1868,
+            },
+            "明治",
+        ),
+        (
+            JapaneseEra {
+                name: "Taisho",
+                start_year: 1912,
+            },
+            "大正",
+        ),
+        (
+            JapaneseEra {
+                name: "Showa",
+                start_year: 1926,
+            },
+            "昭和",
+        ),
+        (
+            JapaneseEra {
+                name: "Heisei",
+                start_year: 1989,
+            },
+            "平成",
+        ),
+    ] {
+        let locale = Locale::parse("ja-JP").expect("locale should parse");
+        assert_eq!(era.localized_name(&locale), expected_native);
+    }
 }
 
 #[test]
@@ -954,6 +1023,10 @@ fn epoch_day_helpers_use_the_spec_epoch() {
     assert_eq!(gregorian_days_in_month(2023, 2), 28);
     assert_eq!(gregorian_days_in_month(2024, 0), 30);
     assert_eq!(gregorian_days_in_month(2024, 13), 30);
+    assert_eq!(coptic_like_days_in_month(1738, 13), 5);
+    assert_eq!(coptic_like_days_in_month(1739, 13), 6);
+    assert_eq!(coptic_like_days_in_month(1739, 1), 30);
+    assert_eq!(coptic_like_days_in_month(1739, 14), 0);
 }
 
 #[test]
@@ -1038,6 +1111,107 @@ fn japanese_era_helper_functions_cover_bounded_and_fallback_paths() {
     );
     assert_eq!(
         bounded_days_in_month(CalendarSystem::Gregorian, 2024, 2, None),
+        None
+    );
+}
+
+#[test]
+fn japanese_helper_functions_cover_non_terminal_and_non_japanese_paths() {
+    let non_terminal_year = CalendarDate {
+        calendar: CalendarSystem::Japanese,
+        era: Some(Era {
+            code: String::from("heisei"),
+            display_name: String::from("Heisei"),
+        }),
+        year: 30,
+        month: NonZero::new(3).expect("month should be non-zero"),
+        day: NonZero::new(15).expect("day should be non-zero"),
+    };
+
+    let gregorian = CalendarDate::new_gregorian(
+        2024,
+        NonZero::new(3).expect("month should be non-zero"),
+        NonZero::new(15).expect("day should be non-zero"),
+    );
+
+    assert_eq!(years_in_era(&gregorian), None);
+    assert_eq!(minimum_month_in_year(&gregorian), 1);
+    assert_eq!(minimum_day_in_month(&gregorian), 1);
+    assert_eq!(
+        bounded_months_in_year(CalendarSystem::Japanese, 30, Some("heisei")),
+        Some(12)
+    );
+    assert_eq!(
+        bounded_days_in_month(CalendarSystem::Japanese, 30, 3, Some("heisei")),
+        Some(31)
+    );
+    assert_eq!(minimum_month_in_year(&non_terminal_year), 1);
+    assert_eq!(minimum_day_in_month(&non_terminal_year), 1);
+}
+
+#[test]
+fn stub_provider_fallback_helpers_cover_remaining_calendar_defaults() {
+    let provider = StubIcuProvider;
+    let locale = Locale::parse("ko-KR").expect("locale should parse");
+    let gregorian = CalendarDate::new_gregorian(
+        2024,
+        NonZero::new(3).expect("month should be non-zero"),
+        NonZero::new(15).expect("day should be non-zero"),
+    );
+
+    assert_eq!(
+        provider.max_months_in_year(&CalendarSystem::Chinese, 2024, None),
+        12
+    );
+    assert_eq!(
+        provider.max_months_in_year(&CalendarSystem::EthiopicAmeteAlem, 2015, None),
+        13
+    );
+    assert_eq!(
+        provider.days_in_month(&CalendarSystem::EthiopicAmeteAlem, 2015, 13, None),
+        6
+    );
+    assert_eq!(
+        provider.days_in_month(&CalendarSystem::Roc, 113, 2, None),
+        29
+    );
+    assert!(provider.default_era(&CalendarSystem::Japanese).is_some());
+    assert_eq!(provider.default_era(&CalendarSystem::Gregorian), None);
+    assert_eq!(provider.years_in_era(&gregorian), None);
+    assert_eq!(provider.minimum_month_in_year(&gregorian), 1);
+    assert_eq!(provider.minimum_day_in_month(&gregorian), 1);
+    assert_eq!(provider.hour_cycle(&locale), HourCycle::H12);
+    assert_eq!(provider.first_day_of_week(&locale), Weekday::Sunday);
+}
+
+#[cfg(feature = "icu4x")]
+#[test]
+fn internal_calendar_shape_helpers_cover_remaining_icu_backed_paths() {
+    let leap_month_year = (2020..=2030)
+        .find(|year| internal_months_in_year(*year, CalendarSystem::Chinese, None) == Some(13))
+        .expect("fixture range should include a Chinese leap-month year");
+    let common_year = (2020..=2030)
+        .find(|year| internal_months_in_year(*year, CalendarSystem::Chinese, None) == Some(12))
+        .expect("fixture range should include a Chinese common year");
+
+    assert_eq!(
+        internal_days_in_month(1739, 13, CalendarSystem::Coptic, Some("am")),
+        Some(6)
+    );
+    assert_eq!(
+        internal_days_in_month(1738, 13, CalendarSystem::Coptic, Some("am")),
+        Some(5)
+    );
+    assert_eq!(
+        internal_months_in_year(leap_month_year, CalendarSystem::Chinese, None),
+        Some(13)
+    );
+    assert_eq!(
+        internal_months_in_year(common_year, CalendarSystem::Chinese, None),
+        Some(12)
+    );
+    assert_eq!(
+        internal_days_in_month(2024, 14, CalendarSystem::Gregorian, None),
         None
     );
 }
