@@ -112,6 +112,14 @@ fn stub_provider_rejects_invalid_coptic_and_ethiopic_epagomenal_days() {
         CalendarDate::new(&provider, CalendarSystem::Ethiopic, None, 2015, 13, 6).is_some(),
         "leap Ethiopic year month 13 has six days"
     );
+    assert!(
+        CalendarDate::new(&provider, CalendarSystem::Coptic, None, i32::MAX, 13, 6).is_some(),
+        "the accepted maximum year should not overflow Coptic leap-year validation"
+    );
+    assert!(
+        CalendarDate::new(&provider, CalendarSystem::Coptic, None, i32::MAX, 13, 7).is_none(),
+        "month 13 must still reject days beyond the widened leap-year bound"
+    );
 }
 
 #[cfg(feature = "icu4x")]

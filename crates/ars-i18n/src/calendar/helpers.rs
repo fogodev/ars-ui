@@ -39,7 +39,10 @@ pub(crate) const fn gregorian_days_in_month(year: i32, month: u8) -> u8 {
 /// Coptic and Ethiopic calendars insert the leap day into month 13, so the
 /// leap-year rule affects only that final month.
 pub(crate) const fn coptic_like_is_leap_year(year: i32) -> bool {
-    (year + 1) % 4 == 0
+    // Coptic-style leap years are the years whose following Gregorian-style
+    // ordinal would be divisible by four. Widen before adding so the accepted
+    // `i32::MAX` year remains well-defined instead of overflowing here.
+    ((year as i64) + 1) % 4 == 0
 }
 
 /// Returns the number of days in a Coptic or Ethiopic month.
