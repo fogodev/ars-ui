@@ -6,19 +6,28 @@ use std::{cell::RefCell, collections::HashMap, string::String};
 
 use ars_a11y::{FocusScopeBehavior, FocusScopeOptions, FocusTarget};
 
-#[cfg(any(test, all(feature = "web", target_arch = "wasm32")))]
-const FOCUSABLE_SELECTOR: &str = concat!(
+/// CSS selector used to query focusable candidate elements before visibility and
+/// inert-state filtering are applied.
+///
+/// This selector includes elements with an explicit `tabindex`, including `-1`,
+/// which means the resulting candidate set may include elements that are
+/// programmatically focusable but not tabbable.
+pub const FOCUSABLE_SELECTOR: &str = concat!(
     "button:not([disabled]):not([aria-hidden='true']),",
     "input:not([disabled]):not([aria-hidden='true']),",
     "select:not([disabled]):not([aria-hidden='true']),",
     "textarea:not([disabled]):not([aria-hidden='true']),",
     "a[href]:not([aria-hidden='true']),",
     "area[href]:not([aria-hidden='true']),",
-    "[tabindex]:not([tabindex='-1']):not([disabled]):not([aria-hidden='true']),",
+    "[tabindex]:not([disabled]):not([aria-hidden='true']),",
     "[contenteditable]:not([contenteditable='false']):not([aria-hidden='true'])",
 );
-#[cfg(any(test, all(feature = "web", target_arch = "wasm32")))]
-const TABBABLE_SELECTOR: &str = concat!(
+/// CSS selector used to query tabbable candidate elements before visibility and
+/// inert-state filtering are applied.
+///
+/// This selector excludes `tabindex="-1"` candidates so the result set maps to
+/// the tab order rather than the broader focusable set.
+pub const TABBABLE_SELECTOR: &str = concat!(
     "button:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
     "input:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
     "select:not([disabled]):not([tabindex='-1']):not([aria-hidden='true']),",
@@ -28,6 +37,12 @@ const TABBABLE_SELECTOR: &str = concat!(
     "[tabindex]:not([tabindex='-1']):not([disabled]):not([aria-hidden='true']),",
     "[contenteditable]:not([contenteditable='false']):not([tabindex='-1']):not([aria-hidden='true'])",
 );
+
+/// Returns the raw selector string used to locate tabbable DOM candidates.
+#[must_use]
+pub fn get_tabbable_elements_selector() -> &'static str {
+    TABBABLE_SELECTOR
+}
 
 /// Platform-agnostic reference to an element captured for later focus restoration.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -868,7 +883,13 @@ mod tests {
     fn tabbable_selector_keeps_focusable_ordering_contract() {
         assert!(TABBABLE_SELECTOR.contains("button:not([disabled])"));
         assert!(TABBABLE_SELECTOR.contains("[tabindex]:not([tabindex='-1'])"));
-        assert!(FOCUSABLE_SELECTOR.contains("[tabindex]:not([tabindex='-1'])"));
+        assert!(FOCUSABLE_SELECTOR.contains("[tabindex]:not([disabled])"));
+        assert!(!FOCUSABLE_SELECTOR.contains("[tabindex]:not([tabindex='-1'])"));
+    }
+
+    #[test]
+    fn get_tabbable_elements_selector_returns_public_constant() {
+        assert_eq!(get_tabbable_elements_selector(), TABBABLE_SELECTOR);
     }
 
     #[test]
@@ -889,5 +910,129 @@ mod tests {
     #[test]
     fn previously_active_lookup_returns_none_for_unknown_scope() {
         assert_eq!(get_previously_active_element("missing-scope"), None);
+    }
+}
+
+#[cfg(all(test, feature = "web", target_arch = "wasm32"))]
+mod wasm_tests {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+    use web_sys::{Document, Element, HtmlElement};
+
+    use super::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    fn document() -> Document {
+        web_sys::window()
+            .expect("window must exist")
+            .document()
+            .expect("document must exist")
+    }
+
+    fn body() -> HtmlElement {
+        document().body().expect("body must exist")
+    }
+
+    fn append_div(parent: &Element, id: &str, style: &str) -> HtmlElement {
+        let element = document()
+            .create_element("div")
+            .expect("div creation must succeed")
+            .dyn_into::<HtmlElement>()
+            .expect("div must be HtmlElement");
+        element.set_id(id);
+        element
+            .set_attribute("style", style)
+            .expect("style assignment must succeed");
+        parent
+            .append_child(&element)
+            .expect("append_child must succeed");
+        element
+    }
+
+    fn append_button(
+        parent: &Element,
+        id: &str,
+        tabindex: Option<&str>,
+        disabled: bool,
+    ) -> HtmlElement {
+        let button = document()
+            .create_element("button")
+            .expect("button creation must succeed")
+            .dyn_into::<HtmlElement>()
+            .expect("button must be HtmlElement");
+        button.set_id(id);
+        if let Some(tabindex) = tabindex {
+            button
+                .set_attribute("tabindex", tabindex)
+                .expect("tabindex assignment must succeed");
+        }
+        if disabled {
+            button
+                .set_attribute("disabled", "")
+                .expect("disabled assignment must succeed");
+        }
+        parent
+            .append_child(&button)
+            .expect("append_child must succeed");
+        button
+    }
+
+    fn append_focusable_div(parent: &Element, id: &str, tabindex: &str) -> HtmlElement {
+        let div = document()
+            .create_element("div")
+            .expect("div creation must succeed")
+            .dyn_into::<HtmlElement>()
+            .expect("div must be HtmlElement");
+        div.set_id(id);
+        div.set_attribute("tabindex", tabindex)
+            .expect("tabindex assignment must succeed");
+        parent
+            .append_child(&div)
+            .expect("append_child must succeed");
+        div
+    }
+
+    fn cleanup(node: &HtmlElement) {
+        node.remove();
+    }
+
+    #[wasm_bindgen_test]
+    fn focus_queries_distinguish_focusable_from_tabbable_candidates() {
+        let root = append_div(
+            body().as_ref(),
+            "focus-query-root",
+            "position:fixed;left:-10000px;top:0;width:240px;height:120px;",
+        );
+        let button = append_button(root.as_ref(), "native-button", None, false);
+        let programmatic_only = append_focusable_div(root.as_ref(), "programmatic-only", "-1");
+        let tabbable = append_focusable_div(root.as_ref(), "tabbable-div", "0");
+        let _disabled = append_button(root.as_ref(), "disabled-button", None, true);
+
+        let focusable_ids = get_focusable_elements(root.as_ref())
+            .into_iter()
+            .map(|element| element.id())
+            .collect::<Vec<_>>();
+        let tabbable_ids = get_tabbable_elements(root.as_ref())
+            .into_iter()
+            .map(|element| element.id())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            focusable_ids,
+            vec![button.id(), programmatic_only.id(), tabbable.id(),]
+        );
+        assert_eq!(tabbable_ids, vec![button.id(), tabbable.id()]);
+        assert_eq!(
+            get_first_focusable(root.as_ref()).map(|element| element.id()),
+            Some(button.id())
+        );
+        assert_eq!(
+            get_last_focusable(root.as_ref()).map(|element| element.id()),
+            Some(tabbable.id())
+        );
+        assert!(get_html_element_by_id("programmatic-only").is_some());
+
+        cleanup(&root);
     }
 }

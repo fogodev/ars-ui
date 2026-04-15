@@ -1,6 +1,6 @@
 # ARIA Assertion Helpers
 
-Reusable helper functions for validating ARIA contracts. These live in `ars-core/src/test_helpers.rs` (or a dedicated `ars-test-utils` crate).
+Reusable helper functions for validating ARIA contracts. These live in `ars-a11y/src/testing/asserts.rs` and are exported behind the `ars-a11y` `testing` feature.
 
 ```rust
 use crate::AttrMap;
@@ -196,12 +196,12 @@ pub fn assert_aria_required(attrs: &AttrMap, expected: bool) {
     }
 }
 
-pub fn assert_aria_invalid(attrs: &AttrMap, expected: bool) {
+pub fn assert_aria_invalid(attrs: &AttrMap, expected: &str) {
     let val = attrs.get(&HtmlAttr::Aria(AriaAttr::Invalid));
-    if expected {
-        assert_eq!(val, Some("true"), "expected aria-invalid=\"true\"");
-    } else {
+    if expected == "false" {
         assert!(val.is_none() || val == Some("false"));
+    } else {
+        assert_eq!(val, Some(expected), "expected aria-invalid=\"{expected}\"");
     }
 }
 
