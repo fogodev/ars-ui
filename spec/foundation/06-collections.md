@@ -4925,6 +4925,12 @@ The `CollationSupport` trait adds locale-aware sorting directly to collection ty
 ```rust
 /// Locale-aware sorting support for collection types.
 /// Requires `i18n` feature flag (depends on `ars-i18n` for `StringCollator`).
+///
+/// The collator is borrowed — callers may reuse a `CollatorCache` across
+/// repeated sort operations without reconstructing the collator each time.
+/// Both the collator and `text_fn` are only used during construction
+/// (sorting happens eagerly), so neither needs to outlive the returned
+/// collection.
 #[cfg(feature = "i18n")]
 pub trait CollationSupport: Sized + CollationTarget {
     /// The output type after applying collation (typically a SortedCollection wrapper).
@@ -4932,9 +4938,9 @@ pub trait CollationSupport: Sized + CollationTarget {
 
     /// Apply locale-aware sorting using the given collator and text extraction function.
     /// `text_fn` extracts the sortable text from each item.
-    fn with_collation<F>(self, collator: StringCollator, text_fn: F) -> Self::Output
+    fn with_collation<F>(self, collator: &StringCollator, text_fn: F) -> Self::Output
     where
-        F: Fn(&<Self as CollationTarget>::Item) -> &str + 'static;
+        F: Fn(&<Self as CollationTarget>::Item) -> &str;
 }
 
 /// Helper trait to associate the item type for CollationSupport.
@@ -4943,21 +4949,40 @@ pub trait CollationTarget {
     type Item;
 }
 
+/// Blanket impl so `&StaticCollection<T>` etc. satisfy the `CollationTarget`
+/// supertrait required by `CollationSupport` without duplicating impls.
 #[cfg(feature = "i18n")]
-impl<T: CollectionItem + Clone> CollationTarget for StaticCollection<T> {
+impl<T: CollationTarget> CollationTarget for &T {
+    type Item = T::Item;
+}
+
+#[cfg(feature = "i18n")]
+impl<T: Clone> CollationTarget for StaticCollection<T> {
     type Item = T;
 }
 
 #[cfg(feature = "i18n")]
-impl<T: CollectionItem + Clone> CollationSupport for &StaticCollection<T> {
-    type Output = SortedCollection<'_, T, StaticCollection<T>>;
+impl<T: Clone> CollationTarget for TreeCollection<T> {
+    type Item = T;
+}
 
-    fn with_collation<F>(self, collator: StringCollator, text_fn: F) -> Self::Output
+#[cfg(feature = "i18n")]
+impl<'a, T: Clone, C: Collection<T>> CollationTarget
+    for FilteredCollection<'a, T, C>
+{
+    type Item = T;
+}
+
+#[cfg(feature = "i18n")]
+impl<'a, T: Clone> CollationSupport for &'a StaticCollection<T> {
+    type Output = SortedCollection<'a, T, StaticCollection<T>>;
+
+    fn with_collation<F>(self, collator: &StringCollator, text_fn: F) -> Self::Output
     where
-        F: Fn(&T) -> &str + 'static,
+        F: Fn(&T) -> &str,
     {
         // SortedCollection::new comparator receives &Node<T>; extract &T via value.
-        SortedCollection::new(self, move |a, b| {
+        SortedCollection::new(self, |a, b| {
             let a_text = text_fn(a.value.as_ref().expect("item node"));
             let b_text = text_fn(b.value.as_ref().expect("item node"));
             collator.compare(a_text, b_text)
@@ -4966,16 +4991,16 @@ impl<T: CollectionItem + Clone> CollationSupport for &StaticCollection<T> {
 }
 
 #[cfg(feature = "i18n")]
-impl<T: CollectionItem + Clone> CollationSupport for &TreeCollection<T> {
-    type Output = SortedCollection<'_, T, TreeCollection<T>>;
+impl<'a, T: Clone> CollationSupport for &'a TreeCollection<T> {
+    type Output = SortedCollection<'a, T, TreeCollection<T>>;
 
     /// Sorts the flattened iteration order. For per-level sibling sorting,
     /// use SortedCollection with a depth-aware comparator instead.
-    fn with_collation<F>(self, collator: StringCollator, text_fn: F) -> Self::Output
+    fn with_collation<F>(self, collator: &StringCollator, text_fn: F) -> Self::Output
     where
-        F: Fn(&T) -> &str + 'static,
+        F: Fn(&T) -> &str,
     {
-        SortedCollection::new(self, move |a, b| {
+        SortedCollection::new(self, |a, b| {
             let a_text = text_fn(a.value.as_ref().expect("item node"));
             let b_text = text_fn(b.value.as_ref().expect("item node"));
             collator.compare(a_text, b_text)
@@ -4984,16 +5009,16 @@ impl<T: CollectionItem + Clone> CollationSupport for &TreeCollection<T> {
 }
 
 #[cfg(feature = "i18n")]
-impl<'a, T: CollectionItem + Clone, C: Collection<T>> CollationSupport
+impl<'a, T: Clone, C: Collection<T>> CollationSupport
     for &'a FilteredCollection<'a, T, C>
 {
     type Output = SortedCollection<'a, T, FilteredCollection<'a, T, C>>;
 
-    fn with_collation<F>(self, collator: StringCollator, text_fn: F) -> Self::Output
+    fn with_collation<F>(self, collator: &StringCollator, text_fn: F) -> Self::Output
     where
-        F: Fn(&T) -> &str + 'static,
+        F: Fn(&T) -> &str,
     {
-        SortedCollection::new(self, move |a, b| {
+        SortedCollection::new(self, |a, b| {
             let a_text = text_fn(a.value.as_ref().expect("item node"));
             let b_text = text_fn(b.value.as_ref().expect("item node"));
             collator.compare(a_text, b_text)
@@ -5015,7 +5040,7 @@ pub struct CollatorCache {
 
 #[cfg(feature = "i18n")]
 impl CollatorCache {
-    pub fn new() -> Self { Self { entries: BTreeMap::new() } }
+    pub const fn new() -> Self { Self { entries: BTreeMap::new() } }
 
     pub fn get_or_create(
         &mut self,
@@ -5023,10 +5048,23 @@ impl CollatorCache {
         strength: CollationStrength,
     ) -> &StringCollator {
         self.entries.entry((locale.clone(), strength)).or_insert_with(|| {
-            let mut options = CollationOptions::default();
-            options.strength = strength;
+            let options = CollationOptions { strength, ..CollationOptions::default() };
             StringCollator::new(locale, options)
         })
+    }
+}
+
+#[cfg(feature = "i18n")]
+impl Default for CollatorCache {
+    fn default() -> Self { Self::new() }
+}
+
+#[cfg(feature = "i18n")]
+impl Debug for CollatorCache {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CollatorCache")
+            .field("entries", &self.entries.len())
+            .finish()
     }
 }
 ```
