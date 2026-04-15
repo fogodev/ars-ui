@@ -772,6 +772,36 @@ mod tests {
     }
 
     #[test]
+    fn grid_horizontal_wrap_uses_partial_last_row_bounds() {
+        let left_edge = FocusZone {
+            options: FocusZoneOptions {
+                direction: FocusZoneDirection::grid(NonZero::new(3).expect("hardcoded nonzero")),
+                ..FocusZoneOptions::default()
+            },
+            active_index: 3,
+            item_count: 5,
+        };
+
+        let right_edge = FocusZone {
+            options: FocusZoneOptions {
+                direction: FocusZoneDirection::grid(NonZero::new(3).expect("hardcoded nonzero")),
+                ..FocusZoneOptions::default()
+            },
+            active_index: 4,
+            item_count: 5,
+        };
+
+        assert_eq!(
+            left_edge.handle_key(KeyboardKey::ArrowLeft, false, disabled_items(&[])),
+            Some(4)
+        );
+        assert_eq!(
+            right_edge.handle_key(KeyboardKey::ArrowRight, false, disabled_items(&[])),
+            Some(3)
+        );
+    }
+
+    #[test]
     fn wrap_navigation_cycles_at_edges() {
         let zone = FocusZone {
             options: FocusZoneOptions::default(),
@@ -1011,6 +1041,68 @@ mod tests {
         assert_eq!(
             zone.handle_key(KeyboardKey::ArrowDown, false, disabled_items(&[1])),
             Some(4)
+        );
+    }
+
+    #[test]
+    fn grid_vertical_wrap_uses_last_existing_cell_in_partial_column() {
+        let upward_zone = FocusZone {
+            options: FocusZoneOptions {
+                direction: FocusZoneDirection::grid(NonZero::new(3).expect("hardcoded nonzero")),
+                ..FocusZoneOptions::default()
+            },
+            active_index: 1,
+            item_count: 5,
+        };
+
+        let downward_zone = FocusZone {
+            options: FocusZoneOptions {
+                direction: FocusZoneDirection::grid(NonZero::new(3).expect("hardcoded nonzero")),
+                ..FocusZoneOptions::default()
+            },
+            active_index: 4,
+            item_count: 5,
+        };
+
+        assert_eq!(
+            upward_zone.handle_key(KeyboardKey::ArrowUp, false, disabled_items(&[])),
+            Some(4)
+        );
+        assert_eq!(
+            downward_zone.handle_key(KeyboardKey::ArrowDown, false, disabled_items(&[])),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn page_navigation_scans_for_enabled_item_without_wrapping() {
+        let page_down_zone = FocusZone {
+            options: FocusZoneOptions {
+                page_navigation: true,
+                page_size: NonZero::new(2).expect("hardcoded nonzero"),
+                ..FocusZoneOptions::default()
+            },
+            active_index: 1,
+            item_count: 5,
+        };
+
+        let page_up_zone = FocusZone {
+            options: FocusZoneOptions {
+                page_navigation: true,
+                page_size: NonZero::new(2).expect("hardcoded nonzero"),
+                ..FocusZoneOptions::default()
+            },
+            active_index: 3,
+            item_count: 5,
+        };
+
+        assert_eq!(
+            page_down_zone.handle_key(KeyboardKey::PageDown, false, disabled_items(&[3])),
+            Some(4)
+        );
+        assert_eq!(
+            page_up_zone.handle_key(KeyboardKey::PageUp, false, disabled_items(&[1])),
+            Some(0)
         );
     }
 
