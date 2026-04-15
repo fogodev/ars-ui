@@ -4957,24 +4957,24 @@ impl<T: CollationTarget> CollationTarget for &T {
 }
 
 #[cfg(feature = "i18n")]
-impl<T: CollectionItem + Clone> CollationTarget for StaticCollection<T> {
+impl<T: Clone> CollationTarget for StaticCollection<T> {
     type Item = T;
 }
 
 #[cfg(feature = "i18n")]
-impl<T: CollectionItem + Clone> CollationTarget for TreeCollection<T> {
+impl<T: Clone> CollationTarget for TreeCollection<T> {
     type Item = T;
 }
 
 #[cfg(feature = "i18n")]
-impl<'a, T: CollectionItem + Clone, C: Collection<T>> CollationTarget
+impl<'a, T: Clone, C: Collection<T>> CollationTarget
     for FilteredCollection<'a, T, C>
 {
     type Item = T;
 }
 
 #[cfg(feature = "i18n")]
-impl<'a, T: CollectionItem + Clone> CollationSupport for &'a StaticCollection<T> {
+impl<'a, T: Clone> CollationSupport for &'a StaticCollection<T> {
     type Output = SortedCollection<'a, T, StaticCollection<T>>;
 
     fn with_collation<F>(self, collator: &StringCollator, text_fn: F) -> Self::Output
@@ -4991,7 +4991,7 @@ impl<'a, T: CollectionItem + Clone> CollationSupport for &'a StaticCollection<T>
 }
 
 #[cfg(feature = "i18n")]
-impl<'a, T: CollectionItem + Clone> CollationSupport for &'a TreeCollection<T> {
+impl<'a, T: Clone> CollationSupport for &'a TreeCollection<T> {
     type Output = SortedCollection<'a, T, TreeCollection<T>>;
 
     /// Sorts the flattened iteration order. For per-level sibling sorting,
@@ -5009,7 +5009,7 @@ impl<'a, T: CollectionItem + Clone> CollationSupport for &'a TreeCollection<T> {
 }
 
 #[cfg(feature = "i18n")]
-impl<'a, T: CollectionItem + Clone, C: Collection<T>> CollationSupport
+impl<'a, T: Clone, C: Collection<T>> CollationSupport
     for &'a FilteredCollection<'a, T, C>
 {
     type Output = SortedCollection<'a, T, FilteredCollection<'a, T, C>>;
