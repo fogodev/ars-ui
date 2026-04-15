@@ -100,6 +100,9 @@ impl CalendarDate {
         // when the caller omits the era, the provider resolves the current era.
         let era = era.or_else(|| provider.default_era(&calendar));
         let era_code = era.as_ref().map(|e| e.code.as_str());
+        if year < 1 || !era_code_is_valid(calendar, era_code) {
+            return None;
+        }
         let max_month = max_months_in_year(provider, calendar, year, era_code);
         if !(1..=max_month).contains(&month) {
             return None;
@@ -113,9 +116,6 @@ impl CalendarDate {
             month: NonZero::new(month).expect("validated 1-based"),
             day: NonZero::new(day).expect("validated 1-based"),
         };
-        if candidate.year < 1 {
-            return None;
-        }
         if let Some(max_year) = provider.years_in_era(&candidate) {
             if candidate.year > max_year {
                 return None;
@@ -161,7 +161,8 @@ impl CalendarDate {
     /// React Aria-inspired behavior:
     /// - omitted eras are resolved through `IcuProvider::default_era()`
     /// - same-era year rollover is allowed (e.g. Heisei 1-12 -> Heisei 2-01)
-    /// - start-of-era partial months clamp forward to the minimum valid month/day
+    /// - day clamping within a valid start-of-era month clamps forward to the
+    ///   minimum valid day
     /// - cross-era rollover returns `None`; callers should use
     ///   `IcuProvider::convert_date()` to round-trip through ISO and re-resolve era
     pub fn add_months(&self, provider: &dyn IcuProvider, n: i32) -> Option<CalendarDate> {
@@ -190,8 +191,7 @@ impl CalendarDate {
         };
         let min_month = provider.minimum_month_in_year(&candidate);
         if month_u8 < min_month {
-            month_u8 = min_month;
-            candidate.month = NonZero::new(month_u8).expect("minimum month is 1-based");
+            return None;
         }
         let max_day = days_in_month_for_calendar(provider, self.calendar, year, month_u8, era_code);
         let mut clamped_day = self.day.get().min(max_day);
@@ -210,7 +210,8 @@ impl CalendarDate {
             return None;
         }
         let jdn = self.to_jdn() + n as i64;
-        Some(Self::from_jdn(jdn, self.calendar))
+        let shifted = Self::from_jdn(jdn, self.calendar);
+        (shifted.year >= 1).then_some(shifted)
     }
 
     /// Add days for any calendar system, delegating to the ICU provider for
@@ -218,14 +219,15 @@ impl CalendarDate {
     /// `IcuProvider` for universal calendar support.
     pub fn add_days_with_provider(&self, provider: &dyn IcuProvider, n: i32) -> CalendarDate {
         if self.calendar == CalendarSystem::Gregorian {
-            // Fast path: direct JDN arithmetic
-            let jdn = self.to_jdn() + n as i64;
-            Self::from_jdn(jdn, self.calendar)
+            self
+                .add_days(n)
+                .expect("Gregorian day arithmetic must remain within the supported year range")
         } else {
             // Convert to Gregorian, add days, convert back
             let greg = provider.convert_date(self, CalendarSystem::Gregorian);
-            let jdn = greg.to_jdn() + n as i64;
-            let greg_result = Self::from_jdn(jdn, CalendarSystem::Gregorian);
+            let greg_result = greg
+                .add_days(n)
+                .expect("provider-backed day arithmetic must remain within the supported year range");
             provider.convert_date(&greg_result, self.calendar)
         }
     }
@@ -338,6 +340,17 @@ fn gregorian_days_in_month(year: i32, month: u8) -> u8 {
 /// English-only logic (see `04-internationalization.md` §9.5).
 fn max_months_in_year(provider: &dyn IcuProvider, calendar: CalendarSystem, year: i32, era: Option<&str>) -> u8 {
     provider.max_months_in_year(&calendar, year, era)
+}
+
+fn era_code_is_valid(calendar: CalendarSystem, era: Option<&str>) -> bool {
+    match calendar {
+        CalendarSystem::Japanese => era.is_some_and(|era_code| {
+            CalendarSystem::japanese_eras()
+                .iter()
+                .any(|candidate| candidate.name.eq_ignore_ascii_case(era_code))
+        }),
+        _ => era.is_none(),
+    }
 }
 
 /// Days in a given month for the given calendar system.

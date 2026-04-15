@@ -741,6 +741,34 @@ fn public_calendar_date_new_rejects_japanese_dates_outside_era_bounds() {
         CalendarDate::new(&provider, CalendarSystem::Japanese, reiwa.clone(), 1, 4, 30,).is_none()
     );
     assert!(CalendarDate::new(&provider, CalendarSystem::Japanese, heisei, 31, 5, 1,).is_none());
+    assert!(
+        CalendarDate::new(
+            &provider,
+            CalendarSystem::Japanese,
+            Some(Era {
+                code: String::from("bogus"),
+                display_name: String::from("Bogus"),
+            }),
+            1,
+            5,
+            1,
+        )
+        .is_none()
+    );
+    assert!(
+        CalendarDate::new(
+            &provider,
+            CalendarSystem::Gregorian,
+            Some(Era {
+                code: String::from("reiwa"),
+                display_name: String::from("Reiwa"),
+            }),
+            2024,
+            3,
+            15,
+        )
+        .is_none()
+    );
     assert!(CalendarDate::new(&provider, CalendarSystem::Japanese, reiwa, 1, 5, 1).is_some());
 }
 
@@ -780,6 +808,27 @@ fn public_calendar_date_arithmetic_helpers_match_shared_spec_shape() {
         )
     );
     assert_eq!(date.to_calendar(&provider, CalendarSystem::Gregorian), date);
+
+    let minimum = CalendarDate::new_gregorian(
+        1,
+        NonZero::new(1).expect("month should be non-zero"),
+        NonZero::new(1).expect("day should be non-zero"),
+    );
+
+    assert_eq!(minimum.add_days(-1), None);
+
+    #[cfg(feature = "std")]
+    {
+        let panic = std::panic::catch_unwind(|| minimum.add_days_with_provider(&provider, -1))
+            .expect_err("Gregorian provider-backed arithmetic should reject year-zero underflow");
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&'static str>().copied())
+            .expect("panic payload should be a string");
+
+        assert!(message.contains("supported year range"));
+    }
 }
 
 #[test]
@@ -1171,9 +1220,15 @@ fn stub_provider_fallback_helpers_cover_remaining_calendar_defaults() {
         provider.days_in_month(&CalendarSystem::EthiopicAmeteAlem, 2015, 13, None),
         6
     );
+    #[cfg(feature = "icu4x")]
     assert_eq!(
         provider.days_in_month(&CalendarSystem::Roc, 113, 2, None),
         29
+    );
+    #[cfg(not(feature = "icu4x"))]
+    assert_eq!(
+        provider.days_in_month(&CalendarSystem::Roc, 113, 2, None),
+        28
     );
     assert!(provider.default_era(&CalendarSystem::Japanese).is_some());
     assert_eq!(provider.default_era(&CalendarSystem::Gregorian), None);

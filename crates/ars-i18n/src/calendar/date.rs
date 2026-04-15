@@ -4,8 +4,8 @@ use core::{cmp::Ordering, num::NonZero};
 use super::{
     CalendarSystem, Era,
     helpers::{
-        GREGORIAN_JDN_OFFSET, days_in_month_for_calendar, epoch_days_to_iso, iso_to_epoch_days,
-        max_months_in_year,
+        GREGORIAN_JDN_OFFSET, days_in_month_for_calendar, epoch_days_to_iso, era_code_is_valid,
+        iso_to_epoch_days, max_months_in_year,
     },
 };
 use crate::{IcuProvider, Weekday};
@@ -58,6 +58,11 @@ impl CalendarDate {
     ) -> Option<Self> {
         let era = era.or_else(|| provider.default_era(&calendar));
         let era_code = era.as_ref().map(|value| value.code.as_str());
+
+        if year < 1 || !era_code_is_valid(calendar, era_code) {
+            return None;
+        }
+
         let max_month = max_months_in_year(provider, calendar, year, era_code);
 
         if !(1..=max_month).contains(&month) {
@@ -77,10 +82,6 @@ impl CalendarDate {
             month: NonZero::new(month).expect("validated month is 1-based"),
             day: NonZero::new(day).expect("validated day is 1-based"),
         };
-
-        if candidate.year < 1 {
-            return None;
-        }
 
         if let Some(max_year) = provider.years_in_era(&candidate) {
             if candidate.year > max_year {
@@ -234,10 +235,9 @@ impl CalendarDate {
             return None;
         }
 
-        Some(Self::from_jdn(
-            self.to_jdn() + i64::from(day_delta),
-            self.calendar,
-        ))
+        let shifted = Self::from_jdn(self.to_jdn() + i64::from(day_delta), self.calendar);
+
+        (shifted.year >= 1).then_some(shifted)
     }
 
     /// Adds whole days, delegating non-Gregorian conversion to the provider.
@@ -248,14 +248,15 @@ impl CalendarDate {
         day_delta: i32,
     ) -> CalendarDate {
         if self.calendar == CalendarSystem::Gregorian {
-            return Self::from_jdn(self.to_jdn() + i64::from(day_delta), self.calendar);
+            return self
+                .add_days(day_delta)
+                .expect("Gregorian day arithmetic must remain within the supported year range");
         }
 
         let gregorian = provider.convert_date(self, CalendarSystem::Gregorian);
-        let shifted = Self::from_jdn(
-            gregorian.to_jdn() + i64::from(day_delta),
-            CalendarSystem::Gregorian,
-        );
+        let shifted = gregorian
+            .add_days(day_delta)
+            .expect("provider-backed day arithmetic must remain within the supported year range");
 
         provider.convert_date(&shifted, self.calendar)
     }

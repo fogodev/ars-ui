@@ -73,6 +73,15 @@ pub(super) fn days_in_month_for_calendar(
     provider.days_in_month(&calendar, year, month, era)
 }
 
+pub(super) fn era_code_is_valid(calendar: CalendarSystem, era: Option<&str>) -> bool {
+    match calendar {
+        CalendarSystem::Japanese => {
+            era.is_some_and(|era_code| japanese_era_boundary(era_code).is_some())
+        }
+        _ => era.is_none(),
+    }
+}
+
 #[derive(Clone, Copy)]
 struct EraBoundary {
     code: &'static str,
