@@ -47,3 +47,45 @@
 .ars-touch-none {
   touch-action: none !important;
 }
+
+/* Print media reset — spec/foundation/03-accessibility.md §8.
+ * Hide overlays, suppress focus rings, undo scroll-lock side-effects,
+ * and remove portal content that is detached from its logical context.
+ * Consumers who need to override these defaults (e.g., to show a
+ * specific dialog in print) can use a higher-specificity selector or
+ * additional @media print rules after this stylesheet. */
+@media print {
+  /* §8.1 — Hide overlays and backdrops (alertdialog remains visible). */
+  [data-ars-scope="dialog"]:not([role="alertdialog"]),
+  [data-ars-scope="drawer"],
+  [data-ars-scope="popover"],
+  [data-ars-scope="tooltip"],
+  [data-ars-scope="toast"],
+  [data-ars-backdrop] {
+    display: none !important;
+  }
+
+  /* §8.3 — Remove scroll-lock side-effects. */
+  html,
+  body {
+    overflow: visible !important;
+    padding-right: 0 !important;
+    height: auto !important;
+  }
+
+  /* §8.4 — Hide portal root (content should be inlined for print). */
+  #ars-portal-root {
+    display: none !important;
+  }
+
+  /* §8.2 — Suppress focus indicators. */
+  [data-ars-focus-visible] {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Suppress loading spinners / skeleton screens. */
+  [data-ars-state="loading"] {
+    visibility: hidden;
+  }
+}
