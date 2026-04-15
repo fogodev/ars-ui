@@ -183,7 +183,10 @@ pub trait Collection<T> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{vec, vec::Vec};
+
     use super::*;
+    use crate::CollectionBuilder;
 
     /// Test struct implementing `CollectionItem` with custom text.
     struct LabeledItem {
@@ -234,5 +237,35 @@ mod tests {
     fn collection_item_text_value_default() {
         let item = BareItem { id: Key::int(1) };
         assert_eq!(item.text_value(), "");
+    }
+
+    #[test]
+    fn collection_default_helpers_delegate_to_required_methods() {
+        let collection = CollectionBuilder::new()
+            .item(Key::int(1), "Apple", "apple")
+            .item(Key::int(2), "Banana", "banana")
+            .build();
+
+        assert!(!collection.is_empty());
+        assert!(collection.contains_key(&Key::int(1)));
+        assert!(!collection.contains_key(&Key::int(99)));
+        assert_eq!(collection.text_value_of(&Key::int(2)), Some("Banana"));
+        assert_eq!(collection.text_value_of(&Key::int(99)), None);
+    }
+
+    #[test]
+    fn item_keys_default_iterator_skips_structural_nodes() {
+        let collection = CollectionBuilder::new()
+            .section(Key::str("fruits"), "Fruits")
+            .item(Key::int(1), "Apple", "apple")
+            .separator()
+            .item(Key::int(2), "Banana", "banana")
+            .end_section()
+            .item(Key::int(3), "Cherry", "cherry")
+            .build();
+
+        let item_keys = collection.item_keys().cloned().collect::<Vec<_>>();
+
+        assert_eq!(item_keys, vec![Key::int(1), Key::int(2), Key::int(3)]);
     }
 }

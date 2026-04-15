@@ -2,6 +2,7 @@
 
 use alloc::{string::String, vec::Vec};
 
+use hashbrown::DefaultHashBuilder;
 use indexmap::IndexMap;
 
 use crate::{
@@ -18,7 +19,7 @@ pub struct StaticCollection<T> {
     nodes: Vec<Node<T>>,
 
     /// Maps Key → flat index for O(1) `get`.
-    key_to_index: IndexMap<Key, usize>,
+    key_to_index: IndexMap<Key, usize, DefaultHashBuilder>,
 
     /// Cached index of the first focusable item.
     first_focusable: Option<usize>,
@@ -29,9 +30,14 @@ pub struct StaticCollection<T> {
 
 impl<T: Clone> StaticCollection<T> {
     /// Construct from pre-built parts (used by `CollectionBuilder`).
-    pub(crate) fn from_parts(nodes: Vec<Node<T>>, key_to_index: IndexMap<Key, usize>) -> Self {
+    pub(crate) fn from_parts(
+        nodes: Vec<Node<T>>,
+        key_to_index: IndexMap<Key, usize, DefaultHashBuilder>,
+    ) -> Self {
         let first_focusable = nodes.iter().position(Node::is_focusable);
+
         let last_focusable = nodes.iter().rposition(Node::is_focusable);
+
         Self {
             nodes,
             key_to_index,
@@ -66,9 +72,11 @@ impl<T: Clone> From<Vec<(Key, String, T)>> for StaticCollection<T> {
 impl<T: Clone> FromIterator<(Key, String, T)> for StaticCollection<T> {
     fn from_iter<I: IntoIterator<Item = (Key, String, T)>>(iter: I) -> Self {
         let mut builder = CollectionBuilder::new();
+
         for (key, text, value) in iter {
             builder = builder.item(key, text, value);
         }
+
         builder.build()
     }
 }
@@ -110,7 +118,7 @@ impl<T: Clone> Collection<T> for StaticCollection<T> {
         let start = *self.key_to_index.get(key)? + 1;
         self.nodes[start..]
             .iter()
-            .find(|n| n.is_focusable())
+            .find(|node| node.is_focusable())
             .map(|n| &n.key)
     }
 
@@ -118,7 +126,7 @@ impl<T: Clone> Collection<T> for StaticCollection<T> {
         let end = *self.key_to_index.get(key)?;
         self.nodes[..end]
             .iter()
-            .rfind(|n| n.is_focusable())
+            .rfind(|node| node.is_focusable())
             .map(|n| &n.key)
     }
 
@@ -200,30 +208,38 @@ impl<T: CollectionItem> StaticCollection<T> {
     /// Insert an item at the given index, shifting subsequent items.
     pub fn insert(&mut self, index: usize, item: T) {
         let key = item.key().clone();
+
         let node = Node::item(key.clone(), index, item);
+
         self.nodes.insert(index, node);
         self.key_to_index.insert(key, index);
+
         self.reindex_from(index + 1);
     }
 
     /// Remove items by key. Returns the removed item values.
     pub fn remove_by_keys(&mut self, keys: &[Key]) -> Vec<T> {
         let mut removed = Vec::with_capacity(keys.len());
+
         for key in keys {
             if let Some(idx) = self.key_to_index.shift_remove(key) {
                 let node = self.nodes.remove(idx);
+
                 if let Some(val) = node.value {
                     removed.push(val);
                 }
+
                 self.reindex_from(idx);
             }
         }
+
         removed
     }
 
     /// Replace an item's data (matched by key).
     pub fn replace(&mut self, item: T) {
         let key = item.key().clone();
+
         if let Some(&idx) = self.key_to_index.get(&key) {
             self.nodes[idx].value = Some(item);
         }
@@ -238,8 +254,11 @@ impl<T: CollectionItem> StaticCollection<T> {
     /// Move an item from one index to another.
     pub fn move_item(&mut self, from: usize, to: usize) {
         let node = self.nodes.remove(from);
+
         self.nodes.insert(to, node);
+
         let start = from.min(to);
+
         self.reindex_from(start);
     }
 
@@ -253,7 +272,9 @@ impl<T: CollectionItem> StaticCollection<T> {
     fn reindex_from(&mut self, start: usize) {
         for i in start..self.nodes.len() {
             self.nodes[i].index = i;
+
             let key = &self.nodes[i].key;
+
             self.key_to_index.insert(key.clone(), i);
         }
     }
@@ -314,6 +335,7 @@ mod tests {
     #[test]
     fn from_vec_basic() {
         let c = three_items();
+
         assert_eq!(c.size(), 3);
         assert!(!c.is_empty());
     }
@@ -321,6 +343,7 @@ mod tests {
     #[test]
     fn from_vec_empty() {
         let c = StaticCollection::<String>::default();
+
         assert_eq!(c.size(), 0);
         assert!(c.is_empty());
     }
@@ -331,10 +354,12 @@ mod tests {
             (Key::int(1), "X".to_string(), 10),
             (Key::int(2), "Y".to_string(), 20),
         ]);
+
         let b = StaticCollection::new([
             (Key::int(1), "X".to_string(), 10),
             (Key::int(2), "Y".to_string(), 20),
         ]);
+
         assert_eq!(a, b);
     }
 
@@ -344,7 +369,9 @@ mod tests {
             (Key::int(1), "A".to_string(), "a"),
             (Key::int(2), "B".to_string(), "b"),
         ];
+
         let c = items.into_iter().collect::<StaticCollection<_>>();
+
         assert_eq!(c.size(), 2);
     }
 
@@ -361,6 +388,7 @@ mod tests {
             .separator()
             .item(Key::int(2), "B", "b")
             .build();
+
         // Section + Header + item + separator + item = 5
         assert_eq!(c.size(), 5);
     }
@@ -372,7 +400,9 @@ mod tests {
     #[test]
     fn get_existing() {
         let c = three_items();
+
         let node = c.get(&Key::int(2)).expect("key 2 should exist");
+
         assert_eq!(node.text_value, "Banana");
         assert_eq!(node.value, Some("b"));
     }
@@ -380,31 +410,37 @@ mod tests {
     #[test]
     fn get_missing() {
         let c = three_items();
+
         assert!(c.get(&Key::int(99)).is_none());
     }
 
     #[test]
     fn contains_key_true() {
         let c = three_items();
+
         assert!(c.contains_key(&Key::int(1)));
     }
 
     #[test]
     fn contains_key_false() {
         let c = three_items();
+
         assert!(!c.contains_key(&Key::int(99)));
     }
 
     #[test]
     fn get_by_index_valid() {
         let c = three_items();
+
         let node = c.get_by_index(1).expect("index 1");
+
         assert_eq!(node.key, Key::int(2));
     }
 
     #[test]
     fn get_by_index_out_of_range() {
         let c = three_items();
+
         assert!(c.get_by_index(100).is_none());
     }
 
@@ -415,12 +451,14 @@ mod tests {
     #[test]
     fn first_key_with_items() {
         let c = three_items();
+
         assert_eq!(c.first_key(), Some(&Key::int(1)));
     }
 
     #[test]
     fn first_key_empty() {
         let c = StaticCollection::<String>::default();
+
         assert_eq!(c.first_key(), None);
     }
 
@@ -431,6 +469,7 @@ mod tests {
             .item(Key::int(1), "Apple", "a")
             .end_section()
             .build();
+
         // Section and Header are structural; first focusable is the item
         assert_eq!(c.first_key(), Some(&Key::int(1)));
     }
@@ -438,6 +477,7 @@ mod tests {
     #[test]
     fn last_key_with_items() {
         let c = three_items();
+
         assert_eq!(c.last_key(), Some(&Key::int(3)));
     }
 
@@ -447,6 +487,7 @@ mod tests {
             .item(Key::int(1), "A", "a")
             .separator()
             .build();
+
         // Separator is structural; last focusable is item 1
         assert_eq!(c.last_key(), Some(&Key::int(1)));
     }
@@ -454,6 +495,7 @@ mod tests {
     #[test]
     fn first_and_last_key_only_structural() {
         let c = CollectionBuilder::<String>::new().separator().build();
+
         assert_eq!(c.first_key(), None);
         assert_eq!(c.last_key(), None);
     }
@@ -465,12 +507,14 @@ mod tests {
     #[test]
     fn key_after_middle() {
         let c = three_items();
+
         assert_eq!(c.key_after(&Key::int(1)), Some(&Key::int(2)));
     }
 
     #[test]
     fn key_after_wraps_at_end() {
         let c = three_items();
+
         // key_after the last item wraps to first
         assert_eq!(c.key_after(&Key::int(3)), Some(&Key::int(1)));
     }
@@ -478,12 +522,14 @@ mod tests {
     #[test]
     fn key_before_middle() {
         let c = three_items();
+
         assert_eq!(c.key_before(&Key::int(3)), Some(&Key::int(2)));
     }
 
     #[test]
     fn key_before_wraps_at_start() {
         let c = three_items();
+
         // key_before the first item wraps to last
         assert_eq!(c.key_before(&Key::int(1)), Some(&Key::int(3)));
     }
@@ -491,6 +537,7 @@ mod tests {
     #[test]
     fn key_after_unknown_key() {
         let c = three_items();
+
         // Unknown key → key_after_no_wrap returns None → or_else(first_key)
         // But wait — key_to_index.get returns None, so key_after_no_wrap returns None,
         // then or_else calls first_key which returns Some(1).
@@ -502,6 +549,7 @@ mod tests {
     #[test]
     fn key_before_unknown_key() {
         let c = three_items();
+
         assert_eq!(c.key_before(&Key::int(99)), Some(&Key::int(3)));
     }
 
@@ -512,36 +560,42 @@ mod tests {
     #[test]
     fn key_after_no_wrap_middle() {
         let c = three_items();
+
         assert_eq!(c.key_after_no_wrap(&Key::int(1)), Some(&Key::int(2)));
     }
 
     #[test]
     fn key_after_no_wrap_at_end() {
         let c = three_items();
+
         assert_eq!(c.key_after_no_wrap(&Key::int(3)), None);
     }
 
     #[test]
     fn key_before_no_wrap_middle() {
         let c = three_items();
+
         assert_eq!(c.key_before_no_wrap(&Key::int(3)), Some(&Key::int(2)));
     }
 
     #[test]
     fn key_before_no_wrap_at_start() {
         let c = three_items();
+
         assert_eq!(c.key_before_no_wrap(&Key::int(1)), None);
     }
 
     #[test]
     fn key_after_no_wrap_unknown_key() {
         let c = three_items();
+
         assert_eq!(c.key_after_no_wrap(&Key::int(99)), None);
     }
 
     #[test]
     fn key_before_no_wrap_unknown_key() {
         let c = three_items();
+
         assert_eq!(c.key_before_no_wrap(&Key::int(99)), None);
     }
 
@@ -556,6 +610,7 @@ mod tests {
             .separator()
             .item(Key::int(2), "B", "b")
             .build();
+
         // key_after(1) should skip separator and land on 2
         assert_eq!(c.key_after(&Key::int(1)), Some(&Key::int(2)));
     }
@@ -567,6 +622,7 @@ mod tests {
             .separator()
             .item(Key::int(2), "B", "b")
             .build();
+
         // key_before(2) should skip separator and land on 1
         assert_eq!(c.key_before(&Key::int(2)), Some(&Key::int(1)));
     }
@@ -596,14 +652,18 @@ mod tests {
     #[test]
     fn keys_iterator() {
         let c = three_items();
+
         let keys = c.keys().collect::<Vec<_>>();
+
         assert_eq!(keys, vec![&Key::int(1), &Key::int(2), &Key::int(3)]);
     }
 
     #[test]
     fn nodes_iterator() {
         let c = three_items();
+
         let text_values = c.nodes().map(|n| n.text_value.as_str()).collect::<Vec<_>>();
+
         assert_eq!(text_values, vec!["Apple", "Banana", "Cherry"]);
     }
 
@@ -616,8 +676,10 @@ mod tests {
             .separator()
             .item(Key::int(2), "B", "b")
             .build();
+
         // item_keys should only return focusable items
         let item_keys = c.item_keys().collect::<Vec<_>>();
+
         assert_eq!(item_keys, vec![&Key::int(1), &Key::int(2)]);
     }
 
@@ -636,6 +698,7 @@ mod tests {
             .build();
 
         let children = c.children_of(&Key::str("fruits")).collect::<Vec<_>>();
+
         // Header + 2 items are children of the section
         assert_eq!(children.len(), 3);
         assert_eq!(children[0].node_type, NodeType::Header);
@@ -646,7 +709,9 @@ mod tests {
     #[test]
     fn children_of_no_match() {
         let c = three_items();
+
         let children = c.children_of(&Key::str("nonexistent")).collect::<Vec<_>>();
+
         assert!(children.is_empty());
     }
 
@@ -657,12 +722,14 @@ mod tests {
     #[test]
     fn text_value_of_existing() {
         let c = three_items();
+
         assert_eq!(c.text_value_of(&Key::int(2)), Some("Banana"));
     }
 
     #[test]
     fn text_value_of_missing() {
         let c = three_items();
+
         assert_eq!(c.text_value_of(&Key::int(99)), None);
     }
 
@@ -673,14 +740,18 @@ mod tests {
     #[test]
     fn clone_produces_equal_collection() {
         let c = three_items();
+
         let cloned = c.clone();
+
         assert_eq!(c, cloned);
     }
 
     #[test]
     fn debug_contains_size() {
         let c = three_items();
+
         let debug = format!("{c:?}");
+
         assert!(debug.contains("StaticCollection"));
         assert!(debug.contains("3"));
     }
@@ -688,21 +759,27 @@ mod tests {
     #[test]
     fn partial_eq_equal() {
         let a = three_items();
+
         let b = three_items();
+
         assert_eq!(a, b);
     }
 
     #[test]
     fn partial_eq_different_size() {
         let a = three_items();
+
         let b = StaticCollection::new([(Key::int(1), "Apple".to_string(), "a")]);
+
         assert_ne!(a, b);
     }
 
     #[test]
     fn partial_eq_different_values() {
         let a = StaticCollection::new([(Key::int(1), "Apple".to_string(), "a")]);
+
         let b = StaticCollection::new([(Key::int(1), "Apple".to_string(), "z")]);
+
         assert_ne!(a, b);
     }
 
@@ -712,26 +789,33 @@ mod tests {
 
     fn fruit_collection() -> StaticCollection<Fruit> {
         let mut c = CollectionBuilder::new().build();
+
         c.insert(0, Fruit::new(1, "Apple"));
         c.insert(1, Fruit::new(2, "Banana"));
         c.insert(2, Fruit::new(3, "Cherry"));
+
         c
     }
 
     #[test]
     fn mutation_len() {
         let c = fruit_collection();
+
         assert_eq!(c.len(), 3);
     }
 
     #[test]
     fn mutation_insert_at_beginning() {
         let mut c = fruit_collection();
+
         c.insert(0, Fruit::new(0, "Avocado"));
+
         assert_eq!(c.len(), 4);
         assert_eq!(c.get_by_index(0).expect("index 0").key, Key::int(0));
+
         // Original items shifted
         assert_eq!(c.get_by_index(1).expect("index 1").key, Key::int(1));
+
         // Indices recomputed
         assert_eq!(c.index_of(&Key::int(0)), Some(0));
         assert_eq!(c.index_of(&Key::int(1)), Some(1));
@@ -740,7 +824,9 @@ mod tests {
     #[test]
     fn mutation_insert_at_end() {
         let mut c = fruit_collection();
+
         c.insert(3, Fruit::new(4, "Dragonfruit"));
+
         assert_eq!(c.len(), 4);
         assert_eq!(c.get_by_index(3).expect("index 3").key, Key::int(4));
     }
@@ -748,7 +834,9 @@ mod tests {
     #[test]
     fn mutation_remove_by_keys() {
         let mut c = fruit_collection();
+
         let removed = c.remove_by_keys(&[Key::int(2)]);
+
         assert_eq!(removed.len(), 1);
         assert_eq!(removed[0].name, "Banana");
         assert_eq!(c.len(), 2);
@@ -758,7 +846,9 @@ mod tests {
     #[test]
     fn mutation_remove_missing_key() {
         let mut c = fruit_collection();
+
         let removed = c.remove_by_keys(&[Key::int(99)]);
+
         assert!(removed.is_empty());
         assert_eq!(c.len(), 3);
     }
@@ -766,15 +856,20 @@ mod tests {
     #[test]
     fn mutation_replace_existing() {
         let mut c = fruit_collection();
+
         c.replace(Fruit::new(2, "Blueberry"));
+
         let node = c.get(&Key::int(2)).expect("key 2");
+
         assert_eq!(node.value.as_ref().expect("value").name, "Blueberry");
     }
 
     #[test]
     fn mutation_replace_missing() {
         let mut c = fruit_collection();
+
         c.replace(Fruit::new(99, "Unknown"));
+
         // No change — key 99 doesn't exist
         assert_eq!(c.len(), 3);
         assert!(!c.contains_key(&Key::int(99)));
@@ -783,7 +878,9 @@ mod tests {
     #[test]
     fn mutation_clear() {
         let mut c = fruit_collection();
+
         c.clear();
+
         assert_eq!(c.len(), 0);
         assert!(c.is_empty());
     }
@@ -791,11 +888,14 @@ mod tests {
     #[test]
     fn mutation_move_item() {
         let mut c = fruit_collection();
+
         // Move Cherry (index 2) to index 0
         c.move_item(2, 0);
+
         assert_eq!(c.get_by_index(0).expect("index 0").key, Key::int(3));
         assert_eq!(c.get_by_index(1).expect("index 1").key, Key::int(1));
         assert_eq!(c.get_by_index(2).expect("index 2").key, Key::int(2));
+
         // Indices updated
         assert_eq!(c.index_of(&Key::int(3)), Some(0));
         assert_eq!(c.index_of(&Key::int(1)), Some(1));
@@ -805,6 +905,7 @@ mod tests {
     #[test]
     fn mutation_index_of() {
         let c = fruit_collection();
+
         assert_eq!(c.index_of(&Key::int(1)), Some(0));
         assert_eq!(c.index_of(&Key::int(2)), Some(1));
         assert_eq!(c.index_of(&Key::int(3)), Some(2));
@@ -818,10 +919,13 @@ mod tests {
     #[test]
     fn single_item_wrapping_navigation() {
         let c = StaticCollection::new([(Key::int(1), "Only".to_string(), "x")]);
+
         // key_after wraps to itself
         assert_eq!(c.key_after(&Key::int(1)), Some(&Key::int(1)));
+
         // key_before wraps to itself
         assert_eq!(c.key_before(&Key::int(1)), Some(&Key::int(1)));
+
         // no_wrap returns None (no other focusable item)
         assert_eq!(c.key_after_no_wrap(&Key::int(1)), None);
         assert_eq!(c.key_before_no_wrap(&Key::int(1)), None);
@@ -834,6 +938,7 @@ mod tests {
     #[test]
     fn empty_collection_navigation() {
         let c = StaticCollection::<String>::default();
+
         assert_eq!(c.first_key(), None);
         assert_eq!(c.last_key(), None);
         assert_eq!(c.key_after(&Key::int(1)), None);

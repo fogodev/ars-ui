@@ -679,4 +679,28 @@ mod tests {
         );
         assert!(AriaRole::Button.required_owned_elements().is_empty());
     }
+
+    #[test]
+    fn required_owned_elements_cover_remaining_non_empty_contracts() {
+        assert_eq!(
+            AriaRole::Feed.required_owned_elements(),
+            &[&[AriaRole::Article]]
+        );
+        assert_eq!(
+            AriaRole::Radiogroup.required_owned_elements(),
+            &[&[AriaRole::Radio]]
+        );
+        assert_eq!(
+            AriaRole::Rowgroup.required_owned_elements(),
+            &[&[AriaRole::Row]]
+        );
+        assert_eq!(
+            AriaRole::Tablist.required_owned_elements(),
+            &[&[AriaRole::Tab]]
+        );
+        assert_eq!(
+            AriaRole::Treegrid.required_owned_elements(),
+            &[&[AriaRole::Row], &[AriaRole::Rowgroup]]
+        );
+    }
 }

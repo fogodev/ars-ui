@@ -18,6 +18,7 @@ serde   = []
 ars-a11y = { path = "../ars-a11y", default-features = false }
 ars-core = { path = "../ars-core", default-features = false }
 ars-i18n = { path = "../ars-i18n", optional = true }
+hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }
 icu      = { version = "2.2", default-features = false, features = ["compiled_data"], optional = true }
 indexmap = { version = "2", default-features = false }
 uuid     = { version = "1", default-features = false, optional = true }

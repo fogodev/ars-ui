@@ -543,6 +543,41 @@ mod tests {
         assert_eq!(found, Some(Key::int(2))); // Still Banana — "ba" matches
     }
 
+    #[test]
+    fn typeahead_finds_matching_item() {
+        let collection = CollectionBuilder::new()
+            .item(Key::int(1), "Apple", "apple")
+            .item(Key::int(2), "Banana", "banana")
+            .item(Key::int(3), "Cherry", "cherry")
+            .item(Key::int(4), "Apricot", "apricot")
+            .item(Key::int(5), "Blueberry", "blueberry")
+            .build();
+
+        let state = State::default();
+
+        let (state, found) = state.process_char(
+            'a',
+            0,
+            Some(&Key::int(1)),
+            &collection,
+            &no_disabled(),
+            DisabledBehavior::Skip,
+        );
+
+        assert_eq!(found, Some(Key::int(4)));
+
+        let (_, found) = state.process_char(
+            'p',
+            10,
+            Some(&Key::int(4)),
+            &collection,
+            &no_disabled(),
+            DisabledBehavior::Skip,
+        );
+
+        assert_eq!(found, Some(Key::int(4)));
+    }
+
     // ------------------------------------------------------------------ //
     // Match cycling (repeated same character)                             //
     // ------------------------------------------------------------------ //

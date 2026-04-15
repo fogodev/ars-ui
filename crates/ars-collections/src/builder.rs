@@ -1,7 +1,9 @@
 // ars-collections/src/builder.rs
 
 use alloc::{format, string::String, vec::Vec};
+use core::fmt::{self, Debug};
 
+use hashbrown::DefaultHashBuilder;
 use indexmap::IndexMap;
 
 use crate::{
@@ -25,8 +27,10 @@ use crate::{
 pub struct CollectionBuilder<T> {
     /// Nodes accumulated so far in flat iteration order.
     nodes: Vec<Node<T>>,
+
     /// Maps each key to its flat index for O(1) duplicate detection.
-    key_to_index: IndexMap<Key, usize>,
+    key_to_index: IndexMap<Key, usize, DefaultHashBuilder>,
+
     /// The key of the currently open section, if any.
     current_section: Option<Key>,
 }
@@ -39,7 +43,7 @@ impl<T> CollectionBuilder<T> {
     pub fn new() -> Self {
         Self {
             nodes: Vec::new(),
-            key_to_index: IndexMap::new(),
+            key_to_index: IndexMap::default(),
             current_section: None,
         }
     }
@@ -50,7 +54,9 @@ impl<T> CollectionBuilder<T> {
     #[must_use]
     pub fn item(mut self, key: impl Into<Key>, text_value: impl Into<String>, value: T) -> Self {
         let key = key.into();
+
         let index = self.nodes.len();
+
         let node = Node {
             key: key.clone(),
             node_type: NodeType::Item,
@@ -62,12 +68,15 @@ impl<T> CollectionBuilder<T> {
             parent_key: self.current_section.clone(),
             index,
         };
+
         debug_assert!(
             !self.key_to_index.contains_key(&key),
             "CollectionBuilder: duplicate key {key:?}"
         );
+
         self.key_to_index.insert(key, index);
         self.nodes.push(node);
+
         self
     }
 
@@ -80,7 +89,9 @@ impl<T> CollectionBuilder<T> {
 
         // Push the Section node itself.
         let section_index = self.nodes.len();
+
         self.key_to_index.insert(key.clone(), section_index);
+
         self.nodes.push(Node {
             key: key.clone(),
             node_type: NodeType::Section,
@@ -95,7 +106,9 @@ impl<T> CollectionBuilder<T> {
 
         // Push a Header node for the visible label.
         let header_index = self.nodes.len();
+
         self.key_to_index.insert(header_key.clone(), header_index);
+
         self.nodes.push(Node {
             key: header_key,
             node_type: NodeType::Header,
@@ -109,6 +122,7 @@ impl<T> CollectionBuilder<T> {
         });
 
         self.current_section = Some(key);
+
         self
     }
 
@@ -116,6 +130,7 @@ impl<T> CollectionBuilder<T> {
     #[must_use]
     pub fn end_section(mut self) -> Self {
         self.current_section = None;
+
         self
     }
 
@@ -123,8 +138,11 @@ impl<T> CollectionBuilder<T> {
     #[must_use]
     pub fn separator(mut self) -> Self {
         let index = self.nodes.len();
+
         let key = Key::str(format!("separator-{index}"));
+
         self.key_to_index.insert(key.clone(), index);
+
         self.nodes.push(Node {
             key,
             node_type: NodeType::Separator,
@@ -136,6 +154,7 @@ impl<T> CollectionBuilder<T> {
             parent_key: self.current_section.clone(),
             index,
         });
+
         self
     }
 }
@@ -158,8 +177,8 @@ impl<T> Default for CollectionBuilder<T> {
 }
 
 /// Manual `Debug` avoids requiring `T: Debug`. Prints item count only.
-impl<T> core::fmt::Debug for CollectionBuilder<T> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl<T> Debug for CollectionBuilder<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CollectionBuilder")
             .field("items", &self.nodes.len())
             .finish()
@@ -168,12 +187,15 @@ impl<T> core::fmt::Debug for CollectionBuilder<T> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use super::*;
     use crate::Collection;
 
     #[test]
     fn builder_empty() {
         let c = CollectionBuilder::<String>::new().build();
+
         assert_eq!(c.size(), 0);
         assert!(c.is_empty());
     }
@@ -185,7 +207,9 @@ mod tests {
             .build();
 
         assert_eq!(c.size(), 1);
+
         let node = c.get(&Key::int(1)).expect("should find key 1");
+
         assert_eq!(node.node_type, NodeType::Item);
         assert_eq!(node.text_value, "Apple");
         assert_eq!(node.value, Some("apple_data"));
@@ -203,7 +227,9 @@ mod tests {
             .build();
 
         assert_eq!(c.size(), 3);
+
         let keys = c.keys().collect::<Vec<_>>();
+
         assert_eq!(keys, vec![&Key::int(1), &Key::int(2), &Key::int(3)]);
 
         // Verify indices
@@ -226,18 +252,21 @@ mod tests {
 
         // Section node
         let section = c.get(&Key::str("fruits")).expect("section");
+
         assert_eq!(section.node_type, NodeType::Section);
         assert_eq!(section.text_value, "Fruits");
         assert!(section.has_children);
 
         // Header node
         let header = c.get(&Key::str("fruits-header")).expect("header");
+
         assert_eq!(header.node_type, NodeType::Header);
         assert_eq!(header.text_value, "Fruits");
         assert_eq!(header.parent_key, Some(Key::str("fruits")));
 
         // Items have level 1 and parent_key
         let apple = c.get(&Key::int(1)).expect("apple");
+
         assert_eq!(apple.level, 1);
         assert_eq!(apple.parent_key, Some(Key::str("fruits")));
     }
@@ -252,10 +281,12 @@ mod tests {
             .build();
 
         let inside = c.get(&Key::int(1)).expect("inside");
+
         assert_eq!(inside.level, 1);
         assert_eq!(inside.parent_key, Some(Key::str("sec")));
 
         let outside = c.get(&Key::int(2)).expect("outside");
+
         assert_eq!(outside.level, 0);
         assert_eq!(outside.parent_key, None);
     }
@@ -272,6 +303,7 @@ mod tests {
 
         // The separator is at index 1, so its key is "separator-1"
         let sep = c.get(&Key::str("separator-1")).expect("separator");
+
         assert_eq!(sep.node_type, NodeType::Separator);
         assert!(sep.text_value.is_empty());
         assert!(!sep.is_focusable());
@@ -280,7 +312,9 @@ mod tests {
     #[test]
     fn builder_default_equals_new() {
         let a = CollectionBuilder::<String>::new();
+
         let b = CollectionBuilder::<String>::default();
+
         assert_eq!(a.build().size(), b.build().size());
     }
 
@@ -290,7 +324,9 @@ mod tests {
             CollectionBuilder::new()
                 .item(Key::int(1), "A", "a")
                 .item(Key::int(2), "B", "b");
+
         let debug = alloc::format!("{builder:?}");
+
         assert!(debug.contains("CollectionBuilder"));
         assert!(debug.contains("2"));
     }

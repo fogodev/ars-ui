@@ -369,6 +369,8 @@ impl<T, C: Collection<T>> Debug for SortedCollection<'_, T, C> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use super::*;
     use crate::{builder::CollectionBuilder, key::Key};
 

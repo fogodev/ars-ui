@@ -2343,108 +2343,52 @@ Focus is contained within the dialog. Tab at the last element wraps to the first
 
 ### 4.3 Type-Ahead / Type-Select Implementation
 
+Type-ahead state is shared across collection-based widgets and lives in
+`ars-collections::typeahead`, not in `ars-a11y`. `ars-a11y` consumes that
+shared state from component tests and higher-level keyboard helpers rather than
+shipping a duplicate implementation.
+
 ```rust
-// ars-a11y/src/keyboard/typeahead.rs
+// ars-collections/src/typeahead.rs
 
-use unicode_normalization::UnicodeNormalization;
+use alloc::{collections::BTreeSet, string::String};
+use core::time::Duration;
 
-/// Type-ahead (type-select) state for list widgets.
-///
-/// All string comparisons use NFC-normalized forms to ensure consistent
-/// matching regardless of how users or data sources compose characters.
-///
-/// When the user types printable characters quickly, moves focus to the
-/// next item whose label starts with the typed string. After a timeout,
-/// the search string is cleared and restarts.
+use crate::{Collection, DisabledBehavior, Key};
+
+/// Default time window for accumulating multi-character type-ahead queries.
+pub const TYPEAHEAD_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// The accumulated type-ahead search state.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct State {
-    /// The accumulated search string (cleared after `timeout_ms`).
-    buffer: String,
-    /// Timestamp (milliseconds) of the last key press.
-    last_key_time: f64,
-    /// How long (ms) to wait before clearing the buffer. Default: 500ms.
-    pub timeout_ms: f64,
+    /// The accumulated search string, e.g. `"ban"` after typing B, A, N.
+    pub search: String,
+    /// Timestamp (in milliseconds since epoch) of the last contributing keypress.
+    pub last_key_time_ms: u64,
+    /// The key that was focused when the current search started.
+    pub search_start_key: Option<Key>,
 }
 
 impl State {
-    pub fn new() -> Self {
-        Self { buffer: String::new(), last_key_time: 0.0, timeout_ms: 500.0 }
-    }
-
-    /// Process a printable key character and return the search string.
-    ///
-    /// `now_ms` is the current time in milliseconds (e.g., `performance.now()`).
-    /// If `now_ms - last_key_time > timeout_ms`, the buffer is reset before
-    /// appending the new character.
-    ///
-    /// Returns the current search string to match against item labels.
-    pub fn process_key(&mut self, key: char, now_ms: f64) -> &str {
-        if now_ms - self.last_key_time > self.timeout_ms {
-            self.buffer.clear();
-        }
-        self.last_key_time = now_ms;
-        // Unicode-aware lowercase — supports CJK, Arabic, Cyrillic, etc.
-        // (to_ascii_lowercase would break non-Latin scripts)
-        for c in key.to_lowercase() {
-            self.buffer.push(c);
-        }
-        // Normalize buffer to NFC before comparison so that equivalent
-        // compositions (e.g., 'é' as U+00E9 vs U+0065 U+0301) always match.
-        self.buffer = self.buffer.nfc().collect::<String>();
-        &self.buffer
-    }
-
-    /// Find the next matching item index, starting search AFTER `from_index`.
-    ///
-    /// Search wraps around. Matching is case-insensitive prefix match.
-    /// If `buffer` contains a single repeated character (e.g., "aaa"), cycles
-    /// through all items starting with that character.
-    pub fn find_next_match(
+    /// Process a new character and return the next immutable state plus any match.
+    pub fn process_char<T, C: Collection<T>>(
         &self,
-        from_index: usize,
-        item_count: usize,
-        label_for: impl Fn(usize) -> String,
-        is_disabled: impl Fn(usize) -> bool,
-    ) -> Option<usize> {
-        if self.buffer.is_empty() || item_count == 0 { return None; }
-
-        let search = &self.buffer;
-
-        // Detect repeated-char scenario: "aaa" → search for "a"
-        let first_char = search.chars().next();
-        let effective_search: &str = if first_char.is_some() && search.chars().all(|c| Some(c) == first_char) {
-            &search[..search.char_indices().nth(1).map(|(i, _)| i).unwrap_or(search.len())]
-        } else {
-            search
-        };
-
-        for offset in 1..=item_count {
-            let idx = (from_index + offset) % item_count;
-            if is_disabled(idx) { continue; }
-            // Normalize label to NFC before case-folding for consistent matching.
-            let label = label_for(idx).nfc().collect::<String>().to_lowercase();
-            if label.starts_with(effective_search) {
-                return Some(idx);
-            }
-        }
-        None
+        ch: char,
+        now_ms: u64,
+        current_focus: Option<&Key>,
+        collection: &C,
+        disabled_keys: &BTreeSet<Key>,
+        disabled_behavior: DisabledBehavior,
+    ) -> (Self, Option<Key>) {
+        /* see spec/foundation/06-collections.md §Typeahead for full algorithm */
     }
-
-    pub fn clear(&mut self) {
-        self.buffer.clear();
-    }
-}
-
-/// Returns true if a `KeyboardEventData` represents a printable character suitable
-/// for type-ahead. With the `KeyboardKey` enum, printable characters are indicated
-/// by `data.character.is_some()` — this helper exists for readability.
-pub fn is_printable_key(data: &KeyboardEventData) -> bool {
-    data.character.is_some()
 }
 ```
 
 > **Dead-key handling.** Dead keys (used for diacritics in many European keyboard layouts)
-> fire `key="Dead"`, which is a multi-character string correctly rejected by
-> `is_printable_key()`. Dead-key compositions arrive via `compositionend`. Type-ahead
+> fire `key="Dead"`, which is a multi-character string and should not be fed
+> into `process_char()`. Dead-key compositions arrive via `compositionend`. Type-ahead
 > SHOULD listen for `input` events as fallback for composed characters.
 >
 > **Locale-specific case folding.** `to_lowercase()` handles most scripts correctly but
@@ -3987,19 +3931,27 @@ pub fn validate_attr_map(
 // ars-a11y/src/testing/keyboard.rs
 
 /// A simulated keyboard event for use in unit tests.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct SimulatedKeyEvent {
+    /// The DOM `key` value exposed by the event.
     pub key: &'static str,
+    /// Whether the Shift modifier is pressed.
     pub shift: bool,
+    /// Whether the Ctrl modifier is pressed.
     pub ctrl: bool,
+    /// Whether the Meta/Cmd modifier is pressed.
     pub meta: bool,
+    /// Whether the Alt/Option modifier is pressed.
     pub alt: bool,
+    /// Whether `prevent_default()` has been called.
     pub default_prevented: AtomicBool,
+    /// Whether `stop_propagation()` has been called.
     pub propagation_stopped: AtomicBool,
 }
 
 impl SimulatedKeyEvent {
-    pub fn key(key: &'static str) -> Self {
+    /// Creates a `keydown` event with the provided key and no modifiers.
+    pub const fn key(key: &'static str) -> Self {
         Self {
             key,
             shift: false, ctrl: false, meta: false, alt: false,
@@ -4008,10 +3960,30 @@ impl SimulatedKeyEvent {
         }
     }
 
-    pub fn with_shift(mut self) -> Self { self.shift = true; self }
-    pub fn with_ctrl(mut self) -> Self { self.ctrl = true; self }
-    pub fn with_meta(mut self) -> Self { self.meta = true; self }
-    pub fn with_alt(mut self) -> Self { self.alt = true; self }
+    /// Marks the event as having the Shift modifier pressed.
+    pub const fn with_shift(mut self) -> Self { self.shift = true; self }
+    /// Marks the event as having the Ctrl modifier pressed.
+    pub const fn with_ctrl(mut self) -> Self { self.ctrl = true; self }
+    /// Marks the event as having the Meta/Cmd modifier pressed.
+    pub const fn with_meta(mut self) -> Self { self.meta = true; self }
+    /// Marks the event as having the Alt/Option modifier pressed.
+    pub const fn with_alt(mut self) -> Self { self.alt = true; self }
+}
+
+// `AtomicBool` does not implement `Clone`, so the spec's field layout
+// requires a manual `Clone` impl instead of `#[derive(Clone)]`.
+impl Clone for SimulatedKeyEvent {
+    fn clone(&self) -> Self {
+        Self {
+            key: self.key,
+            shift: self.shift,
+            ctrl: self.ctrl,
+            meta: self.meta,
+            alt: self.alt,
+            default_prevented: AtomicBool::new(self.default_prevented.load(Ordering::Relaxed)),
+            propagation_stopped: AtomicBool::new(self.propagation_stopped.load(Ordering::Relaxed)),
+        }
+    }
 }
 
 impl crate::DomEvent for SimulatedKeyEvent {
@@ -4028,10 +4000,12 @@ impl crate::DomEvent for SimulatedKeyEvent {
 /// A recorder that captures the sequence of focus index changes
 /// during keyboard navigation testing.
 pub struct NavigationRecorder {
+    /// The ordered list of recorded navigation events.
     pub events: Vec<NavigationEvent>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+/// A keyboard-navigation side effect emitted by a test harness.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NavigationEvent {
     FocusMoved { from: usize, to: usize },
     SelectionChanged { index: usize },
@@ -4040,7 +4014,8 @@ pub enum NavigationEvent {
 }
 
 impl NavigationRecorder {
-    pub fn new() -> Self { Self { events: Vec::new() } }
+    /// Creates an empty navigation recorder.
+    pub const fn new() -> Self { Self { events: Vec::new() } }
 
     pub fn record_focus_move(&mut self, from: usize, to: usize) {
         self.events.push(NavigationEvent::FocusMoved { from, to });
@@ -4055,6 +4030,10 @@ impl NavigationRecorder {
             .collect();
         assert_eq!(actual, expected, "Focus navigation sequence mismatch");
     }
+}
+
+impl Default for NavigationRecorder {
+    fn default() -> Self { Self::new() }
 }
 
 /// Test helper: simulate keyboard navigation through a FocusZone and
@@ -4080,14 +4059,19 @@ impl NavigationRecorder {
 /// recorder.assert_focus_sequence(&[(0, 1), (1, 2), (2, 4), (4, 3)]);
 /// ```
 pub struct FocusZoneTestHarness {
+    /// The focus zone under test.
     pub zone: FocusZone,
+    /// The current focused item index tracked by the harness.
     pub current_index: usize,
+    /// The recorder storing navigation side effects.
     pub recorder: NavigationRecorder,
+    /// Disabled item indices skipped by keyboard navigation when configured.
     pub disabled_indices: std::collections::BTreeSet<usize>,
 }
 
 impl FocusZoneTestHarness {
-    pub fn new(options: FocusZoneOptions, item_count: usize) -> Self {
+    /// Creates a new focus-zone harness starting at item index `0`.
+    pub const fn new(options: FocusZoneOptions, item_count: usize) -> Self {
         Self {
             zone: FocusZone::new(options, item_count),
             current_index: 0,
@@ -4096,6 +4080,7 @@ impl FocusZoneTestHarness {
         }
     }
 
+    /// Marks an item index as disabled for subsequent navigation.
     pub fn disable(&mut self, index: usize) {
         self.disabled_indices.insert(index);
     }
@@ -4114,6 +4099,7 @@ impl FocusZoneTestHarness {
         }
     }
 
+    /// Asserts that the harness focus is currently at `expected_index`.
     pub fn assert_at(&self, expected_index: usize) {
         assert_eq!(
             self.current_index, expected_index,
@@ -4127,8 +4113,9 @@ impl FocusZoneTestHarness {
 
 #[cfg(test)]
 mod tests {
+    use ars_collections::{CollectionBuilder, DisabledBehavior, Key, typeahead};
     use super::*;
-    use crate::focus::zone::{FocusZone, FocusZoneOptions, FocusZoneDirection};
+    use crate::{AriaRole, AriaValidationError, AriaValidator, FocusZoneOptions, FocusZoneDirection, LiveAnnouncer};
 
     #[test]
     fn vertical_zone_wraps() {
@@ -4172,33 +4159,41 @@ mod tests {
 
     #[test]
     fn typeahead_finds_matching_item() {
-        let mut ta = typeahead::State::new();
-        let labels = vec!["Apple", "Banana", "Cherry", "Apricot", "Blueberry"];
+        let collection = CollectionBuilder::new()
+            .item(Key::int(1), "Apple", "apple")
+            .item(Key::int(2), "Banana", "banana")
+            .item(Key::int(3), "Cherry", "cherry")
+            .item(Key::int(4), "Apricot", "apricot")
+            .item(Key::int(5), "Blueberry", "blueberry")
+            .build();
+        let disabled = Default::default();
 
-        let search = ta.process_key('a', 0.0);
-        let result = ta.find_next_match(
+        let state = typeahead::State::default();
+        let (state, result) = state.process_char(
+            'a',
             0,
-            labels.len(),
-            |i| labels[i].to_string(),
-            |_| false,
+            Some(&Key::int(1)),
+            &collection,
+            &disabled,
+            DisabledBehavior::Skip,
         );
-        assert_eq!(result, Some(3)); // "Apricot" comes after "Apple" (from_index=0)
+        assert_eq!(result, Some(Key::int(4))); // "Apricot" comes after "Apple"
 
-        let search2 = ta.process_key('p', 10.0); // 10ms later, still in window
-        let result2 = ta.find_next_match(
-            0,
-            labels.len(),
-            |i| labels[i].to_string(),
-            |_| false,
+        let (_, result2) = state.process_char(
+            'p',
+            10, // 10ms later, still in window
+            Some(&Key::int(4)),
+            &collection,
+            &disabled,
+            DisabledBehavior::Skip,
         );
-        assert_eq!(result2, Some(3)); // "Apricot" starts with "ap"
-        let _ = (search, search2);
+        assert_eq!(result2, Some(Key::int(4))); // "Apricot" starts with "ap"
     }
 
     #[test]
     fn aria_validator_catches_abstract_role() {
         let mut validator = AriaValidator::new();
-        validator.check_role(AriaRole::Widget, &[], false);
+        validator.check_role(AriaRole::Widget, &[], false, &[]);
         assert!(validator.has_errors());
         assert!(matches!(
             validator.errors()[0],
@@ -4210,7 +4205,7 @@ mod tests {
     fn aria_validator_catches_missing_required_attr() {
         let mut validator = AriaValidator::new();
         // Slider requires aria-valuenow
-        validator.check_role(AriaRole::Slider, &[], false);
+        validator.check_role(AriaRole::Slider, &[], false, &[]);
         assert!(validator.errors().iter().any(|e| matches!(
             e,
             AriaValidationError::MissingRequiredAttribute { missing_attr: "aria-valuenow", .. }
@@ -4221,11 +4216,11 @@ mod tests {
     fn live_announcer_deduplicates_voiceover() {
         let mut announcer = LiveAnnouncer::new();
         announcer.announce("Test message");
-        // VoiceOver toggle alternates on each call.
-        // A second identical message should have a different DOM content.
+        announcer.notify_announced();
         announcer.announce("Test message");
-        // The voiceover_toggle alternated → content differs → VoiceOver re-announces.
-        // This is the intended behavior; no assertion here, it's a behavioral guarantee.
+        announcer.notify_announced();
+        announcer.announce("Test message");
+        // The repeated message path alternates rendered content so VoiceOver re-announces.
     }
 }
 ````
@@ -4252,9 +4247,8 @@ crates/ars-a11y/
       zone.rs               // FocusZone, FocusZoneOptions, FocusZoneDirection
     keyboard/
       mod.rs
-      typeahead.rs          // typeahead::State, is_printable_key()
-                            // Depends on `unicode-normalization` crate (no_std + alloc compatible)
       shortcuts.rs          // KeyboardShortcut, KeyModifiers, Platform
+                            // Shared type-ahead state lives in `ars-collections::typeahead`
     announcer.rs            // LiveAnnouncer, AnnouncementPriority, Announcement
     announcements.rs        // Pre-built announcement string helpers
     visually_hidden.rs      // visually_hidden_attrs(), visually_hidden_focusable_attrs()

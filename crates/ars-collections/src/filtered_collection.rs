@@ -99,6 +99,7 @@ impl<'a, T: Clone, C: Collection<T>> FilteredCollection<'a, T, C> {
                 if n.is_focusable() {
                     return passing.contains(&n.index);
                 }
+
                 match (&n.parent_key, n.node_type) {
                     (_, NodeType::Section) => inner
                         .children_of(&n.key)
@@ -269,6 +270,8 @@ impl<T, C: Collection<T>> Debug for FilteredCollection<'_, T, C> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use super::*;
     use crate::{builder::CollectionBuilder, key::Key, node::NodeType};
 
