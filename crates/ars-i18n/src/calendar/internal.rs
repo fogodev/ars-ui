@@ -2,7 +2,8 @@ use alloc::string::{String, ToString};
 
 use icu::calendar::{
     AnyCalendar, Date, Iso,
-    types::{Month as IcuMonth, YearInput},
+    error::DateFromFieldsError,
+    types::{DateFields, YearInput},
 };
 
 use super::{
@@ -56,9 +57,7 @@ impl CalendarDate {
         day: u8,
         calendar: CalendarSystem,
     ) -> Result<Self, CalendarConversionError> {
-        let any_calendar = AnyCalendar::new(calendar.to_icu_kind());
-
-        let date = Date::try_new(year, IcuMonth::new(month), day, any_calendar)
+        let date = date_from_ordinal_fields(year, month, day, calendar)
             .map_err(|error| CalendarConversionError::Icu(error.to_string()))?;
 
         Ok(Self { inner: date })
@@ -167,6 +166,30 @@ impl CalendarDate {
     }
 }
 
+pub(crate) fn months_in_year(year: i32, calendar: CalendarSystem, era: Option<&str>) -> Option<u8> {
+    let date = date_from_ordinal_fields(year_input_from_parts(calendar, era, year), 1, 1, calendar)
+        .ok()?;
+
+    Some(date.months_in_year())
+}
+
+pub(crate) fn days_in_month(
+    year: i32,
+    month: u8,
+    calendar: CalendarSystem,
+    era: Option<&str>,
+) -> Option<u8> {
+    let date = date_from_ordinal_fields(
+        year_input_from_parts(calendar, era, year),
+        month,
+        1,
+        calendar,
+    )
+    .ok()?;
+
+    Some(date.days_in_month())
+}
+
 impl TryFrom<&super::CalendarDate> for CalendarDate {
     type Error = CalendarConversionError;
 
@@ -201,11 +224,51 @@ impl TryFrom<&super::CalendarDate> for CalendarDate {
     }
 }
 
+fn date_from_ordinal_fields(
+    year: YearInput<'_>,
+    ordinal_month: u8,
+    day: u8,
+    calendar: CalendarSystem,
+) -> Result<Date<AnyCalendar>, DateFromFieldsError> {
+    let any_calendar = AnyCalendar::new(calendar.to_icu_kind());
+    let mut fields = DateFields::default();
+
+    assign_year_fields(&mut fields, year);
+    fields.ordinal_month = Some(ordinal_month);
+    fields.day = Some(day);
+
+    Date::try_from_fields(fields, Default::default(), any_calendar)
+}
+
+fn assign_year_fields<'a>(fields: &mut DateFields<'a>, year: YearInput<'a>) {
+    match year {
+        YearInput::Extended(extended_year) => {
+            fields.extended_year = Some(extended_year);
+        }
+        YearInput::EraYear(era, era_year) => {
+            fields.era = Some(era.as_bytes());
+            fields.era_year = Some(era_year);
+        }
+        _ => unreachable!("ICU4X YearInput currently only supports extended and era-year forms"),
+    }
+}
+
 const fn default_year_input(calendar: CalendarSystem, year: i32) -> YearInput<'static> {
     if let Some(era) = default_era_code(calendar) {
         YearInput::EraYear(era, year)
     } else {
         YearInput::Extended(year)
+    }
+}
+
+const fn year_input_from_parts<'a>(
+    calendar: CalendarSystem,
+    era: Option<&'a str>,
+    year: i32,
+) -> YearInput<'a> {
+    match era {
+        Some(era_code) => YearInput::EraYear(era_code, year),
+        None => default_year_input(calendar, year),
     }
 }
 

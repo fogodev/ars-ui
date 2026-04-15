@@ -36,6 +36,15 @@ fn internal_calendar_date_from_calendar_accepts_gregorian_fields() {
 
 #[cfg(feature = "icu4x")]
 #[test]
+fn internal_calendar_date_from_calendar_uses_ordinal_months_for_chinese() {
+    let date = InternalCalendarDate::from_calendar(2023, 3, 1, CalendarSystem::Chinese)
+        .expect("Chinese ordinal month should construct");
+
+    assert_eq!(date.month(), 3);
+}
+
+#[cfg(feature = "icu4x")]
+#[test]
 fn internal_calendar_date_from_calendar_defaults_japanese_to_current_era() {
     let date = InternalCalendarDate::from_calendar(6, 3, 15, CalendarSystem::Japanese)
         .expect("japanese current-era conversion should succeed");
@@ -45,6 +54,60 @@ fn internal_calendar_date_from_calendar_defaults_japanese_to_current_era() {
     assert_eq!(gregorian.year(), 2024);
     assert_eq!(gregorian.month(), 3);
     assert_eq!(gregorian.day(), 15);
+}
+
+#[cfg(feature = "icu4x")]
+#[test]
+fn stub_provider_uses_year_dependent_chinese_month_counts() {
+    let provider = StubIcuProvider;
+
+    let leap_year = (2020..=2030)
+        .find(|year| {
+            InternalCalendarDate::from_calendar(*year, 13, 1, CalendarSystem::Chinese).is_ok()
+        })
+        .expect("fixture range should include a Chinese leap-month year");
+    let common_year = (2020..=2030)
+        .find(|year| {
+            InternalCalendarDate::from_calendar(*year, 13, 1, CalendarSystem::Chinese).is_err()
+        })
+        .expect("fixture range should include a Chinese common year");
+
+    assert_eq!(
+        provider.max_months_in_year(&CalendarSystem::Chinese, leap_year, None),
+        13
+    );
+    assert_eq!(
+        provider.max_months_in_year(&CalendarSystem::Chinese, common_year, None),
+        12
+    );
+    assert!(
+        CalendarDate::new(&provider, CalendarSystem::Chinese, None, leap_year, 13, 1).is_some()
+    );
+    assert!(
+        CalendarDate::new(&provider, CalendarSystem::Chinese, None, common_year, 13, 1).is_none()
+    );
+}
+
+#[test]
+fn stub_provider_rejects_invalid_coptic_and_ethiopic_epagomenal_days() {
+    let provider = StubIcuProvider;
+
+    assert!(
+        CalendarDate::new(&provider, CalendarSystem::Coptic, None, 1738, 13, 6).is_none(),
+        "common Coptic year month 13 only has five days"
+    );
+    assert!(
+        CalendarDate::new(&provider, CalendarSystem::Coptic, None, 1739, 13, 6).is_some(),
+        "leap Coptic year month 13 has six days"
+    );
+    assert!(
+        CalendarDate::new(&provider, CalendarSystem::Ethiopic, None, 2016, 13, 6).is_none(),
+        "common Ethiopic year month 13 only has five days"
+    );
+    assert!(
+        CalendarDate::new(&provider, CalendarSystem::Ethiopic, None, 2015, 13, 6).is_some(),
+        "leap Ethiopic year month 13 has six days"
+    );
 }
 
 #[cfg(feature = "icu4x")]

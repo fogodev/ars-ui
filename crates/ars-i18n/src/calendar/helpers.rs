@@ -34,6 +34,26 @@ pub(crate) const fn gregorian_days_in_month(year: i32, month: u8) -> u8 {
     }
 }
 
+/// Returns `true` when a Coptic-style year carries a sixth epagomenal day.
+///
+/// Coptic and Ethiopic calendars insert the leap day into month 13, so the
+/// leap-year rule affects only that final month.
+pub(crate) const fn coptic_like_is_leap_year(year: i32) -> bool {
+    (year + 1) % 4 == 0
+}
+
+/// Returns the number of days in a Coptic or Ethiopic month.
+///
+/// Months 1-12 are always 30 days. Month 13 has 5 days in common years and
+/// 6 days in leap years.
+pub(crate) const fn coptic_like_days_in_month(year: i32, month: u8) -> u8 {
+    match month {
+        1..=12 => 30,
+        13 => 5 + coptic_like_is_leap_year(year) as u8,
+        _ => 0,
+    }
+}
+
 pub(super) fn max_months_in_year(
     provider: &dyn IcuProvider,
     calendar: CalendarSystem,

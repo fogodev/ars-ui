@@ -279,6 +279,19 @@ pub trait IcuProvider: Send + Sync + 'static {
         if let Some(months) = calendar::bounded_months_in_year(*calendar, year, _era) {
             return months;
         }
+
+        #[cfg(feature = "icu4x")]
+        if let Some(months) = calendar::internal::months_in_year(year, *calendar, _era) {
+            return months;
+        }
+
+        if matches!(calendar, CalendarSystem::Chinese | CalendarSystem::Dangi) {
+            // East Asian leap months require calendar data. Without ICU4X, use
+            // the non-leap baseline so we reject impossible month 13 values
+            // instead of accepting them in every year.
+            return 12;
+        }
+
         match calendar {
             CalendarSystem::Hebrew => {
                 let cycle_year = year.rem_euclid(19);
@@ -290,9 +303,7 @@ pub trait IcuProvider: Send + Sync + 'static {
             }
             CalendarSystem::Ethiopic
             | CalendarSystem::EthiopicAmeteAlem
-            | CalendarSystem::Coptic
-            | CalendarSystem::Chinese
-            | CalendarSystem::Dangi => 13,
+            | CalendarSystem::Coptic => 13,
             _ => 12,
         }
     }
@@ -308,6 +319,19 @@ pub trait IcuProvider: Send + Sync + 'static {
         if let Some(days) = calendar::bounded_days_in_month(*_calendar, year, month, _era) {
             return days;
         }
+
+        #[cfg(feature = "icu4x")]
+        if let Some(days) = calendar::internal::days_in_month(year, month, *_calendar, _era) {
+            return days;
+        }
+
+        if matches!(
+            _calendar,
+            CalendarSystem::Coptic | CalendarSystem::Ethiopic | CalendarSystem::EthiopicAmeteAlem
+        ) {
+            return calendar::coptic_like_days_in_month(year, month);
+        }
+
         calendar::gregorian_days_in_month(year, month)
     }
 
@@ -702,9 +726,16 @@ mod tests {
             provider.max_months_in_year(&CalendarSystem::Hebrew, 5785, None),
             12
         );
+        #[cfg(feature = "icu4x")]
         assert_eq!(
             provider.max_months_in_year(&CalendarSystem::Dangi, 2024, None),
-            13
+            calendar::internal::months_in_year(2024, CalendarSystem::Dangi, None)
+                .expect("ICU4X should resolve Dangi month counts")
+        );
+        #[cfg(not(feature = "icu4x"))]
+        assert_eq!(
+            provider.max_months_in_year(&CalendarSystem::Dangi, 2024, None),
+            12
         );
         assert_eq!(
             provider.max_months_in_year(&CalendarSystem::Gregorian, 2024, None),
