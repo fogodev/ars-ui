@@ -196,7 +196,7 @@ impl CalendarDate {
             month += max;
         }
 
-        let mut month = u8::try_from(month).expect("validated month count fits in u8");
+        let month = u8::try_from(month).expect("validated month count fits in u8");
 
         let mut candidate = Self {
             calendar: self.calendar,
@@ -209,8 +209,7 @@ impl CalendarDate {
         let min_month = provider.minimum_month_in_year(&candidate);
 
         if month < min_month {
-            month = min_month;
-            candidate.month = NonZero::new(month).expect("minimum month is 1-based");
+            return None;
         }
 
         let max_day = days_in_month_for_calendar(provider, self.calendar, year, month, era_code);

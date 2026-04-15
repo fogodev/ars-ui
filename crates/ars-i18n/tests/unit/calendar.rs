@@ -762,6 +762,19 @@ fn public_calendar_date_add_months_respects_era_boundaries() {
     )
     .expect("Heisei year 2 January should be valid");
 
+    let era_start = CalendarDate::new(
+        &provider,
+        CalendarSystem::Japanese,
+        Some(Era {
+            code: String::from("reiwa"),
+            display_name: String::from("Reiwa"),
+        }),
+        1,
+        5,
+        1,
+    )
+    .expect("Reiwa year 1 start date should be valid");
+
     assert_eq!(
         same_era_rollover.add_months(&provider, 1),
         Some(CalendarDate {
@@ -793,6 +806,7 @@ fn public_calendar_date_add_months_respects_era_boundaries() {
         })
     );
     assert_eq!(cross_era_rollover.add_months(&provider, 1), None);
+    assert_eq!(era_start.add_months(&provider, -1), None);
 }
 
 #[test]
