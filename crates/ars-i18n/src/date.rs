@@ -4,6 +4,7 @@
 //! builds. Backend selection is internal to this module.
 
 #[cfg(any(
+    feature = "icu4x",
     all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")),
     not(any(feature = "icu4x", feature = "web-intl")),
     all(
@@ -29,19 +30,9 @@ use {
     wasm_bindgen::JsValue,
 };
 
-#[cfg(any(
-    all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")),
-    not(any(feature = "icu4x", feature = "web-intl")),
-    all(
-        feature = "web-intl",
-        not(target_arch = "wasm32"),
-        not(feature = "icu4x")
-    )
-))]
-use crate::CalendarSystem;
 #[cfg(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32")))]
 use crate::calendar::internal::CalendarDate as InternalCalendarDate;
-use crate::{CalendarDate, Locale};
+use crate::{CalendarDate, CalendarSystem, Locale};
 
 /// Length of the formatted date/time string.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
@@ -165,8 +156,9 @@ impl DateFormatter {
     /// Formats a calendar date for the formatter locale.
     #[must_use]
     pub fn format(&self, date: &CalendarDate) -> String {
-        let internal = InternalCalendarDate::try_from(date)
-            .expect("CalendarDate should be valid for formatting");
+        let Ok(internal) = InternalCalendarDate::try_from(date) else {
+            return fallback_format_date(&self.locale, self.length, date);
+        };
 
         match &self.inner {
             DateFormatterInner::Ymd(formatter) => formatter.format(&internal.inner).to_string(),
@@ -202,7 +194,9 @@ impl DateFormatter {
     /// including any `u-ca-*` Unicode extension carried by the locale.
     #[must_use]
     pub fn format(&self, date: &CalendarDate) -> String {
-        let js_date = js_date_from_calendar(date);
+        let Some(js_date) = js_date_from_calendar(date) else {
+            return fallback_format_date(&self.locale, self.length, date);
+        };
 
         let format: Function = self.inner.format();
 
@@ -240,13 +234,24 @@ impl DateFormatter {
 }
 
 #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
-fn js_date_from_calendar(date: &CalendarDate) -> JsDate {
-    let internal = InternalCalendarDate::try_from(date)
-        .expect("CalendarDate should be valid for browser date formatting");
+fn js_date_from_calendar(date: &CalendarDate) -> Option<JsDate> {
+    if date.calendar == CalendarSystem::Gregorian {
+        return Some(js_date_from_ymd(
+            date.year,
+            date.month.get(),
+            date.day.get(),
+        ));
+    }
+
+    let internal = InternalCalendarDate::try_from(date).ok()?;
 
     let gregorian = internal.to_calendar(CalendarSystem::Gregorian);
 
-    js_date_from_ymd(gregorian.year(), gregorian.month(), gregorian.day())
+    Some(js_date_from_ymd(
+        gregorian.year(),
+        gregorian.month(),
+        gregorian.day(),
+    ))
 }
 
 #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
@@ -267,14 +272,6 @@ fn js_iso_year(year: i32) -> String {
     }
 }
 
-#[cfg(any(
-    not(any(feature = "icu4x", feature = "web-intl")),
-    all(
-        feature = "web-intl",
-        not(target_arch = "wasm32"),
-        not(feature = "icu4x")
-    )
-))]
 fn fallback_format_date(_locale: &Locale, length: FormatLength, date: &CalendarDate) -> String {
     if date.calendar != CalendarSystem::Gregorian {
         return date.to_iso8601();
@@ -305,14 +302,6 @@ fn fallback_format_date(_locale: &Locale, length: FormatLength, date: &CalendarD
     }
 }
 
-#[cfg(any(
-    not(any(feature = "icu4x", feature = "web-intl")),
-    all(
-        feature = "web-intl",
-        not(target_arch = "wasm32"),
-        not(feature = "icu4x")
-    )
-))]
 const fn english_month_short(month: u8) -> &'static str {
     match month {
         1 => "Jan",
@@ -331,14 +320,6 @@ const fn english_month_short(month: u8) -> &'static str {
     }
 }
 
-#[cfg(any(
-    not(any(feature = "icu4x", feature = "web-intl")),
-    all(
-        feature = "web-intl",
-        not(target_arch = "wasm32"),
-        not(feature = "icu4x")
-    )
-))]
 const fn english_month_long(month: u8) -> &'static str {
     match month {
         1 => "January",
@@ -357,14 +338,6 @@ const fn english_month_long(month: u8) -> &'static str {
     }
 }
 
-#[cfg(any(
-    not(any(feature = "icu4x", feature = "web-intl")),
-    all(
-        feature = "web-intl",
-        not(target_arch = "wasm32"),
-        not(feature = "icu4x")
-    )
-))]
 const fn english_weekday_long(weekday: crate::Weekday) -> &'static str {
     match weekday {
         crate::Weekday::Sunday => "Sunday",
@@ -490,6 +463,19 @@ mod tests {
         assert_ne!(formatted, date.to_iso8601());
     }
 
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn formatter_gracefully_formats_large_gregorian_years() {
+        let formatter = DateFormatter::new(&locales::en_us(), FormatLength::Long);
+        let date = CalendarDate::new_gregorian(
+            10_000,
+            NonZero::new(1).expect("nonzero"),
+            NonZero::new(1).expect("nonzero"),
+        );
+
+        assert_eq!(formatter.format(&date), "January 1, 10000");
+    }
+
     #[cfg(any(
         not(any(feature = "icu4x", feature = "web-intl")),
         all(
@@ -594,7 +580,8 @@ mod web_intl_tests {
         );
 
         let js_date = js_date_from_ymd(44, 3, 15);
-        let converted = js_date_from_calendar(&date);
+        let converted =
+            js_date_from_calendar(&date).expect("Gregorian test fixture should map to a Date");
 
         assert_eq!(js_date.get_utc_full_year(), 44);
         assert_eq!(js_date.get_utc_month(), 2);
@@ -602,6 +589,20 @@ mod web_intl_tests {
         assert_eq!(converted.get_utc_full_year(), 44);
         assert_eq!(converted.get_utc_month(), 2);
         assert_eq!(converted.get_utc_date(), 15);
+    }
+
+    #[wasm_bindgen_test]
+    fn web_intl_date_formatter_gracefully_formats_large_gregorian_years() {
+        let formatter = DateFormatter::new(&locales::en_us(), FormatLength::Long);
+        let date = CalendarDate::new_gregorian(
+            10_000,
+            NonZero::new(1).expect("nonzero"),
+            NonZero::new(1).expect("nonzero"),
+        );
+
+        let formatted = formatter.format(&date);
+
+        assert_eq!(formatted, "January 1, 10000");
     }
 
     #[wasm_bindgen_test]
@@ -633,8 +634,11 @@ mod web_intl_tests {
 
         let format: Function = formatter.format();
 
+        let js_date =
+            js_date_from_calendar(date).expect("test fixtures should map to a browser Date");
+
         format
-            .call1(&JsValue::UNDEFINED, js_date_from_calendar(date).as_ref())
+            .call1(&JsValue::UNDEFINED, js_date.as_ref())
             .expect("Intl.DateTimeFormat.format should not throw for a valid Date")
             .as_string()
             .unwrap_or_default()
