@@ -96,6 +96,20 @@ impl core::fmt::Debug for RelativeTimeFormatter {
     }
 }
 
+const fn bucket_relative_time(seconds: i64) -> (i64, &'static str) {
+    let magnitude = seconds.unsigned_abs();
+
+    if magnitude < 60 {
+        (seconds, "second")
+    } else if magnitude < 3_600 {
+        (seconds / 60, "minute")
+    } else if magnitude < 86_400 {
+        (seconds / 3_600, "hour")
+    } else {
+        (seconds / 86_400, "day")
+    }
+}
+
 #[cfg(feature = "icu4x")]
 impl RelativeTimeFormatter {
     /// Creates a formatter using numeric phrasing by default.
@@ -127,30 +141,21 @@ impl RelativeTimeFormatter {
     /// Formats a duration in seconds relative to now.
     #[must_use]
     pub fn format_seconds(&self, seconds: i64) -> String {
-        if seconds.abs() < 60 {
-            return self
+        let (value, unit) = bucket_relative_time(seconds);
+
+        match unit {
+            "second" => self
                 .second_formatter
-                .format(Decimal::from(seconds))
-                .to_string();
-        }
-
-        if seconds.abs() < 3_600 {
-            return self
+                .format(Decimal::from(value))
+                .to_string(),
+            "minute" => self
                 .minute_formatter
-                .format(Decimal::from(seconds / 60))
-                .to_string();
+                .format(Decimal::from(value))
+                .to_string(),
+            "hour" => self.hour_formatter.format(Decimal::from(value)).to_string(),
+            "day" => self.day_formatter.format(Decimal::from(value)).to_string(),
+            _ => unreachable!("bucket_relative_time only returns supported units"),
         }
-
-        if seconds.abs() < 86_400 {
-            return self
-                .hour_formatter
-                .format(Decimal::from(seconds / 3_600))
-                .to_string();
-        }
-
-        self.day_formatter
-            .format(Decimal::from(seconds / 86_400))
-            .to_string()
     }
 }
 
@@ -219,27 +224,6 @@ impl RelativeTimeFormatter {
 }
 
 #[cfg(any(
-    all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")),
-    not(any(feature = "icu4x", feature = "web-intl")),
-    all(
-        feature = "web-intl",
-        not(target_arch = "wasm32"),
-        not(feature = "icu4x")
-    )
-))]
-const fn bucket_relative_time(seconds: i64) -> (i64, &'static str) {
-    if seconds.abs() < 60 {
-        (seconds, "second")
-    } else if seconds.abs() < 3_600 {
-        (seconds / 60, "minute")
-    } else if seconds.abs() < 86_400 {
-        (seconds / 3_600, "hour")
-    } else {
-        (seconds / 86_400, "day")
-    }
-}
-
-#[cfg(any(
     not(any(feature = "icu4x", feature = "web-intl")),
     all(
         feature = "web-intl",
@@ -276,7 +260,7 @@ fn fallback_format_relative_time(numeric: NumericOption, seconds: i64) -> String
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "icu4x")]
-    use super::{NumericOption, RelativeTimeFormatter};
+    use super::{NumericOption, RelativeTimeFormatter, bucket_relative_time};
     #[cfg(any(
         not(any(feature = "icu4x", feature = "web-intl")),
         all(
@@ -285,7 +269,7 @@ mod tests {
             not(feature = "icu4x")
         )
     ))]
-    use super::{NumericOption, RelativeTimeFormatter};
+    use super::{NumericOption, RelativeTimeFormatter, bucket_relative_time};
     #[cfg(any(
         not(any(feature = "icu4x", feature = "web-intl")),
         all(
@@ -345,6 +329,12 @@ mod tests {
         assert_eq!(formatter.format_seconds(86_400), "in 1 day");
     }
 
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn bucketing_handles_i64_min_without_overflow() {
+        assert_eq!(bucket_relative_time(i64::MIN), (i64::MIN / 86_400, "day"));
+    }
+
     #[cfg(any(
         not(any(feature = "icu4x", feature = "web-intl")),
         all(
@@ -360,6 +350,19 @@ mod tests {
         assert_eq!(formatter.format_seconds(-86_400), "yesterday");
         assert_eq!(formatter.format_seconds(3_600), "in 1 hour");
     }
+
+    #[cfg(any(
+        not(any(feature = "icu4x", feature = "web-intl")),
+        all(
+            feature = "web-intl",
+            not(target_arch = "wasm32"),
+            not(feature = "icu4x")
+        )
+    ))]
+    #[test]
+    fn fallback_bucketing_handles_i64_min_without_overflow() {
+        assert_eq!(bucket_relative_time(i64::MIN), (i64::MIN / 86_400, "day"));
+    }
 }
 
 #[cfg(all(
@@ -371,7 +374,7 @@ mod tests {
 mod web_intl_tests {
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
-    use super::{NumericOption, RelativeTimeFormatter};
+    use super::{NumericOption, RelativeTimeFormatter, bucket_relative_time};
     use crate::{Locale, locales};
 
     wasm_bindgen_test_configure!(run_in_browser);
@@ -395,5 +398,10 @@ mod web_intl_tests {
         let formatter = RelativeTimeFormatter::new(&Locale::parse("ar-EG").expect("locale"));
 
         assert!(formatter.format_seconds(-60).contains("قبل"));
+    }
+
+    #[wasm_bindgen_test]
+    fn web_intl_bucketing_handles_i64_min_without_overflow() {
+        assert_eq!(bucket_relative_time(i64::MIN), (i64::MIN / 86_400, "day"));
     }
 }
