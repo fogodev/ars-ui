@@ -4,6 +4,7 @@
 //! builds. Backend selection is internal to this module.
 
 #[cfg(any(
+    all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")),
     not(any(feature = "icu4x", feature = "web-intl")),
     all(
         feature = "web-intl",
@@ -250,16 +251,20 @@ fn js_date_from_calendar(date: &CalendarDate) -> JsDate {
 
 #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 fn js_date_from_ymd(year: i32, month: u8, day: u8) -> JsDate {
-    let date = JsDate::new(&JsValue::from_f64(0.0));
+    let iso = format!("{}-{month:02}-{day:02}T12:00:00.000Z", js_iso_year(year),);
 
-    date.set_utc_full_year_with_month_date(
-        u32::try_from(year).expect("browser-backed date formatting requires Gregorian years >= 0"),
-        i32::from(month) - 1,
-        i32::from(day),
-    );
-    date.set_utc_hours(12);
+    JsDate::new(&JsValue::from_str(&iso))
+}
 
-    date
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
+fn js_iso_year(year: i32) -> String {
+    if (0..=9_999).contains(&year) {
+        format!("{year:04}")
+    } else if year < 0 {
+        format!("-{:06}", year.unsigned_abs())
+    } else {
+        format!("+{year:06}")
+    }
 }
 
 #[cfg(any(
@@ -520,7 +525,9 @@ mod web_intl_tests {
 
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
-    use super::{DateFormatter, FormatLength, js_date_from_calendar, js_date_from_ymd};
+    use super::{
+        DateFormatter, FormatLength, js_date_from_calendar, js_date_from_ymd, js_iso_year,
+    };
     use crate::{CalendarDate, CalendarSystem, Locale, locales};
 
     wasm_bindgen_test_configure!(run_in_browser);
@@ -595,6 +602,17 @@ mod web_intl_tests {
         assert_eq!(converted.get_utc_full_year(), 44);
         assert_eq!(converted.get_utc_month(), 2);
         assert_eq!(converted.get_utc_date(), 15);
+    }
+
+    #[wasm_bindgen_test]
+    fn web_intl_date_helpers_support_pre_ce_gregorian_dates() {
+        let js_date = js_date_from_ymd(-1, 1, 1);
+
+        assert_eq!(js_date.to_iso_string(), "-000001-01-01T12:00:00.000Z");
+        assert_eq!(js_iso_year(-1), "-000001");
+        assert_eq!(js_iso_year(0), "0000");
+        assert_eq!(js_iso_year(44), "0044");
+        assert_eq!(js_iso_year(10_000), "+010000");
     }
 
     fn direct_browser_format(locale: &Locale, length: FormatLength, date: &CalendarDate) -> String {
