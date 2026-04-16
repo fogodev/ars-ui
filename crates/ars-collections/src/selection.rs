@@ -1,5 +1,7 @@
 use alloc::{boxed::Box, collections::BTreeSet};
 
+use ars_core::Callback;
+
 use crate::{Collection, key::Key};
 
 /// Whether and how many items can be selected simultaneously.
@@ -126,6 +128,12 @@ pub enum DisabledBehavior {
     /// Disabled items are focusable but not selectable.
     FocusOnly,
 }
+
+/// Callback for item action (Enter, double-click, tap in replace mode).
+///
+/// Distinct from selection change: action activates the item associated with
+/// the provided [`Key`].
+pub type OnAction = Option<Callback<dyn Fn(Key)>>;
 
 /// The full selection state for a collection-based component.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -385,7 +393,8 @@ impl State {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{collections::BTreeSet, vec, vec::Vec};
+    use alloc::{collections::BTreeSet, sync::Arc, vec, vec::Vec};
+    use core::sync::atomic::{AtomicBool, Ordering};
 
     use super::*;
     use crate::CollectionBuilder;
@@ -830,5 +839,23 @@ mod tests {
         let state = multiple_toggle_state().set_focus(Key::int(4));
         assert_eq!(state.focused_key, Some(Key::int(4)));
         assert_eq!(state.selected_keys, Set::Empty);
+    }
+
+    #[test]
+    fn on_action_uses_callback_abstraction() {
+        let called = Arc::new(AtomicBool::new(false));
+        let callback: Option<Callback<dyn Fn(Key)>> = {
+            let called = Arc::clone(&called);
+            Some(Callback::new(move |key| {
+                if key == Key::int(7) {
+                    called.store(true, Ordering::Relaxed);
+                }
+            }))
+        };
+        let on_action: OnAction = callback.clone();
+
+        assert!(on_action.is_some());
+        on_action.expect("OnAction should exist")(Key::int(7));
+        assert!(called.load(Ordering::Relaxed));
     }
 }
