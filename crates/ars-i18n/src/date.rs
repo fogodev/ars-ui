@@ -250,11 +250,16 @@ fn js_date_from_calendar(date: &CalendarDate) -> JsDate {
 
 #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 fn js_date_from_ymd(year: i32, month: u8, day: u8) -> JsDate {
-    let millis = JsDate::utc(f64::from(year), f64::from(month - 1))
-        + f64::from(day - 1) * 86_400_000.0
-        + 43_200_000.0;
+    let date = JsDate::new(&JsValue::from_f64(0.0));
 
-    JsDate::new(&JsValue::from_f64(millis))
+    date.set_utc_full_year_with_month_date(
+        u32::try_from(year).expect("browser-backed date formatting requires Gregorian years >= 0"),
+        i32::from(month) - 1,
+        i32::from(day),
+    );
+    date.set_utc_hours(12);
+
+    date
 }
 
 #[cfg(any(
@@ -515,7 +520,7 @@ mod web_intl_tests {
 
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
-    use super::{DateFormatter, FormatLength, js_date_from_calendar};
+    use super::{DateFormatter, FormatLength, js_date_from_calendar, js_date_from_ymd};
     use crate::{CalendarDate, CalendarSystem, Locale, locales};
 
     wasm_bindgen_test_configure!(run_in_browser);
@@ -571,6 +576,25 @@ mod web_intl_tests {
         assert_eq!(formatted, direct);
         assert!(formatted.contains("Reiwa"));
         assert_ne!(formatted, date.to_iso8601());
+    }
+
+    #[wasm_bindgen_test]
+    fn web_intl_date_helpers_preserve_low_gregorian_years() {
+        let date = CalendarDate::new_gregorian(
+            44,
+            NonZero::new(3).expect("nonzero"),
+            NonZero::new(15).expect("nonzero"),
+        );
+
+        let js_date = js_date_from_ymd(44, 3, 15);
+        let converted = js_date_from_calendar(&date);
+
+        assert_eq!(js_date.get_utc_full_year(), 44);
+        assert_eq!(js_date.get_utc_month(), 2);
+        assert_eq!(js_date.get_utc_date(), 15);
+        assert_eq!(converted.get_utc_full_year(), 44);
+        assert_eq!(converted.get_utc_month(), 2);
+        assert_eq!(converted.get_utc_date(), 15);
     }
 
     fn direct_browser_format(locale: &Locale, length: FormatLength, date: &CalendarDate) -> String {
