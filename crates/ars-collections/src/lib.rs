@@ -25,6 +25,8 @@
 //! - [`SortedCollection`] — comparator-based sorting view.
 //! - [`SortDirection`] — ascending or descending sort order.
 //! - [`SortDescriptor`] — column + direction for table sorting.
+//! - [`CollectionChangeAnnouncement`] — structured live-region event for collection mutations.
+//! - [`CollectionMessages`] — localizable message closures for collection mutation announcements.
 //! - [`CollectionError`] — error from an async page load.
 //! - [`typeahead`] — type-ahead / type-select state machine for keyboard search.
 //! - [`Virtualizer`] — visible-range and scroll math for virtualized rendering.
@@ -34,6 +36,7 @@
 //! - [`HorizontalVirtualLayout`] — optional extension trait for horizontal layout engines.
 //! - [`normalize_scroll_left_rtl`] — RTL scroll normalization for cross-browser consistency.
 //! - [`RtlScrollMode`] — browser convention for RTL `scrollLeft` values.
+//! - [`OnAction`] — platform-appropriate callback for item activation.
 //!
 //! # Locale-aware collation (`i18n` feature)
 //!
@@ -46,6 +49,8 @@
 
 extern crate alloc;
 
+/// Localizable announcement message helpers for collection mutations.
+pub mod announcements;
 /// Async collection with pagination and loading state management.
 pub mod async_collection;
 /// Async data loading traits and result types.
@@ -77,6 +82,7 @@ pub mod virtual_layout;
 /// Virtualized rendering range and scroll math.
 pub mod virtualization;
 
+pub use announcements::{CollectionChangeAnnouncement, CollectionMessages};
 pub use async_collection::{AsyncCollection, AsyncLoadingState};
 pub use async_loader::{AsyncLoader, CollectionError, LoadResult};
 pub use builder::CollectionBuilder;
@@ -84,7 +90,7 @@ pub use collection::{Collection, CollectionItem};
 pub use filtered_collection::FilteredCollection;
 pub use key::Key;
 pub use node::{Node, NodeType};
-pub use selection::DisabledBehavior;
+pub use selection::{DisabledBehavior, OnAction};
 #[cfg(feature = "i18n")]
 pub use sorted_collection::{CollationSupport, CollationTarget, CollatorCache};
 pub use sorted_collection::{SortDescriptor, SortDirection, SortedCollection};

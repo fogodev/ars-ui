@@ -634,12 +634,12 @@ pub enum CollectionChangeAnnouncement {
 /// for count-dependent messages.
 ///
 /// Default English messages are provided. Override via Props to localize.
-// Uses `MessageFn` and `Locale` from ars-i18n (04-internationalization.md §7.1).
-use ars_i18n::{Locale, MessageFn};
+// Uses `MessageFn` and `Locale` from ars-core, which re-exports locale support.
+use alloc::sync::Arc;
+use ars_core::{Locale, MessageFn};
 
-/// All closure fields use `MessageFn::new()` which delegates to the cfg-gated `From` impls
-/// defined in `04-internationalization.md` §7.1 — `Rc` on WASM, `Arc` on native.
-/// Trait objects include `+ Send + Sync` on all targets (see design note in §7.1).
+/// `ars_core::MessageFn` wraps closures in `Arc` on all targets.
+/// Trait objects include `+ Send + Sync` on all targets.
 
 pub struct CollectionMessages {
     /// Message for items added. Receives (count, locale) for plural-aware formatting.
@@ -680,9 +680,11 @@ impl Default for CollectionMessages {
                 n => format!("{n} results available"),
             }),
             // Note: `SortDirection` is defined in §7.2 and imported at the crate level.
-            sorted: MessageFn::new(|col: &str, dir: SortDirection, _locale: &Locale| {
-                format!("Sorted by {col}, {dir}")
-            }),
+            sorted: MessageFn::new(Arc::new(
+                |col: &str, dir: SortDirection, _locale: &Locale| {
+                    format!("Sorted by {col}, {dir}")
+                },
+            ) as Arc<dyn Fn(&str, SortDirection, &Locale) -> String + Send + Sync>),
             empty: MessageFn::new(|_locale: &Locale| "No items".into()),
             loaded: MessageFn::new(|count: usize, _locale: &Locale| {
                 if count == 1 { "1 item loaded".into() }
@@ -2164,13 +2166,9 @@ pub enum Mode {
 
 /// Callback for item action (Enter, double-click, tap in Replace mode).
 /// Distinct from selection change — action activates the item.
-/// Uses the same cfg-gated pattern as `Callback<T>`: `Rc` on WASM, `Arc` on native,
-/// ensuring cross-platform safety for multi-threaded native runtimes.
-#[cfg(target_arch = "wasm32")]
-pub type OnAction = Option<Rc<dyn Fn(Key)>>;
-
-#[cfg(not(target_arch = "wasm32"))]
-pub type OnAction = Option<Arc<dyn Fn(Key) + Send + Sync>>;
+/// Uses the shared `Callback` abstraction so ownership and equality semantics
+/// stay consistent with other event handlers across all targets.
+pub type OnAction = Option<Callback<dyn Fn(Key)>>;
 ```
 
 > **Capture semantics**: OnAction callbacks are invoked synchronously during event processing.
