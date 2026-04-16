@@ -1,7 +1,12 @@
 use alloc::string::{String, ToString};
 
 use icu::calendar::{
-    AnyCalendar, Date, Iso,
+    AnyCalendar, AnyCalendarKind, Date, Iso,
+    cal::{
+        Buddhist, ChineseTraditional, Coptic, Ethiopian, EthiopianEraStyle, Hebrew, Hijri, Indian,
+        Japanese, KoreanTraditional, Persian, Roc,
+        hijri::{self},
+    },
     error::DateFromFieldsError,
     types::{DateFields, YearInput},
 };
@@ -67,16 +72,21 @@ impl CalendarDate {
     #[must_use]
     pub(crate) fn to_calendar(&self, calendar: CalendarSystem) -> Self {
         Self {
-            inner: self
-                .inner
-                .to_calendar(AnyCalendar::new(calendar.to_icu_kind())),
+            inner: self.inner.to_calendar(any_calendar_for(calendar)),
         }
     }
 
-    /// Returns the display year for the date's calendar.
+    /// Returns the public year for the date's calendar.
+    ///
+    /// Gregorian public dates use astronomical year numbering even though ICU
+    /// exposes CE/BCE era years for Gregorian dates.
     #[must_use]
     pub(crate) fn year(&self) -> i32 {
-        self.inner.year().era_year_or_related_iso()
+        if self.inner.calendar().kind() == AnyCalendarKind::Gregorian {
+            self.inner.year().extended_year()
+        } else {
+            self.inner.year().era_year_or_related_iso()
+        }
     }
 
     /// Returns the 1-based month ordinal.
@@ -161,10 +171,18 @@ impl CalendarDate {
             .map_err(|error| CalendarError::Arithmetic(error.to_string()))?;
 
         Ok(Self {
-            inner: iso.to_calendar(AnyCalendar::new(calendar.to_icu_kind())),
+            inner: iso.to_calendar(any_calendar_for(calendar)),
         })
     }
 }
+
+// Keep these internal helpers live in non-test library builds while they are
+// only exercised indirectly by formatter/provider follow-up work and tests.
+const _: fn(&CalendarDate) -> Weekday = CalendarDate::weekday;
+const _: fn(&CalendarDate, i32) -> Result<CalendarDate, CalendarError> = CalendarDate::add_days;
+const _: fn(&CalendarDate, &CalendarDate) -> Result<i32, CalendarError> = CalendarDate::days_until;
+const _: fn(&CalendarDate, &CalendarDate) -> Result<bool, CalendarError> = CalendarDate::is_before;
+const _: fn(CalendarSystem) -> Result<CalendarDate, CalendarError> = CalendarDate::today;
 
 pub(crate) fn months_in_year(year: i32, calendar: CalendarSystem, era: Option<&str>) -> Option<u8> {
     let date = date_from_ordinal_fields(year_input_from_parts(calendar, era, year), 1, 1, calendar)
@@ -230,14 +248,13 @@ fn date_from_ordinal_fields(
     day: u8,
     calendar: CalendarSystem,
 ) -> Result<Date<AnyCalendar>, DateFromFieldsError> {
-    let any_calendar = AnyCalendar::new(calendar.to_icu_kind());
     let mut fields = DateFields::default();
 
     assign_year_fields(&mut fields, year);
     fields.ordinal_month = Some(ordinal_month);
     fields.day = Some(day);
 
-    Date::try_from_fields(fields, Default::default(), any_calendar)
+    Date::try_from_fields(fields, Default::default(), any_calendar_for(calendar))
 }
 
 fn assign_year_fields<'a>(fields: &mut DateFields<'a>, year: YearInput<'a>) {
@@ -276,5 +293,50 @@ const fn default_era_code(calendar: CalendarSystem) -> Option<&'static str> {
     match calendar {
         CalendarSystem::Japanese => Some("reiwa"),
         _ => None,
+    }
+}
+
+#[expect(
+    deprecated,
+    reason = "CalendarSystem::Islamic maps to ICU4X's simulated Mecca Hijri constructor and enum variant"
+)]
+fn any_calendar_for(calendar: CalendarSystem) -> AnyCalendar {
+    match calendar {
+        CalendarSystem::Gregorian => AnyCalendar::Gregorian(icu::calendar::Gregorian),
+
+        CalendarSystem::Buddhist => AnyCalendar::Buddhist(Buddhist),
+
+        CalendarSystem::Japanese => AnyCalendar::Japanese(Japanese::default()),
+
+        CalendarSystem::Hebrew => AnyCalendar::Hebrew(Hebrew),
+
+        CalendarSystem::Islamic => AnyCalendar::HijriSimulated(Hijri::new_simulated_mecca()),
+
+        CalendarSystem::IslamicCivil => AnyCalendar::HijriTabular(Hijri::new_tabular(
+            hijri::TabularAlgorithmLeapYears::TypeII,
+            hijri::TabularAlgorithmEpoch::Friday,
+        )),
+
+        CalendarSystem::IslamicUmmAlQura => AnyCalendar::HijriUmmAlQura(Hijri::new_umm_al_qura()),
+
+        CalendarSystem::Persian => AnyCalendar::Persian(Persian),
+
+        CalendarSystem::Indian => AnyCalendar::Indian(Indian),
+
+        CalendarSystem::Chinese => AnyCalendar::Chinese(ChineseTraditional::new()),
+
+        CalendarSystem::Coptic => AnyCalendar::Coptic(Coptic),
+
+        CalendarSystem::Dangi => AnyCalendar::Dangi(KoreanTraditional::new()),
+
+        CalendarSystem::Ethiopic => AnyCalendar::Ethiopian(Ethiopian::new_with_era_style(
+            EthiopianEraStyle::AmeteMihret,
+        )),
+
+        CalendarSystem::EthiopicAmeteAlem => {
+            AnyCalendar::Ethiopian(Ethiopian::new_with_era_style(EthiopianEraStyle::AmeteAlem))
+        }
+
+        CalendarSystem::Roc => AnyCalendar::Roc(Roc),
     }
 }

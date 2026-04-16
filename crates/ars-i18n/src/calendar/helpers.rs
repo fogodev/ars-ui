@@ -10,7 +10,11 @@ use crate::IcuProvider;
 pub(super) const GREGORIAN_JDN_OFFSET: i64 = 1_721_426;
 
 /// Number of days between `0001-01-01` and the Unix epoch `1970-01-01`.
-#[cfg(all(feature = "icu4x", feature = "std", not(target_arch = "wasm32")))]
+#[cfg(all(
+    any(feature = "icu4x", feature = "web-intl"),
+    feature = "std",
+    not(target_arch = "wasm32")
+))]
 const UNIX_EPOCH_DAYS_FROM_CE: i64 = 719_162;
 
 /// Returns the number of days in a proleptic Gregorian month.
@@ -366,7 +370,11 @@ pub(crate) const fn epoch_days_to_iso(epoch_days: i64) -> (i32, u8, u8) {
     (year, month, day)
 }
 
-#[cfg(all(feature = "icu4x", feature = "std", not(target_arch = "wasm32")))]
+#[cfg(all(
+    any(feature = "icu4x", feature = "web-intl"),
+    feature = "std",
+    not(target_arch = "wasm32")
+))]
 pub(crate) fn platform_today_iso() -> Result<(i32, u8, u8), String> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -382,7 +390,26 @@ pub(crate) fn platform_today_iso() -> Result<(i32, u8, u8), String> {
     Ok(epoch_days_to_iso(days + UNIX_EPOCH_DAYS_FROM_CE))
 }
 
-#[cfg(all(feature = "icu4x", target_arch = "wasm32", feature = "web-intl"))]
+#[cfg(all(
+    any(feature = "icu4x", feature = "web-intl"),
+    feature = "std",
+    not(target_arch = "wasm32")
+))]
+// Keep the native `today()` plumbing reachable in library builds until the
+// full provider/default-provider tasks wire these helpers through normal
+// runtime call paths.
+const _: i64 = UNIX_EPOCH_DAYS_FROM_CE;
+
+#[cfg(all(
+    any(feature = "icu4x", feature = "web-intl"),
+    feature = "std",
+    not(target_arch = "wasm32")
+))]
+// This is the same reachability trick for the function item itself; remove it
+// once follow-up provider work gives `platform_today_iso()` a real caller.
+const _: fn() -> Result<(i32, u8, u8), String> = platform_today_iso;
+
+#[cfg(all(target_arch = "wasm32", feature = "web-intl"))]
 pub(crate) fn platform_today_iso() -> Result<(i32, u8, u8), String> {
     let date = js_sys::Date::new_0();
 
@@ -405,7 +432,11 @@ pub(crate) fn platform_today_iso() -> Result<(i32, u8, u8), String> {
     ))
 }
 
-#[cfg(all(feature = "icu4x", not(feature = "std"), not(target_arch = "wasm32")))]
+#[cfg(all(
+    any(feature = "icu4x", feature = "web-intl"),
+    not(feature = "std"),
+    not(target_arch = "wasm32")
+))]
 pub(crate) fn platform_today_iso() -> Result<(i32, u8, u8), String> {
     Err(String::from(
         "platform date unavailable without the `std` feature",
