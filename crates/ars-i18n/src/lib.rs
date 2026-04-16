@@ -26,6 +26,7 @@ mod calendar;
 #[cfg(any(feature = "icu4x", feature = "web-intl"))]
 mod case;
 mod collation;
+mod date;
 #[cfg(feature = "std")]
 mod detect;
 mod layout;
@@ -33,6 +34,7 @@ mod locale;
 mod locale_stack;
 mod number;
 mod plural;
+mod relative_time;
 mod translate;
 mod weekday;
 
@@ -47,6 +49,7 @@ pub use calendar::{
 #[cfg(any(feature = "icu4x", feature = "web-intl"))]
 pub use case::{to_lowercase, to_uppercase};
 pub use collation::{CollationFormat, CollationOptions, CollationStrength, StringCollator};
+pub use date::{DateFormatter, FormatLength};
 #[cfg(feature = "std")]
 pub use detect::locale_from_accept_language;
 pub use layout::{LogicalRect, LogicalSide, PhysicalRect, PhysicalSide};
@@ -66,6 +69,7 @@ pub use plural::{
     Plural, PluralCategory, PluralRuleType, PluralRulesFormat, format_plural, plural_category,
     select_plural,
 };
+pub use relative_time::{NumericOption, RelativeTimeFormatter};
 pub use translate::Translate;
 pub use weekday::Weekday;
 
@@ -280,16 +284,9 @@ pub trait IcuProvider: Send + Sync + 'static {
             return months;
         }
 
-        #[cfg(feature = "icu4x")]
+        #[cfg(any(feature = "icu4x", feature = "web-intl"))]
         if let Some(months) = calendar::internal::months_in_year(year, *calendar, _era) {
             return months;
-        }
-
-        if matches!(calendar, CalendarSystem::Chinese | CalendarSystem::Dangi) {
-            // East Asian leap months require calendar data. Without ICU4X, use
-            // the non-leap baseline so we reject impossible month 13 values
-            // instead of accepting them in every year.
-            return 12;
         }
 
         match calendar {
@@ -320,7 +317,7 @@ pub trait IcuProvider: Send + Sync + 'static {
             return days;
         }
 
-        #[cfg(feature = "icu4x")]
+        #[cfg(any(feature = "icu4x", feature = "web-intl"))]
         if let Some(days) = calendar::internal::days_in_month(year, month, *_calendar, _era) {
             return days;
         }
@@ -378,6 +375,30 @@ pub trait IcuProvider: Send + Sync + 'static {
             return date.clone();
         }
 
+        #[cfg(any(feature = "icu4x", feature = "web-intl"))]
+        {
+            let internal = calendar::internal::CalendarDate::try_from(date)
+                .expect("CalendarDate should be valid for calendar conversion");
+            let converted = internal.to_calendar(target);
+
+            CalendarDate {
+                calendar: target,
+                era: converted
+                    .era()
+                    .filter(|_| target.has_custom_eras())
+                    .map(|code| Era {
+                        code: code.clone(),
+                        display_name: code,
+                    }),
+                year: converted.year(),
+                month: NonZero::new(converted.month())
+                    .expect("internal calendar conversion yields a 1-based month"),
+                day: NonZero::new(converted.day())
+                    .expect("internal calendar conversion yields a 1-based day"),
+            }
+        }
+
+        #[cfg(not(any(feature = "icu4x", feature = "web-intl")))]
         panic!(
             "StubIcuProvider does not support non-Gregorian calendar conversion; use Icu4xProvider"
         );
@@ -397,7 +418,7 @@ impl IcuProvider for StubIcuProvider {}
 mod tests {
     use alloc::{string::ToString, vec, vec::Vec};
     use core::num::NonZero;
-    #[cfg(feature = "std")]
+    #[cfg(all(feature = "std", not(any(feature = "icu4x", feature = "web-intl"))))]
     use std::panic::catch_unwind;
 
     use super::*;
@@ -730,13 +751,13 @@ mod tests {
             provider.max_months_in_year(&CalendarSystem::Hebrew, 5785, None),
             12
         );
-        #[cfg(feature = "icu4x")]
+        #[cfg(any(feature = "icu4x", feature = "web-intl"))]
         assert_eq!(
             provider.max_months_in_year(&CalendarSystem::Dangi, 2024, None),
             calendar::internal::months_in_year(2024, CalendarSystem::Dangi, None)
                 .expect("ICU4X should resolve Dangi month counts")
         );
-        #[cfg(not(feature = "icu4x"))]
+        #[cfg(not(any(feature = "icu4x", feature = "web-intl")))]
         assert_eq!(
             provider.max_months_in_year(&CalendarSystem::Dangi, 2024, None),
             12
@@ -801,9 +822,38 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(all(feature = "std", any(feature = "icu4x", feature = "web-intl")))]
     #[test]
-    fn stub_icu_provider_convert_date_panics_for_non_identity_conversions() {
+    fn stub_icu_provider_convert_date_supports_non_identity_conversions_when_internal_calendar_is_available()
+     {
+        let provider = StubIcuProvider;
+        let gregorian = CalendarDate::new(&provider, CalendarSystem::Gregorian, None, 2024, 3, 15)
+            .expect("Gregorian date should validate");
+        let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+        let round_trip = provider.convert_date(&japanese, CalendarSystem::Gregorian);
+
+        assert_eq!(
+            japanese,
+            CalendarDate::new(
+                &provider,
+                CalendarSystem::Japanese,
+                Some(Era {
+                    code: String::from("reiwa"),
+                    display_name: String::from("reiwa"),
+                }),
+                6,
+                3,
+                15,
+            )
+            .expect("converted Japanese date should validate")
+        );
+        assert_eq!(round_trip, gregorian);
+    }
+
+    #[cfg(all(feature = "std", not(any(feature = "icu4x", feature = "web-intl"))))]
+    #[test]
+    fn stub_icu_provider_convert_date_panics_for_non_identity_conversions_without_calendar_backend()
+    {
         let provider = StubIcuProvider;
         let gregorian = CalendarDate::new(&provider, CalendarSystem::Gregorian, None, 2024, 3, 15)
             .expect("Gregorian date should validate");

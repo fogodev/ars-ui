@@ -19,7 +19,7 @@ The `ars-i18n` crate provides complete internationalization support for ars-ui c
 `ars-i18n` supports two formatting backends via feature flags:
 
 - **`icu4x`** (default): Rust-native ICU4X implementation. Required for SSR, desktop, and non-browser environments. Adds ~100-500KB to WASM binary.
-- **`web-intl`**: Delegates to the browser's `Intl` API via `js-sys`. Zero binary size overhead. WASM client only.
+- **`web-intl`**: Delegates localized formatting to the browser's `Intl` API via `js-sys`. No compiled CLDR data is linked into the WASM bundle, but non-Gregorian `CalendarDate` support still relies on a small Rust-side calendar conversion layer. WASM client only.
 
 `Locale` parsing, BCP 47 metadata access (`language()`, `script()`, `region()`,
 Unicode extensions), and `DataLocale` conversion are foundational and may rely on
@@ -2042,7 +2042,8 @@ impl DateFormatter {
     }
 
     pub fn format(&self, date: &shared::CalendarDate) -> String {
-        let internal: CalendarDate = date.into();
+        let internal = CalendarDate::try_from(date)
+            .expect("CalendarDate should be valid for formatting");
         match &self.inner {
             DateFormatterInner::Ymd(fmt) => fmt.format(&internal.inner).to_string(),
             DateFormatterInner::Ymde(fmt) => fmt.format(&internal.inner).to_string(),
@@ -2077,7 +2078,7 @@ impl TryFrom<&shared::CalendarDate> for CalendarDate {
 ### 5.5 RelativeTimeFormatter
 
 ```rust
-use icu::experimental::relativetime::{
+use icu_experimental::relativetime::{
     RelativeTimeFormatter as IcuRelativeTimeFormatter,
     RelativeTimeFormatterPreferences,
     options::{RelativeTimeFormatterOptions, Numeric},
@@ -3367,7 +3368,7 @@ pub fn get_number_formatter(locale: &Locale, options: &NumberFormatOptions) -> N
 ### 9.4 Browser Intl API Feature Flag (`web-intl`)
 
 For WASM client builds, the browser's `Intl` API provides the same formatting
-capabilities as ICU4X with zero bundle size overhead. The `web-intl` feature
+capabilities as ICU4X without shipping compiled CLDR data. The `web-intl` feature
 flag enables this backend on `wasm32`; non-wasm builds that enable the feature
 continue to use the documented English fallback behavior for APIs that depend
 on browser `Intl`.
@@ -4061,7 +4062,20 @@ pub fn default_provider() -> Box<dyn IcuProvider> {
 
 The `web-intl` backend implements `IcuProvider` using browser `Intl` APIs for WASM client
 builds. This mirrors `Icu4xProvider` (§9.5.2) but delegates to browser-native ICU data,
-eliminating compiled CLDR data from the WASM bundle.
+keeping browser-native formatting as the source of localized output. For
+non-Gregorian public `CalendarDate` values, the formatter and provider layers
+use a Rust-side calendar conversion bridge to resolve an absolute day before
+handing that day to `Intl.DateTimeFormat`. This bridge does not require
+`icu/compiled_data`.
+
+For the public formatter surface, `DateFormatter` and `RelativeTimeFormatter` remain the
+backend-neutral APIs. The implementation chooses ICU4X or browser `Intl` internally rather
+than exposing public `JsIntl*` wrapper types.
+
+`RelativeTimeFormatter` maps cleanly to `Intl.RelativeTimeFormat`. `DateFormatter` maps
+cleanly to `Intl.DateTimeFormat` by converting public `CalendarDate` values to their
+absolute Gregorian day first, then formatting that day under the locale's active
+calendar, including `u-ca-*` Unicode extension preferences.
 
 **Browser API mapping:**
 

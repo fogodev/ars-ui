@@ -598,7 +598,7 @@ When validating dates against a specific calendar system, `CalendarDate` MUST en
 **Leap Month Handling**:
 
 - **Hebrew**: In a leap year (years 3, 6, 8, 11, 14, 17, 19 of the 19-year Metonic cycle), a 13th month (Adar II / אדר ב׳) is inserted. Setting `month = 13` in a non-leap Hebrew year MUST return `Err(CalendarValidationError::InvalidLeapMonth)`.
-- **Chinese (if supported)**: Intercalary (leap) months can occur after any month. The leap month is identified by a boolean flag, not a month number. Validation requires consulting the Chinese calendar data for the specific year.
+- **Chinese / Dangi**: Intercalary (leap) months can occur after any month. The public `CalendarDate` type keeps `month: NonZero<u8>` and represents these calendars using the ordinal month position within the year (`1..=13`), not a separate public leap-month boolean. Validation therefore requires consulting calendar data or calendar arithmetic for the specific year to determine whether ordinal month `13` exists and how ordinal months map onto named display months.
 
 **Era Validation** (Japanese Calendar):
 

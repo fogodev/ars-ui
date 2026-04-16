@@ -1,9 +1,9 @@
 use alloc::string::{String, ToString};
 use core::{cmp::Ordering, num::NonZero};
 
-#[cfg(feature = "icu4x")]
+#[cfg(any(feature = "icu4x", feature = "web-intl"))]
 use super::internal::CalendarDate as InternalCalendarDate;
-#[cfg(feature = "icu4x")]
+#[cfg(any(feature = "icu4x", feature = "web-intl"))]
 use super::internal::{
     days_in_month as internal_days_in_month, months_in_year as internal_months_in_year,
 };
@@ -16,7 +16,7 @@ use super::{
 };
 use crate::{IcuProvider, Locale, StubIcuProvider, Weekday};
 
-#[cfg(feature = "icu4x")]
+#[cfg(any(feature = "icu4x", feature = "web-intl"))]
 #[test]
 fn internal_calendar_date_from_iso_exposes_components() {
     let date = InternalCalendarDate::from_iso(2024, 3, 15).expect("date should be valid");
@@ -27,7 +27,7 @@ fn internal_calendar_date_from_iso_exposes_components() {
     assert_eq!(date.weekday(), Weekday::Friday);
 }
 
-#[cfg(feature = "icu4x")]
+#[cfg(any(feature = "icu4x", feature = "web-intl"))]
 #[test]
 fn internal_calendar_date_from_calendar_accepts_gregorian_fields() {
     let date = InternalCalendarDate::from_calendar(2024, 3, 15, CalendarSystem::Gregorian)
@@ -38,7 +38,7 @@ fn internal_calendar_date_from_calendar_accepts_gregorian_fields() {
     assert_eq!(date.day(), 15);
 }
 
-#[cfg(feature = "icu4x")]
+#[cfg(any(feature = "icu4x", feature = "web-intl"))]
 #[test]
 fn internal_calendar_date_from_calendar_uses_ordinal_months_for_chinese() {
     let date = InternalCalendarDate::from_calendar(2023, 3, 1, CalendarSystem::Chinese)
@@ -47,7 +47,7 @@ fn internal_calendar_date_from_calendar_uses_ordinal_months_for_chinese() {
     assert_eq!(date.month(), 3);
 }
 
-#[cfg(feature = "icu4x")]
+#[cfg(any(feature = "icu4x", feature = "web-intl"))]
 #[test]
 fn internal_calendar_date_from_calendar_defaults_japanese_to_current_era() {
     let date = InternalCalendarDate::from_calendar(6, 3, 15, CalendarSystem::Japanese)
@@ -60,7 +60,7 @@ fn internal_calendar_date_from_calendar_defaults_japanese_to_current_era() {
     assert_eq!(gregorian.day(), 15);
 }
 
-#[cfg(feature = "icu4x")]
+#[cfg(any(feature = "icu4x", feature = "web-intl"))]
 #[test]
 fn stub_provider_uses_year_dependent_chinese_month_counts() {
     let provider = StubIcuProvider;
@@ -122,7 +122,7 @@ fn stub_provider_rejects_invalid_coptic_and_ethiopic_epagomenal_days() {
     );
 }
 
-#[cfg(feature = "icu4x")]
+#[cfg(any(feature = "icu4x", feature = "web-intl"))]
 #[test]
 fn internal_calendar_date_from_calendar_with_era_preserves_japanese_era() {
     let date =
@@ -136,7 +136,7 @@ fn internal_calendar_date_from_calendar_with_era_preserves_japanese_era() {
     assert_eq!(gregorian.day(), 30);
 }
 
-#[cfg(feature = "icu4x")]
+#[cfg(any(feature = "icu4x", feature = "web-intl"))]
 #[test]
 fn internal_calendar_date_add_days_and_ordering_work() {
     let start = InternalCalendarDate::from_iso(2024, 3, 15).expect("date should be valid");
@@ -147,7 +147,7 @@ fn internal_calendar_date_add_days_and_ordering_work() {
     assert_eq!(end.day(), 18);
 }
 
-#[cfg(feature = "icu4x")]
+#[cfg(any(feature = "icu4x", feature = "web-intl"))]
 #[test]
 fn internal_calendar_date_conversion_and_era_helpers_are_callable() {
     let gregorian = InternalCalendarDate::from_iso(2024, 3, 15).expect("date should be valid");
@@ -157,7 +157,7 @@ fn internal_calendar_date_conversion_and_era_helpers_are_callable() {
     assert_eq!(converted.era(), Some(String::from("ce")));
 }
 
-#[cfg(all(feature = "icu4x", feature = "std"))]
+#[cfg(all(any(feature = "icu4x", feature = "web-intl"), feature = "std"))]
 #[test]
 fn internal_calendar_date_today_returns_a_valid_date() {
     let today =
@@ -1097,7 +1097,7 @@ fn public_calendar_date_non_gregorian_provider_paths_delegate() {
     );
 }
 
-#[cfg(feature = "icu4x")]
+#[cfg(any(feature = "icu4x", feature = "web-intl"))]
 #[test]
 fn public_calendar_date_to_internal_preserves_explicit_japanese_era() {
     let heisei = CalendarDate {
@@ -1340,12 +1340,12 @@ fn stub_provider_fallback_helpers_cover_remaining_calendar_defaults() {
         provider.days_in_month(&CalendarSystem::EthiopicAmeteAlem, 2015, 13, None),
         6
     );
-    #[cfg(feature = "icu4x")]
+    #[cfg(any(feature = "icu4x", feature = "web-intl"))]
     assert_eq!(
         provider.days_in_month(&CalendarSystem::Roc, 113, 2, None),
         29
     );
-    #[cfg(not(feature = "icu4x"))]
+    #[cfg(not(any(feature = "icu4x", feature = "web-intl")))]
     assert_eq!(
         provider.days_in_month(&CalendarSystem::Roc, 113, 2, None),
         28
@@ -1359,7 +1359,7 @@ fn stub_provider_fallback_helpers_cover_remaining_calendar_defaults() {
     assert_eq!(provider.first_day_of_week(&locale), Weekday::Sunday);
 }
 
-#[cfg(feature = "icu4x")]
+#[cfg(any(feature = "icu4x", feature = "web-intl"))]
 #[test]
 fn internal_calendar_shape_helpers_cover_remaining_icu_backed_paths() {
     let leap_month_year = (2020..=2030)
@@ -1391,7 +1391,7 @@ fn internal_calendar_shape_helpers_cover_remaining_icu_backed_paths() {
     );
 }
 
-#[cfg(feature = "icu4x")]
+#[cfg(any(feature = "icu4x", feature = "web-intl"))]
 #[test]
 fn internal_calendar_date_invalid_construction_paths_return_errors() {
     assert_eq!(
@@ -1417,7 +1417,7 @@ fn internal_calendar_date_invalid_construction_paths_return_errors() {
     );
 }
 
-#[cfg(all(feature = "icu4x", feature = "std"))]
+#[cfg(all(any(feature = "icu4x", feature = "web-intl"), feature = "std"))]
 #[test]
 fn internal_calendar_date_additional_paths_cover_identity_and_ordering() {
     let start = InternalCalendarDate::from_iso(2024, 3, 15).expect("date should be valid");
