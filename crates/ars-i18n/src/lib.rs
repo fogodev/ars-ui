@@ -853,6 +853,35 @@ mod tests {
 
     #[cfg(all(feature = "std", any(feature = "icu4x", feature = "web-intl")))]
     #[test]
+    fn stub_icu_provider_convert_date_preserves_bce_gregorian_years() {
+        let provider = StubIcuProvider;
+        let buddhist = CalendarDate::new(&provider, CalendarSystem::Buddhist, None, 1, 1, 1)
+            .expect("Buddhist date should validate");
+
+        let gregorian = provider.convert_date(&buddhist, CalendarSystem::Gregorian);
+
+        assert_eq!(
+            gregorian,
+            CalendarDate {
+                calendar: CalendarSystem::Gregorian,
+                era: None,
+                year: -542,
+                month: NonZero::new(1).expect("one is non-zero"),
+                day: NonZero::new(1).expect("one is non-zero"),
+            }
+        );
+        assert_eq!(
+            buddhist.to_calendar(&provider, CalendarSystem::Gregorian),
+            gregorian
+        );
+        assert_eq!(
+            provider.convert_date(&gregorian, CalendarSystem::Buddhist),
+            buddhist
+        );
+    }
+
+    #[cfg(all(feature = "std", any(feature = "icu4x", feature = "web-intl")))]
+    #[test]
     fn stub_icu_provider_convert_date_falls_back_for_inputs_outside_internal_bridge_range() {
         let provider = StubIcuProvider;
         let gregorian = CalendarDate::new_gregorian(

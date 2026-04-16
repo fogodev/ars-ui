@@ -1,7 +1,7 @@
 use alloc::string::{String, ToString};
 
 use icu::calendar::{
-    AnyCalendar, Date, Iso,
+    AnyCalendar, AnyCalendarKind, Date, Iso,
     cal::{
         Buddhist, ChineseTraditional, Coptic, Ethiopian, EthiopianEraStyle, Hebrew, Hijri, Indian,
         Japanese, KoreanTraditional, Persian, Roc,
@@ -76,10 +76,17 @@ impl CalendarDate {
         }
     }
 
-    /// Returns the display year for the date's calendar.
+    /// Returns the public year for the date's calendar.
+    ///
+    /// Gregorian public dates use astronomical year numbering even though ICU
+    /// exposes CE/BCE era years for Gregorian dates.
     #[must_use]
     pub(crate) fn year(&self) -> i32 {
-        self.inner.year().era_year_or_related_iso()
+        if self.inner.calendar().kind() == AnyCalendarKind::Gregorian {
+            self.inner.year().extended_year()
+        } else {
+            self.inner.year().era_year_or_related_iso()
+        }
     }
 
     /// Returns the 1-based month ordinal.

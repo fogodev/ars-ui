@@ -78,9 +78,12 @@ impl FormatLength {
 
     /// Returns the ICU4X field set for time-only formatting.
     #[cfg(feature = "icu4x")]
-    #[expect(
-        dead_code,
-        reason = "time field-set support is part of the public formatter contract even though date-only formatting is implemented in this task"
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "time field-set support is part of the public formatter contract even though date-only formatting is implemented in this task"
+        )
     )]
     fn to_icu_time_field_set(self) -> T {
         match self {
@@ -353,14 +356,8 @@ const fn english_weekday_long(weekday: crate::Weekday) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "icu4x")]
-    use alloc::string::String;
-    #[cfg(feature = "icu4x")]
-    use core::num::NonZero;
-
-    #[cfg(feature = "icu4x")]
-    use super::{DateFormatter, FormatLength};
     #[cfg(any(
+        feature = "icu4x",
         not(any(feature = "icu4x", feature = "web-intl")),
         all(
             feature = "web-intl",
@@ -368,7 +365,44 @@ mod tests {
             not(feature = "icu4x")
         )
     ))]
-    use super::{DateFormatter, FormatLength};
+    use alloc::format;
+    #[cfg(any(
+        feature = "icu4x",
+        not(any(feature = "icu4x", feature = "web-intl")),
+        all(
+            feature = "web-intl",
+            not(target_arch = "wasm32"),
+            not(feature = "icu4x")
+        )
+    ))]
+    use alloc::string::String;
+    #[cfg(any(
+        feature = "icu4x",
+        not(any(feature = "icu4x", feature = "web-intl")),
+        all(
+            feature = "web-intl",
+            not(target_arch = "wasm32"),
+            not(feature = "icu4x")
+        )
+    ))]
+    use core::num::NonZero;
+
+    #[cfg(feature = "icu4x")]
+    use icu::datetime::fieldsets::{T, YMD, YMDE};
+
+    #[cfg(any(
+        feature = "icu4x",
+        not(any(feature = "icu4x", feature = "web-intl")),
+        all(
+            feature = "web-intl",
+            not(target_arch = "wasm32"),
+            not(feature = "icu4x")
+        )
+    ))]
+    use super::{
+        DateFormatter, FormatLength, english_month_long, english_month_short, english_weekday_long,
+        fallback_format_date,
+    };
     #[cfg(any(
         not(any(feature = "icu4x", feature = "web-intl")),
         all(
@@ -378,8 +412,18 @@ mod tests {
         )
     ))]
     use crate::locales;
+    #[cfg(any(
+        feature = "icu4x",
+        not(any(feature = "icu4x", feature = "web-intl")),
+        all(
+            feature = "web-intl",
+            not(target_arch = "wasm32"),
+            not(feature = "icu4x")
+        )
+    ))]
+    use crate::{CalendarDate, CalendarSystem, Era};
     #[cfg(feature = "icu4x")]
-    use crate::{CalendarDate, CalendarSystem, Era, Locale, locales};
+    use crate::{Locale, locales};
 
     #[cfg(feature = "icu4x")]
     fn march_2024() -> CalendarDate {
@@ -390,12 +434,50 @@ mod tests {
         )
     }
 
+    #[cfg(any(
+        feature = "icu4x",
+        not(any(feature = "icu4x", feature = "web-intl")),
+        all(
+            feature = "web-intl",
+            not(target_arch = "wasm32"),
+            not(feature = "icu4x")
+        )
+    ))]
+    fn japanese_reiwa_date() -> CalendarDate {
+        CalendarDate {
+            calendar: CalendarSystem::Japanese,
+            era: Some(Era {
+                code: String::from("reiwa"),
+                display_name: String::from("Reiwa"),
+            }),
+            year: 1,
+            month: NonZero::new(5).expect("nonzero"),
+            day: NonZero::new(1).expect("nonzero"),
+        }
+    }
+
     #[cfg(feature = "icu4x")]
     #[test]
     fn short_date_formatter_formats_en_us_date() {
         let formatter = DateFormatter::new(&locales::en_us(), FormatLength::Short);
 
         assert_eq!(formatter.format(&march_2024()), "3/15/24");
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn format_length_icu_field_sets_cover_time_and_full_variants() {
+        assert_eq!(
+            FormatLength::Full.to_icu_full_date_field_set(),
+            YMDE::long()
+        );
+        assert_eq!(FormatLength::Long.to_icu_date_field_set(), YMD::long());
+        assert_eq!(FormatLength::Medium.to_icu_date_field_set(), YMD::medium());
+        assert_eq!(FormatLength::Short.to_icu_date_field_set(), YMD::short());
+        assert_eq!(FormatLength::Full.to_icu_time_field_set(), T::hms());
+        assert_eq!(FormatLength::Long.to_icu_time_field_set(), T::hms());
+        assert_eq!(FormatLength::Medium.to_icu_time_field_set(), T::hm());
+        assert_eq!(FormatLength::Short.to_icu_time_field_set(), T::hm());
     }
 
     #[cfg(feature = "icu4x")]
@@ -478,6 +560,97 @@ mod tests {
     }
 
     #[cfg(any(
+        feature = "icu4x",
+        not(any(feature = "icu4x", feature = "web-intl")),
+        all(
+            feature = "web-intl",
+            not(target_arch = "wasm32"),
+            not(feature = "icu4x")
+        )
+    ))]
+    #[test]
+    fn date_formatter_debug_includes_locale_and_length() {
+        let formatter = DateFormatter::new(&locales::en_us(), FormatLength::Long);
+        let debug = format!("{formatter:?}");
+
+        assert!(debug.contains("DateFormatter"));
+        assert!(debug.contains("en-US"));
+        assert!(debug.contains("Long"));
+    }
+
+    #[cfg(any(
+        feature = "icu4x",
+        not(any(feature = "icu4x", feature = "web-intl")),
+        all(
+            feature = "web-intl",
+            not(target_arch = "wasm32"),
+            not(feature = "icu4x")
+        )
+    ))]
+    #[test]
+    fn fallback_format_date_covers_all_lengths_and_non_gregorian_passthrough() {
+        let locale = locales::en_us();
+        let gregorian = CalendarDate::new_gregorian(
+            2024,
+            NonZero::new(3).expect("nonzero"),
+            NonZero::new(15).expect("nonzero"),
+        );
+
+        assert_eq!(
+            fallback_format_date(&locale, FormatLength::Short, &gregorian),
+            "3/15/24"
+        );
+        assert_eq!(
+            fallback_format_date(&locale, FormatLength::Medium, &gregorian),
+            "Mar 15, 2024"
+        );
+        assert_eq!(
+            fallback_format_date(&locale, FormatLength::Long, &gregorian),
+            "March 15, 2024"
+        );
+        assert_eq!(
+            fallback_format_date(&locale, FormatLength::Full, &gregorian),
+            "Friday, March 15, 2024"
+        );
+
+        let japanese = japanese_reiwa_date();
+        assert_eq!(
+            fallback_format_date(&locale, FormatLength::Long, &japanese),
+            japanese.to_iso8601()
+        );
+    }
+
+    #[cfg(any(
+        feature = "icu4x",
+        not(any(feature = "icu4x", feature = "web-intl")),
+        all(
+            feature = "web-intl",
+            not(target_arch = "wasm32"),
+            not(feature = "icu4x")
+        )
+    ))]
+    #[test]
+    fn english_fallback_helpers_cover_valid_and_invalid_inputs() {
+        assert_eq!(english_month_short(1), "Jan");
+        assert_eq!(english_month_short(12), "Dec");
+        assert_eq!(english_month_short(0), "???");
+        assert_eq!(english_month_short(13), "???");
+
+        assert_eq!(english_month_long(1), "January");
+        assert_eq!(english_month_long(12), "December");
+        assert_eq!(english_month_long(0), "Unknown");
+        assert_eq!(english_month_long(13), "Unknown");
+
+        assert_eq!(english_weekday_long(crate::Weekday::Sunday), "Sunday");
+        assert_eq!(english_weekday_long(crate::Weekday::Monday), "Monday");
+        assert_eq!(english_weekday_long(crate::Weekday::Tuesday), "Tuesday");
+        assert_eq!(english_weekday_long(crate::Weekday::Wednesday), "Wednesday");
+        assert_eq!(english_weekday_long(crate::Weekday::Thursday), "Thursday");
+        assert_eq!(english_weekday_long(crate::Weekday::Friday), "Friday");
+        assert_eq!(english_weekday_long(crate::Weekday::Saturday), "Saturday");
+    }
+
+    #[cfg(any(
         not(any(feature = "icu4x", feature = "web-intl")),
         all(
             feature = "web-intl",
@@ -489,10 +662,10 @@ mod tests {
     fn fallback_date_formatter_keeps_api_available() {
         let formatter = DateFormatter::new(&locales::en_us(), FormatLength::Full);
 
-        let formatted = formatter.format(&crate::CalendarDate::new_gregorian(
+        let formatted = formatter.format(&CalendarDate::new_gregorian(
             2024,
-            core::num::NonZero::new(3).expect("nonzero"),
-            core::num::NonZero::new(15).expect("nonzero"),
+            NonZero::new(3).expect("nonzero"),
+            NonZero::new(15).expect("nonzero"),
         ));
 
         assert!(formatted.contains("Friday"));
@@ -516,7 +689,7 @@ mod web_intl_tests {
         DateFormatter, FormatLength, js_date_from_calendar, js_date_from_ymd, js_date_is_valid,
         js_iso_year,
     };
-    use crate::{CalendarDate, CalendarSystem, Locale, locales};
+    use crate::{CalendarDate, CalendarSystem, Locale, StubIcuProvider, locales};
 
     wasm_bindgen_test_configure!(run_in_browser);
 
@@ -616,6 +789,18 @@ mod web_intl_tests {
         assert_eq!(js_iso_year(0), "0000");
         assert_eq!(js_iso_year(44), "0044");
         assert_eq!(js_iso_year(10_000), "+010000");
+    }
+
+    #[wasm_bindgen_test]
+    fn web_intl_date_helpers_preserve_astronomical_gregorian_years_from_non_gregorian_input() {
+        let provider = StubIcuProvider;
+        let buddhist = CalendarDate::new(&provider, CalendarSystem::Buddhist, None, 1, 1, 1)
+            .expect("Buddhist date should validate");
+
+        let converted = js_date_from_calendar(&buddhist)
+            .expect("Buddhist fixture should map to a browser Date");
+
+        assert_eq!(converted.to_iso_string(), "-000542-01-01T12:00:00.000Z");
     }
 
     #[wasm_bindgen_test]

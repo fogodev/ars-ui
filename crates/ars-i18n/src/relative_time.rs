@@ -259,6 +259,17 @@ fn fallback_format_relative_time(numeric: NumericOption, seconds: i64) -> String
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(
+        feature = "icu4x",
+        not(any(feature = "icu4x", feature = "web-intl")),
+        all(
+            feature = "web-intl",
+            not(target_arch = "wasm32"),
+            not(feature = "icu4x")
+        )
+    ))]
+    use alloc::format;
+
     #[cfg(feature = "icu4x")]
     use super::{NumericOption, RelativeTimeFormatter, bucket_relative_time};
     #[cfg(any(
@@ -335,6 +346,17 @@ mod tests {
         assert_eq!(bucket_relative_time(i64::MIN), (i64::MIN / 86_400, "day"));
     }
 
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn relative_time_formatter_debug_includes_locale_and_numeric_mode() {
+        let formatter = RelativeTimeFormatter::with_numeric(&locales::en_us(), NumericOption::Auto);
+        let debug = format!("{formatter:?}");
+
+        assert!(debug.contains("RelativeTimeFormatter"));
+        assert!(debug.contains("en-US"));
+        assert!(debug.contains("Auto"));
+    }
+
     #[cfg(any(
         not(any(feature = "icu4x", feature = "web-intl")),
         all(
@@ -360,8 +382,44 @@ mod tests {
         )
     ))]
     #[test]
+    fn fallback_relative_time_auto_covers_additional_natural_language_branches() {
+        let formatter = RelativeTimeFormatter::with_numeric(&locales::en_us(), NumericOption::Auto);
+
+        assert_eq!(formatter.format_seconds(0), "now");
+        assert_eq!(formatter.format_seconds(30), "in 30 seconds");
+        assert_eq!(formatter.format_seconds(3_599), "in 59 minutes");
+        assert_eq!(formatter.format_seconds(86_400), "tomorrow");
+    }
+
+    #[cfg(any(
+        not(any(feature = "icu4x", feature = "web-intl")),
+        all(
+            feature = "web-intl",
+            not(target_arch = "wasm32"),
+            not(feature = "icu4x")
+        )
+    ))]
+    #[test]
     fn fallback_bucketing_handles_i64_min_without_overflow() {
         assert_eq!(bucket_relative_time(i64::MIN), (i64::MIN / 86_400, "day"));
+    }
+
+    #[cfg(any(
+        not(any(feature = "icu4x", feature = "web-intl")),
+        all(
+            feature = "web-intl",
+            not(target_arch = "wasm32"),
+            not(feature = "icu4x")
+        )
+    ))]
+    #[test]
+    fn fallback_relative_time_formatter_debug_includes_locale_and_numeric_mode() {
+        let formatter = RelativeTimeFormatter::with_numeric(&locales::en_us(), NumericOption::Auto);
+        let debug = format!("{formatter:?}");
+
+        assert!(debug.contains("RelativeTimeFormatter"));
+        assert!(debug.contains("en-US"));
+        assert!(debug.contains("Auto"));
     }
 }
 
