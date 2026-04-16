@@ -377,8 +377,9 @@ pub trait IcuProvider: Send + Sync + 'static {
 
         #[cfg(any(feature = "icu4x", feature = "web-intl"))]
         {
-            let internal = calendar::internal::CalendarDate::try_from(date)
-                .expect("CalendarDate should be valid for calendar conversion");
+            let Ok(internal) = calendar::internal::CalendarDate::try_from(date) else {
+                return date.clone();
+            };
             let converted = internal.to_calendar(target);
 
             CalendarDate {
@@ -848,6 +849,26 @@ mod tests {
             .expect("converted Japanese date should validate")
         );
         assert_eq!(round_trip, gregorian);
+    }
+
+    #[cfg(all(feature = "std", any(feature = "icu4x", feature = "web-intl")))]
+    #[test]
+    fn stub_icu_provider_convert_date_falls_back_for_inputs_outside_internal_bridge_range() {
+        let provider = StubIcuProvider;
+        let gregorian = CalendarDate::new_gregorian(
+            10_000,
+            NonZero::new(1).expect("one is non-zero"),
+            NonZero::new(1).expect("one is non-zero"),
+        );
+
+        assert_eq!(
+            provider.convert_date(&gregorian, CalendarSystem::Japanese),
+            gregorian
+        );
+        assert_eq!(
+            gregorian.to_calendar(&provider, CalendarSystem::Japanese),
+            gregorian
+        );
     }
 
     #[cfg(all(feature = "std", not(any(feature = "icu4x", feature = "web-intl"))))]
