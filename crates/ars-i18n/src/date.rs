@@ -236,22 +236,18 @@ impl DateFormatter {
 #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 fn js_date_from_calendar(date: &CalendarDate) -> Option<JsDate> {
     if date.calendar == CalendarSystem::Gregorian {
-        return Some(js_date_from_ymd(
-            date.year,
-            date.month.get(),
-            date.day.get(),
-        ));
+        let js_date = js_date_from_ymd(date.year, date.month.get(), date.day.get());
+
+        return js_date_is_valid(&js_date).then_some(js_date);
     }
 
     let internal = InternalCalendarDate::try_from(date).ok()?;
 
     let gregorian = internal.to_calendar(CalendarSystem::Gregorian);
 
-    Some(js_date_from_ymd(
-        gregorian.year(),
-        gregorian.month(),
-        gregorian.day(),
-    ))
+    let js_date = js_date_from_ymd(gregorian.year(), gregorian.month(), gregorian.day());
+
+    js_date_is_valid(&js_date).then_some(js_date)
 }
 
 #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
@@ -259,6 +255,11 @@ fn js_date_from_ymd(year: i32, month: u8, day: u8) -> JsDate {
     let iso = format!("{}-{month:02}-{day:02}T12:00:00.000Z", js_iso_year(year),);
 
     JsDate::new(&JsValue::from_str(&iso))
+}
+
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
+fn js_date_is_valid(date: &JsDate) -> bool {
+    !date.get_time().is_nan()
 }
 
 #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
@@ -512,7 +513,8 @@ mod web_intl_tests {
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
     use super::{
-        DateFormatter, FormatLength, js_date_from_calendar, js_date_from_ymd, js_iso_year,
+        DateFormatter, FormatLength, js_date_from_calendar, js_date_from_ymd, js_date_is_valid,
+        js_iso_year,
     };
     use crate::{CalendarDate, CalendarSystem, Locale, locales};
 
@@ -614,6 +616,21 @@ mod web_intl_tests {
         assert_eq!(js_iso_year(0), "0000");
         assert_eq!(js_iso_year(44), "0044");
         assert_eq!(js_iso_year(10_000), "+010000");
+    }
+
+    #[wasm_bindgen_test]
+    fn web_intl_date_formatter_falls_back_for_js_out_of_range_gregorian_years() {
+        let formatter = DateFormatter::new(&locales::en_us(), FormatLength::Long);
+        let date = CalendarDate::new_gregorian(
+            1_000_000,
+            NonZero::new(1).expect("nonzero"),
+            NonZero::new(1).expect("nonzero"),
+        );
+
+        assert!(js_date_is_valid(&js_date_from_ymd(10_000, 1, 1)));
+        assert!(!js_date_is_valid(&js_date_from_ymd(1_000_000, 1, 1)));
+        assert!(js_date_from_calendar(&date).is_none());
+        assert_eq!(formatter.format(&date), "January 1, 1000000");
     }
 
     fn direct_browser_format(locale: &Locale, length: FormatLength, date: &CalendarDate) -> String {
