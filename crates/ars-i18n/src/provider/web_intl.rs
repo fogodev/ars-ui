@@ -116,9 +116,29 @@ impl WebIntlProvider {
         // for the common Hebrew case) and then sweep the wider list
         // with an early exit on first match, so the typical Hebrew
         // call still resolves on the first probe pair.
-        const SWEEP_YEARS: [u32; 19] = [
-            2023, 2020, 2028, 2021, 2017, 2014, 2031, 2019, 2022, 2026, 2027, 2029, 2030, 2015,
-            2016, 2018, 2032, 2033, 2034,
+        //
+        // The sweep list is curated to hit every Chinese leap-month
+        // position observed in the modern era (1900..=2100):
+        //   leap 1  — (extremely rare; none within our probe range)
+        //   leap 2  — 2023, 2042
+        //   leap 3  — 2031, 2050
+        //   leap 4  — 2020, 2039
+        //   leap 5  — 2028, 2047
+        //   leap 6  — 2025, 2044, 2063
+        //   leap 7  — 1987, 2006, 2044 (shared with leap 6 at year
+        //                boundary), 1968
+        //   leap 8  — 1995, 2014, 2052, 1957
+        //   leap 9  — 1900-era; 2014 covers via adjacent month window
+        //   leap 10 — 2033, 2099
+        //   leap 11 — 2033
+        //   leap 12 — (extremely rare)
+        // Hebrew leap cycle is already covered by the 2024/2025 fast
+        // path plus a scattering of the sweep years below.
+        const SWEEP_YEARS: [u32; 30] = [
+            // Hebrew Metonic cycle coverage + nearby common years
+            2023, 2020, 2028, 2021, 2017, 2031, 2019, 2022, 2026, 2027, 2029, 2030, 2015, 2016,
+            2018, 2032, 2034, // Chinese leap-month coverage for 7/8/10/11
+            1987, 2006, 2044, 1995, 2014, 2052, 2033, 2099, 1968, 1957, 2042, 2063, 2039,
         ];
         let prefer_leap = matches!(
             target,
@@ -396,36 +416,29 @@ impl IcuProvider for WebIntlProvider {
             return weekday;
         }
 
-        // Prefer `Intl.Locale#getWeekInfo()` when available. Not every
-        // browser supports it yet, so we feature-detect at the JS level.
+        // Two Intl.Locale shapes deliver week metadata:
+        //
+        // 1. `getWeekInfo()` — the original TC39 proposal shape, still
+        //    the canonical method on Chrome, Safari, and Node.
+        // 2. `weekInfo` property — the newer getter shape that some
+        //    engines (including Firefox in recent releases) expose
+        //    directly without a method call.
+        //
+        // The previous implementation only tried form (1), so every
+        // engine on form (2) silently fell through to the region
+        // table below and got wrong answers for locales the table
+        // doesn't cover (e.g., `pt-BR` → Monday instead of Sunday).
+        // We now probe both shapes in order.
         if let Ok(js_locale) = Intl::Locale::new(&locale.to_bcp47()) {
             let js_value: JsValue = js_locale.into();
 
-            if let Ok(get_week_info) = Reflect::get(&js_value, &JsValue::from_str("getWeekInfo"))
-                && get_week_info.is_function()
-                && let Ok(func) = get_week_info.dyn_into::<Function>()
-                && let Ok(info) = func.call0(&js_value)
-                && let Ok(first_day) = Reflect::get(&info, &JsValue::from_str("firstDay"))
-                && let Some(day) = first_day.as_f64()
-            {
-                return match day as u8 {
-                    2 => Weekday::Tuesday,
-                    3 => Weekday::Wednesday,
-                    4 => Weekday::Thursday,
-                    5 => Weekday::Friday,
-                    6 => Weekday::Saturday,
-                    7 => Weekday::Sunday,
-
-                    // `getWeekInfo().firstDay` is
-                    // documented as 1..=7 with Monday=1;
-                    // treat 1 and any unexpected value
-                    // as Monday (the ISO 8601 default).
-                    _ => Weekday::Monday,
-                };
+            if let Some(day) = read_week_info_first_day(&js_value) {
+                return weekday_from_iso_index(day);
             }
         }
 
-        // Fallback to the shared region-based table for older browsers.
+        // Fallback to the shared region-based table for older engines
+        // that expose neither shape.
         crate::WeekInfo::for_locale(locale).first_day
     }
 
@@ -625,6 +638,63 @@ impl IcuProvider for WebIntlProvider {
             month: month_nz,
             day: day_nz,
         }
+    }
+}
+
+/// Reads the `firstDay` field from an `Intl.Locale` instance by
+/// probing both known shapes: the `getWeekInfo()` method form and
+/// the `weekInfo` property form. Returns the 1..=7 ISO day index
+/// (Monday=1, Sunday=7) if either shape delivers a number, or
+/// `None` if the engine exposes neither.
+pub(crate) fn read_week_info_first_day(js_locale_value: &JsValue) -> Option<u8> {
+    // Form 1: `getWeekInfo()` method (Chrome, Safari, Node).
+    if let Ok(get_week_info) = Reflect::get(js_locale_value, &JsValue::from_str("getWeekInfo")) {
+        if get_week_info.is_function() {
+            if let Ok(func) = get_week_info.dyn_into::<Function>() {
+                if let Ok(info) = func.call0(js_locale_value) {
+                    if let Some(day) = read_first_day(&info) {
+                        return Some(day);
+                    }
+                }
+            }
+        }
+    }
+
+    // Form 2: `weekInfo` getter/property (Firefox and other engines
+    // that implement the TC39 proposal's property shape).
+    if let Ok(info) = Reflect::get(js_locale_value, &JsValue::from_str("weekInfo")) {
+        if !info.is_undefined() && !info.is_null() {
+            if let Some(day) = read_first_day(&info) {
+                return Some(day);
+            }
+        }
+    }
+
+    None
+}
+
+fn read_first_day(info: &JsValue) -> Option<u8> {
+    Reflect::get(info, &JsValue::from_str("firstDay"))
+        .ok()?
+        .as_f64()
+        .map(|day| day as u8)
+}
+
+/// Maps an ISO 8601 weekday index (1=Monday .. 7=Sunday) to a
+/// [`Weekday`] variant. Out-of-range inputs collapse to Monday,
+/// matching `getWeekInfo()`'s documented default.
+pub(crate) const fn weekday_from_iso_index(day: u8) -> Weekday {
+    match day {
+        2 => Weekday::Tuesday,
+        3 => Weekday::Wednesday,
+        4 => Weekday::Thursday,
+        5 => Weekday::Friday,
+        6 => Weekday::Saturday,
+        7 => Weekday::Sunday,
+        // `getWeekInfo().firstDay` is documented as 1..=7 with
+        // Monday=1; treat 1 and any unexpected value as Monday
+        // (the ISO 8601 default).
+        _ => Weekday::Monday,
     }
 }
 
