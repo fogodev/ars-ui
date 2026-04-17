@@ -202,11 +202,27 @@ impl<T: CollectionItem> MutableListData<T> {
         old
     }
 
-    /// Remove every item and emit [`CollectionChange::Reset`]. Adapters
-    /// treat this as a hint to re-render the full list.
+    /// Remove every item and emit a single [`CollectionChange::Reset`].
+    ///
+    /// Any earlier pending events (`Insert`, `Remove`, `Move`, `Replace`)
+    /// are discarded before pushing `Reset` so the buffer is always
+    /// `[Reset]` after a clear. Coalescing matters because:
+    ///
+    /// * `Insert { index, count }` does not carry the inserted payload —
+    ///   replaying a stale `Insert` against the now-empty inner collection
+    ///   would let the adapter reference an item that no longer exists.
+    /// * `Reset` is by definition a full-rebuild signal, so any change
+    ///   that preceded it within the same update cycle is invisible to the
+    ///   adapter anyway.
+    ///
+    /// Adapters treat the resulting `Reset` as a hint to re-render the
+    /// full list from scratch.
     pub fn clear(&mut self) {
         self.inner.clear();
 
+        // Drop stale events queued earlier in this cycle: they describe
+        // intermediate states the adapter never observes.
+        self.pending_changes.clear();
         self.pending_changes.push(CollectionChange::Reset);
     }
 
@@ -732,6 +748,105 @@ mod tests {
 
         assert_eq!(list.size(), 0);
         assert_eq!(list.drain_changes(), vec![CollectionChange::Reset]);
+    }
+
+    #[test]
+    fn clear_discards_pending_events_and_emits_only_reset() {
+        // Regression test: prior behaviour was to append `Reset` to the
+        // existing buffer, leaving entries like `[Insert, Reset]` for the
+        // adapter to drain. `Insert { index, count }` carries no payload,
+        // so an adapter cannot replay a stale insert against the cleared
+        // collection. After `clear`, the buffer must be exactly `[Reset]`
+        // regardless of what was queued earlier in the cycle.
+        let mut list = list_of_three();
+
+        // Queue every other variant before clearing.
+        list.push(Item::new(4, "Date")); // Insert
+        list.remove(&[Key::int(2)]); // Remove
+        list.move_item(&Key::int(1), 1); // Move
+        list.replace(Item::new(3, "Cherry-2")); // Replace
+
+        // Sanity check: four events queued before clear.
+        assert_eq!(
+            list.drain_changes().len(),
+            4,
+            "precondition: four events queued before clear"
+        );
+
+        // Re-queue more events, then clear.
+        list.push(Item::new(5, "Elderberry"));
+        list.push(Item::new(6, "Fig"));
+
+        list.clear();
+
+        // After clear, the buffer must contain exactly one Reset event —
+        // the prior Insert events would reference indices the adapter
+        // can no longer replay.
+        let drained = list.drain_changes();
+
+        assert_eq!(
+            drained,
+            vec![CollectionChange::Reset],
+            "clear must coalesce all pending events into a single Reset; got {drained:?}"
+        );
+
+        // Inner state is also empty.
+        assert_eq!(list.size(), 0);
+    }
+
+    #[test]
+    fn clear_on_empty_buffer_still_emits_single_reset() {
+        // No prior events queued — clear must still emit exactly `[Reset]`.
+        let mut list = list_of_three();
+
+        list.clear();
+
+        assert_eq!(list.drain_changes(), vec![CollectionChange::Reset]);
+    }
+
+    #[test]
+    fn replace_on_structural_node_returns_none_and_emits_no_event() {
+        // Regression test: a Section node shares the key namespace with
+        // items, so a caller could supply an item whose key collides with
+        // a Section. `MutableListData::replace` must return `None` (the
+        // inner `StaticCollection::replace` refuses to mutate structural
+        // nodes) AND must NOT emit a `Replace` event for the structural
+        // key — otherwise the adapter would try to re-render a Section
+        // as if it were an item.
+        let inner = CollectionBuilder::new()
+            .section(Key::str("fruits"), "Fruits")
+            .item(Key::int(1), "Apple", Item::new(1, "Apple"))
+            .end_section()
+            .build();
+
+        let mut list = MutableListData::new(inner);
+
+        // Drain the empty initial buffer to make assertions unambiguous.
+        drop(list.drain_changes());
+
+        // Build an Item whose key collides with the Section's key.
+        let intruder = Item {
+            id: Key::str("fruits"),
+            label: "Pineapple".to_string(),
+        };
+
+        let old = list.replace(intruder);
+
+        assert!(old.is_none(), "replace must report failure on Section key");
+
+        let drained = list.drain_changes();
+
+        assert!(
+            drained.is_empty(),
+            "no Replace event should be emitted for structural-node keys; got {drained:?}"
+        );
+
+        // The Section is still a Section — no silent promotion to an Item.
+        let section = list
+            .get(&Key::str("fruits"))
+            .expect("section still present");
+
+        assert!(section.value.is_none(), "Section value must remain None");
     }
 
     #[test]

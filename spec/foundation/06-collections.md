@@ -892,8 +892,10 @@ impl<T: CollectionItem> MutableListData<T> {
     }
 
     /// Replace an item's data in-place. Returns the previous value at
-    /// `item.key()` on success, or `None` if the key is not present.
-    /// Emits `Replace` only on success.
+    /// `item.key()` on success, or `None` if the key is not present **or**
+    /// the existing node is structural (Section/Header/Separator) and
+    /// carries no item payload. Emits `Replace` only on success — never
+    /// silently promotes a structural node to an item.
     pub fn replace(&mut self, item: T) -> Option<T> {
         let key = item.key().clone();
         let old = self.inner.replace(item);
@@ -903,9 +905,15 @@ impl<T: CollectionItem> MutableListData<T> {
         old
     }
 
-    /// Remove all items.
+    /// Remove all items and emit a single `Reset`. Any earlier pending
+    /// events queued in this update cycle are discarded before the reset
+    /// is pushed: `Insert { index, count }` carries no payload, so adapters
+    /// cannot meaningfully replay it against the now-empty collection, and
+    /// `Reset` already implies a full re-render anyway. The buffer is
+    /// therefore guaranteed to be exactly `[Reset]` after `clear()`.
     pub fn clear(&mut self) {
         self.inner.clear();
+        self.pending_changes.clear();
         self.pending_changes.push(CollectionChange::Reset);
     }
 
@@ -1067,7 +1075,9 @@ impl<T: CollectionItem> MutableTreeData<T> {
 
     /// Replace a node's data in place (children preserved). Returns the
     /// previous value at `item.key()` on success, or `None` when the key
-    /// is unknown. Emits `Replace` only on success.
+    /// is unknown **or** the existing node carries no item payload.
+    /// Emits `Replace` only on success — never silently promotes a
+    /// structural node to an item.
     pub fn replace(&mut self, item: T) -> Option<T> {
         let key = item.key().clone();
         let old = self.inner.replace(item);
@@ -1509,12 +1519,18 @@ impl<T: CollectionItem> StaticCollection<T> {
     }
 
     /// Replace an item's data (matched by key). Returns the previous
-    /// value on success, or `None` if the key is unknown (in which case
-    /// `item` is dropped and the collection is unchanged).
+    /// value on success, or `None` if the key is unknown **or** the
+    /// existing node is structural (Section/Header/Separator) and carries
+    /// no item payload — in either failure case `item` is dropped and the
+    /// collection is unchanged. Structural nodes are never silently
+    /// promoted to items.
     pub fn replace(&mut self, item: T) -> Option<T> {
-        let key = item.key().clone();
-        let idx = *self.key_to_index.get(&key)?;
-        self.nodes[idx].value.replace(item)
+        let idx = *self.key_to_index.get(item.key())?;
+        let value_slot = &mut self.nodes[idx].value;
+        if value_slot.is_none() {
+            return None;
+        }
+        value_slot.replace(item)
     }
 
     /// Remove all items.
@@ -2210,12 +2226,17 @@ impl<T: CollectionItem> TreeCollection<T> {
     }
 
     /// Replace an item's data (matched by key). Returns the previous
-    /// value on success, or `None` if the key is unknown. Children are
-    /// preserved — only the node's payload is swapped.
+    /// value on success, or `None` if the key is unknown **or** the
+    /// existing node carries no item payload (a structural node).
+    /// Children are preserved — only the node's payload is swapped.
+    /// Structural nodes are never silently promoted to items.
     pub fn replace(&mut self, item: T) -> Option<T> {
-        let key = item.key().clone();
-        let idx = *self.key_to_index.get(&key)?;
-        self.all_nodes[idx].value.replace(item)
+        let idx = *self.key_to_index.get(item.key())?;
+        let value_slot = &mut self.all_nodes[idx].value;
+        if value_slot.is_none() {
+            return None;
+        }
+        value_slot.replace(item)
     }
 
     /// Return the parent key of a node, if any.

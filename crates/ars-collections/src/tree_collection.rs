@@ -744,12 +744,24 @@ impl<T: CollectionItem> TreeCollection<T> {
     /// Replace an item's data (matched by key).
     ///
     /// Returns the previous value at `item.key()` on success, or `None` if
-    /// the key is not present in the tree. Children are preserved — only
-    /// the node's payload is swapped.
+    /// the key is not present in the tree **or** the existing node carries
+    /// no item payload (a structural node). Children are preserved — only
+    /// the node's payload is swapped. Structural nodes are never silently
+    /// promoted to items.
     pub fn replace(&mut self, item: T) -> Option<T> {
-        self.all_nodes[*self.key_to_index.get(item.key())?]
-            .value
-            .replace(item)
+        let idx = *self.key_to_index.get(item.key())?;
+        let value_slot = &mut self.all_nodes[idx].value;
+
+        // Refuse to overwrite structural nodes, mirroring
+        // `StaticCollection::replace`. Tree builders today only emit Item
+        // nodes, but defending the invariant here keeps the contract
+        // consistent across both collection types and prevents future
+        // structural-node support from introducing a silent corruption.
+        if value_slot.is_none() {
+            return None;
+        }
+
+        value_slot.replace(item)
     }
 
     /// Return the parent key of a node, if any.
