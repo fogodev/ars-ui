@@ -1121,6 +1121,82 @@ fn web_intl_convert_date_preserves_roc_era_round_trip() {
 }
 
 #[wasm_bindgen_test]
+fn web_intl_convert_date_routes_japanese_historical_eras_through_bridge() {
+    // Regression (Codex PR #563 comment 3103505088, P1): when
+    // `Intl.DateTimeFormat` emits a Japanese long era label that
+    // falls outside the `era_code_for_calendar` allow-list
+    // (historical eras like `Kansei (1789–1801)`, `Meiwa`, `Bunsei`,
+    // `Tenpō`), the previous code fell back to `default_era_for`
+    // which returns Reiwa — silently rewriting the historical date
+    // to `Reiwa N` and corrupting downstream era-boundary behaviour.
+    //
+    // The fallback now runs the shared ICU4X calendar-arithmetic
+    // bridge, which knows the full CLDR era vocabulary. So a
+    // Gregorian 1800-06-15 (inside the Kansei era, 1789–1801)
+    // resolves to a valid Japanese date with a Kansei / historical
+    // CLDR code — never Reiwa.
+    let provider = WebIntlProvider;
+    let stub = StubIcuProvider;
+
+    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 1800, 6, 15)
+        .expect("Gregorian 1800-06-15 should validate");
+
+    let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+    assert_eq!(japanese.calendar, CalendarSystem::Japanese);
+
+    let era = japanese.era.expect("Japanese dates must carry an era");
+    assert_ne!(
+        era.code, "reiwa",
+        "historical Gregorian 1800 must not be misattributed to Reiwa; got {era:?}"
+    );
+    assert_ne!(
+        era.code, "heisei",
+        "historical Gregorian 1800 predates Heisei; got {era:?}"
+    );
+    assert_ne!(
+        era.code, "meiji",
+        "historical Gregorian 1800 predates Meiji; got {era:?}"
+    );
+}
+
+#[wasm_bindgen_test]
+fn web_intl_convert_date_preserves_modern_japanese_allow_list_hits() {
+    // Complement to the bridge-fallback test above: the fast path
+    // (allow-list hit) must still persist the browser's label as
+    // `display_name` while canonicalising `code`. This pins the
+    // behavior for the common Reiwa/Heisei/Showa/Taishō/Meiji case,
+    // which still runs through `era_code_for_calendar` rather than
+    // the bridge fallback.
+    let provider = WebIntlProvider;
+    let stub = StubIcuProvider;
+
+    // Gregorian 2020-06-15 is deep inside Reiwa (2019+).
+    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 2020, 6, 15)
+        .expect("Gregorian 2020-06-15 should validate");
+    let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+    let era = japanese.era.expect("Japanese dates must carry an era");
+    assert_eq!(era.code, "reiwa", "modern Gregorian 2020 must be Reiwa");
+    assert_eq!(japanese.year, 2);
+}
+
+#[wasm_bindgen_test]
+fn web_intl_bridge_convert_handles_non_gregorian_sources() {
+    // Direct unit coverage for the extracted `bridge_convert` helper
+    // on a non-Gregorian source — the same entry point used by
+    // `convert_date` when the source calendar is not Gregorian.
+    use crate::provider::web_intl::bridge_convert;
+
+    let stub = StubIcuProvider;
+    let buddhist = CalendarDate::new(&stub, CalendarSystem::Buddhist, None, 2567, 6, 15)
+        .expect("Buddhist 2567-06-15 should validate");
+
+    let gregorian = bridge_convert(&buddhist, CalendarSystem::Gregorian)
+        .expect("Buddhist → Gregorian must succeed through the bridge");
+    assert_eq!(gregorian.calendar, CalendarSystem::Gregorian);
+    assert_eq!(gregorian.year, 2024, "Buddhist 2567 = Gregorian 2024");
+}
+
+#[wasm_bindgen_test]
 fn web_intl_resolve_named_month_recovers_when_2_digit_returns_names() {
     // Regression (Codex PR #563 comment 3103083388, P1): when the
     // `month: "2-digit"` probe emits a non-numeric label — Node.js /

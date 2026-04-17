@@ -512,38 +512,7 @@ impl IcuProvider for WebIntlProvider {
         // wrap the wrong calendar in release builds (only guarded by
         // `debug_assert`). The bridge eliminates that footgun.
         if date.calendar != CalendarSystem::Gregorian {
-            if let Ok(internal) = crate::calendar::internal::CalendarDate::try_from(date) {
-                let converted = internal.to_calendar(target);
-
-                let (Some(month_nz), Some(day_nz)) = (
-                    NonZero::new(converted.month()),
-                    NonZero::new(converted.day()),
-                ) else {
-                    return date.clone();
-                };
-
-                return CalendarDate {
-                    calendar: target,
-                    era: converted
-                        .era()
-                        .filter(|_| target.has_custom_eras())
-                        .map(|code| Era {
-                            code: code.clone(),
-                            display_name: code,
-                        }),
-                    year: converted.year(),
-                    month: month_nz,
-                    day: day_nz,
-                };
-            }
-
-            // The bridge rejected the source (invalid era/year/month/day
-            // combination). Returning the source would silently lie
-            // about the calendar, so fall back to the stub's behaviour —
-            // a Gregorian zero-year anchor — only when the calendar
-            // matches. Otherwise clone; the input was already malformed
-            // at validation time.
-            return date.clone();
+            return bridge_convert(date, target).unwrap_or_else(|| date.clone());
         }
 
         let locales = Array::of1(&JsValue::from_str("en-US"));
@@ -686,31 +655,42 @@ impl IcuProvider for WebIntlProvider {
         //    era: 'long' })` emits `Minguo` / `Before R.O.C.` /
         //    `B.R.O.C.`, which a plain-lowercase pass persists as
         //    `minguo` / `b.r.o.c.` — neither is a CLDR code. ICU4X
-        //    expects `roc` (post-1912) and `broc` (before). The
-        //    internal-bridge path in `calendar/internal.rs` calls
-        //    `from_calendar_with_era(era.code, …)`, so a garbage
-        //    `era.code` makes the bridge reject the date and the
-        //    provider falls back to `date.clone()` — silently
-        //    stopping ROC round-trips.
+        //    expects `roc` (post-1912) and `broc` (before).
         //
-        // `era_code_for_calendar` resolves the per-calendar mapping
-        // and returns `None` for unfamiliar labels so downstream
-        // code does not ingest display text as a CLDR code.
-        // When the lookup fails (unknown label) we drop the era
-        // field — that is strictly safer than persisting garbage,
-        // because `calendar::internal::CalendarDate::try_from`
-        // routes eras=None through the default-era path rather
-        // than throwing on an unrecognised code.
+        // `era_code_for_calendar` covers only the well-known modern
+        // allow-list. For labels outside it — notably Japanese
+        // historical eras like `Kansei (1789–1801)`, `Meiwa`,
+        // `Bunsei`, `Tenpō`, etc. — silently defaulting to
+        // `default_era_for(target)` (= Reiwa for Japanese) would
+        // rewrite the date to the wrong era and corrupt downstream
+        // era-boundary behaviour (e.g., a 1800 date becoming
+        // `Reiwa 12`). Route the unmapped label through the shared
+        // ICU4X calendar-arithmetic bridge, which knows the full
+        // CLDR era vocabulary for every calendar we handle.
+        //
+        // Precedence:
+        // 1. Allow-list hit → persist the browser's label as
+        //    `display_name` and the mapped CLDR code.
+        // 2. Label present but not in allow-list → bridge fallback
+        //    on the whole date; refuses silently on bridge
+        //    rejection by returning `date.clone()`.
+        // 3. Label absent (browser suppressed the era part) →
+        //    `default_era_for(target)`; only safe because the
+        //    browser told us the date actually lives in the target
+        //    calendar's default era.
         let era = if target.has_custom_eras() {
-            era_label
-                .as_deref()
-                .and_then(|label| {
-                    era_code_for_calendar(target, label).map(|code| Era {
+            match era_label.as_deref() {
+                Some(label) => match era_code_for_calendar(target, label) {
+                    Some(code) => Some(Era {
                         code,
                         display_name: label.to_string(),
-                    })
-                })
-                .or_else(|| default_era_for(target))
+                    }),
+                    None => {
+                        return bridge_convert(date, target).unwrap_or_else(|| date.clone());
+                    }
+                },
+                None => default_era_for(target),
+            }
         } else {
             None
         };
@@ -918,6 +898,45 @@ fn month_part_value(parts: &Array) -> String {
 /// labels (`Heisei`, `Reiwa`, `Meiji`, CE/BCE for Gregorian, `AH` for
 /// Hijri, etc.) round-trip through the function unchanged apart from
 /// the lowercasing.
+/// Runs the shared ICU4X calendar-arithmetic bridge on `date` and
+/// converts it into `target`. Returns `None` when the bridge rejects
+/// the source (e.g., invalid era/year/month/day combination) so the
+/// caller can fall back to `date.clone()` rather than fabricate a
+/// result.
+///
+/// The `calendar::internal` module is compiled whenever either the
+/// `icu4x` or `web-intl` feature is on (see `calendar.rs`), so this
+/// path is always available under the same feature gate as the
+/// provider itself.
+///
+/// Used in two places in [`WebIntlProvider::convert_date`]:
+/// - Non-Gregorian sources (the browser path only relabels Gregorian
+///   instants, so it cannot convert a non-Gregorian source directly).
+/// - Gregorian sources whose browser era label falls outside the
+///   [`era_code_for_calendar`] allow-list (Japanese historical eras
+///   like `Kansei`, `Meiwa`, `Bunsei`, `Tenpō`, etc.).
+pub(crate) fn bridge_convert(date: &CalendarDate, target: CalendarSystem) -> Option<CalendarDate> {
+    let internal = crate::calendar::internal::CalendarDate::try_from(date).ok()?;
+    let converted = internal.to_calendar(target);
+
+    let month_nz = NonZero::new(converted.month())?;
+    let day_nz = NonZero::new(converted.day())?;
+
+    Some(CalendarDate {
+        calendar: target,
+        era: converted
+            .era()
+            .filter(|_| target.has_custom_eras())
+            .map(|code| Era {
+                code: code.clone(),
+                display_name: code,
+            }),
+        year: converted.year(),
+        month: month_nz,
+        day: day_nz,
+    })
+}
+
 pub(crate) fn canonical_era_code(label: &str) -> String {
     let mut buf = String::with_capacity(label.len());
     for ch in label.chars() {
