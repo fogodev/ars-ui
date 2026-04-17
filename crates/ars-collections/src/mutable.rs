@@ -146,19 +146,44 @@ impl<T: CollectionItem> MutableListData<T> {
             .push(CollectionChange::Insert { index, count: 1 });
     }
 
-    /// Remove items with the given keys, returning their owned values in
-    /// iteration order. Emits [`CollectionChange::Remove`] carrying the keys
-    /// that actually matched an item — unknown keys are silently skipped by
-    /// the inner collection, so they are excluded from the change event to
-    /// keep the change log truthful. Returns an empty `Vec` (and emits no
-    /// event) when no key in `keys` matches.
+    /// Remove items with the given keys, returning their owned item values
+    /// in iteration order. Emits [`CollectionChange::Remove`] carrying every
+    /// **input key that actually existed** in the collection (deduped, in
+    /// input order) — unknown keys are silently skipped by the inner
+    /// collection, so they are excluded from the change event to keep the
+    /// change log truthful. Returns an empty `Vec` of payloads (and emits
+    /// no event) when no key in `keys` matches.
+    ///
+    /// The change event must be derived from existence-before-mutation, not
+    /// from the returned `Vec<T>`: [`StaticCollection::remove_by_keys`]
+    /// drops structural nodes ([`Section`], [`Header`], [`Separator`])
+    /// silently from its return because they carry no payload, even though
+    /// removing one mutates the collection and reindexes every later
+    /// position. Without the snapshot, an adapter reconciling from
+    /// `CollectionChange` would leave a phantom row in the DOM.
+    ///
+    /// [`Section`]: crate::node::NodeType::Section
+    /// [`Header`]: crate::node::NodeType::Header
+    /// [`Separator`]: crate::node::NodeType::Separator
     pub fn remove(&mut self, keys: &[Key]) -> Vec<T> {
+        // Snapshot which input keys are genuinely going to mutate the
+        // collection. We dedup as we go so a duplicated input key only
+        // appears once in the change event — that mirrors the inner
+        // method's behaviour (the second `remove_by_keys` pass over an
+        // already-removed key is a no-op).
+        let mut seen = BTreeSet::<Key>::new();
+
+        let matched_keys = keys
+            .iter()
+            .filter(|k| seen.insert((*k).clone()) && self.inner.index_of(k).is_some())
+            .cloned()
+            .collect::<Vec<_>>();
+
         let removed = self.inner.remove_by_keys(keys);
 
-        if !removed.is_empty() {
-            self.pending_changes.push(CollectionChange::Remove {
-                keys: removed.iter().map(|t| t.key().clone()).collect(),
-            });
+        if !matched_keys.is_empty() {
+            self.pending_changes
+                .push(CollectionChange::Remove { keys: matched_keys });
         }
 
         removed
@@ -374,38 +399,53 @@ impl<T: CollectionItem> MutableTreeData<T> {
     }
 
     /// Remove the listed nodes (and their descendants), returning their
-    /// owned values.
+    /// owned item values.
     ///
-    /// Emits [`CollectionChange::Remove`] carrying only the keys that
-    /// were both **(a)** actually matched by the inner collection and
-    /// **(b)** part of the visible iteration immediately before the
-    /// removal. Hidden nodes (those inside a collapsed ancestor) were
-    /// never rendered, so signalling their removal would force the
-    /// adapter to no-op anyway and pollutes the truthful change log.
-    /// When every removed item was hidden the call returns the values
-    /// without emitting any event.
+    /// Emits [`CollectionChange::Remove`] carrying every key that
+    /// disappeared from the **visible iteration** as a result of the
+    /// call — that includes:
+    ///
+    /// * the input keys that actually matched a node,
+    /// * cascade-removed descendants that were rendered, and
+    /// * structural nodes ([`Section`], [`Header`], [`Separator`]) which
+    ///   carry no payload and would never appear in the returned
+    ///   `Vec<T>`.
+    ///
+    /// Hidden nodes (those inside a collapsed ancestor) were never
+    /// rendered, so they stay out of the change event — emitting them
+    /// would force the adapter to no-op and pollute the truthful change
+    /// log. When every removed item was hidden the call returns the
+    /// values without emitting any event.
+    ///
+    /// The diff is computed against `visible_keys()` before and after
+    /// the inner mutation rather than from the returned `Vec<T>`, both
+    /// to capture cascaded descendants and to surface structural
+    /// removals that have no payload to enumerate.
+    ///
+    /// [`Section`]: crate::node::NodeType::Section
+    /// [`Header`]: crate::node::NodeType::Header
+    /// [`Separator`]: crate::node::NodeType::Separator
     pub fn remove(&mut self, keys: &[Key]) -> Vec<T> {
-        // Snapshot the visible-key set BEFORE mutation so we can later
-        // tell which removed items the adapter had actually rendered.
         // `visible_keys` is the inherent (Clone-free) twin of
         // `Collection::keys`, available because `MutableTreeData::remove`
-        // only requires `T: CollectionItem`.
-        let visible_before = self.inner.visible_keys().cloned().collect::<BTreeSet<_>>();
+        // only requires `T: CollectionItem`. Capturing the iteration
+        // order in a `Vec` (not a `BTreeSet`) lets us preserve DFS
+        // order in the change event.
+        let visible_before = self.inner.visible_keys().cloned().collect::<Vec<_>>();
 
         let removed = self.inner.remove_by_keys(keys);
 
-        if !removed.is_empty() {
-            let visible_removed_keys = removed
-                .iter()
-                .map(|t| t.key().clone())
-                .filter(|k| visible_before.contains(k))
-                .collect::<Vec<_>>();
+        let visible_after = self.inner.visible_keys().cloned().collect::<BTreeSet<_>>();
 
-            if !visible_removed_keys.is_empty() {
-                self.pending_changes.push(CollectionChange::Remove {
-                    keys: visible_removed_keys,
-                });
-            }
+        let visible_removed_keys = visible_before
+            .into_iter()
+            .filter(|k| !visible_after.contains(k))
+            .collect::<Vec<_>>();
+
+        if !visible_removed_keys.is_empty() {
+            self.pending_changes.push(CollectionChange::Remove {
+                keys: visible_removed_keys,
+            });
         }
 
         removed
@@ -815,6 +855,55 @@ mod tests {
         assert!(removed.is_empty());
         assert_eq!(list.size(), 3);
         assert!(list.drain_changes().is_empty());
+    }
+
+    #[test]
+    fn remove_separator_emits_remove_event_despite_empty_payload() {
+        // A separator (and Section/Header) is a structural node — it
+        // appears in `Collection::keys` and adapters render a row for
+        // it, but it carries no `T` payload. `StaticCollection::
+        // remove_by_keys` drops structural nodes silently from its
+        // returned `Vec<T>` even though it does mutate the collection
+        // (the node is gone, every later index has shifted). The
+        // wrapper must still emit `Remove` for that key, otherwise the
+        // change log lies and a reconciler keyed off `CollectionChange`
+        // leaves a phantom row in the DOM.
+        let mut list = MutableListData::new(
+            CollectionBuilder::<Item>::new()
+                .item(Key::int(1), "Apple", Item::new(1, "Apple"))
+                .separator()
+                .item(Key::int(2), "Banana", Item::new(2, "Banana"))
+                .build(),
+        );
+
+        // `separator()` derives its key from the insertion index (1
+        // here, between the two items) — see `CollectionBuilder`.
+        let separator_key = Key::str("separator-1");
+
+        assert_eq!(list.size(), 3, "two items + one separator");
+        assert!(
+            list.contains_key(&separator_key),
+            "separator must be part of the iteration",
+        );
+
+        let removed = list.remove(core::slice::from_ref(&separator_key));
+
+        // The separator carries no payload; the inner method returns
+        // an empty `Vec<T>` even though the node was removed.
+        assert!(removed.is_empty(), "structural nodes never carry a payload",);
+        assert_eq!(
+            list.size(),
+            2,
+            "separator was removed even though no payload was returned",
+        );
+
+        assert_eq!(
+            list.drain_changes(),
+            vec![CollectionChange::Remove {
+                keys: vec![separator_key],
+            }],
+            "structural-key removal must still emit Remove so adapters reconcile",
+        );
     }
 
     #[test]

@@ -864,15 +864,37 @@ impl<T: CollectionItem> MutableListData<T> {
         self.pending_changes.push(CollectionChange::Insert { index, count: 1 });
     }
 
-    /// Remove items by key. Returns the removed values; emits a `Remove`
-    /// change containing only the keys that actually matched (unknown keys
-    /// are silently skipped by the inner collection and excluded from the
-    /// event). Returns an empty `Vec` and emits no event when no key matches.
+    /// Remove items by key. Returns the removed item values; emits
+    /// `Remove` carrying every input key that actually existed in the
+    /// collection (deduped, in input order). Unknown keys are silently
+    /// skipped by the inner collection and excluded from the event.
+    /// Returns an empty `Vec` of payloads and emits no event when no
+    /// key matches.
+    ///
+    /// The change-event keys must come from an existence snapshot, not
+    /// from the returned `Vec<T>`: `StaticCollection::remove_by_keys`
+    /// drops structural nodes (`Section` / `Header` / `Separator`)
+    /// silently from its return because they carry no payload, even
+    /// though removing one mutates the collection and reindexes every
+    /// later position. Without the snapshot, an adapter reconciling
+    /// from `CollectionChange` would leave a phantom row in the DOM.
     pub fn remove(&mut self, keys: &[Key]) -> Vec<T> {
+        // Snapshot which input keys are genuinely going to mutate the
+        // collection. Dedup as we go so a duplicated input key only
+        // appears once in the change event — that mirrors the inner
+        // method's behaviour on an already-removed key.
+        let mut seen = BTreeSet::<Key>::new();
+        let matched_keys: Vec<Key> = keys
+            .iter()
+            .filter(|k| seen.insert((*k).clone()) && self.inner.index_of(k).is_some())
+            .cloned()
+            .collect();
+
         let removed = self.inner.remove_by_keys(keys);
-        if !removed.is_empty() {
-            let removed_keys: Vec<Key> = removed.iter().map(|t| t.key().clone()).collect();
-            self.pending_changes.push(CollectionChange::Remove { keys: removed_keys });
+
+        if !matched_keys.is_empty() {
+            self.pending_changes
+                .push(CollectionChange::Remove { keys: matched_keys });
         }
         removed
     }
@@ -1044,28 +1066,36 @@ impl<T: CollectionItem> MutableTreeData<T> {
     }
 
     /// Remove the listed nodes (and their descendants); returns the
-    /// removed values.
+    /// removed item values.
     ///
-    /// Emits `Remove` carrying only the keys that were both **(a)**
-    /// matched by the inner collection and **(b)** part of the visible
-    /// iteration immediately before the removal. Hidden nodes were never
-    /// rendered, so signalling their removal would force the adapter to
-    /// no-op and pollutes the truthful change log. When every removed
-    /// item was hidden, no event is emitted.
+    /// Emits `Remove` carrying every key that disappeared from the
+    /// **visible iteration** as a result of the call — input keys that
+    /// matched, cascade-removed visible descendants, and any structural
+    /// node (`Section` / `Header` / `Separator`) that carries no
+    /// payload. Hidden nodes (inside a collapsed ancestor) were never
+    /// rendered, so they stay out of the change event — emitting them
+    /// would force the adapter to no-op and pollute the truthful
+    /// change log. When every removed node was hidden, no event is
+    /// emitted.
+    ///
+    /// The diff is computed against `visible_keys()` before and after
+    /// the inner mutation rather than from the returned `Vec<T>`, both
+    /// to capture cascaded descendants and to surface structural
+    /// removals that have no payload to enumerate.
     pub fn remove(&mut self, keys: &[Key]) -> Vec<T> {
-        // Snapshot visible keys before mutation.
-        let visible_before: BTreeSet<Key> = self.inner.visible_keys().cloned().collect();
+        // Capture visible iteration order in a `Vec` (not a
+        // `BTreeSet`) so the change event preserves DFS order.
+        let visible_before: Vec<Key> = self.inner.visible_keys().cloned().collect();
         let removed = self.inner.remove_by_keys(keys);
-        if !removed.is_empty() {
-            let visible_removed_keys: Vec<Key> = removed
-                .iter()
-                .map(|t| t.key().clone())
-                .filter(|k| visible_before.contains(k))
-                .collect();
-            if !visible_removed_keys.is_empty() {
-                self.pending_changes
-                    .push(CollectionChange::Remove { keys: visible_removed_keys });
-            }
+        let visible_after: BTreeSet<Key> =
+            self.inner.visible_keys().cloned().collect();
+        let visible_removed_keys: Vec<Key> = visible_before
+            .into_iter()
+            .filter(|k| !visible_after.contains(k))
+            .collect();
+        if !visible_removed_keys.is_empty() {
+            self.pending_changes
+                .push(CollectionChange::Remove { keys: visible_removed_keys });
         }
         removed
     }
