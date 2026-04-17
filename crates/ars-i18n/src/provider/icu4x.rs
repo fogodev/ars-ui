@@ -116,19 +116,20 @@ impl IcuProvider for Icu4xProvider {
             Time::try_new(1, 0, 0, 0).expect("01:00 is a valid time")
         };
 
-        // Strip digits and separators to isolate the day-period text.
+        // Strip numerals and separators to isolate the day-period text.
         //
         // Limitation: ICU4X 2.x does not expose a direct day-period names
         // API, so we reconstruct the label from a formatted reference time.
-        // Locales that embed non-ASCII separators in their time pattern may
-        // leak a single character into the label; callers that need strict
-        // parity with the CLDR `dayPeriods` table should upgrade when ICU4X
-        // exposes a stable symbols API.
+        // We strip Unicode numerics (ASCII, Arabic-Indic ٠-٩, Persian ۰-۹,
+        // Bengali ০-৯, …) so AM/PM lookup stays correct for locales that
+        // render time in native digits — otherwise ar-EG would surface
+        // `١٠٠ ص` and `day_period_from_char` would see `١` as the first
+        // character of both AM and PM labels.
         formatter
             .format(&test_time)
             .to_string()
             .chars()
-            .filter(|c| !c.is_ascii_digit() && *c != ':')
+            .filter(|c| !is_numeral_or_time_separator(*c))
             .collect::<String>()
             .trim()
             .to_string()
@@ -246,12 +247,15 @@ impl IcuProvider for Icu4xProvider {
 
         let formatted = formatter.format(&test_time).to_string();
 
-        // A 24-hour locale formats 13:00 as "13:00" with no day-period text;
-        // any non-digit, non-separator character in the output indicates a
-        // 12-hour format (`1 PM`, `午後1:00`, `١ م`, …).
+        // A 24-hour locale formats 13:00 as "13:00" — or the locale's
+        // native-digit equivalent (`۱۳:۰۰` in fa-IR, `١٣:٠٠` in ar-EG) —
+        // with no day-period text. Any character that is not a Unicode
+        // numeral or a standard time separator signals a 12-hour format
+        // (`1 PM`, `午後1:00`, `١ م`, …). Using `char::is_numeric` keeps
+        // non-ASCII numerals from being flagged as day-period markers.
         let has_day_period = formatted
             .chars()
-            .any(|c| !c.is_ascii_digit() && c != ':' && !c.is_ascii_whitespace());
+            .any(|c| !is_numeral_or_time_separator(c) && !c.is_whitespace());
         if has_day_period {
             HourCycle::H12
         } else {
@@ -297,4 +301,17 @@ impl IcuProvider for Icu4xProvider {
                 .expect("internal calendar conversion yields a 1-based day"),
         }
     }
+}
+
+/// Returns `true` when `c` is a Unicode numeral or a standard time-pattern
+/// separator (ASCII colon, U+002E period, U+066B Arabic decimal separator,
+/// and the locale-neutral punctuation that CLDR routinely uses inside
+/// time patterns).
+///
+/// The filter covers every Unicode decimal digit (`Nd`) via
+/// [`char::is_numeric`], so native-digit locales such as `ar-EG`
+/// (`٠-٩`), `fa-IR` (`۰-۹`), `bn-BD` (`০-৯`), and `my-MM` (`၀-၉`) are
+/// handled uniformly.
+fn is_numeral_or_time_separator(c: char) -> bool {
+    c.is_numeric() || matches!(c, ':' | '.' | '\u{066B}' | '\u{066C}')
 }

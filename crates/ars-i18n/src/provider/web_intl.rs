@@ -4,7 +4,7 @@
 //! browser's `Intl.*` APIs. See spec §9.5.4. Available only on `wasm32`
 //! targets with the `web-intl` feature.
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use core::num::NonZero;
 
 use js_sys::{Array, Function, Intl, Object, Reflect};
@@ -382,6 +382,14 @@ impl IcuProvider for WebIntlProvider {
         Reflect::set(&opts, &"day".into(), &JsValue::from_str("numeric"))
             .expect("Reflect::set on a fresh Object never fails");
 
+        // Request the era part too so `formatToParts` emits it. Without
+        // `era` in the options, browsers drop the era token entirely and
+        // we lose the Japanese era boundary information that downstream
+        // validation depends on (e.g., Gregorian 1990 → Heisei 2, not
+        // Reiwa 2).
+        Reflect::set(&opts, &"era".into(), &JsValue::from_str("long"))
+            .expect("Reflect::set on a fresh Object never fails");
+
         let formatter = Intl::DateTimeFormat::new(&locales, &opts);
 
         // `Date::new_with_year_month_day` takes a positive `u32` year; for
@@ -403,6 +411,7 @@ impl IcuProvider for WebIntlProvider {
         let mut year = 0_i32;
         let mut month: u8 = 0;
         let mut day: u8 = 0;
+        let mut era_label: Option<String> = None;
 
         for i in 0..parts.length() {
             let part = parts.get(i);
@@ -415,6 +424,7 @@ impl IcuProvider for WebIntlProvider {
                 "year" | "relatedYear" => year = value.parse().unwrap_or(0),
                 "month" => month = value.parse().unwrap_or(0),
                 "day" => day = value.parse().unwrap_or(0),
+                "era" => era_label = Some(value),
                 _ => {}
             }
         }
@@ -423,9 +433,28 @@ impl IcuProvider for WebIntlProvider {
             return date.clone();
         };
 
+        // Map the browser's long era label back to the CLDR era code. The
+        // `era: "long"` option with the en-US formatting locale yields
+        // "Reiwa", "Heisei", "Showa", … for Japanese, which `to_ascii_lowercase`
+        // turns into the canonical codes ("reiwa", "heisei", "showa", …).
+        // If the browser suppressed the era (no `era` token in parts) or
+        // returned an unfamiliar form, fall back to the target's default era
+        // so downstream consumers still see a sensible value.
+        let era = if target.has_custom_eras() {
+            era_label
+                .as_deref()
+                .map(|label| Era {
+                    code: label.to_ascii_lowercase(),
+                    display_name: label.to_string(),
+                })
+                .or_else(|| default_era_for(target))
+        } else {
+            None
+        };
+
         CalendarDate {
             calendar: target,
-            era: default_era_for(target).filter(|_| target.has_custom_eras()),
+            era,
             year,
             month: month_nz,
             day: day_nz,

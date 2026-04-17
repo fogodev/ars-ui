@@ -380,3 +380,28 @@ fn web_intl_convert_date_crosses_calendars_via_browser() {
     assert_eq!(japanese.month.get(), 3);
     assert_eq!(japanese.day.get(), 15);
 }
+
+#[wasm_bindgen_test]
+fn web_intl_convert_date_preserves_historical_japanese_era() {
+    // Regression: previously `convert_date` hard-coded `default_era_for`
+    // (Reiwa) for the target calendar, so historical Gregorian dates
+    // like 1990 came out with era=Reiwa, year=2 instead of era=Heisei,
+    // year=2. The fix requests `era: "long"` from `Intl.DateTimeFormat`
+    // and maps the localized label back to the CLDR era code.
+    let provider = WebIntlProvider;
+    let stub = StubIcuProvider;
+
+    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 1990, 6, 15)
+        .expect("Gregorian 1990-06-15 should validate");
+
+    let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+    assert_eq!(japanese.calendar, CalendarSystem::Japanese);
+    assert_eq!(japanese.year, 2);
+    assert_eq!(japanese.month.get(), 6);
+    assert_eq!(japanese.day.get(), 15);
+    let era = japanese.era.expect("Japanese dates carry an era");
+    assert_eq!(
+        era.code, "heisei",
+        "1990 falls inside Heisei (1989-2019); got {era:?}"
+    );
+}

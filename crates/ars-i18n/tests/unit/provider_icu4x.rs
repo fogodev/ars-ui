@@ -112,6 +112,35 @@ fn icu4x_hour_cycle_reflects_locale() {
 }
 
 #[test]
+fn icu4x_hour_cycle_ignores_native_digits_in_24h_locales() {
+    // Regression: before treating non-ASCII digits as numerals, fa-IR
+    // was misclassified as H12 because its 24-hour display uses
+    // Persian numerals (۱۳:۰۰) whose characters aren't ASCII digits.
+    let provider = Icu4xProvider;
+    assert_eq!(provider.hour_cycle(&locale("fa-IR")), HourCycle::H23);
+}
+
+#[test]
+fn icu4x_day_period_from_char_disambiguates_arabic_labels() {
+    // Regression: before stripping Unicode numerals from the formatted
+    // reference time, ar-EG AM/PM labels both started with `١` and
+    // `day_period_from_char` could not distinguish AM from PM.
+    let provider = Icu4xProvider;
+    let ar = locale("ar-EG");
+    let am_label = provider.day_period_label(false, &ar);
+    let pm_label = provider.day_period_label(true, &ar);
+    assert_ne!(
+        am_label.chars().next(),
+        pm_label.chars().next(),
+        "AM and PM labels must not share a first character"
+    );
+    let am_char = am_label.chars().next().expect("AM label is non-empty");
+    let pm_char = pm_label.chars().next().expect("PM label is non-empty");
+    assert_eq!(provider.day_period_from_char(am_char, &ar), Some(false));
+    assert_eq!(provider.day_period_from_char(pm_char, &ar), Some(true));
+}
+
+#[test]
 fn icu4x_first_day_of_week_from_cldr() {
     let provider = Icu4xProvider;
 
