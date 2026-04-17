@@ -178,9 +178,7 @@ impl WebIntlProvider {
                 // Long label matches this probe instant. Ask the
                 // numeric formatter for the ordinal of the same
                 // instant — that's the target calendar's civil-order
-                // month number. When the numeric formatter also
-                // falls back to a name (extremely rare), we can't
-                // resolve the label so the caller's fallback kicks in.
+                // month number.
                 let numeric_value = month_part_value(&numeric_formatter.format_to_parts(&probe));
                 let leading: String = numeric_value
                     .chars()
@@ -190,6 +188,37 @@ impl WebIntlProvider {
                     && (1..=13).contains(&ordinal)
                 {
                     return Some(ordinal);
+                }
+
+                // The `2-digit` formatter also returned a non-numeric
+                // label (observed on Node/ICU Hebrew: both `long` and
+                // `2-digit` emit names like `"Adar II"`). Previously
+                // this branch returned `None`, which surfaced up
+                // through `convert_date` and demoted the conversion to
+                // `date.clone()` — silently losing the civil-order
+                // ordinal for valid Hebrew leap-month labels.
+                //
+                // Resolve the ordinal through the shared ICU4X
+                // calendar-arithmetic bridge instead. We already know
+                // the Gregorian probe `(probe_year, probe_month, 15)`
+                // falls inside the target-calendar month whose long
+                // label matches the input, so converting that Gregorian
+                // instant through the bridge and reading
+                // `CalendarDate::month()` yields the correct civil-
+                // order ordinal. This path requires no CLDR data and
+                // compiles under pure `--features web-intl`.
+                if let Ok(probe_year_i32) = i32::try_from(probe_year)
+                    && let Ok(probe_month_u8) = u8::try_from(probe_month + 1)
+                    && let Ok(internal) = crate::calendar::internal::CalendarDate::from_iso(
+                        probe_year_i32,
+                        probe_month_u8,
+                        15,
+                    )
+                {
+                    let ordinal = internal.to_calendar(target).month();
+                    if (1..=13).contains(&ordinal) {
+                        return Some(ordinal);
+                    }
                 }
                 return None;
             }
@@ -338,23 +367,19 @@ impl IcuProvider for WebIntlProvider {
             return months;
         }
 
-        match calendar {
-            CalendarSystem::Hebrew => {
-                let cycle_year = year.rem_euclid(19);
-
-                if [0, 3, 6, 8, 11, 14, 17].contains(&cycle_year) {
-                    13
-                } else {
-                    12
-                }
-            }
-
-            CalendarSystem::Ethiopic
-            | CalendarSystem::EthiopicAmeteAlem
-            | CalendarSystem::Coptic => 13,
-
-            _ => 12,
-        }
+        // Delegate to the shared ICU4X calendar-arithmetic bridge
+        // instead of fabricating a per-calendar constant. The previous
+        // implementation hard-coded 12 months for every calendar
+        // outside `Hebrew/Ethiopic/Coptic`, which rejected valid
+        // Chinese/Dangi leap-month dates at the `CalendarDate::new`
+        // validation edge and normalised civil-ordinal 13 inputs into
+        // the next year on `add_months(0)`. The bridge produces the
+        // correct per-year month count including leap-cycle widenings.
+        // Hebrew and the fixed-13 calendars are bounded via the
+        // `bounded_*` fast path above, so the bridge handles the
+        // remaining lunisolar/luni-solar calendars where the year-
+        // specific answer varies.
+        crate::calendar::internal::months_in_year(year, *calendar, era).unwrap_or(12)
     }
 
     fn days_in_month(
@@ -372,12 +397,18 @@ impl IcuProvider for WebIntlProvider {
             CalendarSystem::Gregorian => gregorian_days_in_month(year, month),
 
             _ => {
-                // Other calendars would require probing `Intl.DateTimeFormat`
-                // with the target calendar option. Browsers expose this but
-                // the probing loop is non-trivial and is tracked in #545 as
-                // part of the public era-aware calendar operations API.
-                // Conservative fallback that matches the spec §9.5.4 sketch.
-                30
+                // Delegate to the shared ICU4X calendar-arithmetic
+                // bridge (available whenever `web-intl` is on — the
+                // `calendar::internal` module is gated on
+                // `any(feature = "icu4x", feature = "web-intl")` and
+                // does not require CLDR formatter data). The previous
+                // implementation returned a flat 30 for every non-
+                // Gregorian month outside the `bounded_*` table, which
+                // both accepted impossible day 30 inputs on 29-day
+                // months and rejected correct days on 31-day months
+                // during `CalendarDate::new` validation.
+                crate::calendar::internal::days_in_month(year, month, *calendar, era)
+                    .unwrap_or_else(|| gregorian_days_in_month(year, month))
             }
         }
     }
@@ -462,14 +493,34 @@ impl IcuProvider for WebIntlProvider {
             return date.clone();
         }
 
-        // Use the same ICU4X-backed internal bridge as `Icu4xProvider` when
-        // the `icu4x` feature is also on. Otherwise fall back to formatting
-        // through `Intl.DateTimeFormat({calendar})` and reparsing the parts
-        // — browsers ship full CLDR calendar data without WASM payload.
-        #[cfg(feature = "icu4x")]
-        {
+        // Non-Gregorian sources must route through the shared ICU4X
+        // calendar-arithmetic bridge: the browser's
+        // `Intl.DateTimeFormat({calendar: …})` path only *relabels* a
+        // Gregorian instant, so feeding it a non-Gregorian source would
+        // reinterpret the raw year/month/day fields as Gregorian and
+        // corrupt the result. The `calendar::internal` module is
+        // compiled whenever either the `icu4x` or `web-intl` feature is
+        // on (see `calendar.rs`), so the bridge is always available
+        // under the same feature gate that compiles this provider and
+        // does not require the `compiled_data` CLDR payload.
+        //
+        // Contract reminder: `IcuProvider::convert_date` returns a
+        // [`CalendarDate`] in `target`. Silently returning the source
+        // calendar for non-Gregorian inputs violates that contract,
+        // panics in `CalendarDate::add_days_with_provider` (Gregorian-
+        // only arithmetic) and lets `TypedCalendarDate::to_calendar`
+        // wrap the wrong calendar in release builds (only guarded by
+        // `debug_assert`). The bridge eliminates that footgun.
+        if date.calendar != CalendarSystem::Gregorian {
             if let Ok(internal) = crate::calendar::internal::CalendarDate::try_from(date) {
                 let converted = internal.to_calendar(target);
+
+                let (Some(month_nz), Some(day_nz)) = (
+                    NonZero::new(converted.month()),
+                    NonZero::new(converted.day()),
+                ) else {
+                    return date.clone();
+                };
 
                 return CalendarDate {
                     calendar: target,
@@ -481,25 +532,17 @@ impl IcuProvider for WebIntlProvider {
                             display_name: code,
                         }),
                     year: converted.year(),
-                    month: NonZero::new(converted.month())
-                        .expect("internal calendar conversion yields a 1-based month"),
-                    day: NonZero::new(converted.day())
-                        .expect("internal calendar conversion yields a 1-based day"),
+                    month: month_nz,
+                    day: day_nz,
                 };
             }
-        }
 
-        // The browser-backed path expects a Gregorian civil day as its
-        // JS Date input; `Intl.DateTimeFormat({calendar: …})` only
-        // relabels a Gregorian moment into the target calendar. For
-        // non-Gregorian sources we'd need to resolve the source fields
-        // to Gregorian first, which requires calendar-aware code we
-        // don't have in the pure `web-intl` build. Return the source
-        // date unchanged when we can't safely convert — callers who need
-        // cross-calendar conversion for non-Gregorian sources must
-        // enable the `icu4x` feature alongside `web-intl` so the
-        // internal bridge handles that case (see the cfg block above).
-        if date.calendar != CalendarSystem::Gregorian {
+            // The bridge rejected the source (invalid era/year/month/day
+            // combination). Returning the source would silently lie
+            // about the calendar, so fall back to the stub's behaviour —
+            // a Gregorian zero-year anchor — only when the calendar
+            // matches. Otherwise clone; the input was already malformed
+            // at validation time.
             return date.clone();
         }
 
