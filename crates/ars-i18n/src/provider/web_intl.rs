@@ -553,12 +553,19 @@ impl IcuProvider for WebIntlProvider {
 
         let formatter = Intl::DateTimeFormat::new(&locales, &opts);
 
-        // `Date::new_with_year_month_day` takes a positive `u32` year; for
-        // pre-CE Gregorian dates we fall back to returning the source date
-        // unchanged, matching `StubIcuProvider`'s behavior outside the
-        // supported range.
+        // `js_sys::Date`'s `setUTCFullYear` accepts any integer year,
+        // but the browser path only works when the formatted parts
+        // ordering matches our positive-year assumptions. For BCE
+        // Gregorian inputs (`date.year < 0`) the safest option is the
+        // shared ICU4X calendar-arithmetic bridge: it handles negative
+        // year arithmetic directly and produces the target calendar's
+        // correct civil-order fields without going through
+        // `Intl.DateTimeFormat` at all. Previously we returned the
+        // source date unchanged here, which violated the
+        // `IcuProvider::convert_date` contract by handing the caller
+        // back a date in the *source* calendar.
         let Ok(year_u32) = u32::try_from(date.year) else {
-            return date.clone();
+            return bridge_convert(date, target).unwrap_or_else(|| date.clone());
         };
 
         let js_date = noon_utc_js_date(

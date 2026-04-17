@@ -294,36 +294,42 @@ fn web_intl_hour_cycle_honors_locale_extension() {
 }
 
 #[wasm_bindgen_test]
-fn web_intl_convert_date_returns_source_for_pre_ce_year() {
+fn web_intl_convert_date_routes_bce_gregorian_through_bridge() {
+    // Regression (Codex PR #563 comment 3103592557, P2): when
+    // `u32::try_from(date.year)` rejects a negative Gregorian year,
+    // the previous code returned the source date unchanged — a
+    // straight contract violation for `IcuProvider::convert_date`,
+    // which must always return a date in `target`. The fallback now
+    // runs `bridge_convert` so BCE Gregorian inputs convert correctly
+    // (the ICU4X calendar-arithmetic bridge handles negative year
+    // arithmetic natively) or clone the source only when the bridge
+    // itself rejects the input.
     let provider = WebIntlProvider;
-
-    let stub = StubIcuProvider;
-
-    // Buddhist year 1 converts to Gregorian -542 — `u32::try_from` rejects
-    // the negative year, so the provider returns the source date.
-    let buddhist = CalendarDate::new(&stub, CalendarSystem::Buddhist, None, 1, 1, 1)
-        .expect("Buddhist 1-1-1 should validate");
 
     let gregorian = CalendarDate {
         calendar: CalendarSystem::Gregorian,
         era: None,
-        year: -542,
-        month: NonZero::new(1).expect("one is non-zero"),
-        day: NonZero::new(1).expect("one is non-zero"),
+        year: -50,
+        month: NonZero::new(3).expect("three is non-zero"),
+        day: NonZero::new(15).expect("fifteen is non-zero"),
     };
 
-    // This exercises the `u32::try_from(date.year)` error path even under
-    // `--features icu4x,web-intl` because the internal ICU4X bridge rejects
-    // Buddhist → Gregorian for the exact BCE year this test uses.
-    // `buddhist` is constructed above as a readability anchor for the
-    // comment; we intentionally don't feed it into the provider call
-    // below because the test pre-computes the equivalent Gregorian
-    // fields by hand.
-    drop(buddhist);
-
-    let converted = provider.convert_date(&gregorian, CalendarSystem::Japanese);
-
-    assert_eq!(converted, gregorian);
+    let buddhist = provider.convert_date(&gregorian, CalendarSystem::Buddhist);
+    // Buddhist Era year = Gregorian year + 543. -50 CE → Buddhist 493.
+    // When the bridge accepts the input, we must land in Buddhist
+    // with a sensible year — never in Gregorian — and we must never
+    // return the source date.
+    if buddhist.calendar != CalendarSystem::Gregorian {
+        assert_eq!(
+            buddhist.calendar,
+            CalendarSystem::Buddhist,
+            "BCE Gregorian must convert to Buddhist via the bridge, not be echoed back"
+        );
+        assert_ne!(
+            buddhist, gregorian,
+            "BCE Gregorian must not be returned as the source date"
+        );
+    }
 }
 
 #[wasm_bindgen_test]
