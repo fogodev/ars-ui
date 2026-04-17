@@ -461,13 +461,19 @@ impl<T: CollectionItem> TreeCollection<T> {
     /// (or among root nodes when `parent` is `None`). The node is inserted
     /// into `all_nodes` at the correct DFS position and indices are rebuilt.
     ///
-    /// If `parent` is `Some` but the key does not exist in the tree, the
-    /// operation is a no-op to avoid creating dangling parent references.
-    pub fn insert_child(&mut self, parent: Option<&Key>, sibling_index: usize, item: T) {
+    /// Returns the flat DFS index of the inserted node on success, or
+    /// `None` if `parent` is `Some(k)` and `k` is not present in the tree
+    /// (rejected to avoid creating dangling parent references).
+    pub fn insert_child(
+        &mut self,
+        parent: Option<&Key>,
+        sibling_index: usize,
+        item: T,
+    ) -> Option<usize> {
         // Reject inserts under a nonexistent parent.
         if let Some(pk) = parent {
             if !self.key_to_index.contains_key(pk) {
-                return;
+                return None;
             }
         }
 
@@ -514,6 +520,9 @@ impl<T: CollectionItem> TreeCollection<T> {
         }
 
         self.rebuild_indices();
+
+        // After rebuild, `key_to_index` points at the freshly inserted node.
+        self.key_to_index.get(&key).copied()
     }
 
     /// Remove items by key (and their entire subtrees).
@@ -572,25 +581,91 @@ impl<T: CollectionItem> TreeCollection<T> {
         removed
     }
 
-    /// Get the flat index of a node by key.
+    /// Get the flat (DFS) index of a node by key. The flat index includes
+    /// nodes hidden inside collapsed subtrees and is suitable for
+    /// stable-storage operations on `all_nodes`. For DOM reconciliation
+    /// or any code that drives the visible iteration exposed via
+    /// [`Collection::nodes`] / [`Collection::get_by_index`], use
+    /// [`visible_index_of`](Self::visible_index_of) instead.
     pub fn flat_index_of(&self, key: &Key) -> Option<usize> {
         self.key_to_index.get(key).copied()
     }
 
+    /// Returns `true` when the node at `key` currently has at least one
+    /// child (i.e. it is a branch, not a leaf), or `false` when the
+    /// node is a leaf **or** the key is unknown.
+    ///
+    /// Mirrors the [`Node::has_children`] field. Available without the
+    /// `T: Clone` bound that `Collection::get(&node).has_children` would
+    /// require, so callers operating on a generic `T: CollectionItem`
+    /// (such as [`MutableTreeData`]'s mutation methods) can detect
+    /// leaf↔branch transitions without paying for `Clone`.
+    ///
+    /// [`Node::has_children`]: crate::node::Node::has_children
+    /// [`MutableTreeData`]: crate::mutable::MutableTreeData
+    #[must_use]
+    pub fn has_children(&self, key: &Key) -> bool {
+        self.key_to_index
+            .get(key)
+            .is_some_and(|&i| self.all_nodes[i].has_children)
+    }
+
+    /// Get the **visible** iteration index of a node by key, or `None`
+    /// when the key is unknown **or** the node sits inside a collapsed
+    /// ancestor (and is therefore hidden from `Collection::nodes` /
+    /// `Collection::get_by_index`).
+    ///
+    /// Adapters driving DOM reconciliation should consume visible indices
+    /// — the flat DFS index returned by [`flat_index_of`](Self::flat_index_of)
+    /// does not correspond to any DOM position when a node is hidden.
+    pub fn visible_index_of(&self, key: &Key) -> Option<usize> {
+        let flat = self.flat_index_of(key)?;
+        // `visible_indices` is sorted ascending (it preserves DFS order),
+        // so binary search is correct and faster than a linear scan for
+        // large trees.
+        self.visible_indices.binary_search(&flat).ok()
+    }
+
+    /// Iterate the **visible** keys of the tree in DFS order.
+    ///
+    /// Mirrors the iteration of [`Collection::keys`] but is available
+    /// without the `T: Clone` bound the trait impl requires, so it can be
+    /// called from generic contexts (such as `MutableTreeData`'s mutation
+    /// methods, which only require `T: CollectionItem`).
+    pub fn visible_keys(&self) -> impl Iterator<Item = &Key> {
+        self.visible_indices.iter().map(|&i| &self.all_nodes[i].key)
+    }
+
     /// Move a node (and its subtree) to a new parent at the given child index.
     ///
-    /// If `new_parent` is `Some` but the key does not exist in the tree
-    /// (or is a descendant of the node being moved), the operation is a
-    /// no-op to avoid creating dangling parent references.
-    pub fn reparent(&mut self, key: &Key, new_parent: Option<&Key>, sibling_index: usize) {
+    /// Returns `Some((from_flat_index, to_flat_index))` on success, or
+    /// `None` if the move was rejected. Rejection happens when:
+    ///
+    /// - `key` does not exist in the tree;
+    /// - `new_parent` is `Some(k)` and `k` is not present in the tree; or
+    /// - `new_parent` is a descendant of the node being moved (would create
+    ///   a cycle; detected after extraction).
+    ///
+    /// In the third case the subtree is restored to its original position
+    /// so the tree remains well-formed.
+    pub fn reparent(
+        &mut self,
+        key: &Key,
+        new_parent: Option<&Key>,
+        sibling_index: usize,
+    ) -> Option<(usize, usize)> {
         // Validate new_parent exists before extraction. Checking after
         // extraction is insufficient because the target might be a descendant
         // of the moved node (and thus removed by extract_subtree).
         if let Some(pk) = new_parent {
             if !self.key_to_index.contains_key(pk) {
-                return;
+                return None;
             }
         }
+
+        // Capture the node's current flat index before extraction; used in
+        // both the success return and the descendant-rejection restore path.
+        let from_index = *self.key_to_index.get(key)?;
 
         // Save old parent key before extraction for metadata cleanup.
         let old_parent_key = self.parent_of(key).cloned();
@@ -599,7 +674,7 @@ impl<T: CollectionItem> TreeCollection<T> {
         let subtree = self.extract_subtree(key);
 
         if subtree.is_empty() {
-            return;
+            return None;
         }
 
         // Reject reparenting under a descendant of the moved node.
@@ -616,7 +691,7 @@ impl<T: CollectionItem> TreeCollection<T> {
 
                 self.rebuild_indices();
 
-                return;
+                return None;
             }
         }
 
@@ -675,16 +750,29 @@ impl<T: CollectionItem> TreeCollection<T> {
         }
 
         self.rebuild_indices();
+
+        // After rebuild, `key_to_index` points at the moved node's new position.
+        let to_index = *self.key_to_index.get(key)?;
+        Some((from_index, to_index))
     }
 
     /// Reorder a node among its siblings to the given sibling index.
-    pub fn reorder_sibling(&mut self, key: &Key, to_sibling_index: usize) {
+    ///
+    /// Returns `Some((from_flat_index, to_flat_index))` on success, or
+    /// `None` if `key` does not exist in the tree.
+    pub fn reorder_sibling(
+        &mut self,
+        key: &Key,
+        to_sibling_index: usize,
+    ) -> Option<(usize, usize)> {
+        let from_index = *self.key_to_index.get(key)?;
+
         let parent_key = self.parent_of(key).cloned();
 
         let subtree = self.extract_subtree(key);
 
         if subtree.is_empty() {
-            return;
+            return None;
         }
 
         // Rebuild indices after extraction so flat_insert_position uses valid state.
@@ -697,15 +785,33 @@ impl<T: CollectionItem> TreeCollection<T> {
         }
 
         self.rebuild_indices();
+
+        let to_index = *self.key_to_index.get(key)?;
+
+        Some((from_index, to_index))
     }
 
     /// Replace an item's data (matched by key).
-    pub fn replace(&mut self, item: T) {
-        let key = item.key().clone();
+    ///
+    /// Returns the previous value at `item.key()` on success, or `None` if
+    /// the key is not present in the tree **or** the existing node carries
+    /// no item payload (a structural node). Children are preserved — only
+    /// the node's payload is swapped. Structural nodes are never silently
+    /// promoted to items.
+    pub fn replace(&mut self, item: T) -> Option<T> {
+        let idx = *self.key_to_index.get(item.key())?;
+        let value_slot = &mut self.all_nodes[idx].value;
 
-        if let Some(&idx) = self.key_to_index.get(&key) {
-            self.all_nodes[idx].value = Some(item);
+        // Refuse to overwrite structural nodes, mirroring
+        // `StaticCollection::replace`. Tree builders today only emit Item
+        // nodes, but defending the invariant here keeps the contract
+        // consistent across both collection types and prevents future
+        // structural-node support from introducing a silent corruption.
+        if value_slot.is_none() {
+            return None;
         }
+
+        value_slot.replace(item)
     }
 
     /// Return the parent key of a node, if any.
@@ -716,20 +822,39 @@ impl<T: CollectionItem> TreeCollection<T> {
     }
 
     /// Extract a node and its subtree from `all_nodes`, returning the
-    /// removed nodes. After extraction, indices are stale until
-    /// `rebuild_indices()` is called.
+    /// removed nodes.
+    ///
+    /// Also removes the extracted nodes' keys from `key_to_index` so that
+    /// callers can distinguish "still in tree" from "was extracted" (used
+    /// by `reparent` to detect reparenting under a descendant of the moved
+    /// node). The positional indices stored in `key_to_index` for the
+    /// *surviving* nodes may still be stale until `rebuild_indices()` is
+    /// called, so callers must not use those values between extraction and
+    /// rebuild — only membership (`contains_key`) is reliable.
     fn extract_subtree(&mut self, key: &Key) -> Vec<Node<T>> {
-        self.key_to_index.get(key).map_or_else(Vec::new, |&start| {
-            let root_level = self.all_nodes[start].level;
+        self.key_to_index
+            .get(key)
+            .copied()
+            .map_or_else(Vec::new, |start| {
+                let root_level = self.all_nodes[start].level;
 
-            let mut end = start + 1;
+                let mut end = start + 1;
 
-            while end < self.all_nodes.len() && self.all_nodes[end].level > root_level {
-                end += 1;
-            }
+                while end < self.all_nodes.len() && self.all_nodes[end].level > root_level {
+                    end += 1;
+                }
 
-            self.all_nodes.drain(start..end).collect()
-        })
+                let drained = self.all_nodes.drain(start..end).collect::<Vec<_>>();
+
+                // Remove the extracted keys from `key_to_index` so subsequent
+                // `contains_key` checks (e.g. in `reparent`'s cycle guard)
+                // correctly report that these nodes are no longer in the tree.
+                for node in &drained {
+                    self.key_to_index.shift_remove(&node.key);
+                }
+
+                drained
+            })
     }
 
     /// Compute the flat insertion position for a new child at `sibling_index`
@@ -788,10 +913,10 @@ impl<T: CollectionItem> TreeCollection<T> {
     fn rebuild_indices(&mut self) {
         self.key_to_index.clear();
 
-        for (i, node) in self.all_nodes.iter_mut().enumerate() {
-            node.index = i;
+        for (idx, node) in self.all_nodes.iter_mut().enumerate() {
+            node.index = idx;
 
-            self.key_to_index.insert(node.key.clone(), i);
+            self.key_to_index.insert(node.key.clone(), idx);
         }
 
         let (visible_indices, first_focusable_visible, last_focusable_visible) =
@@ -1684,6 +1809,61 @@ mod tests {
     }
 
     #[test]
+    fn visible_index_of_matches_flat_when_fully_expanded() {
+        // The fruit_tree fixture is fully expanded by default, so visible
+        // and flat indices must agree for every key.
+        let tree = fruit_tree();
+
+        assert_eq!(tree.visible_index_of(&Key::int(1)), Some(0));
+        assert_eq!(tree.visible_index_of(&Key::int(2)), Some(1));
+        assert_eq!(tree.visible_index_of(&Key::int(3)), Some(2));
+        assert_eq!(tree.visible_index_of(&Key::int(4)), Some(3));
+        assert_eq!(tree.visible_index_of(&Key::int(99)), None);
+    }
+
+    #[test]
+    fn visible_index_of_returns_none_for_collapsed_descendants() {
+        // Collapse the Fruits group so its children become hidden. The
+        // root itself stays visible and its children disappear from the
+        // visible iteration.
+        let collapsed = fruit_tree().set_expanded(&Key::int(1), false);
+
+        assert_eq!(
+            collapsed.visible_index_of(&Key::int(1)),
+            Some(0),
+            "the collapsed parent itself is still visible"
+        );
+        assert_eq!(
+            collapsed.visible_index_of(&Key::int(2)),
+            None,
+            "Apple is hidden inside collapsed Fruits"
+        );
+        assert_eq!(
+            collapsed.visible_index_of(&Key::int(3)),
+            None,
+            "Banana is hidden inside collapsed Fruits"
+        );
+        assert_eq!(
+            collapsed.visible_index_of(&Key::int(4)),
+            Some(1),
+            "Other shifts up to visible index 1 once Fruits' children are hidden"
+        );
+    }
+
+    #[test]
+    fn visible_keys_iterates_only_visible_nodes() {
+        let collapsed = fruit_tree().set_expanded(&Key::int(1), false);
+
+        let visible_keys = collapsed.visible_keys().cloned().collect::<Vec<_>>();
+
+        assert_eq!(
+            visible_keys,
+            vec![Key::int(1), Key::int(4)],
+            "visible_keys must skip nodes inside collapsed ancestors"
+        );
+    }
+
+    #[test]
     fn reparent_to_root() {
         let mut tree = fruit_tree();
 
@@ -2180,12 +2360,12 @@ mod tests {
     fn reparent_to_nonexistent_parent_is_noop() {
         let mut tree = fruit_tree();
 
-        let before_keys: Vec<_> = tree.keys().cloned().collect();
+        let before_keys = tree.keys().cloned().collect::<Vec<_>>();
 
         // Reparent Apple(2) under nonexistent key 99 — should be a no-op
         tree.reparent(&Key::int(2), Some(&Key::int(99)), 0);
 
-        let after_keys: Vec<_> = tree.keys().cloned().collect();
+        let after_keys = tree.keys().cloned().collect::<Vec<_>>();
 
         // Tree should be unchanged
         assert_eq!(before_keys, after_keys);
@@ -2259,5 +2439,164 @@ mod tests {
 
         assert!(!fruits.has_children);
         assert_eq!(fruits.is_expanded, None);
+    }
+
+    // ---------------------------------------------------------------
+    // Return-value contracts on mutation methods
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn insert_child_returns_flat_index_on_success() {
+        let mut tree = fruit_tree();
+
+        // fruit_tree has 4 nodes: [Fruits(1), Apple(2), Banana(3), Other(4)].
+        // Insert a root sibling at the end (sibling_index 2) — flat index 4.
+        let flat = tree.insert_child(None, 2, TreeFruit::new(100, "New Root"));
+
+        assert_eq!(flat, Some(4));
+        assert_eq!(tree.flat_index_of(&Key::int(100)), Some(4));
+    }
+
+    #[test]
+    fn insert_child_returns_none_on_unknown_parent() {
+        let mut tree = fruit_tree();
+
+        let flat = tree.insert_child(Some(&Key::int(999)), 0, TreeFruit::new(10, "Orphan"));
+
+        assert_eq!(flat, None);
+        assert!(!tree.contains_key(&Key::int(10)));
+    }
+
+    #[test]
+    fn reparent_returns_flat_indices_on_success() {
+        let mut tree = fruit_tree();
+
+        // Apple(2) is at flat index 1. Moving to root at sibling_index 0
+        // places it at flat index 0.
+        let indices = tree.reparent(&Key::int(2), None, 0);
+
+        assert_eq!(indices, Some((1, 0)));
+    }
+
+    #[test]
+    fn reparent_returns_none_on_unknown_key() {
+        let mut tree = fruit_tree();
+
+        let indices = tree.reparent(&Key::int(999), None, 0);
+
+        assert_eq!(indices, None);
+    }
+
+    #[test]
+    fn reparent_returns_none_on_unknown_new_parent() {
+        let mut tree = fruit_tree();
+
+        let indices = tree.reparent(&Key::int(2), Some(&Key::int(999)), 0);
+
+        assert_eq!(indices, None);
+    }
+
+    #[test]
+    fn reparent_to_own_descendant_returns_none_and_restores_subtree() {
+        // Build a 3-level chain so we can try to reparent a node under its
+        // own descendant:
+        //   1 Root
+        //   └── 2 Mid
+        //       └── 3 Leaf
+        let mut tree = TreeCollection::new(vec![TreeItemConfig {
+            key: Key::int(1),
+            text_value: "Root".to_string(),
+            value: TreeFruit::new(1, "Root"),
+            children: vec![TreeItemConfig {
+                key: Key::int(2),
+                text_value: "Mid".to_string(),
+                value: TreeFruit::new(2, "Mid"),
+                children: vec![TreeItemConfig {
+                    key: Key::int(3),
+                    text_value: "Leaf".to_string(),
+                    value: TreeFruit::new(3, "Leaf"),
+                    children: Vec::new(),
+                    default_expanded: false,
+                }],
+                default_expanded: true,
+            }],
+            default_expanded: true,
+        }]);
+
+        // Try to move Mid(2) under Leaf(3) — a descendant of Mid. That
+        // would create a cycle. The inner detects this after extracting
+        // Mid's subtree and restores it.
+        let indices = tree.reparent(&Key::int(2), Some(&Key::int(3)), 0);
+
+        assert_eq!(indices, None, "cycle-creating reparent must return None");
+
+        // Tree structure is intact.
+        assert_eq!(tree.all_nodes.len(), 3);
+        assert!(tree.contains_key(&Key::int(1)));
+        assert!(tree.contains_key(&Key::int(2)));
+        assert!(tree.contains_key(&Key::int(3)));
+
+        // Flat order is preserved: Root, Mid, Leaf.
+        assert_eq!(tree.flat_index_of(&Key::int(1)), Some(0));
+        assert_eq!(tree.flat_index_of(&Key::int(2)), Some(1));
+        assert_eq!(tree.flat_index_of(&Key::int(3)), Some(2));
+
+        // Parent/level metadata intact.
+        assert_eq!(
+            tree.get(&Key::int(2)).expect("Mid").parent_key,
+            Some(Key::int(1))
+        );
+        assert_eq!(
+            tree.get(&Key::int(3)).expect("Leaf").parent_key,
+            Some(Key::int(2))
+        );
+    }
+
+    #[test]
+    fn reorder_sibling_returns_flat_indices_on_success() {
+        let mut tree = fruit_tree();
+
+        // Apple(2) at flat 1, moving to sibling_index 1 among Fruits's
+        // children places it at flat 2 (after Banana).
+        let indices = tree.reorder_sibling(&Key::int(2), 1);
+
+        assert_eq!(indices, Some((1, 2)));
+    }
+
+    #[test]
+    fn reorder_sibling_returns_none_on_unknown_key() {
+        let mut tree = fruit_tree();
+
+        let indices = tree.reorder_sibling(&Key::int(999), 0);
+
+        assert_eq!(indices, None);
+    }
+
+    #[test]
+    fn replace_returns_old_value_on_success() {
+        let mut tree = fruit_tree();
+
+        let old = tree.replace(TreeFruit::new(2, "Green Apple"));
+
+        assert_eq!(old.expect("old value").name, "Apple");
+        assert_eq!(
+            tree.get(&Key::int(2))
+                .expect("key 2")
+                .value
+                .as_ref()
+                .expect("value")
+                .name,
+            "Green Apple"
+        );
+    }
+
+    #[test]
+    fn replace_returns_none_on_unknown_key() {
+        let mut tree = fruit_tree();
+
+        let old = tree.replace(TreeFruit::new(999, "Phantom"));
+
+        assert!(old.is_none());
+        assert!(!tree.contains_key(&Key::int(999)));
     }
 }

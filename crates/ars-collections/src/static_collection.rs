@@ -237,12 +237,32 @@ impl<T: CollectionItem> StaticCollection<T> {
     }
 
     /// Replace an item's data (matched by key).
-    pub fn replace(&mut self, item: T) {
-        let key = item.key().clone();
+    ///
+    /// Returns the previous value at `item.key()` on success, or `None` if
+    /// the key is not present in the collection **or** the existing node is
+    /// a structural node ([`Section`], [`Header`], or [`Separator`]) that
+    /// carries no item payload. When `None` is returned, `item` is dropped
+    /// and the collection is left unchanged — structural nodes are never
+    /// silently promoted to items. Callers that need to recover the item
+    /// on failure should check `contains_key` and the node's
+    /// [`is_structural`](Node::is_structural) flag first.
+    ///
+    /// [`Section`]: crate::node::NodeType::Section
+    /// [`Header`]: crate::node::NodeType::Header
+    /// [`Separator`]: crate::node::NodeType::Separator
+    pub fn replace(&mut self, item: T) -> Option<T> {
+        let idx = *self.key_to_index.get(item.key())?;
+        let value_slot = &mut self.nodes[idx].value;
 
-        if let Some(&idx) = self.key_to_index.get(&key) {
-            self.nodes[idx].value = Some(item);
+        // Refuse to overwrite structural nodes (Section/Header/Separator),
+        // which always have `value: None`. Silently promoting them to items
+        // would corrupt the collection's structural metadata and confuse
+        // adapters that key off `NodeType`.
+        if value_slot.is_none() {
+            return None;
         }
+
+        value_slot.replace(item)
     }
 
     /// Remove all items.
@@ -270,12 +290,12 @@ impl<T: CollectionItem> StaticCollection<T> {
 
     /// Recompute `key_to_index` and `Node::index` from a starting position.
     fn reindex_from(&mut self, start: usize) {
-        for i in start..self.nodes.len() {
-            self.nodes[i].index = i;
+        for idx in start..self.nodes.len() {
+            self.nodes[idx].index = idx;
 
-            let key = &self.nodes[i].key;
+            let key = &self.nodes[idx].key;
 
-            self.key_to_index.insert(key.clone(), i);
+            self.key_to_index.insert(key.clone(), idx);
         }
     }
 }
@@ -857,7 +877,9 @@ mod tests {
     fn mutation_replace_existing() {
         let mut c = fruit_collection();
 
-        c.replace(Fruit::new(2, "Blueberry"));
+        let old = c.replace(Fruit::new(2, "Blueberry"));
+
+        assert_eq!(old.expect("old value returned").name, "Banana");
 
         let node = c.get(&Key::int(2)).expect("key 2");
 
@@ -868,11 +890,73 @@ mod tests {
     fn mutation_replace_missing() {
         let mut c = fruit_collection();
 
-        c.replace(Fruit::new(99, "Unknown"));
+        let old = c.replace(Fruit::new(99, "Unknown"));
 
         // No change — key 99 doesn't exist
+        assert!(old.is_none(), "replace returns None on unknown key");
         assert_eq!(c.len(), 3);
         assert!(!c.contains_key(&Key::int(99)));
+    }
+
+    #[test]
+    fn replace_does_not_mutate_section_node() {
+        // Build a collection where the key "fruits" belongs to a Section
+        // (a structural node with `value: None`). Calling `replace` with
+        // an item whose key collides with that Section must NOT silently
+        // promote the structural node to an Item — it must return `None`
+        // and leave the node untouched.
+        let mut c: StaticCollection<Fruit> = CollectionBuilder::new()
+            .section(Key::str("fruits"), "Fruits")
+            .item(Key::int(1), "Apple", Fruit::new(1, "Apple"))
+            .end_section()
+            .build();
+
+        // Hand-craft a Fruit with the Section's key.
+        let intruder = Fruit {
+            id: Key::str("fruits"),
+            name: "Pineapple".to_string(),
+        };
+
+        let old = c.replace(intruder);
+
+        // 1. `replace` must report failure.
+        assert!(old.is_none(), "replace must refuse to overwrite Section");
+
+        // 2. The structural node must remain a Section with `value: None`.
+        let section = c.get(&Key::str("fruits")).expect("section still present");
+
+        assert_eq!(section.node_type, NodeType::Section);
+        assert!(
+            section.value.is_none(),
+            "Section value must remain None — silent promotion would corrupt the collection"
+        );
+        assert_eq!(section.text_value, "Fruits");
+    }
+
+    #[test]
+    fn replace_does_not_mutate_separator_node() {
+        let mut c: StaticCollection<Fruit> = CollectionBuilder::new()
+            .item(Key::int(1), "Apple", Fruit::new(1, "Apple"))
+            .separator()
+            .item(Key::int(2), "Banana", Fruit::new(2, "Banana"))
+            .build();
+
+        // The builder names the separator "separator-1" (its flat index).
+        let separator_key = Key::str("separator-1");
+
+        let intruder = Fruit {
+            id: separator_key.clone(),
+            name: "Imposter".to_string(),
+        };
+
+        let old = c.replace(intruder);
+
+        assert!(old.is_none(), "replace must refuse to overwrite Separator");
+
+        let sep = c.get(&separator_key).expect("separator still present");
+
+        assert_eq!(sep.node_type, NodeType::Separator);
+        assert!(sep.value.is_none(), "Separator value must remain None");
     }
 
     #[test]

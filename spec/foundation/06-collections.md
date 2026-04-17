@@ -758,23 +758,62 @@ Mutable collection wrappers support dynamic add, remove, reorder, and move opera
 
 #### 1.8.1 Change Events
 
+`CollectionChange` is the adapter-facing event type. The generic `K` lets tests and alternative collection backends use keys other than the default `Key`; production wrappers (§1.8.2, §1.8.3) always use `CollectionChange<Key>`. The derived `Clone + Debug + PartialEq` bounds are part of the contract — adapters diff and log these events.
+
+The `count` field on `Insert` is always `1` for single-item mutations today but is kept as a field so future bulk inserts can share the variant without a breaking API change.
+
 ```rust
 // ars-collections/src/mutable.rs
 
 /// A granular change event emitted when a mutable collection is modified.
-/// Adapters use these to perform targeted DOM updates instead of full re-renders.
+///
+/// Adapters consume a sequence of these events to perform targeted DOM
+/// updates instead of re-rendering the entire list.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CollectionChange<K: Clone> {
-    /// New items inserted at the given index.
-    Insert { index: usize, count: usize },
+    /// New items inserted at the given flat index.
+    Insert {
+        /// Flat insertion index in the collection's iteration order.
+        index: usize,
+        /// Number of items inserted starting at `index`. Always `1` today;
+        /// reserved for future bulk inserts.
+        count: usize,
+    },
     /// Items with the given keys were removed.
-    Remove { keys: Vec<K> },
-    /// An item moved from one index to another.
-    Move { key: K, from_index: usize, to_index: usize },
-    /// An item's data was replaced in-place (key unchanged).
-    Replace { key: K },
-    /// The entire collection was reset (e.g., bulk replacement).
-    /// Adapters should re-render all items.
+    Remove {
+        /// Keys of the removed items, in iteration order.
+        keys: Vec<K>,
+    },
+    /// An item moved from one flat index to another.
+    Move {
+        /// Key of the moved item.
+        key: K,
+        /// Flat index the item occupied before the move.
+        from_index: usize,
+        /// Flat index the item occupies after the move.
+        to_index: usize,
+    },
+    /// The node at this key needs to be re-rendered in place — its
+    /// position in the iteration is unchanged. Emitted in two cases:
+    ///
+    /// * `replace()` swapped the item's payload `T`, leaving key and
+    ///   structure intact.
+    /// * A non-payload mutation flipped the node's rendered state
+    ///   while leaving the iteration order intact — for example,
+    ///   inserting a child under a previously-leaf tree node turns
+    ///   that parent into a collapsed branch (`has_children: false →
+    ///   true`, `is_expanded: None → Some(false)`), which adapters
+    ///   key DOM off (expander chevron, `aria-expanded`).
+    ///
+    /// Adapters handle both cases identically: re-fetch the node by
+    /// key and re-render it in place.
+    Replace {
+        /// Key of the node whose rendered state changed.
+        key: K,
+    },
+    /// The entire collection was reset (e.g. bulk replacement or clear).
+    /// Adapters should re-render all items instead of trying to reconcile
+    /// individual changes.
     Reset,
 }
 ```
@@ -783,16 +822,45 @@ pub enum CollectionChange<K: Clone> {
 
 `MutableListData<T>` wraps a `StaticCollection<T>` with mutation methods. It maintains an internal change log that the adapter drains after each update cycle.
 
+Design constraints reflected in the code below:
+
+- **Inherent mutation methods are bounded only by `T: CollectionItem`**, matching the inner `StaticCollection`'s own mutation impl — no `Clone` is required to call `push` / `insert` / `remove` / `move_item` / `replace` / `clear`.
+- **The `Collection<T>` delegation requires `T: CollectionItem + Clone`.** `StaticCollection<T>` only implements `Collection<T>` when `T: Clone` (see §2.2 and `static_collection.rs`), so every delegated call transitively requires `Clone`. Omitting the bound would make the delegation body fail to type-check.
+- **Iterator-returning trait methods (`keys`, `nodes`, `children_of`) carry explicit lifetime parameters** with `T: 'a` bounds, matching the `Collection` trait definition in §1.6 (required by Rust 2024's RPITIT lifetime-capture rules). These bounds are load-bearing, not decorative.
+- **`new` is `const fn` and `#[must_use]`** so callers can construct a wrapper in a `const` context and the compiler flags accidentally discarded constructor calls.
+- **A manual `Debug` impl is provided** so the wrapper can be debug-printed without forcing a `T: Debug` bound on every consumer — mirroring `StaticCollection`'s own manual `Debug` impl.
+
+**Truthful change-log contract.** Each mutation method emits a `CollectionChange` event **only** when the underlying mutation actually happened. `remove` emits with the keys that actually matched (skipping unknown keys), and `replace` emits only when the key exists. This keeps the change log in sync with the collection state — adapters never receive a phantom event referencing a key the collection does not contain.
+
 ```rust
 /// A mutable flat-list collection that tracks granular changes.
+///
+/// Wraps a `StaticCollection` and records every mutation as a
+/// `CollectionChange`. The adapter drains the buffer via
+/// `drain_changes()` each update cycle.
 pub struct MutableListData<T: CollectionItem> {
+    /// The inner collection holding the canonical item data.
     inner: StaticCollection<T>,
+    /// Pending change events to be drained by the adapter layer.
     pending_changes: Vec<CollectionChange<Key>>,
 }
 
+/// Manual `Debug` avoids requiring `T: Debug`, matching `StaticCollection`'s
+/// approach. Prints the inner collection and pending-change count only.
+impl<T: CollectionItem> core::fmt::Debug for MutableListData<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("MutableListData")
+            .field("inner", &self.inner)
+            .field("pending_changes", &self.pending_changes.len())
+            .finish()
+    }
+}
+
 impl<T: CollectionItem> MutableListData<T> {
-    /// Create from an existing static collection.
-    pub fn new(collection: StaticCollection<T>) -> Self {
+    /// Create from an existing static collection. The change buffer starts
+    /// empty — construction is not itself reported as a change.
+    #[must_use]
+    pub const fn new(collection: StaticCollection<T>) -> Self {
         Self { inner: collection, pending_changes: Vec::new() }
     }
 
@@ -809,35 +877,78 @@ impl<T: CollectionItem> MutableListData<T> {
         self.pending_changes.push(CollectionChange::Insert { index, count: 1 });
     }
 
-    /// Remove items by key. Returns the removed items.
+    /// Remove items by key. Returns the removed item values; emits
+    /// `Remove` carrying every input key that actually existed in the
+    /// collection (deduped, in input order). Unknown keys are silently
+    /// skipped by the inner collection and excluded from the event.
+    /// Returns an empty `Vec` of payloads and emits no event when no
+    /// key matches.
+    ///
+    /// The change-event keys must come from an existence snapshot, not
+    /// from the returned `Vec<T>`: `StaticCollection::remove_by_keys`
+    /// drops structural nodes (`Section` / `Header` / `Separator`)
+    /// silently from its return because they carry no payload, even
+    /// though removing one mutates the collection and reindexes every
+    /// later position. Without the snapshot, an adapter reconciling
+    /// from `CollectionChange` would leave a phantom row in the DOM.
     pub fn remove(&mut self, keys: &[Key]) -> Vec<T> {
+        // Snapshot which input keys are genuinely going to mutate the
+        // collection. Dedup as we go so a duplicated input key only
+        // appears once in the change event — that mirrors the inner
+        // method's behaviour on an already-removed key.
+        let mut seen = BTreeSet::<Key>::new();
+        let matched_keys: Vec<Key> = keys
+            .iter()
+            .filter(|k| seen.insert((*k).clone()) && self.inner.index_of(k).is_some())
+            .cloned()
+            .collect();
+
         let removed = self.inner.remove_by_keys(keys);
-        self.pending_changes.push(CollectionChange::Remove { keys: keys.to_vec() });
+
+        if !matched_keys.is_empty() {
+            self.pending_changes
+                .push(CollectionChange::Remove { keys: matched_keys });
+        }
         removed
     }
 
-    /// Move an item from one index to another.
-    pub fn move_item(&mut self, key: &Key, to_index: usize) {
-        if let Some(from_index) = self.inner.index_of(key) {
-            self.inner.move_item(from_index, to_index);
-            self.pending_changes.push(CollectionChange::Move {
-                key: key.clone(),
-                from_index,
-                to_index,
-            });
-        }
+    /// Move an item from one index to another. Returns
+    /// `Some((from_flat_index, to_flat_index))` on success, or `None` if
+    /// `key` is not present. Emits `Move` only on success.
+    pub fn move_item(&mut self, key: &Key, to_index: usize) -> Option<(usize, usize)> {
+        let from_index = self.inner.index_of(key)?;
+        self.inner.move_item(from_index, to_index);
+        self.pending_changes.push(CollectionChange::Move {
+            key: key.clone(),
+            from_index,
+            to_index,
+        });
+        Some((from_index, to_index))
     }
 
-    /// Replace an item's data in-place (key must match).
-    pub fn replace(&mut self, item: T) {
+    /// Replace an item's data in-place. Returns the previous value at
+    /// `item.key()` on success, or `None` if the key is not present **or**
+    /// the existing node is structural (Section/Header/Separator) and
+    /// carries no item payload. Emits `Replace` only on success — never
+    /// silently promotes a structural node to an item.
+    pub fn replace(&mut self, item: T) -> Option<T> {
         let key = item.key().clone();
-        self.inner.replace(item);
-        self.pending_changes.push(CollectionChange::Replace { key });
+        let old = self.inner.replace(item);
+        if old.is_some() {
+            self.pending_changes.push(CollectionChange::Replace { key });
+        }
+        old
     }
 
-    /// Remove all items.
+    /// Remove all items and emit a single `Reset`. Any earlier pending
+    /// events queued in this update cycle are discarded before the reset
+    /// is pushed: `Insert { index, count }` carries no payload, so adapters
+    /// cannot meaningfully replay it against the now-empty collection, and
+    /// `Reset` already implies a full re-render anyway. The buffer is
+    /// therefore guaranteed to be exactly `[Reset]` after `clear()`.
     pub fn clear(&mut self) {
         self.inner.clear();
+        self.pending_changes.clear();
         self.pending_changes.push(CollectionChange::Reset);
     }
 
@@ -847,8 +958,9 @@ impl<T: CollectionItem> MutableListData<T> {
     }
 }
 
-impl<T: CollectionItem> Collection<T> for MutableListData<T> {
-    // Delegates all Collection trait methods to self.inner (StaticCollection<T>).
+// The `+ Clone` bound is required: `StaticCollection<T>: Collection<T>` is
+// itself gated on `T: Clone`, so delegation cannot compile without it.
+impl<T: CollectionItem + Clone> Collection<T> for MutableListData<T> {
     fn size(&self) -> usize { self.inner.size() }
     fn get(&self, key: &Key) -> Option<&Node<T>> { self.inner.get(key) }
     fn get_by_index(&self, index: usize) -> Option<&Node<T>> { self.inner.get_by_index(index) }
@@ -858,9 +970,18 @@ impl<T: CollectionItem> Collection<T> for MutableListData<T> {
     fn key_before(&self, key: &Key) -> Option<&Key> { self.inner.key_before(key) }
     fn key_after_no_wrap(&self, key: &Key) -> Option<&Key> { self.inner.key_after_no_wrap(key) }
     fn key_before_no_wrap(&self, key: &Key) -> Option<&Key> { self.inner.key_before_no_wrap(key) }
-    fn keys(&self) -> impl Iterator<Item = &Key> { self.inner.keys() }
-    fn nodes(&self) -> impl Iterator<Item = &Node<T>> { self.inner.nodes() }
-    fn children_of(&self, parent_key: &Key) -> impl Iterator<Item = &Node<T>> { self.inner.children_of(parent_key) }
+
+    fn keys<'a>(&'a self) -> impl Iterator<Item = &'a Key>
+    where T: 'a,
+    { self.inner.keys() }
+
+    fn nodes<'a>(&'a self) -> impl Iterator<Item = &'a Node<T>>
+    where T: 'a,
+    { self.inner.nodes() }
+
+    fn children_of<'a>(&'a self, parent_key: &Key) -> impl Iterator<Item = &'a Node<T>>
+    where T: 'a,
+    { self.inner.children_of(parent_key) }
 }
 ```
 
@@ -868,62 +989,363 @@ impl<T: CollectionItem> Collection<T> for MutableListData<T> {
 
 `MutableTreeData<T>` wraps a `TreeCollection<T>` with tree-specific mutations including reparenting.
 
+`MutableTreeData` inherits all four design constraints from §1.8.2 (inherent methods only require `CollectionItem`; `Collection<T>` delegation requires `CollectionItem + Clone`; iterator methods carry `<'a>` lifetime parameters; a manual `Debug` impl avoids forcing `T: Debug`). The truthful-change-log contract from §1.8.2 applies identically.
+
+##### Return-value contract for tree mutations
+
+Every mutation method in `MutableTreeData` — `insert_child`, `reparent`, `reorder`, `replace`, `remove` — follows the same pattern:
+
+- The inner `TreeCollection` mutation method (see §2.3) returns an `Option` communicating whether the mutation took effect, and carrying the flat DFS index(es) the caller needs to make further bookkeeping decisions.
+- The wrapper forwards that `Option` unchanged as its own return value.
+- The wrapper pushes a `CollectionChange` into `pending_changes` **only** when the inner call returned `Some(_)` **and** the change has a visible-iteration footprint (see "Visibility-aware change events" below).
+
+Failure modes the `Option` captures:
+
+| Method         | `None` when                                                                                        |
+| -------------- | -------------------------------------------------------------------------------------------------- |
+| `insert_child` | `parent` is `Some(k)` and `k` is unknown                                                           |
+| `reparent`     | `key` unknown, `new_parent` is `Some(k)` and `k` unknown, or `new_parent` is a descendant of `key` |
+| `reorder`      | `key` unknown                                                                                      |
+| `replace`      | `item.key()` unknown                                                                               |
+
+This mirrors `HashMap::insert` in idiom: the return value tells the caller whether the operation happened and, when applicable, what changed. Callers that know the precondition holds can ignore the return; callers that need to react to failure can match on `Option::None` without a separate `contains_key` probe.
+
+##### Visibility-aware change events
+
+`Collection::nodes` and `Collection::get_by_index` iterate the **visible** subset of a tree — items inside a collapsed ancestor are excluded. Adapters drive DOM reconciliation against that visible iteration, so `CollectionChange` events emitted by `MutableTreeData` describe **visible-iteration changes**, not raw `all_nodes` mutations. Specifically:
+
+- All indices in `Insert { index, .. }` and `Move { from_index, to_index, .. }` are **visible iteration indices** (the position the adapter would obtain from `Collection::get_by_index`), never flat DFS indices into `all_nodes`.
+- Mutations confined to a hidden subtree (e.g. `insert_child` under a collapsed parent, or `reorder` of two hidden siblings) emit **no event** — the adapter has nothing to render and the inner state will surface naturally when the ancestor is later expanded.
+- Mutations that cross visibility (`reparent` from a visible parent into a hidden one, or vice versa) are translated into the matching DOM-shaped event (`Remove` or `Insert`) instead of `Move`, and the event covers the **entire subtree** that crossed the boundary — `Remove` carries every previously-visible key in DFS order, and `Insert` reports `count` equal to the number of newly-visible nodes — because every visible descendant disappears or appears alongside the moved root. See `reparent` below for the full table.
+- Mutations that flip a still-visible parent's `has_children` flag (and therefore its `is_expanded` state) emit a `Replace { key: parent_key }` alongside the subtree event (if any). This covers `insert_child` turning a visible leaf into a collapsed branch, `remove` draining a visible branch's last remaining child, and `reparent` doing either transition on the old and new parents in any combination. Parents that are themselves hidden are skipped — their rendered state cannot be stale because their row isn't drawn — so the change log stays truthful. `Replace` events are emitted **after** the subtree event (if any) in pre-mutation DFS order.
+
+This contract keeps the change log "truthful" in the sense already required for failure modes: every event corresponds to a DOM operation the adapter must perform. Hidden-only churn does not generate phantom events that an adapter would have to filter or no-op.
+
 ```rust
 /// A mutable tree collection that tracks granular changes.
+///
+/// Wraps a `TreeCollection` and records every mutation — including
+/// reparenting and sibling reordering — as a `CollectionChange` using flat
+/// DFS indices. The adapter drains the buffer via `drain_changes()` each
+/// update cycle.
 pub struct MutableTreeData<T: CollectionItem> {
+    /// The inner tree holding the canonical hierarchy.
     inner: TreeCollection<T>,
+    /// Pending change events to be drained by the adapter layer.
     pending_changes: Vec<CollectionChange<Key>>,
 }
 
+/// Manual `Debug` avoids requiring `T: Debug`, matching `TreeCollection`'s
+/// approach. Prints the inner tree and pending-change count only.
+impl<T: CollectionItem> core::fmt::Debug for MutableTreeData<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("MutableTreeData")
+            .field("inner", &self.inner)
+            .field("pending_changes", &self.pending_changes.len())
+            .finish()
+    }
+}
+
 impl<T: CollectionItem> MutableTreeData<T> {
-    /// Create from an existing tree collection.
-    pub fn new(collection: TreeCollection<T>) -> Self {
+    /// Create from an existing tree collection. The change buffer starts
+    /// empty — construction is not itself reported as a change.
+    #[must_use]
+    pub const fn new(collection: TreeCollection<T>) -> Self {
         Self { inner: collection, pending_changes: Vec::new() }
     }
 
-    /// Insert a child under the given parent at the specified index.
-    /// Use `parent: None` for root-level insertion.
-    pub fn insert_child(&mut self, parent: Option<&Key>, index: usize, item: T) {
-        let flat_index = self.inner.insert_child(parent, index, item);
-        self.pending_changes.push(CollectionChange::Insert { index: flat_index, count: 1 });
+    /// Insert a child under the given parent at the specified sibling
+    /// index (or at the root when `parent` is `None`). Returns the flat
+    /// DFS index of the inserted node on success, or `None` when the
+    /// inner call rejected the insert (unknown parent).
+    ///
+    /// Emits at most one of:
+    ///
+    /// * `Insert { index: visible_index, count: 1 }` — when the new
+    ///   child lands in the visible iteration. A hidden insert (one
+    ///   under a collapsed ancestor) emits no `Insert`; the hidden
+    ///   node surfaces naturally when an ancestor later expands and
+    ///   the adapter re-fetches the expanded subtree.
+    /// * `Replace { key: parent_key }` — when the parent flipped from
+    ///   leaf to collapsed branch. `TreeCollection::insert_child` sets
+    ///   `has_children = true` and `is_expanded = Some(false)` on a
+    ///   previously-leaf parent, which adapters key DOM off (expander
+    ///   chevron, `aria-expanded`). The transition only needs
+    ///   surfacing when the parent is itself visible — a hidden
+    ///   parent's row is not rendered, so the metadata change is
+    ///   invisible until an ancestor expands.
+    ///
+    /// The two events are mutually exclusive: a leaf parent always
+    /// becomes collapsed, so its new child is hidden and never
+    /// produces an `Insert`; an already-expanded branch parent keeps
+    /// its visible state and surfaces the new child via `Insert`
+    /// alone.
+    pub fn insert_child(
+        &mut self,
+        parent: Option<&Key>,
+        index: usize,
+        item: T,
+    ) -> Option<usize> {
+        let key = item.key().clone();
+        // Snapshot whether the parent (if any) is currently a visible
+        // leaf, before the inner call flips its `has_children` /
+        // `is_expanded` metadata.
+        let visible_leaf_parent = parent.filter(|p| {
+            self.inner.visible_index_of(p).is_some() && !self.inner.has_children(p)
+        });
+        let flat_index = self.inner.insert_child(parent, index, item)?;
+        if let Some(visible_index) = self.inner.visible_index_of(&key) {
+            self.pending_changes
+                .push(CollectionChange::Insert { index: visible_index, count: 1 });
+        } else if let Some(parent_key) = visible_leaf_parent {
+            // Hidden child + previously-visible-leaf parent → the
+            // parent is now a collapsed branch and needs its rendered
+            // chevron / `aria-expanded` updated. Emit Replace so a
+            // reconciler that consumes only `CollectionChange` picks
+            // up the new metadata.
+            self.pending_changes
+                .push(CollectionChange::Replace { key: parent_key.clone() });
+        }
+        Some(flat_index)
     }
 
-    /// Remove a node and all its descendants.
+    /// Remove the listed nodes (and their descendants); returns the
+    /// removed item values.
+    ///
+    /// Emits up to two kinds of event, in this order:
+    ///
+    /// * `Remove` — carrying every key that disappeared from the
+    ///   **visible iteration** as a result of the call: input keys
+    ///   that matched, cascade-removed visible descendants, and any
+    ///   structural node (`Section` / `Header` / `Separator`) that
+    ///   carries no payload. Hidden nodes (inside a collapsed
+    ///   ancestor) were never rendered, so they stay out of the
+    ///   change event — emitting them would force the adapter to
+    ///   no-op and pollute the truthful change log.
+    /// * `Replace { key: parent_key }` — one event per still-visible
+    ///   parent whose `has_children` flipped from `true` to `false`
+    ///   as a side effect of the removal. The inner tree flips
+    ///   `has_children: true → false` and `is_expanded: Some(_) → None`
+    ///   on a node the moment its last remaining child (visible *or*
+    ///   hidden) is removed; adapters key expander chevrons and
+    ///   `aria-expanded` off those flags, so the parent row must be
+    ///   re-rendered even when none of its visible children appeared
+    ///   in the `Remove` event. Parents that are themselves hidden
+    ///   are skipped — their row isn't drawn. `Replace` events are
+    ///   emitted in pre-mutation DFS order.
+    ///
+    /// The `Remove` diff is computed against `visible_keys()` before
+    /// and after the inner mutation rather than from the returned
+    /// `Vec<T>`, both to capture cascaded descendants and to surface
+    /// structural removals that have no payload to enumerate. The
+    /// branch→leaf detection reuses the same pre-mutation snapshot.
     pub fn remove(&mut self, keys: &[Key]) -> Vec<T> {
+        // Capture visible iteration order in a `Vec` (not a
+        // `BTreeSet`) so the change event preserves DFS order, and
+        // snapshot branch/leaf state alongside so the post-mutation
+        // loop can detect parents that lost their last child.
+        let visible_before: Vec<Key> = self.inner.visible_keys().cloned().collect();
+        let visible_before_has_children: BTreeMap<Key, bool> = visible_before
+            .iter()
+            .map(|k| (k.clone(), self.inner.has_children(k)))
+            .collect();
         let removed = self.inner.remove_by_keys(keys);
-        self.pending_changes.push(CollectionChange::Remove { keys: keys.to_vec() });
+        let visible_after: BTreeSet<Key> =
+            self.inner.visible_keys().cloned().collect();
+        let visible_removed_keys: Vec<Key> = visible_before
+            .iter()
+            .filter(|k| !visible_after.contains(*k))
+            .cloned()
+            .collect();
+        if !visible_removed_keys.is_empty() {
+            self.pending_changes
+                .push(CollectionChange::Remove { keys: visible_removed_keys });
+        }
+        // Emit Replace for any still-visible parent whose
+        // `has_children` flipped true → false. Removal can only lose
+        // children, never gain them, so the leaf → branch direction
+        // is not considered here. Iterating `visible_before` keeps
+        // emission order DFS-stable and matches how the Remove event
+        // itself is ordered.
+        for k in &visible_before {
+            if !visible_after.contains(k) {
+                continue;
+            }
+            let was_branch = visible_before_has_children
+                .get(k).copied().unwrap_or(false);
+            if was_branch && !self.inner.has_children(k) {
+                self.pending_changes
+                    .push(CollectionChange::Replace { key: k.clone() });
+            }
+        }
         removed
     }
 
-    /// Move a node to a new parent (reparent). The node keeps its subtree.
-    pub fn reparent(&mut self, key: &Key, new_parent: Option<&Key>, index: usize) {
-        let from_index = self.inner.flat_index_of(key).expect("key must exist");
-        self.inner.reparent(key, new_parent, index);
-        let to_index = self.inner.flat_index_of(key).expect("key must exist after reparent");
-        self.pending_changes.push(CollectionChange::Move {
-            key: key.clone(),
-            from_index,
-            to_index,
-        });
+    /// Move a node (with its subtree) to a new parent. Returns
+    /// `Some((from_flat_index, to_flat_index))` on success; `None` when
+    /// the move is rejected (see §2.3 and the table above).
+    ///
+    /// ## Subtree visibility
+    ///
+    /// Visibility may differ between the old and new locations — and a
+    /// single move can flip visibility for every descendant in the
+    /// subtree, not just the moved root — so the subtree event is
+    /// chosen to describe the DOM impact precisely:
+    ///
+    /// | From visible | To visible | Subtree event emitted                                                        |
+    /// | ------------ | ---------- | ---------------------------------------------------------------------------- |
+    /// | yes          | yes        | `Move { key, from: vis_from, to: vis_to }`                                   |
+    /// | yes          | no         | `Remove { keys: <previously-visible subtree keys, DFS order> }`              |
+    /// | no           | yes        | `Insert { index: vis_to, count: <number of newly-visible subtree nodes> }`   |
+    /// | no           | no         | *(no subtree event)*                                                         |
+    ///
+    /// Indices are visible iteration indices, not flat DFS indices. The
+    /// `Insert` always spans `count` consecutive positions starting at
+    /// `to_index`. Emitting only `[key]` for visible→hidden, or
+    /// `count: 1` for hidden→visible, would leave keyed reconcilers
+    /// with orphan descendant rows or miscounted indices.
+    ///
+    /// ## Parent metadata transitions
+    ///
+    /// Reparenting can also flip `has_children` on the old and new
+    /// parents independently of the moved subtree's visibility:
+    ///
+    /// * the old parent transitions branch → leaf when the moved node
+    ///   was its only remaining child (`has_children: true → false`,
+    ///   `is_expanded: Some(_) → None`);
+    /// * the new parent transitions leaf → collapsed branch when it
+    ///   had no children before (`has_children: false → true`,
+    ///   `is_expanded: None → Some(false)`).
+    ///
+    /// These transitions change the parent row's rendered state
+    /// (expander chevron, `aria-expanded`) without moving the row, so
+    /// each still-visible parent that flipped receives a
+    /// `Replace { key: parent }` event emitted **after** the subtree
+    /// event in pre-mutation DFS order. Parents that are themselves
+    /// hidden are skipped. The moved key itself cannot flip
+    /// `has_children` through a reparent — the subtree moves as a
+    /// unit — so no `Replace` for the moved key is ever emitted.
+    pub fn reparent(
+        &mut self,
+        key: &Key,
+        new_parent: Option<&Key>,
+        index: usize,
+    ) -> Option<(usize, usize)> {
+        // Snapshot the pre-mutation visible iteration and branch/leaf
+        // state. The visibility-crossing branches compare visible-
+        // before vs visible-after to capture subtree descendants that
+        // flipped — only the moved subtree's visibility can change,
+        // so the set difference is exactly the subtree delta. The
+        // same snapshot doubles as a membership set for the
+        // hidden→visible count and as the source of pre-mutation
+        // `has_children` state for the parent-transition detection.
+        let visible_before: Vec<Key> = self.inner.visible_keys().cloned().collect();
+        let visible_before_has_children: BTreeMap<Key, bool> = visible_before
+            .iter()
+            .map(|k| (k.clone(), self.inner.has_children(k)))
+            .collect();
+        let from_visible = self.inner.visible_index_of(key);
+        let (from_flat, to_flat) = self.inner.reparent(key, new_parent, index)?;
+        let to_visible = self.inner.visible_index_of(key);
+        let visible_after: BTreeSet<Key> =
+            self.inner.visible_keys().cloned().collect();
+        match (from_visible, to_visible) {
+            (Some(from_index), Some(to_index)) => {
+                self.pending_changes.push(CollectionChange::Move {
+                    key: key.clone(), from_index, to_index,
+                });
+            }
+            (Some(_), None) => {
+                // Root + every visible descendant disappears together
+                // under the collapsed new parent. Remove must list all
+                // of them in pre-mutation DFS order.
+                let removed_keys: Vec<Key> = visible_before
+                    .iter()
+                    .filter(|k| !visible_after.contains(*k))
+                    .cloned()
+                    .collect();
+                self.pending_changes.push(CollectionChange::Remove {
+                    keys: removed_keys,
+                });
+            }
+            (None, Some(to_index)) => {
+                // Root + descendants whose internal expansion keeps
+                // them visible at the new location appear in `count`
+                // consecutive positions starting at `to_index`.
+                // Reuse `visible_before_has_children` as a membership
+                // set — `contains_key` is O(log n) and avoids a
+                // second allocation.
+                let count = self
+                    .inner
+                    .visible_keys()
+                    .filter(|k| !visible_before_has_children.contains_key(*k))
+                    .count();
+                self.pending_changes.push(CollectionChange::Insert {
+                    index: to_index, count,
+                });
+            }
+            (None, None) => {} // both endpoints hidden, no subtree event
+        }
+        // Emit Replace for any still-visible key whose `has_children`
+        // flipped in either direction. This loop surfaces the old
+        // parent losing its last child (branch → leaf) and the new
+        // parent gaining its first child (leaf → branch). The moved
+        // key's own `has_children` is invariant under reparent, so
+        // even if it appears in both visible sets the branch-state
+        // comparison short-circuits.
+        for k in &visible_before {
+            if !visible_after.contains(k) {
+                continue;
+            }
+            let was_branch = visible_before_has_children
+                .get(k).copied().unwrap_or(false);
+            let is_branch = self.inner.has_children(k);
+            if was_branch != is_branch {
+                self.pending_changes
+                    .push(CollectionChange::Replace { key: k.clone() });
+            }
+        }
+        Some((from_flat, to_flat))
     }
 
-    /// Reorder a node among its siblings (same parent).
-    pub fn reorder(&mut self, key: &Key, to_sibling_index: usize) {
-        let from_index = self.inner.flat_index_of(key).expect("key must exist");
-        self.inner.reorder_sibling(key, to_sibling_index);
-        let to_index = self.inner.flat_index_of(key).expect("key must exist after reorder");
-        self.pending_changes.push(CollectionChange::Move {
-            key: key.clone(),
-            from_index,
-            to_index,
-        });
+    /// Reorder a node among its existing siblings. Returns
+    /// `Some((from_flat_index, to_flat_index))` on success; `None` when
+    /// `key` is unknown.
+    ///
+    /// Reordering preserves the parent and therefore preserves
+    /// visibility — either both endpoints are visible (parent expanded)
+    /// or both are hidden (parent collapsed). When visible, emits
+    /// `Move` using **visible iteration indices**; when hidden, emits
+    /// no event.
+    pub fn reorder(
+        &mut self,
+        key: &Key,
+        to_sibling_index: usize,
+    ) -> Option<(usize, usize)> {
+        let from_visible = self.inner.visible_index_of(key);
+        let (from_flat, to_flat) = self.inner.reorder_sibling(key, to_sibling_index)?;
+        if let (Some(from_index), Some(to_index)) =
+            (from_visible, self.inner.visible_index_of(key))
+        {
+            self.pending_changes.push(CollectionChange::Move {
+                key: key.clone(), from_index, to_index,
+            });
+        }
+        Some((from_flat, to_flat))
     }
 
-    /// Replace a node's data in-place (key must match, children preserved).
-    pub fn replace(&mut self, item: T) {
+    /// Replace a node's data in place (children preserved). Returns the
+    /// previous value at `item.key()` on success, or `None` when the key
+    /// is unknown **or** the existing node carries no item payload.
+    /// Emits `Replace` only on success — never silently promotes a
+    /// structural node to an item.
+    pub fn replace(&mut self, item: T) -> Option<T> {
         let key = item.key().clone();
-        self.inner.replace(item);
-        self.pending_changes.push(CollectionChange::Replace { key });
+        let old = self.inner.replace(item);
+        if old.is_some() {
+            self.pending_changes.push(CollectionChange::Replace { key });
+        }
+        old
     }
 
     /// Drain pending changes.
@@ -932,8 +1354,9 @@ impl<T: CollectionItem> MutableTreeData<T> {
     }
 }
 
-impl<T: CollectionItem> Collection<T> for MutableTreeData<T> {
-    // Delegates all Collection trait methods to self.inner (TreeCollection<T>).
+// The `+ Clone` bound is required: `TreeCollection<T>: Collection<T>` is
+// itself gated on `T: Clone`, so delegation cannot compile without it.
+impl<T: CollectionItem + Clone> Collection<T> for MutableTreeData<T> {
     fn size(&self) -> usize { self.inner.size() }
     fn get(&self, key: &Key) -> Option<&Node<T>> { self.inner.get(key) }
     fn get_by_index(&self, index: usize) -> Option<&Node<T>> { self.inner.get_by_index(index) }
@@ -943,9 +1366,18 @@ impl<T: CollectionItem> Collection<T> for MutableTreeData<T> {
     fn key_before(&self, key: &Key) -> Option<&Key> { self.inner.key_before(key) }
     fn key_after_no_wrap(&self, key: &Key) -> Option<&Key> { self.inner.key_after_no_wrap(key) }
     fn key_before_no_wrap(&self, key: &Key) -> Option<&Key> { self.inner.key_before_no_wrap(key) }
-    fn keys(&self) -> impl Iterator<Item = &Key> { self.inner.keys() }
-    fn nodes(&self) -> impl Iterator<Item = &Node<T>> { self.inner.nodes() }
-    fn children_of(&self, parent_key: &Key) -> impl Iterator<Item = &Node<T>> { self.inner.children_of(parent_key) }
+
+    fn keys<'a>(&'a self) -> impl Iterator<Item = &'a Key>
+    where T: 'a,
+    { self.inner.keys() }
+
+    fn nodes<'a>(&'a self) -> impl Iterator<Item = &'a Node<T>>
+    where T: 'a,
+    { self.inner.nodes() }
+
+    fn children_of<'a>(&'a self, parent_key: &Key) -> impl Iterator<Item = &'a Node<T>>
+    where T: 'a,
+    { self.inner.children_of(parent_key) }
 }
 ```
 
@@ -1347,12 +1779,19 @@ impl<T: CollectionItem> StaticCollection<T> {
         removed
     }
 
-    /// Replace an item's data (matched by key).
-    pub fn replace(&mut self, item: T) {
-        let key = item.key().clone();
-        if let Some(&idx) = self.key_to_index.get(&key) {
-            self.nodes[idx].value = Some(item);
+    /// Replace an item's data (matched by key). Returns the previous
+    /// value on success, or `None` if the key is unknown **or** the
+    /// existing node is structural (Section/Header/Separator) and carries
+    /// no item payload — in either failure case `item` is dropped and the
+    /// collection is unchanged. Structural nodes are never silently
+    /// promoted to items.
+    pub fn replace(&mut self, item: T) -> Option<T> {
+        let idx = *self.key_to_index.get(item.key())?;
+        let value_slot = &mut self.nodes[idx].value;
+        if value_slot.is_none() {
+            return None;
         }
+        value_slot.replace(item)
     }
 
     /// Remove all items.
@@ -1812,13 +2251,19 @@ impl<T: CollectionItem> TreeCollection<T> {
     /// (or among root nodes when `parent` is `None`). The node is inserted
     /// into `all_nodes` at the correct DFS position and indices are rebuilt.
     ///
-    /// If `parent` is `Some` but the key does not exist in the tree, the
-    /// operation is a no-op to avoid creating dangling parent references.
-    pub fn insert_child(&mut self, parent: Option<&Key>, sibling_index: usize, item: T) {
+    /// Returns the flat DFS index of the inserted node on success, or
+    /// `None` if `parent` is `Some(k)` and `k` is not present in the tree
+    /// (rejected to avoid creating dangling parent references).
+    pub fn insert_child(
+        &mut self,
+        parent: Option<&Key>,
+        sibling_index: usize,
+        item: T,
+    ) -> Option<usize> {
         // Reject inserts under a nonexistent parent.
         if let Some(pk) = parent {
             if !self.key_to_index.contains_key(pk) {
-                return;
+                return None;
             }
         }
 
@@ -1861,6 +2306,9 @@ impl<T: CollectionItem> TreeCollection<T> {
         }
 
         self.rebuild_indices();
+
+        // After rebuild, key_to_index points at the freshly inserted node.
+        self.key_to_index.get(&key).copied()
     }
 
     /// Remove items by key (and their entire subtrees).
@@ -1908,30 +2356,77 @@ impl<T: CollectionItem> TreeCollection<T> {
         removed
     }
 
-    /// Get the flat index of a node by key.
+    /// Get the flat (DFS) index of a node by key. Includes nodes hidden
+    /// inside collapsed subtrees. For DOM reconciliation, use
+    /// `visible_index_of` instead.
     pub fn flat_index_of(&self, key: &Key) -> Option<usize> {
         self.key_to_index.get(key).copied()
     }
 
+    /// Returns `true` when the node at `key` currently has at least one
+    /// child (i.e. it is a branch, not a leaf), or `false` when the
+    /// node is a leaf or the key is unknown. Inherent twin of
+    /// `Collection::get(&node).has_children` that drops the `T: Clone`
+    /// bound, so `MutableTreeData::insert_child` can detect a leaf →
+    /// branch transition before calling the inner mutation.
+    #[must_use]
+    pub fn has_children(&self, key: &Key) -> bool {
+        self.key_to_index
+            .get(key)
+            .is_some_and(|&i| self.all_nodes[i].has_children)
+    }
+
+    /// Get the visible iteration index of a node by key, or `None` when
+    /// the key is unknown or the node sits inside a collapsed ancestor
+    /// (and is therefore hidden from `Collection::nodes` /
+    /// `Collection::get_by_index`). `MutableTreeData` uses this to emit
+    /// visibility-correct change events.
+    pub fn visible_index_of(&self, key: &Key) -> Option<usize> {
+        let flat = self.flat_index_of(key)?;
+        // `visible_indices` is sorted ascending, so binary search is
+        // correct and faster than a linear scan for large trees.
+        self.visible_indices.binary_search(&flat).ok()
+    }
+
+    /// Iterate the visible keys of the tree in DFS order. Inherent twin
+    /// of `Collection::keys` that drops the `T: Clone` bound, so it can
+    /// be called from `MutableTreeData`'s mutation methods (which only
+    /// require `T: CollectionItem`).
+    pub fn visible_keys(&self) -> impl Iterator<Item = &Key> {
+        self.visible_indices.iter().map(|&i| &self.all_nodes[i].key)
+    }
+
     /// Move a node (and its subtree) to a new parent at the given child index.
     ///
-    /// If `new_parent` is `Some` but the key does not exist in the tree
-    /// (or is a descendant of the node being moved), the operation is a
-    /// no-op to avoid creating dangling parent references.
-    pub fn reparent(&mut self, key: &Key, new_parent: Option<&Key>, sibling_index: usize) {
+    /// Returns `Some((from_flat_index, to_flat_index))` on success, or
+    /// `None` if the move was rejected. Rejection happens when `key` is
+    /// unknown, `new_parent` is `Some(k)` and `k` is unknown, or
+    /// `new_parent` is a descendant of the node being moved (would create
+    /// a cycle; detected after extraction — the subtree is restored to its
+    /// original position so the tree stays well-formed).
+    pub fn reparent(
+        &mut self,
+        key: &Key,
+        new_parent: Option<&Key>,
+        sibling_index: usize,
+    ) -> Option<(usize, usize)> {
         // Validate new_parent exists before extraction.
         if let Some(pk) = new_parent {
             if !self.key_to_index.contains_key(pk) {
-                return;
+                return None;
             }
         }
+
+        // Capture the node's current flat index before extraction; used in
+        // both the success return and the descendant-rejection restore path.
+        let from_index = *self.key_to_index.get(key)?;
 
         // Save old parent key before extraction for metadata cleanup.
         let old_parent_key = self.parent_of(key).cloned();
 
         // Extract the subtree.
         let subtree = self.extract_subtree(key);
-        if subtree.is_empty() { return; }
+        if subtree.is_empty() { return None; }
 
         // Reject reparenting under a descendant of the moved node.
         // After extraction the descendant is no longer in the tree.
@@ -1942,7 +2437,7 @@ impl<T: CollectionItem> TreeCollection<T> {
                     self.all_nodes.insert(insert_pos + offset, node);
                 }
                 self.rebuild_indices();
-                return;
+                return None;
             }
         }
 
@@ -1993,13 +2488,25 @@ impl<T: CollectionItem> TreeCollection<T> {
             self.all_nodes.insert(flat_pos + offset, node);
         }
         self.rebuild_indices();
+
+        let to_index = *self.key_to_index.get(key)?;
+        Some((from_index, to_index))
     }
 
     /// Reorder a node among its siblings to the given sibling index.
-    pub fn reorder_sibling(&mut self, key: &Key, to_sibling_index: usize) {
+    ///
+    /// Returns `Some((from_flat_index, to_flat_index))` on success, or
+    /// `None` if `key` does not exist in the tree.
+    pub fn reorder_sibling(
+        &mut self,
+        key: &Key,
+        to_sibling_index: usize,
+    ) -> Option<(usize, usize)> {
+        let from_index = *self.key_to_index.get(key)?;
+
         let parent_key = self.parent_of(key).cloned();
         let subtree = self.extract_subtree(key);
-        if subtree.is_empty() { return; }
+        if subtree.is_empty() { return None; }
 
         // Rebuild indices after extraction so flat_insert_position uses valid state.
         self.rebuild_indices();
@@ -2009,14 +2516,23 @@ impl<T: CollectionItem> TreeCollection<T> {
             self.all_nodes.insert(flat_pos + offset, node);
         }
         self.rebuild_indices();
+
+        let to_index = *self.key_to_index.get(key)?;
+        Some((from_index, to_index))
     }
 
-    /// Replace an item's data (matched by key).
-    pub fn replace(&mut self, item: T) {
-        let key = item.key().clone();
-        if let Some(&idx) = self.key_to_index.get(&key) {
-            self.all_nodes[idx].value = Some(item);
+    /// Replace an item's data (matched by key). Returns the previous
+    /// value on success, or `None` if the key is unknown **or** the
+    /// existing node carries no item payload (a structural node).
+    /// Children are preserved — only the node's payload is swapped.
+    /// Structural nodes are never silently promoted to items.
+    pub fn replace(&mut self, item: T) -> Option<T> {
+        let idx = *self.key_to_index.get(item.key())?;
+        let value_slot = &mut self.all_nodes[idx].value;
+        if value_slot.is_none() {
+            return None;
         }
+        value_slot.replace(item)
     }
 
     /// Return the parent key of a node, if any.
