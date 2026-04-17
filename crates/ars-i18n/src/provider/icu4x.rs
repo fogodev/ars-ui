@@ -123,20 +123,7 @@ impl IcuProvider for Icu4xProvider {
         let am_formatted = formatter.format(&am_time).to_string();
         let pm_formatted = formatter.format(&pm_time).to_string();
 
-        // Compute the AM- and PM-unique spans by peeling off the
-        // longest common prefix and suffix between the two formatted
-        // outputs. Whatever remains is the day-period marker by
-        // definition — decoration characters that appear in both
-        // strings (hour digits, colons, locale hour literals like
-        // `bg-BG`'s `ч.`, the Japanese `:` separator) are common and
-        // get stripped automatically. The approach was suggested by
-        // the Codex round-6 review and handles locales where the
-        // previous digit/separator filter left hour-literal fragments
-        // in the label (e.g., bg-BG surfacing `ч` as the first char
-        // of both AM and PM labels).
-        let (am_unique, pm_unique) = unique_span_diff(&am_formatted, &pm_formatted);
-        let unique = if is_pm { pm_unique } else { am_unique };
-        unique.trim().to_string()
+        extract_day_period_label(is_pm, &am_formatted, &pm_formatted)
     }
 
     fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
@@ -413,4 +400,94 @@ pub(crate) fn unique_span_diff<'a>(
         &am_formatted[prefix_len..am_end],
         &pm_formatted[prefix_len..pm_end],
     )
+}
+
+/// Returns the byte range covering the first contiguous Unicode-numeric
+/// run in `s`, or `None` when the string carries no digits.
+fn first_numeric_run_range(s: &str) -> Option<(usize, usize)> {
+    let start = s
+        .char_indices()
+        .find_map(|(i, c)| c.is_numeric().then_some(i))?;
+    let end = s[start..]
+        .char_indices()
+        .find_map(|(i, c)| (!c.is_numeric()).then_some(start + i))
+        .unwrap_or(s.len());
+    Some((start, end))
+}
+
+/// Returns the caller-facing day-period label for `is_pm`, given the
+/// `NoCalendarFormatter` outputs for the locale's 01:00 and 13:00
+/// reference times.
+///
+/// The label is surfaced at three precedence levels:
+///
+/// 1. **Label before the hour (CJK-style).** If both probes carry a
+///    numeric hour and the pre-hour segments differ, the label sits
+///    in front of the digits — e.g., Japanese `"午前1:00"` /
+///    `"午後1:00"` returns the full `"午前"` / `"午後"` rather than the
+///    unique-span-only `"前"` / `"後"`. This matters for user-visible
+///    rendering and keeps `day_period_from_char` honest: a single
+///    CJK character cannot disambiguate AM from PM because the labels
+///    share their first character, and `match_day_period_initial`
+///    correctly returns `None` for that case.
+///
+/// 2. **Label after the hour (Latin-style, with optional locale hour
+///    literals).** When the pre-hour segments match, the label sits
+///    after the digits. Bulgarian (`"1:00 ч. am"` / `"1:00 ч. pm"`)
+///    carries a shared decoration (`"ч. "`) that must be stripped,
+///    leaving the unique tail `"am"` / `"pm"`. We walk forward through
+///    the post-hour tails, skip the longest common prefix, and return
+///    what remains on the requested side.
+///
+/// 3. **Fallback: [`unique_span_diff`].** For exotic layouts where
+///    neither side cleanly carries the full label, we fall back to
+///    the prefix/suffix-stripping heuristic that previously handled
+///    every case. This keeps obscure locales working while the
+///    split-around-digits path handles the common locales correctly.
+pub(crate) fn extract_day_period_label(
+    is_pm: bool,
+    am_formatted: &str,
+    pm_formatted: &str,
+) -> String {
+    let selected = if is_pm { pm_formatted } else { am_formatted };
+
+    if let (Some((am_start, am_end)), Some((pm_start, pm_end))) = (
+        first_numeric_run_range(am_formatted),
+        first_numeric_run_range(pm_formatted),
+    ) {
+        let am_before = am_formatted[..am_start].trim();
+        let pm_before = pm_formatted[..pm_start].trim();
+        let selected_start = if is_pm { pm_start } else { am_start };
+        let selected_before = selected[..selected_start].trim();
+
+        if !selected_before.is_empty() && am_before != pm_before {
+            return selected_before.to_string();
+        }
+
+        let am_after_raw = am_formatted[am_end..].trim_start();
+        let pm_after_raw = pm_formatted[pm_end..].trim_start();
+
+        let mut common_prefix_len = 0_usize;
+        for (ach, pch) in am_after_raw.chars().zip(pm_after_raw.chars()) {
+            if ach != pch {
+                break;
+            }
+            common_prefix_len += ach.len_utf8();
+        }
+
+        let am_tail = am_after_raw[common_prefix_len..].trim();
+        let pm_tail = pm_after_raw[common_prefix_len..].trim();
+
+        if !am_tail.is_empty() && !pm_tail.is_empty() && am_tail != pm_tail {
+            return if is_pm {
+                pm_tail.to_string()
+            } else {
+                am_tail.to_string()
+            };
+        }
+    }
+
+    let (am_unique, pm_unique) = unique_span_diff(am_formatted, pm_formatted);
+    let unique = if is_pm { pm_unique } else { am_unique };
+    unique.trim().to_string()
 }

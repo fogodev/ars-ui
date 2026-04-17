@@ -543,3 +543,99 @@ fn icu4x_default_provider_under_icu4x_feature() {
         "default_provider() under icu4x should return Japanese labels; got {label:?}"
     );
 }
+
+#[test]
+fn icu4x_extract_day_period_label_keeps_full_cjk_labels() {
+    // Regression (Codex PR #563 comment 3103414396, P2): the previous
+    // `unique_span_diff`-only path returned the unique *differing
+    // character* (`前` / `後`) for Japanese instead of the full CLDR
+    // label (`午前` / `午後`), because the leading `午` sat in the
+    // shared prefix. Surfacing only the differing character broke
+    // user-visible rendering and also made `day_period_from_char('前')`
+    // resolve to AM unconditionally — contrary to the CJK-ambiguity
+    // contract.
+    //
+    // The new split-around-digit strategy keeps the complete
+    // before-hour label when it differs between the two probes.
+    use crate::provider::icu4x::extract_day_period_label;
+
+    let am = extract_day_period_label(false, "午前1:00", "午後1:00");
+    let pm = extract_day_period_label(true, "午前1:00", "午後1:00");
+    assert_eq!(am, "午前", "AM CJK-style label must be returned whole");
+    assert_eq!(pm, "午後", "PM CJK-style label must be returned whole");
+}
+
+#[test]
+fn icu4x_extract_day_period_label_handles_post_hour_latin_labels() {
+    // English `"1:00 AM"` / `"1:00 PM"` — label follows the hour and
+    // is the only differing segment. The extractor must return the
+    // trimmed bare label (`AM` / `PM`) and not lose characters to a
+    // common-prefix collapse.
+    use crate::provider::icu4x::extract_day_period_label;
+
+    let am = extract_day_period_label(false, "1:00 AM", "1:00 PM");
+    let pm = extract_day_period_label(true, "1:00 AM", "1:00 PM");
+    assert_eq!(am, "AM");
+    assert_eq!(pm, "PM");
+}
+
+#[test]
+fn icu4x_extract_day_period_label_strips_shared_locale_hour_literal() {
+    // `bg-BG` 12-hour probes: the label follows the hour with a
+    // shared decoration (`"ч. "`, the Bulgarian "o'clock" literal)
+    // that must be stripped before the differing tail is returned.
+    use crate::provider::icu4x::extract_day_period_label;
+
+    let am = extract_day_period_label(false, "1:00 ч. am", "1:00 ч. pm");
+    let pm = extract_day_period_label(true, "1:00 ч. am", "1:00 ч. pm");
+    assert_eq!(am, "am");
+    assert_eq!(pm, "pm");
+}
+
+#[test]
+fn icu4x_extract_day_period_label_falls_back_to_span_diff_when_hour_missing() {
+    // Synthetic edge case: no numeric hour in either probe (would
+    // never happen in practice for CLDR 12-hour output, but the
+    // fallback must still work for defensive coverage). The pre/
+    // post-digit split fails, so the extractor falls back to the
+    // unique-span-diff heuristic that handled every case before this
+    // review round.
+    use crate::provider::icu4x::extract_day_period_label;
+
+    let am = extract_day_period_label(false, "abcdef", "abcxyz");
+    let pm = extract_day_period_label(true, "abcdef", "abcxyz");
+    assert_eq!(am, "def");
+    assert_eq!(pm, "xyz");
+}
+
+#[test]
+fn icu4x_day_period_label_full_cjk_label_integration_ja_jp() {
+    // End-to-end regression: the real `ja-JP` CLDR formatter path
+    // must now return the full `午前` / `午後` pair. We defensively
+    // only assert the labels carry the shared `午` character and
+    // differ from each other, since CLDR data could evolve; the
+    // strict split-around-digits unit tests above pin the semantic
+    // contract.
+    let provider = Icu4xProvider;
+    let ja = locale("ja-JP");
+    let am = provider.day_period_label(false, &ja);
+    let pm = provider.day_period_label(true, &ja);
+    assert!(
+        am.contains('午'),
+        "ja-JP AM label must contain the shared `午` character; got {am:?}"
+    );
+    assert!(
+        pm.contains('午'),
+        "ja-JP PM label must contain the shared `午` character; got {pm:?}"
+    );
+    assert_ne!(am, pm, "ja-JP AM/PM labels must differ");
+    // And the single-character disambiguation contract: a single
+    // CJK character must resolve to `None`, because both full labels
+    // share their first character.
+    let first = am.chars().next().expect("ja-JP AM label is non-empty");
+    assert_eq!(
+        provider.day_period_from_char(first, &ja),
+        None,
+        "single CJK character must be ambiguous when both labels share their first char"
+    );
+}
