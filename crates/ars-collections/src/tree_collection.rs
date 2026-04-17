@@ -591,6 +591,25 @@ impl<T: CollectionItem> TreeCollection<T> {
         self.key_to_index.get(key).copied()
     }
 
+    /// Returns `true` when the node at `key` currently has at least one
+    /// child (i.e. it is a branch, not a leaf), or `false` when the
+    /// node is a leaf **or** the key is unknown.
+    ///
+    /// Mirrors the [`Node::has_children`] field. Available without the
+    /// `T: Clone` bound that `Collection::get(&node).has_children` would
+    /// require, so callers operating on a generic `T: CollectionItem`
+    /// (such as [`MutableTreeData`]'s mutation methods) can detect
+    /// leaf↔branch transitions without paying for `Clone`.
+    ///
+    /// [`Node::has_children`]: crate::node::Node::has_children
+    /// [`MutableTreeData`]: crate::mutable::MutableTreeData
+    #[must_use]
+    pub fn has_children(&self, key: &Key) -> bool {
+        self.key_to_index
+            .get(key)
+            .is_some_and(|&i| self.all_nodes[i].has_children)
+    }
+
     /// Get the **visible** iteration index of a node by key, or `None`
     /// when the key is unknown **or** the node sits inside a collapsed
     /// ancestor (and is therefore hidden from `Collection::nodes` /

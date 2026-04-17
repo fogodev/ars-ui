@@ -73,9 +73,24 @@ pub enum CollectionChange<K: Clone> {
         to_index: usize,
     },
 
-    /// An item's data was replaced in-place (key unchanged).
+    /// The node at this key needs to be re-rendered in place — its
+    /// position in the iteration is unchanged.
+    ///
+    /// Emitted in two situations:
+    ///
+    /// * `replace()` swapped the item's payload `T`, leaving the key
+    ///   and surrounding structure untouched.
+    /// * A non-payload mutation flipped the node's rendered state
+    ///   while leaving the iteration order intact — for example,
+    ///   inserting a child under a previously-leaf tree node turns
+    ///   that parent into a collapsed branch (`has_children: false →
+    ///   true`, `is_expanded: None → Some(false)`), which adapters
+    ///   key DOM off (expander chevron, `aria-expanded`).
+    ///
+    /// Adapters handle both cases identically: re-fetch the node by
+    /// key and re-render it in place.
     Replace {
-        /// Key of the replaced item.
+        /// Key of the node whose rendered state changed.
         key: K,
     },
 
@@ -370,28 +385,59 @@ impl<T: CollectionItem> MutableTreeData<T> {
     ///
     /// # Visibility-aware change events
     ///
-    /// The emitted `CollectionChange::Insert` carries the **visible
-    /// iteration index**, matching the position the adapter would use
-    /// against [`Collection::get_by_index`]. When the new child lands
-    /// inside a collapsed ancestor it is not part of the visible
-    /// iteration, so **no event is emitted** — the adapter's DOM is
-    /// already consistent (the node simply isn't rendered yet) and
-    /// emitting an `Insert { index, count }` carrying a flat DFS index
-    /// that has no corresponding visible position would mis-place the
-    /// DOM update. The hidden node will surface naturally when its
-    /// ancestor is later expanded and the adapter re-fetches the
-    /// expanded subtree.
+    /// The wrapper emits at most one of:
+    ///
+    /// * `Insert { index: visible_index, count: 1 }` — when the new
+    ///   child lands in the visible iteration. A hidden insert (one
+    ///   under a collapsed ancestor) emits no `Insert`; the hidden
+    ///   node surfaces naturally when an ancestor later expands and
+    ///   the adapter re-fetches the expanded subtree.
+    /// * `Replace { key: parent_key }` — when the parent flipped from
+    ///   leaf to collapsed branch. [`TreeCollection::insert_child`]
+    ///   sets `has_children = true` and `is_expanded = Some(false)` on
+    ///   a previously-leaf parent, which adapters key DOM off
+    ///   (expander chevron, `aria-expanded`). The transition only
+    ///   needs surfacing when the parent is itself visible — a hidden
+    ///   parent's row is not rendered, so the metadata change is
+    ///   invisible until an ancestor expands and the adapter re-reads
+    ///   the parent.
+    ///
+    /// The two events are mutually exclusive: a leaf parent always
+    /// becomes collapsed, so its new child is hidden and never
+    /// produces an `Insert`. A parent that was already an expanded
+    /// branch keeps its visible state and surfaces the new child via
+    /// `Insert` alone.
     pub fn insert_child(&mut self, parent: Option<&Key>, index: usize, item: T) -> Option<usize> {
         let key = item.key().clone();
+
+        // Snapshot whether the parent (if any) is currently a visible
+        // leaf, before the inner call flips its `has_children` /
+        // `is_expanded` metadata. We only care about visible leaves —
+        // hidden leaves transition the same way internally, but their
+        // row isn't rendered so the metadata change has no DOM impact
+        // until an ancestor expands.
+        let visible_leaf_parent = parent
+            .filter(|p| self.inner.visible_index_of(p).is_some() && !self.inner.has_children(p));
+
         let flat_index = self.inner.insert_child(parent, index, item)?;
 
-        // Only emit an event when the new child is part of the visible
-        // iteration. A hidden insert produces no DOM change for the
-        // adapter to apply.
         if let Some(visible_index) = self.inner.visible_index_of(&key) {
+            // The new child is part of the visible iteration. The
+            // parent therefore couldn't have been a leaf (a leaf
+            // parent would have collapsed the new child), so no
+            // Replace fires alongside.
             self.pending_changes.push(CollectionChange::Insert {
                 index: visible_index,
                 count: 1,
+            });
+        } else if let Some(parent_key) = visible_leaf_parent {
+            // Hidden child + previously-visible-leaf parent → the
+            // parent is now a collapsed branch and needs its rendered
+            // chevron / `aria-expanded` updated. Emit Replace so a
+            // reconciler that consumes only `CollectionChange` picks
+            // up the new metadata.
+            self.pending_changes.push(CollectionChange::Replace {
+                key: parent_key.clone(),
             });
         }
 
@@ -1444,6 +1490,94 @@ mod tests {
         assert!(
             drained.is_empty(),
             "no event for insert under collapsed parent; got {drained:?}"
+        );
+    }
+
+    #[test]
+    fn tree_insert_child_under_visible_leaf_parent_emits_replace_for_parent() {
+        // Adding a child under a visible *leaf* flips that parent from
+        // leaf to collapsed branch:
+        //   has_children: false → true
+        //   is_expanded:  None  → Some(false)
+        //
+        // The new child lands inside the now-collapsed parent and is
+        // therefore hidden from the visible iteration, so no Insert
+        // event fires for the child. But the parent's rendered state
+        // genuinely changed — adapters key DOM off `has_children` and
+        // `is_expanded` (expander chevron, `aria-expanded`), so a
+        // reconciler that consumes only `CollectionChange` would leave
+        // the parent row stale unless we emit `Replace` for it.
+        let mut tree = mixed_visibility_tree();
+
+        // Root C (id 3) is a visible leaf in the fixture.
+        assert!(
+            tree.get(&Key::int(3))
+                .is_some_and(|n| !n.has_children && n.is_expanded.is_none()),
+            "fixture: Root C must be a leaf before the insert",
+        );
+
+        let flat = tree.insert_child(Some(&Key::int(3)), 0, Item::new(99, "New Child"));
+
+        assert!(flat.is_some(), "insert succeeded");
+
+        // The child is in the inner tree but hidden under newly-
+        // collapsed Root C.
+        assert!(
+            tree.get(&Key::int(99)).is_some(),
+            "child is reachable by key",
+        );
+        assert!(
+            !tree.keys().any(|k| *k == Key::int(99)),
+            "child must NOT be in the visible iteration",
+        );
+
+        // Confirm the leaf→branch transition actually happened on Root
+        // C, since that is the precondition for the Replace event.
+        let root_c = tree.get(&Key::int(3)).expect("Root C still in tree");
+        assert!(root_c.has_children, "Root C now has children");
+        assert_eq!(root_c.is_expanded, Some(false), "Root C is collapsed");
+
+        let drained = tree.drain_changes();
+
+        assert_eq!(
+            drained,
+            vec![CollectionChange::Replace { key: Key::int(3) }],
+            "leaf→branch transition on a visible parent must emit Replace so adapters re-render",
+        );
+    }
+
+    #[test]
+    fn tree_insert_child_under_hidden_leaf_parent_emits_no_event() {
+        // Same leaf→branch transition mechanics as the previous test,
+        // but the parent itself is hidden inside a collapsed ancestor.
+        // Its rendered state can't be stale because the row isn't
+        // rendered at all, so no event must fire.
+        let mut tree = mixed_visibility_tree();
+
+        // Child A1 is a hidden leaf (under collapsed Root A).
+        assert!(
+            tree.get(&Key::int(11))
+                .is_some_and(|n| !n.has_children && n.is_expanded.is_none()),
+            "fixture: Child A1 is a hidden leaf",
+        );
+
+        let flat = tree.insert_child(Some(&Key::int(11)), 0, Item::new(111, "Hidden Grand"));
+
+        assert!(flat.is_some(), "insert succeeded");
+
+        // Inner state changed (Child A1 is now a collapsed branch),
+        // but neither it nor the new grandchild is rendered.
+        assert!(
+            tree.get(&Key::int(11))
+                .is_some_and(|n| n.has_children && n.is_expanded == Some(false)),
+            "Child A1 transitioned to a collapsed branch internally",
+        );
+
+        let drained = tree.drain_changes();
+
+        assert!(
+            drained.is_empty(),
+            "no event for leaf→branch on a hidden parent; got {drained:?}",
         );
     }
 

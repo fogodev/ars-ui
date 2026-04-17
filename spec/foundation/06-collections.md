@@ -793,9 +793,22 @@ pub enum CollectionChange<K: Clone> {
         /// Flat index the item occupies after the move.
         to_index: usize,
     },
-    /// An item's data was replaced in-place (key unchanged).
+    /// The node at this key needs to be re-rendered in place — its
+    /// position in the iteration is unchanged. Emitted in two cases:
+    ///
+    /// * `replace()` swapped the item's payload `T`, leaving key and
+    ///   structure intact.
+    /// * A non-payload mutation flipped the node's rendered state
+    ///   while leaving the iteration order intact — for example,
+    ///   inserting a child under a previously-leaf tree node turns
+    ///   that parent into a collapsed branch (`has_children: false →
+    ///   true`, `is_expanded: None → Some(false)`), which adapters
+    ///   key DOM off (expander chevron, `aria-expanded`).
+    ///
+    /// Adapters handle both cases identically: re-fetch the node by
+    /// key and re-render it in place.
     Replace {
-        /// Key of the replaced item.
+        /// Key of the node whose rendered state changed.
         key: K,
     },
     /// The entire collection was reset (e.g. bulk replacement or clear).
@@ -1045,11 +1058,27 @@ impl<T: CollectionItem> MutableTreeData<T> {
     /// DFS index of the inserted node on success, or `None` when the
     /// inner call rejected the insert (unknown parent).
     ///
-    /// Emits `Insert { index, count: 1 }` using the **visible iteration
-    /// index** of the new child, matching `Collection::get_by_index`.
-    /// When the child lands inside a collapsed ancestor it is hidden
-    /// from the visible iteration and **no event is emitted** — emitting
-    /// a flat DFS index would mis-place the DOM update.
+    /// Emits at most one of:
+    ///
+    /// * `Insert { index: visible_index, count: 1 }` — when the new
+    ///   child lands in the visible iteration. A hidden insert (one
+    ///   under a collapsed ancestor) emits no `Insert`; the hidden
+    ///   node surfaces naturally when an ancestor later expands and
+    ///   the adapter re-fetches the expanded subtree.
+    /// * `Replace { key: parent_key }` — when the parent flipped from
+    ///   leaf to collapsed branch. `TreeCollection::insert_child` sets
+    ///   `has_children = true` and `is_expanded = Some(false)` on a
+    ///   previously-leaf parent, which adapters key DOM off (expander
+    ///   chevron, `aria-expanded`). The transition only needs
+    ///   surfacing when the parent is itself visible — a hidden
+    ///   parent's row is not rendered, so the metadata change is
+    ///   invisible until an ancestor expands.
+    ///
+    /// The two events are mutually exclusive: a leaf parent always
+    /// becomes collapsed, so its new child is hidden and never
+    /// produces an `Insert`; an already-expanded branch parent keeps
+    /// its visible state and surfaces the new child via `Insert`
+    /// alone.
     pub fn insert_child(
         &mut self,
         parent: Option<&Key>,
@@ -1057,10 +1086,24 @@ impl<T: CollectionItem> MutableTreeData<T> {
         item: T,
     ) -> Option<usize> {
         let key = item.key().clone();
+        // Snapshot whether the parent (if any) is currently a visible
+        // leaf, before the inner call flips its `has_children` /
+        // `is_expanded` metadata.
+        let visible_leaf_parent = parent.filter(|p| {
+            self.inner.visible_index_of(p).is_some() && !self.inner.has_children(p)
+        });
         let flat_index = self.inner.insert_child(parent, index, item)?;
         if let Some(visible_index) = self.inner.visible_index_of(&key) {
             self.pending_changes
                 .push(CollectionChange::Insert { index: visible_index, count: 1 });
+        } else if let Some(parent_key) = visible_leaf_parent {
+            // Hidden child + previously-visible-leaf parent → the
+            // parent is now a collapsed branch and needs its rendered
+            // chevron / `aria-expanded` updated. Emit Replace so a
+            // reconciler that consumes only `CollectionChange` picks
+            // up the new metadata.
+            self.pending_changes
+                .push(CollectionChange::Replace { key: parent_key.clone() });
         }
         Some(flat_index)
     }
@@ -2229,6 +2272,19 @@ impl<T: CollectionItem> TreeCollection<T> {
     /// `visible_index_of` instead.
     pub fn flat_index_of(&self, key: &Key) -> Option<usize> {
         self.key_to_index.get(key).copied()
+    }
+
+    /// Returns `true` when the node at `key` currently has at least one
+    /// child (i.e. it is a branch, not a leaf), or `false` when the
+    /// node is a leaf or the key is unknown. Inherent twin of
+    /// `Collection::get(&node).has_children` that drops the `T: Clone`
+    /// bound, so `MutableTreeData::insert_child` can detect a leaf →
+    /// branch transition before calling the inner mutation.
+    #[must_use]
+    pub fn has_children(&self, key: &Key) -> bool {
+        self.key_to_index
+            .get(key)
+            .is_some_and(|&i| self.all_nodes[i].has_children)
     }
 
     /// Get the visible iteration index of a node by key, or `None` when
