@@ -3879,10 +3879,16 @@ impl IcuProvider for Icu4xProvider {
         //   en: "AM"/"PM", ja: "午前"/"午後", ar: "ص"/"م", ko: "오전"/"오후"
         // ICU4X 2.x does not expose `DayPeriodNames` as a standalone API.
         // Extract day period labels by formatting known times and parsing the output.
-        let formatter = NoCalendarFormatter::try_new(
-            DateTimeFormatterPreferences::from(&locale.0),
-            T::hm(),
-        ).expect("locale data available");
+        //
+        // Force HourCycle::H12 so 24-hour-default locales (`de-DE`,
+        // `fr-FR`, `ja-JP`, …) still emit a day-period token. Without
+        // this override the formatted probe contains only digits and
+        // separators, `day_period_from_char` then has no usable label
+        // to compare against, and the stripped output is empty.
+        let mut prefs = DateTimeFormatterPreferences::from(&locale.0);
+        prefs.hour_cycle = Some(HourCycle::H12);
+        let formatter = NoCalendarFormatter::try_new(prefs, T::hm())
+            .expect("locale data available");
         let test_time = if is_pm {
             Time::try_new(13, 0, 0, 0).expect("13:00 is a valid time")
         } else {

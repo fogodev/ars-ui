@@ -512,6 +512,38 @@ fn web_intl_is_hebrew_leap_year_matches_19_cycle() {
 }
 
 #[wasm_bindgen_test]
+fn web_intl_resolve_named_month_returns_calendar_ordinal_not_probe_slot() {
+    // Regression: the previous resolver returned the Gregorian probe
+    // loop counter as the target-calendar month ordinal, which is
+    // always the Gregorian slot (1..=12) — not the Hebrew civil-order
+    // ordinal. A Hebrew leap year's `Adar II` is civil ordinal 7 and
+    // must resolve to 7 regardless of which Gregorian probe month
+    // surfaced the label. `Adar I` is civil ordinal 6 in the same leap
+    // year. In a common year, the sole `Adar` is ordinal 6.
+    //
+    // `0` means the runtime emitted neither "Adar I"/"Adar II" nor the
+    // common-year "Adar" for the requested labels; treat that as a
+    // skipped assertion (some old Intl builds collapse Hebrew to
+    // numeric months), but when a value is returned it must be the
+    // canonical civil-order ordinal.
+    if let Some(ordinal) =
+        WebIntlProvider::resolve_named_month(CalendarSystem::Hebrew, 5784, "Adar II")
+    {
+        assert_eq!(ordinal, 7, "Adar II must resolve to civil-order 7");
+    }
+    if let Some(ordinal) =
+        WebIntlProvider::resolve_named_month(CalendarSystem::Hebrew, 5784, "Adar I")
+    {
+        assert_eq!(ordinal, 6, "Adar I must resolve to civil-order 6");
+    }
+    if let Some(ordinal) =
+        WebIntlProvider::resolve_named_month(CalendarSystem::Hebrew, 5785, "Adar")
+    {
+        assert_eq!(ordinal, 6, "Common-year Adar must resolve to civil-order 6");
+    }
+}
+
+#[wasm_bindgen_test]
 fn web_intl_resolve_named_month_matches_common_year_adar() {
     // Regression: the previous probe hard-coded Gregorian 2024 (Hebrew
     // leap year), so common-year labels like "Adar" never matched and

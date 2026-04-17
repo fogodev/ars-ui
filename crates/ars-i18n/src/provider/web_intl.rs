@@ -77,51 +77,40 @@ impl WebIntlProvider {
     /// (e.g., Hebrew `"Adar II"`) to its 1-based ordinal in the target
     /// calendar's year numbering.
     ///
-    /// Even with `month: "numeric"` some browsers emit calendar-specific
-    /// month names for calendars that don't expose a simple numeric
-    /// labelling (notably Hebrew leap years). We resolve these by
-    /// probing: iterate every month slot that the calendar supports in
-    /// the given year, format each through `Intl.DateTimeFormat` with
-    /// `month: "long"`, and compare the result against the label we
-    /// received. Returns `Some(ordinal)` on a match or `None` if the
-    /// label cannot be resolved (which leaves the caller with the
-    /// documented "return source date" failure path).
+    /// Some runtimes (notably Node.js under `--features web-intl` without
+    /// `icu4x`) emit calendar-specific names from
+    /// `Intl.DateTimeFormat({ calendar, month: "numeric" })` when the
+    /// calendar uses non-numeric month labelling — Hebrew leap years
+    /// are the canonical case, where civil-order ordinal 6 is rendered
+    /// as `Adar I` and ordinal 7 as `Adar II`.
+    ///
+    /// We resolve the label by sweeping probe Gregorian days through
+    /// target-calendar years of both leap-cycle flavours and asking two
+    /// formatters for the same instant: `month: "long"` gives us the
+    /// label to match against the input, and `month: "2-digit"` gives
+    /// us the target calendar's numeric ordinal directly. Returning the
+    /// iteration index (as the previous version did) silently corrupted
+    /// Hebrew months because the index tracked the Gregorian probe
+    /// month, not the target calendar's civil-order ordinal.
     pub(crate) fn resolve_named_month(
         target: CalendarSystem,
         target_year: i32,
         label: &str,
     ) -> Option<u8> {
         let locales = Array::of1(&JsValue::from_str("en-US"));
+        let long_formatter = month_label_formatter(&locales, target, "long")?;
+        let numeric_formatter = month_label_formatter(&locales, target, "2-digit")?;
 
-        let opts = Object::new();
-        Reflect::set(
-            &opts,
-            &"calendar".into(),
-            &JsValue::from_str(target.to_bcp47_value()),
-        )
-        .ok()?;
-        Reflect::set(&opts, &"month".into(), &JsValue::from_str("long")).ok()?;
-        // Pin the probe to UTC — same rationale as in `convert_date`: a
-        // probe near midnight otherwise shifts day/month through the
-        // runtime's local timezone and breaks the label comparison.
-        Reflect::set(&opts, &"timeZone".into(), &JsValue::from_str("UTC")).ok()?;
-
-        let formatter = Intl::DateTimeFormat::new(&locales, &opts);
-
-        // Hebrew leap years have 13 months and use labels like `Adar I` /
-        // `Adar II`; common years drop both and surface a single `Adar`.
-        // A fixed probe year (e.g. 2024, which overlaps Hebrew 5784 —
-        // a leap year) never emits the common-year labels. Select probe
-        // Gregorian years from the target's leap/common orbit so both
-        // variants of named month are observable: 2024 sits inside a
-        // Hebrew leap year and 2025 sits inside a Hebrew common year.
+        // Hebrew (and the other 13-month calendars we model as
+        // leap-year aware) surface different month labels in leap vs.
+        // common years. Select probe Gregorian years from the target
+        // calendar's leap/common orbit so both variants of named month
+        // are observable: Gregorian 2024 overlaps Hebrew 5784 (leap)
+        // and Gregorian 2025 overlaps Hebrew 5785 (common).
         //
-        // Non-Hebrew calendars don't have the same ambiguity but are
-        // still served by this two-year sweep. `target_year` influences
-        // which probe runs first: when it's a Hebrew leap year (years
-        // 3, 6, 8, 11, 14, 17 of the 19-cycle — 0 mod 19 is the 19th
-        // year of the cycle) we try the leap probe first so the common
-        // case is fast; otherwise we lead with the common-year probe.
+        // `target_year` only influences which probe runs first so the
+        // common case is fast; the second probe always runs when the
+        // first doesn't match.
         let prefer_leap = matches!(
             target,
             CalendarSystem::Hebrew | CalendarSystem::Ethiopic | CalendarSystem::EthiopicAmeteAlem
@@ -133,21 +122,27 @@ impl WebIntlProvider {
         };
 
         for probe_year in probe_years {
-            for ordinal in 1_u8..=13 {
-                let probe_month = i32::from(ordinal.saturating_sub(1));
+            for probe_month in 0_i32..12 {
                 let probe = noon_utc_js_date(probe_year, probe_month, 15);
 
-                let formatted = formatter.format_to_parts(&probe);
-                for i in 0..formatted.length() {
-                    let part = formatted.get(i);
-                    if Self::string_property(&part, "type").as_deref() == Some("month") {
-                        let probe_label = Self::string_property(&part, "value").unwrap_or_default();
-                        if probe_label == label {
-                            return Some(ordinal);
-                        }
-                        break;
-                    }
+                let long_label = month_part_value(&long_formatter.format_to_parts(&probe));
+                if long_label != label {
+                    continue;
                 }
+
+                // Long label matches this probe instant. Ask the
+                // numeric formatter for the ordinal of the same
+                // instant — that's the target calendar's civil-order
+                // month number. When the numeric formatter also
+                // falls back to a name (extremely rare), we can't
+                // resolve the label so the caller's fallback kicks in.
+                let numeric_value = month_part_value(&numeric_formatter.format_to_parts(&probe));
+                if let Ok(ordinal) = numeric_value.parse::<u8>()
+                    && (1..=13).contains(&ordinal)
+                {
+                    return Some(ordinal);
+                }
+                return None;
             }
         }
 
@@ -612,6 +607,49 @@ pub(crate) fn noon_utc_js_date(year: u32, month: i32, day: i32) -> js_sys::Date 
 /// Scoped to Hebrew so `resolve_named_month` can bias its probe years
 /// without pulling in a full calendar library; other calendars with
 /// conditional month labels should grow their own predicate here.
+/// Builds an `Intl.DateTimeFormat` that renders the given target
+/// calendar's `month` field with the supplied option value (e.g.,
+/// `"long"`, `"2-digit"`). Returns `None` when `Reflect::set` on a
+/// fresh `Object` fails — which can't happen on a valid runtime but
+/// is preserved as the error path per the surrounding helpers.
+fn month_label_formatter(
+    locales: &Array,
+    target: CalendarSystem,
+    month_style: &str,
+) -> Option<Intl::DateTimeFormat> {
+    let opts = Object::new();
+    Reflect::set(
+        &opts,
+        &"calendar".into(),
+        &JsValue::from_str(target.to_bcp47_value()),
+    )
+    .ok()?;
+    Reflect::set(&opts, &"month".into(), &JsValue::from_str(month_style)).ok()?;
+    Reflect::set(&opts, &"timeZone".into(), &JsValue::from_str("UTC")).ok()?;
+    Some(Intl::DateTimeFormat::new(locales, &opts))
+}
+
+/// Extracts the `value` string of the first `month` part from a
+/// `formatToParts` result. Returns an empty string if no month part is
+/// present (e.g., options that suppress month emission).
+fn month_part_value(parts: &Array) -> String {
+    for i in 0..parts.length() {
+        let part = parts.get(i);
+        if Reflect::get(&part, &JsValue::from_str("type"))
+            .ok()
+            .and_then(|v| v.as_string())
+            .as_deref()
+            == Some("month")
+        {
+            return Reflect::get(&part, &JsValue::from_str("value"))
+                .ok()
+                .and_then(|v| v.as_string())
+                .unwrap_or_default();
+        }
+    }
+    String::new()
+}
+
 pub(crate) const fn is_hebrew_leap_year(year: i32) -> bool {
     let cycle_year = year.rem_euclid(19);
     matches!(cycle_year, 3 | 6 | 8 | 11 | 14 | 17 | 0)

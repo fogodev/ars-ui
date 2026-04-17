@@ -17,6 +17,7 @@ use icu::{
         fieldsets::{E, M, T},
     },
     decimal::{DecimalFormatter, DecimalFormatterPreferences},
+    locale::preferences::extensions::unicode::keywords::HourCycle as IcuHourCycle,
     time::Time,
 };
 
@@ -104,11 +105,16 @@ impl IcuProvider for Icu4xProvider {
     }
 
     fn day_period_label(&self, is_pm: bool, locale: &Locale) -> String {
-        let formatter = NoCalendarFormatter::try_new(
-            DateTimeFormatterPreferences::from(locale.as_icu()),
-            T::hm(),
-        )
-        .expect("compiled_data guarantees time formatter availability");
+        // Force a 12-hour cycle so the formatter always emits a
+        // day-period token, even for locales whose CLDR default is
+        // 24-hour (e.g., `de-DE`, `fr-FR`, `ja-JP`). Without this
+        // override the stripped output is empty and
+        // `day_period_from_char` returns `None` for every input.
+        let mut prefs = DateTimeFormatterPreferences::from(locale.as_icu());
+        prefs.hour_cycle = Some(IcuHourCycle::H12);
+
+        let formatter = NoCalendarFormatter::try_new(prefs, T::hm())
+            .expect("compiled_data guarantees time formatter availability");
 
         let test_time = if is_pm {
             Time::try_new(13, 0, 0, 0).expect("13:00 is a valid time")

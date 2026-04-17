@@ -188,6 +188,26 @@ fn icu4x_format_segment_digits_preserves_ascii_in_english() {
 }
 
 #[test]
+fn icu4x_day_period_label_nonempty_for_24h_locales() {
+    // Regression: using the locale's default hour cycle meant that
+    // 24-hour-default locales (`de-DE`, `fr-FR`, `ja-JP`) formatted
+    // the probe time without a day-period marker, and the strip-digits
+    // pipeline returned an empty string. `day_period_from_char` then
+    // could not disambiguate AM/PM for those locales. The fix forces
+    // `HourCycle::H12` on the day-period formatter so every locale
+    // surfaces a non-empty, distinct AM/PM pair.
+    let provider = Icu4xProvider;
+    for tag in ["de-DE", "fr-FR", "ja-JP"] {
+        let loc = locale(tag);
+        let am = provider.day_period_label(false, &loc);
+        let pm = provider.day_period_label(true, &loc);
+        assert!(!am.is_empty(), "{tag} AM label empty");
+        assert!(!pm.is_empty(), "{tag} PM label empty");
+        assert_ne!(am, pm, "{tag} AM/PM labels must differ");
+    }
+}
+
+#[test]
 fn icu4x_day_period_label_returns_nonempty() {
     let provider = Icu4xProvider;
 
