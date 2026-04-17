@@ -141,35 +141,8 @@ impl IcuProvider for Icu4xProvider {
 
     fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
         let am_label = self.day_period_label(false, locale);
-
         let pm_label = self.day_period_label(true, locale);
-
-        let am_char = am_label.chars().next()?;
-
-        let pm_char = pm_label.chars().next()?;
-
-        let ch_lower = ch
-            .to_lowercase()
-            .next()
-            .expect("to_lowercase always yields at least one char");
-
-        let am_lower = am_char
-            .to_lowercase()
-            .next()
-            .expect("to_lowercase always yields at least one char");
-
-        let pm_lower = pm_char
-            .to_lowercase()
-            .next()
-            .expect("to_lowercase always yields at least one char");
-
-        if ch_lower == am_lower {
-            Some(false)
-        } else if ch_lower == pm_lower {
-            Some(true)
-        } else {
-            None
-        }
+        match_day_period_initial(ch, &am_label, &pm_label)
     }
 
     fn format_segment_digits(
@@ -314,6 +287,56 @@ impl IcuProvider for Icu4xProvider {
             day: NonZero::new(converted.day())
                 .expect("internal calendar conversion yields a 1-based day"),
         }
+    }
+}
+
+/// Maps a single typed character to a day-period value, given the AM
+/// and PM labels the caller has already resolved for the locale.
+///
+/// Returns:
+/// - `Some(false)` when `ch` matches the AM label's first character
+///   (case-insensitive) and the two labels start with *different*
+///   characters.
+/// - `Some(true)` similarly for PM.
+/// - `None` when either label is empty, the two labels share their
+///   first character (the CJK-style case — `午前` / `午後` — where
+///   single-character input cannot disambiguate), or `ch` doesn't
+///   match either label.
+///
+/// Extracted as a free function so the shared-prefix branch can be
+/// unit-tested against synthetic inputs regardless of what any
+/// specific CLDR locale happens to surface today.
+pub(crate) fn match_day_period_initial(ch: char, am_label: &str, pm_label: &str) -> Option<bool> {
+    let am_char = am_label.chars().next()?;
+    let pm_char = pm_label.chars().next()?;
+
+    let ch_lower = ch
+        .to_lowercase()
+        .next()
+        .expect("to_lowercase always yields at least one char");
+    let am_lower = am_char
+        .to_lowercase()
+        .next()
+        .expect("to_lowercase always yields at least one char");
+    let pm_lower = pm_char
+        .to_lowercase()
+        .next()
+        .expect("to_lowercase always yields at least one char");
+
+    // Shared first character — can't disambiguate from a single char.
+    // Returning `Some(false)` here would silently collapse PM input
+    // to AM whenever the CLDR labels start with the same character
+    // (Japanese `午前`/`午後`, any future locale with this shape).
+    if am_lower == pm_lower {
+        return None;
+    }
+
+    if ch_lower == am_lower {
+        Some(false)
+    } else if ch_lower == pm_lower {
+        Some(true)
+    } else {
+        None
     }
 }
 

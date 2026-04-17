@@ -137,6 +137,38 @@ fn icu4x_hour_cycle_ignores_locale_hour_literals() {
 }
 
 #[test]
+fn icu4x_match_day_period_initial_returns_none_for_shared_prefix() {
+    // Regression (Codex round 7): when AM and PM labels share their
+    // first character (Japanese `午前` / `午後` is the canonical
+    // example), the old logic always returned `Some(false)` because
+    // the AM arm was checked first. Per spec §9.5 CJK-style input
+    // returns `None`. The extracted `match_day_period_initial` helper
+    // lets us pin this behaviour directly, regardless of whatever
+    // the live CLDR data produces today.
+    use crate::provider::icu4x::match_day_period_initial;
+
+    // Shared-prefix case: both labels start with the same kanji.
+    // `'午'`, `'前'`, and `'後'` all must resolve to `None` because
+    // no single character suffices to disambiguate.
+    assert_eq!(match_day_period_initial('午', "午前", "午後"), None);
+    assert_eq!(match_day_period_initial('前', "午前", "午後"), None);
+    assert_eq!(match_day_period_initial('後', "午前", "午後"), None);
+
+    // Distinct-prefix happy path: ASCII AM/PM.
+    assert_eq!(match_day_period_initial('a', "AM", "PM"), Some(false));
+    assert_eq!(match_day_period_initial('P', "AM", "PM"), Some(true));
+    assert_eq!(match_day_period_initial('x', "AM", "PM"), None);
+
+    // Distinct-prefix but non-ASCII: Arabic ص (AM) vs م (PM).
+    assert_eq!(match_day_period_initial('ص', "ص", "م"), Some(false));
+    assert_eq!(match_day_period_initial('م', "ص", "م"), Some(true));
+
+    // Empty labels short-circuit to `None`.
+    assert_eq!(match_day_period_initial('a', "", "PM"), None);
+    assert_eq!(match_day_period_initial('p', "AM", ""), None);
+}
+
+#[test]
 fn icu4x_day_period_label_survives_locale_hour_literals() {
     // Regression (Codex round 6): `bg-BG` 12-hour probes surface
     // strings like `"1:00 ч. am"` / `"1:00 ч. pm"`. The old filter

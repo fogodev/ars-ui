@@ -235,6 +235,15 @@ impl IcuProvider for WebIntlProvider {
             .next()
             .and_then(|c| c.to_lowercase().next());
 
+        // When the labels share their first character, a single
+        // character can't disambiguate AM from PM — Japanese
+        // `午前` / `午後` is the canonical example. Per the trait
+        // contract, return `None` so CJK-style input fails safely
+        // instead of defaulting to AM because it's checked first.
+        if am_first.is_some() && am_first == pm_first {
+            return None;
+        }
+
         if am_first == Some(ch_lower) {
             Some(false)
         } else if pm_first == Some(ch_lower) {

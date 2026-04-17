@@ -184,6 +184,37 @@ fn web_intl_day_period_from_char_roundtrips_english() {
 }
 
 #[wasm_bindgen_test]
+fn web_intl_day_period_from_char_bails_when_labels_share_prefix() {
+    // Regression (Codex round 7): when the browser-emitted AM and PM
+    // labels share their first character, `day_period_from_char`
+    // would previously resolve any matching input to AM because the
+    // AM arm was checked first. The provider now returns `None` so
+    // CJK-style ambiguous input fails safely instead.
+    //
+    // We can't forcibly make a real locale produce identical first
+    // chars, so we lean on the live Japanese labels: if the diff
+    // extractor happens to leave a shared prefix (e.g., a future
+    // CLDR revision), the ambiguous char must resolve to `None`; if
+    // it doesn't, the happy path is verified end-to-end.
+    let provider = WebIntlProvider;
+    let ja = locale("ja-JP");
+    let am = provider.day_period_label(false, &ja);
+    let pm = provider.day_period_label(true, &ja);
+    let am_first = am.chars().next().expect("AM label non-empty");
+    let pm_first = pm.chars().next().expect("PM label non-empty");
+    if am_first == pm_first {
+        assert_eq!(
+            provider.day_period_from_char(am_first, &ja),
+            None,
+            "shared first char must not collapse to AM"
+        );
+    } else {
+        assert_eq!(provider.day_period_from_char(am_first, &ja), Some(false));
+        assert_eq!(provider.day_period_from_char(pm_first, &ja), Some(true));
+    }
+}
+
+#[wasm_bindgen_test]
 fn web_intl_month_long_name_returns_unknown_for_invalid_month() {
     let provider = WebIntlProvider;
 
