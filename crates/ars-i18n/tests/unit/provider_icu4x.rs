@@ -112,6 +112,58 @@ fn icu4x_hour_cycle_reflects_locale() {
 }
 
 #[test]
+fn icu4x_hour_cycle_ignores_locale_hour_literals() {
+    // Regression (Codex round 6): CLDR 24-hour patterns for some
+    // locales include trailing hour literals that aren't digits —
+    // `bg-BG` renders `13:00` as `"13:00 ч."` and `mr-IN-u-hc-h23`
+    // uses `"१३-००"` with Devanagari numerals and a different
+    // separator. The previous detector classified these as H12
+    // because of the non-digit trailing text. The new digit-run
+    // comparison between the 01:00 and 13:00 probes cannot be fooled
+    // by decoration.
+    let provider = Icu4xProvider;
+    assert_eq!(
+        provider.hour_cycle(&locale("bg-BG")),
+        HourCycle::H23,
+        "bg-BG must resolve to 24-hour despite the trailing ч. literal"
+    );
+    // Explicit `-u-hc-h23` forces 24-hour formatting even for a
+    // locale that would normally default to 12-hour.
+    assert_eq!(
+        provider.hour_cycle(&locale("en-US-u-hc-h23")),
+        HourCycle::H23,
+        "en-US-u-hc-h23 must resolve to 24-hour"
+    );
+}
+
+#[test]
+fn icu4x_day_period_label_survives_locale_hour_literals() {
+    // Regression (Codex round 6): `bg-BG` 12-hour probes surface
+    // strings like `"1:00 ч. am"` / `"1:00 ч. pm"`. The old filter
+    // stripped digits and separators but left the hour literal `ч`,
+    // so both AM and PM labels started with the same character and
+    // `day_period_from_char` collapsed them together. The diff-based
+    // extractor peels off everything shared between the two probes,
+    // leaving only the day-period marker.
+    let provider = Icu4xProvider;
+    let bg = locale("bg-BG");
+    let am = provider.day_period_label(false, &bg);
+    let pm = provider.day_period_label(true, &bg);
+    assert!(!am.is_empty(), "bg-BG AM label empty");
+    assert!(!pm.is_empty(), "bg-BG PM label empty");
+    assert_ne!(
+        am.chars().next(),
+        pm.chars().next(),
+        "bg-BG AM/PM must start with different characters; got am={am:?}, pm={pm:?}"
+    );
+    // Both markers round-trip through `day_period_from_char`.
+    let am_first = am.chars().next().expect("AM label non-empty");
+    let pm_first = pm.chars().next().expect("PM label non-empty");
+    assert_eq!(provider.day_period_from_char(am_first, &bg), Some(false));
+    assert_eq!(provider.day_period_from_char(pm_first, &bg), Some(true));
+}
+
+#[test]
 fn icu4x_hour_cycle_ignores_native_digits_in_24h_locales() {
     // Regression: before treating non-ASCII digits as numerals, fa-IR
     // was misclassified as H12 because its 24-hour display uses

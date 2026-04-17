@@ -111,37 +111,32 @@ impl IcuProvider for Icu4xProvider {
         // Force a 12-hour cycle so the formatter always emits a
         // day-period token, even for locales whose CLDR default is
         // 24-hour (e.g., `de-DE`, `fr-FR`, `ja-JP`). Without this
-        // override the stripped output is empty and
-        // `day_period_from_char` returns `None` for every input.
+        // override 24-hour locales collapse to numbers only.
         let mut prefs = DateTimeFormatterPreferences::from(locale.as_icu());
         prefs.hour_cycle = Some(IcuHourCycle::H12);
 
         let formatter = NoCalendarFormatter::try_new(prefs, T::hm())
             .expect("compiled_data guarantees time formatter availability");
 
-        let test_time = if is_pm {
-            Time::try_new(13, 0, 0, 0).expect("13:00 is a valid time")
-        } else {
-            Time::try_new(1, 0, 0, 0).expect("01:00 is a valid time")
-        };
+        let am_time = Time::try_new(1, 0, 0, 0).expect("01:00 is a valid time");
+        let pm_time = Time::try_new(13, 0, 0, 0).expect("13:00 is a valid time");
+        let am_formatted = formatter.format(&am_time).to_string();
+        let pm_formatted = formatter.format(&pm_time).to_string();
 
-        // Strip numerals and separators to isolate the day-period text.
-        //
-        // Limitation: ICU4X 2.x does not expose a direct day-period names
-        // API, so we reconstruct the label from a formatted reference time.
-        // We strip Unicode numerics (ASCII, Arabic-Indic ٠-٩, Persian ۰-۹,
-        // Bengali ০-৯, …) so AM/PM lookup stays correct for locales that
-        // render time in native digits — otherwise ar-EG would surface
-        // `١٠٠ ص` and `day_period_from_char` would see `١` as the first
-        // character of both AM and PM labels.
-        formatter
-            .format(&test_time)
-            .to_string()
-            .chars()
-            .filter(|c| !is_numeral_or_time_separator(*c))
-            .collect::<String>()
-            .trim()
-            .to_string()
+        // Compute the AM- and PM-unique spans by peeling off the
+        // longest common prefix and suffix between the two formatted
+        // outputs. Whatever remains is the day-period marker by
+        // definition — decoration characters that appear in both
+        // strings (hour digits, colons, locale hour literals like
+        // `bg-BG`'s `ч.`, the Japanese `:` separator) are common and
+        // get stripped automatically. The approach was suggested by
+        // the Codex round-6 review and handles locales where the
+        // previous digit/separator filter left hour-literal fragments
+        // in the label (e.g., bg-BG surfacing `ч` as the first char
+        // of both AM and PM labels).
+        let (am_unique, pm_unique) = unique_span_diff(&am_formatted, &pm_formatted);
+        let unique = if is_pm { pm_unique } else { am_unique };
+        unique.trim().to_string()
     }
 
     fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
@@ -259,20 +254,23 @@ impl IcuProvider for Icu4xProvider {
         )
         .expect("compiled_data guarantees time formatter availability");
 
-        let test_time = Time::try_new(13, 0, 0, 0).expect("13:00 is a valid time");
+        let am_time = Time::try_new(1, 0, 0, 0).expect("01:00 is a valid time");
+        let pm_time = Time::try_new(13, 0, 0, 0).expect("13:00 is a valid time");
 
-        let formatted = formatter.format(&test_time).to_string();
+        let am_formatted = formatter.format(&am_time).to_string();
+        let pm_formatted = formatter.format(&pm_time).to_string();
 
-        // A 24-hour locale formats 13:00 as "13:00" — or the locale's
-        // native-digit equivalent (`۱۳:۰۰` in fa-IR, `١٣:٠٠` in ar-EG) —
-        // with no day-period text. Any character that is not a Unicode
-        // numeral or a standard time separator signals a 12-hour format
-        // (`1 PM`, `午後1:00`, `١ م`, …). Using `char::is_numeric` keeps
-        // non-ASCII numerals from being flagged as day-period markers.
-        let has_day_period = formatted
-            .chars()
-            .any(|c| !is_numeral_or_time_separator(c) && !c.is_whitespace());
-        if has_day_period {
+        // Extract the first run of Unicode numerals from each
+        // formatted output and compare. A 12-hour locale renders both
+        // `01:00` and `13:00` with the same hour digit (`1`), so the
+        // runs match; a 24-hour locale renders them with different
+        // hour digits (`01` vs `13`, or the locale's native-digit
+        // equivalents) and the runs differ. This sidesteps the
+        // decoration-character trap in locales like `bg-BG`
+        // (`"13:00 ч."`) or `mr-IN-u-hc-h23` (Devanagari `"१३-००"`)
+        // where stripping decoration cannot reliably distinguish
+        // day-period markers from hour-literal suffixes.
+        if first_numeric_run(&am_formatted) == first_numeric_run(&pm_formatted) {
             HourCycle::H12
         } else {
             HourCycle::H23
@@ -319,15 +317,67 @@ impl IcuProvider for Icu4xProvider {
     }
 }
 
-/// Returns `true` when `c` is a Unicode numeral or a standard time-pattern
-/// separator (ASCII colon, U+002E period, U+066B Arabic decimal separator,
-/// and the locale-neutral punctuation that CLDR routinely uses inside
-/// time patterns).
+/// Returns the first contiguous run of Unicode numerals from `s`, or
+/// an empty slice when the string contains none.
 ///
-/// The filter covers every Unicode decimal digit (`Nd`) via
-/// [`char::is_numeric`], so native-digit locales such as `ar-EG`
-/// (`٠-٩`), `fa-IR` (`۰-۹`), `bn-BD` (`০-৯`), and `my-MM` (`၀-၉`) are
-/// handled uniformly.
-fn is_numeral_or_time_separator(c: char) -> bool {
-    c.is_numeric() || matches!(c, ':' | '.' | '\u{066B}' | '\u{066C}')
+/// Uses [`char::is_numeric`] so every Unicode decimal digit (`Nd`)
+/// counts — ASCII, Arabic-Indic (٠-٩), Persian (۰-۹), Bengali (০-৯),
+/// Devanagari (०-९), Myanmar (၀-၉), and so on. Hour-cycle detection
+/// compares the runs from the 01:00 and 13:00 probes: when they match
+/// the locale uses 12-hour formatting (both hours render as `1`);
+/// when they differ the locale uses 24-hour formatting.
+pub(crate) fn first_numeric_run(s: &str) -> &str {
+    let Some(start) = s
+        .char_indices()
+        .find_map(|(i, c)| c.is_numeric().then_some(i))
+    else {
+        return "";
+    };
+    let end = s[start..]
+        .char_indices()
+        .find_map(|(i, c)| (!c.is_numeric()).then_some(start + i))
+        .unwrap_or(s.len());
+    &s[start..end]
+}
+
+/// Returns the AM-only and PM-only substrings produced by stripping
+/// the longest common prefix and suffix from `am_formatted` /
+/// `pm_formatted`. Decoration text that appears in both strings (hour
+/// digits, separators, locale hour literals like `bg-BG`'s `ч.`) is
+/// shared and collapses into the prefix/suffix; what remains are the
+/// two day-period markers by construction.
+///
+/// The slices are returned in the order `(am_unique, pm_unique)` and
+/// are trimmed by the caller before use.
+pub(crate) fn unique_span_diff<'a>(
+    am_formatted: &'a str,
+    pm_formatted: &'a str,
+) -> (&'a str, &'a str) {
+    let mut prefix_len = 0_usize;
+    for (ach, pch) in am_formatted.chars().zip(pm_formatted.chars()) {
+        if ach != pch {
+            break;
+        }
+        prefix_len += ach.len_utf8();
+    }
+
+    let am_rest = &am_formatted[prefix_len..];
+    let pm_rest = &pm_formatted[prefix_len..];
+
+    let mut suffix_len = 0_usize;
+    for (ach, pch) in am_rest.chars().rev().zip(pm_rest.chars().rev()) {
+        if ach != pch {
+            break;
+        }
+        suffix_len += ach.len_utf8();
+    }
+
+    let am_end = am_formatted.len().saturating_sub(suffix_len);
+    let pm_end = pm_formatted.len().saturating_sub(suffix_len);
+    let am_end = am_end.max(prefix_len);
+    let pm_end = pm_end.max(prefix_len);
+    (
+        &am_formatted[prefix_len..am_end],
+        &pm_formatted[prefix_len..pm_end],
+    )
 }
