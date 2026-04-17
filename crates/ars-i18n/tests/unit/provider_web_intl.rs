@@ -660,6 +660,31 @@ fn web_intl_resolve_named_month_returns_calendar_ordinal_not_probe_slot() {
 }
 
 #[wasm_bindgen_test]
+fn web_intl_parse_english_ordinal_shifts_leap_ordinals_up_by_one() {
+    // Regression (Codex round 13): `CalendarDate::month` stores
+    // `DateFields.ordinal_month` (civil-order ordinal), so a leap
+    // month always occupies the slot *after* its base lunar month.
+    // A previous revision returned the base ordinal unchanged for
+    // both `"Sixth Monthbis"` and `"Sixth Month"`, so they
+    // collided at ordinal 6. The leap path now bumps by 1:
+    use crate::provider::web_intl::parse_english_ordinal_month_label;
+
+    assert_eq!(parse_english_ordinal_month_label("Sixth Month"), Some(6));
+    assert_eq!(parse_english_ordinal_month_label("Sixth Monthbis"), Some(7));
+    assert_eq!(parse_english_ordinal_month_label("First Monthbis"), Some(2));
+    assert_eq!(
+        parse_english_ordinal_month_label("Twelfth Monthbis"),
+        Some(13)
+    );
+    // 13 + 1 saturates back to 13 so the result stays within the
+    // `CalendarDate::month: NonZero<u8>` range allowed by the type.
+    assert_eq!(
+        parse_english_ordinal_month_label("Thirteenth Monthbis"),
+        Some(13)
+    );
+}
+
+#[wasm_bindgen_test]
 fn web_intl_parse_english_ordinal_month_label_covers_all_ordinals() {
     // Regression (Codex round 12): a fixed `SWEEP_YEARS` list will
     // always miss some leap-month positions — `First Monthbis`
@@ -692,13 +717,16 @@ fn web_intl_parse_english_ordinal_month_label_covers_all_ordinals() {
             Some(expected),
             "label {label:?} should resolve to {expected}"
         );
-        // Leap variant resolves to the same base ordinal (precision
-        // loss is documented in the helper).
+        // Leap variant resolves to `expected + 1` (capped at 13):
+        // the leap month always sits in the civil-order slot after
+        // its base lunar month, matching the `DateFields.ordinal_month`
+        // semantics of `CalendarDate::month`.
         let bis = format!("{label}bis");
+        let leap_expected = expected.saturating_add(1).min(13);
         assert_eq!(
             parse_english_ordinal_month_label(&bis),
-            Some(expected),
-            "leap label {bis:?} should resolve to {expected}"
+            Some(leap_expected),
+            "leap label {bis:?} should resolve to {leap_expected}"
         );
     }
     // Nonsense inputs must return None so the caller falls back

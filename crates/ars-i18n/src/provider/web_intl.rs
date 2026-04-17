@@ -579,20 +579,28 @@ impl IcuProvider for WebIntlProvider {
                         // `"6bis"` / `"06bis"` / `"06L"` from
                         // `Intl.DateTimeFormat({ month: "numeric" })` on
                         // ICU-backed runtimes — a leading numeric run
-                        // followed by a leap-month marker. Strip the
-                        // trailing marker and parse what remains so we
-                        // return a usable civil-order ordinal instead
-                        // of a source clone. The leap-vs-regular
-                        // distinction is lost at this layer (our
-                        // `CalendarDate::month: NonZero<u8>` has no slot
-                        // for it); callers that need exact leap-month
-                        // precision must enable the `icu4x` feature,
-                        // which routes through the internal bridge
-                        // above.
+                        // followed by a leap-month marker. The numeric
+                        // prefix is the underlying *lunar* month, and
+                        // the leap month always sits in the civil-
+                        // ordinal slot immediately after it (e.g., leap
+                        // 6 sits between regular 6 and regular 7 in
+                        // year ordering), so the civil ordinal that
+                        // matches `DateFields.ordinal_month` is
+                        // `prefix + 1`. Without this shift `"6bis"`
+                        // would collide with regular 6 and feed the
+                        // wrong month into downstream validation.
                         let leading: String =
                             value.chars().take_while(|c| c.is_numeric()).collect();
+                        let had_leap_marker =
+                            !leading.is_empty() && leading.len() < value.trim().len();
                         if !leading.is_empty() {
-                            month = leading.parse().unwrap_or(0);
+                            if let Ok(base) = leading.parse::<u8>() {
+                                month = if had_leap_marker {
+                                    base.saturating_add(1).min(13)
+                                } else {
+                                    base
+                                };
+                            }
                         }
                     }
                     if month == 0 {
@@ -658,7 +666,9 @@ impl IcuProvider for WebIntlProvider {
 
 /// Parses an English ordinal month label of the form
 /// `"<Ordinal> Month"` or `"<Ordinal> Monthbis"` into its 1..=13
-/// ordinal.
+/// civil-order ordinal (the same representation this crate's
+/// `CalendarDate::month` carries, matching ICU4X
+/// `DateFields.ordinal_month`).
 ///
 /// These labels come from `Intl.DateTimeFormat('en-US',
 /// { calendar: 'chinese', month: 'long' })` on ICU-backed runtimes
@@ -667,20 +677,24 @@ impl IcuProvider for WebIntlProvider {
 /// maintaining an exhaustive calendar-year probe list covering every
 /// possible leap-cycle position in history.
 ///
-/// Note: the `bis` suffix signals a leap month; we drop it here and
-/// return the base ordinal because `CalendarDate::month: NonZero<u8>`
-/// can't encode the leap distinction. Callers that need exact
-/// leap-month precision must enable the `icu4x` feature, which
-/// routes through the internal ICU4X bridge above.
+/// The `bis` suffix signals a leap month, which always sits in the
+/// civil-order slot immediately after its base lunar month. We bump
+/// the base ordinal by 1 for leap labels — so `"Sixth Monthbis"`
+/// resolves to 7 (leap 6 in civil order), matching the numeric-token
+/// path's handling of `"6bis"` → 7.
 pub(crate) fn parse_english_ordinal_month_label(label: &str) -> Option<u8> {
-    // Strip leap-month marker first.
-    let core = label.strip_suffix("bis").unwrap_or(label);
+    // Detect and strip the leap-month marker, remembering whether it
+    // was present so we can bump the ordinal by 1 below.
+    let (core, is_leap) = match label.strip_suffix("bis") {
+        Some(rest) => (rest, true),
+        None => (label, false),
+    };
     // Strip " Month" suffix; accept both with and without to stay
     // tolerant of future CLDR wording tweaks.
     let core = core.trim();
     let core = core.strip_suffix(" Month").unwrap_or(core);
-    match core.trim() {
-        "First" => Some(1),
+    let base = match core.trim() {
+        "First" => Some(1_u8),
         "Second" => Some(2),
         "Third" => Some(3),
         "Fourth" => Some(4),
@@ -694,6 +708,11 @@ pub(crate) fn parse_english_ordinal_month_label(label: &str) -> Option<u8> {
         "Twelfth" => Some(12),
         "Thirteenth" => Some(13),
         _ => None,
+    }?;
+    if is_leap {
+        Some(base.saturating_add(1).min(13))
+    } else {
+        Some(base)
     }
 }
 
