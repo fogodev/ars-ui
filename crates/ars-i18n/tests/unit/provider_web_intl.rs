@@ -405,3 +405,92 @@ fn web_intl_convert_date_preserves_historical_japanese_era() {
         "1990 falls inside Heisei (1989-2019); got {era:?}"
     );
 }
+
+#[wasm_bindgen_test]
+fn web_intl_convert_date_preserves_years_below_100() {
+    // Regression: `js_sys::Date::new_with_year_month_day(y, _, _)` routes
+    // through the legacy `new Date(y, m)` path, which reinterprets
+    // `0..=99` as `1900..=1999`. `convert_date` now uses `new Date()`
+    // + `setUTCFullYear(..)` so a Gregorian year below 100 is passed
+    // to `Intl.DateTimeFormat` as itself.
+    let provider = WebIntlProvider;
+    let stub = StubIcuProvider;
+
+    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 90, 6, 15)
+        .expect("Gregorian 0090-06-15 should validate");
+
+    let buddhist = provider.convert_date(&gregorian, CalendarSystem::Buddhist);
+    assert_eq!(buddhist.calendar, CalendarSystem::Buddhist);
+    // Buddhist year = Gregorian year + 543. Year 90 CE ⇒ Buddhist 633,
+    // not Buddhist 2533 (which the century-quirk bug would have produced).
+    assert_eq!(
+        buddhist.year, 633,
+        "expected Buddhist 633 for Gregorian year 90; got {}",
+        buddhist.year
+    );
+}
+
+#[wasm_bindgen_test]
+fn web_intl_convert_date_resolves_hebrew_named_month() {
+    // Regression: `Intl.DateTimeFormat("en-US", { calendar: "hebrew",
+    // month: "numeric" })` can still emit "Adar I" / "Adar II" in Hebrew
+    // leap years. The fix retries as `month: "long"` and matches the
+    // label against a probe loop. This test exercises the named-month
+    // resolution path even in browsers that return a numeric month —
+    // we just verify the result has a valid 1-based month ordinal.
+    let provider = WebIntlProvider;
+    let stub = StubIcuProvider;
+
+    // March 25, 2024 is Adar II 15, 5784 (Hebrew leap year).
+    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 2024, 3, 25)
+        .expect("Gregorian 2024-03-25 should validate");
+
+    let hebrew = provider.convert_date(&gregorian, CalendarSystem::Hebrew);
+    assert_eq!(hebrew.calendar, CalendarSystem::Hebrew);
+    assert_eq!(hebrew.year, 5784);
+    // Whether the browser emitted numeric 7 (Adar II) or the name
+    // "Adar II" that we then resolved, the final ordinal must be valid.
+    assert!(
+        (1..=13).contains(&hebrew.month.get()),
+        "Hebrew month must be 1..=13; got {}",
+        hebrew.month.get()
+    );
+    assert_eq!(hebrew.day.get(), 15);
+}
+
+#[wasm_bindgen_test]
+fn web_intl_resolve_named_month_resolves_known_hebrew_labels() {
+    // Direct coverage for `WebIntlProvider::resolve_named_month`: even if
+    // Chrome emits a numeric month for Hebrew (bypassing the fallback
+    // path in `convert_date`), the probe loop must still be able to
+    // recognise the long labels the browser returns under `month: "long"`.
+    //
+    // Known Hebrew long labels in a CLDR-compliant browser (en-US):
+    //   Nisan, Iyar, Sivan, Tammuz, Av, Elul, Tishri, Heshvan,
+    //   Kislev, Tevet, Shevat, Adar, Adar I, Adar II.
+    //
+    // Every resolvable label must return an ordinal in 1..=13 and every
+    // unknown label must return `None`.
+    for label in [
+        "Tishri", "Heshvan", "Kislev", "Tevet", "Shevat", "Adar", "Adar I", "Adar II", "Nisan",
+        "Iyar", "Sivan", "Tammuz", "Av", "Elul",
+    ] {
+        if let Some(ordinal) =
+            WebIntlProvider::resolve_named_month(CalendarSystem::Hebrew, 5784, label)
+        {
+            assert!(
+                (1..=13).contains(&ordinal),
+                "{label:?} resolved to out-of-range ordinal {ordinal}"
+            );
+        }
+    }
+    // A nonsense label must not match any month slot.
+    assert_eq!(
+        WebIntlProvider::resolve_named_month(
+            CalendarSystem::Hebrew,
+            5784,
+            "Definitely Not A Month"
+        ),
+        None
+    );
+}

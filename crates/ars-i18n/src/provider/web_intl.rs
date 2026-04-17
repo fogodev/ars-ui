@@ -72,6 +72,71 @@ impl WebIntlProvider {
             .ok()
             .and_then(|value| value.as_string())
     }
+
+    /// Resolves a named month label emitted by `Intl.DateTimeFormat`
+    /// (e.g., Hebrew `"Adar II"`) to its 1-based ordinal in the target
+    /// calendar's year numbering.
+    ///
+    /// Even with `month: "numeric"` some browsers emit calendar-specific
+    /// month names for calendars that don't expose a simple numeric
+    /// labelling (notably Hebrew leap years). We resolve these by
+    /// probing: iterate every month slot that the calendar supports in
+    /// the given year, format each through `Intl.DateTimeFormat` with
+    /// `month: "long"`, and compare the result against the label we
+    /// received. Returns `Some(ordinal)` on a match or `None` if the
+    /// label cannot be resolved (which leaves the caller with the
+    /// documented "return source date" failure path).
+    pub(crate) fn resolve_named_month(
+        target: CalendarSystem,
+        target_year: i32,
+        label: &str,
+    ) -> Option<u8> {
+        // `target_year` is accepted for future calendar-specific lookups
+        // (#545); the current probe walks all 13 possible month slots
+        // and matches by label, so the year only anchors the probe date.
+        let _ = target_year;
+
+        let locales = Array::of1(&JsValue::from_str("en-US"));
+
+        let opts = Object::new();
+        Reflect::set(
+            &opts,
+            &"calendar".into(),
+            &JsValue::from_str(target.to_bcp47_value()),
+        )
+        .ok()?;
+        Reflect::set(&opts, &"month".into(), &JsValue::from_str("long")).ok()?;
+
+        let formatter = Intl::DateTimeFormat::new(&locales, &opts);
+
+        // Hebrew leap years have 13 months. Other calendars max out at 13
+        // under the current spec (Chinese intercalary months, Ethiopic
+        // Pagume). 13 is a safe upper bound for the probe; nonexistent
+        // months simply won't match the label.
+        for ordinal in 1_u8..=13 {
+            let probe_month = i32::from(ordinal.saturating_sub(1));
+            let probe = js_sys::Date::new_0();
+            // Anchor in a modern year so we never cross the JS century
+            // quirk; the `calendar` option governs how the browser
+            // labels the month, so year choice only affects which month
+            // name a given Gregorian slot maps onto.
+            probe.set_utc_full_year_with_month_date(2024, probe_month, 15);
+
+            let formatted = formatter.format_to_parts(&probe);
+            for i in 0..formatted.length() {
+                let part = formatted.get(i);
+                if Self::string_property(&part, "type").as_deref() == Some("month") {
+                    let probe_label = Self::string_property(&part, "value").unwrap_or_default();
+                    if probe_label == label {
+                        return Some(ordinal);
+                    }
+                    break;
+                }
+            }
+        }
+
+        None
+    }
 }
 
 impl IcuProvider for WebIntlProvider {
@@ -400,7 +465,14 @@ impl IcuProvider for WebIntlProvider {
             return date.clone();
         };
 
-        let js_date = js_sys::Date::new_with_year_month_day(
+        // `js_sys::Date::new_with_year_month_day` goes through the
+        // legacy two-argument `new Date(year, month)` path, which maps
+        // `year ∈ 0..100` onto `1900..2000` per the ECMAScript spec.
+        // Calling `setUTCFullYear` after construction bypasses the quirk
+        // and lets us pass historical years (e.g., 90 CE) through
+        // `Intl.DateTimeFormat` unmodified.
+        let js_date = js_sys::Date::new_0();
+        js_date.set_utc_full_year_with_month_date(
             year_u32,
             i32::from(date.month.get().saturating_sub(1)),
             i32::from(date.day.get()),
@@ -412,6 +484,7 @@ impl IcuProvider for WebIntlProvider {
         let mut month: u8 = 0;
         let mut day: u8 = 0;
         let mut era_label: Option<String> = None;
+        let mut month_label: Option<String> = None;
 
         for i in 0..parts.length() {
             let part = parts.get(i);
@@ -422,10 +495,30 @@ impl IcuProvider for WebIntlProvider {
 
             match part_type.as_str() {
                 "year" | "relatedYear" => year = value.parse().unwrap_or(0),
-                "month" => month = value.parse().unwrap_or(0),
+                "month" => {
+                    month = value.parse().unwrap_or(0);
+                    if month == 0 {
+                        // Non-numeric month label (e.g., Hebrew "Adar II"
+                        // even when `month: "numeric"` is requested). Keep
+                        // the label so we can resolve it after `year` is
+                        // known.
+                        month_label = Some(value);
+                    }
+                }
                 "day" => day = value.parse().unwrap_or(0),
                 "era" => era_label = Some(value),
                 _ => {}
+            }
+        }
+
+        // If the browser returned a named month, probe the target calendar
+        // to resolve it to an ordinal. This matters for Hebrew leap years
+        // where `Intl.DateTimeFormat('en-US', { calendar: 'hebrew',
+        // month: 'numeric' })` can still emit `Adar I`/`Adar II` instead
+        // of a number.
+        if month == 0 {
+            if let Some(label) = month_label {
+                month = Self::resolve_named_month(target, year, &label).unwrap_or(0);
             }
         }
 
