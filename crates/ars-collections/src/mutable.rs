@@ -15,7 +15,7 @@
 //! Spec reference: `spec/foundation/06-collections.md` §1.8 "Mutable
 //! Collections".
 
-use alloc::vec::Vec;
+use alloc::{collections::BTreeSet, vec::Vec};
 use core::{
     fmt::{self, Debug},
     mem,
@@ -341,30 +341,71 @@ impl<T: CollectionItem> MutableTreeData<T> {
     ///
     /// Returns the flat DFS index of the inserted node on success, or
     /// `None` if the inner [`TreeCollection::insert_child`] rejected the
-    /// insert (unknown parent key). `CollectionChange::Insert` is emitted
-    /// only on success, so the change log never references a phantom node.
+    /// insert (unknown parent key).
+    ///
+    /// # Visibility-aware change events
+    ///
+    /// The emitted `CollectionChange::Insert` carries the **visible
+    /// iteration index**, matching the position the adapter would use
+    /// against [`Collection::get_by_index`]. When the new child lands
+    /// inside a collapsed ancestor it is not part of the visible
+    /// iteration, so **no event is emitted** — the adapter's DOM is
+    /// already consistent (the node simply isn't rendered yet) and
+    /// emitting an `Insert { index, count }` carrying a flat DFS index
+    /// that has no corresponding visible position would mis-place the
+    /// DOM update. The hidden node will surface naturally when its
+    /// ancestor is later expanded and the adapter re-fetches the
+    /// expanded subtree.
     pub fn insert_child(&mut self, parent: Option<&Key>, index: usize, item: T) -> Option<usize> {
+        let key = item.key().clone();
         let flat_index = self.inner.insert_child(parent, index, item)?;
 
-        self.pending_changes.push(CollectionChange::Insert {
-            index: flat_index,
-            count: 1,
-        });
+        // Only emit an event when the new child is part of the visible
+        // iteration. A hidden insert produces no DOM change for the
+        // adapter to apply.
+        if let Some(visible_index) = self.inner.visible_index_of(&key) {
+            self.pending_changes.push(CollectionChange::Insert {
+                index: visible_index,
+                count: 1,
+            });
+        }
 
         Some(flat_index)
     }
 
     /// Remove the listed nodes (and their descendants), returning their
-    /// owned values. Emits [`CollectionChange::Remove`] carrying only the
-    /// keys that actually matched an item — unknown keys are silently
-    /// skipped by the inner collection and excluded from the change event.
+    /// owned values.
+    ///
+    /// Emits [`CollectionChange::Remove`] carrying only the keys that
+    /// were both **(a)** actually matched by the inner collection and
+    /// **(b)** part of the visible iteration immediately before the
+    /// removal. Hidden nodes (those inside a collapsed ancestor) were
+    /// never rendered, so signalling their removal would force the
+    /// adapter to no-op anyway and pollutes the truthful change log.
+    /// When every removed item was hidden the call returns the values
+    /// without emitting any event.
     pub fn remove(&mut self, keys: &[Key]) -> Vec<T> {
+        // Snapshot the visible-key set BEFORE mutation so we can later
+        // tell which removed items the adapter had actually rendered.
+        // `visible_keys` is the inherent (Clone-free) twin of
+        // `Collection::keys`, available because `MutableTreeData::remove`
+        // only requires `T: CollectionItem`.
+        let visible_before = self.inner.visible_keys().cloned().collect::<BTreeSet<_>>();
+
         let removed = self.inner.remove_by_keys(keys);
 
         if !removed.is_empty() {
-            self.pending_changes.push(CollectionChange::Remove {
-                keys: removed.iter().map(|t| t.key().clone()).collect(),
-            });
+            let visible_removed_keys = removed
+                .iter()
+                .map(|t| t.key().clone())
+                .filter(|k| visible_before.contains(k))
+                .collect::<Vec<_>>();
+
+            if !visible_removed_keys.is_empty() {
+                self.pending_changes.push(CollectionChange::Remove {
+                    keys: visible_removed_keys,
+                });
+            }
         }
 
         removed
@@ -376,40 +417,97 @@ impl<T: CollectionItem> MutableTreeData<T> {
     /// Returns `Some((from_flat_index, to_flat_index))` on success, or
     /// `None` when the inner [`TreeCollection::reparent`] rejected the
     /// move (unknown key, unknown `new_parent`, or `new_parent` is a
-    /// descendant of `key`). `CollectionChange::Move` is emitted only on
-    /// success.
+    /// descendant of `key`).
+    ///
+    /// # Visibility-aware change events
+    ///
+    /// The visibility of the moved node may differ between the old and
+    /// new locations (e.g. moving from an expanded parent into a
+    /// collapsed one), so a single `Move` event is not always sufficient
+    /// to describe the DOM impact. The wrapper handles each case
+    /// precisely:
+    ///
+    /// | From visible | To visible | Event emitted                                               |
+    /// | ------------ | ---------- | ----------------------------------------------------------- |
+    /// | yes          | yes        | `Move { key, from: vis_from, to: vis_to }`                  |
+    /// | yes          | no         | `Remove { keys: [key] }` (subtree disappears from the DOM)  |
+    /// | no           | yes        | `Insert { index: vis_to, count: 1 }` (subtree appears)      |
+    /// | no           | no         | *(no event — neither location is rendered)*                 |
+    ///
+    /// In all cases the indices are **visible iteration indices**, not
+    /// flat DFS indices, so the adapter can apply them directly against
+    /// [`Collection::get_by_index`].
     pub fn reparent(
         &mut self,
         key: &Key,
         new_parent: Option<&Key>,
         index: usize,
     ) -> Option<(usize, usize)> {
-        let (from_index, to_index) = self.inner.reparent(key, new_parent, index)?;
+        // Capture pre-mutation visibility so we can pick the right event
+        // shape after the inner collection settles.
+        let from_visible = self.inner.visible_index_of(key);
 
-        self.pending_changes.push(CollectionChange::Move {
-            key: key.clone(),
-            from_index,
-            to_index,
-        });
+        let (from_flat, to_flat) = self.inner.reparent(key, new_parent, index)?;
 
-        Some((from_index, to_index))
+        let to_visible = self.inner.visible_index_of(key);
+
+        match (from_visible, to_visible) {
+            (Some(from_index), Some(to_index)) => {
+                self.pending_changes.push(CollectionChange::Move {
+                    key: key.clone(),
+                    from_index,
+                    to_index,
+                });
+            }
+
+            (Some(_), None) => {
+                self.pending_changes.push(CollectionChange::Remove {
+                    keys: alloc::vec![key.clone()],
+                });
+            }
+
+            (None, Some(to_index)) => {
+                self.pending_changes.push(CollectionChange::Insert {
+                    index: to_index,
+                    count: 1,
+                });
+            }
+
+            (None, None) => {
+                // Both endpoints hidden — no DOM change to report.
+            }
+        }
+
+        Some((from_flat, to_flat))
     }
 
     /// Reorder a node among its existing siblings (same parent).
     ///
     /// Returns `Some((from_flat_index, to_flat_index))` on success, or
-    /// `None` when `key` does not exist in the tree. `CollectionChange::Move`
-    /// is emitted only on success.
+    /// `None` when `key` does not exist in the tree.
+    ///
+    /// # Visibility-aware change events
+    ///
+    /// Reordering preserves the parent and therefore preserves
+    /// visibility — either both endpoints are visible (the parent is
+    /// expanded) or both are hidden (the parent is collapsed). In the
+    /// visible case `CollectionChange::Move` is emitted using **visible
+    /// iteration indices**; in the hidden case no event is emitted.
     pub fn reorder(&mut self, key: &Key, to_sibling_index: usize) -> Option<(usize, usize)> {
-        let (from_index, to_index) = self.inner.reorder_sibling(key, to_sibling_index)?;
+        let from_visible = self.inner.visible_index_of(key);
 
-        self.pending_changes.push(CollectionChange::Move {
-            key: key.clone(),
-            from_index,
-            to_index,
-        });
+        let (from_flat, to_flat) = self.inner.reorder_sibling(key, to_sibling_index)?;
 
-        Some((from_index, to_index))
+        if let (Some(from_index), Some(to_index)) = (from_visible, self.inner.visible_index_of(key))
+        {
+            self.pending_changes.push(CollectionChange::Move {
+                key: key.clone(),
+                from_index,
+                to_index,
+            });
+        }
+
+        Some((from_flat, to_flat))
     }
 
     /// Replace a node's data in place. Children are preserved.
@@ -1106,6 +1204,359 @@ mod tests {
         let second = tree.drain_changes();
 
         assert!(second.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // MutableTreeData — visibility-aware change events
+    //
+    // The events `MutableTreeData` emits must describe *visible* iteration
+    // changes, not raw `all_nodes` mutations. Hidden subtrees never appear
+    // in `Collection::nodes`, so adapters relying on `get_by_index` would
+    // mis-place DOM updates if the events carried flat DFS indices that
+    // pointed inside a collapsed ancestor.
+    // -----------------------------------------------------------------------
+
+    /// Helper: build a tree with one collapsed root parent and one expanded
+    /// root parent, plus a leaf root at the end. After construction:
+    ///
+    /// ```text
+    /// 1 Root A   (collapsed)         flat 0, visible 0
+    /// ├── 11 Child A1                flat 1, visible — (hidden)
+    /// └── 12 Child A2                flat 2, visible — (hidden)
+    /// 2 Root B   (expanded)          flat 3, visible 1
+    /// └── 21 Child B1                flat 4, visible 2
+    /// 3 Root C   (leaf)              flat 5, visible 3
+    /// ```
+    fn mixed_visibility_tree() -> MutableTreeData<Item> {
+        MutableTreeData::new(TreeCollection::new([
+            TreeItemConfig {
+                key: Key::int(1),
+                text_value: "Root A".to_string(),
+                value: Item::new(1, "Root A"),
+                children: vec![
+                    TreeItemConfig {
+                        key: Key::int(11),
+                        text_value: "Child A1".to_string(),
+                        value: Item::new(11, "Child A1"),
+                        children: vec![],
+                        default_expanded: true,
+                    },
+                    TreeItemConfig {
+                        key: Key::int(12),
+                        text_value: "Child A2".to_string(),
+                        value: Item::new(12, "Child A2"),
+                        children: vec![],
+                        default_expanded: true,
+                    },
+                ],
+                default_expanded: false, // <-- A is collapsed
+            },
+            TreeItemConfig {
+                key: Key::int(2),
+                text_value: "Root B".to_string(),
+                value: Item::new(2, "Root B"),
+                children: vec![TreeItemConfig {
+                    key: Key::int(21),
+                    text_value: "Child B1".to_string(),
+                    value: Item::new(21, "Child B1"),
+                    children: vec![],
+                    default_expanded: true,
+                }],
+                default_expanded: true,
+            },
+            TreeItemConfig {
+                key: Key::int(3),
+                text_value: "Root C".to_string(),
+                value: Item::new(3, "Root C"),
+                children: vec![],
+                default_expanded: true,
+            },
+        ]))
+    }
+
+    #[test]
+    fn tree_visibility_fixture_has_expected_visible_iteration() {
+        // Sanity check: confirm that `mixed_visibility_tree` actually
+        // hides the children of Root A, so the visibility-aware tests
+        // below exercise the real "hidden" branches.
+        let tree = mixed_visibility_tree();
+
+        let visible = tree.keys().cloned().collect::<Vec<_>>();
+
+        assert_eq!(
+            visible,
+            vec![Key::int(1), Key::int(2), Key::int(21), Key::int(3)],
+            "Children of collapsed Root A must be hidden from visible iteration"
+        );
+    }
+
+    #[test]
+    fn tree_insert_child_under_collapsed_parent_emits_no_event() {
+        // Insert a new child under the collapsed Root A. The child sits
+        // inside a hidden subtree, so adapters have nothing to render.
+        // Per the visibility-aware contract no event is emitted.
+        let mut tree = mixed_visibility_tree();
+
+        let flat = tree.insert_child(Some(&Key::int(1)), 0, Item::new(99, "Hidden Child"));
+
+        assert!(
+            flat.is_some(),
+            "insert succeeded — Some(_) returned even though no event is emitted"
+        );
+
+        // The node IS in the inner tree (just not in the visible iteration).
+        assert!(
+            tree.get(&Key::int(99)).is_some(),
+            "hidden node is still reachable by key"
+        );
+
+        let drained = tree.drain_changes();
+
+        assert!(
+            drained.is_empty(),
+            "no event for insert under collapsed parent; got {drained:?}"
+        );
+    }
+
+    #[test]
+    fn tree_insert_child_emits_visible_index_when_visibility_skews_flat() {
+        // Insert a new root after Root B. Because Root A's subtree is
+        // collapsed, the new root's flat DFS index differs from its
+        // visible iteration index — the event must use the visible one.
+        //
+        // Before insert (flat / visible):
+        //   1 Root A    flat 0 / visible 0
+        //   11/12       flat 1,2 / hidden
+        //   2 Root B    flat 3 / visible 1
+        //   21          flat 4 / visible 2
+        //   3 Root C    flat 5 / visible 3
+        //
+        // After inserting a new root at sibling_index 2 (between B and C):
+        //   New root    flat 5 / visible 3
+        let mut tree = mixed_visibility_tree();
+
+        let flat = tree.insert_child(None, 2, Item::new(50, "New Root"));
+
+        assert_eq!(flat, Some(5), "flat DFS index after the existing nodes");
+
+        let drained = tree.drain_changes();
+
+        assert_eq!(
+            drained,
+            vec![CollectionChange::Insert {
+                index: 3, // visible position, not flat position
+                count: 1,
+            }],
+            "Insert event must carry visible iteration index, not flat DFS"
+        );
+
+        // Sanity check: the visible iteration now includes the new root
+        // at position 3.
+        let visible_at_3 = tree.get_by_index(3).expect("visible index 3");
+
+        assert_eq!(visible_at_3.key, Key::int(50));
+    }
+
+    #[test]
+    fn tree_remove_hidden_only_emits_no_event() {
+        // Remove the children of collapsed Root A. They were never
+        // visible, so the adapter has no DOM to clean up — no event.
+        let mut tree = mixed_visibility_tree();
+
+        let removed = tree.remove(&[Key::int(11), Key::int(12)]);
+
+        assert_eq!(removed.len(), 2, "inner removal still returns the values");
+
+        let drained = tree.drain_changes();
+
+        assert!(
+            drained.is_empty(),
+            "no event when removed items were all hidden; got {drained:?}"
+        );
+    }
+
+    #[test]
+    fn tree_remove_filters_event_to_visible_keys() {
+        // Remove a mix: Root B (visible, plus its visible child 21) and
+        // Child A1 (hidden inside collapsed Root A).
+        // The Remove event must list ONLY the previously-visible keys.
+        let mut tree = mixed_visibility_tree();
+
+        let removed = tree.remove(&[Key::int(2), Key::int(11)]);
+
+        // Root B + Child B1 + Child A1 = 3 inner removals.
+        assert_eq!(removed.len(), 3);
+
+        let drained = tree.drain_changes();
+
+        // Order of keys in the event mirrors the order returned by the
+        // inner `remove_by_keys` (subtree-by-subtree).
+        let expected = vec![CollectionChange::Remove {
+            keys: vec![Key::int(2), Key::int(21)],
+        }];
+
+        assert_eq!(
+            drained, expected,
+            "Remove event must include only previously-visible keys"
+        );
+    }
+
+    #[test]
+    fn tree_reparent_visible_to_hidden_emits_remove() {
+        // Move Root C (visible leaf) under collapsed Root A.
+        // From the adapter's DOM perspective, Root C disappears.
+        let mut tree = mixed_visibility_tree();
+
+        let indices = tree.reparent(&Key::int(3), Some(&Key::int(1)), 0);
+
+        assert!(indices.is_some(), "reparent succeeded");
+
+        let visible_keys = tree.keys().cloned().collect::<Vec<_>>();
+
+        assert!(
+            !visible_keys.contains(&Key::int(3)),
+            "Root C is no longer visible after moving under collapsed parent; \
+             visible: {visible_keys:?}"
+        );
+
+        let drained = tree.drain_changes();
+
+        assert_eq!(
+            drained,
+            vec![CollectionChange::Remove {
+                keys: vec![Key::int(3)],
+            }],
+            "visible→hidden reparent must emit Remove, not Move"
+        );
+    }
+
+    #[test]
+    fn tree_reparent_hidden_to_visible_emits_insert() {
+        // Move Child A1 (hidden inside collapsed Root A) out to be a
+        // root sibling. From the adapter's DOM perspective, Child A1
+        // appears for the first time.
+        let mut tree = mixed_visibility_tree();
+
+        // Reparent Child A1 to root, between Root B and Root C.
+        let indices = tree.reparent(&Key::int(11), None, 2);
+
+        assert!(indices.is_some(), "reparent succeeded");
+
+        let drained = tree.drain_changes();
+
+        // Visible iteration after reparent:
+        //   1 Root A    visible 0 (still collapsed; only Child A2 hidden)
+        //   2 Root B    visible 1
+        //   21 Child B1 visible 2
+        //   11 Child A1 visible 3 (newly inserted)
+        //   3 Root C    visible 4
+        assert_eq!(
+            drained,
+            vec![CollectionChange::Insert { index: 3, count: 1 }],
+            "hidden→visible reparent must emit Insert at the visible position"
+        );
+    }
+
+    #[test]
+    fn tree_reparent_hidden_to_hidden_emits_no_event() {
+        // Build a tree with two collapsed parents so we can shuffle a
+        // child between them without ever entering the visible region.
+        let mut tree = MutableTreeData::new(TreeCollection::new([
+            TreeItemConfig {
+                key: Key::int(1),
+                text_value: "Box 1".to_string(),
+                value: Item::new(1, "Box 1"),
+                children: vec![TreeItemConfig {
+                    key: Key::int(11),
+                    text_value: "Item".to_string(),
+                    value: Item::new(11, "Item"),
+                    children: vec![],
+                    default_expanded: true,
+                }],
+                default_expanded: false,
+            },
+            TreeItemConfig {
+                key: Key::int(2),
+                text_value: "Box 2".to_string(),
+                value: Item::new(2, "Box 2"),
+                children: vec![],
+                default_expanded: false,
+            },
+        ]));
+
+        let indices = tree.reparent(&Key::int(11), Some(&Key::int(2)), 0);
+
+        assert!(indices.is_some(), "reparent succeeded");
+        assert!(
+            tree.drain_changes().is_empty(),
+            "no event when both endpoints are hidden"
+        );
+    }
+
+    #[test]
+    fn tree_reorder_under_collapsed_parent_emits_no_event() {
+        // Reorder hidden siblings under the collapsed Root A.
+        // Visibility is preserved (still hidden) so no event.
+        let mut tree = mixed_visibility_tree();
+
+        let indices = tree.reorder(&Key::int(11), 1);
+
+        assert!(indices.is_some(), "reorder succeeded internally");
+
+        let drained = tree.drain_changes();
+
+        assert!(
+            drained.is_empty(),
+            "no event when reordering hidden siblings; got {drained:?}"
+        );
+    }
+
+    #[test]
+    fn tree_reorder_visible_emits_visible_index_move() {
+        // In the mixed-visibility fixture, the only expanded subtree
+        // with multiple siblings would be a manufactured one. Build a
+        // small tree where Root B has two visible children we can swap.
+        let mut tree = MutableTreeData::new(TreeCollection::new([TreeItemConfig {
+            key: Key::int(2),
+            text_value: "Root B".to_string(),
+            value: Item::new(2, "Root B"),
+            children: vec![
+                TreeItemConfig {
+                    key: Key::int(21),
+                    text_value: "Child B1".to_string(),
+                    value: Item::new(21, "Child B1"),
+                    children: vec![],
+                    default_expanded: true,
+                },
+                TreeItemConfig {
+                    key: Key::int(22),
+                    text_value: "Child B2".to_string(),
+                    value: Item::new(22, "Child B2"),
+                    children: vec![],
+                    default_expanded: true,
+                },
+            ],
+            default_expanded: true,
+        }]));
+
+        // Visible: [Root B (0), Child B1 (1), Child B2 (2)].
+        // Move Child B1 to sibling_index 1 → it becomes the second
+        // visible child (visible index 2).
+        let indices = tree.reorder(&Key::int(21), 1);
+
+        assert_eq!(indices, Some((1, 2)), "flat indices match visible here");
+
+        let drained = tree.drain_changes();
+
+        assert_eq!(
+            drained,
+            vec![CollectionChange::Move {
+                key: Key::int(21),
+                from_index: 1,
+                to_index: 2,
+            }],
+            "visible reorder uses visible iteration indices"
+        );
     }
 
     #[test]

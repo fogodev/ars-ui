@@ -581,9 +581,40 @@ impl<T: CollectionItem> TreeCollection<T> {
         removed
     }
 
-    /// Get the flat index of a node by key.
+    /// Get the flat (DFS) index of a node by key. The flat index includes
+    /// nodes hidden inside collapsed subtrees and is suitable for
+    /// stable-storage operations on `all_nodes`. For DOM reconciliation
+    /// or any code that drives the visible iteration exposed via
+    /// [`Collection::nodes`] / [`Collection::get_by_index`], use
+    /// [`visible_index_of`](Self::visible_index_of) instead.
     pub fn flat_index_of(&self, key: &Key) -> Option<usize> {
         self.key_to_index.get(key).copied()
+    }
+
+    /// Get the **visible** iteration index of a node by key, or `None`
+    /// when the key is unknown **or** the node sits inside a collapsed
+    /// ancestor (and is therefore hidden from `Collection::nodes` /
+    /// `Collection::get_by_index`).
+    ///
+    /// Adapters driving DOM reconciliation should consume visible indices
+    /// — the flat DFS index returned by [`flat_index_of`](Self::flat_index_of)
+    /// does not correspond to any DOM position when a node is hidden.
+    pub fn visible_index_of(&self, key: &Key) -> Option<usize> {
+        let flat = self.flat_index_of(key)?;
+        // `visible_indices` is sorted ascending (it preserves DFS order),
+        // so binary search is correct and faster than a linear scan for
+        // large trees.
+        self.visible_indices.binary_search(&flat).ok()
+    }
+
+    /// Iterate the **visible** keys of the tree in DFS order.
+    ///
+    /// Mirrors the iteration of [`Collection::keys`] but is available
+    /// without the `T: Clone` bound the trait impl requires, so it can be
+    /// called from generic contexts (such as `MutableTreeData`'s mutation
+    /// methods, which only require `T: CollectionItem`).
+    pub fn visible_keys(&self) -> impl Iterator<Item = &Key> {
+        self.visible_indices.iter().map(|&i| &self.all_nodes[i].key)
     }
 
     /// Move a node (and its subtree) to a new parent at the given child index.
@@ -1756,6 +1787,61 @@ mod tests {
         assert_eq!(tree.flat_index_of(&Key::int(3)), Some(2));
         assert_eq!(tree.flat_index_of(&Key::int(4)), Some(3));
         assert_eq!(tree.flat_index_of(&Key::int(99)), None);
+    }
+
+    #[test]
+    fn visible_index_of_matches_flat_when_fully_expanded() {
+        // The fruit_tree fixture is fully expanded by default, so visible
+        // and flat indices must agree for every key.
+        let tree = fruit_tree();
+
+        assert_eq!(tree.visible_index_of(&Key::int(1)), Some(0));
+        assert_eq!(tree.visible_index_of(&Key::int(2)), Some(1));
+        assert_eq!(tree.visible_index_of(&Key::int(3)), Some(2));
+        assert_eq!(tree.visible_index_of(&Key::int(4)), Some(3));
+        assert_eq!(tree.visible_index_of(&Key::int(99)), None);
+    }
+
+    #[test]
+    fn visible_index_of_returns_none_for_collapsed_descendants() {
+        // Collapse the Fruits group so its children become hidden. The
+        // root itself stays visible and its children disappear from the
+        // visible iteration.
+        let collapsed = fruit_tree().set_expanded(&Key::int(1), false);
+
+        assert_eq!(
+            collapsed.visible_index_of(&Key::int(1)),
+            Some(0),
+            "the collapsed parent itself is still visible"
+        );
+        assert_eq!(
+            collapsed.visible_index_of(&Key::int(2)),
+            None,
+            "Apple is hidden inside collapsed Fruits"
+        );
+        assert_eq!(
+            collapsed.visible_index_of(&Key::int(3)),
+            None,
+            "Banana is hidden inside collapsed Fruits"
+        );
+        assert_eq!(
+            collapsed.visible_index_of(&Key::int(4)),
+            Some(1),
+            "Other shifts up to visible index 1 once Fruits' children are hidden"
+        );
+    }
+
+    #[test]
+    fn visible_keys_iterates_only_visible_nodes() {
+        let collapsed = fruit_tree().set_expanded(&Key::int(1), false);
+
+        let visible_keys = collapsed.visible_keys().cloned().collect::<Vec<_>>();
+
+        assert_eq!(
+            visible_keys,
+            vec![Key::int(1), Key::int(4)],
+            "visible_keys must skip nodes inside collapsed ancestors"
+        );
     }
 
     #[test]

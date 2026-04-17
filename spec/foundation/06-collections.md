@@ -960,9 +960,9 @@ impl<T: CollectionItem + Clone> Collection<T> for MutableListData<T> {
 
 Every mutation method in `MutableTreeData` — `insert_child`, `reparent`, `reorder`, `replace`, `remove` — follows the same pattern:
 
-- The inner `TreeCollection` mutation method (see §2.3) returns an `Option` communicating whether the mutation took effect, and carrying the flat DFS index(es) the caller needs to emit a precise change event.
+- The inner `TreeCollection` mutation method (see §2.3) returns an `Option` communicating whether the mutation took effect, and carrying the flat DFS index(es) the caller needs to make further bookkeeping decisions.
 - The wrapper forwards that `Option` unchanged as its own return value.
-- The wrapper pushes a `CollectionChange` into `pending_changes` **only** when the inner call returned `Some(_)`.
+- The wrapper pushes a `CollectionChange` into `pending_changes` **only** when the inner call returned `Some(_)` **and** the change has a visible-iteration footprint (see "Visibility-aware change events" below).
 
 Failure modes the `Option` captures:
 
@@ -974,6 +974,16 @@ Failure modes the `Option` captures:
 | `replace`      | `item.key()` unknown                                                                               |
 
 This mirrors `HashMap::insert` in idiom: the return value tells the caller whether the operation happened and, when applicable, what changed. Callers that know the precondition holds can ignore the return; callers that need to react to failure can match on `Option::None` without a separate `contains_key` probe.
+
+##### Visibility-aware change events
+
+`Collection::nodes` and `Collection::get_by_index` iterate the **visible** subset of a tree — items inside a collapsed ancestor are excluded. Adapters drive DOM reconciliation against that visible iteration, so `CollectionChange` events emitted by `MutableTreeData` describe **visible-iteration changes**, not raw `all_nodes` mutations. Specifically:
+
+- All indices in `Insert { index, .. }` and `Move { from_index, to_index, .. }` are **visible iteration indices** (the position the adapter would obtain from `Collection::get_by_index`), never flat DFS indices into `all_nodes`.
+- Mutations confined to a hidden subtree (e.g. `insert_child` under a collapsed parent, or `reorder` of two hidden siblings) emit **no event** — the adapter has nothing to render and the inner state will surface naturally when the ancestor is later expanded.
+- Mutations that cross visibility (`reparent` from a visible parent into a hidden one, or vice versa) are translated into the matching DOM-shaped event (`Remove` or `Insert`) instead of `Move`. See `reparent` below for the full table.
+
+This contract keeps the change log "truthful" in the sense already required for failure modes: every event corresponds to a DOM operation the adapter must perform. Hidden-only churn does not generate phantom events that an adapter would have to filter or no-op.
 
 ```rust
 /// A mutable tree collection that tracks granular changes.
@@ -1009,68 +1019,126 @@ impl<T: CollectionItem> MutableTreeData<T> {
     }
 
     /// Insert a child under the given parent at the specified sibling
-    /// index (or at the root when `parent` is `None`). Returns the flat DFS
-    /// index of the inserted node on success, or `None` when the inner
-    /// call rejected the insert (unknown parent). Emits `Insert` only on
-    /// success.
+    /// index (or at the root when `parent` is `None`). Returns the flat
+    /// DFS index of the inserted node on success, or `None` when the
+    /// inner call rejected the insert (unknown parent).
+    ///
+    /// Emits `Insert { index, count: 1 }` using the **visible iteration
+    /// index** of the new child, matching `Collection::get_by_index`.
+    /// When the child lands inside a collapsed ancestor it is hidden
+    /// from the visible iteration and **no event is emitted** — emitting
+    /// a flat DFS index would mis-place the DOM update.
     pub fn insert_child(
         &mut self,
         parent: Option<&Key>,
         index: usize,
         item: T,
     ) -> Option<usize> {
+        let key = item.key().clone();
         let flat_index = self.inner.insert_child(parent, index, item)?;
-        self.pending_changes
-            .push(CollectionChange::Insert { index: flat_index, count: 1 });
+        if let Some(visible_index) = self.inner.visible_index_of(&key) {
+            self.pending_changes
+                .push(CollectionChange::Insert { index: visible_index, count: 1 });
+        }
         Some(flat_index)
     }
 
-    /// Remove the listed nodes (and their descendants). Emits `Remove`
-    /// containing only the keys that actually matched; returns the removed
-    /// values. Emits no event and returns an empty `Vec` when no key matches.
+    /// Remove the listed nodes (and their descendants); returns the
+    /// removed values.
+    ///
+    /// Emits `Remove` carrying only the keys that were both **(a)**
+    /// matched by the inner collection and **(b)** part of the visible
+    /// iteration immediately before the removal. Hidden nodes were never
+    /// rendered, so signalling their removal would force the adapter to
+    /// no-op and pollutes the truthful change log. When every removed
+    /// item was hidden, no event is emitted.
     pub fn remove(&mut self, keys: &[Key]) -> Vec<T> {
+        // Snapshot visible keys before mutation.
+        let visible_before: BTreeSet<Key> = self.inner.visible_keys().cloned().collect();
         let removed = self.inner.remove_by_keys(keys);
         if !removed.is_empty() {
-            let removed_keys: Vec<Key> = removed.iter().map(|t| t.key().clone()).collect();
-            self.pending_changes.push(CollectionChange::Remove { keys: removed_keys });
+            let visible_removed_keys: Vec<Key> = removed
+                .iter()
+                .map(|t| t.key().clone())
+                .filter(|k| visible_before.contains(k))
+                .collect();
+            if !visible_removed_keys.is_empty() {
+                self.pending_changes
+                    .push(CollectionChange::Remove { keys: visible_removed_keys });
+            }
         }
         removed
     }
 
     /// Move a node (with its subtree) to a new parent. Returns
-    /// `Some((from_flat_index, to_flat_index))` on success; `None` when the
-    /// move is rejected (see §2.3 and the table above). Emits `Move` only
-    /// on success.
+    /// `Some((from_flat_index, to_flat_index))` on success; `None` when
+    /// the move is rejected (see §2.3 and the table above).
+    ///
+    /// Visibility may differ between the old and new locations, so the
+    /// emitted event is chosen to describe the DOM impact precisely:
+    ///
+    /// | From visible | To visible | Event emitted                               |
+    /// | ------------ | ---------- | ------------------------------------------- |
+    /// | yes          | yes        | `Move { key, from: vis_from, to: vis_to }`  |
+    /// | yes          | no         | `Remove { keys: [key] }`                    |
+    /// | no           | yes        | `Insert { index: vis_to, count: 1 }`        |
+    /// | no           | no         | *(no event)*                                |
+    ///
+    /// Indices are visible iteration indices, not flat DFS indices.
     pub fn reparent(
         &mut self,
         key: &Key,
         new_parent: Option<&Key>,
         index: usize,
     ) -> Option<(usize, usize)> {
-        let (from_index, to_index) = self.inner.reparent(key, new_parent, index)?;
-        self.pending_changes.push(CollectionChange::Move {
-            key: key.clone(),
-            from_index,
-            to_index,
-        });
-        Some((from_index, to_index))
+        let from_visible = self.inner.visible_index_of(key);
+        let (from_flat, to_flat) = self.inner.reparent(key, new_parent, index)?;
+        let to_visible = self.inner.visible_index_of(key);
+        match (from_visible, to_visible) {
+            (Some(from_index), Some(to_index)) => {
+                self.pending_changes.push(CollectionChange::Move {
+                    key: key.clone(), from_index, to_index,
+                });
+            }
+            (Some(_), None) => {
+                self.pending_changes.push(CollectionChange::Remove {
+                    keys: vec![key.clone()],
+                });
+            }
+            (None, Some(to_index)) => {
+                self.pending_changes.push(CollectionChange::Insert {
+                    index: to_index, count: 1,
+                });
+            }
+            (None, None) => {} // both endpoints hidden, nothing to report
+        }
+        Some((from_flat, to_flat))
     }
 
     /// Reorder a node among its existing siblings. Returns
     /// `Some((from_flat_index, to_flat_index))` on success; `None` when
-    /// `key` is unknown. Emits `Move` only on success.
+    /// `key` is unknown.
+    ///
+    /// Reordering preserves the parent and therefore preserves
+    /// visibility — either both endpoints are visible (parent expanded)
+    /// or both are hidden (parent collapsed). When visible, emits
+    /// `Move` using **visible iteration indices**; when hidden, emits
+    /// no event.
     pub fn reorder(
         &mut self,
         key: &Key,
         to_sibling_index: usize,
     ) -> Option<(usize, usize)> {
-        let (from_index, to_index) = self.inner.reorder_sibling(key, to_sibling_index)?;
-        self.pending_changes.push(CollectionChange::Move {
-            key: key.clone(),
-            from_index,
-            to_index,
-        });
-        Some((from_index, to_index))
+        let from_visible = self.inner.visible_index_of(key);
+        let (from_flat, to_flat) = self.inner.reorder_sibling(key, to_sibling_index)?;
+        if let (Some(from_index), Some(to_index)) =
+            (from_visible, self.inner.visible_index_of(key))
+        {
+            self.pending_changes.push(CollectionChange::Move {
+                key: key.clone(), from_index, to_index,
+            });
+        }
+        Some((from_flat, to_flat))
     }
 
     /// Replace a node's data in place (children preserved). Returns the
@@ -2095,9 +2163,31 @@ impl<T: CollectionItem> TreeCollection<T> {
         removed
     }
 
-    /// Get the flat index of a node by key.
+    /// Get the flat (DFS) index of a node by key. Includes nodes hidden
+    /// inside collapsed subtrees. For DOM reconciliation, use
+    /// `visible_index_of` instead.
     pub fn flat_index_of(&self, key: &Key) -> Option<usize> {
         self.key_to_index.get(key).copied()
+    }
+
+    /// Get the visible iteration index of a node by key, or `None` when
+    /// the key is unknown or the node sits inside a collapsed ancestor
+    /// (and is therefore hidden from `Collection::nodes` /
+    /// `Collection::get_by_index`). `MutableTreeData` uses this to emit
+    /// visibility-correct change events.
+    pub fn visible_index_of(&self, key: &Key) -> Option<usize> {
+        let flat = self.flat_index_of(key)?;
+        // `visible_indices` is sorted ascending, so binary search is
+        // correct and faster than a linear scan for large trees.
+        self.visible_indices.binary_search(&flat).ok()
+    }
+
+    /// Iterate the visible keys of the tree in DFS order. Inherent twin
+    /// of `Collection::keys` that drops the `T: Clone` bound, so it can
+    /// be called from `MutableTreeData`'s mutation methods (which only
+    /// require `T: CollectionItem`).
+    pub fn visible_keys(&self) -> impl Iterator<Item = &Key> {
+        self.visible_indices.iter().map(|&i| &self.all_nodes[i].key)
     }
 
     /// Move a node (and its subtree) to a new parent at the given child index.
