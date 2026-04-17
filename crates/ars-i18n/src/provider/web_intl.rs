@@ -97,6 +97,21 @@ impl WebIntlProvider {
         target_year: i32,
         label: &str,
     ) -> Option<u8> {
+        // English ordinal labels (`"First Month"`, `"Seventh Monthbis"`,
+        // `"Twelfth Monthbis"`) have a fixed, year-independent mapping
+        // to civil-order ordinal — regardless of whether a year-based
+        // probe happens to land inside a cycle where that leap month
+        // appears. Parse them directly so labels unreachable from any
+        // finite probe list (First Monthbis, Twelfth Monthbis, and
+        // the rarer Tenth/Eleventh positions) still resolve.
+        //
+        // Leap-vs-regular precision is lost at this layer (our
+        // `CalendarDate::month: NonZero<u8>` has no slot for it), same
+        // caveat as the `"6bis"` numeric path.
+        if let Some(ordinal) = parse_english_ordinal_month_label(label) {
+            return Some(ordinal);
+        }
+
         let locales = Array::of1(&JsValue::from_str("en-US"));
         let long_formatter = month_label_formatter(&locales, target, "long")?;
         let numeric_formatter = month_label_formatter(&locales, target, "2-digit")?;
@@ -638,6 +653,47 @@ impl IcuProvider for WebIntlProvider {
             month: month_nz,
             day: day_nz,
         }
+    }
+}
+
+/// Parses an English ordinal month label of the form
+/// `"<Ordinal> Month"` or `"<Ordinal> Monthbis"` into its 1..=13
+/// ordinal.
+///
+/// These labels come from `Intl.DateTimeFormat('en-US',
+/// { calendar: 'chinese', month: 'long' })` on ICU-backed runtimes
+/// and are the only way some leap-month positions (`First Monthbis`,
+/// `Tenth Monthbis`, `Twelfth Monthbis`) can be resolved without
+/// maintaining an exhaustive calendar-year probe list covering every
+/// possible leap-cycle position in history.
+///
+/// Note: the `bis` suffix signals a leap month; we drop it here and
+/// return the base ordinal because `CalendarDate::month: NonZero<u8>`
+/// can't encode the leap distinction. Callers that need exact
+/// leap-month precision must enable the `icu4x` feature, which
+/// routes through the internal ICU4X bridge above.
+pub(crate) fn parse_english_ordinal_month_label(label: &str) -> Option<u8> {
+    // Strip leap-month marker first.
+    let core = label.strip_suffix("bis").unwrap_or(label);
+    // Strip " Month" suffix; accept both with and without to stay
+    // tolerant of future CLDR wording tweaks.
+    let core = core.trim();
+    let core = core.strip_suffix(" Month").unwrap_or(core);
+    match core.trim() {
+        "First" => Some(1),
+        "Second" => Some(2),
+        "Third" => Some(3),
+        "Fourth" => Some(4),
+        "Fifth" => Some(5),
+        "Sixth" => Some(6),
+        "Seventh" => Some(7),
+        "Eighth" => Some(8),
+        "Ninth" => Some(9),
+        "Tenth" => Some(10),
+        "Eleventh" => Some(11),
+        "Twelfth" => Some(12),
+        "Thirteenth" => Some(13),
+        _ => None,
     }
 }
 

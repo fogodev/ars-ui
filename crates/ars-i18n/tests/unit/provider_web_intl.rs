@@ -3,7 +3,7 @@
 //! Run with:
 //! `wasm-pack test --headless --firefox crates/ars-i18n --no-default-features --features std,web-intl`.
 
-use alloc::string::ToString;
+use alloc::{format, string::ToString};
 use core::num::NonZero;
 
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
@@ -656,6 +656,77 @@ fn web_intl_resolve_named_month_returns_calendar_ordinal_not_probe_slot() {
         WebIntlProvider::resolve_named_month(CalendarSystem::Hebrew, 5785, "Adar")
     {
         assert_eq!(ordinal, 6, "Common-year Adar must resolve to civil-order 6");
+    }
+}
+
+#[wasm_bindgen_test]
+fn web_intl_parse_english_ordinal_month_label_covers_all_ordinals() {
+    // Regression (Codex round 12): a fixed `SWEEP_YEARS` list will
+    // always miss some leap-month positions — `First Monthbis`
+    // (last occurred 1651), `Twelfth Monthbis` (last 1832), and
+    // other distant cycle positions can't be covered without
+    // maintaining an exhaustive year list. Parsing the English
+    // ordinal label directly bypasses the probe entirely.
+    //
+    // This test pins all thirteen ordinals plus the `bis` leap
+    // marker plus a rejection assertion for unrecognised input.
+    use crate::provider::web_intl::parse_english_ordinal_month_label;
+
+    for (label, expected) in [
+        ("First Month", 1_u8),
+        ("Second Month", 2),
+        ("Third Month", 3),
+        ("Fourth Month", 4),
+        ("Fifth Month", 5),
+        ("Sixth Month", 6),
+        ("Seventh Month", 7),
+        ("Eighth Month", 8),
+        ("Ninth Month", 9),
+        ("Tenth Month", 10),
+        ("Eleventh Month", 11),
+        ("Twelfth Month", 12),
+        ("Thirteenth Month", 13),
+    ] {
+        assert_eq!(
+            parse_english_ordinal_month_label(label),
+            Some(expected),
+            "label {label:?} should resolve to {expected}"
+        );
+        // Leap variant resolves to the same base ordinal (precision
+        // loss is documented in the helper).
+        let bis = format!("{label}bis");
+        assert_eq!(
+            parse_english_ordinal_month_label(&bis),
+            Some(expected),
+            "leap label {bis:?} should resolve to {expected}"
+        );
+    }
+    // Nonsense inputs must return None so the caller falls back
+    // through the probe sweep.
+    assert_eq!(parse_english_ordinal_month_label("Adar II"), None);
+    assert_eq!(parse_english_ordinal_month_label("Month of Sundays"), None);
+    assert_eq!(parse_english_ordinal_month_label(""), None);
+}
+
+#[wasm_bindgen_test]
+fn web_intl_resolve_named_month_resolves_english_ordinal_labels_without_probe() {
+    // Regression (Codex round 12): Node Intl currently emits labels
+    // like `First Monthbis` and `Twelfth Monthbis` that no realistic
+    // `SWEEP_YEARS` list can cover (they require Chinese leap 1 /
+    // leap 12, both extremely rare in modern history). The resolver
+    // now parses those labels directly before consulting the probe
+    // sweep, so downstream `convert_date` doesn't silently clone.
+    for label in [
+        "First Monthbis",
+        "Tenth Monthbis",
+        "Twelfth Monthbis",
+        "Seventh Monthbis",
+    ] {
+        let ordinal = WebIntlProvider::resolve_named_month(CalendarSystem::Chinese, 2024, label);
+        assert!(
+            matches!(ordinal, Some(o) if (1..=13).contains(&o)),
+            "{label:?} must resolve via direct English-ordinal parse; got {ordinal:?}"
+        );
     }
 }
 
