@@ -981,7 +981,7 @@ This mirrors `HashMap::insert` in idiom: the return value tells the caller wheth
 
 - All indices in `Insert { index, .. }` and `Move { from_index, to_index, .. }` are **visible iteration indices** (the position the adapter would obtain from `Collection::get_by_index`), never flat DFS indices into `all_nodes`.
 - Mutations confined to a hidden subtree (e.g. `insert_child` under a collapsed parent, or `reorder` of two hidden siblings) emit **no event** — the adapter has nothing to render and the inner state will surface naturally when the ancestor is later expanded.
-- Mutations that cross visibility (`reparent` from a visible parent into a hidden one, or vice versa) are translated into the matching DOM-shaped event (`Remove` or `Insert`) instead of `Move`. See `reparent` below for the full table.
+- Mutations that cross visibility (`reparent` from a visible parent into a hidden one, or vice versa) are translated into the matching DOM-shaped event (`Remove` or `Insert`) instead of `Move`, and the event covers the **entire subtree** that crossed the boundary — `Remove` carries every previously-visible key in DFS order, and `Insert` reports `count` equal to the number of newly-visible nodes — because every visible descendant disappears or appears alongside the moved root. See `reparent` below for the full table.
 
 This contract keeps the change log "truthful" in the sense already required for failure modes: every event corresponds to a DOM operation the adapter must perform. Hidden-only churn does not generate phantom events that an adapter would have to filter or no-op.
 
@@ -1074,23 +1074,35 @@ impl<T: CollectionItem> MutableTreeData<T> {
     /// `Some((from_flat_index, to_flat_index))` on success; `None` when
     /// the move is rejected (see §2.3 and the table above).
     ///
-    /// Visibility may differ between the old and new locations, so the
-    /// emitted event is chosen to describe the DOM impact precisely:
+    /// Visibility may differ between the old and new locations — and a
+    /// single move can flip visibility for every descendant in the
+    /// subtree, not just the moved root — so the emitted event is
+    /// chosen to describe the DOM impact precisely:
     ///
-    /// | From visible | To visible | Event emitted                               |
-    /// | ------------ | ---------- | ------------------------------------------- |
-    /// | yes          | yes        | `Move { key, from: vis_from, to: vis_to }`  |
-    /// | yes          | no         | `Remove { keys: [key] }`                    |
-    /// | no           | yes        | `Insert { index: vis_to, count: 1 }`        |
-    /// | no           | no         | *(no event)*                                |
+    /// | From visible | To visible | Event emitted                                                                |
+    /// | ------------ | ---------- | ---------------------------------------------------------------------------- |
+    /// | yes          | yes        | `Move { key, from: vis_from, to: vis_to }`                                   |
+    /// | yes          | no         | `Remove { keys: <previously-visible subtree keys, DFS order> }`              |
+    /// | no           | yes        | `Insert { index: vis_to, count: <number of newly-visible subtree nodes> }`   |
+    /// | no           | no         | *(no event)*                                                                 |
     ///
-    /// Indices are visible iteration indices, not flat DFS indices.
+    /// Indices are visible iteration indices, not flat DFS indices. The
+    /// `Insert` always spans `count` consecutive positions starting at
+    /// `to_index`. Emitting only `[key]` for visible→hidden, or
+    /// `count: 1` for hidden→visible, would leave keyed reconcilers
+    /// with orphan descendant rows or miscounted indices.
     pub fn reparent(
         &mut self,
         key: &Key,
         new_parent: Option<&Key>,
         index: usize,
     ) -> Option<(usize, usize)> {
+        // Snapshot the pre-mutation visible iteration. Both visibility-
+        // crossing branches need to compare visible-before vs
+        // visible-after to capture every subtree descendant whose
+        // visibility flipped — only the moved subtree's visibility can
+        // change, so the set difference is exactly the subtree delta.
+        let visible_before: Vec<Key> = self.inner.visible_keys().cloned().collect();
         let from_visible = self.inner.visible_index_of(key);
         let (from_flat, to_flat) = self.inner.reparent(key, new_parent, index)?;
         let to_visible = self.inner.visible_index_of(key);
@@ -1101,13 +1113,32 @@ impl<T: CollectionItem> MutableTreeData<T> {
                 });
             }
             (Some(_), None) => {
+                // Root + every visible descendant disappears together
+                // under the collapsed new parent. Remove must list all
+                // of them in pre-mutation DFS order.
+                let visible_after: BTreeSet<Key> =
+                    self.inner.visible_keys().cloned().collect();
+                let removed_keys: Vec<Key> = visible_before
+                    .into_iter()
+                    .filter(|k| !visible_after.contains(k))
+                    .collect();
                 self.pending_changes.push(CollectionChange::Remove {
-                    keys: vec![key.clone()],
+                    keys: removed_keys,
                 });
             }
             (None, Some(to_index)) => {
+                // Root + descendants whose internal expansion keeps
+                // them visible at the new location appear in `count`
+                // consecutive positions starting at `to_index`.
+                let visible_before_set: BTreeSet<Key> =
+                    visible_before.into_iter().collect();
+                let count = self
+                    .inner
+                    .visible_keys()
+                    .filter(|k| !visible_before_set.contains(*k))
+                    .count();
                 self.pending_changes.push(CollectionChange::Insert {
-                    index: to_index, count: 1,
+                    index: to_index, count,
                 });
             }
             (None, None) => {} // both endpoints hidden, nothing to report
