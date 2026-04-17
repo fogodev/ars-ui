@@ -101,25 +101,35 @@ impl WebIntlProvider {
         let long_formatter = month_label_formatter(&locales, target, "long")?;
         let numeric_formatter = month_label_formatter(&locales, target, "2-digit")?;
 
-        // Hebrew (and the other 13-month calendars we model as
-        // leap-year aware) surface different month labels in leap vs.
-        // common years. Select probe Gregorian years from the target
-        // calendar's leap/common orbit so both variants of named month
-        // are observable: Gregorian 2024 overlaps Hebrew 5784 (leap)
-        // and Gregorian 2025 overlaps Hebrew 5785 (common).
+        // Hebrew, Chinese, Dangi, Ethiopic, and other 13-month
+        // calendars surface different month labels in leap vs. common
+        // years — and in Chinese/Dangi the *specific* leap month
+        // varies each cycle (leap 4th in 2020, leap 2nd in 2023, leap
+        // 6th in 2025, …). Probing only `[2024, 2025]` couldn't match
+        // labels like `"Second Monthbis"` (2023) or `"Fourth Monthbis"`
+        // (2020), so `convert_date` fell back to `date.clone()` for
+        // those dates on runtimes that emit spelled-out leap labels.
         //
-        // `target_year` only influences which probe runs first so the
-        // common case is fast; the second probe always runs when the
-        // first doesn't match.
+        // `SWEEP_YEARS` covers the full 19-year Metonic-style cycle
+        // plus recent Chinese/Dangi leap-month positions. We start
+        // with a Hebrew-aware fast path (matching round-5 behaviour
+        // for the common Hebrew case) and then sweep the wider list
+        // with an early exit on first match, so the typical Hebrew
+        // call still resolves on the first probe pair.
+        const SWEEP_YEARS: [u32; 19] = [
+            2023, 2020, 2028, 2021, 2017, 2014, 2031, 2019, 2022, 2026, 2027, 2029, 2030, 2015,
+            2016, 2018, 2032, 2033, 2034,
+        ];
         let prefer_leap = matches!(
             target,
             CalendarSystem::Hebrew | CalendarSystem::Ethiopic | CalendarSystem::EthiopicAmeteAlem
         ) && is_hebrew_leap_year(target_year);
-        let probe_years: [u32; 2] = if prefer_leap {
+        let primary_years: [u32; 2] = if prefer_leap {
             [2024, 2025]
         } else {
             [2025, 2024]
         };
+        let probe_years = primary_years.iter().chain(SWEEP_YEARS.iter()).copied();
 
         for probe_year in probe_years {
             for probe_month in 0_i32..12 {
@@ -137,7 +147,11 @@ impl WebIntlProvider {
                 // falls back to a name (extremely rare), we can't
                 // resolve the label so the caller's fallback kicks in.
                 let numeric_value = month_part_value(&numeric_formatter.format_to_parts(&probe));
-                if let Ok(ordinal) = numeric_value.parse::<u8>()
+                let leading: String = numeric_value
+                    .chars()
+                    .take_while(|c| c.is_numeric())
+                    .collect();
+                if let Ok(ordinal) = leading.parse::<u8>()
                     && (1..=13).contains(&ordinal)
                 {
                     return Some(ordinal);

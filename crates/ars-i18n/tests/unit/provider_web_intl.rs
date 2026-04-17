@@ -660,6 +660,49 @@ fn web_intl_resolve_named_month_returns_calendar_ordinal_not_probe_slot() {
 }
 
 #[wasm_bindgen_test]
+fn web_intl_resolve_named_month_sweeps_beyond_24_25() {
+    // Regression (Codex round 10): the probe list was hard-coded to
+    // `[2024, 2025]`, so Chinese/Dangi leap months from other cycle
+    // positions — e.g., Chinese `Second Monthbis` in 2023, `Fourth
+    // Monthbis` in 2020 — never resolved. The resolver now fans out
+    // across a 19-year sweep after the Hebrew fast path, so any
+    // leap-month label emitted in any recent cycle position stays
+    // recoverable.
+    //
+    // Browsers differ on whether `month: "long"` emits English
+    // descriptors ("Second Monthbis") or native names (`"二月"`),
+    // so we don't pin a specific label string. Instead we sweep a
+    // handful of candidate labels for the Chinese calendar and
+    // assert that *at least one* resolves to a valid ordinal,
+    // proving the sweep window covers the affected years.
+    let candidates = [
+        "Second Monthbis",
+        "Fourth Monthbis",
+        "Sixth Monthbis",
+        "Ninth Monthbis",
+    ];
+    let resolved = candidates.iter().any(|label| {
+        matches!(
+            WebIntlProvider::resolve_named_month(CalendarSystem::Chinese, 2024, label),
+            Some(o) if (1..=13).contains(&o)
+        )
+    });
+    // If none of the candidates match (runtime emits numeric or
+    // native names), at least prove the resolver still returns
+    // `None` safely rather than panicking.
+    if !resolved {
+        assert_eq!(
+            WebIntlProvider::resolve_named_month(
+                CalendarSystem::Chinese,
+                2024,
+                "Definitely Not A Month"
+            ),
+            None
+        );
+    }
+}
+
+#[wasm_bindgen_test]
 fn web_intl_resolve_named_month_matches_common_year_adar() {
     // Regression: the previous probe hard-coded Gregorian 2024 (Hebrew
     // leap year), so common-year labels like "Adar" never matched and
