@@ -24,6 +24,9 @@ pub use ars_core::{
 pub use compose::merge_attrs;
 pub use direction::{LogicalDirection, resolve_arrow_key};
 pub use dismissable::dismiss_button_attrs;
+/// Test-only helpers for constructing drag payloads in downstream crates.
+#[cfg(feature = "test-support")]
+pub use drag_drop::test_support;
 pub use drag_drop::{
     DirectoryHandle, DragAnnouncements, DragConfig, DragEndEvent, DragItem, DragItemKind,
     DragItemPreview, DragResult, DragStartEvent, DragState, DropConfig, DropEvent,

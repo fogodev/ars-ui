@@ -5886,7 +5886,7 @@ use alloc::vec::Vec;
 use crate::key::Key;
 
 /// Events fired by collection-level drag-and-drop operations.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum CollectionDndEvent {
     /// Items within the same collection are being reordered.
     ///
@@ -5938,7 +5938,9 @@ pub enum CollectionDndEvent {
 // Note: `CollectionDndEvent` is a callback event type, not a Machine::Event.
 // It is passed to user-supplied handler callbacks (e.g., `on_reorder`, `on_insert`)
 // rather than being dispatched through the Machine's `transition()` function.
-// The `Clone + Debug + PartialEq` derives are for testing and logging convenience.
+// `PartialEq` is implemented manually because `DragItem` does not implement
+// `PartialEq`. The `Insert` variant compares drag items structurally by payload
+// data and ignores opaque file/directory handle identity.
 
 // `DragItem` — defined in `05-interactions.md`
 ```
@@ -5948,7 +5950,6 @@ pub enum CollectionDndEvent {
 ```rust
 // ars-collections/src/dnd.rs
 
-use alloc::collections::BTreeMap;
 use crate::{Collection, key::Key, selection};
 
 /// Extends a collection with drag-source behavior.
@@ -5970,11 +5971,8 @@ pub trait DraggableCollection<T>: Collection<T> {
     fn drag_data(&self, keys: &[Key]) -> Vec<DragItem> {
         keys.iter()
             .filter_map(|k| {
-                self.text_value_of(k).map(|text| {
-                    let mut data = BTreeMap::new();
-                    data.insert("text/plain".into(), text.to_owned());
-                    DragItem { data }
-                })
+                self.text_value_of(k)
+                    .map(|text| DragItem::Text(text.to_owned()))
             })
             .collect()
     }
@@ -6002,13 +6000,15 @@ pub trait DraggableCollection<T>: Collection<T> {
 
 use crate::{Collection, key::Key};
 
-/// Extends a collection with drop-target behavior.
+/// Extends a collection with drop-target policy hooks.
 ///
 /// When applied to a collection component, this trait:
-/// 1. Computes the nearest drop target based on pointer position
-/// 2. Renders drop indicators between items
-/// 3. Validates whether a drop is accepted
-/// 4. Fires `Reorder`, `Move`, or `Insert` events on drop
+/// 1. Declares which external payload types are accepted
+/// 2. Declares whether "drop on item" is allowed for a given key
+/// 3. Validates whether a resolved drop should be accepted
+///
+/// Adapters are responsible for pointer hit-testing, resolving the nearest
+/// [`CollectionDropTarget`], and rendering drop indicators from DOM layout data.
 pub trait DroppableCollection<T>: Collection<T> {
     /// The set of MIME types this collection accepts for external drops.
     /// Empty means only internal reorder is supported.
@@ -6020,25 +6020,6 @@ pub trait DroppableCollection<T>: Collection<T> {
     /// (e.g., dropping into a folder). Default: false (only between-item drops).
     fn allows_drop_on(&self, _key: &Key) -> bool {
         false
-    }
-
-    /// Compute the drop target for a given pointer position.
-    /// The adapter translates screen coordinates into a `CollectionDropTarget`
-    /// based on item bounding boxes and the current writing direction.
-    ///
-    /// - `pointer_x` and `pointer_y` are viewport-relative coordinates.
-    /// - `direction` is needed for horizontal collections to correctly resolve
-    ///   `Before`/`After` in RTL layouts (where the inline-start side is on the right).
-    ///
-    /// This method is implemented by the adapter layer, not in pure Rust,
-    /// because it requires DOM measurements.
-    fn compute_drop_target(
-        &self,
-        _pointer_x: f64,
-        _pointer_y: f64,
-        _direction: Direction,
-    ) -> Option<CollectionDropTarget> {
-        None // Adapter override required
     }
 
     /// Validate whether a proposed drop should be accepted.
@@ -6054,6 +6035,13 @@ pub trait DroppableCollection<T>: Collection<T> {
     }
 }
 ```
+
+Adapter hit-testing is intentionally outside `DroppableCollection`. Pointer
+coordinates, item rectangles, scroll offsets, and writing-direction-aware
+`Before`/`After` resolution depend on framework and DOM state, so adapters
+compute `CollectionDropTarget` values and then consult
+`DroppableCollection::allows_drop_on` and `DroppableCollection::is_drop_valid`
+to decide whether the resolved drop is accepted.
 
 ### 10.6 Draggable Item Accessibility
 
@@ -6099,7 +6087,7 @@ After defining these traits, the following components gain optional DnD support:
 | **Table**    | `DragHandle` (optional per-row), `DropIndicator` | `CollectionDndEvent::Reorder`                                           |
 | **TreeView** | `DragHandle` (optional), `DropIndicator`         | `CollectionDndEvent::Reorder`, `CollectionDndEvent::Move` (reparenting) |
 
-Each component's state machine gains an optional `dnd_enabled: bool` config field. When enabled, the adapter wires up the `DraggableCollection` and `DroppableCollection` trait implementations.
+Each component's state machine gains an optional `dnd_enabled: bool` config field. When enabled, the adapter wires up `DraggableCollection` source behavior, consults `DroppableCollection` policy hooks, and performs adapter-specific hit-testing to resolve `CollectionDropTarget` values from DOM layout data.
 
 ### 10.9 I18n — CollectionDndMessages
 

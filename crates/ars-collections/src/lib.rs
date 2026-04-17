@@ -30,6 +30,11 @@
 //! - [`SortDescriptor`] — column + direction for table sorting.
 //! - [`CollectionChangeAnnouncement`] — structured live-region event for collection mutations.
 //! - [`CollectionMessages`] — localizable message closures for collection mutation announcements.
+//! - [`CollectionDndEvent`] — collection-level drag-and-drop callback events.
+//! - [`DropPosition`] — relative drop location for collection drag-and-drop.
+//! - [`CollectionDropTarget`] — resolved item-relative drop target.
+//! - [`DraggableCollection`] / [`DroppableCollection`] — collection `DnD` extension traits.
+//! - [`CollectionDndMessages`] — localizable message closures for collection drag-and-drop.
 //! - [`CollectionError`] — error from an async page load.
 //! - [`typeahead`] — type-ahead / type-select state machine for keyboard search.
 //! - [`Virtualizer`] — visible-range and scroll math for virtualized rendering.
@@ -62,6 +67,8 @@ pub mod async_loader;
 pub mod builder;
 /// Core collection traits: [`Collection`] and [`CollectionItem`].
 pub mod collection;
+/// Collection-level drag-and-drop types, messages, and extension traits.
+pub mod dnd;
 /// Predicate-based filtering view over a [`Collection`].
 pub mod filtered_collection;
 /// Stable node identifiers for collections.
@@ -92,6 +99,10 @@ pub use async_collection::{AsyncCollection, AsyncLoadingState};
 pub use async_loader::{AsyncLoader, CollectionError, LoadResult};
 pub use builder::CollectionBuilder;
 pub use collection::{Collection, CollectionItem};
+pub use dnd::{
+    CollectionDndEvent, CollectionDndMessages, CollectionDropTarget, DndAnnouncementData,
+    DndAnnouncements, DraggableCollection, DropPosition, DroppableCollection,
+};
 pub use filtered_collection::FilteredCollection;
 pub use key::Key;
 pub use mutable::{CollectionChange, MutableListData, MutableTreeData};

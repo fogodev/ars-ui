@@ -234,6 +234,38 @@ pub struct FileHandle(());
 #[derive(Clone, Debug)]
 pub struct DirectoryHandle(());
 
+/// Test-only helpers for constructing opaque drag payloads in downstream crates.
+#[cfg(feature = "test-support")]
+pub mod test_support {
+    use std::string::String;
+
+    use super::{DirectoryHandle, DragItem, FileHandle};
+
+    /// Constructs a file drag item with a placeholder opaque handle for tests.
+    #[must_use]
+    pub fn file_drag_item(
+        name: impl Into<String>,
+        mime_type: impl Into<String>,
+        size: u64,
+    ) -> DragItem {
+        DragItem::File {
+            name: name.into(),
+            mime_type: mime_type.into(),
+            size,
+            handle: FileHandle(()),
+        }
+    }
+
+    /// Constructs a directory drag item with a placeholder opaque handle for tests.
+    #[must_use]
+    pub fn directory_drag_item(name: impl Into<String>) -> DragItem {
+        DragItem::Directory {
+            name: name.into(),
+            handle: DirectoryHandle(()),
+        }
+    }
+}
+
 /// The type of operation that will occur when items are dropped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DropOperation {
