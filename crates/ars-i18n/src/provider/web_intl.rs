@@ -91,11 +91,6 @@ impl WebIntlProvider {
         target_year: i32,
         label: &str,
     ) -> Option<u8> {
-        // `target_year` is accepted for future calendar-specific lookups
-        // (#545); the current probe walks all 13 possible month slots
-        // and matches by label, so the year only anchors the probe date.
-        let _ = target_year;
-
         let locales = Array::of1(&JsValue::from_str("en-US"));
 
         let opts = Object::new();
@@ -106,31 +101,52 @@ impl WebIntlProvider {
         )
         .ok()?;
         Reflect::set(&opts, &"month".into(), &JsValue::from_str("long")).ok()?;
+        // Pin the probe to UTC — same rationale as in `convert_date`: a
+        // probe near midnight otherwise shifts day/month through the
+        // runtime's local timezone and breaks the label comparison.
+        Reflect::set(&opts, &"timeZone".into(), &JsValue::from_str("UTC")).ok()?;
 
         let formatter = Intl::DateTimeFormat::new(&locales, &opts);
 
-        // Hebrew leap years have 13 months. Other calendars max out at 13
-        // under the current spec (Chinese intercalary months, Ethiopic
-        // Pagume). 13 is a safe upper bound for the probe; nonexistent
-        // months simply won't match the label.
-        for ordinal in 1_u8..=13 {
-            let probe_month = i32::from(ordinal.saturating_sub(1));
-            let probe = js_sys::Date::new_0();
-            // Anchor in a modern year so we never cross the JS century
-            // quirk; the `calendar` option governs how the browser
-            // labels the month, so year choice only affects which month
-            // name a given Gregorian slot maps onto.
-            probe.set_utc_full_year_with_month_date(2024, probe_month, 15);
+        // Hebrew leap years have 13 months and use labels like `Adar I` /
+        // `Adar II`; common years drop both and surface a single `Adar`.
+        // A fixed probe year (e.g. 2024, which overlaps Hebrew 5784 —
+        // a leap year) never emits the common-year labels. Select probe
+        // Gregorian years from the target's leap/common orbit so both
+        // variants of named month are observable: 2024 sits inside a
+        // Hebrew leap year and 2025 sits inside a Hebrew common year.
+        //
+        // Non-Hebrew calendars don't have the same ambiguity but are
+        // still served by this two-year sweep. `target_year` influences
+        // which probe runs first: when it's a Hebrew leap year (years
+        // 3, 6, 8, 11, 14, 17 of the 19-cycle — 0 mod 19 is the 19th
+        // year of the cycle) we try the leap probe first so the common
+        // case is fast; otherwise we lead with the common-year probe.
+        let prefer_leap = matches!(
+            target,
+            CalendarSystem::Hebrew | CalendarSystem::Ethiopic | CalendarSystem::EthiopicAmeteAlem
+        ) && is_hebrew_leap_year(target_year);
+        let probe_years: [u32; 2] = if prefer_leap {
+            [2024, 2025]
+        } else {
+            [2025, 2024]
+        };
 
-            let formatted = formatter.format_to_parts(&probe);
-            for i in 0..formatted.length() {
-                let part = formatted.get(i);
-                if Self::string_property(&part, "type").as_deref() == Some("month") {
-                    let probe_label = Self::string_property(&part, "value").unwrap_or_default();
-                    if probe_label == label {
-                        return Some(ordinal);
+        for probe_year in probe_years {
+            for ordinal in 1_u8..=13 {
+                let probe_month = i32::from(ordinal.saturating_sub(1));
+                let probe = noon_utc_js_date(probe_year, probe_month, 15);
+
+                let formatted = formatter.format_to_parts(&probe);
+                for i in 0..formatted.length() {
+                    let part = formatted.get(i);
+                    if Self::string_property(&part, "type").as_deref() == Some("month") {
+                        let probe_label = Self::string_property(&part, "value").unwrap_or_default();
+                        if probe_label == label {
+                            return Some(ordinal);
+                        }
+                        break;
                     }
-                    break;
                 }
             }
         }
@@ -427,6 +443,20 @@ impl IcuProvider for WebIntlProvider {
             }
         }
 
+        // The browser-backed path expects a Gregorian civil day as its
+        // JS Date input; `Intl.DateTimeFormat({calendar: …})` only
+        // relabels a Gregorian moment into the target calendar. For
+        // non-Gregorian sources we'd need to resolve the source fields
+        // to Gregorian first, which requires calendar-aware code we
+        // don't have in the pure `web-intl` build. Return the source
+        // date unchanged when we can't safely convert — callers who need
+        // cross-calendar conversion for non-Gregorian sources must
+        // enable the `icu4x` feature alongside `web-intl` so the
+        // internal bridge handles that case (see the cfg block above).
+        if date.calendar != CalendarSystem::Gregorian {
+            return date.clone();
+        }
+
         let locales = Array::of1(&JsValue::from_str("en-US"));
 
         let opts = Object::new();
@@ -455,6 +485,14 @@ impl IcuProvider for WebIntlProvider {
         Reflect::set(&opts, &"era".into(), &JsValue::from_str("long"))
             .expect("Reflect::set on a fresh Object never fails");
 
+        // Pin the formatter to UTC so the browser doesn't reinterpret
+        // the probe day through the runtime's local timezone. Without
+        // this, a probe whose UTC time lands near midnight can be
+        // rendered into the previous or next local day, flipping the
+        // returned month/day against the caller's expectation.
+        Reflect::set(&opts, &"timeZone".into(), &JsValue::from_str("UTC"))
+            .expect("Reflect::set on a fresh Object never fails");
+
         let formatter = Intl::DateTimeFormat::new(&locales, &opts);
 
         // `Date::new_with_year_month_day` takes a positive `u32` year; for
@@ -465,14 +503,7 @@ impl IcuProvider for WebIntlProvider {
             return date.clone();
         };
 
-        // `js_sys::Date::new_with_year_month_day` goes through the
-        // legacy two-argument `new Date(year, month)` path, which maps
-        // `year ∈ 0..100` onto `1900..2000` per the ECMAScript spec.
-        // Calling `setUTCFullYear` after construction bypasses the quirk
-        // and lets us pass historical years (e.g., 90 CE) through
-        // `Intl.DateTimeFormat` unmodified.
-        let js_date = js_sys::Date::new_0();
-        js_date.set_utc_full_year_with_month_date(
+        let js_date = noon_utc_js_date(
             year_u32,
             i32::from(date.month.get().saturating_sub(1)),
             i32::from(date.day.get()),
@@ -553,4 +584,35 @@ impl IcuProvider for WebIntlProvider {
             day: day_nz,
         }
     }
+}
+
+/// Builds a JS `Date` pinned to 12:00:00 UTC on the given Gregorian
+/// civil day, bypassing the legacy `new Date(year, month)` century
+/// quirk and the `new Date()` wall-clock seeding.
+///
+/// The noon anchor keeps the instant away from midnight so any
+/// formatter that, for whatever reason, doesn't honour `timeZone:
+/// "UTC"` still lands on the intended day in the browser's local
+/// timezone. `year` is a `u32` because `Date::set_utc_full_year_*`
+/// rejects negative inputs; callers that need BCE support handle the
+/// out-of-range case before reaching this helper.
+pub(crate) fn noon_utc_js_date(year: u32, month: i32, day: i32) -> js_sys::Date {
+    let js_date = js_sys::Date::new_0();
+    js_date.set_utc_full_year_with_month_date(year, month, day);
+    js_date.set_utc_hours(12);
+    js_date.set_utc_minutes(0);
+    js_date.set_utc_seconds(0);
+    js_date.set_utc_milliseconds(0);
+    js_date
+}
+
+/// Returns `true` if the given Hebrew year is a leap year of the 19-year
+/// Metonic cycle (years 3, 6, 8, 11, 14, 17, and 19 of the cycle).
+///
+/// Scoped to Hebrew so `resolve_named_month` can bias its probe years
+/// without pulling in a full calendar library; other calendars with
+/// conditional month labels should grow their own predicate here.
+pub(crate) const fn is_hebrew_leap_year(year: i32) -> bool {
+    let cycle_year = year.rem_euclid(19);
+    matches!(cycle_year, 3 | 6 | 8 | 11 | 14 | 17 | 0)
 }

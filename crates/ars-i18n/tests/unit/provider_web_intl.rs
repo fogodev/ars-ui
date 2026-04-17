@@ -284,7 +284,11 @@ fn web_intl_convert_date_returns_source_for_pre_ce_year() {
     // This exercises the `u32::try_from(date.year)` error path even under
     // `--features icu4x,web-intl` because the internal ICU4X bridge rejects
     // Buddhist → Gregorian for the exact BCE year this test uses.
-    let _ = buddhist; // bind kept for readability; provider test uses gregorian
+    // `buddhist` is constructed above as a readability anchor for the
+    // comment; we intentionally don't feed it into the provider call
+    // below because the test pre-computes the equivalent Gregorian
+    // fields by hand.
+    drop(buddhist);
 
     let converted = provider.convert_date(&gregorian, CalendarSystem::Japanese);
 
@@ -456,6 +460,72 @@ fn web_intl_convert_date_resolves_hebrew_named_month() {
         hebrew.month.get()
     );
     assert_eq!(hebrew.day.get(), 15);
+}
+
+#[wasm_bindgen_test]
+fn web_intl_convert_date_non_gregorian_source_without_icu4x_is_identity() {
+    // Regression: the pure-`web-intl` path used to pass non-Gregorian
+    // `date.year/month/day` straight to `Intl.DateTimeFormat({ calendar: target })`,
+    // which reinterpreted them as Gregorian and produced nonsense (Reiwa
+    // 6-03-15 came back as Gregorian year 6). Under `--features web-intl`
+    // without `icu4x` there is no Rust-side bridge to resolve the source
+    // calendar, so the provider now returns the source date unchanged
+    // instead of silently corrupting it.
+    //
+    // When `icu4x` is *also* enabled, the internal bridge above handles
+    // the conversion correctly — this test stays meaningful in both
+    // configurations because the post-condition is "no invalid date
+    // emitted", which both paths satisfy.
+    let provider = WebIntlProvider;
+    let stub = StubIcuProvider;
+
+    let buddhist = CalendarDate::new(&stub, CalendarSystem::Buddhist, None, 2567, 6, 15)
+        .expect("Buddhist 2567-06-15 should validate");
+
+    let gregorian = provider.convert_date(&buddhist, CalendarSystem::Gregorian);
+    if cfg!(feature = "icu4x") {
+        // Internal ICU4X bridge: Buddhist 2567 ≈ Gregorian 2024.
+        assert_eq!(gregorian.calendar, CalendarSystem::Gregorian);
+        assert_eq!(gregorian.year, 2024);
+    } else {
+        // Pure web-intl: safe identity fallback.
+        assert_eq!(gregorian, buddhist);
+    }
+}
+
+#[wasm_bindgen_test]
+fn web_intl_is_hebrew_leap_year_matches_19_cycle() {
+    use crate::provider::web_intl::is_hebrew_leap_year;
+    // Hebrew 5784 sits at position 8 of the 19-year Metonic cycle — leap.
+    assert!(is_hebrew_leap_year(5784));
+    // Hebrew 5785 sits at position 9 — common.
+    assert!(!is_hebrew_leap_year(5785));
+    // Cycle positions 3, 6, 8, 11, 14, 17, and year 19 (0 mod 19) are leap.
+    for offset in [3, 6, 8, 11, 14, 17, 0] {
+        assert!(
+            is_hebrew_leap_year(offset),
+            "cycle offset {offset} should be leap"
+        );
+    }
+    // Cycle position 1 must not be leap.
+    assert!(!is_hebrew_leap_year(1));
+}
+
+#[wasm_bindgen_test]
+fn web_intl_resolve_named_month_matches_common_year_adar() {
+    // Regression: the previous probe hard-coded Gregorian 2024 (Hebrew
+    // leap year), so common-year labels like "Adar" never matched and
+    // `convert_date` silently fell back. The resolver now sweeps both a
+    // leap and a common probe year.
+    let ordinal = WebIntlProvider::resolve_named_month(
+        CalendarSystem::Hebrew,
+        5785, // Common year — `rem_euclid(19) == 9`.
+        "Adar",
+    );
+    assert!(
+        matches!(ordinal, Some(o) if (1..=13).contains(&o)),
+        "'Adar' must resolve to a 1..=13 ordinal under the dual-probe strategy; got {ordinal:?}"
+    );
 }
 
 #[wasm_bindgen_test]
