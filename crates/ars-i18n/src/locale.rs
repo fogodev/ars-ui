@@ -116,6 +116,31 @@ impl Locale {
             .and_then(|subtag| Weekday::from_bcp47_fw(subtag.as_str()))
     }
 
+    /// Returns the hour cycle requested by the `u-hc-*` Unicode extension,
+    /// if any, as one of [`HourCycle::H11`], [`HourCycle::H12`],
+    /// [`HourCycle::H23`], or [`HourCycle::H24`].
+    ///
+    /// Providers honour this override before falling back to heuristic
+    /// detection, so a caller that explicitly requests `ja-u-hc-h11` or
+    /// `de-DE-u-hc-h24` gets the cycle they asked for rather than the
+    /// locale's CLDR default.
+    #[must_use]
+    pub fn hour_cycle_extension(&self) -> Option<HourCycle> {
+        self.0
+            .extensions
+            .unicode
+            .keywords
+            .get(&icu::locale::extensions::unicode::key!("hc"))
+            .and_then(|value| value.as_single_subtag())
+            .and_then(|subtag| match subtag.as_str() {
+                "h11" => Some(HourCycle::H11),
+                "h12" => Some(HourCycle::H12),
+                "h23" => Some(HourCycle::H23),
+                "h24" => Some(HourCycle::H24),
+                _ => None,
+            })
+    }
+
     /// Returns the locale's first day of the week through the active provider.
     #[must_use]
     pub fn first_day_of_week(&self, provider: &dyn IcuProvider) -> Weekday {

@@ -34,6 +34,7 @@ mod locale;
 mod locale_stack;
 mod number;
 mod plural;
+mod provider;
 mod relative_time;
 mod translate;
 mod weekday;
@@ -69,6 +70,11 @@ pub use plural::{
     Plural, PluralCategory, PluralRuleType, PluralRulesFormat, format_plural, plural_category,
     select_plural,
 };
+#[cfg(feature = "icu4x")]
+pub use provider::Icu4xProvider;
+#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+pub use provider::WebIntlProvider;
+pub use provider::{StubIcuProvider, default_provider};
 pub use relative_time::{NumericOption, RelativeTimeFormatter};
 pub use translate::Translate;
 pub use weekday::Weekday;
@@ -405,15 +411,6 @@ pub trait IcuProvider: Send + Sync + 'static {
         );
     }
 }
-
-/// English-only stub provider for tests and non-ICU4X builds.
-///
-/// Returns hardcoded English values for all provider operations. This is the
-/// default provider used by [`Env::default()`](ars_core::Env).
-#[derive(Debug)]
-pub struct StubIcuProvider;
-
-impl IcuProvider for StubIcuProvider {}
 
 #[cfg(test)]
 mod tests {

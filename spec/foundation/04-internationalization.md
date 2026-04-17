@@ -3794,23 +3794,17 @@ use {
 
 /// Production ICU4X-backed provider with full CLDR data.
 ///
-/// Holds a reference to the ICU4X data provider (typically compiled data via
-/// `compiled_data` feature, or `BlobDataProvider` for dynamically loaded data).
-/// Formatters are created lazily and cached internally.
+/// Under the `compiled_data` feature the ICU4X data provider is a zero-sized
+/// type, so `Icu4xProvider` is itself a unit struct. Callers construct it as
+/// `Icu4xProvider` or via `Icu4xProvider::default()`; no explicit `new`
+/// constructor is needed. Dynamically loaded data (`BlobDataProvider` or
+/// similar) would add fields and bring back an explicit constructor.
 #[cfg(feature = "icu4x")]
-pub struct Icu4xProvider {
-    // The data provider is generic in ICU4X; for compiled data it is a
-    // zero-size type. For blob data, it holds the deserialized postcard blob.
-    //
-    // In practice this will be:
-    //   compiled_data feature — zero-cost, no field needed
-    //   BlobDataProvider  (dynamic data)          — holds Arc<[u8]>
-}
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Icu4xProvider;
 
 #[cfg(feature = "icu4x")]
 impl Icu4xProvider {
-    pub fn new() -> Self { Self {} }
-
     fn english_month_name_fallback(month: u8) -> &'static str {
         match month {
             1 => "January", 2 => "February", 3 => "March",
@@ -3885,10 +3879,16 @@ impl IcuProvider for Icu4xProvider {
         //   en: "AM"/"PM", ja: "午前"/"午後", ar: "ص"/"م", ko: "오전"/"오후"
         // ICU4X 2.x does not expose `DayPeriodNames` as a standalone API.
         // Extract day period labels by formatting known times and parsing the output.
-        let formatter = NoCalendarFormatter::try_new(
-            DateTimeFormatterPreferences::from(&locale.0),
-            T::hm(),
-        ).expect("locale data available");
+        //
+        // Force HourCycle::H12 so 24-hour-default locales (`de-DE`,
+        // `fr-FR`, `ja-JP`, …) still emit a day-period token. Without
+        // this override the formatted probe contains only digits and
+        // separators, `day_period_from_char` then has no usable label
+        // to compare against, and the stripped output is empty.
+        let mut prefs = DateTimeFormatterPreferences::from(&locale.0);
+        prefs.hour_cycle = Some(HourCycle::H12);
+        let formatter = NoCalendarFormatter::try_new(prefs, T::hm())
+            .expect("locale data available");
         let test_time = if is_pm {
             Time::try_new(13, 0, 0, 0).expect("13:00 is a valid time")
         } else {
@@ -3935,8 +3935,11 @@ impl IcuProvider for Icu4xProvider {
             Default::default(),
         ).expect("locale data available");
         let mut fd = Decimal::from(value as i64);
-        // Decimal is Signed<UnsignedDecimal>; .absolute access verified for fixed_decimal 0.7.x
-        fd.absolute.pad_start((min_digits.get() - 1) as i16);
+        // `Decimal` is `Signed<UnsignedDecimal>`; `.absolute` access verified for fixed_decimal 0.7.x.
+        // `pad_start(n)` grows the integer part to at least `n` digits, filling
+        // leading positions with zeros (e.g. pad_start(2) → "05"), so we pass
+        // the requested minimum digit count directly.
+        fd.absolute.pad_start(min_digits.get() as i16);
         fmt.format(&fd).to_string()
     }
 
@@ -4046,14 +4049,20 @@ impl IcuProvider for Icu4xProvider {
 /// Returns the default IcuProvider for the current feature-flag configuration.
 ///
 /// - With `icu4x` feature: returns `Icu4xProvider` (full CLDR data).
-/// - With `web-intl` feature: returns `WebIntlProvider` (browser-backed).
+/// - With `web-intl` feature on `wasm32`: returns `WebIntlProvider`
+///   (browser-backed).
 /// - Without either: returns `StubIcuProvider` (English-only).
+///
+/// The `web-intl` arm must be gated on `target_arch = "wasm32"` because
+/// `WebIntlProvider` wraps `Intl.*` APIs that only exist in a JavaScript
+/// runtime. Native `web-intl` builds keep `StubIcuProvider` so the crate
+/// still compiles in test and documentation contexts.
 pub fn default_provider() -> Box<dyn IcuProvider> {
     #[cfg(feature = "icu4x")]
-    { Box::new(Icu4xProvider::new()) }
-    #[cfg(feature = "web-intl")]
-    { Box::new(WebIntlProvider::new()) }
-    #[cfg(not(any(feature = "icu4x", feature = "web-intl")))]
+    { Box::new(Icu4xProvider) }
+    #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
+    { Box::new(WebIntlProvider) }
+    #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
     { Box::new(StubIcuProvider) }
 }
 ```
@@ -4103,13 +4112,12 @@ calendar, including `u-ca-*` Unicode extension preferences.
   `calendar` option, then parses the formatted parts back into structured fields.
 
 ```rust
-#[cfg(feature = "web-intl")]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct WebIntlProvider;
 
-#[cfg(feature = "web-intl")]
+#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
 impl WebIntlProvider {
-    pub fn new() -> Self { Self }
-
     /// Format a known date to extract a weekday/month/period label from the browser.
     /// Creates a DateTimeFormat with the specified options and formats a reference date.
     fn format_date_part(locale: &Locale, date: &js_sys::Date, opts: &js_sys::Object) -> String {
@@ -4297,7 +4305,13 @@ impl IcuProvider for WebIntlProvider {
         use wasm_bindgen::JsValue;
 
         let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
+        // `resolvedOptions().hourCycle` is only populated when `hour` is
+        // requested in the options bag — otherwise the browser leaves it
+        // undefined and the locale's preferred cycle is hidden. Requesting
+        // `hour: "numeric"` forces the engine to materialize it.
         let opts = Object::new();
+        Reflect::set(&opts, &"hour".into(), &JsValue::from_str("numeric"))
+            .expect("Reflect::set on a fresh Object never fails");
         let fmt = Intl::DateTimeFormat::new(&locales, &opts);
         let resolved = fmt.resolved_options();
         let cycle = Reflect::get(&resolved, &"hourCycle".into())
