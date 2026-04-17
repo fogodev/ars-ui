@@ -758,23 +758,49 @@ Mutable collection wrappers support dynamic add, remove, reorder, and move opera
 
 #### 1.8.1 Change Events
 
+`CollectionChange` is the adapter-facing event type. The generic `K` lets tests and alternative collection backends use keys other than the default `Key`; production wrappers (§1.8.2, §1.8.3) always use `CollectionChange<Key>`. The derived `Clone + Debug + PartialEq` bounds are part of the contract — adapters diff and log these events.
+
+The `count` field on `Insert` is always `1` for single-item mutations today but is kept as a field so future bulk inserts can share the variant without a breaking API change.
+
 ```rust
 // ars-collections/src/mutable.rs
 
 /// A granular change event emitted when a mutable collection is modified.
-/// Adapters use these to perform targeted DOM updates instead of full re-renders.
+///
+/// Adapters consume a sequence of these events to perform targeted DOM
+/// updates instead of re-rendering the entire list.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CollectionChange<K: Clone> {
-    /// New items inserted at the given index.
-    Insert { index: usize, count: usize },
+    /// New items inserted at the given flat index.
+    Insert {
+        /// Flat insertion index in the collection's iteration order.
+        index: usize,
+        /// Number of items inserted starting at `index`. Always `1` today;
+        /// reserved for future bulk inserts.
+        count: usize,
+    },
     /// Items with the given keys were removed.
-    Remove { keys: Vec<K> },
-    /// An item moved from one index to another.
-    Move { key: K, from_index: usize, to_index: usize },
+    Remove {
+        /// Keys of the removed items, in iteration order.
+        keys: Vec<K>,
+    },
+    /// An item moved from one flat index to another.
+    Move {
+        /// Key of the moved item.
+        key: K,
+        /// Flat index the item occupied before the move.
+        from_index: usize,
+        /// Flat index the item occupies after the move.
+        to_index: usize,
+    },
     /// An item's data was replaced in-place (key unchanged).
-    Replace { key: K },
-    /// The entire collection was reset (e.g., bulk replacement).
-    /// Adapters should re-render all items.
+    Replace {
+        /// Key of the replaced item.
+        key: K,
+    },
+    /// The entire collection was reset (e.g. bulk replacement or clear).
+    /// Adapters should re-render all items instead of trying to reconcile
+    /// individual changes.
     Reset,
 }
 ```
@@ -783,16 +809,45 @@ pub enum CollectionChange<K: Clone> {
 
 `MutableListData<T>` wraps a `StaticCollection<T>` with mutation methods. It maintains an internal change log that the adapter drains after each update cycle.
 
+Design constraints reflected in the code below:
+
+- **Inherent mutation methods are bounded only by `T: CollectionItem`**, matching the inner `StaticCollection`'s own mutation impl — no `Clone` is required to call `push` / `insert` / `remove` / `move_item` / `replace` / `clear`.
+- **The `Collection<T>` delegation requires `T: CollectionItem + Clone`.** `StaticCollection<T>` only implements `Collection<T>` when `T: Clone` (see §2.2 and `static_collection.rs`), so every delegated call transitively requires `Clone`. Omitting the bound would make the delegation body fail to type-check.
+- **Iterator-returning trait methods (`keys`, `nodes`, `children_of`) carry explicit lifetime parameters** with `T: 'a` bounds, matching the `Collection` trait definition in §1.6 (required by Rust 2024's RPITIT lifetime-capture rules). These bounds are load-bearing, not decorative.
+- **`new` is `const fn` and `#[must_use]`** so callers can construct a wrapper in a `const` context and the compiler flags accidentally discarded constructor calls.
+- **A manual `Debug` impl is provided** so the wrapper can be debug-printed without forcing a `T: Debug` bound on every consumer — mirroring `StaticCollection`'s own manual `Debug` impl.
+
+**Truthful change-log contract.** Each mutation method emits a `CollectionChange` event **only** when the underlying mutation actually happened. `remove` emits with the keys that actually matched (skipping unknown keys), and `replace` emits only when the key exists. This keeps the change log in sync with the collection state — adapters never receive a phantom event referencing a key the collection does not contain.
+
 ```rust
 /// A mutable flat-list collection that tracks granular changes.
+///
+/// Wraps a `StaticCollection` and records every mutation as a
+/// `CollectionChange`. The adapter drains the buffer via
+/// `drain_changes()` each update cycle.
 pub struct MutableListData<T: CollectionItem> {
+    /// The inner collection holding the canonical item data.
     inner: StaticCollection<T>,
+    /// Pending change events to be drained by the adapter layer.
     pending_changes: Vec<CollectionChange<Key>>,
 }
 
+/// Manual `Debug` avoids requiring `T: Debug`, matching `StaticCollection`'s
+/// approach. Prints the inner collection and pending-change count only.
+impl<T: CollectionItem> core::fmt::Debug for MutableListData<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("MutableListData")
+            .field("inner", &self.inner)
+            .field("pending_changes", &self.pending_changes.len())
+            .finish()
+    }
+}
+
 impl<T: CollectionItem> MutableListData<T> {
-    /// Create from an existing static collection.
-    pub fn new(collection: StaticCollection<T>) -> Self {
+    /// Create from an existing static collection. The change buffer starts
+    /// empty — construction is not itself reported as a change.
+    #[must_use]
+    pub const fn new(collection: StaticCollection<T>) -> Self {
         Self { inner: collection, pending_changes: Vec::new() }
     }
 
@@ -809,30 +864,43 @@ impl<T: CollectionItem> MutableListData<T> {
         self.pending_changes.push(CollectionChange::Insert { index, count: 1 });
     }
 
-    /// Remove items by key. Returns the removed items.
+    /// Remove items by key. Returns the removed values; emits a `Remove`
+    /// change containing only the keys that actually matched (unknown keys
+    /// are silently skipped by the inner collection and excluded from the
+    /// event). Returns an empty `Vec` and emits no event when no key matches.
     pub fn remove(&mut self, keys: &[Key]) -> Vec<T> {
         let removed = self.inner.remove_by_keys(keys);
-        self.pending_changes.push(CollectionChange::Remove { keys: keys.to_vec() });
+        if !removed.is_empty() {
+            let removed_keys: Vec<Key> = removed.iter().map(|t| t.key().clone()).collect();
+            self.pending_changes.push(CollectionChange::Remove { keys: removed_keys });
+        }
         removed
     }
 
-    /// Move an item from one index to another.
-    pub fn move_item(&mut self, key: &Key, to_index: usize) {
-        if let Some(from_index) = self.inner.index_of(key) {
-            self.inner.move_item(from_index, to_index);
-            self.pending_changes.push(CollectionChange::Move {
-                key: key.clone(),
-                from_index,
-                to_index,
-            });
-        }
+    /// Move an item from one index to another. Returns
+    /// `Some((from_flat_index, to_flat_index))` on success, or `None` if
+    /// `key` is not present. Emits `Move` only on success.
+    pub fn move_item(&mut self, key: &Key, to_index: usize) -> Option<(usize, usize)> {
+        let from_index = self.inner.index_of(key)?;
+        self.inner.move_item(from_index, to_index);
+        self.pending_changes.push(CollectionChange::Move {
+            key: key.clone(),
+            from_index,
+            to_index,
+        });
+        Some((from_index, to_index))
     }
 
-    /// Replace an item's data in-place (key must match).
-    pub fn replace(&mut self, item: T) {
+    /// Replace an item's data in-place. Returns the previous value at
+    /// `item.key()` on success, or `None` if the key is not present.
+    /// Emits `Replace` only on success.
+    pub fn replace(&mut self, item: T) -> Option<T> {
         let key = item.key().clone();
-        self.inner.replace(item);
-        self.pending_changes.push(CollectionChange::Replace { key });
+        let old = self.inner.replace(item);
+        if old.is_some() {
+            self.pending_changes.push(CollectionChange::Replace { key });
+        }
+        old
     }
 
     /// Remove all items.
@@ -847,8 +915,9 @@ impl<T: CollectionItem> MutableListData<T> {
     }
 }
 
-impl<T: CollectionItem> Collection<T> for MutableListData<T> {
-    // Delegates all Collection trait methods to self.inner (StaticCollection<T>).
+// The `+ Clone` bound is required: `StaticCollection<T>: Collection<T>` is
+// itself gated on `T: Clone`, so delegation cannot compile without it.
+impl<T: CollectionItem + Clone> Collection<T> for MutableListData<T> {
     fn size(&self) -> usize { self.inner.size() }
     fn get(&self, key: &Key) -> Option<&Node<T>> { self.inner.get(key) }
     fn get_by_index(&self, index: usize) -> Option<&Node<T>> { self.inner.get_by_index(index) }
@@ -858,9 +927,18 @@ impl<T: CollectionItem> Collection<T> for MutableListData<T> {
     fn key_before(&self, key: &Key) -> Option<&Key> { self.inner.key_before(key) }
     fn key_after_no_wrap(&self, key: &Key) -> Option<&Key> { self.inner.key_after_no_wrap(key) }
     fn key_before_no_wrap(&self, key: &Key) -> Option<&Key> { self.inner.key_before_no_wrap(key) }
-    fn keys(&self) -> impl Iterator<Item = &Key> { self.inner.keys() }
-    fn nodes(&self) -> impl Iterator<Item = &Node<T>> { self.inner.nodes() }
-    fn children_of(&self, parent_key: &Key) -> impl Iterator<Item = &Node<T>> { self.inner.children_of(parent_key) }
+
+    fn keys<'a>(&'a self) -> impl Iterator<Item = &'a Key>
+    where T: 'a,
+    { self.inner.keys() }
+
+    fn nodes<'a>(&'a self) -> impl Iterator<Item = &'a Node<T>>
+    where T: 'a,
+    { self.inner.nodes() }
+
+    fn children_of<'a>(&'a self, parent_key: &Key) -> impl Iterator<Item = &'a Node<T>>
+    where T: 'a,
+    { self.inner.children_of(parent_key) }
 }
 ```
 
@@ -868,62 +946,135 @@ impl<T: CollectionItem> Collection<T> for MutableListData<T> {
 
 `MutableTreeData<T>` wraps a `TreeCollection<T>` with tree-specific mutations including reparenting.
 
+`MutableTreeData` inherits all four design constraints from §1.8.2 (inherent methods only require `CollectionItem`; `Collection<T>` delegation requires `CollectionItem + Clone`; iterator methods carry `<'a>` lifetime parameters; a manual `Debug` impl avoids forcing `T: Debug`). The truthful-change-log contract from §1.8.2 applies identically.
+
+##### Return-value contract for tree mutations
+
+Every mutation method in `MutableTreeData` — `insert_child`, `reparent`, `reorder`, `replace`, `remove` — follows the same pattern:
+
+- The inner `TreeCollection` mutation method (see §2.3) returns an `Option` communicating whether the mutation took effect, and carrying the flat DFS index(es) the caller needs to emit a precise change event.
+- The wrapper forwards that `Option` unchanged as its own return value.
+- The wrapper pushes a `CollectionChange` into `pending_changes` **only** when the inner call returned `Some(_)`.
+
+Failure modes the `Option` captures:
+
+| Method         | `None` when                                                                                        |
+| -------------- | -------------------------------------------------------------------------------------------------- |
+| `insert_child` | `parent` is `Some(k)` and `k` is unknown                                                           |
+| `reparent`     | `key` unknown, `new_parent` is `Some(k)` and `k` unknown, or `new_parent` is a descendant of `key` |
+| `reorder`      | `key` unknown                                                                                      |
+| `replace`      | `item.key()` unknown                                                                               |
+
+This mirrors `HashMap::insert` in idiom: the return value tells the caller whether the operation happened and, when applicable, what changed. Callers that know the precondition holds can ignore the return; callers that need to react to failure can match on `Option::None` without a separate `contains_key` probe.
+
 ```rust
 /// A mutable tree collection that tracks granular changes.
+///
+/// Wraps a `TreeCollection` and records every mutation — including
+/// reparenting and sibling reordering — as a `CollectionChange` using flat
+/// DFS indices. The adapter drains the buffer via `drain_changes()` each
+/// update cycle.
 pub struct MutableTreeData<T: CollectionItem> {
+    /// The inner tree holding the canonical hierarchy.
     inner: TreeCollection<T>,
+    /// Pending change events to be drained by the adapter layer.
     pending_changes: Vec<CollectionChange<Key>>,
 }
 
+/// Manual `Debug` avoids requiring `T: Debug`, matching `TreeCollection`'s
+/// approach. Prints the inner tree and pending-change count only.
+impl<T: CollectionItem> core::fmt::Debug for MutableTreeData<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("MutableTreeData")
+            .field("inner", &self.inner)
+            .field("pending_changes", &self.pending_changes.len())
+            .finish()
+    }
+}
+
 impl<T: CollectionItem> MutableTreeData<T> {
-    /// Create from an existing tree collection.
-    pub fn new(collection: TreeCollection<T>) -> Self {
+    /// Create from an existing tree collection. The change buffer starts
+    /// empty — construction is not itself reported as a change.
+    #[must_use]
+    pub const fn new(collection: TreeCollection<T>) -> Self {
         Self { inner: collection, pending_changes: Vec::new() }
     }
 
-    /// Insert a child under the given parent at the specified index.
-    /// Use `parent: None` for root-level insertion.
-    pub fn insert_child(&mut self, parent: Option<&Key>, index: usize, item: T) {
-        let flat_index = self.inner.insert_child(parent, index, item);
-        self.pending_changes.push(CollectionChange::Insert { index: flat_index, count: 1 });
+    /// Insert a child under the given parent at the specified sibling
+    /// index (or at the root when `parent` is `None`). Returns the flat DFS
+    /// index of the inserted node on success, or `None` when the inner
+    /// call rejected the insert (unknown parent). Emits `Insert` only on
+    /// success.
+    pub fn insert_child(
+        &mut self,
+        parent: Option<&Key>,
+        index: usize,
+        item: T,
+    ) -> Option<usize> {
+        let flat_index = self.inner.insert_child(parent, index, item)?;
+        self.pending_changes
+            .push(CollectionChange::Insert { index: flat_index, count: 1 });
+        Some(flat_index)
     }
 
-    /// Remove a node and all its descendants.
+    /// Remove the listed nodes (and their descendants). Emits `Remove`
+    /// containing only the keys that actually matched; returns the removed
+    /// values. Emits no event and returns an empty `Vec` when no key matches.
     pub fn remove(&mut self, keys: &[Key]) -> Vec<T> {
         let removed = self.inner.remove_by_keys(keys);
-        self.pending_changes.push(CollectionChange::Remove { keys: keys.to_vec() });
+        if !removed.is_empty() {
+            let removed_keys: Vec<Key> = removed.iter().map(|t| t.key().clone()).collect();
+            self.pending_changes.push(CollectionChange::Remove { keys: removed_keys });
+        }
         removed
     }
 
-    /// Move a node to a new parent (reparent). The node keeps its subtree.
-    pub fn reparent(&mut self, key: &Key, new_parent: Option<&Key>, index: usize) {
-        let from_index = self.inner.flat_index_of(key).expect("key must exist");
-        self.inner.reparent(key, new_parent, index);
-        let to_index = self.inner.flat_index_of(key).expect("key must exist after reparent");
+    /// Move a node (with its subtree) to a new parent. Returns
+    /// `Some((from_flat_index, to_flat_index))` on success; `None` when the
+    /// move is rejected (see §2.3 and the table above). Emits `Move` only
+    /// on success.
+    pub fn reparent(
+        &mut self,
+        key: &Key,
+        new_parent: Option<&Key>,
+        index: usize,
+    ) -> Option<(usize, usize)> {
+        let (from_index, to_index) = self.inner.reparent(key, new_parent, index)?;
         self.pending_changes.push(CollectionChange::Move {
             key: key.clone(),
             from_index,
             to_index,
         });
+        Some((from_index, to_index))
     }
 
-    /// Reorder a node among its siblings (same parent).
-    pub fn reorder(&mut self, key: &Key, to_sibling_index: usize) {
-        let from_index = self.inner.flat_index_of(key).expect("key must exist");
-        self.inner.reorder_sibling(key, to_sibling_index);
-        let to_index = self.inner.flat_index_of(key).expect("key must exist after reorder");
+    /// Reorder a node among its existing siblings. Returns
+    /// `Some((from_flat_index, to_flat_index))` on success; `None` when
+    /// `key` is unknown. Emits `Move` only on success.
+    pub fn reorder(
+        &mut self,
+        key: &Key,
+        to_sibling_index: usize,
+    ) -> Option<(usize, usize)> {
+        let (from_index, to_index) = self.inner.reorder_sibling(key, to_sibling_index)?;
         self.pending_changes.push(CollectionChange::Move {
             key: key.clone(),
             from_index,
             to_index,
         });
+        Some((from_index, to_index))
     }
 
-    /// Replace a node's data in-place (key must match, children preserved).
-    pub fn replace(&mut self, item: T) {
+    /// Replace a node's data in place (children preserved). Returns the
+    /// previous value at `item.key()` on success, or `None` when the key
+    /// is unknown. Emits `Replace` only on success.
+    pub fn replace(&mut self, item: T) -> Option<T> {
         let key = item.key().clone();
-        self.inner.replace(item);
-        self.pending_changes.push(CollectionChange::Replace { key });
+        let old = self.inner.replace(item);
+        if old.is_some() {
+            self.pending_changes.push(CollectionChange::Replace { key });
+        }
+        old
     }
 
     /// Drain pending changes.
@@ -932,8 +1083,9 @@ impl<T: CollectionItem> MutableTreeData<T> {
     }
 }
 
-impl<T: CollectionItem> Collection<T> for MutableTreeData<T> {
-    // Delegates all Collection trait methods to self.inner (TreeCollection<T>).
+// The `+ Clone` bound is required: `TreeCollection<T>: Collection<T>` is
+// itself gated on `T: Clone`, so delegation cannot compile without it.
+impl<T: CollectionItem + Clone> Collection<T> for MutableTreeData<T> {
     fn size(&self) -> usize { self.inner.size() }
     fn get(&self, key: &Key) -> Option<&Node<T>> { self.inner.get(key) }
     fn get_by_index(&self, index: usize) -> Option<&Node<T>> { self.inner.get_by_index(index) }
@@ -943,9 +1095,18 @@ impl<T: CollectionItem> Collection<T> for MutableTreeData<T> {
     fn key_before(&self, key: &Key) -> Option<&Key> { self.inner.key_before(key) }
     fn key_after_no_wrap(&self, key: &Key) -> Option<&Key> { self.inner.key_after_no_wrap(key) }
     fn key_before_no_wrap(&self, key: &Key) -> Option<&Key> { self.inner.key_before_no_wrap(key) }
-    fn keys(&self) -> impl Iterator<Item = &Key> { self.inner.keys() }
-    fn nodes(&self) -> impl Iterator<Item = &Node<T>> { self.inner.nodes() }
-    fn children_of(&self, parent_key: &Key) -> impl Iterator<Item = &Node<T>> { self.inner.children_of(parent_key) }
+
+    fn keys<'a>(&'a self) -> impl Iterator<Item = &'a Key>
+    where T: 'a,
+    { self.inner.keys() }
+
+    fn nodes<'a>(&'a self) -> impl Iterator<Item = &'a Node<T>>
+    where T: 'a,
+    { self.inner.nodes() }
+
+    fn children_of<'a>(&'a self, parent_key: &Key) -> impl Iterator<Item = &'a Node<T>>
+    where T: 'a,
+    { self.inner.children_of(parent_key) }
 }
 ```
 
@@ -1347,12 +1508,13 @@ impl<T: CollectionItem> StaticCollection<T> {
         removed
     }
 
-    /// Replace an item's data (matched by key).
-    pub fn replace(&mut self, item: T) {
+    /// Replace an item's data (matched by key). Returns the previous
+    /// value on success, or `None` if the key is unknown (in which case
+    /// `item` is dropped and the collection is unchanged).
+    pub fn replace(&mut self, item: T) -> Option<T> {
         let key = item.key().clone();
-        if let Some(&idx) = self.key_to_index.get(&key) {
-            self.nodes[idx].value = Some(item);
-        }
+        let idx = *self.key_to_index.get(&key)?;
+        self.nodes[idx].value.replace(item)
     }
 
     /// Remove all items.
@@ -1812,13 +1974,19 @@ impl<T: CollectionItem> TreeCollection<T> {
     /// (or among root nodes when `parent` is `None`). The node is inserted
     /// into `all_nodes` at the correct DFS position and indices are rebuilt.
     ///
-    /// If `parent` is `Some` but the key does not exist in the tree, the
-    /// operation is a no-op to avoid creating dangling parent references.
-    pub fn insert_child(&mut self, parent: Option<&Key>, sibling_index: usize, item: T) {
+    /// Returns the flat DFS index of the inserted node on success, or
+    /// `None` if `parent` is `Some(k)` and `k` is not present in the tree
+    /// (rejected to avoid creating dangling parent references).
+    pub fn insert_child(
+        &mut self,
+        parent: Option<&Key>,
+        sibling_index: usize,
+        item: T,
+    ) -> Option<usize> {
         // Reject inserts under a nonexistent parent.
         if let Some(pk) = parent {
             if !self.key_to_index.contains_key(pk) {
-                return;
+                return None;
             }
         }
 
@@ -1861,6 +2029,9 @@ impl<T: CollectionItem> TreeCollection<T> {
         }
 
         self.rebuild_indices();
+
+        // After rebuild, key_to_index points at the freshly inserted node.
+        self.key_to_index.get(&key).copied()
     }
 
     /// Remove items by key (and their entire subtrees).
@@ -1915,23 +2086,35 @@ impl<T: CollectionItem> TreeCollection<T> {
 
     /// Move a node (and its subtree) to a new parent at the given child index.
     ///
-    /// If `new_parent` is `Some` but the key does not exist in the tree
-    /// (or is a descendant of the node being moved), the operation is a
-    /// no-op to avoid creating dangling parent references.
-    pub fn reparent(&mut self, key: &Key, new_parent: Option<&Key>, sibling_index: usize) {
+    /// Returns `Some((from_flat_index, to_flat_index))` on success, or
+    /// `None` if the move was rejected. Rejection happens when `key` is
+    /// unknown, `new_parent` is `Some(k)` and `k` is unknown, or
+    /// `new_parent` is a descendant of the node being moved (would create
+    /// a cycle; detected after extraction — the subtree is restored to its
+    /// original position so the tree stays well-formed).
+    pub fn reparent(
+        &mut self,
+        key: &Key,
+        new_parent: Option<&Key>,
+        sibling_index: usize,
+    ) -> Option<(usize, usize)> {
         // Validate new_parent exists before extraction.
         if let Some(pk) = new_parent {
             if !self.key_to_index.contains_key(pk) {
-                return;
+                return None;
             }
         }
+
+        // Capture the node's current flat index before extraction; used in
+        // both the success return and the descendant-rejection restore path.
+        let from_index = *self.key_to_index.get(key)?;
 
         // Save old parent key before extraction for metadata cleanup.
         let old_parent_key = self.parent_of(key).cloned();
 
         // Extract the subtree.
         let subtree = self.extract_subtree(key);
-        if subtree.is_empty() { return; }
+        if subtree.is_empty() { return None; }
 
         // Reject reparenting under a descendant of the moved node.
         // After extraction the descendant is no longer in the tree.
@@ -1942,7 +2125,7 @@ impl<T: CollectionItem> TreeCollection<T> {
                     self.all_nodes.insert(insert_pos + offset, node);
                 }
                 self.rebuild_indices();
-                return;
+                return None;
             }
         }
 
@@ -1993,13 +2176,25 @@ impl<T: CollectionItem> TreeCollection<T> {
             self.all_nodes.insert(flat_pos + offset, node);
         }
         self.rebuild_indices();
+
+        let to_index = *self.key_to_index.get(key)?;
+        Some((from_index, to_index))
     }
 
     /// Reorder a node among its siblings to the given sibling index.
-    pub fn reorder_sibling(&mut self, key: &Key, to_sibling_index: usize) {
+    ///
+    /// Returns `Some((from_flat_index, to_flat_index))` on success, or
+    /// `None` if `key` does not exist in the tree.
+    pub fn reorder_sibling(
+        &mut self,
+        key: &Key,
+        to_sibling_index: usize,
+    ) -> Option<(usize, usize)> {
+        let from_index = *self.key_to_index.get(key)?;
+
         let parent_key = self.parent_of(key).cloned();
         let subtree = self.extract_subtree(key);
-        if subtree.is_empty() { return; }
+        if subtree.is_empty() { return None; }
 
         // Rebuild indices after extraction so flat_insert_position uses valid state.
         self.rebuild_indices();
@@ -2009,14 +2204,18 @@ impl<T: CollectionItem> TreeCollection<T> {
             self.all_nodes.insert(flat_pos + offset, node);
         }
         self.rebuild_indices();
+
+        let to_index = *self.key_to_index.get(key)?;
+        Some((from_index, to_index))
     }
 
-    /// Replace an item's data (matched by key).
-    pub fn replace(&mut self, item: T) {
+    /// Replace an item's data (matched by key). Returns the previous
+    /// value on success, or `None` if the key is unknown. Children are
+    /// preserved — only the node's payload is swapped.
+    pub fn replace(&mut self, item: T) -> Option<T> {
         let key = item.key().clone();
-        if let Some(&idx) = self.key_to_index.get(&key) {
-            self.all_nodes[idx].value = Some(item);
-        }
+        let idx = *self.key_to_index.get(&key)?;
+        self.all_nodes[idx].value.replace(item)
     }
 
     /// Return the parent key of a node, if any.

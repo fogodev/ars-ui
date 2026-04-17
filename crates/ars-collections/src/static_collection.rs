@@ -237,12 +237,15 @@ impl<T: CollectionItem> StaticCollection<T> {
     }
 
     /// Replace an item's data (matched by key).
-    pub fn replace(&mut self, item: T) {
-        let key = item.key().clone();
-
-        if let Some(&idx) = self.key_to_index.get(&key) {
-            self.nodes[idx].value = Some(item);
-        }
+    ///
+    /// Returns the previous value at `item.key()` on success, or `None` if
+    /// the key is not present in the collection. When `None` is returned,
+    /// `item` is dropped because the collection is unchanged — if the caller
+    /// needs to recover the item on failure, check `contains_key` first.
+    pub fn replace(&mut self, item: T) -> Option<T> {
+        self.nodes[*self.key_to_index.get(item.key())?]
+            .value
+            .replace(item)
     }
 
     /// Remove all items.
@@ -270,12 +273,12 @@ impl<T: CollectionItem> StaticCollection<T> {
 
     /// Recompute `key_to_index` and `Node::index` from a starting position.
     fn reindex_from(&mut self, start: usize) {
-        for i in start..self.nodes.len() {
-            self.nodes[i].index = i;
+        for idx in start..self.nodes.len() {
+            self.nodes[idx].index = idx;
 
-            let key = &self.nodes[i].key;
+            let key = &self.nodes[idx].key;
 
-            self.key_to_index.insert(key.clone(), i);
+            self.key_to_index.insert(key.clone(), idx);
         }
     }
 }
@@ -857,7 +860,9 @@ mod tests {
     fn mutation_replace_existing() {
         let mut c = fruit_collection();
 
-        c.replace(Fruit::new(2, "Blueberry"));
+        let old = c.replace(Fruit::new(2, "Blueberry"));
+
+        assert_eq!(old.expect("old value returned").name, "Banana");
 
         let node = c.get(&Key::int(2)).expect("key 2");
 
@@ -868,9 +873,10 @@ mod tests {
     fn mutation_replace_missing() {
         let mut c = fruit_collection();
 
-        c.replace(Fruit::new(99, "Unknown"));
+        let old = c.replace(Fruit::new(99, "Unknown"));
 
         // No change — key 99 doesn't exist
+        assert!(old.is_none(), "replace returns None on unknown key");
         assert_eq!(c.len(), 3);
         assert!(!c.contains_key(&Key::int(99)));
     }

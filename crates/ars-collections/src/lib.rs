@@ -15,6 +15,9 @@
 //! - [`StaticCollection`] — in-memory `Collection` implementation.
 //! - [`TreeCollection`] — hierarchical `Collection` with expand/collapse.
 //! - [`TreeItemConfig`] — configuration for tree item construction.
+//! - [`CollectionChange`] — granular change event emitted by mutable collections.
+//! - [`MutableListData`] — mutable wrapper around [`StaticCollection`] with change tracking.
+//! - [`MutableTreeData`] — mutable wrapper around [`TreeCollection`] with change tracking.
 //! - [`selection`] — selection enums and state for collection-based components.
 //! - [`navigation`] — disabled-aware navigation helpers for collection widgets.
 //! - [`AsyncLoadingState`] — loading phase for async/paginated collections.
@@ -63,6 +66,8 @@ pub mod collection;
 pub mod filtered_collection;
 /// Stable node identifiers for collections.
 pub mod key;
+/// Mutable collection wrappers that track granular changes for adapters.
+pub mod mutable;
 /// Disabled-aware navigation helpers for collection widgets.
 pub mod navigation;
 /// Node types and structural metadata for collection items.
@@ -89,6 +94,7 @@ pub use builder::CollectionBuilder;
 pub use collection::{Collection, CollectionItem};
 pub use filtered_collection::FilteredCollection;
 pub use key::Key;
+pub use mutable::{CollectionChange, MutableListData, MutableTreeData};
 pub use node::{Node, NodeType};
 pub use selection::{DisabledBehavior, OnAction};
 #[cfg(feature = "i18n")]
