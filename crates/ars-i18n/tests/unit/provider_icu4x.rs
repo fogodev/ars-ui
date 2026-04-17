@@ -112,6 +112,31 @@ fn icu4x_hour_cycle_reflects_locale() {
 }
 
 #[test]
+fn icu4x_hour_cycle_honors_all_four_unicode_extension_overrides() {
+    // Regression (Codex round 8): the digit-run heuristic can only
+    // distinguish 12-hour from 24-hour patterns, so an explicit
+    // `-u-hc-h11` or `-u-hc-h24` request silently degraded to H12 /
+    // H23. The provider now reads the locale's `-u-hc-*` keyword
+    // before running the heuristic and returns the matching
+    // `HourCycle` variant — crucial for consumers that distinguish
+    // H11 vs H12 (midnight 0 vs 12) or H23 vs H24.
+    let provider = Icu4xProvider;
+    assert_eq!(provider.hour_cycle(&locale("ja-u-hc-h11")), HourCycle::H11);
+    assert_eq!(
+        provider.hour_cycle(&locale("en-US-u-hc-h12")),
+        HourCycle::H12
+    );
+    assert_eq!(
+        provider.hour_cycle(&locale("de-DE-u-hc-h23")),
+        HourCycle::H23
+    );
+    assert_eq!(
+        provider.hour_cycle(&locale("de-DE-u-hc-h24")),
+        HourCycle::H24
+    );
+}
+
+#[test]
 fn icu4x_hour_cycle_ignores_locale_hour_literals() {
     // Regression (Codex round 6): CLDR 24-hour patterns for some
     // locales include trailing hour literals that aren't digits —

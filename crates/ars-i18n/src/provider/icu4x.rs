@@ -221,6 +221,16 @@ impl IcuProvider for Icu4xProvider {
     }
 
     fn hour_cycle(&self, locale: &Locale) -> HourCycle {
+        // Honour an explicit `-u-hc-*` override first. The digit-run
+        // heuristic below can only distinguish 12-hour from 24-hour
+        // patterns, so without this branch the `H11` and `H24`
+        // variants would never surface — `ja-u-hc-h11` would collapse
+        // to `H12` and `de-DE-u-hc-h24` to `H23`, losing the explicit
+        // midnight-handling choice the caller encoded in the tag.
+        if let Some(explicit) = locale.hour_cycle_extension() {
+            return explicit;
+        }
+
         let formatter = NoCalendarFormatter::try_new(
             DateTimeFormatterPreferences::from(locale.as_icu()),
             T::hm(),
