@@ -674,23 +674,41 @@ impl IcuProvider for WebIntlProvider {
             return date.clone();
         };
 
-        // Map the browser's long era label back to the CLDR era code.
-        // Several `Intl.DateTimeFormat` implementations emit macronized
-        // long names for Japanese eras — `Shōwa`, `Taishō` — whose
-        // ASCII-lowercase forms (`shōwa`, `taishō`) do NOT match the
-        // canonical CLDR codes (`showa`, `taisho`). `canonical_era_code`
-        // normalizes known macrons (ō/ū/ā/ē/ī) to their ASCII base
-        // letters before lowercasing so downstream era-aware helpers
-        // see the same codes the stub provider and `Icu4xProvider`
-        // would emit. If the browser suppressed the era (no token in
-        // parts) or returned an unfamiliar form, fall back to the
-        // target's default era.
+        // Map the browser's long era label back to the CLDR era code
+        // that ICU4X's `Date::try_from_fields` expects. Two sharp
+        // edges to handle:
+        //
+        // 1. Japanese: `Intl.DateTimeFormat` emits macronized names
+        //    (`Shōwa`, `Taishō`) whose plain-lowercase forms (`shōwa`)
+        //    do NOT match the ASCII CLDR codes (`showa`).
+        //
+        // 2. ROC: `Intl.DateTimeFormat('en-US', { calendar: 'roc',
+        //    era: 'long' })` emits `Minguo` / `Before R.O.C.` /
+        //    `B.R.O.C.`, which a plain-lowercase pass persists as
+        //    `minguo` / `b.r.o.c.` — neither is a CLDR code. ICU4X
+        //    expects `roc` (post-1912) and `broc` (before). The
+        //    internal-bridge path in `calendar/internal.rs` calls
+        //    `from_calendar_with_era(era.code, …)`, so a garbage
+        //    `era.code` makes the bridge reject the date and the
+        //    provider falls back to `date.clone()` — silently
+        //    stopping ROC round-trips.
+        //
+        // `era_code_for_calendar` resolves the per-calendar mapping
+        // and returns `None` for unfamiliar labels so downstream
+        // code does not ingest display text as a CLDR code.
+        // When the lookup fails (unknown label) we drop the era
+        // field — that is strictly safer than persisting garbage,
+        // because `calendar::internal::CalendarDate::try_from`
+        // routes eras=None through the default-era path rather
+        // than throwing on an unrecognised code.
         let era = if target.has_custom_eras() {
             era_label
                 .as_deref()
-                .map(|label| Era {
-                    code: canonical_era_code(label),
-                    display_name: label.to_string(),
+                .and_then(|label| {
+                    era_code_for_calendar(target, label).map(|code| Era {
+                        code,
+                        display_name: label.to_string(),
+                    })
                 })
                 .or_else(|| default_era_for(target))
         } else {
@@ -916,6 +934,65 @@ pub(crate) fn canonical_era_code(label: &str) -> String {
         }
     }
     buf
+}
+
+/// Maps a browser-emitted `era: "long"` label onto the CLDR era code
+/// ICU4X accepts for `target`'s calendar, returning `None` for labels
+/// we cannot confidently map.
+///
+/// Unlike [`canonical_era_code`] — which only ASCII-folds macrons and
+/// lowercases — this function also strips separator characters
+/// (`.`, whitespace) and validates the normalised value against a
+/// per-calendar allow-list. ICU4X's `Date::try_from_fields` rejects
+/// any era code outside its vocabulary, so persisting an unmapped
+/// label (`minguo`, `b.r.o.c.`, `anno mundi`, …) would break the
+/// internal-bridge round-trip for `calendar::internal::CalendarDate::
+/// try_from(&ars_i18n::CalendarDate)`.
+///
+/// Calendars covered here are restricted to those with
+/// well-documented ICU4X era vocabularies:
+///
+/// - [`CalendarSystem::Japanese`]: `reiwa` / `heisei` / `showa` /
+///   `taisho` / `meiji` (macron variants accepted).
+/// - [`CalendarSystem::Roc`]: `roc` for post-1912 (`Minguo`), `broc`
+///   for before (`Before R.O.C.`, `B.R.O.C.`).
+///
+/// For every other custom-era calendar the browser-emitted label is
+/// too varied to map reliably (Hebrew `"Anno Mundi"` vs `"AM"`,
+/// Ethiopic `"Amete Mihret"` / `"ERA0"` / `"Incarnation Era"`, Islamic
+/// `"AH"` vs `"Anno Hegirae"`, …), so we return `None`. The caller's
+/// downstream handling then drops the era entirely rather than
+/// persisting display text as a CLDR code.
+pub(crate) fn era_code_for_calendar(target: CalendarSystem, label: &str) -> Option<String> {
+    // Normalise: macron-fold + lowercase + strip separators so a
+    // label like `"Before R.O.C."` collapses to `"beforeroc"` and
+    // `"Anno Mundi"` to `"annomundi"`.
+    let normalized: String = canonical_era_code(label)
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace() && *c != '.')
+        .collect();
+
+    match target {
+        CalendarSystem::Japanese => match normalized.as_str() {
+            "reiwa" | "heisei" | "showa" | "taisho" | "meiji" => Some(normalized),
+            _ => None,
+        },
+        CalendarSystem::Roc => match normalized.as_str() {
+            // Post-1912: Intl emits `"Minguo"` (en-US) or the
+            // abbreviation `"ROC"`.
+            "minguo" | "roc" => Some(String::from("roc")),
+            // Before ROC: observed forms include
+            // `"Before R.O.C."` → `"beforeroc"` after normalisation,
+            // the abbreviation `"B.R.O.C."` → `"broc"`, and
+            // variants like `"Before Minguo"` → `"beforeminguo"`.
+            "broc" | "beforeroc" | "beforeminguo" => Some(String::from("broc")),
+            _ => None,
+        },
+        // Other custom-era calendars have Intl long labels that vary
+        // too much to map without test coverage against real browser
+        // output. Drop the era rather than persist garbage.
+        _ => None,
+    }
 }
 
 pub(crate) const fn is_hebrew_leap_year(year: i32) -> bool {

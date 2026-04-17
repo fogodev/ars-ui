@@ -982,6 +982,145 @@ fn web_intl_resolve_named_month_resolves_known_hebrew_labels() {
 }
 
 #[wasm_bindgen_test]
+fn web_intl_era_code_for_calendar_maps_roc_long_labels() {
+    // Regression (Codex PR #563 comment 3103280941, P1): ROC era long
+    // labels (`Minguo`, `Before R.O.C.`, `B.R.O.C.`) used to be
+    // persisted as `era.code` after a plain `canonical_era_code`
+    // pass — i.e., as `minguo` / `b.r.o.c.` — which are not CLDR
+    // codes. ICU4X's `Date::try_from_fields` rejects those, so the
+    // internal bridge failed and `convert_date` silently echoed the
+    // source date back to the caller.
+    //
+    // `era_code_for_calendar` now validates against a per-calendar
+    // allow-list and maps:
+    //   `Minguo` / `ROC`                    → Some("roc")
+    //   `Before R.O.C.` / `B.R.O.C.` /
+    //   `Before Minguo`                     → Some("broc")
+    //   unknown label                        → None
+    use crate::provider::web_intl::era_code_for_calendar;
+
+    assert_eq!(
+        era_code_for_calendar(CalendarSystem::Roc, "Minguo").as_deref(),
+        Some("roc"),
+        "Chrome emits 'Minguo' for ROC post-1912 — must map to `roc`"
+    );
+    assert_eq!(
+        era_code_for_calendar(CalendarSystem::Roc, "ROC").as_deref(),
+        Some("roc")
+    );
+    assert_eq!(
+        era_code_for_calendar(CalendarSystem::Roc, "Before R.O.C.").as_deref(),
+        Some("broc"),
+        "separator-rich label must normalize to `broc`"
+    );
+    assert_eq!(
+        era_code_for_calendar(CalendarSystem::Roc, "B.R.O.C.").as_deref(),
+        Some("broc")
+    );
+    assert_eq!(
+        era_code_for_calendar(CalendarSystem::Roc, "Before Minguo").as_deref(),
+        Some("broc")
+    );
+    // Unknown ROC label must NOT be persisted as a CLDR code.
+    assert_eq!(
+        era_code_for_calendar(CalendarSystem::Roc, "Not A ROC Era"),
+        None
+    );
+}
+
+#[wasm_bindgen_test]
+fn web_intl_era_code_for_calendar_maps_japanese_allow_list() {
+    // Japanese era labels are already covered by
+    // `web_intl_convert_date_canonicalizes_macronized_japanese_eras`
+    // at the `convert_date` level, but pin the allow-list directly
+    // to catch future changes that drop a supported era by mistake.
+    use crate::provider::web_intl::era_code_for_calendar;
+
+    for (label, expected) in [
+        ("Reiwa", "reiwa"),
+        ("Heisei", "heisei"),
+        ("Shōwa", "showa"),
+        ("Taishō", "taisho"),
+        ("Meiji", "meiji"),
+    ] {
+        assert_eq!(
+            era_code_for_calendar(CalendarSystem::Japanese, label).as_deref(),
+            Some(expected),
+            "Japanese era {label:?} must canonicalize to {expected:?}"
+        );
+    }
+
+    // Unknown Japanese era must drop out.
+    assert_eq!(
+        era_code_for_calendar(CalendarSystem::Japanese, "Fabricated"),
+        None
+    );
+}
+
+#[wasm_bindgen_test]
+fn web_intl_era_code_for_calendar_drops_unmapped_custom_era_labels() {
+    // Hebrew / Ethiopic / Coptic / Islamic / Persian long labels vary
+    // too much across browsers to map without targeted test
+    // coverage. For each of those custom-era calendars, the helper
+    // must return `None` so `convert_date` does not persist display
+    // text as a CLDR era code.
+    use crate::provider::web_intl::era_code_for_calendar;
+
+    for target in [
+        CalendarSystem::Hebrew,
+        CalendarSystem::Ethiopic,
+        CalendarSystem::EthiopicAmeteAlem,
+        CalendarSystem::Coptic,
+        CalendarSystem::Persian,
+        CalendarSystem::Islamic,
+        CalendarSystem::IslamicCivil,
+        CalendarSystem::IslamicUmmAlQura,
+    ] {
+        assert_eq!(
+            era_code_for_calendar(target, "AM"),
+            None,
+            "{target:?} should not persist 'AM' without confirmed ICU4X mapping"
+        );
+        assert_eq!(
+            era_code_for_calendar(target, "Anno Mundi"),
+            None,
+            "{target:?} should not persist 'Anno Mundi' either"
+        );
+    }
+}
+
+#[wasm_bindgen_test]
+fn web_intl_convert_date_preserves_roc_era_round_trip() {
+    // End-to-end regression: the ROC calendar now persists CLDR
+    // codes (`roc`/`broc`), so a Gregorian 2024-06-15 → ROC
+    // conversion must land in the `roc` era (Republic of China year
+    // 113) rather than a bogus `minguo` code that would fail the
+    // internal-bridge round-trip.
+    let provider = WebIntlProvider;
+    let stub = StubIcuProvider;
+
+    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 2024, 6, 15)
+        .expect("Gregorian 2024-06-15 should validate");
+
+    let roc = provider.convert_date(&gregorian, CalendarSystem::Roc);
+    assert_eq!(roc.calendar, CalendarSystem::Roc);
+    // ROC year = Gregorian year - 1911. 2024 - 1911 = 113.
+    assert_eq!(
+        roc.year, 113,
+        "Gregorian 2024 corresponds to ROC 113; got {}",
+        roc.year
+    );
+    // Browsers that emit an era part must have it normalised to a
+    // CLDR code — `roc` — and never left as `minguo`/`b.r.o.c.`.
+    if let Some(era) = roc.era {
+        assert_eq!(
+            era.code, "roc",
+            "post-1912 ROC date must carry the `roc` CLDR code; got {era:?}"
+        );
+    }
+}
+
+#[wasm_bindgen_test]
 fn web_intl_resolve_named_month_recovers_when_2_digit_returns_names() {
     // Regression (Codex PR #563 comment 3103083388, P1): when the
     // `month: "2-digit"` probe emits a non-numeric label — Node.js /
