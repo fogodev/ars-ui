@@ -1017,6 +1017,7 @@ This mirrors `HashMap::insert` in idiom: the return value tells the caller wheth
 - All indices in `Insert { index, .. }` and `Move { from_index, to_index, .. }` are **visible iteration indices** (the position the adapter would obtain from `Collection::get_by_index`), never flat DFS indices into `all_nodes`.
 - Mutations confined to a hidden subtree (e.g. `insert_child` under a collapsed parent, or `reorder` of two hidden siblings) emit **no event** — the adapter has nothing to render and the inner state will surface naturally when the ancestor is later expanded.
 - Mutations that cross visibility (`reparent` from a visible parent into a hidden one, or vice versa) are translated into the matching DOM-shaped event (`Remove` or `Insert`) instead of `Move`, and the event covers the **entire subtree** that crossed the boundary — `Remove` carries every previously-visible key in DFS order, and `Insert` reports `count` equal to the number of newly-visible nodes — because every visible descendant disappears or appears alongside the moved root. See `reparent` below for the full table.
+- Mutations that flip a still-visible parent's `has_children` flag (and therefore its `is_expanded` state) emit a `Replace { key: parent_key }` alongside the subtree event (if any). This covers `insert_child` turning a visible leaf into a collapsed branch, `remove` draining a visible branch's last remaining child, and `reparent` doing either transition on the old and new parents in any combination. Parents that are themselves hidden are skipped — their rendered state cannot be stale because their row isn't drawn — so the change log stays truthful. `Replace` events are emitted **after** the subtree event (if any) in pre-mutation DFS order.
 
 This contract keeps the change log "truthful" in the sense already required for failure modes: every event corresponds to a DOM operation the adapter must perform. Hidden-only churn does not generate phantom events that an adapter would have to filter or no-op.
 
@@ -1111,34 +1112,71 @@ impl<T: CollectionItem> MutableTreeData<T> {
     /// Remove the listed nodes (and their descendants); returns the
     /// removed item values.
     ///
-    /// Emits `Remove` carrying every key that disappeared from the
-    /// **visible iteration** as a result of the call — input keys that
-    /// matched, cascade-removed visible descendants, and any structural
-    /// node (`Section` / `Header` / `Separator`) that carries no
-    /// payload. Hidden nodes (inside a collapsed ancestor) were never
-    /// rendered, so they stay out of the change event — emitting them
-    /// would force the adapter to no-op and pollute the truthful
-    /// change log. When every removed node was hidden, no event is
-    /// emitted.
+    /// Emits up to two kinds of event, in this order:
     ///
-    /// The diff is computed against `visible_keys()` before and after
-    /// the inner mutation rather than from the returned `Vec<T>`, both
-    /// to capture cascaded descendants and to surface structural
-    /// removals that have no payload to enumerate.
+    /// * `Remove` — carrying every key that disappeared from the
+    ///   **visible iteration** as a result of the call: input keys
+    ///   that matched, cascade-removed visible descendants, and any
+    ///   structural node (`Section` / `Header` / `Separator`) that
+    ///   carries no payload. Hidden nodes (inside a collapsed
+    ///   ancestor) were never rendered, so they stay out of the
+    ///   change event — emitting them would force the adapter to
+    ///   no-op and pollute the truthful change log.
+    /// * `Replace { key: parent_key }` — one event per still-visible
+    ///   parent whose `has_children` flipped from `true` to `false`
+    ///   as a side effect of the removal. The inner tree flips
+    ///   `has_children: true → false` and `is_expanded: Some(_) → None`
+    ///   on a node the moment its last remaining child (visible *or*
+    ///   hidden) is removed; adapters key expander chevrons and
+    ///   `aria-expanded` off those flags, so the parent row must be
+    ///   re-rendered even when none of its visible children appeared
+    ///   in the `Remove` event. Parents that are themselves hidden
+    ///   are skipped — their row isn't drawn. `Replace` events are
+    ///   emitted in pre-mutation DFS order.
+    ///
+    /// The `Remove` diff is computed against `visible_keys()` before
+    /// and after the inner mutation rather than from the returned
+    /// `Vec<T>`, both to capture cascaded descendants and to surface
+    /// structural removals that have no payload to enumerate. The
+    /// branch→leaf detection reuses the same pre-mutation snapshot.
     pub fn remove(&mut self, keys: &[Key]) -> Vec<T> {
         // Capture visible iteration order in a `Vec` (not a
-        // `BTreeSet`) so the change event preserves DFS order.
+        // `BTreeSet`) so the change event preserves DFS order, and
+        // snapshot branch/leaf state alongside so the post-mutation
+        // loop can detect parents that lost their last child.
         let visible_before: Vec<Key> = self.inner.visible_keys().cloned().collect();
+        let visible_before_has_children: BTreeMap<Key, bool> = visible_before
+            .iter()
+            .map(|k| (k.clone(), self.inner.has_children(k)))
+            .collect();
         let removed = self.inner.remove_by_keys(keys);
         let visible_after: BTreeSet<Key> =
             self.inner.visible_keys().cloned().collect();
         let visible_removed_keys: Vec<Key> = visible_before
-            .into_iter()
-            .filter(|k| !visible_after.contains(k))
+            .iter()
+            .filter(|k| !visible_after.contains(*k))
+            .cloned()
             .collect();
         if !visible_removed_keys.is_empty() {
             self.pending_changes
                 .push(CollectionChange::Remove { keys: visible_removed_keys });
+        }
+        // Emit Replace for any still-visible parent whose
+        // `has_children` flipped true → false. Removal can only lose
+        // children, never gain them, so the leaf → branch direction
+        // is not considered here. Iterating `visible_before` keeps
+        // emission order DFS-stable and matches how the Remove event
+        // itself is ordered.
+        for k in &visible_before {
+            if !visible_after.contains(k) {
+                continue;
+            }
+            let was_branch = visible_before_has_children
+                .get(k).copied().unwrap_or(false);
+            if was_branch && !self.inner.has_children(k) {
+                self.pending_changes
+                    .push(CollectionChange::Replace { key: k.clone() });
+            }
         }
         removed
     }
@@ -1147,38 +1185,70 @@ impl<T: CollectionItem> MutableTreeData<T> {
     /// `Some((from_flat_index, to_flat_index))` on success; `None` when
     /// the move is rejected (see §2.3 and the table above).
     ///
+    /// ## Subtree visibility
+    ///
     /// Visibility may differ between the old and new locations — and a
     /// single move can flip visibility for every descendant in the
-    /// subtree, not just the moved root — so the emitted event is
+    /// subtree, not just the moved root — so the subtree event is
     /// chosen to describe the DOM impact precisely:
     ///
-    /// | From visible | To visible | Event emitted                                                                |
+    /// | From visible | To visible | Subtree event emitted                                                        |
     /// | ------------ | ---------- | ---------------------------------------------------------------------------- |
     /// | yes          | yes        | `Move { key, from: vis_from, to: vis_to }`                                   |
     /// | yes          | no         | `Remove { keys: <previously-visible subtree keys, DFS order> }`              |
     /// | no           | yes        | `Insert { index: vis_to, count: <number of newly-visible subtree nodes> }`   |
-    /// | no           | no         | *(no event)*                                                                 |
+    /// | no           | no         | *(no subtree event)*                                                         |
     ///
     /// Indices are visible iteration indices, not flat DFS indices. The
     /// `Insert` always spans `count` consecutive positions starting at
     /// `to_index`. Emitting only `[key]` for visible→hidden, or
     /// `count: 1` for hidden→visible, would leave keyed reconcilers
     /// with orphan descendant rows or miscounted indices.
+    ///
+    /// ## Parent metadata transitions
+    ///
+    /// Reparenting can also flip `has_children` on the old and new
+    /// parents independently of the moved subtree's visibility:
+    ///
+    /// * the old parent transitions branch → leaf when the moved node
+    ///   was its only remaining child (`has_children: true → false`,
+    ///   `is_expanded: Some(_) → None`);
+    /// * the new parent transitions leaf → collapsed branch when it
+    ///   had no children before (`has_children: false → true`,
+    ///   `is_expanded: None → Some(false)`).
+    ///
+    /// These transitions change the parent row's rendered state
+    /// (expander chevron, `aria-expanded`) without moving the row, so
+    /// each still-visible parent that flipped receives a
+    /// `Replace { key: parent }` event emitted **after** the subtree
+    /// event in pre-mutation DFS order. Parents that are themselves
+    /// hidden are skipped. The moved key itself cannot flip
+    /// `has_children` through a reparent — the subtree moves as a
+    /// unit — so no `Replace` for the moved key is ever emitted.
     pub fn reparent(
         &mut self,
         key: &Key,
         new_parent: Option<&Key>,
         index: usize,
     ) -> Option<(usize, usize)> {
-        // Snapshot the pre-mutation visible iteration. Both visibility-
-        // crossing branches need to compare visible-before vs
-        // visible-after to capture every subtree descendant whose
-        // visibility flipped — only the moved subtree's visibility can
-        // change, so the set difference is exactly the subtree delta.
+        // Snapshot the pre-mutation visible iteration and branch/leaf
+        // state. The visibility-crossing branches compare visible-
+        // before vs visible-after to capture subtree descendants that
+        // flipped — only the moved subtree's visibility can change,
+        // so the set difference is exactly the subtree delta. The
+        // same snapshot doubles as a membership set for the
+        // hidden→visible count and as the source of pre-mutation
+        // `has_children` state for the parent-transition detection.
         let visible_before: Vec<Key> = self.inner.visible_keys().cloned().collect();
+        let visible_before_has_children: BTreeMap<Key, bool> = visible_before
+            .iter()
+            .map(|k| (k.clone(), self.inner.has_children(k)))
+            .collect();
         let from_visible = self.inner.visible_index_of(key);
         let (from_flat, to_flat) = self.inner.reparent(key, new_parent, index)?;
         let to_visible = self.inner.visible_index_of(key);
+        let visible_after: BTreeSet<Key> =
+            self.inner.visible_keys().cloned().collect();
         match (from_visible, to_visible) {
             (Some(from_index), Some(to_index)) => {
                 self.pending_changes.push(CollectionChange::Move {
@@ -1189,11 +1259,10 @@ impl<T: CollectionItem> MutableTreeData<T> {
                 // Root + every visible descendant disappears together
                 // under the collapsed new parent. Remove must list all
                 // of them in pre-mutation DFS order.
-                let visible_after: BTreeSet<Key> =
-                    self.inner.visible_keys().cloned().collect();
                 let removed_keys: Vec<Key> = visible_before
-                    .into_iter()
-                    .filter(|k| !visible_after.contains(k))
+                    .iter()
+                    .filter(|k| !visible_after.contains(*k))
+                    .cloned()
                     .collect();
                 self.pending_changes.push(CollectionChange::Remove {
                     keys: removed_keys,
@@ -1203,18 +1272,38 @@ impl<T: CollectionItem> MutableTreeData<T> {
                 // Root + descendants whose internal expansion keeps
                 // them visible at the new location appear in `count`
                 // consecutive positions starting at `to_index`.
-                let visible_before_set: BTreeSet<Key> =
-                    visible_before.into_iter().collect();
+                // Reuse `visible_before_has_children` as a membership
+                // set — `contains_key` is O(log n) and avoids a
+                // second allocation.
                 let count = self
                     .inner
                     .visible_keys()
-                    .filter(|k| !visible_before_set.contains(*k))
+                    .filter(|k| !visible_before_has_children.contains_key(*k))
                     .count();
                 self.pending_changes.push(CollectionChange::Insert {
                     index: to_index, count,
                 });
             }
-            (None, None) => {} // both endpoints hidden, nothing to report
+            (None, None) => {} // both endpoints hidden, no subtree event
+        }
+        // Emit Replace for any still-visible key whose `has_children`
+        // flipped in either direction. This loop surfaces the old
+        // parent losing its last child (branch → leaf) and the new
+        // parent gaining its first child (leaf → branch). The moved
+        // key's own `has_children` is invariant under reparent, so
+        // even if it appears in both visible sets the branch-state
+        // comparison short-circuits.
+        for k in &visible_before {
+            if !visible_after.contains(k) {
+                continue;
+            }
+            let was_branch = visible_before_has_children
+                .get(k).copied().unwrap_or(false);
+            let is_branch = self.inner.has_children(k);
+            if was_branch != is_branch {
+                self.pending_changes
+                    .push(CollectionChange::Replace { key: k.clone() });
+            }
         }
         Some((from_flat, to_flat))
     }

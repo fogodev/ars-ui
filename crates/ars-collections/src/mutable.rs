@@ -15,7 +15,10 @@
 //! Spec reference: `spec/foundation/06-collections.md` §1.8 "Mutable
 //! Collections".
 
-use alloc::{collections::BTreeSet, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
 use core::{
     fmt::{self, Debug},
     mem,
@@ -447,27 +450,47 @@ impl<T: CollectionItem> MutableTreeData<T> {
     /// Remove the listed nodes (and their descendants), returning their
     /// owned item values.
     ///
-    /// Emits [`CollectionChange::Remove`] carrying every key that
-    /// disappeared from the **visible iteration** as a result of the
-    /// call — that includes:
+    /// Emits up to two kinds of event, in DFS order:
     ///
-    /// * the input keys that actually matched a node,
-    /// * cascade-removed descendants that were rendered, and
-    /// * structural nodes ([`Section`], [`Header`], [`Separator`]) which
-    ///   carry no payload and would never appear in the returned
-    ///   `Vec<T>`.
+    /// * [`CollectionChange::Remove`] — carrying every key that
+    ///   disappeared from the **visible iteration** as a result of the
+    ///   call. That includes:
+    ///     - the input keys that actually matched a node,
+    ///     - cascade-removed descendants that were rendered, and
+    ///     - structural nodes ([`Section`], [`Header`], [`Separator`]),
+    ///       which carry no payload and would never appear in the
+    ///       returned `Vec<T>`.
     ///
-    /// Hidden nodes (those inside a collapsed ancestor) were never
-    /// rendered, so they stay out of the change event — emitting them
-    /// would force the adapter to no-op and pollute the truthful change
-    /// log. When every removed item was hidden the call returns the
-    /// values without emitting any event.
+    ///   Hidden nodes (those inside a collapsed ancestor) were never
+    ///   rendered, so they stay out of the change event — emitting them
+    ///   would force the adapter to no-op and pollute the truthful
+    ///   change log.
     ///
-    /// The diff is computed against `visible_keys()` before and after
-    /// the inner mutation rather than from the returned `Vec<T>`, both
-    /// to capture cascaded descendants and to surface structural
-    /// removals that have no payload to enumerate.
+    /// * [`CollectionChange::Replace`] — one event per still-visible
+    ///   parent whose [`has_children`] flipped from `true` to `false`
+    ///   as a side effect of the removal. A parent transitions from a
+    ///   branch to a leaf when the removal drains its last remaining
+    ///   child (visible *or* hidden); the inner tree flips
+    ///   `has_children: true → false` and `is_expanded: Some(_) → None`
+    ///   on that node. Adapters key expander chevrons and
+    ///   `aria-expanded` off those flags, so the parent row must be
+    ///   re-rendered even when none of its visible children appeared in
+    ///   the `Remove` event. Parents that are themselves hidden (inside
+    ///   a collapsed ancestor) are skipped: their row isn't rendered,
+    ///   so the metadata change is invisible until an ancestor expands
+    ///   and the adapter re-reads them.
     ///
+    /// Remove events precede Replace events in the drained buffer, and
+    /// Replace events are emitted in pre-mutation DFS order so the
+    /// event trace is stable for keyed reconcilers.
+    ///
+    /// The Remove diff is computed against `visible_keys()` before and
+    /// after the inner mutation rather than from the returned `Vec<T>`,
+    /// both to capture cascaded descendants and to surface structural
+    /// removals that have no payload to enumerate. The branch→leaf
+    /// detection reuses the same pre-mutation snapshot.
+    ///
+    /// [`has_children`]: crate::node::Node::has_children
     /// [`Section`]: crate::node::NodeType::Section
     /// [`Header`]: crate::node::NodeType::Header
     /// [`Separator`]: crate::node::NodeType::Separator
@@ -476,22 +499,50 @@ impl<T: CollectionItem> MutableTreeData<T> {
         // `Collection::keys`, available because `MutableTreeData::remove`
         // only requires `T: CollectionItem`. Capturing the iteration
         // order in a `Vec` (not a `BTreeSet`) lets us preserve DFS
-        // order in the change event.
+        // order in the change event. The parallel `BTreeMap` snapshot
+        // records branch/leaf state for each visible key so the
+        // post-mutation loop can detect parents whose last child was
+        // drained by this call.
         let visible_before = self.inner.visible_keys().cloned().collect::<Vec<_>>();
+
+        let visible_before_has_children = visible_before
+            .iter()
+            .map(|k| (k.clone(), self.inner.has_children(k)))
+            .collect::<BTreeMap<_, _>>();
 
         let removed = self.inner.remove_by_keys(keys);
 
         let visible_after = self.inner.visible_keys().cloned().collect::<BTreeSet<_>>();
 
         let visible_removed_keys = visible_before
-            .into_iter()
-            .filter(|k| !visible_after.contains(k))
+            .iter()
+            .filter(|k| !visible_after.contains(*k))
+            .cloned()
             .collect::<Vec<_>>();
 
         if !visible_removed_keys.is_empty() {
             self.pending_changes.push(CollectionChange::Remove {
                 keys: visible_removed_keys,
             });
+        }
+
+        // Emit Replace for any still-visible parent whose `has_children`
+        // flipped from true to false. Removal can only lose children,
+        // never gain them, so the leaf→branch direction is not
+        // considered here. Iterating `visible_before` keeps the
+        // emission order DFS-stable and matches how the Remove event
+        // itself is ordered.
+        for k in &visible_before {
+            if !visible_after.contains(k) {
+                continue;
+            }
+
+            let was_branch = visible_before_has_children.get(k).copied().unwrap_or(false);
+
+            if was_branch && !self.inner.has_children(k) {
+                self.pending_changes
+                    .push(CollectionChange::Replace { key: k.clone() });
+            }
         }
 
         removed
@@ -514,42 +565,79 @@ impl<T: CollectionItem> MutableTreeData<T> {
     /// expanded subtree into a visible location surfaces all of it at
     /// once). A single `Move` event is therefore not always sufficient
     /// to describe the DOM impact. The wrapper picks the event shape
-    /// that matches the visibility transition:
+    /// that matches the subtree-visibility transition:
     ///
     /// | From visible | To visible | Event emitted                                                                    |
     /// | ------------ | ---------- | -------------------------------------------------------------------------------- |
     /// | yes          | yes        | `Move { key, from: vis_from, to: vis_to }`                                       |
     /// | yes          | no         | `Remove { keys: <previously-visible subtree keys, DFS order> }`                  |
     /// | no           | yes        | `Insert { index: vis_to, count: <number of newly-visible subtree nodes> }`       |
-    /// | no           | no         | *(no event — neither location is rendered)*                                      |
+    /// | no           | no         | *(no subtree event — neither location is rendered)*                              |
     ///
     /// In all cases the indices are **visible iteration indices**, not
     /// flat DFS indices, so the adapter can apply them directly against
     /// [`Collection::get_by_index`]. The `Insert` always spans
     /// `count` consecutive positions starting at `to_index`.
+    ///
+    /// # Parent metadata transitions
+    ///
+    /// Reparenting can also flip [`has_children`] on the old and new
+    /// parents independently of the moved subtree's own visibility:
+    ///
+    /// * the **old parent** transitions branch → leaf when the moved
+    ///   node was its only remaining child (`has_children: true →
+    ///   false`, `is_expanded: Some(_) → None`);
+    /// * the **new parent** transitions leaf → collapsed branch when it
+    ///   had no children before (`has_children: false → true`,
+    ///   `is_expanded: None → Some(false)`).
+    ///
+    /// These transitions change the parent row's rendered state
+    /// (expander chevron, `aria-expanded`) without changing its
+    /// iteration position, so they are surfaced as
+    /// [`CollectionChange::Replace`] events keyed by the affected
+    /// parent — one per still-visible parent that flipped. The
+    /// transition is silent when the affected parent is itself hidden
+    /// inside a collapsed ancestor, since its row is not rendered.
+    ///
+    /// The subtree event (if any) is emitted first, followed by the
+    /// parent `Replace` events in pre-mutation DFS order. The moved
+    /// key itself cannot flip `has_children` through a reparent — the
+    /// subtree moves as a unit — so it never triggers a `Replace` of
+    /// its own even when it appears in both the pre- and post-mutation
+    /// visible set.
+    ///
+    /// [`has_children`]: crate::node::Node::has_children
     pub fn reparent(
         &mut self,
         key: &Key,
         new_parent: Option<&Key>,
         index: usize,
     ) -> Option<(usize, usize)> {
-        // Snapshot the pre-mutation visible-key set in DFS order. The
-        // visible→hidden and hidden→visible branches both need to
-        // compare visibility before/after to capture every subtree
-        // descendant whose visibility flipped — only the moved
-        // subtree's visibility can change here, so a set difference
-        // against the full visible iteration is exactly the subtree
-        // delta. Capturing eagerly is simpler than re-deriving the
-        // pre-mutation state by walking the moved subtree post-move,
-        // and the visible iteration is bounded by what the adapter
-        // would render anyway.
+        // Snapshot the pre-mutation visible-key set in DFS order and
+        // the branch/leaf flag for each visible key.
+        //
+        // Both visibility-crossing subtree branches need to compare
+        // pre/post visibility to capture every subtree descendant that
+        // flipped — only the moved subtree's visibility can change, so
+        // a set difference against the full visible iteration is
+        // exactly the subtree delta. The same snapshot doubles as a
+        // membership set for the hidden→visible count and as the
+        // source of pre-mutation `has_children` state for the parent
+        // metadata-transition detection.
         let visible_before = self.inner.visible_keys().cloned().collect::<Vec<_>>();
+
+        let visible_before_has_children = visible_before
+            .iter()
+            .map(|k| (k.clone(), self.inner.has_children(k)))
+            .collect::<BTreeMap<_, _>>();
 
         let from_visible = self.inner.visible_index_of(key);
 
         let (from_flat, to_flat) = self.inner.reparent(key, new_parent, index)?;
 
         let to_visible = self.inner.visible_index_of(key);
+
+        let visible_after = self.inner.visible_keys().cloned().collect::<BTreeSet<_>>();
 
         match (from_visible, to_visible) {
             (Some(from_index), Some(to_index)) => {
@@ -567,11 +655,10 @@ impl<T: CollectionItem> MutableTreeData<T> {
                 // order so a keyed reconciler can drop the matching
                 // DOM rows in one pass — emitting only `key` would
                 // leave orphan descendants in the DOM/state.
-                let visible_after = self.inner.visible_keys().cloned().collect::<BTreeSet<_>>();
-
                 let removed_keys = visible_before
-                    .into_iter()
-                    .filter(|k| !visible_after.contains(k))
+                    .iter()
+                    .filter(|k| !visible_after.contains(*k))
+                    .cloned()
                     .collect::<Vec<_>>();
 
                 self.pending_changes
@@ -584,13 +671,14 @@ impl<T: CollectionItem> MutableTreeData<T> {
                 // in `count` consecutive visible positions starting at
                 // `to_index`. Emitting `count: 1` would leave adapters
                 // that honour `count` under-applying the change and
-                // drifting subsequent indices.
-                let visible_before_set = visible_before.into_iter().collect::<BTreeSet<_>>();
-
+                // drifting subsequent indices. Reuse
+                // `visible_before_has_children` as a membership set —
+                // `contains_key` is O(log n) and avoids a second
+                // allocation.
                 let count = self
                     .inner
                     .visible_keys()
-                    .filter(|k| !visible_before_set.contains(*k))
+                    .filter(|k| !visible_before_has_children.contains_key(*k))
                     .count();
 
                 self.pending_changes.push(CollectionChange::Insert {
@@ -600,7 +688,38 @@ impl<T: CollectionItem> MutableTreeData<T> {
             }
 
             (None, None) => {
-                // Both endpoints hidden — no DOM change to report.
+                // Both subtree endpoints hidden — no subtree event.
+                // Parent-metadata transitions may still fire below.
+            }
+        }
+
+        // Emit Replace for any still-visible key whose `has_children`
+        // flipped in either direction. Iteration follows pre-mutation
+        // DFS order so the event trace is stable and matches the
+        // ordering used elsewhere.
+        //
+        // This loop is what surfaces `old_parent` losing its last
+        // child (branch → leaf) and `new_parent` gaining its first
+        // child (leaf → branch). The moved `key` itself cannot flip
+        // here — its subtree moves as a unit, so its own
+        // `has_children` is invariant under reparent — which means
+        // even if it appears in both visible sets the branch-state
+        // comparison short-circuits.
+        for k in visible_before {
+            if !visible_after.contains(&k) {
+                continue;
+            }
+
+            let was_branch = visible_before_has_children
+                .get(&k)
+                .copied()
+                .unwrap_or(false);
+
+            let is_branch = self.inner.has_children(&k);
+
+            if was_branch != is_branch {
+                self.pending_changes
+                    .push(CollectionChange::Replace { key: k });
             }
         }
 
@@ -1510,10 +1629,14 @@ mod tests {
         let mut tree = mixed_visibility_tree();
 
         // Root C (id 3) is a visible leaf in the fixture.
-        assert!(
-            tree.get(&Key::int(3))
-                .is_some_and(|n| !n.has_children && n.is_expanded.is_none()),
-            "fixture: Root C must be a leaf before the insert",
+        let root_c_before = tree
+            .get(&Key::int(3))
+            .expect("fixture: Root C must be present before the insert");
+
+        assert!(!root_c_before.has_children, "Root C starts as a leaf");
+        assert_eq!(
+            root_c_before.is_expanded, None,
+            "a leaf has no expansion state",
         );
 
         let flat = tree.insert_child(Some(&Key::int(3)), 0, Item::new(99, "New Child"));
@@ -1555,10 +1678,12 @@ mod tests {
         let mut tree = mixed_visibility_tree();
 
         // Child A1 is a hidden leaf (under collapsed Root A).
-        assert!(
-            tree.get(&Key::int(11))
-                .is_some_and(|n| !n.has_children && n.is_expanded.is_none()),
-            "fixture: Child A1 is a hidden leaf",
+        let child_a1_before = tree.get(&Key::int(11)).expect("fixture: Child A1 present");
+
+        assert!(!child_a1_before.has_children, "Child A1 starts as a leaf");
+        assert_eq!(
+            child_a1_before.is_expanded, None,
+            "Child A1 is a leaf, not an expanded branch",
         );
 
         let flat = tree.insert_child(Some(&Key::int(11)), 0, Item::new(111, "Hidden Grand"));
@@ -1567,10 +1692,18 @@ mod tests {
 
         // Inner state changed (Child A1 is now a collapsed branch),
         // but neither it nor the new grandchild is rendered.
+        let child_a1_after = tree
+            .get(&Key::int(11))
+            .expect("Child A1 still present after insert");
+
         assert!(
-            tree.get(&Key::int(11))
-                .is_some_and(|n| n.has_children && n.is_expanded == Some(false)),
-            "Child A1 transitioned to a collapsed branch internally",
+            child_a1_after.has_children,
+            "Child A1 flipped leaf→branch internally",
+        );
+        assert_eq!(
+            child_a1_after.is_expanded,
+            Some(false),
+            "Child A1 is now a collapsed branch",
         );
 
         let drained = tree.drain_changes();
@@ -1621,20 +1754,36 @@ mod tests {
     }
 
     #[test]
-    fn tree_remove_hidden_only_emits_no_event() {
-        // Remove the children of collapsed Root A. They were never
-        // visible, so the adapter has no DOM to clean up — no event.
+    fn tree_remove_hidden_non_last_child_emits_no_event() {
+        // Remove one hidden child of collapsed Root A. Root A still has
+        // its other hidden child afterwards, so `has_children` stays
+        // `true` (no branch→leaf flip), *and* no visible keys are
+        // removed. With nothing to render differently, the adapter gets
+        // an empty drain. (Removing *both* children would drain Root A's
+        // child list and emit `Replace { Root A }` — see
+        // `tree_remove_hidden_last_children_emits_replace_for_visible_parent`.)
         let mut tree = mixed_visibility_tree();
 
-        let removed = tree.remove(&[Key::int(11), Key::int(12)]);
+        let removed = tree.remove(&[Key::int(11)]);
 
-        assert_eq!(removed.len(), 2, "inner removal still returns the values");
+        assert_eq!(removed.len(), 1, "inner removal returned Child A1");
+
+        // Root A is still a collapsed branch (Child A2 remains).
+        let root_a = tree.get(&Key::int(1)).expect("Root A still in tree");
+
+        assert!(root_a.has_children, "Root A still has Child A2");
+        assert_eq!(
+            root_a.is_expanded,
+            Some(false),
+            "Root A is still a collapsed branch",
+        );
 
         let drained = tree.drain_changes();
 
         assert!(
             drained.is_empty(),
-            "no event when removed items were all hidden; got {drained:?}"
+            "no event when removed node was hidden and parent stayed a branch; \
+             got {drained:?}"
         );
     }
 
@@ -1661,6 +1810,104 @@ mod tests {
         assert_eq!(
             drained, expected,
             "Remove event must include only previously-visible keys"
+        );
+    }
+
+    #[test]
+    fn tree_remove_hidden_last_children_emits_replace_for_visible_parent() {
+        // Remove *both* hidden children of collapsed Root A. None of the
+        // removed keys were visible, so `visible_removed_keys` is empty —
+        // but `TreeCollection::remove_by_keys` still flips Root A's
+        // metadata from a collapsed branch to a leaf:
+        //   has_children: true  → false
+        //   is_expanded:  Some(false) → None
+        // Root A is *visible*, and adapters key expander chevron /
+        // `aria-expanded` off those flags. A reconciler consuming only
+        // `CollectionChange` would leave Root A rendered as a collapsed
+        // branch forever unless the wrapper emits `Replace`.
+        let mut tree = mixed_visibility_tree();
+
+        // Sanity: Root A starts as a collapsed branch.
+        let root_a_before = tree
+            .get(&Key::int(1))
+            .expect("fixture: Root A present before remove");
+
+        assert!(root_a_before.has_children, "Root A starts with children");
+        assert_eq!(
+            root_a_before.is_expanded,
+            Some(false),
+            "Root A starts collapsed",
+        );
+
+        let removed = tree.remove(&[Key::int(11), Key::int(12)]);
+
+        assert_eq!(
+            removed.len(),
+            2,
+            "inner removal still returns both payloads"
+        );
+
+        // Confirm the branch→leaf transition actually landed, since
+        // that is the precondition for the Replace event.
+        let root_a = tree.get(&Key::int(1)).expect("Root A still present");
+
+        assert!(!root_a.has_children, "Root A lost its last child");
+        assert_eq!(root_a.is_expanded, None, "a leaf has no expansion state",);
+
+        let drained = tree.drain_changes();
+
+        assert_eq!(
+            drained,
+            vec![CollectionChange::Replace { key: Key::int(1) }],
+            "branch→leaf transition on a visible parent must emit Replace, \
+             even though no visible descendants were removed",
+        );
+    }
+
+    #[test]
+    fn tree_remove_visible_last_child_emits_replace_alongside_remove() {
+        // Remove Child B1, the only visible child of Root B. The visible
+        // iteration loses Child B1 (→ Remove event) *and* Root B flips
+        // from an expanded branch to a leaf:
+        //   has_children: true → false
+        //   is_expanded:  Some(true) → None
+        // Root B is still visible at the same row, so its chevron /
+        // `aria-expanded` must be refreshed in the same update cycle.
+        // The Replace for Root B fires alongside the Remove for Child B1.
+        let mut tree = mixed_visibility_tree();
+
+        let root_b_before = tree
+            .get(&Key::int(2))
+            .expect("fixture: Root B present before remove");
+
+        assert!(root_b_before.has_children, "Root B starts with children");
+        assert_eq!(
+            root_b_before.is_expanded,
+            Some(true),
+            "Root B starts expanded",
+        );
+
+        let removed = tree.remove(&[Key::int(21)]);
+
+        assert_eq!(removed.len(), 1, "Child B1 payload returned");
+
+        let root_b = tree.get(&Key::int(2)).expect("Root B still present");
+
+        assert!(!root_b.has_children, "Root B lost its last child");
+        assert_eq!(root_b.is_expanded, None, "Root B is now a leaf");
+
+        let drained = tree.drain_changes();
+
+        assert_eq!(
+            drained,
+            vec![
+                CollectionChange::Remove {
+                    keys: vec![Key::int(21)],
+                },
+                CollectionChange::Replace { key: Key::int(2) },
+            ],
+            "visible child removal that flips the visible parent must emit \
+             Remove for the child and Replace for the parent in that order",
         );
     }
 
@@ -1767,6 +2014,12 @@ mod tests {
         // becomes visible at once — `count` must reflect the full
         // subtree size, not 1, otherwise adapters that honour `count`
         // will under-apply the change and drift indices.
+        //
+        // Child A1 is Root A's *only* child in this fixture, so the
+        // move also drains Root A: it flips branch → leaf while
+        // staying visible at row 0. The wrapper emits the subtree
+        // `Insert` first, then a `Replace` for Root A's metadata flip,
+        // in that order.
         let mut tree = MutableTreeData::new(TreeCollection::new([
             TreeItemConfig {
                 key: Key::int(1),
@@ -1823,15 +2076,28 @@ mod tests {
 
         assert_eq!(
             drained,
-            vec![CollectionChange::Insert { index: 1, count: 2 }],
-            "Insert count must reflect every newly-visible subtree node, not just the root"
+            vec![
+                CollectionChange::Insert { index: 1, count: 2 },
+                CollectionChange::Replace { key: Key::int(1) },
+            ],
+            "Insert count must reflect every newly-visible subtree node, not \
+             just the root; Replace must fire for Root A's branch→leaf flip",
         );
     }
 
     #[test]
-    fn tree_reparent_hidden_to_hidden_emits_no_event() {
-        // Build a tree with two collapsed parents so we can shuffle a
-        // child between them without ever entering the visible region.
+    fn tree_reparent_hidden_to_hidden_flips_both_visible_roots_emits_replace_for_each() {
+        // Two collapsed visible roots (Box 1, Box 2) with a single
+        // hidden item under Box 1. Moving the item between them keeps
+        // both subtree endpoints hidden (a `(None, None)` case — no
+        // `Move` / `Insert` / `Remove` for the subtree itself), but
+        // both roots *are* visible and both flip their branch/leaf
+        // state:
+        //   Box 1: has_children true → false, is_expanded Some(false) → None
+        //   Box 2: has_children false → true, is_expanded None → Some(false)
+        // The wrapper must emit one `Replace` per affected visible
+        // parent in pre-mutation DFS order, otherwise adapters leave
+        // both chevrons stale.
         let mut tree = MutableTreeData::new(TreeCollection::new([
             TreeItemConfig {
                 key: Key::int(1),
@@ -1855,12 +2121,279 @@ mod tests {
             },
         ]));
 
+        // Sanity: both roots are visible; the item is hidden.
+        assert_eq!(
+            tree.keys().cloned().collect::<Vec<_>>(),
+            vec![Key::int(1), Key::int(2)],
+            "fixture: only the two roots are visible",
+        );
+
         let indices = tree.reparent(&Key::int(11), Some(&Key::int(2)), 0);
 
         assert!(indices.is_some(), "reparent succeeded");
+
+        // Confirm both transitions landed.
+        let box_1 = tree.get(&Key::int(1)).expect("Box 1 still present");
+
+        assert!(!box_1.has_children, "Box 1 lost its only child");
+        assert_eq!(box_1.is_expanded, None, "Box 1 is now a leaf");
+
+        let box_2 = tree.get(&Key::int(2)).expect("Box 2 still present");
+
+        assert!(box_2.has_children, "Box 2 gained the item");
+        assert_eq!(
+            box_2.is_expanded,
+            Some(false),
+            "Box 2 is now a collapsed branch",
+        );
+
+        // The visible iteration is unchanged — the item is hidden
+        // under the newly-collapsed Box 2.
+        assert_eq!(
+            tree.keys().cloned().collect::<Vec<_>>(),
+            vec![Key::int(1), Key::int(2)],
+        );
+
+        let drained = tree.drain_changes();
+
+        assert_eq!(
+            drained,
+            vec![
+                CollectionChange::Replace { key: Key::int(1) },
+                CollectionChange::Replace { key: Key::int(2) },
+            ],
+            "both visible parents flipped metadata; one Replace per parent, \
+             pre-mutation DFS order",
+        );
+    }
+
+    #[test]
+    fn tree_reparent_hidden_to_hidden_emits_replace_for_visible_leaf_destination() {
+        // Move Child A1 (hidden under collapsed Root A) to be the first
+        // child of Root C (a visible leaf). The moved subtree is hidden
+        // before *and* after (Root C flips into a collapsed branch the
+        // moment it gains a child, so Child A1 lands inside a collapsed
+        // ancestor). That makes this a `(None, None)` subtree-visibility
+        // case — no `Move` / `Insert` / `Remove` fires for the subtree —
+        // yet Root C's *visible row* transitioned:
+        //   has_children: false → true
+        //   is_expanded:  None  → Some(false)
+        // Adapters key expander chevron / `aria-expanded` off those
+        // flags, so a reconciler consuming only `CollectionChange`
+        // would leave Root C rendered as a leaf unless the wrapper
+        // emits `Replace` for it. Root A still has Child A2, so its
+        // `has_children` flag is unchanged — no Replace for Root A.
+        let mut tree = mixed_visibility_tree();
+
+        // Sanity: Root C starts as a visible leaf.
+        let root_c_before = tree
+            .get(&Key::int(3))
+            .expect("fixture: Root C present before reparent");
+
+        assert!(!root_c_before.has_children, "Root C starts as a leaf");
+        assert_eq!(
+            root_c_before.is_expanded, None,
+            "a leaf has no expansion state",
+        );
+
+        let indices = tree.reparent(&Key::int(11), Some(&Key::int(3)), 0);
+
+        assert!(indices.is_some(), "reparent succeeded");
+
+        // Confirm the leaf→branch transition landed on Root C.
+        let root_c = tree.get(&Key::int(3)).expect("Root C still present");
+
+        assert!(root_c.has_children, "Root C gained a child");
+        assert_eq!(
+            root_c.is_expanded,
+            Some(false),
+            "Root C is now a collapsed branch",
+        );
+
+        // Child A1 is hidden under newly-collapsed Root C; the visible
+        // iteration length is unchanged (still [Root A, Root B, Child
+        // B1, Root C]).
+        assert_eq!(
+            tree.keys().cloned().collect::<Vec<_>>(),
+            vec![Key::int(1), Key::int(2), Key::int(21), Key::int(3)],
+            "Child A1 is hidden under the newly-collapsed Root C",
+        );
+
+        // Root A still has Child A2 and remains a branch.
+        let root_a_after = tree
+            .get(&Key::int(1))
+            .expect("Root A present after reparent");
+
+        assert!(root_a_after.has_children, "Root A kept Child A2");
+        assert_eq!(
+            root_a_after.is_expanded,
+            Some(false),
+            "Root A is still a collapsed branch",
+        );
+
+        let drained = tree.drain_changes();
+
+        assert_eq!(
+            drained,
+            vec![CollectionChange::Replace { key: Key::int(3) }],
+            "leaf→branch transition on a visible destination must emit \
+             Replace even when neither subtree endpoint is visible",
+        );
+    }
+
+    #[test]
+    fn tree_reparent_visible_move_flips_src_parent_emits_move_and_replace() {
+        // Both endpoints visible (Move case). Root A has only Child A1,
+        // so moving Child A1 away drains Root A's child list:
+        //   has_children: true → false
+        //   is_expanded:  Some(true) → None
+        // Root A stays visible at row 0, so the wrapper must emit both
+        // the subtree `Move` *and* a `Replace` for Root A's branch→leaf
+        // flip in the same drain cycle.
+        let mut tree = MutableTreeData::new(TreeCollection::new([
+            TreeItemConfig {
+                key: Key::int(1),
+                text_value: "Root A".to_string(),
+                value: Item::new(1, "Root A"),
+                children: vec![TreeItemConfig {
+                    key: Key::int(11),
+                    text_value: "Child A1".to_string(),
+                    value: Item::new(11, "Child A1"),
+                    children: vec![],
+                    default_expanded: true,
+                }],
+                default_expanded: true,
+            },
+            TreeItemConfig {
+                key: Key::int(2),
+                text_value: "Root B".to_string(),
+                value: Item::new(2, "Root B"),
+                children: vec![TreeItemConfig {
+                    key: Key::int(21),
+                    text_value: "Child B1".to_string(),
+                    value: Item::new(21, "Child B1"),
+                    children: vec![],
+                    default_expanded: true,
+                }],
+                default_expanded: true,
+            },
+        ]));
+
+        // Sanity: everything is visible, Root A is an expanded branch.
+        assert_eq!(
+            tree.keys().cloned().collect::<Vec<_>>(),
+            vec![Key::int(1), Key::int(11), Key::int(2), Key::int(21),],
+        );
+
+        // Move Child A1 under Root B at sibling-index 0.
+        let indices = tree.reparent(&Key::int(11), Some(&Key::int(2)), 0);
+
+        assert!(indices.is_some(), "reparent succeeded");
+
+        // Root A now has no children (branch→leaf) while Root B still
+        // has two (Root B's branch state is unchanged).
+        let root_a = tree.get(&Key::int(1)).expect("Root A still present");
+
+        assert!(!root_a.has_children, "Root A lost its only child");
+        assert_eq!(root_a.is_expanded, None, "Root A is now a leaf");
+
+        let root_b = tree.get(&Key::int(2)).expect("Root B still present");
+
+        assert!(root_b.has_children, "Root B still a branch");
+        assert_eq!(root_b.is_expanded, Some(true), "Root B still expanded",);
+
+        // Post-move visible order: Root A (leaf), Root B, Child A1, Child B1.
+        assert_eq!(
+            tree.keys().cloned().collect::<Vec<_>>(),
+            vec![Key::int(1), Key::int(2), Key::int(11), Key::int(21),],
+        );
+
+        let drained = tree.drain_changes();
+
+        assert_eq!(
+            drained,
+            vec![
+                CollectionChange::Move {
+                    key: Key::int(11),
+                    from_index: 1,
+                    to_index: 2,
+                },
+                CollectionChange::Replace { key: Key::int(1) },
+            ],
+            "visible move that drains src_parent's last child must emit \
+             Move then Replace for the src_parent's branch→leaf flip",
+        );
+    }
+
+    #[test]
+    fn tree_reparent_hidden_to_hidden_with_hidden_parents_emits_no_event() {
+        // Deeply nested fixture: a single visible collapsed root that
+        // hides two sub-parents (a collapsed branch and a leaf) with
+        // their own hidden item. Moving the hidden item between the
+        // two hidden sub-parents flips `has_children` on both — but
+        // since neither sub-parent is itself rendered (both are hidden
+        // under the outer collapsed root), the metadata change is
+        // invisible and no event should fire. This is the negative
+        // guard for the leaf→branch / branch→leaf Replace emissions in
+        // `reparent`: the transitions only matter when the affected
+        // parent is actually part of the visible iteration.
+        let mut tree = MutableTreeData::new(TreeCollection::new([TreeItemConfig {
+            key: Key::int(1),
+            text_value: "Outer".to_string(),
+            value: Item::new(1, "Outer"),
+            children: vec![
+                TreeItemConfig {
+                    key: Key::int(11),
+                    text_value: "Box 1".to_string(),
+                    value: Item::new(11, "Box 1"),
+                    children: vec![TreeItemConfig {
+                        key: Key::int(111),
+                        text_value: "Item".to_string(),
+                        value: Item::new(111, "Item"),
+                        children: vec![],
+                        default_expanded: true,
+                    }],
+                    default_expanded: false,
+                },
+                TreeItemConfig {
+                    key: Key::int(12),
+                    text_value: "Box 2".to_string(),
+                    value: Item::new(12, "Box 2"),
+                    children: vec![],
+                    default_expanded: false,
+                },
+            ],
+            default_expanded: false,
+        }]));
+
+        // Sanity: only Outer is visible. Everything below is hidden.
+        assert_eq!(tree.keys().cloned().collect::<Vec<_>>(), vec![Key::int(1)],);
+
+        let indices = tree.reparent(&Key::int(111), Some(&Key::int(12)), 0);
+
+        assert!(indices.is_some(), "reparent succeeded");
+
+        // Box 1 (hidden) transitioned branch→leaf; Box 2 (hidden)
+        // transitioned leaf→branch. Both are invisible under the
+        // collapsed Outer, so no Replace is emitted.
+        let box_1 = tree.get(&Key::int(11)).expect("Box 1 present");
+
+        assert!(!box_1.has_children, "Box 1 flipped branch→leaf internally");
+        assert_eq!(box_1.is_expanded, None, "Box 1 has no expansion state");
+
+        let box_2 = tree.get(&Key::int(12)).expect("Box 2 present");
+
+        assert!(box_2.has_children, "Box 2 flipped leaf→branch internally");
+        assert_eq!(
+            box_2.is_expanded,
+            Some(false),
+            "Box 2 is now a collapsed branch",
+        );
+
         assert!(
             tree.drain_changes().is_empty(),
-            "no event when both endpoints are hidden"
+            "no event when every affected parent is hidden; got {:?}",
+            tree.drain_changes(),
         );
     }
 
