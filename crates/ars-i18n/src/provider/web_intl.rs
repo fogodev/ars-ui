@@ -533,10 +533,30 @@ impl IcuProvider for WebIntlProvider {
                 "month" => {
                     month = value.parse().unwrap_or(0);
                     if month == 0 {
-                        // Non-numeric month label (e.g., Hebrew "Adar II"
-                        // even when `month: "numeric"` is requested). Keep
-                        // the label so we can resolve it after `year` is
-                        // known.
+                        // Chinese and Dangi leap months surface as
+                        // `"6bis"` / `"06bis"` / `"06L"` from
+                        // `Intl.DateTimeFormat({ month: "numeric" })` on
+                        // ICU-backed runtimes — a leading numeric run
+                        // followed by a leap-month marker. Strip the
+                        // trailing marker and parse what remains so we
+                        // return a usable civil-order ordinal instead
+                        // of a source clone. The leap-vs-regular
+                        // distinction is lost at this layer (our
+                        // `CalendarDate::month: NonZero<u8>` has no slot
+                        // for it); callers that need exact leap-month
+                        // precision must enable the `icu4x` feature,
+                        // which routes through the internal bridge
+                        // above.
+                        let leading: String =
+                            value.chars().take_while(|c| c.is_numeric()).collect();
+                        if !leading.is_empty() {
+                            month = leading.parse().unwrap_or(0);
+                        }
+                    }
+                    if month == 0 {
+                        // Non-numeric month label (e.g., Hebrew
+                        // `"Adar II"`). Keep the label so we can
+                        // resolve it against the long-form probe.
                         month_label = Some(value);
                     }
                 }

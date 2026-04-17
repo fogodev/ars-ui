@@ -492,6 +492,41 @@ fn web_intl_canonical_era_code_strips_known_macrons() {
 }
 
 #[wasm_bindgen_test]
+fn web_intl_convert_date_recovers_chinese_leap_month_ordinal() {
+    // Regression (Codex round 9): Chinese/Dangi leap months surface
+    // from `Intl.DateTimeFormat({ month: "numeric" })` as tokens like
+    // `"6bis"` or `"06L"` on ICU-backed runtimes, so `str::parse`
+    // returned 0 and `convert_date` fell through to `date.clone()`.
+    // We now strip a trailing leap-month marker, parse the leading
+    // digits, and keep the conversion alive (with the caveat that
+    // leap-vs-regular precision is lost in pure `web-intl` — the
+    // `icu4x` bridge handles that correctly).
+    //
+    // Gregorian 2020-05-30 falls inside Chinese 闰四月 (leap 4th
+    // month) in some calendar variants. Because actual browser
+    // behaviour for Chinese is inconsistent (some emit numeric, some
+    // the `bis` token, some a localised name), we only assert the
+    // weaker post-condition: the converted date must differ from the
+    // source and must expose a non-zero month ordinal.
+    let provider = WebIntlProvider;
+    let stub = StubIcuProvider;
+
+    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 2020, 5, 30)
+        .expect("Gregorian 2020-05-30 should validate");
+
+    let chinese = provider.convert_date(&gregorian, CalendarSystem::Chinese);
+    assert_ne!(
+        chinese, gregorian,
+        "convert_date must not silently clone the source for Chinese leap-month dates"
+    );
+    assert!(
+        (1..=13).contains(&chinese.month.get()),
+        "Chinese month must be 1..=13; got {}",
+        chinese.month.get()
+    );
+}
+
+#[wasm_bindgen_test]
 fn web_intl_convert_date_preserves_years_below_100() {
     // Regression: `js_sys::Date::new_with_year_month_day(y, _, _)` routes
     // through the legacy `new Date(y, m)` path, which reinterprets
