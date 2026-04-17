@@ -411,6 +411,56 @@ fn web_intl_convert_date_preserves_historical_japanese_era() {
 }
 
 #[wasm_bindgen_test]
+fn web_intl_convert_date_canonicalizes_macronized_japanese_eras() {
+    // Regression: `Intl.DateTimeFormat('en-US', { calendar: 'japanese',
+    // era: 'long' })` emits macron spellings — `Shōwa`, `Taishō`, `Meiji`
+    // — so `label.to_ascii_lowercase()` used to produce `shōwa` / `taishō`
+    // which do NOT match the canonical CLDR era codes (`showa`,
+    // `taisho`). Downstream era-aware helpers then missed the era and
+    // silently returned incorrect bounds. `canonical_era_code` strips
+    // the known Latin-macron letters before lowercasing.
+    let provider = WebIntlProvider;
+    let stub = StubIcuProvider;
+
+    // Shōwa: 1926-12-25 .. 1989-01-07. Gregorian 1970 is deep inside it.
+    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 1970, 6, 15)
+        .expect("Gregorian 1970-06-15 should validate");
+    let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+    let era = japanese.era.expect("Japanese dates carry an era");
+    assert_eq!(
+        era.code, "showa",
+        "macron must be stripped; got era.code = {:?} (display_name = {:?})",
+        era.code, era.display_name
+    );
+
+    // Taishō: 1912-07-30 .. 1926-12-25. Gregorian 1920 is inside.
+    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 1920, 6, 15)
+        .expect("Gregorian 1920-06-15 should validate");
+    let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+    let era = japanese.era.expect("Japanese dates carry an era");
+    assert_eq!(
+        era.code, "taisho",
+        "macron must be stripped; got era.code = {:?} (display_name = {:?})",
+        era.code, era.display_name
+    );
+}
+
+#[wasm_bindgen_test]
+fn web_intl_canonical_era_code_strips_known_macrons() {
+    use crate::provider::web_intl::canonical_era_code;
+    // Direct unit coverage for the helper — stays meaningful even if a
+    // future browser stops emitting macron long labels.
+    assert_eq!(canonical_era_code("Shōwa"), "showa");
+    assert_eq!(canonical_era_code("Taishō"), "taisho");
+    assert_eq!(canonical_era_code("Heisei"), "heisei");
+    assert_eq!(canonical_era_code("Reiwa"), "reiwa");
+    assert_eq!(canonical_era_code("Meiji"), "meiji");
+    // Non-macronized labels round-trip through the plain lowercase path.
+    assert_eq!(canonical_era_code("CE"), "ce");
+    assert_eq!(canonical_era_code("AH"), "ah");
+}
+
+#[wasm_bindgen_test]
 fn web_intl_convert_date_preserves_years_below_100() {
     // Regression: `js_sys::Date::new_with_year_month_day(y, _, _)` routes
     // through the legacy `new Date(y, m)` path, which reinterprets

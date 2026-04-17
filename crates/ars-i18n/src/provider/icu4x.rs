@@ -16,7 +16,10 @@ use icu::{
         DateTimeFormatter, DateTimeFormatterPreferences, NoCalendarFormatter,
         fieldsets::{E, M, T},
     },
-    decimal::{DecimalFormatter, DecimalFormatterPreferences},
+    decimal::{
+        DecimalFormatter, DecimalFormatterPreferences,
+        options::{DecimalFormatterOptions, GroupingStrategy},
+    },
     locale::preferences::extensions::unicode::keywords::HourCycle as IcuHourCycle,
     time::Time,
 };
@@ -180,11 +183,18 @@ impl IcuProvider for Icu4xProvider {
         min_digits: NonZero<u8>,
         locale: &Locale,
     ) -> String {
-        let formatter = DecimalFormatter::try_new(
-            DecimalFormatterPreferences::from(locale.as_icu()),
-            Default::default(),
-        )
-        .expect("compiled_data guarantees decimal formatter availability");
+        // Disable locale grouping so segment values never pick up
+        // thousand separators. A year like 2024 must format as
+        // `"2024"` (or its native-digit equivalent), not `"2,024"` —
+        // otherwise downstream parsers that expect a contiguous digit
+        // run break, and behavior diverges from `WebIntlProvider`,
+        // which already sets `useGrouping: false`.
+        let mut options = DecimalFormatterOptions::default();
+        options.grouping_strategy = Some(GroupingStrategy::Never);
+
+        let formatter =
+            DecimalFormatter::try_new(DecimalFormatterPreferences::from(locale.as_icu()), options)
+                .expect("compiled_data guarantees decimal formatter availability");
 
         let mut decimal = Decimal::from(i64::from(value));
 

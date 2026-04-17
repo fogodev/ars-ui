@@ -175,6 +175,27 @@ fn icu4x_format_segment_digits_uses_native_digits_in_arabic() {
 }
 
 #[test]
+fn icu4x_format_segment_digits_never_groups_thousands() {
+    // Regression: `DecimalFormatter`'s default options keep locale
+    // grouping enabled, so the segment formatter would happily return
+    // `"2,024"` for a year — breaking both the segment contract
+    // (contiguous digits with zero-padding only) and parity with
+    // `WebIntlProvider::format_segment_digits`, which passes
+    // `useGrouping: false`. The provider now sets
+    // `grouping_strategy = GroupingStrategy::Never` explicitly.
+    let provider = Icu4xProvider;
+    for tag in ["en-US", "de-DE", "fr-FR"] {
+        let loc = locale(tag);
+        let formatted =
+            provider.format_segment_digits(2024, NonZero::new(4).expect("4 is non-zero"), &loc);
+        assert_eq!(
+            formatted, "2024",
+            "{tag} must not insert grouping separators; got {formatted:?}"
+        );
+    }
+}
+
+#[test]
 fn icu4x_format_segment_digits_preserves_ascii_in_english() {
     let provider = Icu4xProvider;
 

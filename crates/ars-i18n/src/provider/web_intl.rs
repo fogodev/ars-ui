@@ -552,18 +552,22 @@ impl IcuProvider for WebIntlProvider {
             return date.clone();
         };
 
-        // Map the browser's long era label back to the CLDR era code. The
-        // `era: "long"` option with the en-US formatting locale yields
-        // "Reiwa", "Heisei", "Showa", … for Japanese, which `to_ascii_lowercase`
-        // turns into the canonical codes ("reiwa", "heisei", "showa", …).
-        // If the browser suppressed the era (no `era` token in parts) or
-        // returned an unfamiliar form, fall back to the target's default era
-        // so downstream consumers still see a sensible value.
+        // Map the browser's long era label back to the CLDR era code.
+        // Several `Intl.DateTimeFormat` implementations emit macronized
+        // long names for Japanese eras — `Shōwa`, `Taishō` — whose
+        // ASCII-lowercase forms (`shōwa`, `taishō`) do NOT match the
+        // canonical CLDR codes (`showa`, `taisho`). `canonical_era_code`
+        // normalizes known macrons (ō/ū/ā/ē/ī) to their ASCII base
+        // letters before lowercasing so downstream era-aware helpers
+        // see the same codes the stub provider and `Icu4xProvider`
+        // would emit. If the browser suppressed the era (no token in
+        // parts) or returned an unfamiliar form, fall back to the
+        // target's default era.
         let era = if target.has_custom_eras() {
             era_label
                 .as_deref()
                 .map(|label| Era {
-                    code: label.to_ascii_lowercase(),
+                    code: canonical_era_code(label),
                     display_name: label.to_string(),
                 })
                 .or_else(|| default_era_for(target))
@@ -648,6 +652,39 @@ fn month_part_value(parts: &Array) -> String {
         }
     }
     String::new()
+}
+
+/// Converts a browser-emitted era long label into its canonical CLDR
+/// era code.
+///
+/// `Intl.DateTimeFormat('en-US', { calendar: 'japanese', era: 'long' })`
+/// emits labels with macrons (`Shōwa`, `Taishō`) on every major
+/// browser. The canonical CLDR era codes drop the macrons
+/// (`showa`, `taisho`), so a plain `to_ascii_lowercase()` call leaves
+/// the code mismatched against every downstream era lookup.
+///
+/// The mapping here replaces the handful of Unicode macron letters that
+/// appear in Japanese (and transliterated Ryukyuan/Ainu) era labels
+/// with their ASCII base letters, then lowercases. Non-macronized
+/// labels (`Heisei`, `Reiwa`, `Meiji`, CE/BCE for Gregorian, `AH` for
+/// Hijri, etc.) round-trip through the function unchanged apart from
+/// the lowercasing.
+pub(crate) fn canonical_era_code(label: &str) -> String {
+    let mut buf = String::with_capacity(label.len());
+    for ch in label.chars() {
+        let replacement = match ch {
+            'ā' | 'Ā' => 'a',
+            'ē' | 'Ē' => 'e',
+            'ī' | 'Ī' => 'i',
+            'ō' | 'Ō' => 'o',
+            'ū' | 'Ū' => 'u',
+            other => other,
+        };
+        for lower in replacement.to_lowercase() {
+            buf.push(lower);
+        }
+    }
+    buf
 }
 
 pub(crate) const fn is_hebrew_leap_year(year: i32) -> bool {
