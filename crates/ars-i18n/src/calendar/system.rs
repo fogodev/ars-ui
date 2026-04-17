@@ -85,6 +85,33 @@ impl CalendarSystem {
         }
     }
 
+    /// Returns the canonical BCP 47 `u-ca-*` identifier for this calendar.
+    ///
+    /// This is the inverse of [`CalendarSystem::from_bcp47`] using the
+    /// preferred (non-deprecated) identifier for each calendar, so it is
+    /// suitable to pass to `Intl.DateTimeFormat({ calendar })` or any other
+    /// API that expects the BCP 47 calendar extension value.
+    #[must_use]
+    pub const fn to_bcp47_value(self) -> &'static str {
+        match self {
+            Self::Gregorian => "gregory",
+            Self::Buddhist => "buddhist",
+            Self::Japanese => "japanese",
+            Self::Hebrew => "hebrew",
+            Self::Islamic => "islamic",
+            Self::IslamicCivil => "islamic-civil",
+            Self::IslamicUmmAlQura => "islamic-umalqura",
+            Self::Persian => "persian",
+            Self::Indian => "indian",
+            Self::Chinese => "chinese",
+            Self::Coptic => "coptic",
+            Self::Dangi => "dangi",
+            Self::Ethiopic => "ethiopic",
+            Self::EthiopicAmeteAlem => "ethioaa",
+            Self::Roc => "roc",
+        }
+    }
+
     /// Resolves the requested calendar from a locale, defaulting to Gregorian.
     #[must_use]
     pub fn from_locale(locale: &Locale) -> Self {
