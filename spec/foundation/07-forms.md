@@ -158,13 +158,14 @@ impl Error {
     }
 
     /// Creates a "pattern" validation error.
-    pub fn pattern(messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
+    pub fn pattern(
+        pattern: impl Into<String>,
+        messages: &FormMessages,
+        locale: &ars_i18n::Locale,
+    ) -> Self {
         Self {
             message: (messages.pattern_error)(locale),
-            // Note: Pattern string is intentionally omitted from the error code —
-            // regex patterns are opaque implementation details not suitable for error codes.
-            // The pattern is documented in the validator setup, not the error.
-            code: ErrorCode::Pattern(String::new()),
+            code: ErrorCode::Pattern(pattern.into()),
         }
     }
 
@@ -741,7 +742,9 @@ impl Validator for PatternValidator {
                     .map(|m| Error { message: m, code: ErrorCode::Pattern(self.pattern.clone()) })
                     // Do not expose raw regex to users — it is incomprehensible
                     // in any language. Callers should provide a custom `message`.
-                    .unwrap_or_else(|| Error::pattern(&FormMessages::default(), locale))
+                    .unwrap_or_else(|| {
+                        Error::pattern(self.pattern.clone(), &FormMessages::default(), locale)
+                    })
             ]))
         } else {
             Ok(())

@@ -43,10 +43,10 @@ impl Error {
     }
 
     /// Creates a pattern validation error with a localized message.
-    pub fn pattern(messages: &FormMessages, locale: &Locale) -> Self {
+    pub fn pattern(pattern: impl Into<String>, messages: &FormMessages, locale: &Locale) -> Self {
         Self {
             message: (messages.pattern_error)(locale),
-            code: ErrorCode::Pattern(String::new()),
+            code: ErrorCode::Pattern(pattern.into()),
         }
     }
 
@@ -322,10 +322,22 @@ mod tests {
 
     #[test]
     fn error_pattern_factory() {
-        let err = Error::pattern(&FormMessages::default(), &locales::en());
+        let err = Error::pattern(r"^[a-z]+$", &FormMessages::default(), &locales::en());
 
         assert_eq!(err.message, "Invalid format");
-        assert_eq!(err.code, ErrorCode::Pattern(String::new()));
+        assert_eq!(err.code, ErrorCode::Pattern(String::from(r"^[a-z]+$")));
+    }
+
+    #[test]
+    fn validation_errors_has_code_matches_pattern_payload() {
+        let pattern = String::from(r"^[a-z]+$");
+        let errors = Errors(vec![Error::pattern(
+            pattern.clone(),
+            &FormMessages::default(),
+            &locales::en(),
+        )]);
+
+        assert!(errors.has_code(&ErrorCode::Pattern(pattern)));
     }
 
     #[test]
