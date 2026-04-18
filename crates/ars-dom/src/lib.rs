@@ -21,6 +21,7 @@ pub mod portal;
 pub mod positioning;
 mod scroll;
 pub mod scroll_lock;
+pub mod url;
 pub mod z_index;
 
 #[cfg(feature = "web")]
@@ -55,6 +56,7 @@ pub use scroll_lock::{
 };
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub use scroll_lock::{needs_ios_workaround, scrollbar_width};
+pub use url::{SafeUrl, UnsafeUrlError, is_safe_url, sanitize_url};
 pub use z_index::{ZIndexAllocator, next_z_index, reset_z_index};
 
 /// Describes the platform capabilities available to the current runtime.
@@ -62,6 +64,7 @@ pub use z_index::{ZIndexAllocator, next_z_index, reset_z_index};
 pub struct PlatformFeatures {
     /// `true` when running in a web browser environment with DOM access.
     pub web: bool,
+
     /// `true` when running in server-side rendering mode without DOM access.
     pub ssr: bool,
 }
