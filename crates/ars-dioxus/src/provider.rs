@@ -7,7 +7,10 @@ use ars_core::{
     resolve_messages as core_resolve_messages,
 };
 use ars_forms::field::FileRef;
-use ars_i18n::{Direction, IcuProvider, Locale, StubIcuProvider, Translate, locales};
+use ars_i18n::{
+    Direction, IcuProvider, Locale, NumberFormatOptions, NumberFormatter, StubIcuProvider,
+    Translate, locales,
+};
 use dioxus::prelude::*;
 
 /// Options for opening a platform file picker.
@@ -194,28 +197,41 @@ fn default_dioxus_platform() -> Arc<dyn DioxusPlatform> {
 pub struct ArsContext {
     /// Active locale for this subtree.
     pub locale: Signal<Locale>,
+
     /// Resolved reading direction for this subtree.
     pub direction: Memo<Direction>,
+
     /// Active color mode for descendants.
     pub color_mode: Signal<ColorMode>,
+
     /// Whether interactive descendants should render as disabled.
     pub disabled: Signal<bool>,
+
     /// Whether descendant form fields should render as read-only.
     pub read_only: Signal<bool>,
+
     /// Optional generated-ID prefix.
     pub id_prefix: Signal<Option<String>>,
+
     /// Optional portal container element ID.
     pub portal_container_id: Signal<Option<String>>,
+
     /// Optional focus/portal root node ID.
     pub root_node_id: Signal<Option<String>>,
+
     /// Platform side-effect capabilities.
     pub platform: Arc<dyn PlatformEffects>,
+
     /// ICU-backed locale data provider.
     pub icu_provider: Arc<dyn IcuProvider>,
+
     /// Application-owned message registries.
     pub i18n_registries: Arc<I18nRegistries>,
+
     /// Dioxus-specific platform services.
     pub dioxus_platform: Arc<dyn DioxusPlatform>,
+
+    /// CSS style injection strategy for all descendant ars components.
     style_strategy: StyleStrategy,
 }
 
@@ -261,24 +277,15 @@ impl ArsContext {
         dioxus_platform: Arc<dyn DioxusPlatform>,
         style_strategy: StyleStrategy,
     ) -> Self {
-        let locale_signal = Signal::new(locale);
-        let direction_signal = Memo::new(move || direction);
-        let color_mode = Signal::new(color_mode);
-        let disabled = Signal::new(disabled);
-        let read_only = Signal::new(read_only);
-        let id_prefix = Signal::new(id_prefix);
-        let portal_container_id = Signal::new(portal_container_id);
-        let root_node_id = Signal::new(root_node_id);
-
         Self {
-            locale: locale_signal,
-            direction: direction_signal,
-            color_mode,
-            disabled,
-            read_only,
-            id_prefix,
-            portal_container_id,
-            root_node_id,
+            locale: Signal::new(locale),
+            direction: Memo::new(move || direction),
+            color_mode: Signal::new(color_mode),
+            disabled: Signal::new(disabled),
+            read_only: Signal::new(read_only),
+            id_prefix: Signal::new(id_prefix),
+            portal_container_id: Signal::new(portal_container_id),
+            root_node_id: Signal::new(root_node_id),
             platform,
             icu_provider,
             i18n_registries,
@@ -310,9 +317,11 @@ pub const fn warn_missing_provider(_hook: &str) {}
 #[must_use]
 pub fn use_locale() -> Signal<Locale> {
     let fallback = use_signal(locales::en_us);
+
     try_use_context::<ArsContext>().map_or_else(
         || {
             warn_missing_provider("use_locale");
+
             fallback
         },
         |ctx| ctx.locale,
@@ -327,12 +336,44 @@ pub(crate) fn resolve_locale(adapter_props_locale: Option<&Locale>) -> Locale {
         .unwrap_or_else(|| use_locale().read().clone())
 }
 
+/// Resolves a memoized number formatter from the current provider locale.
+#[must_use]
+pub fn use_number_formatter<F>(options: F) -> Memo<NumberFormatter>
+where
+    F: Fn() -> NumberFormatOptions + 'static,
+{
+    use_resolved_number_formatter(None, options)
+}
+
+/// Resolves a memoized number formatter from an explicit locale or provider context.
+#[must_use]
+pub(crate) fn use_resolved_number_formatter<F>(
+    adapter_props_locale: Option<&Locale>,
+    options: F,
+) -> Memo<NumberFormatter>
+where
+    F: Fn() -> NumberFormatOptions + 'static,
+{
+    let explicit_locale = adapter_props_locale.cloned();
+
+    let locale = use_locale();
+
+    use_memo(move || {
+        let resolved_locale = explicit_locale
+            .clone()
+            .unwrap_or_else(|| locale.read().clone());
+
+        NumberFormatter::new(&resolved_locale, options())
+    })
+}
+
 /// Resolves the current ICU provider from provider context.
 #[must_use]
 pub fn use_icu_provider() -> Arc<dyn IcuProvider> {
     try_use_context::<ArsContext>().map_or_else(
         || -> Arc<dyn IcuProvider> {
             warn_missing_provider("use_icu_provider");
+
             Arc::new(StubIcuProvider)
         },
         |ctx| -> Arc<dyn IcuProvider> { Arc::clone(&ctx.icu_provider) },
@@ -346,10 +387,12 @@ pub fn use_messages<M: ars_core::ComponentMessages + Send + Sync + 'static>(
     adapter_props_locale: Option<&Locale>,
 ) -> M {
     let locale = resolve_locale(adapter_props_locale);
+
     let registries = try_use_context::<ArsContext>().map_or_else(
         || Arc::new(I18nRegistries::new()),
         |ctx| Arc::clone(&ctx.i18n_registries),
     );
+
     core_resolve_messages(adapter_props_messages, registries.as_ref(), &locale)
 }
 
@@ -359,6 +402,7 @@ pub fn use_platform() -> Arc<dyn DioxusPlatform> {
     try_use_context::<ArsContext>().map_or_else(
         || {
             warn_missing_provider("use_platform");
+
             default_dioxus_platform()
         },
         |ctx| Arc::clone(&ctx.dioxus_platform),
@@ -375,7 +419,9 @@ pub fn t<T: Translate>(msg: T) -> String {
     try_use_context::<ArsContext>().map_or_else(
         || {
             warn_missing_provider("t");
+
             let fallback = locales::en_us();
+
             msg.translate(&fallback, &StubIcuProvider)
         },
         |ctx| msg.translate(&ctx.locale.read(), &*ctx.icu_provider),
@@ -389,11 +435,13 @@ mod tests {
         pin::Pin,
         rc::Rc,
         sync::Arc,
-        task::{Context, Poll, Wake, Waker},
+        task::{Context, Poll, Waker},
     };
 
     use ars_core::{ColorMode, I18nRegistries, NullPlatformEffects, StyleStrategy};
-    use ars_i18n::{Direction, IcuProvider, Locale, StubIcuProvider, Translate, locales};
+    use ars_i18n::{
+        Direction, IcuProvider, Locale, NumberFormatOptions, StubIcuProvider, Translate, locales,
+    };
     use dioxus::dioxus_core::{NoOpMutations, ScopeId};
 
     use super::*;
@@ -413,6 +461,7 @@ mod tests {
     }
 
     struct TestIcuProvider;
+
     impl IcuProvider for TestIcuProvider {}
 
     #[derive(Clone, Debug, PartialEq)]
@@ -485,14 +534,8 @@ mod tests {
     }
 
     fn block_on_ready<T>(mut future: Pin<Box<dyn Future<Output = T>>>) -> T {
-        struct NoopWake;
+        let mut context = Context::from_waker(Waker::noop());
 
-        impl Wake for NoopWake {
-            fn wake(self: Arc<Self>) {}
-        }
-
-        let waker = Waker::from(Arc::new(NoopWake));
-        let mut context = Context::from_waker(&waker);
         match future.as_mut().poll(&mut context) {
             Poll::Ready(value) => value,
             Poll::Pending => panic!("test future unexpectedly returned Pending"),
@@ -503,12 +546,14 @@ mod tests {
     fn use_locale_falls_back_without_provider() {
         fn app() -> Element {
             assert_eq!(use_locale()().to_bcp47(), "en-US");
+
             rsx! {
                 div {}
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -516,16 +561,19 @@ mod tests {
     fn use_icu_provider_falls_back_without_provider() {
         fn app() -> Element {
             let provider = use_icu_provider();
+
             assert_eq!(
                 AppText::Greeting.translate(&locales::en_us(), provider.as_ref()),
                 "Hello"
             );
+
             rsx! {
                 div {}
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -533,6 +581,7 @@ mod tests {
     fn use_icu_provider_reads_context_value() {
         fn app() -> Element {
             let expected: Arc<dyn IcuProvider> = Arc::new(TestIcuProvider);
+
             let ctx = ArsContext::new(
                 locales::en_us(),
                 Direction::Ltr,
@@ -548,14 +597,18 @@ mod tests {
                 Arc::new(NullPlatform),
                 StyleStrategy::Inline,
             );
+
             use_context_provider(|| ctx);
+
             assert!(Arc::ptr_eq(&use_icu_provider(), &expected));
+
             rsx! {
                 div {}
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -563,6 +616,7 @@ mod tests {
     fn use_messages_reads_provider_registry_bundle() {
         fn app() -> Element {
             let mut registries = I18nRegistries::new();
+
             registries.register(
                 ars_core::MessagesRegistry::new(TestMessages::default()).register(
                     "es",
@@ -571,6 +625,7 @@ mod tests {
                     },
                 ),
             );
+
             let ctx = ArsContext::new(
                 Locale::parse("es-MX").expect("locale should parse"),
                 Direction::Ltr,
@@ -586,15 +641,22 @@ mod tests {
                 Arc::new(NullPlatform),
                 StyleStrategy::Inline,
             );
+
             use_context_provider(|| ctx);
 
             let locale = Locale::parse("es-MX").expect("locale should parse");
+
             let resolved = use_messages::<TestMessages>(None, None);
+
             assert_eq!((resolved.label)(&locale), "Etiqueta");
-            rsx! { div {} }
+
+            rsx! {
+                div {}
+            }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -602,12 +664,119 @@ mod tests {
     fn use_messages_falls_back_without_provider() {
         fn app() -> Element {
             let locale = Locale::parse("pt-BR").expect("locale should parse");
+
             let resolved = use_messages::<TestMessages>(None, Some(&locale));
+
             assert_eq!((resolved.label)(&locale), "Default");
-            rsx! { div {} }
+
+            rsx! {
+                div {}
+            }
         }
 
         let mut dom = VirtualDom::new(app);
+
+        dom.rebuild_in_place();
+    }
+
+    #[test]
+    fn use_number_formatter_falls_back_without_provider() {
+        fn app() -> Element {
+            let formatter = use_number_formatter(NumberFormatOptions::default);
+
+            assert_eq!(formatter.read().format(1234.56), "1,234.56");
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new(app);
+
+        dom.rebuild_in_place();
+    }
+
+    #[test]
+    fn use_number_formatter_reads_context_locale() {
+        fn app() -> Element {
+            let ctx = test_context(locales::de_de(), Arc::new(StubIcuProvider));
+
+            use_context_provider(|| ctx);
+
+            let formatter = use_number_formatter(NumberFormatOptions::default);
+
+            assert_eq!(formatter.read().format(1234.56), "1.234,56");
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new(app);
+
+        dom.rebuild_in_place();
+    }
+
+    #[test]
+    fn use_number_formatter_recomputes_when_locale_changes() {
+        let outputs = Rc::new(RefCell::new(Vec::new()));
+
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "Dioxus root props are moved into the render function."
+        )]
+        fn app(outputs: Rc<RefCell<Vec<String>>>) -> Element {
+            let mut ctx =
+                use_context_provider(|| test_context(locales::en_us(), Arc::new(StubIcuProvider)));
+
+            let mut phase = use_signal(|| 0u8);
+
+            let formatter = use_number_formatter(NumberFormatOptions::default);
+
+            outputs.borrow_mut().push(formatter.read().format(1234.56));
+
+            if phase() == 0 {
+                phase.set(1);
+                ctx.locale.set(locales::de_de());
+            }
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new_with_props(app, Rc::clone(&outputs));
+
+        dom.rebuild_in_place();
+
+        dom.mark_dirty(ScopeId::APP);
+
+        dom.render_immediate(&mut NoOpMutations);
+
+        assert_eq!(outputs.borrow().as_slice(), ["1,234.56", "1.234,56"]);
+    }
+
+    #[test]
+    fn use_resolved_number_formatter_prefers_explicit_override() {
+        fn app() -> Element {
+            let ctx = test_context(locales::fr(), Arc::new(StubIcuProvider));
+
+            use_context_provider(|| ctx);
+
+            let explicit = locales::de_de();
+
+            let formatter =
+                use_resolved_number_formatter(Some(&explicit), NumberFormatOptions::default);
+
+            assert_eq!(formatter.read().format(1234.56), "1.234,56");
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -637,25 +806,31 @@ mod tests {
                     StyleStrategy::Inline,
                 )
             });
+
             let mut phase = use_signal(|| 0u8);
+
             let text = t(AppText::Greeting);
+
             outputs.borrow_mut().push(text.clone());
 
             if phase() == 0 {
                 phase.set(1);
+
                 ctx.locale
                     .set(Locale::parse("es-ES").expect("locale should parse"));
             }
 
             rsx! {
                 div { "{text}" }
-
             }
         }
 
         let mut dom = VirtualDom::new_with_props(app, Rc::clone(&outputs));
+
         dom.rebuild_in_place();
+
         dom.mark_dirty(ScopeId::APP);
+
         dom.render_immediate(&mut NoOpMutations);
 
         assert_eq!(outputs.borrow().as_slice(), ["Hello", "Hola"]);
@@ -665,27 +840,37 @@ mod tests {
     fn t_falls_back_without_provider() {
         fn app() -> Element {
             assert_eq!(t(AppText::Greeting), "Hello");
+
             rsx! {
                 div {}
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
     #[test]
     fn prelude_exports_compile() {
         fn app() -> Element {
+            use crate::prelude::use_number_formatter as prelude_use_number_formatter;
+
             let ctx = test_context(locales::en_us(), Arc::new(StubIcuProvider));
+
             use_context_provider(|| ctx);
+
             drop(t(AppText::Greeting));
+
+            let _ = prelude_use_number_formatter(NumberFormatOptions::default);
+
             rsx! {
                 div {}
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -696,17 +881,21 @@ mod tests {
                 Locale::parse("fr-FR").expect("locale should parse"),
                 Arc::new(StubIcuProvider),
             );
+
             use_context_provider(|| ctx);
 
             let explicit = Locale::parse("es-ES").expect("locale should parse");
+
             assert_eq!(resolve_locale(Some(&explicit)).to_bcp47(), "es-ES");
             assert_eq!(resolve_locale(None).to_bcp47(), "fr-FR");
+
             rsx! {
                 div {}
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -714,6 +903,7 @@ mod tests {
     fn use_platform_reads_context_value() {
         fn app() -> Element {
             let expected: Arc<dyn DioxusPlatform> = Arc::new(TestPlatform);
+
             let ctx = ArsContext::new(
                 locales::en_us(),
                 Direction::Ltr,
@@ -729,22 +919,31 @@ mod tests {
                 Arc::clone(&expected),
                 StyleStrategy::Inline,
             );
+
             use_context_provider(|| ctx);
+
             let platform = use_platform();
+
             assert!(Arc::ptr_eq(&platform, &expected));
+
             platform.focus_element("target");
+
             assert!(platform.get_bounding_rect("target").is_none());
+
             platform.scroll_into_view("target");
+
             assert_eq!(block_on_ready(platform.set_clipboard("hello")), Ok(()));
             assert!(block_on_ready(platform.open_file_picker(FilePickerOptions)).is_empty());
             assert_eq!(platform.new_id(), "test-platform-id");
             assert!(platform.create_drag_data(&()).is_none());
+
             rsx! {
                 div {}
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -752,17 +951,22 @@ mod tests {
     fn use_platform_falls_back_without_provider() {
         fn app() -> Element {
             let platform = use_platform();
+
             let first = platform.new_id();
+
             let second = platform.new_id();
+
             assert!(first.starts_with("null-id-"));
             assert!(second.starts_with("null-id-"));
             assert_ne!(first, second);
+
             rsx! {
                 div {}
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -771,8 +975,11 @@ mod tests {
         let platform = NullPlatform;
 
         platform.focus_element("missing");
+
         assert!(platform.get_bounding_rect("missing").is_none());
+
         platform.scroll_into_view("missing");
+
         assert_eq!(block_on_ready(platform.set_clipboard("text")), Ok(()));
         assert!(block_on_ready(platform.open_file_picker(FilePickerOptions)).is_empty());
         assert_eq!(platform.now_ms(), 0.0);
@@ -784,13 +991,16 @@ mod tests {
     fn ars_context_debug_includes_struct_name() {
         fn app() -> Element {
             let ctx = test_context(locales::en_us(), Arc::new(StubIcuProvider));
+
             assert!(format!("{ctx:?}").contains("ArsContext"));
+
             rsx! {
                 div {}
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 }
@@ -800,7 +1010,9 @@ mod wasm_tests {
     use std::{cell::RefCell, rc::Rc, sync::Arc};
 
     use ars_core::{ColorMode, I18nRegistries, NullPlatformEffects, StyleStrategy};
-    use ars_i18n::{Direction, IcuProvider, Locale, StubIcuProvider, Translate, locales};
+    use ars_i18n::{
+        Direction, IcuProvider, Locale, NumberFormatOptions, StubIcuProvider, Translate, locales,
+    };
     use dioxus::dioxus_core::{NoOpMutations, ScopeId};
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
@@ -823,6 +1035,7 @@ mod wasm_tests {
     }
 
     struct TestIcuProvider;
+
     impl IcuProvider for TestIcuProvider {}
 
     fn test_context(locale: Locale, icu_provider: Arc<dyn IcuProvider>) -> ArsContext {
@@ -846,8 +1059,10 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn default_dioxus_platform_uses_web_feature_path() {
         let platform = default_dioxus_platform();
+
         platform.focus_element("missing");
         platform.scroll_into_view("missing");
+
         assert!(platform.get_bounding_rect("missing").is_none());
         assert!(platform.new_id().starts_with("null-id-"));
         assert!(platform.create_drag_data(&()).is_none());
@@ -857,17 +1072,25 @@ mod wasm_tests {
     fn use_locale_and_icu_provider_fall_back_without_provider_on_wasm() {
         fn app() -> Element {
             assert_eq!(use_locale()().to_bcp47(), "en-US");
+
             let provider = use_icu_provider();
+
             assert_eq!(
                 AppText::Greeting.translate(&locales::en_us(), &*provider),
                 "Hello"
             );
+
+            let formatter = use_number_formatter(NumberFormatOptions::default);
+
+            assert_eq!(formatter.read().format(1234.56), "1,234.56");
+
             rsx! {
                 div {}
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -882,25 +1105,31 @@ mod wasm_tests {
         fn app(outputs: Rc<RefCell<Vec<String>>>) -> Element {
             let mut ctx =
                 use_context_provider(|| test_context(locales::en_us(), Arc::new(StubIcuProvider)));
+
             let mut phase = use_signal(|| 0u8);
+
             let text = t(AppText::Greeting);
+
             outputs.borrow_mut().push(text.clone());
 
             if phase() == 0 {
                 phase.set(1);
+
                 ctx.locale
                     .set(Locale::parse("es-ES").expect("locale should parse"));
             }
 
             rsx! {
                 div { "{text}" }
-
             }
         }
 
         let mut dom = VirtualDom::new_with_props(app, Rc::clone(&outputs));
+
         dom.rebuild_in_place();
+
         dom.mark_dirty(ScopeId::APP);
+
         dom.render_immediate(&mut NoOpMutations);
 
         assert_eq!(outputs.borrow().as_slice(), ["Hello", "Hola"]);
@@ -910,28 +1139,74 @@ mod wasm_tests {
     fn use_platform_and_explicit_locale_work_on_wasm() {
         fn app() -> Element {
             let expected: Arc<dyn IcuProvider> = Arc::new(TestIcuProvider);
+
             let ctx = test_context(locales::en_us(), Arc::clone(&expected));
+
             use_context_provider(|| ctx);
 
             let explicit = Locale::parse("pt-BR").expect("locale should parse");
+
             assert_eq!(resolve_locale(Some(&explicit)).to_bcp47(), "pt-BR");
             assert_eq!(resolve_locale(None).to_bcp47(), "en-US");
             assert!(Arc::ptr_eq(&use_icu_provider(), &expected));
 
             let platform = use_platform();
+
             let first = platform.new_id();
+
             let second = platform.new_id();
+
             assert!(first.starts_with("null-id-"));
             assert!(second.starts_with("null-id-"));
             assert_ne!(first, second);
 
             rsx! {
                 div {}
-
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
+    }
+
+    #[wasm_bindgen_test]
+    fn use_number_formatter_recomputes_when_locale_changes_on_wasm() {
+        let outputs = Rc::new(RefCell::new(Vec::new()));
+
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "Dioxus root props are moved into the render function."
+        )]
+        fn app(outputs: Rc<RefCell<Vec<String>>>) -> Element {
+            let mut ctx =
+                use_context_provider(|| test_context(locales::en_us(), Arc::new(StubIcuProvider)));
+
+            let mut phase = use_signal(|| 0u8);
+
+            let formatter = use_number_formatter(NumberFormatOptions::default);
+
+            outputs.borrow_mut().push(formatter.read().format(1234.56));
+
+            if phase() == 0 {
+                phase.set(1);
+
+                ctx.locale.set(locales::de_de());
+            }
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new_with_props(app, Rc::clone(&outputs));
+
+        dom.rebuild_in_place();
+
+        dom.mark_dirty(ScopeId::APP);
+
+        dom.render_immediate(&mut NoOpMutations);
+
+        assert_eq!(outputs.borrow().as_slice(), ["1,234.56", "1.234,56"]);
     }
 }

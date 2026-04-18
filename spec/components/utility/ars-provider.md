@@ -163,6 +163,7 @@ let ctx = try_use_context::<ArsContext>();
 Convenience hooks read from `ArsContext` with fallback defaults:
 
 - `use_locale()` — locale, falls back to `en-US`
+- `use_number_formatter()` — locale-aware number formatting derived from the active `ArsProvider` locale
 - `use_platform_effects()` — platform capabilities
 - `use_modality_context()` — provider-scoped input-modality state
 - `use_icu_provider()` — calendar/locale data
@@ -200,6 +201,7 @@ ArsProvider
 | All effect closures      | `platform` — via `use_platform_effects()` for focus, timers, scroll-lock, positioning, DOM queries |
 | Focus / Hover / Press    | `modality` — via `use_modality_context()` for shared modality and global press state               |
 | Date-time components     | `icu_provider` — via `use_icu_provider()` for calendar data (weekday names, month names, etc.)     |
+| Numeric components       | `locale` — via `use_number_formatter()` for provider-derived number formatting                      |
 | All stateful components  | `i18n_registries` — via `resolve_messages::<M>()` for per-component translation lookups            |
 | All rendered components  | `style_strategy` — via `use_style_strategy()` for CSS injection method                             |
 

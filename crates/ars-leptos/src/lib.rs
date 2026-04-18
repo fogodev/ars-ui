@@ -28,7 +28,7 @@ pub use id::reset_id_counter;
 pub use id::use_id;
 pub use provider::{
     ArsContext, provide_ars_context, resolve_locale, t, use_icu_provider, use_locale, use_messages,
-    warn_missing_provider,
+    use_number_formatter, warn_missing_provider,
 };
 pub use use_machine::{UseMachineReturn, use_machine, use_machine_with_reactive_props};
 

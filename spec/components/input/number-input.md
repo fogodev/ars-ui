@@ -691,7 +691,9 @@ announcements.
   and parsing uses this resolved locale.
 - **Decimal separator**: Uses locale-appropriate separator (`,` vs `.`).
 - **Thousands separator**: Applied when formatting the displayed value.
-- **`aria-valuetext`**: Formatted using `NumberFormatter` from `ars-i18n` with the resolved locale.
+- **`aria-valuetext`**: Adapters derive a memoized formatter from `ArsProvider`
+  via `use_number_formatter(|| NumberFormatOptions::default())` and use it for
+  locale-aware value text.
 - **RTL**: Increment/decrement button positions swap visually (CSS `direction` handles this).
 - **Input parsing**: Must accept both locale-specific input (e.g., `1.234,56` in `de-DE`) and
   canonical format (e.g., `1234.56`). On blur, the value is normalized to the canonical `f64`
@@ -715,6 +717,9 @@ announcements.
 **Non-Uniform Digit Grouping**: Number formatting and parsing delegate to ICU4X
 `NumberFormatter`, which handles locale-specific grouping (including non-uniform patterns
 like Indian numbering: `12,34,567`). The component must not hardcode grouping assumptions.
+When locale is inherited from `ArsProvider`, adapters should resolve this
+through `use_number_formatter(...)` rather than constructing ad hoc ambient
+formatters from a thread-local cache.
 
 **Negative Number Sign Placement**: Negative number display follows locale conventions via
 ICU4X — leading minus, trailing minus, or accounting parentheses. Adapters must not hardcode minus sign position.

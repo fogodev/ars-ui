@@ -10,34 +10,49 @@ use ars_core::{
     ColorMode, I18nRegistries, PlatformEffects, StyleStrategy,
     resolve_messages as core_resolve_messages,
 };
-use ars_i18n::{Direction, IcuProvider, Locale, StubIcuProvider, Translate, locales};
-use leptos::prelude::*;
+use ars_i18n::{
+    Direction, IcuProvider, Locale, NumberFormatOptions, NumberFormatter, StubIcuProvider,
+    Translate, locales,
+};
+use leptos::{prelude::*, reactive::owner::LocalStorage};
 
 /// Reactive environment context published by the Leptos `ArsProvider`.
 #[derive(Clone)]
 pub struct ArsContext {
     /// Active locale for this subtree.
     pub locale: Signal<Locale>,
+
     /// Resolved reading direction for this subtree.
     pub direction: Memo<Direction>,
+
     /// Active color mode for descendants.
     pub color_mode: Signal<ColorMode>,
+
     /// Whether interactive descendants should render as disabled.
     pub disabled: Signal<bool>,
+
     /// Whether descendant form fields should render as read-only.
     pub read_only: Signal<bool>,
+
     /// Optional generated-ID prefix.
     pub id_prefix: Signal<Option<String>>,
+
     /// Optional portal container element ID.
     pub portal_container_id: Signal<Option<String>>,
+
     /// Optional focus/portal root node ID.
     pub root_node_id: Signal<Option<String>>,
+
     /// Platform side-effect capabilities.
     pub platform: Arc<dyn PlatformEffects>,
+
     /// ICU-backed locale data provider.
     pub icu_provider: Arc<dyn IcuProvider>,
+
     /// Application-owned message registries.
     pub i18n_registries: Arc<I18nRegistries>,
+
+    /// CSS style injection strategy for all descendant ars components.
     style_strategy: StyleStrategy,
 }
 
@@ -81,24 +96,15 @@ impl ArsContext {
         i18n_registries: Arc<I18nRegistries>,
         style_strategy: StyleStrategy,
     ) -> Self {
-        let locale = Signal::stored(locale);
-        let color_mode = Signal::stored(color_mode);
-        let disabled = Signal::stored(disabled);
-        let read_only = Signal::stored(read_only);
-        let id_prefix = Signal::stored(id_prefix);
-        let portal_container_id = Signal::stored(portal_container_id);
-        let root_node_id = Signal::stored(root_node_id);
-        let direction = Memo::new(move |_| direction);
-
         Self {
-            locale,
-            direction,
-            color_mode,
-            disabled,
-            read_only,
-            id_prefix,
-            portal_container_id,
-            root_node_id,
+            locale: Signal::stored(locale),
+            direction: Memo::new(move |_| direction),
+            color_mode: Signal::stored(color_mode),
+            disabled: Signal::stored(disabled),
+            read_only: Signal::stored(read_only),
+            id_prefix: Signal::stored(id_prefix),
+            portal_container_id: Signal::stored(portal_container_id),
+            root_node_id: Signal::stored(root_node_id),
             platform,
             icu_provider,
             i18n_registries,
@@ -140,6 +146,7 @@ pub fn use_locale() -> Signal<Locale> {
     current_ars_context().map_or_else(
         || {
             warn_missing_provider("use_locale");
+
             Signal::stored(locales::en_us())
         },
         |ctx| ctx.locale,
@@ -152,10 +159,69 @@ pub fn use_icu_provider() -> Arc<dyn IcuProvider> {
     current_ars_context().map_or_else(
         || -> Arc<dyn IcuProvider> {
             warn_missing_provider("use_icu_provider");
+
             Arc::new(StubIcuProvider)
         },
         |ctx| -> Arc<dyn IcuProvider> { Arc::clone(&ctx.icu_provider) },
     )
+}
+
+/// Resolves a provider-derived number formatter from the current provider locale.
+///
+/// Leptos 0.8 only exposes public `Memo` constructors for `Send + Sync` values.
+/// `NumberFormatter` is intentionally not guaranteed to be thread-safe on every
+/// backend, so the adapter uses a local derived signal plus component-local
+/// cache to preserve provider-derived reuse semantics without inventing
+/// unsupported thread-safe guarantees.
+#[must_use]
+pub fn use_number_formatter<F>(options: F) -> Signal<NumberFormatter, LocalStorage>
+where
+    F: Fn() -> NumberFormatOptions + 'static,
+{
+    use_resolved_number_formatter(None, options)
+}
+
+/// Resolves a provider-derived number formatter from an explicit locale or provider context.
+#[must_use]
+pub(crate) fn use_resolved_number_formatter<F>(
+    adapter_props_locale: Option<&Locale>,
+    options: F,
+) -> Signal<NumberFormatter, LocalStorage>
+where
+    F: Fn() -> NumberFormatOptions + 'static,
+{
+    let explicit_locale = adapter_props_locale.cloned();
+    let locale = use_locale();
+    let cache =
+        StoredValue::<Option<(Locale, NumberFormatOptions, NumberFormatter)>, LocalStorage>::new_local(
+            None,
+        );
+
+    Signal::derive_local(move || {
+        let resolved_locale = explicit_locale.clone().unwrap_or_else(|| locale.get());
+
+        let resolved_options = options();
+
+        let mut resolved_formatter = None;
+
+        cache.update_value(|cached| {
+            if let Some((cached_locale, cached_options, cached_formatter)) = cached {
+                if *cached_locale == resolved_locale && *cached_options == resolved_options {
+                    resolved_formatter = Some(cached_formatter.clone());
+
+                    return;
+                }
+            }
+
+            let next_formatter = NumberFormatter::new(&resolved_locale, resolved_options.clone());
+
+            *cached = Some((resolved_locale, resolved_options, next_formatter.clone()));
+
+            resolved_formatter = Some(next_formatter);
+        });
+
+        resolved_formatter.expect("formatter cache should always produce a formatter")
+    })
 }
 
 /// Resolves the effective locale for an adapter component instance.
@@ -173,16 +239,20 @@ pub fn use_messages<M: ars_core::ComponentMessages + Send + Sync + 'static>(
     adapter_props_locale: Option<&Locale>,
 ) -> M {
     let locale = resolve_locale(adapter_props_locale);
+
     let registries = current_ars_context().map_or_else(
         || Arc::new(I18nRegistries::new()),
         |ctx| Arc::clone(&ctx.i18n_registries),
     );
+
     core_resolve_messages(adapter_props_messages, registries.as_ref(), &locale)
 }
 
 fn translated_text<T: Translate + Send + Sync + 'static>(msg: T) -> impl Fn() -> String {
     let locale = use_locale();
+
     let icu = use_icu_provider();
+
     move || msg.translate(&locale.get(), &*icu)
 }
 
@@ -198,12 +268,14 @@ mod tests {
     use std::sync::Arc;
 
     use ars_core::{ColorMode, I18nRegistries, NullPlatformEffects, StyleStrategy};
-    use ars_i18n::{Direction, IcuProvider, Locale, StubIcuProvider, Translate, locales};
+    use ars_i18n::{
+        Direction, IcuProvider, Locale, NumberFormatOptions, StubIcuProvider, Translate, locales,
+    };
     use leptos::prelude::{Get, GetUntracked, Memo, Owner, RwSignal, Set, Signal};
 
     use super::{
         ArsContext, current_ars_context, resolve_locale, t, translated_text, use_icu_provider,
-        use_locale, use_messages,
+        use_locale, use_messages, use_number_formatter, use_resolved_number_formatter,
     };
 
     #[derive(Clone, Debug, PartialEq)]
@@ -236,6 +308,7 @@ mod tests {
     }
 
     struct TestIcuProvider;
+
     impl IcuProvider for TestIcuProvider {}
 
     fn reactive_test_context(
@@ -243,6 +316,7 @@ mod tests {
         icu_provider: Arc<dyn IcuProvider>,
     ) -> (ArsContext, RwSignal<Locale>) {
         let locale_signal = RwSignal::new(locale);
+
         let context = ArsContext {
             locale: locale_signal.into(),
             direction: Memo::new(move |_| direction_from_locale(&locale_signal.get())),
@@ -274,12 +348,14 @@ mod tests {
         icu_provider: Arc<dyn IcuProvider>,
     ) -> ArsContext {
         let (context, _) = reactive_test_context(locale, icu_provider);
+
         context
     }
 
     #[test]
     fn use_locale_falls_back_to_en_us_without_provider() {
         let owner = Owner::new();
+
         owner.with(|| {
             assert_eq!(use_locale().get_untracked().to_bcp47(), "en-US");
         });
@@ -288,6 +364,7 @@ mod tests {
     #[test]
     fn resolve_locale_prefers_explicit_override() {
         let owner = Owner::new();
+
         owner.with(|| {
             crate::provide_ars_context(test_context_with_defaults(
                 Locale::parse("fr-FR").expect("locale should parse"),
@@ -295,6 +372,7 @@ mod tests {
             ));
 
             let override_locale = Locale::parse("pt-BR").expect("locale should parse");
+
             assert_eq!(resolve_locale(Some(&override_locale)).to_bcp47(), "pt-BR");
             assert_eq!(resolve_locale(None).to_bcp47(), "fr-FR");
         });
@@ -303,6 +381,7 @@ mod tests {
     #[test]
     fn current_ars_context_round_trips_through_leptos_context() {
         let owner = Owner::new();
+
         owner.with(|| {
             assert!(current_ars_context().is_none());
 
@@ -312,6 +391,7 @@ mod tests {
             ));
 
             let current = current_ars_context().expect("provider context should exist");
+
             assert_eq!(current.locale.get_untracked().to_bcp47(), "fr-FR");
         });
     }
@@ -319,8 +399,10 @@ mod tests {
     #[test]
     fn use_icu_provider_reads_context_value() {
         let owner = Owner::new();
+
         owner.with(|| {
             let expected: Arc<dyn IcuProvider> = Arc::new(TestIcuProvider);
+
             crate::provide_ars_context(test_context_with_defaults(
                 locales::en_us(),
                 Arc::clone(&expected),
@@ -333,8 +415,10 @@ mod tests {
     #[test]
     fn use_icu_provider_falls_back_without_provider() {
         let owner = Owner::new();
+
         owner.with(|| {
             let provider = use_icu_provider();
+
             assert_eq!(
                 AppText::Greeting.translate(&locales::en_us(), &*provider),
                 "Hello"
@@ -345,8 +429,10 @@ mod tests {
     #[test]
     fn use_messages_uses_provider_registry_bundle() {
         let owner = Owner::new();
+
         owner.with(|| {
             let mut registries = I18nRegistries::new();
+
             registries.register(
                 ars_core::MessagesRegistry::new(TestMessages::default()).register(
                     "es",
@@ -355,6 +441,7 @@ mod tests {
                     },
                 ),
             );
+
             crate::provide_ars_context(ArsContext::new(
                 Locale::parse("es-MX").expect("locale should parse"),
                 Direction::Ltr,
@@ -371,7 +458,9 @@ mod tests {
             ));
 
             let resolved = use_messages::<TestMessages>(None, None);
+
             let locale = Locale::parse("es-MX").expect("locale should parse");
+
             assert_eq!((resolved.label)(&locale), "Etiqueta");
         });
     }
@@ -379,9 +468,12 @@ mod tests {
     #[test]
     fn use_messages_falls_back_without_provider() {
         let owner = Owner::new();
+
         owner.with(|| {
             let locale = Locale::parse("pt-BR").expect("locale should parse");
+
             let resolved = use_messages::<TestMessages>(None, Some(&locale));
+
             assert_eq!((resolved.label)(&locale), "Default");
         });
     }
@@ -389,28 +481,104 @@ mod tests {
     #[test]
     fn translated_text_reacts_to_locale_changes() {
         let owner = Owner::new();
+
         owner.with(|| {
             let (context, locale_signal) =
                 reactive_test_context(locales::en_us(), Arc::new(StubIcuProvider));
+
             crate::provide_ars_context(context);
+
             let text = translated_text(AppText::Greeting);
 
             assert_eq!(text(), "Hello");
+
             locale_signal.set(Locale::parse("es-ES").expect("locale should parse"));
+
             assert_eq!(text(), "Hola");
+        });
+    }
+
+    #[test]
+    fn use_number_formatter_falls_back_without_provider() {
+        let owner = Owner::new();
+
+        owner.with(|| {
+            let formatter = use_number_formatter(NumberFormatOptions::default);
+
+            assert_eq!(formatter.get().format(1234.56), "1,234.56");
+        });
+    }
+
+    #[test]
+    fn use_number_formatter_reads_context_locale() {
+        let owner = Owner::new();
+
+        owner.with(|| {
+            crate::provide_ars_context(test_context_with_defaults(
+                locales::de_de(),
+                Arc::new(StubIcuProvider),
+            ));
+
+            let formatter = use_number_formatter(NumberFormatOptions::default);
+
+            assert_eq!(formatter.get().format(1234.56), "1.234,56");
+        });
+    }
+
+    #[test]
+    fn use_number_formatter_recomputes_when_locale_changes() {
+        let owner = Owner::new();
+
+        owner.with(|| {
+            let (context, locale_signal) =
+                reactive_test_context(locales::en_us(), Arc::new(StubIcuProvider));
+
+            crate::provide_ars_context(context);
+
+            let formatter = use_number_formatter(NumberFormatOptions::default);
+
+            assert_eq!(formatter.get().format(1234.56), "1,234.56");
+
+            locale_signal.set(locales::de_de());
+
+            assert_eq!(formatter.get().format(1234.56), "1.234,56");
+        });
+    }
+
+    #[test]
+    fn use_resolved_number_formatter_prefers_explicit_locale_override() {
+        let owner = Owner::new();
+
+        owner.with(|| {
+            crate::provide_ars_context(test_context_with_defaults(
+                locales::fr(),
+                Arc::new(StubIcuProvider),
+            ));
+
+            let explicit = locales::de_de();
+
+            let formatter =
+                use_resolved_number_formatter(Some(&explicit), NumberFormatOptions::default);
+
+            assert_eq!(formatter.get().format(1234.56), "1.234,56");
         });
     }
 
     #[test]
     fn prelude_t_reexport_compiles() {
         let owner = Owner::new();
+
         owner.with(|| {
             crate::provide_ars_context(test_context_with_defaults(
                 locales::en_us(),
                 Arc::new(StubIcuProvider),
             ));
+
             drop(t(AppText::Greeting));
-            drop(t(AppText::Greeting));
+
+            use crate::prelude::use_number_formatter as prelude_use_number_formatter;
+
+            let _ = prelude_use_number_formatter(NumberFormatOptions::default);
         });
     }
 }
@@ -420,13 +588,15 @@ mod wasm_tests {
     use std::sync::Arc;
 
     use ars_core::{ColorMode, I18nRegistries, NullPlatformEffects, StyleStrategy};
-    use ars_i18n::{Direction, IcuProvider, Locale, StubIcuProvider, Translate, locales};
+    use ars_i18n::{
+        Direction, IcuProvider, Locale, NumberFormatOptions, StubIcuProvider, Translate, locales,
+    };
     use leptos::prelude::{Get, GetUntracked, Memo, Owner, RwSignal, Set, Signal};
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
     use super::{
         ArsContext, current_ars_context, resolve_locale, t, translated_text, use_icu_provider,
-        use_locale,
+        use_locale, use_number_formatter,
     };
 
     wasm_bindgen_test_configure!(run_in_browser);
@@ -446,6 +616,7 @@ mod wasm_tests {
     }
 
     struct TestIcuProvider;
+
     impl IcuProvider for TestIcuProvider {}
 
     fn direction_from_locale(locale: &Locale) -> Direction {
@@ -461,6 +632,7 @@ mod wasm_tests {
         icu_provider: Arc<dyn IcuProvider>,
     ) -> (ArsContext, RwSignal<Locale>) {
         let locale_signal = RwSignal::new(locale);
+
         let context = ArsContext {
             locale: locale_signal.into(),
             direction: Memo::new(move |_| direction_from_locale(&locale_signal.get())),
@@ -482,15 +654,19 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn translated_text_reacts_to_locale_changes_on_wasm() {
         let owner = Owner::new();
+
         owner.with(|| {
             let (context, locale_signal) =
                 reactive_test_context(locales::en_us(), Arc::new(StubIcuProvider));
+
             crate::provide_ars_context(context);
 
             let text = translated_text(AppText::Greeting);
+
             assert_eq!(text(), "Hello");
 
             locale_signal.set(Locale::parse("es-ES").expect("locale should parse"));
+
             assert_eq!(text(), "Hola");
 
             drop(t(AppText::Greeting));
@@ -500,13 +676,16 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn current_ars_context_round_trips_on_wasm() {
         let owner = Owner::new();
+
         owner.with(|| {
             assert!(current_ars_context().is_none());
 
             let (context, _) = reactive_test_context(locales::en_us(), Arc::new(StubIcuProvider));
+
             crate::provide_ars_context(context);
 
             let current = current_ars_context().expect("provider context should exist");
+
             assert_eq!(current.locale.get_untracked().to_bcp47(), "en-US");
         });
     }
@@ -514,10 +693,13 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn locale_and_icu_provider_are_readable_on_wasm() {
         let owner = Owner::new();
+
         owner.with(|| {
             let expected_provider: Arc<dyn IcuProvider> = Arc::new(TestIcuProvider);
+
             let (context, _) =
                 reactive_test_context(locales::en_us(), Arc::clone(&expected_provider));
+
             crate::provide_ars_context(context);
 
             assert_eq!(use_locale().get_untracked().to_bcp47(), "en-US");
@@ -528,6 +710,7 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn use_locale_falls_back_without_provider_on_wasm() {
         let owner = Owner::new();
+
         owner.with(|| {
             assert_eq!(use_locale().get_untracked().to_bcp47(), "en-US");
         });
@@ -536,8 +719,10 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn use_icu_provider_falls_back_without_provider_on_wasm() {
         let owner = Owner::new();
+
         owner.with(|| {
             let provider = use_icu_provider();
+
             assert_eq!(
                 AppText::Greeting.translate(&locales::en_us(), &*provider),
                 "Hello"
@@ -548,13 +733,47 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn resolve_locale_prefers_override_on_wasm() {
         let owner = Owner::new();
+
         owner.with(|| {
             let (context, _) = reactive_test_context(locales::en_us(), Arc::new(StubIcuProvider));
+
             crate::provide_ars_context(context);
 
             let override_locale = Locale::parse("pt-BR").expect("locale should parse");
+
             assert_eq!(resolve_locale(Some(&override_locale)).to_bcp47(), "pt-BR");
             assert_eq!(resolve_locale(None).to_bcp47(), "en-US");
+        });
+    }
+
+    #[wasm_bindgen_test]
+    fn use_number_formatter_falls_back_without_provider_on_wasm() {
+        let owner = Owner::new();
+
+        owner.with(|| {
+            let formatter = use_number_formatter(NumberFormatOptions::default);
+
+            assert_eq!(formatter.get().format(1234.56), "1,234.56");
+        });
+    }
+
+    #[wasm_bindgen_test]
+    fn use_number_formatter_reacts_to_locale_changes_on_wasm() {
+        let owner = Owner::new();
+
+        owner.with(|| {
+            let (context, locale_signal) =
+                reactive_test_context(locales::en_us(), Arc::new(StubIcuProvider));
+
+            crate::provide_ars_context(context);
+
+            let formatter = use_number_formatter(NumberFormatOptions::default);
+
+            assert_eq!(formatter.get().format(1234.56), "1,234.56");
+
+            locale_signal.set(locales::de_de());
+
+            assert_eq!(formatter.get().format(1234.56), "1.234,56");
         });
     }
 }

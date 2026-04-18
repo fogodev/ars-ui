@@ -7,12 +7,15 @@
 pub(crate) mod feature_matrix;
 
 use std::{
-    fmt, fs, io,
+    fmt::{self, Display},
+    fs, io,
     path::{Path, PathBuf},
     process,
 };
 
 use crate::{coverage, i18n, test};
+
+const MUTUAL_EXCLUSION_GUARD: &str = "features `icu4x` and `web-intl` are mutually exclusive";
 
 /// CI pipeline steps, matching the GitHub Actions job names.
 ///
@@ -24,32 +27,51 @@ use crate::{coverage, i18n, test};
 pub enum Step {
     /// `cargo +nightly fmt --all --check`
     Fmt,
+
     /// `cargo check --workspace --all-features`
     Check,
+
     /// `cargo clippy --workspace --all-targets --all-features -- -D warnings`
     Clippy,
+
     /// Unit tests for core crates.
     Unit,
+
+    /// Browser-executed wasm tests for ars-i18n's web-intl backend.
+    I18nBrowser,
+
     /// Release-profile compile and test smoke checks.
     Release,
+
     /// Integration tests.
     Integration,
+
     /// Adapter harness tests (Leptos + Dioxus).
     Adapter,
+
     /// Generate coverage and check per-crate thresholds.
     Coverage,
+
     /// Meta-step: run all five feature-matrix groups.
     FeatureMatrix,
+
     /// Feature flags — ars-core (15 combos).
     FeatureMatrixCore,
+
     /// Feature flags — ars-i18n (11 combos + wasm32).
     FeatureMatrixI18n,
+
     /// Feature flags — subsystem crates (13 combos + wasm32).
     FeatureMatrixSubsystems,
+
     /// Feature flags — ars-leptos (3 combos).
     FeatureMatrixLeptos,
+
     /// Feature flags — ars-dioxus (4 combos + wasm32).
     FeatureMatrixDioxus,
+
+    /// Verify the mutual-exclusion compile guard for ars-i18n backend features.
+    MutualExclusion,
 }
 
 /// Default pipeline order when no steps are specified.
@@ -61,6 +83,7 @@ const PIPELINE_ORDER: &[Step] = &[
     Step::Check,
     Step::Clippy,
     Step::Unit,
+    Step::I18nBrowser,
     Step::Release,
     Step::Integration,
     Step::Adapter,
@@ -70,6 +93,7 @@ const PIPELINE_ORDER: &[Step] = &[
     Step::FeatureMatrixSubsystems,
     Step::FeatureMatrixLeptos,
     Step::FeatureMatrixDioxus,
+    Step::MutualExclusion,
 ];
 
 /// Errors from CI operations.
@@ -79,25 +103,31 @@ pub enum Error {
     StepFailed {
         /// The step that failed.
         step: Step,
+
         /// The command that was run (for display).
         command: String,
+
         /// Process exit code, if available.
         code: Option<i32>,
     },
+
     /// A required tool is not installed.
     MissingTool {
         /// Human-readable tool name.
         tool: String,
+
         /// How to install it.
         install_hint: String,
     },
+
     /// IO error spawning a subprocess.
     Io(io::Error),
+
     /// Coverage threshold check failed.
     Coverage(coverage::Error),
 }
 
-impl fmt::Display for Error {
+impl Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::StepFailed {
@@ -111,13 +141,16 @@ impl fmt::Display for Error {
                 }
                 write!(f, ": {command}")
             }
+
             Self::MissingTool { tool, install_hint } => {
                 write!(
                     f,
                     "missing required tool: {tool}\n  install: {install_hint}"
                 )
             }
+
             Self::Io(e) => write!(f, "IO error: {e}"),
+
             Self::Coverage(e) => write!(f, "{e}"),
         }
     }
@@ -148,6 +181,7 @@ pub fn run(steps: Vec<Step>, message_format: Option<&str>) -> Result<(), Error> 
     }
 
     print_summary(&steps);
+
     Ok(())
 }
 
@@ -166,6 +200,7 @@ fn resolve_steps(steps: Vec<Step>) -> Vec<Step> {
     }
 
     let mut resolved = Vec::with_capacity(steps.len());
+
     for step in steps {
         if step == Step::FeatureMatrix {
             resolved.extend_from_slice(&[
@@ -179,6 +214,7 @@ fn resolve_steps(steps: Vec<Step>) -> Vec<Step> {
             resolved.push(step);
         }
     }
+
     resolved
 }
 
@@ -190,23 +226,40 @@ fn resolve_steps(steps: Vec<Step>) -> Vec<Step> {
 fn run_step(step: Step, message_format: Option<&str>) -> Result<(), Error> {
     match step {
         Step::Fmt => run_fmt(),
+
         Step::Check => run_check(message_format),
+
         Step::Clippy => run_clippy(message_format),
+
         Step::Unit => run_unit(),
+
+        Step::I18nBrowser => run_i18n_browser(),
+
         Step::Release => run_release(),
+
         Step::Integration => run_integration(),
+
         Step::Adapter => run_adapter(),
+
         Step::Coverage => run_coverage(),
+
         Step::FeatureMatrix => {
             unreachable!("FeatureMatrix is expanded by resolve_steps")
         }
+
         Step::FeatureMatrixCore => feature_matrix::run_group(feature_matrix::Group::Core),
+
         Step::FeatureMatrixI18n => feature_matrix::run_group(feature_matrix::Group::I18n),
+
         Step::FeatureMatrixSubsystems => {
             feature_matrix::run_group(feature_matrix::Group::Subsystems)
         }
+
         Step::FeatureMatrixLeptos => feature_matrix::run_group(feature_matrix::Group::Leptos),
+
         Step::FeatureMatrixDioxus => feature_matrix::run_group(feature_matrix::Group::Dioxus),
+
+        Step::MutualExclusion => run_mutual_exclusion(),
     }
 }
 
@@ -216,6 +269,7 @@ fn run_step(step: Step, message_format: Option<&str>) -> Result<(), Error> {
 
 fn run_fmt() -> Result<(), Error> {
     preflight_nightly()?;
+
     cargo(Step::Fmt, &["+nightly", "fmt", "--all", "--check"])
 }
 
@@ -236,6 +290,7 @@ fn run_check(message_format: Option<&str>) -> Result<(), Error> {
     )?;
 
     let [icu4x_features, web_intl_features] = i18n::i18n_feature_lists().map_err(Error::Io)?;
+
     for features in [&icu4x_features, &web_intl_features] {
         cargo_with_format(
             Step::Check,
@@ -251,6 +306,7 @@ fn run_check(message_format: Option<&str>) -> Result<(), Error> {
             message_format,
         )?;
     }
+
     Ok(())
 }
 
@@ -279,12 +335,15 @@ pub fn clippy_workspace(message_format: Option<&str>, deny_warnings: bool) -> Re
         "--exclude",
         "ars-i18n",
     ];
+
     if deny_warnings {
         workspace_args.extend_from_slice(&["--", "-D", "warnings"]);
     }
+
     cargo_with_format(Step::Clippy, &workspace_args, message_format)?;
 
     let [icu4x_features, web_intl_features] = i18n::i18n_feature_lists().map_err(Error::Io)?;
+
     for features in [&icu4x_features, &web_intl_features] {
         let mut args = vec![
             "clippy",
@@ -295,16 +354,23 @@ pub fn clippy_workspace(message_format: Option<&str>, deny_warnings: bool) -> Re
             "--features",
             features.as_str(),
         ];
+
         if deny_warnings {
             args.extend_from_slice(&["--", "-D", "warnings"]);
         }
+
         cargo_with_format(Step::Clippy, &args, message_format)?;
     }
+
     Ok(())
 }
 
 fn run_unit() -> Result<(), Error> {
     run_test_stage(Step::Unit, test::Stage::Unit)
+}
+
+fn run_i18n_browser() -> Result<(), Error> {
+    run_test_stage(Step::I18nBrowser, test::Stage::I18nBrowser)
 }
 
 fn run_release() -> Result<(), Error> {
@@ -319,7 +385,9 @@ fn run_release() -> Result<(), Error> {
             "ars-i18n",
         ],
     )?;
+
     let [icu4x_features, web_intl_features] = i18n::i18n_feature_lists().map_err(Error::Io)?;
+
     for features in [&icu4x_features, &web_intl_features] {
         cargo(
             Step::Release,
@@ -335,6 +403,7 @@ fn run_release() -> Result<(), Error> {
             ],
         )?;
     }
+
     run_test_stage(Step::Release, test::Stage::Release)
 }
 
@@ -346,13 +415,64 @@ fn run_adapter() -> Result<(), Error> {
     run_test_stage(Step::Adapter, test::Stage::Adapter)
 }
 
+fn run_mutual_exclusion() -> Result<(), Error> {
+    let args = [
+        "check",
+        "-p",
+        "ars-i18n",
+        "--no-default-features",
+        "--features",
+        "icu4x,web-intl",
+    ];
+
+    let display_cmd = format!("cargo {}", args.join(" "));
+
+    eprintln!("  > {display_cmd}");
+
+    let output = process::Command::new("cargo")
+        .args(args)
+        .output()
+        .map_err(Error::Io)?;
+
+    if output.status.success() {
+        Err(Error::StepFailed {
+            step: Step::MutualExclusion,
+            command: format!("{display_cmd} (unexpected success)"),
+            code: output.status.code(),
+        })
+    } else if is_expected_mutual_exclusion_failure(&String::from_utf8_lossy(&output.stderr)) {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        Err(Error::StepFailed {
+            step: Step::MutualExclusion,
+            command: format!(
+                "{display_cmd} (unexpected failure; missing guard message)\nstderr:\n{}",
+                stderr.trim()
+            ),
+            code: output.status.code(),
+        })
+    }
+}
+
+fn is_expected_mutual_exclusion_failure(stderr: &str) -> bool {
+    stderr.contains(MUTUAL_EXCLUSION_GUARD)
+}
+
 fn run_coverage() -> Result<(), Error> {
     preflight_llvm_cov()?;
+
     preflight_nextest()?;
+
     coverage::preflight_nightly().map_err(Error::Coverage)?;
+
     let coverage_dir = Path::new("target").join("coverage");
+
     fs::create_dir_all(&coverage_dir).map_err(Error::Io)?;
+
     let native_lcov = coverage_dir.join("native.lcov");
+
     let merged_lcov = PathBuf::from("lcov.info");
 
     // Generate native lcov via cargo-llvm-cov + cargo-nextest.
@@ -372,8 +492,10 @@ fn run_coverage() -> Result<(), Error> {
     )?;
 
     let mut reports = vec![native_lcov];
+
     for target in coverage::default_wasm_coverage_targets() {
         let wasm_lcov = coverage_dir.join(format!("{}-wasm.lcov", target.package));
+
         coverage::generate_wasm_lcov(&coverage::WasmCoverageOptions {
             package: target.package.to_owned(),
             output: wasm_lcov.clone(),
@@ -386,6 +508,7 @@ fn run_coverage() -> Result<(), Error> {
             extra_test_args: Vec::new(),
         })
         .map_err(Error::Coverage)?;
+
         reports.push(wasm_lcov);
     }
 
@@ -393,6 +516,7 @@ fn run_coverage() -> Result<(), Error> {
 
     // Check thresholds programmatically (reuses coverage module).
     let thresholds = coverage::default_thresholds();
+
     match coverage::check_all(&merged_lcov, &thresholds) {
         Ok(output) => {
             eprint!("{output}");
@@ -413,12 +537,15 @@ pub(crate) fn map_test_error(step: Step, error: test::Error) -> Error {
         test::Error::MissingTool { tool, install_hint } => {
             Error::MissingTool { tool, install_hint }
         }
+
         test::Error::CommandFailed { command, code } => Error::StepFailed {
             step,
             command,
             code,
         },
+
         test::Error::Io(error) => Error::Io(error),
+
         test::Error::Failed { summary } => Error::Io(io::Error::other(summary)),
     }
 }
@@ -433,24 +560,28 @@ pub(crate) fn map_test_error(step: Step, error: test::Error) -> Error {
 /// lets rust-analyzer's `overrideCommand` request JSON diagnostics via
 /// `cargo xtask ci clippy --message-format=json`.
 fn cargo_with_format(step: Step, args: &[&str], message_format: Option<&str>) -> Result<(), Error> {
-    match message_format {
-        None => cargo(step, args),
-        Some(fmt) => {
-            let fmt_flag = format!("--message-format={fmt}");
-            let mut full_args = Vec::with_capacity(args.len() + 1);
-            let mut inserted = false;
-            for &arg in args {
-                if arg == "--" && !inserted {
-                    full_args.push(fmt_flag.as_str());
-                    inserted = true;
-                }
-                full_args.push(arg);
-            }
-            if !inserted {
+    if let Some(fmt) = message_format {
+        let fmt_flag = format!("--message-format={fmt}");
+
+        let mut full_args = Vec::with_capacity(args.len() + 1);
+
+        let mut inserted = false;
+
+        for &arg in args {
+            if arg == "--" && !inserted {
                 full_args.push(fmt_flag.as_str());
+                inserted = true;
             }
-            cargo(step, &full_args)
+            full_args.push(arg);
         }
+
+        if !inserted {
+            full_args.push(fmt_flag.as_str());
+        }
+
+        cargo(step, &full_args)
+    } else {
+        cargo(step, args)
     }
 }
 
@@ -459,6 +590,7 @@ fn cargo_with_format(step: Step, args: &[&str], message_format: Option<&str>) ->
 /// Returns `Ok(())` on exit-code 0, or `CiError::StepFailed` otherwise.
 pub(crate) fn cargo(step: Step, args: &[&str]) -> Result<(), Error> {
     let display_cmd = format!("cargo {}", args.join(" "));
+
     eprintln!("  > {display_cmd}");
 
     let status = process::Command::new("cargo")
@@ -496,6 +628,7 @@ fn preflight_nightly() -> Result<(), Error> {
             install_hint: "rustup toolchain install nightly".into(),
         });
     }
+
     Ok(())
 }
 
@@ -546,6 +679,7 @@ const fn step_name(step: Step) -> &'static str {
         Step::Check => "check",
         Step::Clippy => "clippy",
         Step::Unit => "unit",
+        Step::I18nBrowser => "i18n-browser",
         Step::Release => "release",
         Step::Integration => "integration",
         Step::Adapter => "adapter",
@@ -556,6 +690,7 @@ const fn step_name(step: Step) -> &'static str {
         Step::FeatureMatrixSubsystems => "feature-matrix-subsystems",
         Step::FeatureMatrixLeptos => "feature-matrix-leptos",
         Step::FeatureMatrixDioxus => "feature-matrix-dioxus",
+        Step::MutualExclusion => "mutual-exclusion",
     }
 }
 
@@ -584,11 +719,15 @@ fn format_pass(step: Step) -> String {
 /// Format the final summary (testable).
 fn format_summary(steps: &[Step]) -> String {
     use fmt::Write as _;
+
     let mut out = String::from("\n=== CI Summary ===\n");
+
     for step in steps {
         writeln!(out, "  {}: passed", step_name(*step)).expect("write to String");
     }
+
     writeln!(out, "\nAll {} steps passed.", steps.len()).expect("write to String");
+
     out
 }
 
@@ -603,19 +742,23 @@ mod tests {
     #[test]
     fn empty_steps_resolve_to_pipeline_order() {
         let resolved = resolve_steps(vec![]);
+
         assert_eq!(resolved, PIPELINE_ORDER);
     }
 
     #[test]
     fn explicit_steps_pass_through() {
         let input = vec![Step::Check, Step::Clippy];
+
         let resolved = resolve_steps(input.clone());
+
         assert_eq!(resolved, input);
     }
 
     #[test]
     fn feature_matrix_expands_to_five_groups() {
         let resolved = resolve_steps(vec![Step::FeatureMatrix]);
+
         assert_eq!(resolved.len(), 5);
         assert_eq!(resolved[0], Step::FeatureMatrixCore);
         assert_eq!(resolved[1], Step::FeatureMatrixI18n);
@@ -627,6 +770,7 @@ mod tests {
     #[test]
     fn feature_matrix_expands_in_context() {
         let resolved = resolve_steps(vec![Step::Fmt, Step::FeatureMatrix, Step::Coverage]);
+
         assert_eq!(resolved.len(), 7); // 1 + 5 + 1
         assert_eq!(resolved[0], Step::Fmt);
         assert_eq!(resolved[6], Step::Coverage);
@@ -644,6 +788,7 @@ mod tests {
     fn step_names_are_kebab_case() {
         for &step in PIPELINE_ORDER {
             let name = step_name(step);
+
             assert!(
                 !name.contains('_') && !name.contains(' '),
                 "step name {name:?} is not kebab-case"
@@ -659,6 +804,7 @@ mod tests {
             Step::Check,
             Step::Clippy,
             Step::Unit,
+            Step::I18nBrowser,
             Step::Release,
             Step::Integration,
             Step::Adapter,
@@ -669,10 +815,26 @@ mod tests {
             Step::FeatureMatrixSubsystems,
             Step::FeatureMatrixLeptos,
             Step::FeatureMatrixDioxus,
+            Step::MutualExclusion,
         ];
+
         for step in all {
             assert!(!step_name(step).is_empty(), "{step:?} has empty name");
         }
+    }
+
+    #[test]
+    fn mutual_exclusion_guard_matches_expected_compile_error() {
+        let stderr = format!("error: {MUTUAL_EXCLUSION_GUARD}");
+
+        assert!(is_expected_mutual_exclusion_failure(&stderr));
+    }
+
+    #[test]
+    fn mutual_exclusion_guard_rejects_unrelated_compile_failures() {
+        assert!(!is_expected_mutual_exclusion_failure(
+            "error[E0432]: unresolved import `missing`"
+        ));
     }
 
     // -- CiError::Display tests -----------------------------------------------
@@ -684,7 +846,9 @@ mod tests {
             command: "cargo clippy".into(),
             code: Some(101),
         };
+
         let msg = err.to_string();
+
         assert!(msg.contains("clippy failed"), "got: {msg}");
         assert!(msg.contains("exit code 101"), "got: {msg}");
         assert!(msg.contains("cargo clippy"), "got: {msg}");
@@ -697,7 +861,9 @@ mod tests {
             command: "cargo +nightly fmt --all --check".into(),
             code: None,
         };
+
         let msg = err.to_string();
+
         assert!(msg.contains("fmt failed"), "got: {msg}");
         assert!(!msg.contains("exit code"), "got: {msg}");
     }
@@ -708,7 +874,9 @@ mod tests {
             tool: "nightly toolchain".into(),
             install_hint: "rustup toolchain install nightly".into(),
         };
+
         let msg = err.to_string();
+
         assert!(msg.contains("nightly toolchain"), "got: {msg}");
         assert!(
             msg.contains("rustup toolchain install nightly"),
@@ -719,7 +887,9 @@ mod tests {
     #[test]
     fn display_io_error() {
         let err = Error::Io(io::Error::new(io::ErrorKind::NotFound, "no cargo"));
+
         let msg = err.to_string();
+
         assert!(msg.contains("IO error"), "got: {msg}");
         assert!(msg.contains("no cargo"), "got: {msg}");
     }
@@ -729,7 +899,9 @@ mod tests {
         let err = Error::Coverage(coverage::Error::NoSourceFiles {
             package: "ars-core".into(),
         });
+
         let msg = err.to_string();
+
         assert!(msg.contains("ars-core"), "got: {msg}");
     }
 
@@ -738,6 +910,7 @@ mod tests {
     #[test]
     fn format_header_contains_step_and_progress() {
         let hdr = format_header(Step::Clippy, 3, 12);
+
         assert!(hdr.contains("[3/12]"), "got: {hdr}");
         assert!(hdr.contains("clippy"), "got: {hdr}");
     }
@@ -745,13 +918,16 @@ mod tests {
     #[test]
     fn format_pass_contains_step_name() {
         let msg = format_pass(Step::Unit);
+
         assert!(msg.contains("unit passed"), "got: {msg}");
     }
 
     #[test]
     fn format_summary_lists_all_steps() {
         let steps = vec![Step::Fmt, Step::Check];
+
         let summary = format_summary(&steps);
+
         assert!(summary.contains("fmt: passed"), "got: {summary}");
         assert!(summary.contains("check: passed"), "got: {summary}");
         assert!(summary.contains("All 2 steps passed"), "got: {summary}");
@@ -760,6 +936,7 @@ mod tests {
     #[test]
     fn format_summary_empty() {
         let summary = format_summary(&[]);
+
         assert!(summary.contains("All 0 steps passed"), "got: {summary}");
     }
 }
