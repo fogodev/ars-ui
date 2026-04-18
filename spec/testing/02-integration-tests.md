@@ -254,8 +254,7 @@ fn effect_cleanup_runs_on_state_change() {
     assert!(!open_result.pending_effects.is_empty());
 
     // Run effects, collecting cleanups
-    // Note: Rc on WASM; use Arc<dyn Fn(Event) + Send + Sync> on native targets
-    let send_fn: Rc<dyn Fn(dialog::Event)> = Rc::new(|_: dialog::Event| {});
+    let send_fn: Arc<dyn Fn(dialog::Event) + Send + Sync> = Arc::new(|_: dialog::Event| {});
     use ars_core::CleanupFn;
 
     let mut active_cleanups: Vec<CleanupFn> = Vec::new();

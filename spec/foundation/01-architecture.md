@@ -145,7 +145,7 @@ ssr = ["dioxus/server", "dep:ars-dom", "ars-dom/ssr"]
 
 > **Debug logging:** `ars-core` provides an optional `debug` feature flag that enables the `log` crate facade. When enabled, state transitions, guard evaluations, and effect dispatches emit trace-level log events. Adapters must initialize a logger (e.g., `console_log` for WASM, `env_logger` for native). Without the feature flag, all logging is compiled out. This resolves the `no_std` limitation on debug output.
 >
-> **Design note — `Rc` and single-threaded model:** On WASM targets, `ars-core` uses `Rc` (not `Arc`) throughout, including for the `send` callback in `PendingEffect::setup`. This is intentional — WASM environments are single-threaded and `Rc` avoids atomic overhead. On native targets, cfg-gated `Arc` variants are used (see `Callback<T>` in §2.2). Desktop adapters (e.g., Dioxus Desktop) must still ensure machine mutation remains on a single thread.
+> **Design note — single-threaded machine mutation:** `ars-core` machine services are still driven from a single logical thread, even though shared callback handles such as `Callback<T>` and the `send` callback passed to `PendingEffect::setup` use `Arc` on all targets. Desktop adapters (e.g., Dioxus Desktop) must still ensure machine mutation remains on one thread at a time.
 
 #### 1.4.1 Thread Safety for Desktop Adapters
 
@@ -295,11 +295,9 @@ use core::{fmt::Debug, hash::Hash};
 // SAFETY/THREADING: Machine instances use `Rc` (not `Arc`) and are NOT thread-safe.
 // Each machine instance must remain on its originating thread. For multi-threaded
 // applications, create separate machine instances per thread.
-use alloc::rc::Rc;
-// Arc is only used on native targets (where the `std` feature is active)
-// for Callback wrappers that cross thread boundaries. On WASM, Rc suffices.
+
+// Arc is used for shared callback wrappers on every target.
 // Note: native targets always enable the `std` feature, making alloc::sync available.
-#[cfg(not(target_arch = "wasm32"))]
 use alloc::sync::{Arc, Weak};
 
 /// Trait for props that carry a component ID.
@@ -608,6 +606,8 @@ This enables `data-ars-state` values and Service debug logging.
 > `TransitionPlan::to(State::Open).apply(|ctx| ctx.count += 1).with_effect(...)`.
 
 ````rust
+type ApplyFn<M> = dyn FnOnce(&mut <M as Machine>::Context);
+
 /// A transition plan describes what should happen in response to an event.
 /// Built using a fluent builder pattern.
 pub struct TransitionPlan<M: Machine> {
@@ -617,7 +617,7 @@ pub struct TransitionPlan<M: Machine> {
     /// Uses `FnOnce` — apply is called exactly once, immediately after transition
     /// selection. Using FnOnce enforces single-invocation semantics.
     /// `pub(crate)` — construct via `.apply()` / `.context_only()` builder methods.
-    pub(crate) apply: Option<Box<dyn FnOnce(&mut M::Context)>>,
+    pub(crate) apply: Option<Box<ApplyFn<M>>>,
     /// Events to enqueue after this transition completes.
     pub then_send: Vec<M::Event>,
     /// Optional human-readable description of the apply closure's purpose.

@@ -66,21 +66,11 @@ impl AsyncValidators {
     pub fn new() -> Self { Self { rules: vec![] } }
     pub fn unique_username(mut self) -> Self { /* adds async uniqueness check */ self }
     pub fn custom_async(mut self, f: impl AsyncValidator + 'static) -> Self {
-        #[cfg(target_arch = "wasm32")]
-        self.rules.push(Rc::new(f));
-        #[cfg(not(target_arch = "wasm32"))]
         self.rules.push(Arc::new(f));
         self
     }
 
     /// Build a composed async validator that runs all registered rules.
-    #[cfg(target_arch = "wasm32")]
-    pub fn build(self) -> BoxedAsyncValidator {
-        let rules = self.rules;
-        Rc::new(ComposedAsyncValidator { rules })
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn build(self) -> BoxedAsyncValidator {
         let rules = self.rules;
         Arc::new(ComposedAsyncValidator { rules })
@@ -479,7 +469,7 @@ fn cascading_validation_on_dependency_change() {
 
     form.register_cross_field_validator("zip", CrossFieldValidator {
         depends_on: vec!["country".into()],
-        validate_fn: Rc::new(|value: &FieldValue, ctx: &ValidationContext| -> ValidationResult {
+        validate_fn: Arc::new(|value: &FieldValue, ctx: &ValidationContext| -> ValidationResult {
             let country = ctx.form_values.get("country");
             match (country, value) {
                 (Some(FieldValue::Text(c)), FieldValue::Text(zip)) if c == "US" => {
@@ -524,7 +514,7 @@ fn cross_field_validator_auto_revalidates_on_dependency_change() {
     form.register("confirm_password", FieldValue::Text("abc123".into()), Some(Validators::new().build()), None);
     form.register_cross_field_validator("confirm_password", CrossFieldValidator {
         depends_on: vec!["password".into()],
-        validate_fn: Rc::new(|value: &FieldValue, ctx: &ValidationContext| -> ValidationResult {
+        validate_fn: Arc::new(|value: &FieldValue, ctx: &ValidationContext| -> ValidationResult {
             let password = ctx.form_values.get("password");
             if Some(value) != password {
                 ValidationResult::Invalid(ValidationErrors(vec![

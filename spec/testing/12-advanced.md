@@ -345,11 +345,6 @@ mod leak_tests {
         let mut svc = Service::<dialog::Machine>::new(props);
         let mut active_cleanups: Vec<Box<dyn FnOnce()>> = Vec::new();
 
-        // PendingEffect::run() takes Rc<dyn Fn(M::Event)> on wasm32,
-        // Arc<dyn Fn(M::Event) + Send + Sync> on native.
-        #[cfg(target_arch = "wasm32")]
-        let send_fn: Rc<dyn Fn(dialog::Event)> = Rc::new(|_| {});
-        #[cfg(not(target_arch = "wasm32"))]
         let send_fn: Arc<dyn Fn(dialog::Event) + Send + Sync> = Arc::new(|_| {});
 
         for _ in 0..100 {
@@ -389,11 +384,6 @@ mod leak_tests {
         let props = dialog::Props { id: "rc-test".into(), ..Default::default() };
         let mut svc = Service::<dialog::Machine>::new(props);
 
-        // PendingEffect::run() takes Rc<dyn Fn(M::Event)> on wasm32,
-        // Arc<dyn Fn(M::Event) + Send + Sync> on native.
-        #[cfg(target_arch = "wasm32")]
-        let send_fn: Rc<dyn Fn(dialog::Event)> = Rc::new(|_| {});
-        #[cfg(not(target_arch = "wasm32"))]
         let send_fn: Arc<dyn Fn(dialog::Event) + Send + Sync> = Arc::new(|_| {});
 
         #[cfg(target_arch = "wasm32")]
@@ -473,11 +463,6 @@ fn effects_balanced_on_lifecycle() {
 
     let props = dialog::Props { id: "balance-test".into(), ..Default::default() };
     let mut svc = Service::<dialog::Machine>::new(props);
-    // PendingEffect::run() takes Rc<dyn Fn(M::Event)> on wasm32,
-    // Arc<dyn Fn(M::Event) + Send + Sync> on native.
-    #[cfg(target_arch = "wasm32")]
-    let send_fn: Rc<dyn Fn(dialog::Event)> = Rc::new(|_| {});
-    #[cfg(not(target_arch = "wasm32"))]
     let send_fn: Arc<dyn Fn(dialog::Event) + Send + Sync> = Arc::new(|_| {});
     let mut active_cleanups: Vec<CleanupFn> = Vec::new();
 
@@ -532,11 +517,6 @@ fn dialog_cleanup_on_unmount() {
     let cleanup_ran = Rc::new(Cell::new(false));
     let props = dialog::Props { id: "unmount-test".into(), ..Default::default() };
     let mut svc = Service::<dialog::Machine>::new(props);
-    // PendingEffect::run() takes Rc<dyn Fn(M::Event)> on wasm32,
-    // Arc<dyn Fn(M::Event) + Send + Sync> on native.
-    #[cfg(target_arch = "wasm32")]
-    let send_fn: Rc<dyn Fn(dialog::Event)> = Rc::new(|_| {});
-    #[cfg(not(target_arch = "wasm32"))]
     let send_fn: Arc<dyn Fn(dialog::Event) + Send + Sync> = Arc::new(|_| {});
 
     let result = svc.send(dialog::Event::Open);
@@ -577,11 +557,6 @@ fn dialog_cleanup_on_unmount() {
 async fn interleaved_effect_setup_and_cancel() {
     let props = tooltip::Props { open_delay_ms: 500, ..Default::default() };
     let mut svc = Service::new(props, Env::default(), Default::default());
-    // PendingEffect::run() takes Rc<dyn Fn(M::Event)> on wasm32,
-    // Arc<dyn Fn(M::Event) + Send + Sync> on native.
-    #[cfg(target_arch = "wasm32")]
-    let send_fn: Rc<dyn Fn(tooltip::Event)> = Rc::new(|_| {});
-    #[cfg(not(target_arch = "wasm32"))]
     let send_fn: Arc<dyn Fn(tooltip::Event) + Send + Sync> = Arc::new(|_| {});
 
     // Send N: hover triggers delayed open effect

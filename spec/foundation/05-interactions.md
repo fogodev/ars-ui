@@ -129,8 +129,8 @@ use crate::PointerType;
 
 /// Configuration for press interaction behavior.
 ///
-/// Callbacks use [`Callback`] (not raw `Rc`/`Arc`) for automatic
-/// platform-appropriate pointer type and built-in `Clone`, `Debug`,
+/// Callbacks use [`Callback`] (not raw `Rc`/`Arc`) for shared Arc-backed
+/// ownership and built-in `Clone`, `Debug`,
 /// and `PartialEq` (by pointer identity).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PressConfig {
@@ -845,8 +845,8 @@ use crate::PointerType;
 /// Configuration for hover interaction behavior.
 ///
 /// Controls how the hover interaction responds to pointer enter/leave events.
-/// Callbacks use [`Callback`] for automatic platform-appropriate pointer type
-/// (`Rc` on wasm, `Arc` on native) and built-in `Clone`, `Debug`, and
+/// Callbacks use [`Callback`] for shared Arc-backed ownership plus built-in
+/// `Clone`, `Debug`, and
 /// `PartialEq` (by pointer identity).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct HoverConfig {
@@ -2310,13 +2310,14 @@ pub struct KeyboardDropTarget {
 /// Follows the canonical `MessageFn` pattern from `ars-i18n` (`04-internationalization.md` §7.1):
 /// cfg-gated `Rc`/`Arc` wrapper, `+ Send + Sync` on all targets, `&Locale` parameter.
 ///
-/// All closure fields use `MessageFn::new()` which delegates to the cfg-gated `From` impls
-/// defined in `04-internationalization.md` §7.1 — `Rc` on WASM, `Arc` on native.
+/// All closure fields use `MessageFn::new()` which delegates to the `From` impls
+/// defined in `04-internationalization.md` §7.1 and stores closures in `Arc`
+/// on every target.
 ///
 /// **`+ Send + Sync` bounds:** All `MessageFn` closures include `+ Send + Sync` as a
-/// deliberate project-wide convention. On WASM targets the `MessageFn` wrapper uses `Rc`
-/// (non-atomic), but the trait object bounds remain `Send + Sync` so that closures are
-/// thread-safe for native desktop targets without cfg-gated API differences. See the
+/// deliberate project-wide convention. The trait object bounds remain `Send + Sync`
+/// so that closures are thread-safe for native desktop targets without cfg-gated API
+/// differences. See the
 /// `MessageFn` definition in `04-internationalization.md` §7.1 for the full rationale.
 #[derive(Clone)]
 pub struct DragAnnouncements {

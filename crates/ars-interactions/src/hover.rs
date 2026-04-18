@@ -23,6 +23,7 @@ pub enum HoverState {
     /// Pointer is not over the element.
     #[default]
     NotHovered,
+
     /// Pointer is over the element.
     Hovered,
 }
@@ -44,6 +45,7 @@ impl HoverState {
 pub enum HoverEventType {
     /// The pointer entered the element.
     HoverStart,
+
     /// The pointer left the element.
     HoverEnd,
 }
@@ -70,9 +72,8 @@ pub struct HoverEvent {
 /// Configuration for hover interaction behavior.
 ///
 /// Controls how the hover interaction responds to pointer enter/leave events.
-/// Callbacks use [`Callback`] for automatic platform-appropriate pointer type
-/// (`Rc` on wasm, `Arc` on native) and built-in `Clone`, `Debug`, and
-/// `PartialEq` (by pointer identity).
+/// Callbacks use [`Callback`] for shared Arc-backed ownership plus built-in
+/// `Clone`, `Debug`, and `PartialEq` (by pointer identity).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct HoverConfig {
     /// Whether the element is disabled. Disabled elements receive no hover events.
@@ -136,6 +137,7 @@ pub(crate) fn had_pointer_interaction(modality: &dyn ModalityContext) -> bool {
 pub struct HoverResult {
     /// Whether the element is currently hovered (reactive signal in adapter).
     pub hovered: bool,
+
     /// Internal state handle — use [`current_attrs()`](Self::current_attrs) to
     /// produce a live `AttrMap`.
     state: SharedState<HoverState>,
@@ -149,11 +151,13 @@ impl HoverResult {
     #[must_use]
     pub fn current_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
+
         self.state.with(|s| {
             if s.is_hovered() {
                 attrs.set_bool(HtmlAttr::Data("ars-hovered"), true);
             }
         });
+
         attrs
     }
 }
@@ -174,6 +178,7 @@ impl HoverResult {
 )]
 pub fn use_hover(config: HoverConfig) -> HoverResult {
     let state = SharedState::new(HoverState::NotHovered);
+
     let _is_disabled = config.disabled;
 
     let hovered = state.get().is_hovered();
@@ -197,6 +202,7 @@ mod tests {
     #[test]
     fn hover_config_default_values() {
         let config = HoverConfig::default();
+
         assert!(!config.disabled);
         assert!(config.on_hover_start.is_none());
         assert!(config.on_hover_end.is_none());
@@ -206,7 +212,9 @@ mod tests {
     #[test]
     fn hover_config_debug_default_shows_none_callbacks() {
         let config = HoverConfig::default();
+
         let debug = format!("{config:?}");
+
         assert!(debug.contains("disabled: false"));
         assert!(debug.contains("on_hover_start: None"));
         assert!(debug.contains("on_hover_end: None"));
@@ -216,40 +224,51 @@ mod tests {
     #[test]
     fn hover_config_debug_with_callbacks_shows_callback() {
         let start_calls = Arc::new(AtomicUsize::new(0));
+
         let end_calls = Arc::new(AtomicUsize::new(0));
+
         let change_calls = Arc::new(AtomicUsize::new(0));
+
         let config = HoverConfig {
             on_hover_start: Some({
                 let start_calls = Arc::clone(&start_calls);
+
                 Callback::new(move |_: HoverEvent| {
                     start_calls.fetch_add(1, Ordering::SeqCst);
                 })
             }),
             on_hover_end: Some({
                 let end_calls = Arc::clone(&end_calls);
+
                 Callback::new(move |_: HoverEvent| {
                     end_calls.fetch_add(1, Ordering::SeqCst);
                 })
             }),
             on_hover_change: Some({
                 let change_calls = Arc::clone(&change_calls);
+
                 Callback::new(move |_: bool| {
                     change_calls.fetch_add(1, Ordering::SeqCst);
                 })
             }),
             ..HoverConfig::default()
         };
+
         let debug = format!("{config:?}");
+
         assert!(debug.contains("on_hover_start: Some(Callback(..))"));
         assert!(debug.contains("on_hover_end: Some(Callback(..))"));
         assert!(debug.contains("on_hover_change: Some(Callback(..))"));
+
         let event = HoverEvent {
             pointer_type: PointerType::Mouse,
             event_type: HoverEventType::HoverStart,
         };
+
         config.on_hover_start.as_ref().expect("callback")(event.clone());
         config.on_hover_end.as_ref().expect("callback")(event);
         config.on_hover_change.as_ref().expect("callback")(true);
+
         assert_eq!(start_calls.load(Ordering::SeqCst), 1);
         assert_eq!(end_calls.load(Ordering::SeqCst), 1);
         assert_eq!(change_calls.load(Ordering::SeqCst), 1);
@@ -258,68 +277,87 @@ mod tests {
     #[test]
     fn hover_config_clone_preserves_disabled_and_shares_callbacks() {
         let calls = Arc::new(AtomicUsize::new(0));
+
         let config = HoverConfig {
             disabled: true,
             on_hover_start: Some({
                 let calls = Arc::clone(&calls);
+
                 Callback::new(move |_: HoverEvent| {
                     calls.fetch_add(1, Ordering::SeqCst);
                 })
             }),
             ..HoverConfig::default()
         };
+
         let cloned = config.clone();
+
         assert!(cloned.disabled);
+
         // Callback clone shares the same allocation (pointer identity)
         assert_eq!(config.on_hover_start, cloned.on_hover_start);
+
         cloned.on_hover_start.as_ref().expect("callback")(HoverEvent {
             pointer_type: PointerType::Pen,
             event_type: HoverEventType::HoverStart,
         });
+
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
     fn hover_config_partial_eq_uses_pointer_identity_for_callbacks() {
         let shared_calls = Arc::new(AtomicUsize::new(0));
+
         let cb = {
             let shared_calls = Arc::clone(&shared_calls);
+
             Callback::new(move |_: HoverEvent| {
                 shared_calls.fetch_add(1, Ordering::SeqCst);
             })
         };
+
         let config1 = HoverConfig {
             on_hover_start: Some(cb.clone()),
             ..HoverConfig::default()
         };
+
         let config2 = HoverConfig {
             on_hover_start: Some(cb),
             ..HoverConfig::default()
         };
+
         // Same callback allocation → equal
         assert_eq!(config1, config2);
+
         config2.on_hover_start.as_ref().expect("callback")(HoverEvent {
             pointer_type: PointerType::Touch,
             event_type: HoverEventType::HoverStart,
         });
+
         assert_eq!(shared_calls.load(Ordering::SeqCst), 1);
 
         // Different callback allocation → not equal (even if same closure body)
         let different_calls = Arc::new(AtomicUsize::new(0));
+
         let config3 = HoverConfig {
             on_hover_start: Some({
                 let different_calls = Arc::clone(&different_calls);
+
                 Callback::new(move |_: HoverEvent| {
                     different_calls.fetch_add(1, Ordering::SeqCst);
                 })
             }),
             ..HoverConfig::default()
         };
+
         assert_ne!(config1, config3);
+
         config3.on_hover_start.as_ref().expect("callback")(HoverEvent {
             pointer_type: PointerType::Mouse,
             event_type: HoverEventType::HoverStart,
         });
+
         assert_eq!(different_calls.load(Ordering::SeqCst), 1);
     }
 
@@ -333,7 +371,9 @@ mod tests {
     #[test]
     fn hover_event_type_is_copy() {
         let t = HoverEventType::HoverStart;
+
         let t2 = t;
+
         assert_eq!(t, t2);
     }
 
@@ -345,6 +385,7 @@ mod tests {
             pointer_type: PointerType::Mouse,
             event_type: HoverEventType::HoverStart,
         };
+
         assert_eq!(event.pointer_type, PointerType::Mouse);
         assert_eq!(event.event_type, HoverEventType::HoverStart);
     }
@@ -355,6 +396,7 @@ mod tests {
             pointer_type: PointerType::Pen,
             event_type: HoverEventType::HoverEnd,
         };
+
         assert_eq!(event.pointer_type, PointerType::Pen);
         assert_eq!(event.event_type, HoverEventType::HoverEnd);
     }
@@ -365,7 +407,9 @@ mod tests {
             pointer_type: PointerType::Mouse,
             event_type: HoverEventType::HoverStart,
         };
+
         let cloned = event.clone();
+
         assert_eq!(cloned.pointer_type, PointerType::Mouse);
         assert_eq!(cloned.event_type, HoverEventType::HoverStart);
     }
@@ -395,7 +439,9 @@ mod tests {
             state: SharedState::new(HoverState::NotHovered),
             hovered: false,
         };
+
         let attrs = result.current_attrs();
+
         assert!(!attrs.contains(&HtmlAttr::Data("ars-hovered")));
     }
 
@@ -405,7 +451,9 @@ mod tests {
             state: SharedState::new(HoverState::Hovered),
             hovered: true,
         };
+
         let attrs = result.current_attrs();
+
         assert!(attrs.contains(&HtmlAttr::Data("ars-hovered")));
         assert_eq!(
             attrs.get_value(&HtmlAttr::Data("ars-hovered")),
@@ -416,6 +464,7 @@ mod tests {
     #[test]
     fn hover_result_current_attrs_reflects_live_state_mutation() {
         let state = SharedState::new(HoverState::NotHovered);
+
         let result = HoverResult {
             state: state.clone(),
             hovered: false,
@@ -433,6 +482,7 @@ mod tests {
 
         // current_attrs() must reflect the live state, not a stale snapshot
         let attrs = result.current_attrs();
+
         assert!(attrs.contains(&HtmlAttr::Data("ars-hovered")));
         assert_eq!(
             attrs.get_value(&HtmlAttr::Data("ars-hovered")),
@@ -441,6 +491,7 @@ mod tests {
 
         // Mutate back to NotHovered
         state.set(HoverState::NotHovered);
+
         assert!(
             !result
                 .current_attrs()
@@ -453,12 +504,14 @@ mod tests {
     #[test]
     fn use_hover_returns_not_hovered_state() {
         let result = use_hover(HoverConfig::default());
+
         assert_eq!(result.state.get(), HoverState::NotHovered);
     }
 
     #[test]
     fn use_hover_returns_hovered_false() {
         let result = use_hover(HoverConfig::default());
+
         assert!(!result.hovered);
     }
 
@@ -468,7 +521,9 @@ mod tests {
             disabled: true,
             ..HoverConfig::default()
         };
+
         let result = use_hover(config);
+
         assert_eq!(result.state.get(), HoverState::NotHovered);
         assert!(!result.hovered);
     }
@@ -478,26 +533,32 @@ mod tests {
     #[test]
     fn should_clear_hover_false_when_no_press() {
         let modality = DefaultModalityContext::new();
+
         assert!(!should_clear_hover(&modality));
     }
 
     #[test]
     fn should_clear_hover_true_when_press_active() {
         let modality = DefaultModalityContext::new();
+
         modality.set_global_press_active(true);
+
         assert!(should_clear_hover(&modality));
     }
 
     #[test]
     fn had_pointer_interaction_false_initially() {
         let modality = DefaultModalityContext::new();
+
         assert!(!had_pointer_interaction(&modality));
     }
 
     #[test]
     fn had_pointer_interaction_true_after_pointer_down() {
         let modality = DefaultModalityContext::new();
+
         modality.on_pointer_down(PointerType::Mouse);
+
         assert!(had_pointer_interaction(&modality));
     }
 }

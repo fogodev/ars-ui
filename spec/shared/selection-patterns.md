@@ -397,11 +397,7 @@ pub enum FilterMode {
     StartsWith,
     /// Custom filter function. Receives the input text and an item label,
     /// returns `true` if the item should be visible.
-    /// Uses the same cfg-gate pattern as `MessageFn` (see 04-internationalization.md §7):
-    /// `Rc` on WASM, `Arc + Send + Sync` on native.
-    #[cfg(target_arch = "wasm32")]
-    Custom(Rc<dyn Fn(&str, &str) -> bool>),
-    #[cfg(not(target_arch = "wasm32"))]
+    /// Uses shared `Arc` ownership on all targets.
     Custom(Arc<dyn Fn(&str, &str) -> bool + Send + Sync>),
     /// No filtering — show all items always.
     None,

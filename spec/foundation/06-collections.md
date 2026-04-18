@@ -6106,12 +6106,12 @@ Each component's state machine gains an optional `dnd_enabled: bool` config fiel
 ```rust
 /// Localizable messages for collection-level drag-and-drop operations.
 /// Follows the ComponentMessages pattern from `04-internationalization.md` §7.1.
-/// `CollectionDndMessages` uses `MessageFn` (cfg-gated: `Rc` on WASM, `Arc` on native)
+/// `CollectionDndMessages` uses `MessageFn` (`Arc` on all targets)
 /// for closure fields, consistent with the Messages convention in `04-internationalization.md` §7.1.
 ///
 /// `MessageFn::new(closure)` accepts any closure matching the field's function signature.
 /// The `MessageFn<dyn Fn(A, B, ...) -> String + Send + Sync>` wrapper provides a
-/// type-erased, cfg-gated (Rc on WASM / Arc on native) container. Each closure signature
+/// type-erased, Arc-backed container. Each closure signature
 /// requires a corresponding `From` impl in the `MessageFn` infrastructure (see
 /// `04-internationalization.md` §7.1).
 // Manual Debug impl prints closure fields as "<closure>".
