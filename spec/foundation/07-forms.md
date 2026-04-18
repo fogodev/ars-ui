@@ -2856,11 +2856,11 @@ pub enum Event {
 }
 ```
 
-#### 12.2.3 Fieldset Component Context
+#### 12.2.3 Fieldset Component MachineContext
 
 ```rust
 #[derive(Clone, Debug, PartialEq)]
-pub struct Context {
+pub struct MachineContext {
     /// Whether the entire fieldset and all contained inputs are disabled.
     pub disabled: bool,
     /// Whether the fieldset is in an invalid state.
@@ -2916,13 +2916,13 @@ pub struct Machine;
 impl ars_core::Machine for Machine {
     type State = State;
     type Event = Event;
-    type Context = Context;
+    type Context = MachineContext;
     type Props = Props;
     type Api<'a> = Api<'a>;
     type Messages = Messages;
 
     fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let ctx = Context {
+        let ctx = MachineContext {
             disabled: props.disabled,
             invalid: props.invalid,
             readonly: props.readonly,
@@ -3002,12 +3002,12 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a Self::State,
+        _state: &'a Self::State,
         ctx: &'a Self::Context,
-        props: &'a Self::Props,
-        send: &'a dyn Fn(Self::Event),
+        _props: &'a Self::Props,
+        _send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
-        Api { state, ctx, props, send }
+        Api { ctx }
     }
 }
 ```
@@ -3016,10 +3016,7 @@ impl ars_core::Machine for Machine {
 
 ```rust
 pub struct Api<'a> {
-    state: &'a State,
-    ctx: &'a Context,
-    props: &'a Props,
-    send: &'a dyn Fn(Event),
+    ctx: &'a MachineContext,
 }
 
 #[derive(ComponentPart)]

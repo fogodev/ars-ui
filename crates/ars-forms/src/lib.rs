@@ -8,6 +8,8 @@
 //!
 //! - **[`field`]** — [`field::State`], [`field::Value`], [`field::Context`],
 //!   [`field::Descriptors`], [`field::InputAria`], [`field::ValueExt`]
+//! - **[`fieldset`]** — [`fieldset::State`], [`fieldset::Props`],
+//!   [`fieldset::Context`], [`fieldset::Part`]
 //! - **[`validation`]** — [`validation::Error`], [`validation::Result`],
 //!   [`validation::ResultExt`], [`validation::Validator`],
 //!   [`validation::BoxedValidator`], [`validation::Context`],
@@ -19,6 +21,7 @@
 //!   [`hidden_input::attrs()`], [`hidden_input::multi_attrs()`]
 
 pub mod field;
+pub mod fieldset;
 pub mod form;
 pub mod form_messages;
 pub mod form_submit;
