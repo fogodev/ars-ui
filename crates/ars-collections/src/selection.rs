@@ -634,6 +634,45 @@ mod tests {
     }
 
     #[test]
+    fn select_in_none_mode_with_non_default_state_is_identity() {
+        // Even when anchor_key, focused_key, and selection_mode_active are all
+        // populated, a `Mode::None` state must return an identical clone from
+        // `select()` — the early-return at the top of the function preserves
+        // every field, not just the mode.
+        let state = State {
+            mode: Mode::None,
+            selected_keys: Set::Multiple(BTreeSet::from([Key::int(2)])),
+            anchor_key: Some(Key::int(2)),
+            focused_key: Some(Key::int(2)),
+            selection_mode_active: true,
+            ..multiple_toggle_state()
+        };
+
+        assert_eq!(state.select(Key::int(1)), state);
+    }
+
+    #[test]
+    fn deselect_from_all_delegates_to_deselect_for_multiple_set() {
+        // When `selected_keys` is not `Set::All`, `deselect_from_all` must
+        // delegate to `deselect()` — covering the `_` arm of the inner match.
+        let collection = fixture_collection();
+
+        let state = State {
+            selected_keys: Set::Multiple(BTreeSet::from([Key::int(1), Key::int(2)])),
+            selection_mode_active: true,
+            ..multiple_toggle_state()
+        };
+
+        let next = state.deselect_from_all(&Key::int(1), &collection);
+
+        assert_eq!(
+            next.selected_keys,
+            Set::Multiple(BTreeSet::from([Key::int(2)]))
+        );
+        assert!(next.selection_mode_active);
+    }
+
+    #[test]
     fn toggle_from_all_uses_collection_complement() {
         let collection = fixture_collection();
         let state = State {
