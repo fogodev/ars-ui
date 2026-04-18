@@ -2122,6 +2122,56 @@ mod tests {
     }
 
     #[test]
+    fn reparent_ancestor_under_descendant_restores_tree() {
+        // Tree: parent(1) -> child(2) -> grandchild(3). Uses TreeFruit values
+        // because `reparent` requires `T: CollectionItem` — the `leaf`/`branch`
+        // helpers in this module produce `&'static str` values, which don't
+        // satisfy the bound.
+        let mut tree = TreeCollection::new(vec![TreeItemConfig {
+            key: Key::int(1),
+            text_value: "Parent".to_string(),
+            value: TreeFruit::new(1, "Parent"),
+            children: vec![TreeItemConfig {
+                key: Key::int(2),
+                text_value: "Child".to_string(),
+                value: TreeFruit::new(2, "Child"),
+                children: vec![TreeItemConfig {
+                    key: Key::int(3),
+                    text_value: "Grandchild".to_string(),
+                    value: TreeFruit::new(3, "Grandchild"),
+                    children: Vec::new(),
+                    default_expanded: false,
+                }],
+                default_expanded: true,
+            }],
+            default_expanded: true,
+        }]);
+
+        // Attempting to reparent an ancestor (1) beneath its own descendant
+        // (3) would create a cycle. The cycle guard must reject the move and
+        // restore the extracted subtree so the tree stays well-formed.
+        let result = tree.reparent(&Key::int(1), Some(&Key::int(3)), 0);
+
+        assert_eq!(result, None);
+        assert_eq!(tree.all_nodes.len(), 3);
+
+        let parent = tree.get(&Key::int(1)).expect("Parent restored");
+
+        assert_eq!(parent.level, 0);
+        assert_eq!(parent.parent_key, None);
+
+        let child = tree.get(&Key::int(2)).expect("Child restored");
+
+        assert_eq!(child.level, 1);
+        assert_eq!(child.parent_key, Some(Key::int(1)));
+
+        let grandchild = tree.get(&Key::int(3)).expect("Grandchild restored");
+
+        assert_eq!(grandchild.level, 2);
+        assert_eq!(grandchild.parent_key, Some(Key::int(2)));
+    }
+
+    #[test]
     fn tree_item_config_debug() {
         let config = leaf(1, "Apple");
 

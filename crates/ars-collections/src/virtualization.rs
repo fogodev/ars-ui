@@ -1524,6 +1524,32 @@ mod tests {
     }
 
     #[test]
+    fn waterfall_layout_visible_range_returns_empty_when_all_items_offscreen() {
+        // 3 uniform columns of 45px items with 12px gap produce rows at y=0,
+        // y=57, y=114. Positioning the viewport inside the 45→57 gap means
+        // every item fails the `item_bottom > scroll_offset && y < scroll +
+        // viewport` predicate, leaving `first = total_count` and `last = 0`.
+        // The `if first > last` reset branch then collapses the range to
+        // `(0, 0)` so `visible_range()` is empty.
+        let mut virt = Virtualizer::new(
+            9,
+            LayoutStrategy::WaterfallLayout {
+                min_item_width: 120.0,
+                max_item_width: 240.0,
+                min_item_height: 45.0,
+                gap: 12.0,
+            },
+        );
+
+        // viewport_width=400 → 3 columns. scroll_top=46 with height=10 sits
+        // entirely inside the 45→57 gap between row 0 and row 1.
+        virt.set_scroll_state_mut(46.0, 0.0, 10.0, 400.0);
+        virt.overscan = 0;
+
+        assert_eq!(virt.visible_range(), 0..0);
+    }
+
+    #[test]
     fn waterfall_layout_empty_collection() {
         let virt = Virtualizer::new(
             0,
