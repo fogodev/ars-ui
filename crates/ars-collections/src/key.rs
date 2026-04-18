@@ -15,6 +15,7 @@ use core::fmt;
 /// primary key). The `Uuid` variant (requires the `uuid` feature) provides
 /// a zero-allocation path for UUID-based identifiers.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Key {
     /// String key — the universal fallback.
     String(String),

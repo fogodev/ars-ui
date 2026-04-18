@@ -5641,18 +5641,27 @@ crates/ars-collections/
     lib.rs                  # Re-exports: Collection, Key, Node, NodeType, ...
     key.rs                  # Key enum, From impls
     node.rs                 # Node<T>, NodeType
-    collection.rs           # Collection<T> trait
+    collection.rs           # Collection<T> trait, CollectionItem
     builder.rs              # CollectionBuilder<T>
     static_collection.rs    # StaticCollection<T>
     tree_collection.rs      # TreeCollection<T>, TreeItemConfig<T>
+    mutable.rs              # MutableListData, MutableTreeData, CollectionChange
+    announcements.rs        # CollectionChangeAnnouncement, CollectionMessages
     selection.rs            # selection::Mode, selection::Behavior, selection::Set,
-                            #   selection::State
+                            #   selection::State, selection::DisabledBehavior, selection::OnAction
     typeahead.rs            # typeahead::State, TYPEAHEAD_TIMEOUT_MS
     navigation.rs           # next_enabled_key, prev_enabled_key, first_enabled_key, last_enabled_key
     async_collection.rs     # AsyncLoadingState, AsyncCollection<T>
-    virtualization.rs       # Virtualizer, LayoutStrategy, ScrollAlign
+    async_loader.rs         # AsyncLoader trait, LoadResult, CollectionError
+    virtualization.rs       # Virtualizer, LayoutStrategy, ScrollAlign, RtlScrollMode
+    virtual_layout.rs       # VirtualLayout, HorizontalVirtualLayout extension traits
     filtered_collection.rs  # FilteredCollection<T>
-    sorted_collection.rs    # SortedCollection<T>, SortDirection
+    sorted_collection/      # SortedCollection<T>, SortDirection, SortDescriptor<K>
+      mod.rs                #   (collation submodule gated on the `i18n` feature)
+      collation.rs          # CollationSupport, CollationTarget, CollatorCache (i18n only)
+    dnd.rs                  # DraggableCollection, DroppableCollection, CollectionDndEvent,
+                            #   CollectionDropTarget, DropPosition, CollectionDndMessages,
+                            #   DndAnnouncements, DndAnnouncementData (std feature only)
 ```
 
 ```toml
@@ -5663,20 +5672,32 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ars-core  = { path = "../ars-core" }
-ars-a11y  = { path = "../ars-a11y" }
-ars-i18n  = { path = "../ars-i18n", optional = true }
+ars-core         = { path = "../ars-core", default-features = false }
+ars-a11y         = { path = "../ars-a11y", default-features = false }
+ars-i18n         = { path = "../ars-i18n", optional = true }
+ars-interactions = { path = "../ars-interactions", default-features = false, optional = true }
+# `std` feature: supplies `Callback`, `SharedFlag`, and `DragItem` used by
+# `selection::OnAction` and the DnD extension traits in `dnd.rs`.
+
+hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }
+# Required: `indexmap` without std has no default `BuildHasher`; `hashbrown::DefaultHashBuilder`
+# (foldhash) fills that slot for `IndexMap<Key, usize, _>` used throughout this crate.
+
+icu = { version = "2.2", default-features = false, features = ["compiled_data"], optional = true }
+# `i18n` feature: locale-aware collation in `sorted_collection::collation`.
+
 # indexmap v2 provides no_std + alloc support by default when "std" is disabled;
 # there is no separate "alloc" feature.
-indexmap  = { version = "2", default-features = false }
+indexmap = { version = "2", default-features = false }
+serde    = { version = "1", default-features = false, features = ["alloc", "derive"], optional = true }
 uuid     = { version = "1", default-features = false, optional = true }
 
 [features]
-default  = ["std"]
-std      = ["indexmap/std"]
-i18n     = ["dep:ars-i18n"]          # Enables locale-aware collation helpers
-uuid     = ["dep:uuid"]              # Enables Key::Uuid variant (zero-allocation UUID keys)
-serde    = ["dep:serde", "indexmap/serde"] # Serializable selection::Set, Key
+default = ["std"]
+std     = ["dep:ars-interactions", "indexmap/std"]          # Enables DnD, selection callbacks, and `IndexMap`'s std path
+i18n    = ["dep:ars-i18n", "dep:icu"]                       # Enables locale-aware collation helpers
+uuid    = ["dep:uuid"]                                      # Enables Key::Uuid variant (zero-allocation UUID keys)
+serde   = ["dep:serde", "indexmap/serde", "uuid?/serde"]    # Serialize/Deserialize for Key, Node, selection types, SortDescriptor, AsyncLoadingState, CollectionChange (weak dep: `uuid?/serde` only activates when both `uuid` and `serde` are enabled)
 ```
 
 ---

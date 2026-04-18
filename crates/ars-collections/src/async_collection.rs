@@ -9,6 +9,7 @@ use crate::{Collection, Key, Node, StaticCollection};
 /// Tracks whether a collection is idle, actively loading its initial or
 /// subsequent data, fully loaded, or in an error state requiring retry.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AsyncLoadingState {
     /// No load has been initiated yet.
     #[default]

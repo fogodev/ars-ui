@@ -44,6 +44,14 @@ use crate::{
 /// use keys other than [`Key`]; production wrappers always use
 /// `CollectionChange<Key>`.
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        serialize = "K: Clone + serde::Serialize",
+        deserialize = "K: Clone + serde::de::DeserializeOwned"
+    ))
+)]
 pub enum CollectionChange<K: Clone> {
     /// New items inserted at the given flat index.
     ///

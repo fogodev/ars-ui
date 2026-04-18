@@ -12,7 +12,7 @@ default = ["std"]
 std     = ["dep:ars-interactions", "indexmap/std"]
 i18n    = ["dep:ars-i18n", "dep:icu"]
 uuid    = ["dep:uuid"]
-serde   = []
+serde   = ["dep:serde", "indexmap/serde", "uuid?/serde"]
 
 [dependencies]
 ars-a11y = { path = "../ars-a11y", default-features = false }
@@ -22,10 +22,12 @@ ars-interactions = { path = "../ars-interactions", default-features = false, opt
 hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }
 icu      = { version = "2.2", default-features = false, features = ["compiled_data"], optional = true }
 indexmap = { version = "2", default-features = false }
+serde    = { version = "1", default-features = false, features = ["alloc", "derive"], optional = true }
 uuid     = { version = "1", default-features = false, optional = true }
 
 [dev-dependencies]
 ars-interactions = { path = "../ars-interactions", default-features = false, features = ["test-support"] }
+serde_json       = "1"
 
 [lints]
 workspace = true

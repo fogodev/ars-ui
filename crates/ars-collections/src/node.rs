@@ -6,6 +6,7 @@ use crate::{collection::CollectionItem, key::Key};
 
 /// The structural role of a node within a collection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum NodeType {
     /// A selectable/focusable item (the common case).
     Item,
@@ -26,6 +27,14 @@ pub enum NodeType {
 /// together with structural metadata used by components for rendering,
 /// keyboard navigation, and ARIA attribute generation.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        serialize = "T: serde::Serialize",
+        deserialize = "T: serde::de::DeserializeOwned"
+    ))
+)]
 pub struct Node<T> {
     /// Stable identity of this node.
     pub key: Key,

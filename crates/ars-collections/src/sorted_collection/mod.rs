@@ -23,6 +23,7 @@ use crate::{
 
 /// The direction of a sort.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SortDirection {
     /// Sort in ascending order (smallest first).
     Ascending,
@@ -45,6 +46,14 @@ impl Display for SortDirection {
 /// `K` is the column key type — typically the same `Key` used by the
 /// collection, but any type works (e.g., a string column identifier).
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        serialize = "K: serde::Serialize",
+        deserialize = "K: serde::de::DeserializeOwned"
+    ))
+)]
 pub struct SortDescriptor<K> {
     /// The column (or field) being sorted.
     pub column: K,
