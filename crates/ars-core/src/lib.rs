@@ -127,9 +127,11 @@ type EffectSetupFn<M> = Box<
 pub struct PendingEffect<M: Machine> {
     /// The identifier for this effect, used by adapters to match and execute it.
     pub name: &'static str,
+
     /// The state after the transition that produced this effect.
     /// Set by [`Service::drain_queue`] before returning to the adapter.
     pub target_state: Option<M::State>,
+
     /// Setup closure — receives a snapshot of context, props, and the
     /// strong send handle. Returns a cleanup function.
     pub(crate) setup: EffectSetupFn<M>,
@@ -192,6 +194,8 @@ impl<M: Machine> Debug for PendingEffect<M> {
 // TransitionPlan
 // ────────────────────────────────────────────────────────────────────
 
+type ApplyFn<M> = dyn FnOnce(&mut <M as Machine>::Context);
+
 /// The result of a state machine transition, describing what should change.
 ///
 /// Built using a fluent builder pattern. Returning `None` from
@@ -200,15 +204,19 @@ impl<M: Machine> Debug for PendingEffect<M> {
 pub struct TransitionPlan<M: Machine> {
     /// The new state to transition to, or `None` to remain in the current state.
     pub target: Option<M::State>,
+
     /// Mutation to apply to the context after state change.
-    #[expect(clippy::type_complexity, reason = "closure type is inherently complex")]
-    pub(crate) apply: Option<Box<dyn FnOnce(&mut M::Context)>>,
+    pub(crate) apply: Option<Box<ApplyFn<M>>>,
+
     /// Human-readable description of the apply closure's purpose.
     pub(crate) apply_description: Option<&'static str>,
+
     /// Events to enqueue after this transition completes.
     pub then_send: Vec<M::Event>,
+
     /// Side effects for the adapter to set up.
     pub effects: Vec<PendingEffect<M>>,
+
     /// Named effects to cancel (cleanup runs immediately, no replacement).
     pub cancel_effects: Vec<&'static str>,
 }
@@ -372,6 +380,7 @@ impl<T: Clone + PartialEq + Debug> BindableValue for T {}
 pub struct Bindable<T: BindableValue> {
     /// The externally controlled value, or `None` if uncontrolled.
     controlled: Option<T>,
+
     /// The internal value managed by the component.
     internal: T,
 }
@@ -521,6 +530,7 @@ pub trait ConnectApi {
 pub struct Env {
     /// The resolved locale from `ArsProvider`.
     pub locale: Locale,
+
     /// Calendar/locale data provider for date-time formatting.
     /// Defaults to [`StubIcuProvider`] (English-only, zero dependencies).
     pub icu_provider: Arc<dyn IcuProvider>,
@@ -556,14 +566,19 @@ impl Default for Env {
 pub trait Machine: Sized + 'static {
     /// The state type representing the machine's current configuration.
     type State: Clone + Debug + PartialEq;
+
     /// The event type that triggers state transitions.
     type Event: Clone + Debug;
+
     /// Internal context accumulated across transitions (e.g. focused index, scroll offset).
     type Context: Clone + Debug;
+
     /// External configuration passed in by the parent component.
     type Props: Clone + PartialEq + HasId;
+
     /// Per-component i18n messages type.
     type Messages: ComponentMessages + Clone + Default + 'static;
+
     /// The connect API type that produces attributes from current state.
     type Api<'a>: ConnectApi
     where
@@ -619,13 +634,16 @@ const MAX_DRAIN_ITERATIONS: usize = 100;
 #[cfg(feature = "debug")]
 fn format_effect_names<M: Machine>(effects: &[PendingEffect<M>]) -> String {
     let mut formatted = String::from("[");
+
     for (index, effect) in effects.iter().enumerate() {
         if index > 0 {
             formatted.push_str(", ");
         }
         formatted.push_str(effect.name);
     }
+
     formatted.push(']');
+
     formatted
 }
 
@@ -656,17 +674,22 @@ fn format_apply_description(description: Option<&'static str>) -> String {
 pub struct SendResult<M: Machine> {
     /// Whether any state change occurred during this send cycle.
     pub state_changed: bool,
+
     /// Whether any context mutation occurred (via `plan.apply`).
     ///
     /// Adapters should trigger re-render when `state_changed || context_changed`.
     pub context_changed: bool,
+
     /// Effects that the adapter must set up.
     pub pending_effects: Vec<PendingEffect<M>>,
+
     /// Named effects to cancel. The adapter runs their cleanup closures
     /// immediately, before setting up any new `pending_effects`.
     pub cancel_effects: Vec<&'static str>,
+
     /// Whether the event queue was truncated due to hitting `MAX_DRAIN_ITERATIONS`.
     pub truncated: bool,
+
     /// Number of consecutive context-only iterations at the end of drain.
     ///
     /// Useful for diagnostics — a high trailing value may indicate a
@@ -726,7 +749,9 @@ impl<M: Machine> Service<M> {
     #[must_use]
     pub fn new(props: M::Props, env: &Env, messages: &M::Messages) -> Self {
         debug_assert!(!props.id().is_empty(), "Props::id must not be empty");
+
         let (state, context) = M::init(&props, env, messages);
+
         Self {
             state,
             context,
@@ -753,7 +778,9 @@ impl<M: Machine> Service<M> {
         messages: &M::Messages,
     ) -> Self {
         debug_assert!(!props.id().is_empty(), "Props::id must not be empty");
+
         let (_init_state, context) = M::init(&props, env, messages);
+
         Self {
             state,
             context,
@@ -798,6 +825,7 @@ impl<M: Machine> Service<M> {
     #[must_use]
     pub fn send(&mut self, event: M::Event) -> SendResult<M> {
         debug_assert!(!self.unmounted, "send() called after unmount()");
+
         if self.unmounted {
             #[cfg(feature = "debug")]
             log::debug!(
@@ -805,6 +833,7 @@ impl<M: Machine> Service<M> {
                 self.props.id(),
                 event
             );
+
             return SendResult {
                 state_changed: false,
                 context_changed: false,
@@ -814,16 +843,22 @@ impl<M: Machine> Service<M> {
                 context_change_count: 0,
             };
         }
+
         self.event_queue.push_back(event);
+
         self.drain_queue()
     }
 
     /// Processes all queued events iteratively with loop safety.
     fn drain_queue(&mut self) -> SendResult<M> {
         let mut pending_effects = Vec::new();
+
         let mut cancel_effects = Vec::new();
+
         let mut state_changed = false;
+
         let mut context_changed = false;
+
         #[cfg_attr(
             debug_assertions,
             expect(
@@ -832,21 +867,27 @@ impl<M: Machine> Service<M> {
             )
         )]
         let mut truncated = false;
+
         let mut iterations = 0;
+
         let mut context_change_count = 0;
 
         while let Some(event) = self.event_queue.pop_front() {
             iterations += 1;
+
             #[cfg(feature = "debug")]
             let state_before = format!("{:?}", self.state);
+
             #[cfg(feature = "debug")]
             let event_repr = format!("{event:?}");
+
             if iterations > MAX_DRAIN_ITERATIONS {
                 #[cfg(debug_assertions)]
                 panic!(
                     "Event queue exceeded {MAX_DRAIN_ITERATIONS} iterations — \
                      likely an infinite loop in transitions"
                 );
+
                 #[cfg(not(debug_assertions))]
                 {
                     #[cfg(feature = "debug")]
@@ -855,7 +896,9 @@ impl<M: Machine> Service<M> {
                          truncating. This likely indicates an infinite loop in state machine \
                          transitions."
                     );
+
                     truncated = true;
+
                     break;
                 }
             }
@@ -863,22 +906,27 @@ impl<M: Machine> Service<M> {
             if let Some(plan) = M::transition(&self.state, &event, &self.context, &self.props) {
                 #[cfg(feature = "debug")]
                 let target_state = format_target_state(plan.target.as_ref());
+
                 #[cfg(feature = "debug")]
                 let effect_names = format_effect_names(&plan.effects);
+
                 #[cfg(feature = "debug")]
                 let apply_description = format_apply_description(plan.apply_description);
+
                 #[cfg(feature = "debug")]
                 let follow_up_events = format_follow_up_events(&plan.then_send);
 
                 // Apply context mutation.
                 if let Some(apply) = plan.apply {
                     apply(&mut self.context);
+
                     context_changed = true;
                 }
 
                 // Track context-only iterations for diagnostics.
                 if plan.target.is_none() {
                     context_change_count += 1;
+
                     if context_change_count >= MAX_DRAIN_ITERATIONS {
                         #[cfg(debug_assertions)]
                         panic!(
@@ -886,6 +934,7 @@ impl<M: Machine> Service<M> {
                              iterations without a state change — likely an infinite \
                              context_only + then_send loop"
                         );
+
                         #[cfg(not(debug_assertions))]
                         {
                             #[cfg(feature = "debug")]
@@ -893,7 +942,9 @@ impl<M: Machine> Service<M> {
                                 "drain_queue: {context_change_count} context_only iterations \
                                  without state change — possible infinite loop, truncating."
                             );
+
                             truncated = true;
+
                             break;
                         }
                     }
@@ -903,12 +954,14 @@ impl<M: Machine> Service<M> {
 
                 // Enqueue follow-up events.
                 self.event_queue.extend(plan.then_send);
+
                 #[cfg(feature = "debug")]
                 let queue_depth = self.event_queue.len();
 
                 // Apply state change.
                 if let Some(next) = plan.target {
                     self.state = next;
+
                     state_changed = true;
                 }
 
@@ -925,10 +978,12 @@ impl<M: Machine> Service<M> {
                 #[cfg(feature = "debug")]
                 {
                     let component_id = self.props.id();
+
                     log::trace!(
                         "[ars:{component_id}] {state_before} + {event_repr} → {target_state} \
                          (guard: pass, effects: {effect_names})"
                     );
+
                     log::trace!(
                         "[ars:{component_id}]   apply: {apply_description}, then_send: \
                          {follow_up_events}, iteration: {iterations}, queue_depth: {queue_depth}"
@@ -961,10 +1016,13 @@ impl<M: Machine> Service<M> {
     /// enqueues any returned events, and drains the queue.
     pub fn set_props(&mut self, props: M::Props) -> SendResult<M> {
         let old_props = core::mem::replace(&mut self.props, props);
+
         let events = M::on_props_changed(&old_props, &self.props);
+
         for event in events {
             self.event_queue.push_back(event);
         }
+
         self.drain_queue()
     }
 
@@ -974,10 +1032,13 @@ impl<M: Machine> Service<M> {
     /// In debug builds, subsequent sends will panic; in release builds,
     /// they return an inert [`SendResult`].
     pub fn unmount(&mut self, active_cleanups: Vec<CleanupFn>) {
-        for cleanup in active_cleanups.into_iter().rev() {
-            cleanup();
-        }
+        active_cleanups
+            .into_iter()
+            .rev()
+            .for_each(|cleanup| cleanup());
+
         self.event_queue.clear();
+
         self.unmounted = true;
     }
 
@@ -1003,7 +1064,9 @@ impl<M: Machine> Service<M> {
     #[cfg(test)]
     pub fn set_state_for_test(&mut self, state: M::State) {
         let (_init_state, context) = M::init(&self.props, &Env::default(), &M::Messages::default());
+
         self.state = state;
+
         self.context = context;
     }
 }
@@ -1081,23 +1144,29 @@ mod tests {
     #[cfg(feature = "debug")]
     fn capture_logs(run: impl FnOnce()) -> Vec<CapturedLog> {
         init_test_logger();
+
         let _capture_guard = CAPTURE_LOCK.lock().expect("capture mutex poisoned");
+
         TEST_LOGGER
             .records
             .lock()
             .expect("test logger mutex poisoned")
             .clear();
+
         run();
+
         let records = TEST_LOGGER
             .records
             .lock()
             .expect("test logger mutex poisoned")
             .clone();
+
         TEST_LOGGER
             .records
             .lock()
             .expect("test logger mutex poisoned")
             .clear();
+
         records
     }
 
@@ -1185,6 +1254,7 @@ mod tests {
                 (ToggleState::Off, ToggleEvent::Toggle) => {
                     Some(TransitionPlan::to(ToggleState::On))
                 }
+
                 (ToggleState::On, ToggleEvent::Toggle) => {
                     Some(TransitionPlan::to(ToggleState::Off))
                 }
@@ -1210,9 +1280,11 @@ mod tests {
             &Env::default(),
             &(),
         );
+
         assert_eq!(service.state(), &ToggleState::Off);
 
         let result = service.send(ToggleEvent::Toggle);
+
         assert!(result.state_changed);
         assert!(result.pending_effects.is_empty());
         assert_eq!(service.state(), &ToggleState::On);
@@ -1227,10 +1299,14 @@ mod tests {
             &Env::default(),
             &(),
         );
+
         // Toggle is exhaustive so nothing is ignored — toggle twice and check.
         let result = service.send(ToggleEvent::Toggle);
+
         assert!(result.state_changed);
+
         let result = service.send(ToggleEvent::Toggle);
+
         assert!(result.state_changed);
         assert_eq!(service.state(), &ToggleState::Off);
     }
@@ -1287,7 +1363,9 @@ mod tests {
             &Env::default(),
             &(),
         );
+
         let result = service.send(ToggleEvent::Toggle);
+
         assert!(!result.state_changed);
         assert!(result.context_changed);
         assert_eq!(service.context().count, 1);
@@ -1343,7 +1421,9 @@ mod tests {
             &Env::default(),
             &(),
         );
+
         let result = service.send(ToggleEvent::Toggle);
+
         assert_eq!(result.cancel_effects, vec!["timer", "polling"]);
     }
 
@@ -1393,7 +1473,9 @@ mod tests {
             &Env::default(),
             &(),
         );
+
         let result = service.send(ToggleEvent::Toggle);
+
         assert_eq!(result.pending_effects.len(), 1);
         assert_eq!(result.pending_effects[0].name, "focus");
         assert_eq!(
@@ -1441,6 +1523,7 @@ mod tests {
                 match event {
                     PropsEvent::SetMode(m) => {
                         let m = *m;
+
                         Some(TransitionPlan::context_only(move |ctx: &mut PropsCtx| {
                             ctx.mode = m;
                         }))
@@ -1478,6 +1561,7 @@ mod tests {
         let result = service.set_props(ToggleProps {
             id: String::from("b"),
         });
+
         assert!(result.context_changed);
         assert_eq!(service.context().mode, 1);
     }
@@ -1491,9 +1575,11 @@ mod tests {
             &Env::default(),
             &(),
         );
+
         assert_eq!(service.state(), &ToggleState::Off);
 
         service.set_state_for_test(ToggleState::On);
+
         assert_eq!(service.state(), &ToggleState::On);
     }
 
@@ -1508,6 +1594,7 @@ mod tests {
     #[test]
     fn env_default_has_en_us_locale() {
         let env = Env::default();
+
         assert_eq!(env.locale.to_bcp47(), "en-US");
     }
 
@@ -1619,6 +1706,7 @@ mod tests {
             .iter()
             .find(|record| record.message.contains("[ars:menu#item-1]"))
             .expect("expected transition log");
+
         assert!(
             transition.message.contains("effects: [focus, announce]"),
             "expected comma-joined effect names: {transition:?}"
@@ -1669,10 +1757,14 @@ mod tests {
                             .apply(|ctx: &mut DebugContext| ctx.pressed = true)
                             .then(DebugEvent::Notify)
                             .with_effect(PendingEffect::named("notify_change"));
+
                         plan.apply_description = Some("set pressed = true");
+
                         Some(plan)
                     }
+
                     (ToggleState::On, DebugEvent::Notify) => Some(TransitionPlan::new()),
+
                     _ => None,
                 }
             }
@@ -1707,6 +1799,7 @@ mod tests {
                     .contains("[ars:toggle#btn-1] Off + Toggle → On")
             })
             .expect("expected transition log");
+
         assert_eq!(transition.level, log::Level::Trace);
         assert!(
             transition.message.contains("guard: pass"),
@@ -1800,6 +1893,7 @@ mod tests {
             .iter()
             .find(|record| record.message.contains("[ars:combobox#cb-1]"))
             .expect("expected rejected transition log");
+
         assert!(
             rejected.message.contains("guard: reject"),
             "missing guard reject marker: {rejected:?}"
@@ -1847,9 +1941,11 @@ mod tests {
                     (ToggleState::Off, ChainEvent::Start) => {
                         Some(TransitionPlan::to(ToggleState::On).then(ChainEvent::Continue))
                     }
+
                     (ToggleState::On, ChainEvent::Continue) => {
                         Some(TransitionPlan::to(ToggleState::Off))
                     }
+
                     _ => None,
                 }
             }
@@ -1885,6 +1981,7 @@ mod tests {
                     && record.message.contains("iteration: 1")
             })
             .expect("expected first detail log");
+
         assert!(
             iteration_one.message.contains("queue_depth: 1"),
             "expected queued follow-up event after first iteration: {iteration_one:?}"
@@ -1899,6 +1996,7 @@ mod tests {
                     && record.message.contains("iteration: 2")
             })
             .expect("expected second detail log");
+
         assert!(
             iteration_two.message.contains("queue_depth: 0"),
             "expected queue to be drained after second iteration: {iteration_two:?}"
@@ -2046,10 +2144,12 @@ mod tests {
             &Env::default(),
             &(),
         );
+
         service.unmount(Vec::new());
 
         let logs = capture_logs(|| {
             let result = service.send(ToggleEvent::Toggle);
+
             assert!(!result.state_changed);
             assert!(!result.context_changed);
             assert!(result.pending_effects.is_empty());
@@ -2062,6 +2162,7 @@ mod tests {
             .iter()
             .find(|record| record.level == log::Level::Debug)
             .expect("expected dropped-event debug log");
+
         assert!(
             dropped
                 .message
@@ -2106,6 +2207,7 @@ mod tests {
                     (ToggleState::Off, LoopEvent::Continue) => {
                         Some(TransitionPlan::to(ToggleState::On).then(LoopEvent::Continue))
                     }
+
                     (ToggleState::On, LoopEvent::Continue) => {
                         Some(TransitionPlan::to(ToggleState::Off).then(LoopEvent::Continue))
                     }
@@ -2132,6 +2234,7 @@ mod tests {
 
         let logs = capture_logs(|| {
             let result = service.send(LoopEvent::Continue);
+
             assert!(result.truncated);
             assert!(result.state_changed);
             assert!(!result.context_changed);
@@ -2142,6 +2245,7 @@ mod tests {
             .iter()
             .find(|record| record.level == log::Level::Warn)
             .expect("expected truncation warning log");
+
         assert!(
             warning
                 .message
@@ -2225,6 +2329,7 @@ mod tests {
             .iter()
             .find(|record| record.level == log::Level::Warn)
             .expect("expected context_only truncation warning");
+
         assert!(
             warning
                 .message
@@ -2236,27 +2341,35 @@ mod tests {
     #[test]
     fn bindable_set_updates_internal_value_in_both_modes() {
         let mut uncontrolled = Bindable::uncontrolled(1_u8);
+
         uncontrolled.set(2);
+
         assert_eq!(uncontrolled.get(), &2);
 
         let mut controlled = Bindable::controlled(1_u8);
+
         controlled.set(2);
+
         assert_eq!(controlled.get(), &1);
 
         controlled.sync_controlled(None);
+
         assert_eq!(controlled.get(), &2);
     }
 
     #[test]
     fn bindable_sync_controlled_updates_only_the_controlled_value() {
         let mut b = Bindable::uncontrolled(10_u8);
+
         assert!(!b.is_controlled());
 
         b.sync_controlled(Some(20));
+
         assert!(b.is_controlled());
         assert_eq!(b.get(), &20);
 
         b.sync_controlled(None);
+
         assert!(!b.is_controlled());
         assert_eq!(b.get(), &10);
     }
@@ -2275,9 +2388,11 @@ mod tests {
         let mut b = Bindable::controlled(vec![String::from("controlled")]);
 
         b.get_mut_owned().push(String::from("pending"));
+
         assert_eq!(b.get(), &vec![String::from("controlled")]);
 
         b.sync_controlled(None);
+
         assert_eq!(
             b.get(),
             &vec![String::from("controlled"), String::from("pending")]
@@ -2289,12 +2404,17 @@ mod tests {
         use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
         let observed = Arc::new(AtomicBool::new(false));
+
         let cleanup_calls = Arc::new(AtomicUsize::new(0));
+
         let effect = PendingEffect::<ToggleMachine>::new("notify", {
             let cleanup_calls = Arc::clone(&cleanup_calls);
+
             move |_ctx, _props, send| {
                 send.call_if_alive(ToggleEvent::Toggle);
+
                 let cleanup_calls = Arc::clone(&cleanup_calls);
+
                 Box::new(move || {
                     cleanup_calls.fetch_add(1, Ordering::SeqCst);
                 })
@@ -2303,6 +2423,7 @@ mod tests {
 
         let send: StrongSend<ToggleEvent> = {
             let observed = Arc::clone(&observed);
+
             Arc::new(move |_event| {
                 observed.store(true, Ordering::SeqCst);
             })
@@ -2313,9 +2434,11 @@ mod tests {
         let (_state, context) = ToggleMachine::init(&props, &Env::default(), &());
 
         let cleanup = effect.run(&context, &props, send);
+
         assert!(observed.load(Ordering::SeqCst));
 
         cleanup();
+
         assert_eq!(cleanup_calls.load(Ordering::SeqCst), 1);
     }
 
@@ -2324,6 +2447,7 @@ mod tests {
         use alloc::format;
 
         let effect = PendingEffect::<ToggleMachine>::named("focus");
+
         assert_eq!(
             format!("{effect:?}"),
             "PendingEffect { name: \"focus\", target_state: None, setup: \"<closure>\" }"
@@ -2332,9 +2456,13 @@ mod tests {
         let props = ToggleProps {
             id: String::from("toggle"),
         };
+
         let (_state, context) = ToggleMachine::init(&props, &Env::default(), &());
+
         let send: StrongSend<ToggleEvent> = Arc::new(|_| {});
+
         let cleanup = effect.run(&context, &props, send);
+
         cleanup();
     }
 
@@ -2395,6 +2523,7 @@ mod tests {
     #[test]
     fn no_cleanup_is_callable() {
         let cleanup = no_cleanup();
+
         cleanup();
     }
 }

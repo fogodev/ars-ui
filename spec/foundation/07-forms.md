@@ -158,13 +158,14 @@ impl Error {
     }
 
     /// Creates a "pattern" validation error.
-    pub fn pattern(messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
+    pub fn pattern(
+        pattern: impl Into<String>,
+        messages: &FormMessages,
+        locale: &ars_i18n::Locale,
+    ) -> Self {
         Self {
             message: (messages.pattern_error)(locale),
-            // Note: Pattern string is intentionally omitted from the error code —
-            // regex patterns are opaque implementation details not suitable for error codes.
-            // The pattern is documented in the validator setup, not the error.
-            code: ErrorCode::Pattern(String::new()),
+            code: ErrorCode::Pattern(pattern.into()),
         }
     }
 
@@ -475,10 +476,7 @@ impl State {
 ### 3.1 Synchronous Validator
 
 ````rust
-#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
-#[cfg(target_arch = "wasm32")]
-use std::rc::Rc;
 use std::fmt;
 
 /// Context available to validators during validation.
@@ -555,48 +553,28 @@ impl<'a> Context<'a> {
 
 /// A synchronous field validator.
 ///
-/// **Platform-dependent bounds:** On native targets, `Validator`
-/// requires `Send + Sync` so that `BoxedValidator = Arc<dyn Validator + Send + Sync>`
-/// can wrap any implementor. On WASM (single-threaded), no extra bounds are required.
-/// All built-in validators satisfy both bound sets. Custom validators created via
-/// `FnValidator` or `ValidatorsBuilder::add()` automatically pick up the correct
-/// bounds through cfg-gated signatures.
-#[cfg(not(target_arch = "wasm32"))]
-pub trait Validator: Send + Sync {
-    fn validate(&self, value: &Value, ctx: &Context) -> Result;
-}
-
+/// Native targets require validators to be `Send + Sync`; `wasm32` allows
+/// single-threaded validators that capture browser-only state.
 #[cfg(target_arch = "wasm32")]
 pub trait Validator {
     fn validate(&self, value: &Value, ctx: &Context) -> Result;
 }
 
-/// A type-erased synchronous validator.
-/// Uses `Arc` instead of `Box` for cheap cloning across reactive signals.
-///
-/// On WASM targets, `Send + Sync` are not available (single-threaded),
-/// so we use `Rc` instead of `Arc` to avoid unnecessary atomic overhead.
-///
-/// The `BoxedValidator` bounds match the `Validator` trait bounds per platform,
-/// so `Arc::from(Box::new(v))` / `Rc::new(v)` in `ValidatorsBuilder::add()`
-/// always compiles without additional where-clause gymnastics.
 #[cfg(not(target_arch = "wasm32"))]
-pub type BoxedValidator = Arc<dyn Validator + Send + Sync>;
-#[cfg(target_arch = "wasm32")]
-pub type BoxedValidator = Rc<dyn Validator>;
-
-/// Helper to wrap a Validator into the correct smart pointer for the platform.
-pub fn boxed_validator(v: impl Validator + 'static) -> BoxedValidator {
-    #[cfg(not(target_arch = "wasm32"))]
-    { Arc::new(v) }
-    #[cfg(target_arch = "wasm32")]
-    { Rc::new(v) }
+pub trait Validator: Send + Sync {
+    fn validate(&self, value: &Value, ctx: &Context) -> Result;
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub type BoxedAsyncValidator = Arc<dyn AsyncValidator + Send + Sync>;
-#[cfg(target_arch = "wasm32")]
-pub type BoxedAsyncValidator = Rc<dyn AsyncValidator>;
+/// A type-erased synchronous validator.
+/// Uses `Arc` instead of `Box` for cheap cloning across reactive signals.
+pub type BoxedValidator = Arc<dyn Validator>;
+
+/// Helper to wrap a Validator into the standard shared pointer type.
+pub fn boxed_validator(v: impl Validator + 'static) -> BoxedValidator {
+    Arc::new(v)
+}
+
+pub type BoxedAsyncValidator = Arc<dyn AsyncValidator>;
 ````
 
 ### 3.2 Built-in Validators
@@ -769,7 +747,9 @@ impl Validator for PatternValidator {
                     .map(|m| Error { message: m, code: ErrorCode::Pattern(self.pattern.clone()) })
                     // Do not expose raw regex to users — it is incomprehensible
                     // in any language. Callers should provide a custom `message`.
-                    .unwrap_or_else(|| Error::pattern(&FormMessages::default(), locale))
+                    .unwrap_or_else(|| {
+                        Error::pattern(self.pattern.clone(), &FormMessages::default(), locale)
+                    })
             ]))
         } else {
             Ok(())
@@ -895,28 +875,10 @@ fn is_valid_url(s: &str) -> bool {
 }
 
 /// Validator created from a closure.
-///
-/// On non-WASM targets, `F` must also be `Send + Sync` so that
-/// `BoxedValidator = Arc<dyn Validator + Send + Sync>` can wrap it.
-#[cfg(not(target_arch = "wasm32"))]
 pub struct FnValidator<F: Fn(&Value, &Context) -> Result + Send + Sync> {
     pub f: F,
 }
-
-#[cfg(target_arch = "wasm32")]
-pub struct FnValidator<F: Fn(&Value, &Context) -> Result> {
-    pub f: F,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 impl<F: Fn(&Value, &Context) -> Result + Send + Sync> Validator for FnValidator<F> {
-    fn validate(&self, value: &Value, ctx: &Context) -> Result {
-        (self.f)(value, ctx)
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-impl<F: Fn(&Value, &Context) -> Result> Validator for FnValidator<F> {
     fn validate(&self, value: &Value, ctx: &Context) -> Result {
         (self.f)(value, ctx)
     }
@@ -931,18 +893,8 @@ impl<F: Fn(&Value, &Context) -> Result> Validator for FnValidator<F> {
 /// ];
 /// ```
 /// The `Validator` trait is object-safe. `FnValidator` erases the closure type.
-/// Use `.boxed()` to create the correct smart pointer type (`Arc` on native, `Rc` on WASM).
-/// When closures capture `Rc<RefCell<T>>`, ensure the capture is `Clone`-compatible
-/// with the platform-specific `BoxedValidator` bounds.
-
-#[cfg(not(target_arch = "wasm32"))]
+/// Use `.boxed()` to create the standard shared smart pointer type.
 impl<F: Fn(&Value, &Context) -> Result + Send + Sync + 'static> FnValidator<F> {
-    pub fn new(f: F) -> Self { Self { f } }
-    pub fn boxed(self) -> BoxedValidator { boxed_validator(self) }
-}
-
-#[cfg(target_arch = "wasm32")]
-impl<F: Fn(&Value, &Context) -> Result + 'static> FnValidator<F> {
     pub fn new(f: F) -> Self { Self { f } }
     pub fn boxed(self) -> BoxedValidator { boxed_validator(self) }
 }
@@ -971,23 +923,14 @@ impl ValidatorsBuilder {
         Self { validators: Vec::new() }
     }
 
-    /// Add a validator. The `Validator` trait itself carries `Send + Sync` on
-    /// native targets (cfg-gated), so the bound here is simply `Validator + 'static`
-    /// and the conversion to `BoxedValidator` compiles on all platforms without
-    /// additional where clauses.
-    pub fn add(mut self, v: impl Validator + 'static) -> Self {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            // `Validator: Send + Sync` on native, so this cast is valid.
-            let v: Box<dyn Validator + Send + Sync> = Box::new(v);
-            self.validators.push(Arc::from(v));
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            self.validators.push(Rc::new(v));
-        }
-        self
-    }
+/// Add a validator. Native targets still require `Send + Sync`, while
+/// `wasm32` accepts single-threaded validators as long as they implement
+/// the shared `Validator` contract.
+pub fn add(mut self, v: impl Validator + 'static) -> Self {
+    let v: Box<dyn Validator> = Box::new(v);
+    self.validators.push(Arc::from(v));
+    self
+}
 
     pub fn required(self) -> Self {
         self.add(RequiredValidator { message: None })
@@ -1038,15 +981,6 @@ impl ValidatorsBuilder {
 
     // NOTE: `any()` moved to `AnyValidator::new()` — see below.
 
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn custom<F>(self, f: F) -> Self
-    where
-        F: Fn(&Value, &Context) -> Result + Send + Sync + 'static,
-    {
-        self.add(FnValidator { f })
-    }
-
-    #[cfg(target_arch = "wasm32")]
     pub fn custom<F>(self, f: F) -> Self
     where
         F: Fn(&Value, &Context) -> Result + 'static,
@@ -1110,17 +1044,10 @@ use core::pin::Pin;
 use std::collections::BTreeMap;
 use ars_i18n::Locale;
 
-/// Async validation trait. On non-WASM targets, returned futures must be `Send`.
-/// On WASM (single-threaded), the `Send` bound is relaxed.
-#[cfg(not(target_arch = "wasm32"))]
-pub trait AsyncValidator: Send + Sync {
-    fn validate_async<'a>(
-        &'a self,
-        value: &'a Value,
-        ctx: &'a Context<'a>,
-    ) -> Pin<Box<dyn Future<Output = Result> + Send + 'a>>;
-}
-
+/// Async validation trait.
+///
+/// Native targets require async validators and their returned futures to be
+/// `Send`; `wasm32` preserves browser futures that are intentionally `!Send`.
 #[cfg(target_arch = "wasm32")]
 pub trait AsyncValidator {
     fn validate_async<'a>(
@@ -1130,35 +1057,26 @@ pub trait AsyncValidator {
     ) -> Pin<Box<dyn Future<Output = Result> + 'a>>;
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub trait AsyncValidator: Send + Sync {
+    fn validate_async<'a>(
+        &'a self,
+        value: &'a Value,
+        ctx: &'a Context<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result> + Send + 'a>>;
+}
+
 /// Wrap a closure as an async validator.
 pub struct AsyncFnValidator<F> {
     pub f: F,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl<F, Fut> AsyncValidator for AsyncFnValidator<F>
 where
-    F: Fn(String, OwnedContext) -> Fut + Send + Sync,
-    Fut: Future<Output = Result> + Send + 'static,
-{
-    fn validate_async<'a>(
-        &'a self,
-        value: &'a Value,
-        ctx: &'a Context<'a>,
-    ) -> Pin<Box<dyn Future<Output = Result> + Send + 'a>> {
-        let text = value.to_string_for_validation();
-        let owned_ctx = ctx.snapshot();
-        let fut = (self.f)(text, owned_ctx);
-        Box::pin(fut)
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-impl<F, Fut> AsyncValidator for AsyncFnValidator<F>
-where
-    F: Fn(String, OwnedContext) -> Fut,
+    F: Fn(String, OwnedContext) -> Fut + 'static,
     Fut: Future<Output = Result> + 'static,
 {
+    #[cfg(target_arch = "wasm32")]
     fn validate_async<'a>(
         &'a self,
         value: &'a Value,
@@ -1169,34 +1087,35 @@ where
         let fut = (self.f)(text, owned_ctx);
         Box::pin(fut)
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn validate_async<'a>(
+        &'a self,
+        value: &'a Value,
+        ctx: &'a Context<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result> + Send + 'a>>
+    where
+        F: Send + Sync,
+        Fut: Send,
+    {
+        let text = value.to_string_for_validation();
+        let owned_ctx = ctx.snapshot();
+        let fut = (self.f)(text, owned_ctx);
+        Box::pin(fut)
+    }
 }
 
 /// Debounced async validator — waits for `delay` of inactivity before calling.
-///
-/// Uses cfg-gated trait object: `Arc<dyn AsyncValidator + Send + Sync>` on native,
-/// `Rc<dyn AsyncValidator>` on WASM.
-#[cfg(not(target_arch = "wasm32"))]
 pub struct DebouncedAsyncValidator {
-    pub validator: Arc<dyn AsyncValidator + Send + Sync>,
+    pub validator: Arc<dyn AsyncValidator>,
     pub delay_ms: u32,
     /// Adapter-provided callback that spawns an async future to completion.
     /// On native: wraps `tokio::spawn`; on WASM: wraps `wasm_bindgen_futures::spawn_local`.
     /// The callback takes ownership of the `OwnedContext` and the future,
     /// avoiding lifetime issues with borrowed `Context`.
-    pub spawn_async_validation: Arc<dyn Fn(Arc<dyn AsyncValidator + Send + Sync>, Value, OwnedContext) + Send + Sync>,
+    pub spawn_async_validation: Arc<dyn Fn(Arc<dyn AsyncValidator>, Value, OwnedContext) + Send + Sync>,
     /// Handle to the currently pending debounce timer, if any.
     /// Used to cancel the previous timer when new input arrives.
-    pending_timer: Option<TimerHandle>,
-}
-
-#[cfg(target_arch = "wasm32")]
-pub struct DebouncedAsyncValidator {
-    pub validator: Rc<dyn AsyncValidator>,
-    pub delay_ms: u32,
-    /// Adapter-provided callback that spawns an async future to completion.
-    /// On WASM: wraps `wasm_bindgen_futures::spawn_local`.
-    /// Takes ownership of validator, value, and context to avoid lifetime issues.
-    pub spawn_async_validation: Rc<dyn Fn(Rc<dyn AsyncValidator>, Value, OwnedContext)>,
     pending_timer: Option<TimerHandle>,
 }
 
@@ -1323,7 +1242,7 @@ pub struct Context {
     #[doc(hidden)]
     validators: BTreeMap<String, BoxedValidator>,
 
-    /// Async validators per field. Uses `BoxedAsyncValidator` type alias (cfg-gated).
+    /// Async validators per field. Uses `BoxedAsyncValidator` for shared ownership.
     #[doc(hidden)]
     async_validators: BTreeMap<String, BoxedAsyncValidator>,
 
@@ -1448,7 +1367,6 @@ impl Validator for AnyValidator {
 /// ```rust
 /// let confirm = CrossFieldValidator {
 ///     depends_on: vec!["password".into()],
-///     // cfg-gated: use Rc::new(...) on WASM targets instead of Arc::new(...)
 ///     validate_fn: Arc::new(|value, ctx| {
 ///         let password = ctx.form_values.get("password")
 ///             .and_then(|v| v.as_text());
@@ -1463,12 +1381,13 @@ impl Validator for AnyValidator {
 /// };
 /// ```
 // Type alias avoids clippy::type_complexity on the struct field.
+#[cfg(target_arch = "wasm32")]
+type CrossFieldValidateFn =
+    Arc<dyn Fn(&Value, &Context) -> Result>;
+
 #[cfg(not(target_arch = "wasm32"))]
 type CrossFieldValidateFn =
     Arc<dyn Fn(&Value, &Context) -> Result + Send + Sync>;
-#[cfg(target_arch = "wasm32")]
-type CrossFieldValidateFn =
-    Rc<dyn Fn(&Value, &Context) -> Result>;
 
 #[derive(Clone)]
 pub struct CrossFieldValidator {
@@ -1776,10 +1695,8 @@ impl Context {
     /// **Note:** `is_submitting` is only meaningful for the duration of the synchronous
     /// `handler` call. For async submission, use `form_submit::Machine` (§8) or
     /// `form::Machine` (§14), which properly manage the Submitting state across async boundaries.
-    /// Note: Adapter wrappers (e.g., `use_form`) may add platform-specific bounds
-    /// to the submit handler closure. On native targets (desktop Leptos/Dioxus),
-    /// the adapter wraps this with `+ Send` to satisfy multi-threaded runtime requirements.
-    /// See the adapter files (08-adapter-leptos.md, 09-adapter-dioxus.md) for cfg-gated Send bounds.
+    /// Note: adapter wrappers may require the submit handler closure to be `Send`
+    /// so it can be used uniformly across targets and runtimes.
     /// Submit the form with a synchronous handler.
     /// For fallible/async handlers, use `form_submit::Machine` (§8) which provides
     /// `SubmitError` event handling and proper async state management.
@@ -2221,10 +2138,7 @@ template expressions (e.g., conditionally showing a "clear" button when
 ```rust
 use ars_core::{TransitionPlan, PendingEffect, WeakSend, ConnectApi, AttrMap, HtmlAttr, AriaAttr};
 use ars_core::ComponentIds;
-#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
-#[cfg(target_arch = "wasm32")]
-use std::rc::Rc;
 
 pub mod form_submit {
     use super::*;
@@ -2361,25 +2275,16 @@ pub mod form_submit {
                             // so the closure will run before the next user interaction.
                             // A CancellationToken guards against stale dispatch if the
                             // component unmounts between schedule and execution.
-                            #[cfg(not(target_arch = "wasm32"))]
                             let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
-                            #[cfg(target_arch = "wasm32")]
-                            let cancelled = Rc::new(std::cell::Cell::new(false));
                             let cancelled_clone = cancelled.clone();
                             (props.schedule_microtask)(Box::new(move || {
-                                #[cfg(not(target_arch = "wasm32"))]
                                 let is_cancelled = cancelled_clone.load(std::sync::atomic::Ordering::Relaxed);
-                                #[cfg(target_arch = "wasm32")]
-                                let is_cancelled = cancelled_clone.get();
                                 if !is_cancelled {
                                     send.call_if_alive(event);
                                 }
                             }));
                             Box::new(move || {
-                                #[cfg(not(target_arch = "wasm32"))]
                                 cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
-                                #[cfg(target_arch = "wasm32")]
-                                cancelled.set(true);
                             })
                         }
                     })))
@@ -2484,6 +2389,10 @@ pub mod form_submit {
     /// Note: `id` must be set by the adapter layer (via `use_id`/`use_stable_id`);
     /// the Default empty string is a builder placeholder.
     // Adapters provide default no-op implementations; end-users never construct Props directly.
+    type SpawnAsyncValidationInput = (Vec<(String, BoxedAsyncValidator)>, WeakSend<Event>);
+    type SpawnAsyncValidationFn = dyn Fn(SpawnAsyncValidationInput) -> Box<dyn FnOnce()>;
+    type ScheduleMicrotaskFn = dyn Fn(Box<dyn FnOnce()>);
+
     #[derive(Clone, HasId)]
     pub struct Props {
         pub id: String,
@@ -2492,10 +2401,10 @@ pub mod form_submit {
         /// Signature: (validators, send) -> CleanupFn.
         /// Leptos: wraps `spawn_local`; Dioxus: wraps `spawn`.
         // Tuple parameter: Callback::new() supports single-arg closures; multi-param fns use a tuple.
-        pub spawn_async_validation: Callback<dyn Fn((Vec<(String, BoxedAsyncValidator)>, WeakSend<Event>)) -> Box<dyn FnOnce()>>,
+        pub spawn_async_validation: Callback<SpawnAsyncValidationFn>,
         /// Adapter-provided microtask scheduler for deferred event dispatch.
         /// WASM: wraps `queueMicrotask`; native: wraps `tokio::spawn` or equivalent.
-        pub schedule_microtask: Callback<dyn Fn(Box<dyn FnOnce()>)>,
+        pub schedule_microtask: Callback<ScheduleMicrotaskFn>,
         // On native targets (tokio), the boxed closure must be Send.
         // Adapters targeting native should use: Box<dyn FnOnce() + Send>
         // WASM targets (single-threaded) do not require Send.
@@ -4132,14 +4041,14 @@ Framework adapters must:
 ```rust
 /// Localizable messages for Form component announcements.
 /// Follows the ComponentMessages pattern from `04-internationalization.md` §7.1.
-/// `FormMessages` uses `MessageFn` (`Rc` on WASM, `Arc` on native) for closure fields
+/// `FormMessages` uses `MessageFn` (`Arc` on all targets) for closure fields
 /// so the struct can derive `Clone`. `MessageFn<T>` implements `Debug` by printing
 /// `"<closure>"`, so `#[derive(Debug)]` works without a manual impl.
 ///
 /// Trait objects include `+ Send + Sync` in their type signature on all targets.
-/// On WASM, `MessageFn` uses `Rc` internally (not `Arc`), so `FormMessages` itself
-/// is `!Send + !Sync` on WASM — this is expected and matches the single-threaded
-/// WASM execution model. See `04-internationalization.md` §7.1.
+/// `MessageFn` uses shared `Arc` ownership internally, matching the callback
+/// and validator closure patterns elsewhere in the codebase. See
+/// `04-internationalization.md` §7.1.
 
 #[derive(Clone, Debug)]
 pub struct FormMessages {
@@ -4248,8 +4157,6 @@ use std::sync::Arc;
 use ars_i18n::{plural_category, PluralCategory};
 
 // Build FormMessages from an i18n catalog for the active locale.
-// NOTE: This example uses Arc for brevity. On WASM targets, substitute Rc
-// (matching the cfg-gated MessageFn inner type).
 fn form_messages_for_locale(locale: &Locale) -> FormMessages {
     let catalog = Arc::new(load_catalog(locale));
     let c1 = Arc::clone(&catalog);

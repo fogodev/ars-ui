@@ -2494,7 +2494,7 @@ function stores `env.locale.clone()` in the machine's `Context` struct. Connect
 functions then access it via `self.ctx.locale`. See `01-architecture.md` §6.4.3
 for the environment resolution rule.
 
-**Closure fields** use `MessageFn<dyn Fn>` (`Arc` on native, `Rc` on WASM — not `Box`) so the struct remains `Clone`.
+**Closure fields** use `MessageFn<dyn Fn>` (`Arc` on all targets — not `Box`) so the struct remains `Clone`.
 `MessageFn<T>` implements `Debug` by printing `"<closure>"`, so all Messages structs
 can `#[derive(Clone, Debug)]` uniformly — no manual `Debug` impls needed.
 
@@ -2615,10 +2615,9 @@ impl MessageFn<dyn Fn(&Locale) -> String + Send + Sync> {
 - For signatures outside the shared `ars-core` set, first coerce the closure into a typed `Arc<dyn Fn(...) + Send + Sync>` and then pass that `Arc` to `MessageFn::new`. This is the escape hatch for downstream crates that define their own event or domain-specific parameter types.
 
 > **Design note — All `MessageFn` trait objects include `+ Send + Sync`.**
-> This avoids cfg-gated dual struct definitions for every `*Messages` type. On WASM,
-> `Rc<dyn Fn(...) + Send + Sync>` is valid — the bound constrains the closure type, not
-> the wrapper. Most closures satisfy `Send + Sync` by default. If WASM gains threading,
-> the migration to `Arc` is a single-line change in the `MessageFn` typedef.
+> This avoids cfg-gated dual struct definitions for every `*Messages` type.
+> `MessageFn` uses `Arc` on all targets, and most closures satisfy `Send + Sync`
+> by default, so message structs stay uniform across native and WASM builds.
 
 ```rust
 /// The pattern all component message structs follow.

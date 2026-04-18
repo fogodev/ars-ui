@@ -373,15 +373,9 @@ fn aria_parity_search_input() {
 ### 6.2.1 FilterMode::Custom Cfg-Gate Compilation Test
 
 ```rust
-/// Verify FilterMode::Custom compiles and works under both cfg targets.
-/// shared/selection-patterns.md now cfg-gates Custom: Rc on WASM, Arc + Send + Sync on native.
+/// Verify FilterMode::Custom compiles and works with shared `Arc` ownership.
 #[test]
 fn filter_mode_custom_compiles_on_both_targets() {
-    #[cfg(target_arch = "wasm32")]
-    let filter = FilterMode::Custom(Rc::new(|input: &str, label: &str| {
-        label.to_lowercase().contains(&input.to_lowercase())
-    }));
-    #[cfg(not(target_arch = "wasm32"))]
     let filter = FilterMode::Custom(Arc::new(|input: &str, label: &str| {
         label.to_lowercase().contains(&input.to_lowercase())
     }));
