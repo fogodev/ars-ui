@@ -8,10 +8,16 @@ use core::{
 pub use icu_experimental::measure::measureunit::MeasureUnit;
 #[cfg(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32")))]
 use {alloc::sync::Arc, icu_experimental::measure::parser::ids::CLDR_IDS_TRIE};
-#[cfg(feature = "icu4x")]
+#[cfg(any(
+    feature = "icu4x",
+    not(all(feature = "web-intl", target_arch = "wasm32"))
+))]
 use {
     core::str::FromStr,
     fixed_decimal::{Decimal, SignDisplay as FixedSignDisplay},
+};
+#[cfg(feature = "icu4x")]
+use {
     icu::decimal::DecimalFormatter,
     icu::decimal::{
         DecimalFormatterPreferences,
@@ -387,7 +393,10 @@ impl NumberFormatter {
         format!("{}{}{}", self.format(start), separator, self.format(end))
     }
 
-    #[cfg(feature = "icu4x")]
+    #[cfg(any(
+        feature = "icu4x",
+        not(all(feature = "web-intl", target_arch = "wasm32"))
+    ))]
     fn prepare_decimal(&self, value: f64) -> Decimal {
         let rounded = self.prepare_numeric_value(value, true);
 
@@ -837,15 +846,7 @@ fn fallback_separators(locale: &Locale) -> (char, char) {
 
 #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
 fn fallback_format(value: f64, formatter: &NumberFormatter) -> String {
-    let precision = usize::from(formatter.options.max_fraction_digits);
-
-    let rounded = formatter.prepare_numeric_value(value, true);
-
-    let mut output = if precision == 0 {
-        format!("{rounded:.0}")
-    } else {
-        format!("{rounded:.precision$}")
-    };
+    let mut output = formatter.prepare_decimal(value).to_string();
 
     if formatter.decimal_separator != '.' {
         output = output.replace('.', &String::from(formatter.decimal_separator));
@@ -855,7 +856,10 @@ fn fallback_format(value: f64, formatter: &NumberFormatter) -> String {
 }
 
 impl SignDisplay {
-    #[cfg(feature = "icu4x")]
+    #[cfg(any(
+        feature = "icu4x",
+        not(all(feature = "web-intl", target_arch = "wasm32"))
+    ))]
     const fn into_fixed_decimal(self) -> FixedSignDisplay {
         match self {
             Self::Auto => FixedSignDisplay::Auto,
@@ -1228,6 +1232,55 @@ mod tests {
             Decimal::default()
         );
         assert_eq!(formatter.prepare_decimal(f64::NAN), Decimal::default());
+    }
+
+    #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
+    #[test]
+    fn fallback_format_preserves_digit_padding_and_sign_display() {
+        let formatter = NumberFormatter::new(
+            &locales::de_de(),
+            NumberFormatOptions {
+                min_integer_digits: NonZeroU8::new(3).expect("hardcoded nonzero"),
+                min_fraction_digits: 1,
+                max_fraction_digits: 3,
+                sign_display: SignDisplay::Always,
+                ..NumberFormatOptions::default()
+            },
+        );
+
+        assert_eq!(formatter.format(5.2), "+005,2");
+        assert_eq!(formatter.format(5.0), "+005,0");
+    }
+
+    #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
+    #[test]
+    fn fallback_format_respects_negative_zero_sign_policies() {
+        let auto = NumberFormatter::new(
+            &locales::en_us(),
+            NumberFormatOptions {
+                sign_display: SignDisplay::Auto,
+                ..NumberFormatOptions::default()
+            },
+        );
+        let negative = NumberFormatter::new(
+            &locales::en_us(),
+            NumberFormatOptions {
+                sign_display: SignDisplay::Negative,
+                ..NumberFormatOptions::default()
+            },
+        );
+        let except_zero = NumberFormatter::new(
+            &locales::en_us(),
+            NumberFormatOptions {
+                sign_display: SignDisplay::ExceptZero,
+                ..NumberFormatOptions::default()
+            },
+        );
+
+        assert_eq!(auto.format(-0.0), "-0");
+        assert_eq!(negative.format(-0.0), "0");
+        assert_eq!(except_zero.format(12.0), "+12");
+        assert_eq!(except_zero.format(0.0), "0");
     }
 
     #[test]
