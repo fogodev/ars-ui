@@ -553,23 +553,28 @@ impl<'a> Context<'a> {
 
 /// A synchronous field validator.
 ///
-/// Validators are always `Send + Sync`, so the same trait object shape works
-/// on every target without cfg-gated API differences. Custom validators created via
-/// `FnValidator` or `ValidatorsBuilder::add()` automatically pick up the same bounds.
+/// Native targets require validators to be `Send + Sync`; `wasm32` allows
+/// single-threaded validators that capture browser-only state.
+#[cfg(target_arch = "wasm32")]
+pub trait Validator {
+    fn validate(&self, value: &Value, ctx: &Context) -> Result;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub trait Validator: Send + Sync {
     fn validate(&self, value: &Value, ctx: &Context) -> Result;
 }
 
 /// A type-erased synchronous validator.
 /// Uses `Arc` instead of `Box` for cheap cloning across reactive signals.
-pub type BoxedValidator = Arc<dyn Validator + Send + Sync>;
+pub type BoxedValidator = Arc<dyn Validator>;
 
 /// Helper to wrap a Validator into the standard shared pointer type.
 pub fn boxed_validator(v: impl Validator + 'static) -> BoxedValidator {
     Arc::new(v)
 }
 
-pub type BoxedAsyncValidator = Arc<dyn AsyncValidator + Send + Sync>;
+pub type BoxedAsyncValidator = Arc<dyn AsyncValidator>;
 ````
 
 ### 3.2 Built-in Validators
@@ -918,15 +923,14 @@ impl ValidatorsBuilder {
         Self { validators: Vec::new() }
     }
 
-    /// Add a validator. The `Validator` trait itself always carries
-    /// `Send + Sync`, so the bound here is simply `Validator + 'static`
-    /// and the conversion to `BoxedValidator` compiles on all platforms
-    /// without additional where clauses.
-    pub fn add(mut self, v: impl Validator + 'static) -> Self {
-        let v: Box<dyn Validator + Send + Sync> = Box::new(v);
-        self.validators.push(Arc::from(v));
-        self
-    }
+/// Add a validator. Native targets still require `Send + Sync`, while
+/// `wasm32` accepts single-threaded validators as long as they implement
+/// the shared `Validator` contract.
+pub fn add(mut self, v: impl Validator + 'static) -> Self {
+    let v: Box<dyn Validator> = Box::new(v);
+    self.validators.push(Arc::from(v));
+    self
+}
 
     pub fn required(self) -> Self {
         self.add(RequiredValidator { message: None })
@@ -979,7 +983,7 @@ impl ValidatorsBuilder {
 
     pub fn custom<F>(self, f: F) -> Self
     where
-        F: Fn(&Value, &Context) -> Result + Send + Sync + 'static,
+        F: Fn(&Value, &Context) -> Result + 'static,
     {
         self.add(FnValidator { f })
     }
@@ -1042,8 +1046,18 @@ use ars_i18n::Locale;
 
 /// Async validation trait.
 ///
-/// Async validators are always `Send + Sync`, and returned futures are always
-/// `Send`, so the same trait object shape works on every target.
+/// Native targets require async validators and their returned futures to be
+/// `Send`; `wasm32` preserves browser futures that are intentionally `!Send`.
+#[cfg(target_arch = "wasm32")]
+pub trait AsyncValidator {
+    fn validate_async<'a>(
+        &'a self,
+        value: &'a Value,
+        ctx: &'a Context<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result> + 'a>>;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub trait AsyncValidator: Send + Sync {
     fn validate_async<'a>(
         &'a self,
@@ -1059,14 +1073,31 @@ pub struct AsyncFnValidator<F> {
 
 impl<F, Fut> AsyncValidator for AsyncFnValidator<F>
 where
-    F: Fn(String, OwnedContext) -> Fut + Send + Sync,
-    Fut: Future<Output = Result> + Send + 'static,
+    F: Fn(String, OwnedContext) -> Fut + 'static,
+    Fut: Future<Output = Result> + 'static,
 {
+    #[cfg(target_arch = "wasm32")]
     fn validate_async<'a>(
         &'a self,
         value: &'a Value,
         ctx: &'a Context<'a>,
-    ) -> Pin<Box<dyn Future<Output = Result> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result> + 'a>> {
+        let text = value.to_string_for_validation();
+        let owned_ctx = ctx.snapshot();
+        let fut = (self.f)(text, owned_ctx);
+        Box::pin(fut)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn validate_async<'a>(
+        &'a self,
+        value: &'a Value,
+        ctx: &'a Context<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result> + Send + 'a>>
+    where
+        F: Send + Sync,
+        Fut: Send,
+    {
         let text = value.to_string_for_validation();
         let owned_ctx = ctx.snapshot();
         let fut = (self.f)(text, owned_ctx);
@@ -1350,6 +1381,11 @@ impl Validator for AnyValidator {
 /// };
 /// ```
 // Type alias avoids clippy::type_complexity on the struct field.
+#[cfg(target_arch = "wasm32")]
+type CrossFieldValidateFn =
+    Arc<dyn Fn(&Value, &Context) -> Result>;
+
+#[cfg(not(target_arch = "wasm32"))]
 type CrossFieldValidateFn =
     Arc<dyn Fn(&Value, &Context) -> Result + Send + Sync>;
 

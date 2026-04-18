@@ -200,6 +200,13 @@ impl Validator for AnyValidator {
 /// A type-erased cross-field validation function.
 ///
 /// Uses [`Arc`](std::sync::Arc) on all targets for shared ownership.
+#[cfg(target_arch = "wasm32")]
+type CrossFieldValidateFn = Arc<dyn Fn(&Value, &ValContext) -> Result>;
+
+/// A type-erased cross-field validation function.
+///
+/// Uses [`Arc`](std::sync::Arc) on all targets for shared ownership.
+#[cfg(not(target_arch = "wasm32"))]
 type CrossFieldValidateFn = Arc<dyn Fn(&Value, &ValContext) -> Result + Send + Sync>;
 
 /// Validates a field using values from other fields in the form.
@@ -1259,6 +1266,16 @@ mod tests {
         struct StubAsync;
 
         impl AsyncValidator for StubAsync {
+            #[cfg(target_arch = "wasm32")]
+            fn validate_async<'a>(
+                &'a self,
+                _value: &'a Value,
+                _ctx: &'a ValContext<'a>,
+            ) -> Pin<Box<dyn Future<Output = Result> + 'a>> {
+                Box::pin(async { Ok(()) })
+            }
+
+            #[cfg(not(target_arch = "wasm32"))]
             fn validate_async<'a>(
                 &'a self,
                 _value: &'a Value,
@@ -1284,6 +1301,38 @@ mod tests {
 
         assert_eq!(collected.len(), 1);
         assert_eq!(collected[0].0, "email");
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[test]
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "CrossFieldValidateFn intentionally preserves single-threaded wasm closures"
+    )]
+    fn cross_field_validator_allows_non_send_captures_on_wasm() {
+        use std::{cell::RefCell, rc::Rc};
+
+        let hits = Rc::new(RefCell::new(0_u8));
+        let validator = CrossFieldValidator {
+            depends_on: vec![String::from("password")],
+            validate_fn: Arc::new({
+                let hits = Rc::clone(&hits);
+                move |_value, _ctx| {
+                    *hits.borrow_mut() += 1;
+                    Ok(())
+                }
+            }),
+        };
+
+        assert!(
+            validator
+                .validate(
+                    &Value::Text(String::new()),
+                    &ValContext::standalone("confirm")
+                )
+                .is_ok()
+        );
+        assert_eq!(*hits.borrow(), 1);
     }
 
     // ── validate_all true path ──────────────────────────────────────────

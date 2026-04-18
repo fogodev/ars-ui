@@ -106,8 +106,23 @@ impl<'a> Context<'a> {
 
 /// A synchronous field validator.
 ///
-/// Validators are always `Send + Sync`, so the same trait object shape works
-/// on every target without cfg-gated API differences.
+/// Native targets require validators to be `Send + Sync`, while `wasm32`
+/// preserves single-threaded validators that capture browser-only state.
+#[cfg(target_arch = "wasm32")]
+pub trait Validator {
+    /// Validates the given value and returns a result with any errors found.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(Errors)` when the value fails validation.
+    fn validate(&self, value: &Value, ctx: &Context) -> Result;
+}
+
+/// A synchronous field validator.
+///
+/// Native targets require validators to be `Send + Sync`, while `wasm32`
+/// preserves single-threaded validators that capture browser-only state.
+#[cfg(not(target_arch = "wasm32"))]
 pub trait Validator: Send + Sync {
     /// Validates the given value and returns a result with any errors found.
     ///
@@ -120,7 +135,7 @@ pub trait Validator: Send + Sync {
 /// A type-erased synchronous validator.
 ///
 /// Uses [`Arc`](std::sync::Arc) on all targets for cheap shared ownership.
-pub type BoxedValidator = Arc<dyn Validator + Send + Sync>;
+pub type BoxedValidator = Arc<dyn Validator>;
 
 /// Helper to wrap a [`Validator`] into the standard shared pointer type.
 pub fn boxed_validator(v: impl Validator + 'static) -> BoxedValidator {
@@ -226,6 +241,39 @@ mod tests {
 
         assert!(boxed.validate(&Value::Text(String::new()), &ctx).is_err());
         assert!(boxed.validate(&Value::Text("ok".to_string()), &ctx).is_ok());
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[test]
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "BoxedValidator intentionally preserves single-threaded wasm validators"
+    )]
+    fn boxed_validator_allows_non_send_captures_on_wasm() {
+        use std::{cell::RefCell, rc::Rc};
+
+        struct RcValidator {
+            hits: Rc<RefCell<u8>>,
+        }
+
+        impl Validator for RcValidator {
+            fn validate(&self, _value: &Value, _ctx: &Context) -> Result {
+                *self.hits.borrow_mut() += 1;
+                Ok(())
+            }
+        }
+
+        let hits = Rc::new(RefCell::new(0));
+        let validator: BoxedValidator = Arc::new(RcValidator {
+            hits: Rc::clone(&hits),
+        });
+
+        assert!(
+            validator
+                .validate(&Value::Text(String::new()), &Context::standalone("x"))
+                .is_ok()
+        );
+        assert_eq!(*hits.borrow(), 1);
     }
 
     #[test]

@@ -481,6 +481,16 @@ mod tests {
     struct DummyAsyncValidator;
 
     impl AsyncValidator for DummyAsyncValidator {
+        #[cfg(target_arch = "wasm32")]
+        fn validate_async<'a>(
+            &'a self,
+            _value: &'a Value,
+            _ctx: &'a ValidationContext<'a>,
+        ) -> Pin<Box<dyn Future<Output = ValidationResult> + 'a>> {
+            Box::pin(async { Ok(()) })
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
         fn validate_async<'a>(
             &'a self,
             _value: &'a Value,
