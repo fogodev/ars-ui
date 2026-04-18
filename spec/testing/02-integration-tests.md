@@ -1985,18 +1985,21 @@ fn is_draggable_returns_true_for_focusable_items() {
 
 #[test]
 fn drag_keys_returns_selected_keys_when_selection_active() {
-    // When dragging from a selection, drag_keys returns all selected keys
+    // When dragging from a selection, drag_keys returns all selected keys in
+    // collection order rather than key-sorted order.
     let col = TestDraggableCollection::new(vec![
-        TestItem { key: Key::from("a"), label: "Alpha".into() },
         TestItem { key: Key::from("b"), label: "Beta".into() },
+        TestItem { key: Key::from("a"), label: "Alpha".into() },
         TestItem { key: Key::from("c"), label: "Gamma".into() },
     ]);
-    col.select(&[Key::from("a"), Key::from("c")]);
+    col.select(&[Key::from("a"), Key::from("b")]);
 
     let drag_keys = col.drag_keys();
-    assert_eq!(drag_keys.len(), 2, "drag_keys must return all selected keys");
-    assert!(drag_keys.contains(&Key::from("a")));
-    assert!(drag_keys.contains(&Key::from("c")));
+    assert_eq!(
+        drag_keys,
+        vec![Key::from("b"), Key::from("a")],
+        "drag_keys must preserve collection order for selected items"
+    );
 }
 
 #[test]
