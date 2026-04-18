@@ -214,12 +214,14 @@ pub trait DraggableCollection<T>: Collection<T> {
     ///
     /// When selection is [`selection::Set::All`], this resolves to all item
     /// keys in the concrete collection. Otherwise it returns the explicit
-    /// selected keys.
+    /// selected keys in collection order.
     fn drag_keys(&self) -> Vec<Key> {
-        match &self.selection().selected_keys {
-            selection::Set::All => self.item_keys().cloned().collect(),
-            other => other.keys().cloned().collect(),
-        }
+        let selected_keys = &self.selection().selected_keys;
+
+        self.item_keys()
+            .filter(|key| selected_keys.contains(key))
+            .cloned()
+            .collect()
     }
 }
 
@@ -964,16 +966,16 @@ mod tests {
     }
 
     #[test]
-    fn draggable_collection_drag_keys_returns_selected_keys_for_concrete_selection() {
+    fn draggable_collection_drag_keys_preserves_collection_order_for_concrete_selection() {
         let mut selected = BTreeSet::new();
 
-        selected.insert(Key::int(1));
-        selected.insert(Key::int(3));
+        selected.insert(Key::str("a"));
+        selected.insert(Key::str("b"));
 
         let mut collection = TestDraggableCollection::new(&[
-            (Key::int(1), "Alpha"),
-            (Key::int(2), "Beta"),
-            (Key::int(3), "Gamma"),
+            (Key::str("b"), "Beta"),
+            (Key::str("a"), "Alpha"),
+            (Key::str("c"), "Gamma"),
         ]);
 
         collection.selection = selection::State {
@@ -981,7 +983,7 @@ mod tests {
             ..selection::State::new(selection::Mode::Multiple, selection::Behavior::Toggle)
         };
 
-        assert_eq!(collection.drag_keys(), vec![Key::int(1), Key::int(3)]);
+        assert_eq!(collection.drag_keys(), vec![Key::str("b"), Key::str("a")]);
     }
 
     #[test]

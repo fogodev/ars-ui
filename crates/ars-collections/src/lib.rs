@@ -30,11 +30,11 @@
 //! - [`SortDescriptor`] — column + direction for table sorting.
 //! - [`CollectionChangeAnnouncement`] — structured live-region event for collection mutations.
 //! - [`CollectionMessages`] — localizable message closures for collection mutation announcements.
-//! - [`CollectionDndEvent`] — collection-level drag-and-drop callback events.
-//! - [`DropPosition`] — relative drop location for collection drag-and-drop.
-//! - [`CollectionDropTarget`] — resolved item-relative drop target.
-//! - [`DraggableCollection`] / [`DroppableCollection`] — collection `DnD` extension traits.
-//! - [`CollectionDndMessages`] — localizable message closures for collection drag-and-drop.
+//! - [`CollectionDndEvent`] — collection-level drag-and-drop callback events (`std` feature only).
+//! - [`DropPosition`] — relative drop location for collection drag-and-drop (`std` feature only).
+//! - [`CollectionDropTarget`] — resolved item-relative drop target (`std` feature only).
+//! - [`DraggableCollection`] / [`DroppableCollection`] — collection `DnD` extension traits (`std` feature only).
+//! - [`CollectionDndMessages`] — localizable message closures for collection drag-and-drop (`std` feature only).
 //! - [`CollectionError`] — error from an async page load.
 //! - [`typeahead`] — type-ahead / type-select state machine for keyboard search.
 //! - [`Virtualizer`] — visible-range and scroll math for virtualized rendering.
@@ -68,6 +68,7 @@ pub mod builder;
 /// Core collection traits: [`Collection`] and [`CollectionItem`].
 pub mod collection;
 /// Collection-level drag-and-drop types, messages, and extension traits.
+#[cfg(feature = "std")]
 pub mod dnd;
 /// Predicate-based filtering view over a [`Collection`].
 pub mod filtered_collection;
@@ -99,6 +100,7 @@ pub use async_collection::{AsyncCollection, AsyncLoadingState};
 pub use async_loader::{AsyncLoader, CollectionError, LoadResult};
 pub use builder::CollectionBuilder;
 pub use collection::{Collection, CollectionItem};
+#[cfg(feature = "std")]
 pub use dnd::{
     CollectionDndEvent, CollectionDndMessages, CollectionDropTarget, DndAnnouncementData,
     DndAnnouncements, DraggableCollection, DropPosition, DroppableCollection,

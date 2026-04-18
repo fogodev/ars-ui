@@ -5959,6 +5959,9 @@ use crate::{Collection, key::Key, selection};
 /// 2. When a selected item is dragged, includes all selected items in the drag
 /// 3. Provides drag preview data derived from item text values
 /// 4. Fires `DragStart` / `DragEnd` events
+///
+/// Collection drag-and-drop is available in `std`-enabled builds because it
+/// depends on `ars-interactions::DragItem`.
 pub trait DraggableCollection<T>: Collection<T> {
     /// Returns whether the item with the given key can be dragged.
     /// Default: all focusable items are draggable.
@@ -5984,11 +5987,14 @@ pub trait DraggableCollection<T>: Collection<T> {
     /// is the drag handle. If `key` is part of the current selection,
     /// returns all selected keys; otherwise returns just `key`.
     /// When selection is `Set::All`, iterates the collection's item keys.
+    /// Concrete selections are returned in collection order.
     fn drag_keys(&self) -> Vec<Key> {
-        match &self.selection().selected_keys {
-            selection::Set::All => self.item_keys().cloned().collect(),
-            other => other.keys().cloned().collect(),
-        }
+        let selected_keys = &self.selection().selected_keys;
+
+        self.item_keys()
+            .filter(|key| selected_keys.contains(key))
+            .cloned()
+            .collect()
     }
 }
 ```
