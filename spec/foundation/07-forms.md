@@ -1048,12 +1048,11 @@ impl ValidatorsBuilder {
         Self { validators: Vec::new() }
     }
 
-/// Add a validator.
-pub fn add(mut self, v: impl Validator + 'static) -> Self {
-    let v: Box<dyn Validator> = Box::new(v);
-    self.validators.push(Arc::from(v));
-    self
-}
+    /// Add a validator.
+    pub fn add(mut self, v: impl Validator + 'static) -> Self {
+        self.validators.push(boxed_validator(v));
+        self
+    }
 
     pub fn required(self) -> Self {
         self.add(RequiredValidator::default())
@@ -1142,12 +1141,15 @@ impl Validator for ChainValidator {
         let mut all_errors = Errors::new();
 
         for validator in &self.validators {
-            match validator.validate(value, ctx) {
-                Ok(()) => {}
-                Err(errors) => {
-                    all_errors.0.extend(errors.0);
-                    if self.stop_on_first { break; }
+            if let Err(mut errors) = validator.validate(value, ctx) {
+                if self.stop_on_first {
+                    // Return only the very first error, even when a single
+                    // validator produces multiple.
+                    errors.0.truncate(1);
+                    return Err(errors);
                 }
+
+                all_errors.0.extend(errors.0);
             }
         }
 
