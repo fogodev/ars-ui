@@ -553,14 +553,8 @@ impl<'a> Context<'a> {
 
 /// A synchronous field validator.
 ///
-/// Native targets require validators to be `Send + Sync`; `wasm32` allows
-/// single-threaded validators that capture browser-only state.
-#[cfg(target_arch = "wasm32")]
-pub trait Validator {
-    fn validate(&self, value: &Value, ctx: &Context) -> Result;
-}
-
-#[cfg(not(target_arch = "wasm32"))]
+/// Validators are always `Send + Sync`, including on `wasm32`, because the
+/// forms engine stores them behind shared `Arc` pointers.
 pub trait Validator: Send + Sync {
     fn validate(&self, value: &Value, ctx: &Context) -> Result;
 }
@@ -579,10 +573,22 @@ pub type BoxedAsyncValidator = Arc<dyn AsyncValidator>;
 
 ### 3.2 Built-in Validators
 
+Message-only validators such as `RequiredValidator` and `EmailValidator`
+implement `Default`, and parameterized validators expose semantic constructors
+plus `.with_message(...)` so callers do not need to write `message: None`
+struct literals repeatedly.
+
 ```rust
 /// Fails if the value is empty.
 pub struct RequiredValidator {
     pub message: Option<String>,
+}
+
+impl RequiredValidator {
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = Some(message.into());
+        self
+    }
 }
 
 impl Validator for RequiredValidator {
@@ -624,6 +630,17 @@ static DEFAULT_VALIDATOR_LOCALE: std::sync::LazyLock<ars_i18n::Locale> =
 
 pub struct MinLengthValidator { pub min: usize, pub message: Option<String> }
 
+impl MinLengthValidator {
+    pub fn with_length(min: usize) -> Self {
+        Self { min, message: None }
+    }
+
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = Some(message.into());
+        self
+    }
+}
+
 impl Validator for MinLengthValidator {
     fn validate(&self, value: &Value, ctx: &Context) -> Result {
         let s = value.to_string_for_validation();
@@ -641,6 +658,17 @@ impl Validator for MinLengthValidator {
 }
 
 pub struct MaxLengthValidator { pub max: usize, pub message: Option<String> }
+
+impl MaxLengthValidator {
+    pub fn with_length(max: usize) -> Self {
+        Self { max, message: None }
+    }
+
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = Some(message.into());
+        self
+    }
+}
 
 impl Validator for MaxLengthValidator {
     fn validate(&self, value: &Value, ctx: &Context) -> Result {
@@ -660,6 +688,17 @@ impl Validator for MaxLengthValidator {
 
 pub struct MinValidator { pub min: f64, pub message: Option<String> }
 
+impl MinValidator {
+    pub fn with_value(min: f64) -> Self {
+        Self { min, message: None }
+    }
+
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = Some(message.into());
+        self
+    }
+}
+
 impl Validator for MinValidator {
     fn validate(&self, value: &Value, ctx: &Context) -> Result {
         let n = match value.as_number() {
@@ -667,7 +706,7 @@ impl Validator for MinValidator {
             None => return Ok(()), // Let RequiredValidator handle None
         };
         let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
-        if n < self.min {
+        if !n.is_finite() || !self.min.is_finite() || n < self.min {
             Err(Errors(vec![
                 self.message.clone()
                     .map(|m| Error { message: m, code: ErrorCode::Min(self.min) })
@@ -681,6 +720,17 @@ impl Validator for MinValidator {
 
 pub struct MaxValidator { pub max: f64, pub message: Option<String> }
 
+impl MaxValidator {
+    pub fn with_value(max: f64) -> Self {
+        Self { max, message: None }
+    }
+
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = Some(message.into());
+        self
+    }
+}
+
 impl Validator for MaxValidator {
     fn validate(&self, value: &Value, ctx: &Context) -> Result {
         let n = match value.as_number() {
@@ -688,7 +738,7 @@ impl Validator for MaxValidator {
             None => return Ok(()),
         };
         let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
-        if n > self.max {
+        if !n.is_finite() || !self.max.is_finite() || n > self.max {
             Err(Errors(vec![
                 self.message.clone()
                     .map(|m| Error { message: m, code: ErrorCode::Max(self.max) })
@@ -705,9 +755,6 @@ impl Validator for MaxValidator {
 /// The `Regex` is compiled once at construction time and cached in `compiled`.
 /// This avoids re-compiling on every `validate()` call, which was
 /// the previous behavior of the per-call `regex_matches()` helper.
-///
-/// Construction panics if the pattern is invalid — callers should validate
-/// patterns at build time (e.g., in `ValidatorsBuilder::pattern()`).
 pub struct PatternValidator {
     /// The cached, compiled regex (anchored with `^(?:...)$`).
     pub compiled: regex::Regex,
@@ -716,22 +763,40 @@ pub struct PatternValidator {
     pub message: Option<String>,
 }
 
+pub enum PatternValidatorError {
+    PatternTooLong { max_bytes: usize, actual_bytes: usize },
+    InvalidRegex(regex::Error),
+}
+
 impl PatternValidator {
     /// Create a new `PatternValidator`, compiling the regex eagerly.
+    pub fn new(pattern: impl Into<String>) -> std::result::Result<Self, PatternValidatorError> {
+        let pattern = pattern.into();
+        const MAX_PATTERN_LEN: usize = 1024;
+        if pattern.len() > MAX_PATTERN_LEN {
+            return Err(PatternValidatorError::PatternTooLong {
+                max_bytes: MAX_PATTERN_LEN,
+                actual_bytes: pattern.len(),
+            });
+        }
+        let anchored = format!("^(?:{})$", pattern);
+        let compiled = regex::Regex::new(&anchored)
+            .map_err(PatternValidatorError::InvalidRegex)?;
+        Ok(Self { compiled, pattern, message: None })
+    }
+
+    /// Create a `PatternValidator` from a hardcoded regex literal.
     ///
     /// # Panics
     /// Panics if `pattern` exceeds 1024 bytes or is not a valid regex.
-    pub fn new(pattern: impl Into<String>, message: Option<String>) -> Self {
-        let pattern = pattern.into();
-        const MAX_PATTERN_LEN: usize = 1024;
-        assert!(
-            pattern.len() <= MAX_PATTERN_LEN,
-            "PatternValidator: pattern exceeds {} bytes", MAX_PATTERN_LEN
-        );
-        let anchored = format!("^(?:{})$", pattern);
-        let compiled = regex::Regex::new(&anchored)
-            .expect("PatternValidator: invalid regex pattern");
-        Self { compiled, pattern, message }
+    pub fn new_from_static(pattern: &'static str) -> Self {
+        Self::new(pattern)
+            .unwrap_or_else(|err| panic!("PatternValidator::new_from_static: {err}"))
+    }
+
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = Some(message.into());
+        self
     }
 }
 
@@ -765,18 +830,27 @@ impl Validator for PatternValidator {
 
 ````rust
 
+> `EmailValidator` uses RFC-grade address parsing when the `ars-forms`
+> `email-validation` Cargo feature is enabled. That feature is enabled by
+> default and SHOULD use the `addr-spec` crate. If consumers disable the
+> feature to avoid the parser dependency, `EmailValidator` falls back to the
+> baseline `@`/`.` shape check so the public API remains available.
+
 pub struct EmailValidator { pub message: Option<String> }
+
+impl EmailValidator {
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = Some(message.into());
+        self
+    }
+}
 
 impl Validator for EmailValidator {
     fn validate(&self, value: &Value, ctx: &Context) -> Result {
         let s = value.to_string_for_validation();
         if s.is_empty() { return Ok(()); }
 
-        // Simple email validation: must contain @ and have something before and after
-        let valid = s.contains('@') && {
-            let parts: Vec<&str> = s.splitn(2, '@').collect();
-            parts.len() == 2 && !parts[0].is_empty() && parts[1].contains('.')
-        };
+        let valid = is_valid_email(&s);
 
         if !valid {
             let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
@@ -789,6 +863,17 @@ impl Validator for EmailValidator {
             Ok(())
         }
     }
+}
+
+#[cfg(feature = "email-validation")]
+fn is_valid_email(value: &str) -> bool {
+    value.parse::<addr_spec::AddrSpec>().is_ok()
+}
+
+#[cfg(not(feature = "email-validation"))]
+fn is_valid_email(value: &str) -> bool {
+    value.split_once('@')
+        .is_some_and(|(local, domain)| !local.is_empty() && domain.contains('.'))
 }
 
 /// Validates that a numeric value is a multiple of the given step,
@@ -811,21 +896,38 @@ impl StepValidator {
         self.step_base = base;
         self
     }
+
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = Some(message.into());
+        self
+    }
 }
 
 impl Validator for StepValidator {
     fn validate(&self, value: &Value, ctx: &Context) -> Result {
         if let Some(num) = value.as_number() {
-            let remainder = ((num - self.step_base) % self.step).abs();
-            if remainder > f64::EPSILON && (self.step - remainder) > f64::EPSILON {
-                if let Some(ref msg) = self.message {
-                    return Err(Errors(vec![
-                        Error::custom("step", msg.clone())
-                    ]));
-                }
+            if !num.is_finite()
+                || !self.step_base.is_finite()
+                || !self.step.is_finite()
+                || self.step <= 0.0
+            {
                 let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
                 return Err(Errors(vec![
-                    Error::step(self.step, &FormMessages::default(), locale)
+                    self.message.clone()
+                        .map(|m| Error { message: m, code: ErrorCode::Step(self.step) })
+                        .unwrap_or_else(|| Error::step(self.step, &FormMessages::default(), locale))
+                ]));
+            }
+
+            let quotient = (num - self.step_base) / self.step;
+            let nearest_step = quotient.round();
+            let tolerance = (quotient.abs().max(1.0) * f64::EPSILON * 16.0).min(1e-9);
+            if (quotient - nearest_step).abs() > tolerance {
+                let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
+                return Err(Errors(vec![
+                    self.message.clone()
+                        .map(|m| Error { message: m, code: ErrorCode::Step(self.step) })
+                        .unwrap_or_else(|| Error::step(self.step, &FormMessages::default(), locale))
                 ]));
             }
         }
@@ -835,6 +937,12 @@ impl Validator for StepValidator {
 
 /// Validates that a string value is a well-formed URL.
 /// Uses the WHATWG URL Standard parsing algorithm.
+///
+/// `UrlValidator` uses WHATWG parsing when the `ars-forms`
+/// `url-validation` Cargo feature is enabled. That feature is enabled by
+/// default and SHOULD use the `url` crate. If consumers disable the feature
+/// to avoid the parser dependency, `UrlValidator` falls back to a baseline
+/// `scheme://authority` shape check so the public API remains available.
 pub struct UrlValidator {
     /// Optional custom error message, overriding the default.
     pub message: Option<String>,
@@ -844,20 +952,22 @@ impl UrlValidator {
     pub fn new() -> Self {
         Self { message: None }
     }
+
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = Some(message.into());
+        self
+    }
 }
 
 impl Validator for UrlValidator {
     fn validate(&self, value: &Value, ctx: &Context) -> Result {
         if let Some(s) = value.as_text() {
             if !s.is_empty() && !is_valid_url(s) {
-                if let Some(ref msg) = self.message {
-                    return Err(Errors(vec![
-                        Error::custom("url", msg.clone())
-                    ]));
-                }
                 let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
                 return Err(Errors(vec![
-                    Error::url(&FormMessages::default(), locale)
+                    self.message.clone()
+                        .map(|m| Error { message: m, code: ErrorCode::Url })
+                        .unwrap_or_else(|| Error::url(&FormMessages::default(), locale))
                 ]));
             }
         }
@@ -866,12 +976,27 @@ impl Validator for UrlValidator {
 }
 
 /// Check whether `s` is a valid URL per the WHATWG URL Standard.
-/// In browser targets, delegates to the `URL` constructor via `web_sys`.
-/// In non-browser targets, performs a basic scheme + authority check.
+/// Uses the `url` crate when the default `url-validation` feature is enabled.
+#[cfg(feature = "url-validation")]
 fn is_valid_url(s: &str) -> bool {
-    // Minimal validation: must have a scheme followed by "://" and a non-empty authority.
-    // Full WHATWG parsing is delegated to the platform URL parser at runtime.
-    s.find("://").map_or(false, |pos| s.len() > pos + 3)
+    url::Url::parse(s).is_ok()
+}
+
+#[cfg(not(feature = "url-validation"))]
+fn is_valid_url(s: &str) -> bool {
+    s.find("://").is_some_and(|pos| {
+        if pos == 0 {
+            return false;
+        }
+
+        let authority_and_rest = &s[pos + 3..];
+        let authority = authority_and_rest
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or("");
+
+        !authority.is_empty()
+    })
 }
 
 /// Validator created from a closure.
@@ -911,7 +1036,7 @@ impl<F: Fn(&Value, &Context) -> Result + Send + Sync + 'static> FnValidator<F> {
 ///     .required()
 ///     .min_length(3)
 ///     .max_length(50)
-///     .pattern(r"^[a-zA-Z0-9_]+$")
+///     .pattern_static(r"^[a-zA-Z0-9_]+$")
 ///     .build();
 /// ```
 pub struct ValidatorsBuilder {
@@ -923,9 +1048,7 @@ impl ValidatorsBuilder {
         Self { validators: Vec::new() }
     }
 
-/// Add a validator. Native targets still require `Send + Sync`, while
-/// `wasm32` accepts single-threaded validators as long as they implement
-/// the shared `Validator` contract.
+/// Add a validator.
 pub fn add(mut self, v: impl Validator + 'static) -> Self {
     let v: Box<dyn Validator> = Box::new(v);
     self.validators.push(Arc::from(v));
@@ -933,35 +1056,42 @@ pub fn add(mut self, v: impl Validator + 'static) -> Self {
 }
 
     pub fn required(self) -> Self {
-        self.add(RequiredValidator { message: None })
+        self.add(RequiredValidator::default())
     }
 
     pub fn required_msg(self, msg: impl Into<String>) -> Self {
-        self.add(RequiredValidator { message: Some(msg.into()) })
+        self.add(RequiredValidator::default().with_message(msg))
     }
 
     pub fn min_length(self, n: usize) -> Self {
-        self.add(MinLengthValidator { min: n, message: None })
+        self.add(MinLengthValidator::with_length(n))
     }
 
     pub fn max_length(self, n: usize) -> Self {
-        self.add(MaxLengthValidator { max: n, message: None })
+        self.add(MaxLengthValidator::with_length(n))
     }
 
     pub fn min(self, n: f64) -> Self {
-        self.add(MinValidator { min: n, message: None })
+        self.add(MinValidator::with_value(n))
     }
 
     pub fn max(self, n: f64) -> Self {
-        self.add(MaxValidator { max: n, message: None })
+        self.add(MaxValidator::with_value(n))
     }
 
-    pub fn pattern(self, regex: impl Into<String>) -> Self {
-        self.add(PatternValidator::new(regex, None))
+    pub fn pattern_static(self, regex: &'static str) -> Self {
+        self.add(PatternValidator::new_from_static(regex))
+    }
+
+    pub fn try_pattern(
+        self,
+        regex: impl Into<String>,
+    ) -> std::result::Result<Self, PatternValidatorError> {
+        Ok(self.add(PatternValidator::new(regex)?))
     }
 
     pub fn email(self) -> Self {
-        self.add(EmailValidator { message: None })
+        self.add(EmailValidator::default())
     }
 
     /// Add a step validation rule.
@@ -976,16 +1106,16 @@ pub fn add(mut self, v: impl Validator + 'static) -> Self {
 
     /// Add URL validation.
     pub fn url(self) -> Self {
-        self.add(UrlValidator { message: None })
+        self.add(UrlValidator::new())
     }
 
     // NOTE: `any()` moved to `AnyValidator::new()` — see below.
 
     pub fn custom<F>(self, f: F) -> Self
     where
-        F: Fn(&Value, &Context) -> Result + 'static,
+        F: Fn(&Value, &Context) -> Result + Send + Sync + 'static,
     {
-        self.add(FnValidator { f })
+        self.add(FnValidator::new(f))
     }
 
     /// Run all validators and collect ALL errors.
@@ -1351,8 +1481,8 @@ impl Validator for AnyValidator {
 //
 // // OR: at least one must pass
 // let v = AnyValidator::new(vec![
-//     boxed_validator(EmailValidator { message: None }),
-//     boxed_validator(PatternValidator::new(r"^\+\d+$", None)),
+//     boxed_validator(EmailValidator::default()),
+//     boxed_validator(PatternValidator::new_from_static(r"^\+\d+$")),
 // ]);
 // ```
 
@@ -1381,11 +1511,6 @@ impl Validator for AnyValidator {
 /// };
 /// ```
 // Type alias avoids clippy::type_complexity on the struct field.
-#[cfg(target_arch = "wasm32")]
-type CrossFieldValidateFn =
-    Arc<dyn Fn(&Value, &Context) -> Result>;
-
-#[cfg(not(target_arch = "wasm32"))]
 type CrossFieldValidateFn =
     Arc<dyn Fn(&Value, &Context) -> Result + Send + Sync>;
 
@@ -2723,7 +2848,7 @@ mod tests {
 
     #[test]
     fn test_required_validator() {
-        let v = RequiredValidator { message: None };
+        let v = RequiredValidator::default();
         let ctx = Context::standalone("test");
         let messages = FormMessages::default();
 
@@ -2741,7 +2866,7 @@ mod tests {
 
     #[test]
     fn test_min_length_validator() {
-        let v = MinLengthValidator { min: 3, message: None };
+        let v = MinLengthValidator::with_length(3);
         let ctx = Context::standalone("test");
 
         let short_value = Value::Text("ab".into());

@@ -8,14 +8,23 @@ repository.workspace   = true
 rust-version.workspace = true
 
 [features]
-default = []
-serde   = []
+default          = ["email-validation", "url-validation"]
+email-validation = ["dep:addr-spec"]
+url-validation   = ["dep:url"]
+serde            = []
 
 [dependencies]
 ars-collections = { path = "../ars-collections" }
 ars-core        = { path = "../ars-core" }
 ars-i18n        = { path = "../ars-i18n" }
-indexmap        = "2"
+indexmap        = "2.14"
+regex           = "1.12"
+url             = { version = "2.5", optional = true }
+
+[dependencies.addr-spec]
+version  = "0.9.1"
+optional = true
+features = ["normalization", "comments", "white-spaces", "literals"]
 
 [lints]
 workspace = true
