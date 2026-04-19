@@ -64,6 +64,21 @@ jobs:
       - name: Unit Tests
         run: cargo xtest unit
 
+  i18n-browser:
+    name: I18n Browser Tests
+    needs: [unit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked --version 0.14.0
+      - name: I18n Browser Tests
+        run: cargo xtest i18n-browser
+
   release:
     name: Release Verification
     needs: [unit]
@@ -74,10 +89,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
       - uses: ./.github/actions/install-dioxus-desktop-deps
-      - name: Release Compile Check
-        run: cargo check -p ars-i18n --release --all-targets --no-default-features --features icu4x
-      - name: Release Tests
-        run: cargo xtest release
+      - name: Release Verification
+        run: cargo xtask ci release
+
+  mutual-exclusion:
+    name: Mutual Exclusion Guard
+    needs: [check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Mutual Exclusion Guard
+        run: cargo xtask ci mutual-exclusion
 
   integration:
     name: Integration Tests

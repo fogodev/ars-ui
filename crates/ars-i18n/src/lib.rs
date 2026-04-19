@@ -56,8 +56,6 @@ pub use detect::locale_from_accept_language;
 pub use layout::{LogicalRect, LogicalSide, PhysicalRect, PhysicalSide};
 pub use locale::{Locale, LocaleParseError, locales};
 pub use locale_stack::LocaleStack;
-#[cfg(feature = "std")]
-pub use number::get_number_formatter;
 pub use number::{
     CurrencyCode, MeasureUnit, NumberFormatOptions, NumberFormatter, NumberStyle, RoundingMode,
     SignDisplay, UnitDisplay, decimal_and_group_separators, normalize_digits, parse_locale_number,

@@ -55,24 +55,16 @@ mod tests {
         pin::Pin,
         task::{Context as TaskContext, Poll, Waker},
     };
-    use std::{sync::Arc, task::Wake};
+    use std::sync::Arc;
 
     use super::*;
     use crate::field::Value;
-
-    struct NoopWake;
-
-    impl Wake for NoopWake {
-        fn wake(self: Arc<Self>) {}
-    }
 
     fn block_on_ready<F>(future: F) -> F::Output
     where
         F: Future,
     {
-        let waker = Waker::from(Arc::new(NoopWake));
-
-        let mut context = TaskContext::from_waker(&waker);
+        let mut context = TaskContext::from_waker(Waker::noop());
 
         let mut future = Pin::from(Box::new(future));
 

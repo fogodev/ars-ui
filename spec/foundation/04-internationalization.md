@@ -27,14 +27,13 @@ the lightweight ICU locale/provider crates in all builds, including WASM clients
 The `icu4x` vs `web-intl` split applies to formatter backends and compiled CLDR
 data, not to the core `Locale` wrapper itself.
 
-```rust
-#[cfg(feature = "icu4x")]
-pub type DefaultNumberFormatter = icu4x::Icu4xNumberFormatter;
-#[cfg(feature = "web-intl")]
-pub type DefaultNumberFormatter = web_intl::JsIntlNumberFormatter;
-```
-
-Both backends expose the same concrete formatter surface. Components are backend-agnostic.
+Number formatting does **not** expose a public backend alias. The public type is
+always `NumberFormatter`; `icu4x` and `web-intl` only change the internal
+backend selected by `NumberFormatter::new()`. Components are backend-agnostic.
+Ambient formatter reuse is adapter-scoped: adapters derive memoized formatters
+from `ArsProvider` context through `use_number_formatter(...)`, while
+`NumberFormatter::new()` remains the explicit low-level constructor for
+host-application and non-adapter code.
 
 #### 1.1.1 Number Formatter Context Propagation
 
@@ -1129,12 +1128,13 @@ impl NumberFormatter {
     /// **Implementation backends:**
     /// - `icu4x`: ICU4X 2.x does not yet provide a range formatter. Uses a
     ///   language-match heuristic for locale-specific range separators.
-    /// - `web-intl`: Use `Intl.NumberFormat.prototype.formatRange(start, end)` via
-    ///   `js_sys` / `wasm_bindgen`.
+    /// - `web-intl`: ars-i18n keeps the same language-match heuristic for the
+    ///   public `NumberFormatter` API. `Intl.NumberFormat.prototype.formatRange`
+    ///   is not currently surfaced as a separate delivered backend behavior.
     ///
     /// **Implementation**: Uses a language-match heuristic for locale-correct
-    /// range separators. ICU4X 2.x does not provide a `NumberRangeFormatter`;
-    /// the heuristic below is the specified approach.
+    /// range separators under both backends. ICU4X 2.x does not provide a
+    /// `NumberRangeFormatter`; the heuristic below is the specified approach.
     pub fn format_range(&self, start: f64, end: f64, locale: &Locale) -> String {
         // Language-match heuristic for the most common CLDR range patterns.
         // Does not handle all CLDR range patterns (e.g., Arabic spacing,
@@ -3336,32 +3336,19 @@ types from the crate.
 ### 9.3 Lazy-Loaded Formatters
 
 ```rust
-/// Cache formatters keyed by locale + options to avoid re-creation.
+/// Ambient formatter reuse is handled by adapter hooks rather than a public
+/// global cache API.
 ///
-/// Note: ICU4X formatter handles used inside `NumberFormatter` are not
-/// `Send`, so ars-i18n uses a `std` thread-local cache rather than a process-
-/// wide `Mutex`-guarded static. On `no_std` targets (bare `alloc`),
-/// formatters must be constructed per-call or cached by the application.
-#[cfg(feature = "std")]
-thread_local! {
-    static NUMBER_FORMATTER_CACHE:
-        std::cell::RefCell<alloc::collections::BTreeMap<String, NumberFormatter>> =
-            std::cell::RefCell::new(alloc::collections::BTreeMap::new());
-}
-
-#[cfg(feature = "std")]
-pub fn get_number_formatter(locale: &Locale, options: &NumberFormatOptions) -> NumberFormatter {
-    let key = format!("{:?}-{:?}", locale.to_bcp47(), options);
-    NUMBER_FORMATTER_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if let Some(existing) = cache.get(&key) {
-            return existing.clone();
-        }
-        let formatter = NumberFormatter::new(locale, options.clone());
-        cache.insert(key, formatter.clone());
-        formatter
-    })
-}
+/// `ars-i18n` keeps `NumberFormatter::new()` as the explicit constructor for
+/// any code that already has a resolved `Locale`. Adapters derive memoized
+/// formatters from `ArsProvider` context through `use_number_formatter(...)`
+/// so formatter lifetime follows component/provider scope instead of a
+/// thread-local cache.
+///
+/// `NumberFormatter` may internally use `Arc` to share backend state between
+/// clones, but that ownership cleanup does not by itself guarantee that every
+/// backend is `Send + Sync` on every target. In particular, the `web-intl`
+/// backend still wraps browser `Intl` objects.
 ```
 
 ### 9.4 Browser Intl API Feature Flag (`web-intl`)
@@ -3375,13 +3362,13 @@ on browser `Intl`.
 #### 9.4.1 Feature-flagged type aliases
 
 ```rust
-// ars-i18n/src/lib.rs — zero-cost dispatch via cfg type aliases
+// ars-i18n/src/lib.rs — zero-cost dispatch via cfg type aliases where the
+// public surface is genuinely backend-specific.
 
 // ── Number formatting ──
-#[cfg(feature = "icu4x")]
-pub type DefaultNumberFormatter = icu4x::Icu4xNumberFormatter;
-#[cfg(feature = "web-intl")]
-pub type DefaultNumberFormatter = web_intl::JsIntlNumberFormatter;
+// Number formatting keeps a single public `NumberFormatter` type.
+// Backend selection is internal to `NumberFormatter::new()`, so there is no
+// public `DefaultNumberFormatter` alias and no public backend wrapper type.
 
 // ── Date formatting ──
 #[cfg(feature = "icu4x")]
@@ -3435,40 +3422,46 @@ abstract over.
 #### 9.4.3 `web-intl` backend sketch
 
 ```rust
-#[cfg(feature = "web-intl")]
-pub struct JsIntlNumberFormatter {
+#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+pub(crate) struct WebIntlNumberFormatter {
     inner: js_sys::Intl::NumberFormat,
 }
 
-#[cfg(feature = "web-intl")]
-impl JsIntlNumberFormatter {
-    pub fn new(locale: &str, options: &NumberFormatOptions) -> Self {
-        use js_sys::{Array, Object, Reflect, Intl};
+#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+impl WebIntlNumberFormatter {
+    pub(crate) fn new(locale: &Locale, options: &NumberFormatOptions) -> Self {
+        use js_sys::{Array, Intl};
         use wasm_bindgen::JsValue;
 
-        let locales = Array::of1(&JsValue::from_str(locale));
-        let js_opts = Object::new();
-
-        // Map our options to Intl.NumberFormat options.
-        Reflect::set(&js_opts, &"minimumFractionDigits".into(),
-            &JsValue::from_f64(options.min_fraction_digits as f64)).expect("Reflect::set on JS object");
-        Reflect::set(&js_opts, &"maximumFractionDigits".into(),
-            &JsValue::from_f64(options.max_fraction_digits as f64)).expect("Reflect::set on JS object");
-        Reflect::set(&js_opts, &"useGrouping".into(),
-            &JsValue::from_bool(options.use_grouping)).expect("Reflect::set on JS object");
-
+        let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
+        let js_opts = build_number_format_options(options);
         let inner = Intl::NumberFormat::new(&locales, &js_opts);
         Self { inner }
     }
-}
 
-#[cfg(feature = "web-intl")]
-impl NumberFormat for JsIntlNumberFormatter {
-    fn format(&self, value: f64) -> String {
-        self.inner.format(value).as_string().unwrap_or_default()
+    pub(crate) fn format(&self, value: f64) -> String {
+        // `Intl.NumberFormat` applies locale rounding, grouping, percent, and
+        // currency semantics directly in the browser.
+        //
+        // Percent formatting receives the original fractional value here, so
+        // `0.47` formats as `47%` rather than being pre-scaled to `4700%`.
+        todo!()
+    }
+
+    pub(crate) fn decimal_and_group_separators(locale: &Locale) -> (char, char) {
+        // Probe `formatToParts(12345.6)` and read the `decimal` / `group` parts
+        // instead of using static fallback tables on wasm32.
+        todo!()
     }
 }
+```
 
+`NumberFormatter::new()` normalizes the public options first, then selects either
+the ICU4X formatter family, the internal browser helper above, or the native
+fallback path. No public `JsIntlNumberFormatter` / `DefaultNumberFormatter`
+surface is exposed for numbers.
+
+```rust
 // ── web-intl collation ──
 // StringCollator's web-intl backend is defined inline in §8 alongside the
 // ICU4X backend. Both use the same public API (new, compare, sort, sort_by_key).

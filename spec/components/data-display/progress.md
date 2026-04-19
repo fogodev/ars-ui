@@ -286,7 +286,10 @@ impl<'a> Api<'a> {
         if self.is_complete() {
             return (self.ctx.messages.complete)(&self.ctx.locale);
         }
-        let fmt = NumberFormatter::new(&self.ctx.locale, self.props.format_options.as_ref());
+        let fmt = NumberFormatter::new(
+            &self.ctx.locale,
+            self.props.format_options.clone().unwrap_or_default(),
+        );
         format!("{}% complete", fmt.format_percent(self.ctx.percent / 100.0))
     }
 
@@ -478,7 +481,9 @@ Progress
 ## 4. Internationalization
 
 - `aria-valuetext` uses `NumberFormatter::format_percent()` from `ars-i18n` for locale-aware
-  percentage formatting (e.g. "47 %" in French, "47%" in English).
+  percentage formatting (e.g. "47 %" in French, "47%" in English). When locale
+  is inherited from `ArsProvider`, adapters should derive the formatter through
+  `use_number_formatter(...)`.
 - "Loading…" and "Complete" strings come from `Messages` and should be supplied
   by the host application from a message catalog.
 

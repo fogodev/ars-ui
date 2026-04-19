@@ -1311,8 +1311,12 @@ impl Translate for Price {
     fn translate(&self, locale: &Locale, icu: &dyn IcuProvider) -> String {
         match self {
             Self::Total { amount } => {
-                let formatter = ars_i18n::get_number_formatter(
-                    locale, &ars_i18n::NumberFormatOptions::currency("USD"),
+                let formatter = ars_i18n::NumberFormatter::new(
+                    locale,
+                    ars_i18n::NumberFormatOptions {
+                        style: ars_i18n::NumberStyle::Currency(ars_i18n::CurrencyCode::USD),
+                        ..ars_i18n::NumberFormatOptions::default()
+                    },
                 );
                 match locale.language().as_str() {
                     "es" => format!("Total: {}", formatter.format(*amount)),

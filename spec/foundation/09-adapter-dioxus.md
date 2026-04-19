@@ -2198,7 +2198,50 @@ pub fn use_locale() -> Signal<Locale> {
 }
 ```
 
-### 16.2 Environment Resolution Utilities
+### 16.2 use_number_formatter()
+
+```rust
+use ars_i18n::{NumberFormatOptions, NumberFormatter};
+
+/// Resolve a memoized number formatter from ArsProvider locale context.
+///
+/// `use_number_formatter()` is the public ambient-locale formatting helper for
+/// Dioxus components. The `options` closure may read reactive props/signals;
+/// the memo rebuilds when either the locale signal or the closure output
+/// changes.
+pub fn use_number_formatter<F>(options: F) -> Memo<NumberFormatter>
+where
+    F: Fn() -> NumberFormatOptions + 'static,
+{
+    use_resolved_number_formatter(None, options)
+}
+
+/// Resolve a memoized formatter from an explicit locale override or the
+/// ambient ArsProvider locale.
+///
+/// This helper is adapter-internal so component implementations with a
+/// `locale` prop can preserve the documented resolution chain without pushing
+/// formatter state into `ars_core::Env`.
+pub(crate) fn use_resolved_number_formatter<F>(
+    adapter_props_locale: Option<&Locale>,
+    options: F,
+) -> Memo<NumberFormatter>
+where
+    F: Fn() -> NumberFormatOptions + 'static,
+{
+    let explicit_locale = adapter_props_locale.cloned();
+    let locale = use_locale();
+
+    use_memo(move || {
+        let resolved_locale = explicit_locale.clone().unwrap_or_else(|| locale.read().clone());
+        NumberFormatter::new(&resolved_locale, options())
+    })
+}
+```
+
+**Prelude export:** `pub use crate::use_number_formatter;`
+
+### 16.3 Environment Resolution Utilities
 
 These adapter-only utilities resolve environment values from `ArsProvider` context
 before passing them to core code via the `Env` struct and `Messages` parameter.
@@ -2275,7 +2318,7 @@ fn use_messages<M: ComponentMessages + Send + Sync + 'static>(
 }
 ```
 
-### 16.3 t() — Translatable Text Resolver
+### 16.4 t() — Translatable Text Resolver
 
 ```rust
 use ars_i18n::Translate;

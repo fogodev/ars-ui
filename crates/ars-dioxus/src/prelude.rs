@@ -49,7 +49,7 @@
 pub use ars_i18n::{Direction, Locale, Orientation, ResolvedDirection, Translate};
 
 // -- User-facing helpers --
-pub use crate::t;
+pub use crate::{t, use_number_formatter};
 
 // -- Component modules --
 // (none yet — added as components are implemented, e.g.:

@@ -296,6 +296,9 @@ a `trend` or `change` value is provided. It uses `Trend` enum to indicate direct
   before being passed as the `value` prop; Stat does not format internally.
 - `Change` delta uses `NumberFormatter::format_percent()` for locale-aware percentage
   rendering (e.g. "12,5 %" in French).
+- When Stat formatting is derived from ambient `ArsProvider` locale inside an
+  adapter, adapters should use `use_number_formatter(...)` rather than a
+  thread-local formatter cache.
 - `Messages` keys ("increase", "decrease", "no change"; directional prefixes) are
   localizable strings that the host application supplies from a message catalog.
 - **RTL**: `Root` receives `dir="rtl"` from the adapter when the active locale is

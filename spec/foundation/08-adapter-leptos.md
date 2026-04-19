@@ -1833,7 +1833,73 @@ pub fn use_locale() -> Signal<Locale> {
 > `derive()` call creates an independent memo that only updates its dependents
 > when its output value actually changes.
 
-### 13.2 resolve_locale() — Adapter Locale Resolution
+### 13.2 use_number_formatter()
+
+```rust
+use ars_i18n::{NumberFormatOptions, NumberFormatter};
+
+/// Resolve a provider-derived number formatter from ArsProvider locale context.
+///
+/// `use_number_formatter()` is the public ambient-locale formatting helper for
+/// Leptos components. The `options` closure may read reactive props/signals;
+/// the formatter rebuilds when either the locale signal or the closure output
+/// changes.
+///
+/// Leptos 0.8 only exposes public `Memo` constructors for `Send + Sync`
+/// values. Because `NumberFormatter` is not guaranteed to be thread-safe on
+/// every backend, the Leptos adapter returns a local derived `Signal` backed
+/// by a component-local cache instead of a `Memo`.
+pub fn use_number_formatter<F>(
+    options: F,
+) -> Signal<NumberFormatter, LocalStorage>
+where
+    F: Fn() -> NumberFormatOptions + 'static,
+{
+    use_resolved_number_formatter(None, options)
+}
+
+/// Resolve a provider-derived formatter from an explicit locale override or the
+/// ambient ArsProvider locale.
+///
+/// This helper is adapter-internal so component implementations with a
+/// `locale` prop can preserve the documented resolution chain without pushing
+/// formatter state into `ars_core::Env`.
+pub(crate) fn use_resolved_number_formatter<F>(
+    adapter_props_locale: Option<&Locale>,
+    options: F,
+) -> Signal<NumberFormatter, LocalStorage>
+where
+    F: Fn() -> NumberFormatOptions + 'static,
+{
+    let explicit_locale = adapter_props_locale.cloned();
+    let locale = use_locale();
+    let cache =
+        StoredValue::<Option<(Locale, NumberFormatOptions, NumberFormatter)>, LocalStorage>::new_local(
+            None,
+        );
+
+    Signal::derive_local(move || {
+        let resolved_locale = explicit_locale.clone().unwrap_or_else(|| locale.get());
+        let resolved_options = options();
+
+        cache.update_value(|cached| {
+            if let Some((cached_locale, cached_options, formatter)) = cached {
+                if *cached_locale == resolved_locale && *cached_options == resolved_options {
+                    return formatter.clone();
+                }
+            }
+
+            let formatter = NumberFormatter::new(&resolved_locale, resolved_options.clone());
+            *cached = Some((resolved_locale, resolved_options, formatter.clone()));
+            formatter
+        })
+    })
+}
+```
+
+**Prelude export:** `pub use crate::use_number_formatter;`
+
+### 13.3 resolve_locale() — Adapter Locale Resolution
 
 An adapter-only utility (not available in core crates) that resolves the effective locale for a component. If the adapter-level component provides a per-instance `locale` prop override, that value is used; otherwise falls back to the `ArsProvider` context locale.
 
@@ -1852,7 +1918,7 @@ fn resolve_locale(adapter_props_locale: Option<&Locale>) -> Locale {
 }
 ```
 
-### 13.3 use_messages() — Adapter Message Resolution
+### 13.4 use_messages() — Adapter Message Resolution
 
 ```rust
 use ars_core::resolve_messages as core_resolve_messages;
@@ -1877,7 +1943,7 @@ pub fn use_messages<M: ComponentMessages + Send + Sync + 'static>(
 }
 ```
 
-### 13.4 t() — Translatable Text Resolver
+### 13.5 t() — Translatable Text Resolver
 
 ```rust
 use ars_i18n::Translate;
