@@ -906,7 +906,11 @@ impl StepValidator {
 impl Validator for StepValidator {
     fn validate(&self, value: &Value, ctx: &Context) -> Result {
         if let Some(num) = value.as_number() {
-            if !self.step.is_finite() || self.step <= 0.0 {
+            if !num.is_finite()
+                || !self.step_base.is_finite()
+                || !self.step.is_finite()
+                || self.step <= 0.0
+            {
                 let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
                 return Err(Errors(vec![
                     self.message.clone()
@@ -978,7 +982,15 @@ fn is_valid_url(s: &str) -> bool {
 
 #[cfg(not(feature = "url-validation"))]
 fn is_valid_url(s: &str) -> bool {
-    s.find("://").map_or(false, |pos| s.len() > pos + 3)
+    s.find("://").is_some_and(|pos| {
+        let authority_and_rest = &s[pos + 3..];
+        let authority = authority_and_rest
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or("");
+
+        !authority.is_empty()
+    })
 }
 
 /// Validator created from a closure.

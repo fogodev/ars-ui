@@ -486,7 +486,11 @@ impl StepValidator {
 impl Validator for StepValidator {
     fn validate(&self, value: &Value, ctx: &Context) -> Result {
         if let Some(number) = value.as_number() {
-            if !self.step.is_finite() || self.step <= 0.0 {
+            if !number.is_finite()
+                || !self.step_base.is_finite()
+                || !self.step.is_finite()
+                || self.step <= 0.0
+            {
                 let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
 
                 let error = self.message.clone().map_or_else(
@@ -610,9 +614,16 @@ fn is_valid_url(value: &str) -> bool {
 
 #[cfg(not(feature = "url-validation"))]
 fn is_valid_url(value: &str) -> bool {
-    value
-        .find("://")
-        .is_some_and(|position| value.len() > position + 3)
+    value.find("://").is_some_and(|position| {
+        let authority_and_rest = &value[position + 3..];
+
+        let authority = authority_and_rest
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or("");
+
+        !authority.is_empty()
+    })
 }
 
 #[cfg(test)]
@@ -1072,6 +1083,28 @@ mod tests {
     }
 
     #[test]
+    fn step_nan_base_fails() {
+        let validator = StepValidator::new(1.0).with_base(f64::NAN);
+
+        assert_eq!(
+            error_code(validator.validate(&Value::Number(Some(1.0)), &Context::standalone("x"))),
+            ErrorCode::Step(1.0)
+        );
+    }
+
+    #[test]
+    fn step_nan_number_fails() {
+        let validator = StepValidator::new(1.0);
+
+        assert_eq!(
+            error_code(
+                validator.validate(&Value::Number(Some(f64::NAN)), &Context::standalone("x"))
+            ),
+            ErrorCode::Step(1.0)
+        );
+    }
+
+    #[test]
     fn step_none_number_skips() {
         let validator = StepValidator::new(0.5);
 
@@ -1142,6 +1175,27 @@ mod tests {
         assert_eq!(
             error_code(validator.validate(
                 &Value::Text("https://exa mple.com".into()),
+                &Context::standalone("x")
+            )),
+            ErrorCode::Url
+        );
+    }
+
+    #[cfg(not(feature = "url-validation"))]
+    #[test]
+    fn url_missing_authority_fails_under_fallback_validation() {
+        let validator = UrlValidator::new();
+
+        assert_eq!(
+            error_code(validator.validate(
+                &Value::Text("https:///path".into()),
+                &Context::standalone("x")
+            )),
+            ErrorCode::Url
+        );
+        assert_eq!(
+            error_code(validator.validate(
+                &Value::Text("http://?q=1".into()),
                 &Context::standalone("x")
             )),
             ErrorCode::Url
