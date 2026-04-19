@@ -47,13 +47,6 @@ impl Display for SortDirection {
 /// collection, but any type works (e.g., a string column identifier).
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "serde",
-    serde(bound(
-        serialize = "K: serde::Serialize",
-        deserialize = "K: serde::de::DeserializeOwned"
-    ))
-)]
 pub struct SortDescriptor<K> {
     /// The column (or field) being sorted.
     pub column: K,

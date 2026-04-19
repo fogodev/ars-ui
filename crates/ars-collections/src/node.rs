@@ -28,13 +28,6 @@ pub enum NodeType {
 /// keyboard navigation, and ARIA attribute generation.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "serde",
-    serde(bound(
-        serialize = "T: serde::Serialize",
-        deserialize = "T: serde::de::DeserializeOwned"
-    ))
-)]
 pub struct Node<T> {
     /// Stable identity of this node.
     pub key: Key,

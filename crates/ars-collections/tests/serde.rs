@@ -320,3 +320,37 @@ fn collection_change_reset_round_trips() {
 
     assert_eq!(change, round_trip(&change));
 }
+
+// ---------------------------------------------------------------------------
+// Regression: borrowed generic parameters must satisfy `Deserialize<'de>`.
+//
+// The derives on `SortDescriptor<K>`, `Node<T>`, and `CollectionChange<K>`
+// must lean on serde's default bound (`Deserialize<'de>`) rather than the
+// stricter `DeserializeOwned`, otherwise consumers that parameterise these
+// types with borrowed keys (for example `&str`-based column IDs) cannot
+// deserialize at all. This is a compile-time assertion — if the bound is
+// tightened back to `DeserializeOwned`, this function fails to compile.
+// ---------------------------------------------------------------------------
+
+/// Compile-time proof that the serde derives admit borrowed generic types.
+///
+/// The inner `assertions` function takes a `PhantomData<&'a ()>` argument
+/// so its body must type-check for an arbitrary lifetime `'a`. If the
+/// derives were tightened back to `DeserializeOwned`, `&'a str` — a
+/// borrowed, non-`'static` type — would fail the check and the test
+/// file would no longer compile.
+#[expect(
+    dead_code,
+    reason = "exists solely to assert serde bounds at compile time"
+)]
+const BORROWED_GENERIC_PARAMS_DESERIALIZE_ASSERTION: () = {
+    const fn assert_deserialize<'de, T: serde::Deserialize<'de>>() {}
+
+    const fn assertions<'a>(_marker: core::marker::PhantomData<&'a ()>) {
+        assert_deserialize::<SortDescriptor<&'a str>>();
+        assert_deserialize::<Node<&'a str>>();
+        assert_deserialize::<CollectionChange<&'a str>>();
+    }
+
+    assertions(core::marker::PhantomData);
+};
