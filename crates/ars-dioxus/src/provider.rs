@@ -355,16 +355,16 @@ where
     F: Fn() -> NumberFormatOptions + 'static,
 {
     let explicit_locale = adapter_props_locale.cloned();
-
     let locale = use_locale();
+    let resolved_options = options();
 
-    use_memo(move || {
+    use_memo(use_reactive!(|explicit_locale, resolved_options| {
         let resolved_locale = explicit_locale
             .clone()
             .unwrap_or_else(|| locale.read().clone());
 
-        NumberFormatter::new(&resolved_locale, options())
-    })
+        NumberFormatter::new(&resolved_locale, resolved_options.clone())
+    }))
 }
 
 /// Resolves the current ICU provider from provider context.
@@ -778,6 +778,106 @@ mod tests {
         let mut dom = VirtualDom::new(app);
 
         dom.rebuild_in_place();
+    }
+
+    #[test]
+    fn use_resolved_number_formatter_recomputes_when_explicit_locale_changes() {
+        let outputs = Rc::new(RefCell::new(Vec::new()));
+
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "Dioxus root props are moved into the render function."
+        )]
+        fn app(outputs: Rc<RefCell<Vec<String>>>) -> Element {
+            let ctx = test_context(locales::fr(), Arc::new(StubIcuProvider));
+
+            use_context_provider(|| ctx);
+
+            let mut phase = use_signal(|| 0u8);
+            let mut use_german_locale = use_signal(|| false);
+
+            let explicit = if use_german_locale() {
+                locales::de_de()
+            } else {
+                locales::en_us()
+            };
+
+            let formatter =
+                use_resolved_number_formatter(Some(&explicit), NumberFormatOptions::default);
+
+            outputs.borrow_mut().push(formatter.read().format(1234.56));
+
+            if phase() == 0 {
+                phase.set(1);
+                use_german_locale.set(true);
+            }
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new_with_props(app, Rc::clone(&outputs));
+
+        dom.rebuild_in_place();
+
+        dom.mark_dirty(ScopeId::APP);
+
+        dom.render_immediate(&mut NoOpMutations);
+
+        assert_eq!(outputs.borrow().as_slice(), ["1,234.56", "1.234,56"]);
+    }
+
+    #[test]
+    fn use_number_formatter_recomputes_when_non_reactive_options_change() {
+        let outputs = Rc::new(RefCell::new(Vec::new()));
+
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "Dioxus root props are moved into the render function."
+        )]
+        fn app(outputs: Rc<RefCell<Vec<String>>>) -> Element {
+            let _ctx =
+                use_context_provider(|| test_context(locales::en_us(), Arc::new(StubIcuProvider)));
+
+            let mut phase = use_signal(|| 0u8);
+            let mut use_percent = use_signal(|| false);
+
+            let options = if use_percent() {
+                NumberFormatOptions {
+                    style: ars_i18n::NumberStyle::Percent,
+                    ..NumberFormatOptions::default()
+                }
+            } else {
+                NumberFormatOptions::default()
+            };
+
+            let formatter = use_number_formatter({
+                let options = options.clone();
+                move || options.clone()
+            });
+
+            outputs.borrow_mut().push(formatter.read().format(0.47));
+
+            if phase() == 0 {
+                phase.set(1);
+                use_percent.set(true);
+            }
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new_with_props(app, Rc::clone(&outputs));
+
+        dom.rebuild_in_place();
+
+        dom.mark_dirty(ScopeId::APP);
+
+        dom.render_immediate(&mut NoOpMutations);
+
+        assert_eq!(outputs.borrow().as_slice(), ["0.47", "47%"]);
     }
 
     #[test]

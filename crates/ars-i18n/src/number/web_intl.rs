@@ -7,8 +7,7 @@ use js_sys::{
     Intl::{
         CurrencyDisplay, CurrencySign, NumberFormat, NumberFormatOptions as JsNumberFormatOptions,
         NumberFormatPart, NumberFormatPartType, NumberFormatStyle, RoundingMode as JsRoundingMode,
-        SignDisplay as JsSignDisplay, SupportedValuesKey, UnitDisplay as JsUnitDisplay,
-        UseGrouping, supported_values_of,
+        SignDisplay as JsSignDisplay, UnitDisplay as JsUnitDisplay, UseGrouping,
     },
     Reflect,
 };
@@ -180,7 +179,24 @@ fn normalized_fraction_digit_bounds(options: &NumberFormatOptions) -> (u8, u8) {
 }
 
 fn browser_supports_unit(unit_id: &str) -> bool {
-    supported_values_of(SupportedValuesKey::Unit)
+    let Ok(intl) = Reflect::get(&js_sys::global(), &JsValue::from_str("Intl")) else {
+        return false;
+    };
+
+    let Ok(supported_values_of) = Reflect::get(&intl, &JsValue::from_str("supportedValuesOf"))
+    else {
+        return false;
+    };
+
+    let Some(supported_values_of) = supported_values_of.dyn_ref::<Function>() else {
+        return false;
+    };
+
+    let Ok(supported_units) = supported_values_of.call1(&intl, &JsValue::from_str("unit")) else {
+        return false;
+    };
+
+    Array::from(&supported_units)
         .iter()
         .filter_map(|value| value.as_string())
         .any(|supported| supported == unit_id)

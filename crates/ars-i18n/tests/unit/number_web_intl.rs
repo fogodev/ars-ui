@@ -5,7 +5,11 @@
 
 use alloc::{collections::BTreeSet, string::String};
 
-use js_sys::Intl::{NumberFormat, NumberFormatOptions, SupportedValuesKey, supported_values_of};
+use js_sys::{
+    Intl::{NumberFormat, NumberFormatOptions, SupportedValuesKey, supported_values_of},
+    Reflect,
+};
+use wasm_bindgen::JsValue;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
 use crate::{
@@ -45,6 +49,43 @@ fn unsupported_browser_measure_unit() -> (crate::MeasureUnit, String) {
     }
 
     panic!("expected a CLDR unit that Intl.NumberFormat does not sanction");
+}
+
+struct SupportedValuesOfGuard {
+    original: JsValue,
+}
+
+impl SupportedValuesOfGuard {
+    fn remove() -> Self {
+        let intl = Reflect::get(&js_sys::global(), &JsValue::from_str("Intl"))
+            .expect("global Intl should exist");
+
+        let original = Reflect::get(&intl, &JsValue::from_str("supportedValuesOf"))
+            .expect("reading Intl.supportedValuesOf should succeed");
+
+        Reflect::set(
+            &intl,
+            &JsValue::from_str("supportedValuesOf"),
+            &JsValue::UNDEFINED,
+        )
+        .expect("overriding Intl.supportedValuesOf should succeed");
+
+        Self { original }
+    }
+}
+
+impl Drop for SupportedValuesOfGuard {
+    fn drop(&mut self) {
+        let intl = Reflect::get(&js_sys::global(), &JsValue::from_str("Intl"))
+            .expect("global Intl should exist");
+
+        Reflect::set(
+            &intl,
+            &JsValue::from_str("supportedValuesOf"),
+            &self.original,
+        )
+        .expect("restoring Intl.supportedValuesOf should succeed");
+    }
 }
 
 #[wasm_bindgen_test]
@@ -147,6 +188,30 @@ fn web_intl_unsupported_units_fall_back_to_decimal_formatting() {
         formatter.format(5.0),
         decimal.format(5.0),
         "expected unsupported unit {unit_id:?} to fall back to decimal formatting"
+    );
+}
+
+#[wasm_bindgen_test]
+fn web_intl_units_fall_back_to_decimal_when_supported_values_of_is_unavailable() {
+    let _guard = SupportedValuesOfGuard::remove();
+
+    let unit = crate::MeasureUnit::try_from_str("kilogram").expect("kilogram should parse");
+
+    let decimal = NumberFormatter::new(&locale("en-US"), ArsNumberFormatOptions::default());
+
+    let formatter = NumberFormatter::new(
+        &locale("en-US"),
+        ArsNumberFormatOptions {
+            style: NumberStyle::Unit(unit),
+            unit_display: UnitDisplay::Short,
+            ..ArsNumberFormatOptions::default()
+        },
+    );
+
+    assert_eq!(
+        formatter.format(5.0),
+        decimal.format(5.0),
+        "expected missing Intl.supportedValuesOf to fall back to decimal formatting"
     );
 }
 
@@ -318,13 +383,13 @@ fn web_intl_style_specific_formatters_resolve_expected_browser_options() {
     opts.set_style(js_sys::Intl::NumberFormatStyle::Currency);
     opts.set_currency(CurrencyCode::USD.as_str());
 
-    let locales = js_sys::Array::of1(&wasm_bindgen::JsValue::from_str("en-US"));
+    let locales = js_sys::Array::of1(&JsValue::from_str("en-US"));
 
     let formatter = NumberFormat::new(&locales, opts.as_ref());
 
     let resolved = formatter.resolved_options();
 
-    let currency = js_sys::Reflect::get(resolved.as_ref(), &"currency".into())
+    let currency = Reflect::get(resolved.as_ref(), &"currency".into())
         .ok()
         .and_then(|value| value.as_string());
 
