@@ -17,7 +17,7 @@ use crate::validation::Error;
 /// Single state for the fieldset machine.
 ///
 /// `Fieldset` is effectively stateless. All meaningful changes are stored in
-/// [`Context`] and applied through context-only transitions.
+/// [`MachineContext`] and applied through context-only transitions.
 #[derive(Clone, Debug, PartialEq)]
 pub enum State {
     /// The fieldset is mounted and ready to expose its current context.
@@ -405,20 +405,11 @@ impl<'a> Api<'a> {
 }
 
 /// Framework-context payload propagated from a fieldset to descendant fields.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Context {
-    /// Optional group name inherited by child field components.
-    pub name: Option<String>,
-
-    /// Whether the parent fieldset is disabled.
-    pub disabled: bool,
-
-    /// Whether the parent fieldset is invalid.
-    pub invalid: bool,
-
-    /// Whether the parent fieldset is read-only.
-    pub readonly: bool,
-}
+///
+/// This aliases the shared [`crate::field::Context`] type so framework context
+/// lookup stays consistent across `Fieldset`, `CheckboxGroup`, `RadioGroup`,
+/// and descendant `Field` components.
+pub type Context = crate::field::Context;
 
 #[cfg(test)]
 mod tests {
@@ -626,11 +617,11 @@ mod tests {
 
     #[test]
     fn fieldset_context_propagation() {
-        let ctx = Context::default();
+        let ctx: crate::field::Context = Context::default();
 
         assert_eq!(
             ctx,
-            Context {
+            crate::field::Context {
                 name: None,
                 disabled: false,
                 invalid: false,
@@ -638,7 +629,7 @@ mod tests {
             }
         );
 
-        let named = Context {
+        let named: Context = crate::field::Context {
             name: Some("address".to_string()),
             disabled: true,
             invalid: true,

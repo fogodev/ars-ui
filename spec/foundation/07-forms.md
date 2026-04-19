@@ -3193,6 +3193,17 @@ pub struct Context {
 }
 ```
 
+`Fieldset` reuses this shared type directly:
+
+```rust
+/// Framework-context payload propagated from a fieldset to descendant fields.
+///
+/// This aliases the shared `field::Context` type so framework context lookup
+/// stays consistent across `Fieldset`, `CheckboxGroup`, `RadioGroup`, and
+/// descendant `Field` components.
+pub type Context = crate::field::Context;
+```
+
 **Merge semantics**: When a `Field` detects a parent `Context`, it merges via logical OR:
 
 - `effective_disabled = field_props.disabled || field_ctx.disabled`
