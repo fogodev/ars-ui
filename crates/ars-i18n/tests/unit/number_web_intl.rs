@@ -4,6 +4,7 @@
 //! `wasm-pack test --headless --chrome crates/ars-i18n --no-default-features --features std,web-intl`.
 
 use alloc::{collections::BTreeSet, string::String};
+use core::num::NonZeroU8;
 
 use js_sys::{
     Intl::{NumberFormat, NumberFormatOptions, SupportedValuesKey, supported_values_of},
@@ -85,6 +86,24 @@ impl Drop for SupportedValuesOfGuard {
             &self.original,
         )
         .expect("restoring Intl.supportedValuesOf should succeed");
+    }
+}
+
+struct NegativeSignDisplaySupportGuard {
+    original: Option<bool>,
+}
+
+impl NegativeSignDisplaySupportGuard {
+    fn unsupported() -> Self {
+        Self {
+            original: super::web_intl::replace_negative_sign_display_support_override(Some(false)),
+        }
+    }
+}
+
+impl Drop for NegativeSignDisplaySupportGuard {
+    fn drop(&mut self) {
+        super::web_intl::replace_negative_sign_display_support_override(self.original);
     }
 }
 
@@ -268,6 +287,31 @@ fn web_intl_normalizes_inverted_fraction_digit_bounds_before_formatting() {
 }
 
 #[wasm_bindgen_test]
+fn web_intl_clamps_out_of_range_digit_bounds_before_formatting() {
+    let actual = NumberFormatter::new(
+        &locale("en-US"),
+        ArsNumberFormatOptions {
+            min_integer_digits: NonZeroU8::new(42).expect("42 should be non-zero"),
+            min_fraction_digits: 150,
+            max_fraction_digits: 200,
+            ..ArsNumberFormatOptions::default()
+        },
+    );
+
+    let expected = NumberFormatter::new(
+        &locale("en-US"),
+        ArsNumberFormatOptions {
+            min_integer_digits: NonZeroU8::new(21).expect("21 should be non-zero"),
+            min_fraction_digits: 100,
+            max_fraction_digits: 100,
+            ..ArsNumberFormatOptions::default()
+        },
+    );
+
+    assert_eq!(actual.format(1.5), expected.format(1.5));
+}
+
+#[wasm_bindgen_test]
 fn web_intl_sign_display_is_reflected_in_output() {
     let formatter = NumberFormatter::new(
         &locale("en-US"),
@@ -323,6 +367,21 @@ fn web_intl_negative_sign_display_differs_from_auto_for_negative_zero() {
 
     assert_eq!(auto.format(-0.0), "-0");
     assert_eq!(negative.format(-0.0), "0");
+}
+
+#[wasm_bindgen_test]
+fn web_intl_negative_sign_display_falls_back_when_browser_rejects_it() {
+    let _guard = NegativeSignDisplaySupportGuard::unsupported();
+
+    let formatter = NumberFormatter::new(
+        &locale("en-US"),
+        ArsNumberFormatOptions {
+            sign_display: SignDisplay::Negative,
+            ..ArsNumberFormatOptions::default()
+        },
+    );
+
+    assert_eq!(formatter.format(-0.0), "-0");
 }
 
 #[wasm_bindgen_test]
