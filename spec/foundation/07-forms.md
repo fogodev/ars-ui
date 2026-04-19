@@ -2856,11 +2856,11 @@ pub enum Event {
 }
 ```
 
-#### 12.2.3 Fieldset Component Context
+#### 12.2.3 Fieldset Component MachineContext
 
 ```rust
 #[derive(Clone, Debug, PartialEq)]
-pub struct Context {
+pub struct MachineContext {
     /// Whether the entire fieldset and all contained inputs are disabled.
     pub disabled: bool,
     /// Whether the fieldset is in an invalid state.
@@ -2884,6 +2884,10 @@ pub struct Context {
 ```rust
 #[derive(Clone, Debug, PartialEq, HasId)]
 pub struct Props {
+    /// Adapter-provided base ID for the fieldset root.
+    ///
+    /// This ID is immutable for the lifetime of a machine instance because
+    /// `MachineContext::ids` caches the derived part IDs during initialization.
     pub id: String,
     /// Whether the entire fieldset and all contained inputs are disabled.
     pub disabled: bool,
@@ -2916,13 +2920,13 @@ pub struct Machine;
 impl ars_core::Machine for Machine {
     type State = State;
     type Event = Event;
-    type Context = Context;
+    type Context = MachineContext;
     type Props = Props;
     type Api<'a> = Api<'a>;
     type Messages = Messages;
 
     fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let ctx = Context {
+        let ctx = MachineContext {
             disabled: props.disabled,
             invalid: props.invalid,
             readonly: props.readonly,
@@ -2954,9 +2958,10 @@ impl ars_core::Machine for Machine {
         match event {
             Event::SetErrors(errors) => {
                 let errors = errors.clone();
+                let base_invalid = props.invalid;
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.errors = errors;
-                    ctx.invalid = !ctx.errors.is_empty();
+                    ctx.invalid = base_invalid || !ctx.errors.is_empty();
                 }))
             }
             Event::ClearErrors => {
@@ -3002,12 +3007,12 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a Self::State,
+        _state: &'a Self::State,
         ctx: &'a Self::Context,
-        props: &'a Self::Props,
-        send: &'a dyn Fn(Self::Event),
+        _props: &'a Self::Props,
+        _send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
-        Api { state, ctx, props, send }
+        Api { ctx }
     }
 }
 ```
@@ -3016,10 +3021,7 @@ impl ars_core::Machine for Machine {
 
 ```rust
 pub struct Api<'a> {
-    state: &'a State,
-    ctx: &'a Context,
-    props: &'a Props,
-    send: &'a dyn Fn(Event),
+    ctx: &'a MachineContext,
 }
 
 #[derive(ComponentPart)]
@@ -3189,6 +3191,17 @@ pub struct Context {
     /// Whether the parent group is read-only. Child fields merge this with their own `readonly` prop.
     pub readonly: bool,
 }
+```
+
+`Fieldset` reuses this shared type directly:
+
+```rust
+/// Framework-context payload propagated from a fieldset to descendant fields.
+///
+/// This aliases the shared `field::Context` type so framework context lookup
+/// stays consistent across `Fieldset`, `CheckboxGroup`, `RadioGroup`, and
+/// descendant `Field` components.
+pub type Context = crate::field::Context;
 ```
 
 **Merge semantics**: When a `Field` detects a parent `Context`, it merges via logical OR:
@@ -3374,9 +3387,10 @@ impl ars_core::Machine for Machine {
         match event {
             Event::SetErrors(errors) => {
                 let errors = errors.clone();
+                let base_invalid = props.invalid;
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.errors = errors;
-                    ctx.invalid = !ctx.errors.is_empty();
+                    ctx.invalid = base_invalid || !ctx.errors.is_empty();
                 }))
             }
             Event::ClearErrors => {

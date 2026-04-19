@@ -120,7 +120,7 @@ Fieldset
 ├── Root          <fieldset>  data-ars-scope="fieldset" data-ars-part="root"
 ├── Legend         <legend>   data-ars-part="legend"
 ├── Description   <div>      data-ars-part="description" (optional)
-├── {child fields}            Field components inherit disabled state via FieldCtx
+├── {child fields}            Field components inherit disabled state via Context
 └── ErrorMessage  <span>     data-ars-part="error-message" role="alert"
 ```
 
@@ -144,7 +144,7 @@ When rendering as a native `<fieldset>` with `<legend>`, no explicit `aria-label
 
 ## 4. Adapter Context Propagation
 
-Adapters MUST provide `FieldCtx` to descendant fields via framework context (`provide_context` in Leptos, `use_context_provider` in Dioxus). Child Field components consume this context to inherit disabled, invalid, and readonly states from their parent Fieldset.
+Adapters MUST provide `Context` to descendant fields via framework context (`provide_context` in Leptos, `use_context_provider` in Dioxus). Child Field components consume this context to inherit disabled, invalid, and readonly states from their parent Fieldset.
 
 ## 5. Library Parity
 
