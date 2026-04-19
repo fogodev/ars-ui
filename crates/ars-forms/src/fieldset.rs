@@ -78,6 +78,9 @@ pub struct MachineContext {
 #[derive(Clone, Debug, Default, PartialEq, ars_core::HasId)]
 pub struct Props {
     /// Adapter-provided base ID for the fieldset root.
+    ///
+    /// This ID is immutable for the lifetime of a machine instance because
+    /// [`MachineContext::ids`] caches the derived part IDs during initialization.
     pub id: String,
 
     /// Whether the entire fieldset and all contained inputs are disabled.
@@ -125,6 +128,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(
+            old.id, new.id,
+            "fieldset Props.id must remain stable after init"
+        );
+
         let mut events = Vec::new();
 
         if old.disabled != new.disabled {
@@ -516,7 +524,7 @@ mod tests {
         };
 
         let new = Props {
-            id: "shipping".to_string(),
+            id: "billing".to_string(),
             disabled: true,
             invalid: true,
             readonly: true,
@@ -530,6 +538,17 @@ mod tests {
         assert!(matches!(events[1], Event::SetInvalid(true)));
         assert!(matches!(events[2], Event::SetReadonly(true)));
         assert!(matches!(events[3], Event::SetDir(Some(Direction::Rtl))));
+    }
+
+    #[test]
+    #[should_panic(expected = "fieldset Props.id must remain stable after init")]
+    fn fieldset_set_props_panics_when_id_changes() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        let mut next = test_props();
+        next.id = "shipping".to_string();
+
+        drop(service.set_props(next));
     }
 
     #[test]

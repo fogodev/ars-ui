@@ -2884,6 +2884,10 @@ pub struct MachineContext {
 ```rust
 #[derive(Clone, Debug, PartialEq, HasId)]
 pub struct Props {
+    /// Adapter-provided base ID for the fieldset root.
+    ///
+    /// This ID is immutable for the lifetime of a machine instance because
+    /// `MachineContext::ids` caches the derived part IDs during initialization.
     pub id: String,
     /// Whether the entire fieldset and all contained inputs are disabled.
     pub disabled: bool,
