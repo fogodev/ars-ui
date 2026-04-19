@@ -40,6 +40,9 @@ pub enum Step {
     /// Browser-executed wasm tests for ars-i18n's web-intl backend.
     I18nBrowser,
 
+    /// Browser-executed wasm tests for ars-dom's web feature.
+    DomBrowser,
+
     /// Release-profile compile and test smoke checks.
     Release,
 
@@ -84,6 +87,7 @@ const PIPELINE_ORDER: &[Step] = &[
     Step::Clippy,
     Step::Unit,
     Step::I18nBrowser,
+    Step::DomBrowser,
     Step::Release,
     Step::Integration,
     Step::Adapter,
@@ -235,6 +239,8 @@ fn run_step(step: Step, message_format: Option<&str>) -> Result<(), Error> {
 
         Step::I18nBrowser => run_i18n_browser(),
 
+        Step::DomBrowser => run_dom_browser(),
+
         Step::Release => run_release(),
 
         Step::Integration => run_integration(),
@@ -371,6 +377,10 @@ fn run_unit() -> Result<(), Error> {
 
 fn run_i18n_browser() -> Result<(), Error> {
     run_test_stage(Step::I18nBrowser, test::Stage::I18nBrowser)
+}
+
+fn run_dom_browser() -> Result<(), Error> {
+    run_test_stage(Step::DomBrowser, test::Stage::DomBrowser)
 }
 
 fn run_release() -> Result<(), Error> {
@@ -680,6 +690,7 @@ const fn step_name(step: Step) -> &'static str {
         Step::Clippy => "clippy",
         Step::Unit => "unit",
         Step::I18nBrowser => "i18n-browser",
+        Step::DomBrowser => "dom-browser",
         Step::Release => "release",
         Step::Integration => "integration",
         Step::Adapter => "adapter",
@@ -805,6 +816,7 @@ mod tests {
             Step::Clippy,
             Step::Unit,
             Step::I18nBrowser,
+            Step::DomBrowser,
             Step::Release,
             Step::Integration,
             Step::Adapter,

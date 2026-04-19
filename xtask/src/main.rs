@@ -134,6 +134,9 @@ enum TestCommand {
     /// Run browser-executed wasm tests for ars-i18n's web-intl backend.
     I18nBrowser,
 
+    /// Run browser-executed wasm tests for ars-dom's web feature.
+    DomBrowser,
+
     /// Run the release verification test stage.
     Release,
 
@@ -342,6 +345,7 @@ fn main() {
             let stage = cmd.map(|cmd| match cmd {
                 TestCommand::Unit => test::Stage::Unit,
                 TestCommand::I18nBrowser => test::Stage::I18nBrowser,
+                TestCommand::DomBrowser => test::Stage::DomBrowser,
                 TestCommand::Release => test::Stage::Release,
                 TestCommand::Integration => test::Stage::Integration,
                 TestCommand::Adapter => test::Stage::Adapter,

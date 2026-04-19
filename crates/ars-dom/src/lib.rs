@@ -42,8 +42,8 @@ pub use media::{
 };
 pub use modality::ModalityManager;
 pub use overlay_stack::{
-    OverlayEntry, contains_overlay, is_topmost, overlay_count, overlays_above, push_overlay,
-    remove_overlay, reset_overlay_stack, topmost_overlay,
+    OverlayEntry, contains_overlay, is_above, is_topmost, overlay_count, overlays_above,
+    push_overlay, remove_overlay, reset_overlay_stack, topmost_overlay,
 };
 #[cfg(feature = "web")]
 pub use portal::{
