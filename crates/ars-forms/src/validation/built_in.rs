@@ -486,20 +486,34 @@ impl StepValidator {
 impl Validator for StepValidator {
     fn validate(&self, value: &Value, ctx: &Context) -> Result {
         if let Some(number) = value.as_number() {
+            if !self.step.is_finite() || self.step <= 0.0 {
+                let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
+
+                let error = self.message.clone().map_or_else(
+                    || Error::step(self.step, &FormMessages::default(), locale),
+                    |message| Error {
+                        message,
+                        code: ErrorCode::Step(self.step),
+                    },
+                );
+
+                return Err(Errors(vec![error]));
+            }
+
             let remainder = ((number - self.step_base) % self.step).abs();
 
             if remainder > f64::EPSILON && (self.step - remainder) > f64::EPSILON {
-                if let Some(message) = &self.message {
-                    return Err(Errors(vec![Error::custom("step", message.clone())]));
-                }
-
                 let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
 
-                return Err(Errors(vec![Error::step(
-                    self.step,
-                    &FormMessages::default(),
-                    locale,
-                )]));
+                let error = self.message.clone().map_or_else(
+                    || Error::step(self.step, &FormMessages::default(), locale),
+                    |message| Error {
+                        message,
+                        code: ErrorCode::Step(self.step),
+                    },
+                );
+
+                return Err(Errors(vec![error]));
             }
         }
 
@@ -536,13 +550,17 @@ impl Validator for UrlValidator {
             && !value.is_empty()
             && !is_valid_url(value)
         {
-            if let Some(message) = &self.message {
-                return Err(Errors(vec![Error::custom("url", message.clone())]));
-            }
-
             let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
 
-            return Err(Errors(vec![Error::url(&FormMessages::default(), locale)]));
+            let error = self.message.clone().map_or_else(
+                || Error::url(&FormMessages::default(), locale),
+                |message| Error {
+                    message,
+                    code: ErrorCode::Url,
+                },
+            );
+
+            return Err(Errors(vec![error]));
         }
 
         Ok(())
@@ -1034,6 +1052,26 @@ mod tests {
     }
 
     #[test]
+    fn step_zero_fails() {
+        let validator = StepValidator::new(0.0);
+
+        assert_eq!(
+            error_code(validator.validate(&Value::Number(Some(1.0)), &Context::standalone("x"))),
+            ErrorCode::Step(0.0)
+        );
+    }
+
+    #[test]
+    fn step_infinite_fails() {
+        let validator = StepValidator::new(f64::INFINITY);
+
+        assert_eq!(
+            error_code(validator.validate(&Value::Number(Some(1.0)), &Context::standalone("x"))),
+            ErrorCode::Step(f64::INFINITY)
+        );
+    }
+
+    #[test]
     fn step_none_number_skips() {
         let validator = StepValidator::new(0.5);
 
@@ -1236,8 +1274,8 @@ mod tests {
             ErrorCode::Pattern("[a-z]+".into())
         );
         assert_eq!(error_code(email_result), ErrorCode::Email);
-        assert_eq!(error_code(step_result), ErrorCode::Custom("step".into()));
-        assert_eq!(error_code(url_result), ErrorCode::Custom("url".into()));
+        assert_eq!(error_code(step_result), ErrorCode::Step(2.0));
+        assert_eq!(error_code(url_result), ErrorCode::Url);
 
         assert_eq!(required_message, "required override");
         assert_eq!(min_length_message, "min override");

@@ -906,16 +906,22 @@ impl StepValidator {
 impl Validator for StepValidator {
     fn validate(&self, value: &Value, ctx: &Context) -> Result {
         if let Some(num) = value.as_number() {
-            let remainder = ((num - self.step_base) % self.step).abs();
-            if remainder > f64::EPSILON && (self.step - remainder) > f64::EPSILON {
-                if let Some(ref msg) = self.message {
-                    return Err(Errors(vec![
-                        Error::custom("step", msg.clone())
-                    ]));
-                }
+            if !self.step.is_finite() || self.step <= 0.0 {
                 let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
                 return Err(Errors(vec![
-                    Error::step(self.step, &FormMessages::default(), locale)
+                    self.message.clone()
+                        .map(|m| Error { message: m, code: ErrorCode::Step(self.step) })
+                        .unwrap_or_else(|| Error::step(self.step, &FormMessages::default(), locale))
+                ]));
+            }
+
+            let remainder = ((num - self.step_base) % self.step).abs();
+            if remainder > f64::EPSILON && (self.step - remainder) > f64::EPSILON {
+                let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
+                return Err(Errors(vec![
+                    self.message.clone()
+                        .map(|m| Error { message: m, code: ErrorCode::Step(self.step) })
+                        .unwrap_or_else(|| Error::step(self.step, &FormMessages::default(), locale))
                 ]));
             }
         }
@@ -951,14 +957,11 @@ impl Validator for UrlValidator {
     fn validate(&self, value: &Value, ctx: &Context) -> Result {
         if let Some(s) = value.as_text() {
             if !s.is_empty() && !is_valid_url(s) {
-                if let Some(ref msg) = self.message {
-                    return Err(Errors(vec![
-                        Error::custom("url", msg.clone())
-                    ]));
-                }
                 let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
                 return Err(Errors(vec![
-                    Error::url(&FormMessages::default(), locale)
+                    self.message.clone()
+                        .map(|m| Error { message: m, code: ErrorCode::Url })
+                        .unwrap_or_else(|| Error::url(&FormMessages::default(), locale))
                 ]));
             }
         }
