@@ -3,7 +3,9 @@
 //! Run with:
 //! `wasm-pack test --headless --chrome crates/ars-i18n --no-default-features --features std,web-intl`.
 
-use js_sys::Intl::{NumberFormat, NumberFormatOptions};
+use alloc::{collections::BTreeSet, string::String};
+
+use js_sys::Intl::{NumberFormat, NumberFormatOptions, SupportedValuesKey, supported_values_of};
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
 use crate::{
@@ -22,6 +24,27 @@ fn style_options(style: NumberStyle) -> ArsNumberFormatOptions {
         style,
         ..ArsNumberFormatOptions::default()
     }
+}
+
+fn unsupported_browser_measure_unit() -> (crate::MeasureUnit, String) {
+    let supported_units = supported_values_of(SupportedValuesKey::Unit)
+        .iter()
+        .filter_map(|value| value.as_string())
+        .collect::<BTreeSet<_>>();
+
+    for (candidate, _) in super::CLDR_IDS_TRIE.iter() {
+        if supported_units.contains(candidate.as_str()) {
+            continue;
+        }
+
+        let Ok(unit) = crate::MeasureUnit::try_from_str(&candidate) else {
+            continue;
+        };
+
+        return (unit, candidate);
+    }
+
+    panic!("expected a CLDR unit that Intl.NumberFormat does not sanction");
 }
 
 #[wasm_bindgen_test]
@@ -106,6 +129,28 @@ fn web_intl_unit_formatting_uses_browser_backend() {
 }
 
 #[wasm_bindgen_test]
+fn web_intl_unsupported_units_fall_back_to_decimal_formatting() {
+    let (unit, unit_id) = unsupported_browser_measure_unit();
+
+    let decimal = NumberFormatter::new(&locale("en-US"), ArsNumberFormatOptions::default());
+
+    let formatter = NumberFormatter::new(
+        &locale("en-US"),
+        ArsNumberFormatOptions {
+            style: NumberStyle::Unit(unit),
+            unit_display: UnitDisplay::Short,
+            ..ArsNumberFormatOptions::default()
+        },
+    );
+
+    assert_eq!(
+        formatter.format(5.0),
+        decimal.format(5.0),
+        "expected unsupported unit {unit_id:?} to fall back to decimal formatting"
+    );
+}
+
+#[wasm_bindgen_test]
 fn web_intl_rounding_modes_cover_remaining_browser_mappings() {
     let cases = [
         (RoundingMode::HalfUp, 1.25, "1.3"),
@@ -141,6 +186,20 @@ fn web_intl_grouping_flag_is_reflected_in_output() {
 
     assert_eq!(formatter.format(1234.56), "1234.56");
     assert_eq!(formatter.grouping_separator(), Some(','));
+}
+
+#[wasm_bindgen_test]
+fn web_intl_normalizes_inverted_fraction_digit_bounds_before_formatting() {
+    let formatter = NumberFormatter::new(
+        &locale("en-US"),
+        ArsNumberFormatOptions {
+            min_fraction_digits: 3,
+            max_fraction_digits: 1,
+            ..ArsNumberFormatOptions::default()
+        },
+    );
+
+    assert_eq!(formatter.format(1.2), "1.200");
 }
 
 #[wasm_bindgen_test]

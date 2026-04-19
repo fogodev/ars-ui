@@ -7,7 +7,8 @@ use js_sys::{
     Intl::{
         CurrencyDisplay, CurrencySign, NumberFormat, NumberFormatOptions as JsNumberFormatOptions,
         NumberFormatPart, NumberFormatPartType, NumberFormatStyle, RoundingMode as JsRoundingMode,
-        SignDisplay as JsSignDisplay, UnitDisplay as JsUnitDisplay, UseGrouping,
+        SignDisplay as JsSignDisplay, SupportedValuesKey, UnitDisplay as JsUnitDisplay,
+        UseGrouping, supported_values_of,
     },
     Reflect,
 };
@@ -96,11 +97,13 @@ pub(super) fn decimal_and_group_separators(locale: &Locale) -> (char, char) {
 fn build_options(options: &NumberFormatOptions) -> JsNumberFormatOptions {
     let js_options = JsNumberFormatOptions::new();
 
+    let (min_fraction_digits, max_fraction_digits) = normalized_fraction_digit_bounds(options);
+
     js_options.set_minimum_integer_digits(options.min_integer_digits.get());
 
-    js_options.set_minimum_fraction_digits(options.min_fraction_digits);
+    js_options.set_minimum_fraction_digits(min_fraction_digits);
 
-    js_options.set_maximum_fraction_digits(options.max_fraction_digits);
+    js_options.set_maximum_fraction_digits(max_fraction_digits);
 
     js_options.set_use_grouping(if options.use_grouping {
         UseGrouping::True
@@ -154,15 +157,33 @@ fn build_options(options: &NumberFormatOptions) -> JsNumberFormatOptions {
             let unit_id = resolve_measure_unit_id(unit)
                 .expect("unit formatter requires a resolvable CLDR unit id");
 
-            js_options.set_style(NumberFormatStyle::Unit);
+            if browser_supports_unit(&unit_id) {
+                js_options.set_style(NumberFormatStyle::Unit);
 
-            js_options.set_unit(&unit_id);
+                js_options.set_unit(&unit_id);
 
-            js_options.set_unit_display(options.unit_display.into_js());
+                js_options.set_unit_display(options.unit_display.into_js());
+            } else {
+                js_options.set_style(NumberFormatStyle::Decimal);
+            }
         }
     }
 
     js_options
+}
+
+fn normalized_fraction_digit_bounds(options: &NumberFormatOptions) -> (u8, u8) {
+    (
+        options.min_fraction_digits,
+        options.max_fraction_digits.max(options.min_fraction_digits),
+    )
+}
+
+fn browser_supports_unit(unit_id: &str) -> bool {
+    supported_values_of(SupportedValuesKey::Unit)
+        .iter()
+        .filter_map(|value| value.as_string())
+        .any(|supported| supported == unit_id)
 }
 
 fn first_char(value: &js_sys::JsString) -> Option<char> {
