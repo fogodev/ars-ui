@@ -2484,7 +2484,7 @@ The library detects top-layer support at runtime. When available, overlay compon
 /// This is detected once and cached.
 pub fn supports_top_layer() -> bool {
     thread_local! {
-        static CACHED: Cell<Option<bool>> = Cell::new(None);
+        static CACHED: Cell<Option<bool>> = const { Cell::new(None) };
     }
     CACHED.with(|c| {
         if let Some(v) = c.get() {
@@ -2493,7 +2493,10 @@ pub fn supports_top_layer() -> bool {
         let supported = web_sys::window()
             .and_then(|w| w.document())
             .and_then(|d| d.create_element("dialog").ok())
-            .map(|el| js_sys::Reflect::has(&el, &"showModal".into()).unwrap_or(false))
+            .map(|el| {
+                js_sys::Reflect::has(&el, &wasm_bindgen::JsValue::from_str("showModal"))
+                    .unwrap_or(false)
+            })
             .unwrap_or(false);
         c.set(Some(supported));
         supported

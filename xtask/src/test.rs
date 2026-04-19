@@ -28,6 +28,9 @@ pub enum Stage {
     /// Browser-executed wasm tests for ars-i18n's `web-intl` backend.
     I18nBrowser,
 
+    /// Browser-executed wasm tests for ars-dom's web feature.
+    DomBrowser,
+
     /// Release-profile test verification.
     Release,
 
@@ -146,6 +149,7 @@ pub fn run(stage: Option<Stage>) -> Result<Summary, Error> {
             vec![
                 Stage::Unit,
                 Stage::I18nBrowser,
+                Stage::DomBrowser,
                 Stage::Release,
                 Stage::Integration,
                 Stage::Adapter,
@@ -225,6 +229,7 @@ fn run_stage_inner(stage: Stage) -> Result<StageResult, Error> {
     match stage {
         Stage::Unit => run_unit_stage(),
         Stage::I18nBrowser => run_i18n_browser_stage(),
+        Stage::DomBrowser => run_dom_browser_stage(),
         Stage::Release => run_release_stage(),
         Stage::Integration => run_invocations(integration_invocations()),
         Stage::Adapter => run_invocations(adapter_invocations()),
@@ -261,6 +266,28 @@ fn run_i18n_browser_stage() -> Result<StageResult, Error> {
         result
             .failures
             .push(format_failure("i18n browser", &run.command, run.code));
+    }
+
+    Ok(result)
+}
+
+fn run_dom_browser_stage() -> Result<StageResult, Error> {
+    let run = run_shell_command(
+        "dom browser",
+        "wasm-pack",
+        &["test", "--headless", "--chrome", "crates/ars-dom"],
+    )?;
+
+    let mut result = StageResult::default();
+
+    result
+        .summary
+        .add_assign(parse_wasm_pack_summary(&run.output));
+
+    if !run.success {
+        result
+            .failures
+            .push(format_failure("dom browser", &run.command, run.code));
     }
 
     Ok(result)
@@ -499,7 +526,7 @@ fn preflight_wasm_pack() -> Result<(), Error> {
 
 fn preflight_for_stage(stage: Stage) -> Result<(), Error> {
     match stage {
-        Stage::I18nBrowser => preflight_wasm_pack(),
+        Stage::I18nBrowser | Stage::DomBrowser => preflight_wasm_pack(),
         Stage::Unit
         | Stage::Release
         | Stage::Integration
@@ -709,6 +736,7 @@ const fn stage_name(stage: Stage) -> &'static str {
     match stage {
         Stage::Unit => "unit",
         Stage::I18nBrowser => "i18n-browser",
+        Stage::DomBrowser => "dom-browser",
         Stage::Release => "release",
         Stage::Integration => "integration",
         Stage::Adapter => "adapter",
@@ -876,6 +904,11 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 filtered out;
     #[test]
     fn stage_name_reports_i18n_browser() {
         assert_eq!(stage_name(Stage::I18nBrowser), "i18n-browser");
+    }
+
+    #[test]
+    fn stage_name_reports_dom_browser() {
+        assert_eq!(stage_name(Stage::DomBrowser), "dom-browser");
     }
 
     #[test]

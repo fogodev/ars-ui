@@ -1,9 +1,10 @@
 //! DOM utilities for focus management, scroll control, z-index allocation,
-//! and platform feature detection.
+//! overlay stack tracking, and platform feature detection.
 //!
 //! This crate provides browser-level helpers shared across framework adapters,
-//! including focus management, scroll lock management for modal overlays, and
-//! platform capability detection.
+//! including focus management, scroll lock management for modal overlays,
+//! overlay stack registration for nested dismissal, and platform capability
+//! detection.
 
 // Many ars-dom functions have cfg-gated web implementations that call
 // web_sys/js_sys APIs at runtime. The non-web stubs look const-eligible
@@ -17,6 +18,7 @@ mod announcer;
 pub mod focus;
 pub mod media;
 pub mod modality;
+pub mod overlay_stack;
 pub mod portal;
 pub mod positioning;
 mod scroll;
@@ -39,6 +41,10 @@ pub use media::{
     prefers_reduced_motion, prefers_reduced_transparency,
 };
 pub use modality::ModalityManager;
+pub use overlay_stack::{
+    OverlayEntry, OverlayKind, is_above, is_topmost, overlay_count, overlays_above, push_overlay,
+    remove_overlay, reset_overlay_stack, topmost_overlay,
+};
 #[cfg(feature = "web")]
 pub use portal::{
     ensure_portal_mount_root, get_or_create_portal_root, remove_inert_from_siblings,
@@ -57,7 +63,7 @@ pub use scroll_lock::{
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub use scroll_lock::{needs_ios_workaround, scrollbar_width};
 pub use url::{SafeUrl, UnsafeUrlError, is_safe_url, sanitize_url};
-pub use z_index::{ZIndexAllocator, next_z_index, reset_z_index};
+pub use z_index::{ZIndexAllocator, next_z_index, reset_z_index, supports_top_layer};
 
 /// Describes the platform capabilities available to the current runtime.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

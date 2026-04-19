@@ -188,6 +188,57 @@ impl Default for ZIndexAllocator {
 }
 
 // ---------------------------------------------------------------------------
+// Top-layer detection
+// ---------------------------------------------------------------------------
+
+/// Check whether the browser supports the CSS top-layer (native `<dialog>` or
+/// popover API).
+///
+/// When `true`, overlay components can skip [`next_z_index()`] and rely on the
+/// browser's native stacking via `<dialog>.showModal()` or the `popover`
+/// attribute. When `false`, components fall back to z-index-based stacking.
+///
+/// The result is detected once per thread and cached. Subsequent calls return
+/// the cached value without DOM access.
+///
+/// Returns `false` on non-wasm targets and when `window()` is unavailable
+/// (SSR, Web Worker).
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+#[must_use]
+pub fn supports_top_layer() -> bool {
+    thread_local! {
+        static CACHED: Cell<Option<bool>> = const { Cell::new(None) };
+    }
+
+    CACHED.with(|c| {
+        if let Some(v) = c.get() {
+            return v;
+        }
+
+        let supported = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.create_element("dialog").ok())
+            .is_some_and(|el| {
+                js_sys::Reflect::has(&el, &wasm_bindgen::JsValue::from_str("showModal"))
+                    .unwrap_or(false)
+            });
+
+        c.set(Some(supported));
+
+        supported
+    })
+}
+
+/// Check whether the browser supports the CSS top-layer.
+///
+/// Returns `false` on non-wasm targets — top-layer is a browser-only concept.
+#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+#[must_use]
+pub const fn supports_top_layer() -> bool {
+    false
+}
+
+// ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
@@ -447,5 +498,55 @@ mod tests {
             debug.contains("ZIndexAllocator"),
             "Debug output should contain the type name"
         );
+    }
+
+    // == G. supports_top_layer() ================================================
+
+    #[test]
+    fn supports_top_layer_returns_false_without_browser() {
+        // Non-wasm targets always return false — top-layer is a browser-only concept.
+        assert!(!supports_top_layer());
+    }
+
+    #[test]
+    fn supports_top_layer_is_idempotent() {
+        // Repeated calls must return the same value (exercises cache path).
+        let first = supports_top_layer();
+
+        let second = supports_top_layer();
+
+        assert_eq!(first, second);
+    }
+}
+
+#[cfg(all(test, feature = "web", target_arch = "wasm32"))]
+mod wasm_tests {
+    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+    use super::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    // ── supports_top_layer ─────────────────────────────────────────────
+
+    #[wasm_bindgen_test]
+    fn supports_top_layer_returns_true_in_modern_browser() {
+        // Modern test browsers (Chrome, Firefox, Safari 15.4+) support
+        // native <dialog> with showModal, so this should return true.
+        // The important thing is that the function executes without panic
+        // and exercises the window → document → createElement → Reflect path.
+        let result = supports_top_layer();
+
+        assert!(result, "modern browsers should support top-layer");
+    }
+
+    #[wasm_bindgen_test]
+    fn supports_top_layer_caches_across_calls() {
+        // Calling twice exercises the Cell<Option<bool>> cache-hit path.
+        let first = supports_top_layer();
+
+        let second = supports_top_layer();
+
+        assert_eq!(first, second);
     }
 }
