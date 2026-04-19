@@ -2954,9 +2954,10 @@ impl ars_core::Machine for Machine {
         match event {
             Event::SetErrors(errors) => {
                 let errors = errors.clone();
+                let base_invalid = props.invalid;
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.errors = errors;
-                    ctx.invalid = !ctx.errors.is_empty();
+                    ctx.invalid = base_invalid || !ctx.errors.is_empty();
                 }))
             }
             Event::ClearErrors => {
@@ -3371,9 +3372,10 @@ impl ars_core::Machine for Machine {
         match event {
             Event::SetErrors(errors) => {
                 let errors = errors.clone();
+                let base_invalid = props.invalid;
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.errors = errors;
-                    ctx.invalid = !ctx.errors.is_empty();
+                    ctx.invalid = base_invalid || !ctx.errors.is_empty();
                 }))
             }
             Event::ClearErrors => {

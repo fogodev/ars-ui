@@ -155,10 +155,11 @@ impl ars_core::Machine for Machine {
         match event {
             Event::SetErrors(errors) => {
                 let errors = errors.clone();
+                let base_invalid = props.invalid;
                 Some(TransitionPlan::context_only(
                     move |ctx: &mut MachineContext| {
                         ctx.errors = errors;
-                        ctx.invalid = !ctx.errors.is_empty();
+                        ctx.invalid = base_invalid || !ctx.errors.is_empty();
                     },
                 ))
             }
@@ -647,6 +648,17 @@ mod tests {
 
         drop(service.send(Event::SetErrors(vec![custom_error()])));
         drop(service.send(Event::ClearErrors));
+
+        assert!(service.context().errors.is_empty());
+        assert!(service.context().invalid);
+    }
+
+    #[test]
+    fn fieldset_set_errors_empty_preserves_prop_invalid() {
+        let mut service = Service::<Machine>::new(test_props_with_invalid(), &Env::default(), &());
+
+        drop(service.send(Event::SetErrors(vec![custom_error()])));
+        drop(service.send(Event::SetErrors(vec![])));
 
         assert!(service.context().errors.is_empty());
         assert!(service.context().invalid);
