@@ -48,12 +48,15 @@ impl Validator for ChainValidator {
         let mut all_errors = Errors::new();
 
         for validator in &self.validators {
-            if let Err(errors) = validator.validate(value, ctx) {
-                all_errors.0.extend(errors.0);
-
+            if let Err(mut errors) = validator.validate(value, ctx) {
                 if self.stop_on_first {
-                    break;
+                    // Return only the very first error, even when a single
+                    // validator produces multiple.
+                    errors.0.truncate(1);
+                    return Err(errors);
                 }
+
+                all_errors.0.extend(errors.0);
             }
         }
 
@@ -281,6 +284,29 @@ mod tests {
             errors.has_code(&ErrorCode::Required),
             "first error should be Required"
         );
+    }
+
+    #[test]
+    fn first_fail_returns_single_error_from_multi_error_validator() {
+        // A custom validator that returns two errors at once.
+        let chain = Validators::new()
+            .custom(|_value, _ctx| {
+                Err(Errors(vec![
+                    Error::custom("first", "first error"),
+                    Error::custom("second", "second error"),
+                ]))
+            })
+            .build_first_fail();
+
+        let result = chain.validate(&Value::Text("x".into()), &Context::standalone("f"));
+        let errors = result.expect_err("should fail");
+
+        assert_eq!(
+            errors.len(),
+            1,
+            "first-fail must return exactly one error even when a validator produces multiple"
+        );
+        assert!(errors.has_code(&ErrorCode::Custom("first".into())));
     }
 
     #[test]

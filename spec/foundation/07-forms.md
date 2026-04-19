@@ -1141,12 +1141,15 @@ impl Validator for ChainValidator {
         let mut all_errors = Errors::new();
 
         for validator in &self.validators {
-            match validator.validate(value, ctx) {
-                Ok(()) => {}
-                Err(errors) => {
-                    all_errors.0.extend(errors.0);
-                    if self.stop_on_first { break; }
+            if let Err(mut errors) = validator.validate(value, ctx) {
+                if self.stop_on_first {
+                    // Return only the very first error, even when a single
+                    // validator produces multiple.
+                    errors.0.truncate(1);
+                    return Err(errors);
                 }
+
+                all_errors.0.extend(errors.0);
             }
         }
 
