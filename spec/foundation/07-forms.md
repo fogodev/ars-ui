@@ -706,7 +706,7 @@ impl Validator for MinValidator {
             None => return Ok(()), // Let RequiredValidator handle None
         };
         let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
-        if n < self.min {
+        if !n.is_finite() || n < self.min {
             Err(Errors(vec![
                 self.message.clone()
                     .map(|m| Error { message: m, code: ErrorCode::Min(self.min) })
@@ -738,7 +738,7 @@ impl Validator for MaxValidator {
             None => return Ok(()),
         };
         let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
-        if n > self.max {
+        if !n.is_finite() || n > self.max {
             Err(Errors(vec![
                 self.message.clone()
                     .map(|m| Error { message: m, code: ErrorCode::Max(self.max) })
@@ -919,8 +919,10 @@ impl Validator for StepValidator {
                 ]));
             }
 
-            let remainder = ((num - self.step_base) % self.step).abs();
-            if remainder > f64::EPSILON && (self.step - remainder) > f64::EPSILON {
+            let quotient = (num - self.step_base) / self.step;
+            let nearest_step = quotient.round();
+            let tolerance = quotient.abs().max(1.0) * f64::EPSILON * 16.0;
+            if (quotient - nearest_step).abs() > tolerance {
                 let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
                 return Err(Errors(vec![
                     self.message.clone()
@@ -983,6 +985,10 @@ fn is_valid_url(s: &str) -> bool {
 #[cfg(not(feature = "url-validation"))]
 fn is_valid_url(s: &str) -> bool {
     s.find("://").is_some_and(|pos| {
+        if pos == 0 {
+            return false;
+        }
+
         let authority_and_rest = &s[pos + 3..];
         let authority = authority_and_rest
             .split(['/', '?', '#'])

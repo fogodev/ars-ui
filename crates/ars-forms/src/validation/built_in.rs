@@ -188,7 +188,7 @@ impl Validator for MinValidator {
 
         let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
 
-        if number < self.min {
+        if !number.is_finite() || number < self.min {
             let error = self.message.clone().map_or_else(
                 || Error::min(self.min, &FormMessages::default(), locale),
                 |message| Error {
@@ -237,7 +237,7 @@ impl Validator for MaxValidator {
 
         let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
 
-        if number > self.max {
+        if !number.is_finite() || number > self.max {
             let error = self.message.clone().map_or_else(
                 || Error::max(self.max, &FormMessages::default(), locale),
                 |message| Error {
@@ -504,9 +504,11 @@ impl Validator for StepValidator {
                 return Err(Errors(vec![error]));
             }
 
-            let remainder = ((number - self.step_base) % self.step).abs();
+            let quotient = (number - self.step_base) / self.step;
+            let nearest_step = quotient.round();
+            let tolerance = quotient.abs().max(1.0) * f64::EPSILON * 16.0;
 
-            if remainder > f64::EPSILON && (self.step - remainder) > f64::EPSILON {
+            if (quotient - nearest_step).abs() > tolerance {
                 let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
 
                 let error = self.message.clone().map_or_else(
@@ -615,6 +617,10 @@ fn is_valid_url(value: &str) -> bool {
 #[cfg(not(feature = "url-validation"))]
 fn is_valid_url(value: &str) -> bool {
     value.find("://").is_some_and(|position| {
+        if position == 0 {
+            return false;
+        }
+
         let authority_and_rest = &value[position + 3..];
 
         let authority = authority_and_rest
@@ -849,6 +855,30 @@ mod tests {
     }
 
     #[test]
+    fn min_nan_fails() {
+        let validator = MinValidator::with_value(10.0);
+
+        assert_eq!(
+            error_code(
+                validator.validate(&Value::Number(Some(f64::NAN)), &Context::standalone("x"))
+            ),
+            ErrorCode::Min(10.0)
+        );
+    }
+
+    #[test]
+    fn max_nan_fails() {
+        let validator = MaxValidator::with_value(10.0);
+
+        assert_eq!(
+            error_code(
+                validator.validate(&Value::Number(Some(f64::NAN)), &Context::standalone("x"))
+            ),
+            ErrorCode::Max(10.0)
+        );
+    }
+
+    #[test]
     fn pattern_no_match_fails() {
         let validator = PatternValidator::new(r"[a-z]+").expect("valid pattern");
 
@@ -1063,6 +1093,17 @@ mod tests {
     }
 
     #[test]
+    fn step_large_decimal_multiple_passes() {
+        let validator = StepValidator::new(0.1);
+
+        assert!(
+            validator
+                .validate(&Value::Number(Some(100.0)), &Context::standalone("x"))
+                .is_ok()
+        );
+    }
+
+    #[test]
     fn step_zero_fails() {
         let validator = StepValidator::new(0.0);
 
@@ -1197,6 +1238,20 @@ mod tests {
             error_code(validator.validate(
                 &Value::Text("http://?q=1".into()),
                 &Context::standalone("x")
+            )),
+            ErrorCode::Url
+        );
+    }
+
+    #[cfg(not(feature = "url-validation"))]
+    #[test]
+    fn url_missing_scheme_fails_under_fallback_validation() {
+        let validator = UrlValidator::new();
+
+        assert_eq!(
+            error_code(validator.validate(
+                &Value::Text("://example.com".into()),
+                 &Context::standalone("x")
             )),
             ErrorCode::Url
         );
