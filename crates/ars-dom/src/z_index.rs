@@ -69,6 +69,7 @@ thread_local! {
 pub fn next_z_index() -> u32 {
     NEXT_Z_INDEX.with(|z| {
         let val = z.get();
+
         if val >= Z_INDEX_CEILING {
             // Returning Z_INDEX_BASE here and storing BASE + 1 keeps the
             // sequence monotonic from the caller's perspective after wrap:
@@ -80,10 +81,13 @@ pub fn next_z_index() -> u32 {
                 "[ars-dom] z-index counter reached ceiling ({Z_INDEX_CEILING}), \
                  resetting to base ({Z_INDEX_BASE})"
             );
+
             z.set(Z_INDEX_BASE + 1);
+
             Z_INDEX_BASE
         } else {
             z.set(val + 1);
+
             val
         }
     })
@@ -124,10 +128,14 @@ pub fn reset_z_index(base: u32) {
 /// use ars_dom::z_index::{ZIndexAllocator, reset_z_index};
 ///
 /// reset_z_index(1000);
+///
 /// let allocator = ZIndexAllocator::new();
+///
 /// let z1 = allocator.allocate(); // 1000
 /// let z2 = allocator.allocate(); // 1001
+///
 /// allocator.release(z1);         // removes from tracking, does not reuse
+///
 /// let z3 = allocator.allocate(); // 1002 (not 1000)
 /// ```
 #[derive(Debug)]
@@ -157,7 +165,9 @@ impl ZIndexAllocator {
     #[must_use]
     pub fn allocate(&self) -> u32 {
         let z = next_z_index();
+
         self.allocated.borrow_mut().push(z);
+
         z
     }
 
@@ -177,6 +187,7 @@ impl ZIndexAllocator {
     /// navigation in an SPA).
     pub fn reset(&self) {
         self.allocated.borrow_mut().clear();
+
         reset_z_index(Z_INDEX_BASE);
     }
 }
@@ -185,6 +196,69 @@ impl Default for ZIndexAllocator {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Top-layer detection
+// ---------------------------------------------------------------------------
+
+/// Check whether the browser supports the CSS top-layer (native `<dialog>` or
+/// Popover API).
+///
+/// Detected once per thread and cached. When top-layer is supported, overlay
+/// components can skip z-index allocation and rely on the browser's native
+/// stacking. Returns `false` in non-browser environments (SSR, native desktop,
+/// tests).
+///
+/// # Spec reference
+///
+/// `spec/foundation/11-dom-utilities.md` §6.5 — CSS `top-layer` Note.
+///
+/// # Examples
+///
+/// ```
+/// use ars_dom::z_index::supports_top_layer;
+///
+/// // In non-browser test environment, always returns false.
+/// assert!(!supports_top_layer());
+/// ```
+#[must_use]
+pub fn supports_top_layer() -> bool {
+    supports_top_layer_impl()
+}
+
+/// Web implementation: creates a temporary `<dialog>` element and checks for
+/// the `showModal` method via `js_sys::Reflect::has`. The result is cached in a
+/// thread-local `Cell<Option<bool>>` so the feature probe runs at most once per
+/// thread.
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn supports_top_layer_impl() -> bool {
+    use std::cell::Cell;
+
+    thread_local! {
+        static CACHED: Cell<Option<bool>> = const { Cell::new(None) };
+    }
+
+    CACHED.with(|c| {
+        if let Some(v) = c.get() {
+            return v;
+        }
+
+        let supported = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.create_element("dialog").ok())
+            .is_some_and(|el| js_sys::Reflect::has(&el, &"showModal".into()).unwrap_or(false));
+
+        c.set(Some(supported));
+
+        supported
+    })
+}
+
+/// Non-web fallback: top-layer is a browser-only concept.
+#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+const fn supports_top_layer_impl() -> bool {
+    false
 }
 
 // ---------------------------------------------------------------------------
@@ -225,7 +299,9 @@ mod tests {
         let guard = TEST_SERIAL
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+
         reset_global_state();
+
         guard
     }
 
@@ -243,15 +319,18 @@ mod tests {
     #[test]
     fn next_z_index_starts_at_base() {
         let _g = serial_reset();
+
         assert_eq!(next_z_index(), 1000);
     }
 
     #[test]
     fn next_z_index_is_monotonically_increasing() {
         let _g = serial_reset();
+
         let z1 = next_z_index();
         let z2 = next_z_index();
         let z3 = next_z_index();
+
         assert_eq!(z1, 1000);
         assert_eq!(z2, 1001);
         assert_eq!(z3, 1002);
@@ -262,17 +341,24 @@ mod tests {
     #[test]
     fn next_z_index_wraps_at_ceiling() {
         let _g = serial_reset();
+
         reset_z_index(Z_INDEX_CEILING);
+
         let z = next_z_index();
+
         assert_eq!(z, Z_INDEX_BASE, "ceiling hit should return Z_INDEX_BASE");
     }
 
     #[test]
     fn next_z_index_resumes_after_wrap() {
         let _g = serial_reset();
+
         reset_z_index(Z_INDEX_CEILING);
+
         let _ = next_z_index(); // triggers wrap, returns Z_INDEX_BASE
+
         let z = next_z_index();
+
         assert_eq!(
             z,
             Z_INDEX_BASE + 1,
@@ -283,10 +369,15 @@ mod tests {
     #[test]
     fn next_z_index_one_below_ceiling_then_wraps() {
         let _g = serial_reset();
+
         reset_z_index(Z_INDEX_CEILING - 1);
+
         let z1 = next_z_index();
+
         assert_eq!(z1, Z_INDEX_CEILING - 1, "one below ceiling is still normal");
+
         let z2 = next_z_index();
+
         assert_eq!(z2, Z_INDEX_BASE, "next call hits ceiling and wraps");
     }
 
@@ -295,7 +386,9 @@ mod tests {
     #[test]
     fn reset_z_index_changes_next_value() {
         let _g = serial_reset();
+
         reset_z_index(5000);
+
         assert_eq!(next_z_index(), 5000);
         assert_eq!(next_z_index(), 5001);
     }
@@ -303,11 +396,14 @@ mod tests {
     #[test]
     fn reset_z_index_to_base_restores_default() {
         let _g = serial_reset();
+
         // Move counter forward
         let _ = next_z_index(); // 1000
         let _ = next_z_index(); // 1001
+
         // Reset back to base
         reset_z_index(Z_INDEX_BASE);
+
         assert_eq!(next_z_index(), 1000);
     }
 
@@ -316,10 +412,13 @@ mod tests {
     #[test]
     fn allocator_allocate_returns_increasing_values() {
         let _g = serial_reset();
+
         let alloc = ZIndexAllocator::new();
+
         let z1 = alloc.allocate();
         let z2 = alloc.allocate();
         let z3 = alloc.allocate();
+
         assert_eq!(z1, 1000);
         assert_eq!(z2, 1001);
         assert_eq!(z3, 1002);
@@ -328,11 +427,17 @@ mod tests {
     #[test]
     fn allocator_allocate_wraps_at_ceiling() {
         let _g = serial_reset();
+
         reset_z_index(Z_INDEX_CEILING);
+
         let alloc = ZIndexAllocator::new();
+
         let z1 = alloc.allocate();
+
         assert_eq!(z1, Z_INDEX_BASE, "allocator must wrap at ceiling");
+
         let z2 = alloc.allocate();
+
         assert_eq!(z2, Z_INDEX_BASE + 1, "allocator must resume after wrap");
         assert_eq!(alloc.tracked_count(), 2);
     }
@@ -340,12 +445,15 @@ mod tests {
     #[test]
     fn allocator_allocate_delegates_to_thread_local() {
         let _g = serial_reset();
+
         let alloc = ZIndexAllocator::new();
+
         // Interleave bare next_z_index() with allocator
         let z1 = next_z_index(); // 1000 (bare)
         let z2 = alloc.allocate(); // 1001 (allocator)
         let z3 = next_z_index(); // 1002 (bare)
         let z4 = alloc.allocate(); // 1003 (allocator)
+
         assert_eq!(z1, 1000);
         assert_eq!(z2, 1001);
         assert_eq!(z3, 1002);
@@ -357,44 +465,64 @@ mod tests {
     #[test]
     fn allocator_release_removes_from_tracked() {
         let _g = serial_reset();
+
         let alloc = ZIndexAllocator::new();
+
         let z1 = alloc.allocate();
         let _z2 = alloc.allocate();
+
         assert_eq!(alloc.tracked_count(), 2);
+
         alloc.release(z1);
+
         assert_eq!(alloc.tracked_count(), 1);
     }
 
     #[test]
     fn allocator_release_unknown_is_noop() {
         let _g = serial_reset();
+
         let alloc = ZIndexAllocator::new();
+
         // Release a value that was never allocated — should not panic.
         alloc.release(9999);
+
         assert_eq!(alloc.tracked_count(), 0);
     }
 
     #[test]
     fn allocator_release_does_not_affect_counter() {
         let _g = serial_reset();
+
         let alloc = ZIndexAllocator::new();
+
         let z1 = alloc.allocate(); // 1000
+
         alloc.release(z1);
+
         let z2 = alloc.allocate(); // 1001, NOT 1000 (values never reused)
+
         assert_eq!(z2, 1001);
     }
 
     #[test]
     fn allocator_double_release_is_noop() {
         let _g = serial_reset();
+
         let alloc = ZIndexAllocator::new();
+
         let z1 = alloc.allocate();
         let _z2 = alloc.allocate();
+
         assert_eq!(alloc.tracked_count(), 2);
+
         alloc.release(z1);
+
         assert_eq!(alloc.tracked_count(), 1);
+
         // Second release of same value — already removed, no panic.
         alloc.release(z1);
+
         assert_eq!(
             alloc.tracked_count(),
             1,
@@ -405,12 +533,18 @@ mod tests {
     #[test]
     fn allocator_release_after_reset_is_noop() {
         let _g = serial_reset();
+
         let alloc = ZIndexAllocator::new();
+
         let z1 = alloc.allocate();
+
         alloc.reset();
+
         assert_eq!(alloc.tracked_count(), 0);
+
         // Release a value that was cleared by reset — should not panic.
         alloc.release(z1);
+
         assert_eq!(alloc.tracked_count(), 0);
     }
 
@@ -419,12 +553,18 @@ mod tests {
     #[test]
     fn allocator_reset_clears_tracked_and_resets_counter() {
         let _g = serial_reset();
+
         let alloc = ZIndexAllocator::new();
+
         let _ = alloc.allocate(); // 1000
         let _ = alloc.allocate(); // 1001
+
         assert_eq!(alloc.tracked_count(), 2);
+
         alloc.reset();
+
         assert_eq!(alloc.tracked_count(), 0);
+
         // Counter should be back at base
         assert_eq!(alloc.allocate(), 1000);
     }
@@ -434,18 +574,73 @@ mod tests {
     #[test]
     fn allocator_default_is_empty() {
         let _g = serial_reset();
+
         let alloc = ZIndexAllocator::default();
+
         assert_eq!(alloc.tracked_count(), 0);
     }
 
     #[test]
     fn allocator_debug_format() {
         let _g = serial_reset();
+
         let alloc = ZIndexAllocator::new();
+
         let debug = format!("{alloc:?}");
+
         assert!(
             debug.contains("ZIndexAllocator"),
             "Debug output should contain the type name"
         );
+    }
+
+    // == G. supports_top_layer() ============================================
+
+    #[test]
+    fn supports_top_layer_returns_false_in_test_environment() {
+        // Native test runner (not wasm32) has no browser — always false.
+        assert!(!supports_top_layer());
+    }
+
+    #[test]
+    fn supports_top_layer_is_idempotent() {
+        // Multiple calls must return the same value (tests caching contract).
+        let first = supports_top_layer();
+
+        let second = supports_top_layer();
+
+        assert_eq!(first, second);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WASM browser tests
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "web", target_arch = "wasm32"))]
+mod wasm_tests {
+    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+    use super::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    // == supports_top_layer() in a real browser =============================
+
+    #[wasm_bindgen_test]
+    fn supports_top_layer_returns_true_in_modern_browser() {
+        // Modern headless browsers (Chrome, Firefox) support <dialog>.showModal()
+        // and therefore the CSS top-layer. The function must detect this.
+        assert!(supports_top_layer());
+    }
+
+    #[wasm_bindgen_test]
+    fn supports_top_layer_caches_across_calls() {
+        // Exercises the Cell<Option<bool>> cache-hit path inside the web impl.
+        let first = supports_top_layer();
+
+        let second = supports_top_layer();
+
+        assert_eq!(first, second);
     }
 }
