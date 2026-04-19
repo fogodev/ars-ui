@@ -3239,7 +3239,7 @@ Windows High Contrast Mode (WHCM) and CSS `forced-colors` media feature apply a 
 3. Focus indicators must use `Highlight` or `ButtonText` in forced-colors mode — never `transparent`.
 4. Custom SVG icons must have `fill: currentColor` or `forced-color-adjust: auto` to inherit system colors.
 
-> **Canonical location:** `11-dom-utilities.md` §9 — media query utilities including
+> **Canonical location:** `11-dom-utilities.md` §10 — media query utilities including
 > `is_forced_colors_active()`, `prefers_reduced_motion()`, `prefers_reduced_transparency()`,
 > and `prefers_color_scheme()`. These live in `ars-dom` because they depend on `web_sys::window()`.
 > Components import directly from `ars_dom::media`. (The `ars-a11y` re-export originally planned
@@ -3330,7 +3330,7 @@ pub fn resolve_opaque_backdrop(override_: Option<bool>) -> bool {
 }
 ```
 
-> **Note:** `prefers-reduced-transparency` has limited browser support (Chrome 118+, no Firefox/Safari as of 2026). The `prefers_reduced_transparency()` function in `11-dom-utilities.md` §9 returns `false` when unsupported, so the fallback behavior is safe — components render normally on browsers that don't support the media query.
+> **Note:** `prefers-reduced-transparency` has limited browser support (Chrome 118+, no Firefox/Safari as of 2026). The `prefers_reduced_transparency()` function in `11-dom-utilities.md` §10 returns `false` when unsupported, so the fallback behavior is safe — components render normally on browsers that don't support the media query.
 
 ### 6.4 Focus Indicator Contrast Requirements
 

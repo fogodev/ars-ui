@@ -2484,7 +2484,7 @@ The library detects top-layer support at runtime. When available, overlay compon
 /// This is detected once and cached.
 pub fn supports_top_layer() -> bool {
     thread_local! {
-        static CACHED: Cell<Option<bool>> = Cell::new(None);
+        static CACHED: Cell<Option<bool>> = const { Cell::new(None) };
     }
     CACHED.with(|c| {
         if let Some(v) = c.get() {
@@ -2493,8 +2493,9 @@ pub fn supports_top_layer() -> bool {
         let supported = web_sys::window()
             .and_then(|w| w.document())
             .and_then(|d| d.create_element("dialog").ok())
-            .map(|el| js_sys::Reflect::has(&el, &"showModal".into()).unwrap_or(false))
-            .unwrap_or(false);
+            .is_some_and(|el| {
+                js_sys::Reflect::has(&el, &"showModal".into()).unwrap_or(false)
+            });
         c.set(Some(supported));
         supported
     })
@@ -2721,7 +2722,170 @@ impl ModalityManager {
 
 ---
 
-## 9. Media Query Utilities
+## 9. Overlay Stack Registry
+
+### 9.1 Overview
+
+Overlay components (Dialog, Popover, Menu, Tooltip, etc.) register with a global thread-local stack when they mount and deregister when they unmount. The stack determines:
+
+- **Topmost overlay** — only the topmost overlay responds to outside interactions and Escape-key dismissal (`05-interactions.md` §12.8 rule 1).
+- **Child overlay membership** — a click inside a child overlay does NOT trigger `InteractOutside` on the parent (`05-interactions.md` §12.8 rule 2).
+- **LIFO close ordering** — Escape / outside-click dismisses the topmost overlay first; the parent remains open (`05-interactions.md` §12.8 rule 3).
+
+The overlay stack is distinct from the z-index allocator (§6). The allocator assigns stacking-order values; the overlay stack tracks which overlays are currently open and their nesting relationship. Overlay components use both: `next_z_index()` for visual stacking order and the overlay stack for dismissal logic.
+
+### 9.2 Thread-Local Design
+
+The stack is stored in a `thread_local!` `RefCell<Vec<OverlayEntry>>`, consistent with the z-index allocator (§6.2) and the library's `Rc`-based, single-threaded WASM-first design. Each thread maintains its own overlay stack.
+
+### 9.3 Types and Public API
+
+```rust
+// ars-dom/src/overlay_stack.rs
+
+use std::cell::RefCell;
+
+thread_local! {
+    /// Per-thread overlay stack. Entries are ordered by mount time: the last
+    /// entry is the topmost (most recently opened) overlay.
+    static OVERLAY_STACK: RefCell<Vec<OverlayEntry>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Metadata for a registered overlay in the global stack.
+///
+/// Each overlay component creates an `OverlayEntry` when it mounts and passes
+/// it to `push_overlay()`. The entry records whether the overlay is modal
+/// (triggering scroll lock and background inert) and the allocated z-index
+/// (or `None` when using native CSS top-layer).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OverlayEntry {
+    /// Unique overlay identifier (matches the component's DOM id).
+    pub id: String,
+
+    /// Whether this overlay is modal (triggers scroll lock + background inert).
+    pub modal: bool,
+
+    /// Allocated z-index from `next_z_index()` (§6), or `None` when the overlay
+    /// uses native CSS top-layer (see `supports_top_layer()` in §6.5).
+    pub z_index: Option<u32>,
+}
+
+/// Register an overlay on the global stack.
+///
+/// Called when an overlay component mounts. If an entry with the same `id`
+/// already exists, the call is a no-op to prevent double-registration from
+/// framework re-renders.
+pub fn push_overlay(entry: OverlayEntry) {
+    OVERLAY_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        if !stack.iter().any(|e| e.id == entry.id) {
+            stack.push(entry);
+        }
+    });
+}
+
+/// Deregister an overlay from the global stack.
+///
+/// Removes the entry with the given `id` regardless of its position in the
+/// stack (not limited to the topmost entry). Called when an overlay component
+/// unmounts. If no entry with the given `id` exists, the call is a no-op
+/// (safe to call multiple times).
+pub fn remove_overlay(id: &str) {
+    OVERLAY_STACK.with(|stack| {
+        stack.borrow_mut().retain(|e| e.id != id);
+    });
+}
+
+/// Return the topmost (most recently opened) overlay, or `None` if the stack
+/// is empty.
+pub fn topmost_overlay() -> Option<OverlayEntry> {
+    OVERLAY_STACK.with(|stack| stack.borrow().last().cloned())
+}
+
+/// Check whether the overlay with the given `id` is the topmost overlay.
+pub fn is_topmost(id: &str) -> bool {
+    OVERLAY_STACK.with(|stack| stack.borrow().last().is_some_and(|entry| entry.id == id))
+}
+
+/// Return the IDs of all overlays stacked above the overlay with the given
+/// `id`. Used by `InteractOutside` to determine whether a click target is
+/// inside a child overlay. Returns an empty `Vec` if `id` is not found.
+pub fn overlays_above(id: &str) -> Vec<String> {
+    OVERLAY_STACK.with(|stack| {
+        let stack = stack.borrow();
+        let pos = stack.iter().position(|e| e.id == id);
+        match pos {
+            Some(idx) => stack[idx + 1..].iter().map(|e| e.id.clone()).collect(),
+            None => Vec::new(),
+        }
+    })
+}
+
+/// Check whether an overlay with the given `id` is currently registered.
+pub fn contains_overlay(id: &str) -> bool {
+    OVERLAY_STACK.with(|stack| stack.borrow().iter().any(|e| e.id == id))
+}
+
+/// Return the number of overlays currently on the stack.
+pub fn overlay_count() -> usize {
+    OVERLAY_STACK.with(|stack| stack.borrow().len())
+}
+
+/// Clear the overlay stack.
+///
+/// Intended for tests and application-level teardown (e.g., full-page
+/// navigation in an SPA). Matches `reset_z_index()` (§6.2) in purpose.
+pub fn reset_overlay_stack() {
+    OVERLAY_STACK.with(|stack| stack.borrow_mut().clear());
+}
+```
+
+### 9.4 Usage by Overlay Components
+
+Each overlay component calls `push_overlay()` when it mounts (opens) and `remove_overlay()` when it unmounts (closes):
+
+```rust
+// Inside an overlay component's connect function:
+let z = if supports_top_layer() {
+    None
+} else {
+    Some(next_z_index())
+};
+
+push_overlay(OverlayEntry {
+    id: ids.base.clone(),
+    modal: true,
+    z_index: z,
+});
+
+// On unmount (effect cleanup):
+remove_overlay(&ids.base);
+```
+
+`InteractOutside` (see `05-interactions.md` §12.8) consults the overlay stack via `is_topmost()` and `overlays_above()` to implement nested overlay dismissal:
+
+1. Before processing an outside interaction, check `is_topmost(my_id)` — only the topmost overlay responds.
+2. Before firing `InteractOutsideEvent::PointerOutside`, check whether the resolved element is inside any ID returned by `overlays_above(my_id)` — clicks inside child overlays are not "outside."
+
+### 9.5 Components That Use the Overlay Stack
+
+All components listed in §6.4 (Z-Index Allocator users) also register with the overlay stack:
+
+- Dialog (modal and non-modal)
+- AlertDialog
+- Popover
+- Menu
+- Tooltip
+- Toast
+- HoverCard
+- Select (listbox overlay)
+- Combobox (listbox overlay)
+- DatePicker (calendar overlay)
+- Drawer
+
+---
+
+## 10. Media Query Utilities
 
 ```rust
 // crates/ars-dom/src/media.rs
@@ -2778,7 +2942,7 @@ pub enum ColorScheme { Light, Dark }
 
 ---
 
-## 10. URL Sanitization
+## 11. URL Sanitization
 
 All URL-valued attributes (`HtmlAttr::Href`, `HtmlAttr::Action`, `HtmlAttr::FormAction`) must be validated before rendering to prevent URL injection attacks (e.g., `javascript:`, `data:`, `vbscript:` schemes).
 

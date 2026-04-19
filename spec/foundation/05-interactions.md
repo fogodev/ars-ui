@@ -3073,7 +3073,7 @@ pub use ars_dom::media::is_forced_colors_active;
 
 Components that apply inline styles for visual feedback (e.g., drag preview opacity, hover background) SHOULD check `is_forced_colors_active()` and skip custom color overrides when forced colors are active, allowing the system colors to take effect.
 
-> **`matchMedia()` Caching:** Cache the `MediaQueryList` **object** (not the boolean result) in a `thread_local! { static MQL: OnceCell<Option<web_sys::MediaQueryList>> }`. On each call, read `.matches()` from the cached object — this is a live property that always reflects the current state, so no explicit `change` event listener is needed. See `11-dom-utilities.md` §9 for the canonical caching pattern.
+> **`matchMedia()` Caching:** Cache the `MediaQueryList` **object** (not the boolean result) in a `thread_local! { static MQL: OnceCell<Option<web_sys::MediaQueryList>> }`. On each call, read `.matches()` from the cached object — this is a live property that always reflects the current state, so no explicit `change` event listener is needed. See `11-dom-utilities.md` §10 for the canonical caching pattern.
 
 ### 10.5 Forced-Colors Testing Requirements
 
@@ -4350,10 +4350,10 @@ Portal-rendered content is DOM-detached from the component tree. The detection a
 
 When overlays are nested (e.g., a Menu opens a sub-menu, or a Dialog contains a Select dropdown):
 
-1. **Only the topmost overlay responds to outside interactions.** The overlay stack (managed by the z-index system, `11-dom-utilities.md` §6) determines ordering.
-2. **A click inside a child overlay does NOT trigger `InteractOutside` on the parent.** The detection algorithm checks the full overlay stack, not just direct DOM containment.
+1. **Only the topmost overlay responds to outside interactions.** The overlay stack (`11-dom-utilities.md` §9) determines ordering via `is_topmost()`.
+2. **A click inside a child overlay does NOT trigger `InteractOutside` on the parent.** The detection algorithm checks `overlays_above()` (`11-dom-utilities.md` §9.3), not just direct DOM containment.
 3. **Closing order is top-down.** Escape key and outside-click dismiss the topmost overlay first. The parent overlay remains open until it receives its own dismiss signal.
-4. **Stack registration:** Each overlay registers itself with a global overlay stack on mount and deregisters on unmount. `InteractOutside` consults this stack to determine whether the `elementFromPoint()`-resolved element (from §12.3 step 2) is inside any child overlay. Note: `event.target` is unreliable during pointer capture.
+4. **Stack registration:** Each overlay registers itself with the global overlay stack (`push_overlay()`) on mount and deregisters (`remove_overlay()`) on unmount. `InteractOutside` consults this stack to determine whether the `elementFromPoint()`-resolved element (from §12.3 step 2) is inside any child overlay. Note: `event.target` is unreliable during pointer capture. See `11-dom-utilities.md` §9.4 for the full integration pattern.
 
 ### 12.9 Component Cross-References
 
