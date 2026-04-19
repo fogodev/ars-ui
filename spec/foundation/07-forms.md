@@ -706,7 +706,7 @@ impl Validator for MinValidator {
             None => return Ok(()), // Let RequiredValidator handle None
         };
         let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
-        if !n.is_finite() || n < self.min {
+        if !n.is_finite() || !self.min.is_finite() || n < self.min {
             Err(Errors(vec![
                 self.message.clone()
                     .map(|m| Error { message: m, code: ErrorCode::Min(self.min) })
@@ -738,7 +738,7 @@ impl Validator for MaxValidator {
             None => return Ok(()),
         };
         let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
-        if !n.is_finite() || n > self.max {
+        if !n.is_finite() || !self.max.is_finite() || n > self.max {
             Err(Errors(vec![
                 self.message.clone()
                     .map(|m| Error { message: m, code: ErrorCode::Max(self.max) })
@@ -921,7 +921,7 @@ impl Validator for StepValidator {
 
             let quotient = (num - self.step_base) / self.step;
             let nearest_step = quotient.round();
-            let tolerance = quotient.abs().max(1.0) * f64::EPSILON * 16.0;
+            let tolerance = (quotient.abs().max(1.0) * f64::EPSILON * 16.0).min(1e-9);
             if (quotient - nearest_step).abs() > tolerance {
                 let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
                 return Err(Errors(vec![

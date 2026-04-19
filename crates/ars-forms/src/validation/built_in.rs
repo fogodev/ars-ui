@@ -188,7 +188,7 @@ impl Validator for MinValidator {
 
         let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
 
-        if !number.is_finite() || number < self.min {
+        if !number.is_finite() || !self.min.is_finite() || number < self.min {
             let error = self.message.clone().map_or_else(
                 || Error::min(self.min, &FormMessages::default(), locale),
                 |message| Error {
@@ -237,7 +237,7 @@ impl Validator for MaxValidator {
 
         let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
 
-        if !number.is_finite() || number > self.max {
+        if !number.is_finite() || !self.max.is_finite() || number > self.max {
             let error = self.message.clone().map_or_else(
                 || Error::max(self.max, &FormMessages::default(), locale),
                 |message| Error {
@@ -506,7 +506,7 @@ impl Validator for StepValidator {
 
             let quotient = (number - self.step_base) / self.step;
             let nearest_step = quotient.round();
-            let tolerance = quotient.abs().max(1.0) * f64::EPSILON * 16.0;
+            let tolerance = (quotient.abs().max(1.0) * f64::EPSILON * 16.0).min(1e-9);
 
             if (quotient - nearest_step).abs() > tolerance {
                 let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
@@ -867,6 +867,16 @@ mod tests {
     }
 
     #[test]
+    fn min_nan_bound_fails() {
+        let validator = MinValidator::with_value(f64::NAN);
+
+        assert!(matches!(
+            error_code(validator.validate(&Value::Number(Some(1.0)), &Context::standalone("x"))),
+            ErrorCode::Min(min) if min.is_nan()
+        ));
+    }
+
+    #[test]
     fn max_nan_fails() {
         let validator = MaxValidator::with_value(10.0);
 
@@ -876,6 +886,16 @@ mod tests {
             ),
             ErrorCode::Max(10.0)
         );
+    }
+
+    #[test]
+    fn max_nan_bound_fails() {
+        let validator = MaxValidator::with_value(f64::NAN);
+
+        assert!(matches!(
+            error_code(validator.validate(&Value::Number(Some(1.0)), &Context::standalone("x"))),
+            ErrorCode::Max(max) if max.is_nan()
+        ));
     }
 
     #[test]
@@ -1104,6 +1124,19 @@ mod tests {
     }
 
     #[test]
+    fn step_large_off_grid_value_fails() {
+        let validator = StepValidator::new(0.1);
+
+        assert_eq!(
+            error_code(validator.validate(
+                &Value::Number(Some(10_000_000_000_000.03)),
+                &Context::standalone("x")
+            )),
+            ErrorCode::Step(0.1)
+        );
+    }
+
+    #[test]
     fn step_zero_fails() {
         let validator = StepValidator::new(0.0);
 
@@ -1251,7 +1284,7 @@ mod tests {
         assert_eq!(
             error_code(validator.validate(
                 &Value::Text("://example.com".into()),
-                 &Context::standalone("x")
+                &Context::standalone("x")
             )),
             ErrorCode::Url
         );
