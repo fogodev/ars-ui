@@ -79,6 +79,21 @@ jobs:
       - name: I18n Browser Tests
         run: cargo xtest i18n-browser
 
+  dom-browser:
+    name: DOM Browser Tests
+    needs: [unit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked --version 0.14.0
+      - name: DOM Browser Tests
+        run: cargo xtest dom-browser
+
   release:
     name: Release Verification
     needs: [unit]

@@ -159,6 +159,32 @@ pub fn contains_overlay(id: &str) -> bool {
     OVERLAY_STACK.with(|stack| stack.borrow().iter().any(|e| e.id == id))
 }
 
+/// Check whether `child_id` is stacked above `parent_id`.
+///
+/// Returns `true` when both IDs are registered and the child appears later
+/// in the stack (i.e., was pushed after the parent). Returns `false` when
+/// either ID is missing or when `child_id == parent_id`.
+///
+/// This is a convenience wrapper for `InteractOutside` suppression logic:
+/// a parent overlay should not fire an outside-interaction event when the
+/// click target belongs to a child overlay that is above it.
+///
+/// # Spec reference
+///
+/// `spec/foundation/05-interactions.md` §12.8 rule 2 — "A click inside a
+/// child overlay does NOT trigger `InteractOutside` on the parent."
+#[must_use]
+pub fn is_above(child_id: &str, parent_id: &str) -> bool {
+    OVERLAY_STACK.with(|stack| {
+        let stack = stack.borrow();
+
+        let parent_pos = stack.iter().position(|e| e.id == parent_id);
+        let child_pos = stack.iter().position(|e| e.id == child_id);
+
+        matches!((parent_pos, child_pos), (Some(p), Some(c)) if c > p)
+    })
+}
+
 /// Return the number of overlays currently on the stack.
 #[must_use]
 pub fn overlay_count() -> usize {
@@ -526,6 +552,80 @@ mod tests {
 
         assert_eq!(overlay_count(), 1);
     }
+
+    // == F2. is_above ==========================================================
+
+    #[test]
+    fn is_above_child_above_parent() {
+        let _g = serial_reset();
+
+        push_overlay(entry("dialog", true, Some(1000)));
+        push_overlay(entry("menu", false, Some(1001)));
+        push_overlay(entry("tooltip", false, Some(1002)));
+
+        assert!(is_above("menu", "dialog"), "menu is above dialog");
+        assert!(is_above("tooltip", "dialog"), "tooltip is above dialog");
+        assert!(is_above("tooltip", "menu"), "tooltip is above menu");
+    }
+
+    #[test]
+    fn is_above_parent_not_above_child() {
+        let _g = serial_reset();
+
+        push_overlay(entry("dialog", true, Some(1000)));
+        push_overlay(entry("menu", false, Some(1001)));
+
+        assert!(!is_above("dialog", "menu"), "parent is not above its child");
+    }
+
+    #[test]
+    fn is_above_same_id_false() {
+        let _g = serial_reset();
+
+        push_overlay(entry("dialog", true, Some(1000)));
+
+        assert!(
+            !is_above("dialog", "dialog"),
+            "an overlay is not above itself"
+        );
+    }
+
+    #[test]
+    fn is_above_unknown_id_false() {
+        let _g = serial_reset();
+
+        push_overlay(entry("dialog", true, Some(1000)));
+
+        assert!(
+            !is_above("nonexistent", "dialog"),
+            "unknown child returns false"
+        );
+        assert!(
+            !is_above("dialog", "nonexistent"),
+            "unknown parent returns false"
+        );
+        assert!(
+            !is_above("ghost-a", "ghost-b"),
+            "both unknown returns false"
+        );
+    }
+
+    #[test]
+    fn is_above_after_out_of_order_removal() {
+        let _g = serial_reset();
+
+        push_overlay(entry("a", false, Some(1000)));
+        push_overlay(entry("b", false, Some(1001)));
+        push_overlay(entry("c", false, Some(1002)));
+
+        // Remove middle overlay
+        remove_overlay("b");
+
+        assert!(is_above("c", "a"), "c is still above a after b removed");
+        assert!(!is_above("b", "a"), "removed overlay is not above anything");
+    }
+
+    // == F3. Reset =============================================================
 
     #[test]
     fn reset_clears_all() {

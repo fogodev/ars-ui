@@ -2826,6 +2826,24 @@ pub fn contains_overlay(id: &str) -> bool {
     OVERLAY_STACK.with(|stack| stack.borrow().iter().any(|e| e.id == id))
 }
 
+/// Check whether `child_id` is stacked above `parent_id`.
+///
+/// Returns `true` when both IDs are registered and the child appears later
+/// in the stack (i.e., was pushed after the parent). Returns `false` when
+/// either ID is missing or when `child_id == parent_id`.
+///
+/// Convenience wrapper for `InteractOutside` suppression: a parent overlay
+/// should not fire an outside-interaction event when the click target belongs
+/// to a child overlay above it.
+pub fn is_above(child_id: &str, parent_id: &str) -> bool {
+    OVERLAY_STACK.with(|stack| {
+        let stack = stack.borrow();
+        let parent_pos = stack.iter().position(|e| e.id == parent_id);
+        let child_pos = stack.iter().position(|e| e.id == child_id);
+        matches!((parent_pos, child_pos), (Some(p), Some(c)) if c > p)
+    })
+}
+
 /// Return the number of overlays currently on the stack.
 pub fn overlay_count() -> usize {
     OVERLAY_STACK.with(|stack| stack.borrow().len())
@@ -2862,10 +2880,10 @@ push_overlay(OverlayEntry {
 remove_overlay(&ids.base);
 ```
 
-`InteractOutside` (see `05-interactions.md` §12.8) consults the overlay stack via `is_topmost()` and `overlays_above()` to implement nested overlay dismissal:
+`InteractOutside` (see `05-interactions.md` §12.8) consults the overlay stack via `is_topmost()`, `is_above()`, and `overlays_above()` to implement nested overlay dismissal:
 
 1. Before processing an outside interaction, check `is_topmost(my_id)` — only the topmost overlay responds.
-2. Before firing `InteractOutsideEvent::PointerOutside`, check whether the resolved element is inside any ID returned by `overlays_above(my_id)` — clicks inside child overlays are not "outside."
+2. Before firing `InteractOutsideEvent::PointerOutside`, use `is_above(child_id, my_id)` to check whether the click target belongs to a child overlay — clicks inside child overlays are not "outside." For bulk queries, `overlays_above(my_id)` returns all child IDs at once.
 
 ### 9.5 Components That Use the Overlay Stack
 
