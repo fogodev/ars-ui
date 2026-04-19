@@ -20,14 +20,7 @@ use crate::field::Value;
 /// `None`. This produces correct English validation messages but may produce
 /// incorrect pluralization for other languages until callers supply a
 /// locale-aware context.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "built-in validators introduced in the next forms task use this fallback"
-    )
-)]
-static DEFAULT_VALIDATOR_LOCALE: LazyLock<Locale> =
+pub(super) static DEFAULT_VALIDATOR_LOCALE: LazyLock<Locale> =
     LazyLock::new(|| Locale::parse("en").expect("valid locale"));
 
 /// Context available to validators during validation.
@@ -106,23 +99,8 @@ impl<'a> Context<'a> {
 
 /// A synchronous field validator.
 ///
-/// Native targets require validators to be `Send + Sync`, while `wasm32`
-/// preserves single-threaded validators that capture browser-only state.
-#[cfg(target_arch = "wasm32")]
-pub trait Validator {
-    /// Validates the given value and returns a result with any errors found.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Err(Errors)` when the value fails validation.
-    fn validate(&self, value: &Value, ctx: &Context) -> Result;
-}
-
-/// A synchronous field validator.
-///
-/// Native targets require validators to be `Send + Sync`, while `wasm32`
-/// preserves single-threaded validators that capture browser-only state.
-#[cfg(not(target_arch = "wasm32"))]
+/// Validators are always `Send + Sync`, including on `wasm32`, because the
+/// forms engine stores them behind shared [`Arc`](std::sync::Arc) pointers.
 pub trait Validator: Send + Sync {
     /// Validates the given value and returns a result with any errors found.
     ///
@@ -241,39 +219,6 @@ mod tests {
 
         assert!(boxed.validate(&Value::Text(String::new()), &ctx).is_err());
         assert!(boxed.validate(&Value::Text("ok".to_string()), &ctx).is_ok());
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    #[test]
-    #[expect(
-        clippy::arc_with_non_send_sync,
-        reason = "BoxedValidator intentionally preserves single-threaded wasm validators"
-    )]
-    fn boxed_validator_allows_non_send_captures_on_wasm() {
-        use std::{cell::RefCell, rc::Rc};
-
-        struct RcValidator {
-            hits: Rc<RefCell<u8>>,
-        }
-
-        impl Validator for RcValidator {
-            fn validate(&self, _value: &Value, _ctx: &Context) -> Result {
-                *self.hits.borrow_mut() += 1;
-                Ok(())
-            }
-        }
-
-        let hits = Rc::new(RefCell::new(0));
-        let validator: BoxedValidator = Arc::new(RcValidator {
-            hits: Rc::clone(&hits),
-        });
-
-        assert!(
-            validator
-                .validate(&Value::Text(String::new()), &Context::standalone("x"))
-                .is_ok()
-        );
-        assert_eq!(*hits.borrow(), 1);
     }
 
     #[test]

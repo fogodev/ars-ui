@@ -200,13 +200,6 @@ impl Validator for AnyValidator {
 /// A type-erased cross-field validation function.
 ///
 /// Uses [`Arc`](std::sync::Arc) on all targets for shared ownership.
-#[cfg(target_arch = "wasm32")]
-type CrossFieldValidateFn = Arc<dyn Fn(&Value, &ValContext) -> Result>;
-
-/// A type-erased cross-field validation function.
-///
-/// Uses [`Arc`](std::sync::Arc) on all targets for shared ownership.
-#[cfg(not(target_arch = "wasm32"))]
 type CrossFieldValidateFn = Arc<dyn Fn(&Value, &ValContext) -> Result + Send + Sync>;
 
 /// Validates a field using values from other fields in the form.
@@ -1303,27 +1296,16 @@ mod tests {
         assert_eq!(collected[0].0, "email");
     }
 
-    #[cfg(target_arch = "wasm32")]
     #[test]
-    #[expect(
-        clippy::arc_with_non_send_sync,
-        reason = "CrossFieldValidateFn intentionally preserves single-threaded wasm closures"
-    )]
-    fn cross_field_validator_allows_non_send_captures_on_wasm() {
-        use std::{cell::RefCell, rc::Rc};
+    fn cross_field_validator_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
 
-        let hits = Rc::new(RefCell::new(0_u8));
         let validator = CrossFieldValidator {
             depends_on: vec![String::from("password")],
-            validate_fn: Arc::new({
-                let hits = Rc::clone(&hits);
-                move |_value, _ctx| {
-                    *hits.borrow_mut() += 1;
-                    Ok(())
-                }
-            }),
+            validate_fn: Arc::new(|_value, _ctx| Ok(())),
         };
 
+        assert_send_sync::<CrossFieldValidator>();
         assert!(
             validator
                 .validate(
@@ -1332,7 +1314,6 @@ mod tests {
                 )
                 .is_ok()
         );
-        assert_eq!(*hits.borrow(), 1);
     }
 
     // ── validate_all true path ──────────────────────────────────────────
