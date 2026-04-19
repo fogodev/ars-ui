@@ -6,6 +6,7 @@ use crate::{Collection, key::Key};
 
 /// Whether and how many items can be selected simultaneously.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Mode {
     /// No items can be selected. Focus still moves through the list.
     #[default]
@@ -20,6 +21,7 @@ pub enum Mode {
 
 /// Controls how pointer and keyboard selection affect the current selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Behavior {
     /// Toggling an item preserves the rest of the current selection.
     #[default]
@@ -34,6 +36,7 @@ pub enum Behavior {
 /// `All` represents "every item is selected", including items not yet loaded
 /// in async or paginated collections.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum Set {
     /// No items are selected.
@@ -120,6 +123,7 @@ impl Set {
 
 /// Controls how disabled items behave in selection contexts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DisabledBehavior {
     /// Disabled items are skipped during keyboard navigation.
     #[default]
@@ -137,6 +141,7 @@ pub type OnAction = Option<Callback<dyn Fn(Key)>>;
 
 /// The full selection state for a collection-based component.
 #[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct State {
     /// Which items are currently selected.
     pub selected_keys: Set,
