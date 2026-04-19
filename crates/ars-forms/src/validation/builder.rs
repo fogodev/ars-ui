@@ -387,4 +387,174 @@ mod tests {
                 .is_ok()
         );
     }
+
+    #[test]
+    fn builder_required_msg() {
+        let chain = Validators::new().required_msg("custom required").build();
+
+        let result = chain.validate(&Value::Text(String::new()), &Context::standalone("x"));
+        let errors = result.expect_err("empty should fail");
+
+        assert!(errors.has_code(&ErrorCode::Required));
+        assert_eq!(errors.0[0].message, "custom required");
+    }
+
+    #[test]
+    fn builder_max_length() {
+        let chain = Validators::new().max_length(5).build();
+
+        assert!(
+            chain
+                .validate(&Value::Text("hello".into()), &Context::standalone("x"))
+                .is_ok()
+        );
+
+        let result = chain.validate(&Value::Text("toolong".into()), &Context::standalone("x"));
+
+        assert!(
+            result
+                .expect_err("should fail")
+                .has_code(&ErrorCode::MaxLength(5))
+        );
+    }
+
+    #[test]
+    fn builder_min_max_numeric() {
+        let chain = Validators::new().min(1.0).max(10.0).build();
+
+        assert!(
+            chain
+                .validate(&Value::Number(Some(5.0)), &Context::standalone("x"))
+                .is_ok()
+        );
+
+        let below = chain.validate(&Value::Number(Some(0.5)), &Context::standalone("x"));
+
+        assert!(
+            below
+                .expect_err("should fail")
+                .has_code(&ErrorCode::Min(1.0))
+        );
+
+        let above = chain.validate(&Value::Number(Some(11.0)), &Context::standalone("x"));
+
+        assert!(
+            above
+                .expect_err("should fail")
+                .has_code(&ErrorCode::Max(10.0))
+        );
+    }
+
+    #[test]
+    fn builder_pattern_static() {
+        let chain = Validators::new().pattern_static(r"^[a-z]+$").build();
+
+        assert!(
+            chain
+                .validate(&Value::Text("abc".into()), &Context::standalone("x"))
+                .is_ok()
+        );
+
+        let result = chain.validate(&Value::Text("123".into()), &Context::standalone("x"));
+
+        assert!(
+            result
+                .expect_err("should fail")
+                .has_code(&ErrorCode::Pattern("^[a-z]+$".into()))
+        );
+    }
+
+    #[test]
+    fn builder_try_pattern() {
+        let chain = Validators::new()
+            .try_pattern(r"^[a-z]+$")
+            .expect("valid pattern")
+            .build();
+
+        assert!(
+            chain
+                .validate(&Value::Text("abc".into()), &Context::standalone("x"))
+                .is_ok()
+        );
+
+        assert!(Validators::new().try_pattern("(").is_err());
+    }
+
+    #[test]
+    fn builder_step_and_step_with_base() {
+        let chain = Validators::new().step(0.5).build();
+
+        assert!(
+            chain
+                .validate(&Value::Number(Some(1.5)), &Context::standalone("x"))
+                .is_ok()
+        );
+
+        let result = chain.validate(&Value::Number(Some(0.3)), &Context::standalone("x"));
+
+        assert!(
+            result
+                .expect_err("should fail")
+                .has_code(&ErrorCode::Step(0.5))
+        );
+
+        let chain_base = Validators::new().step_with_base(2.0, 1.0).build();
+
+        assert!(
+            chain_base
+                .validate(&Value::Number(Some(5.0)), &Context::standalone("x"))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn builder_url() {
+        let chain = Validators::new().url().build();
+
+        assert!(
+            chain
+                .validate(
+                    &Value::Text("https://example.com".into()),
+                    &Context::standalone("x")
+                )
+                .is_ok()
+        );
+
+        let result = chain.validate(&Value::Text("notaurl".into()), &Context::standalone("x"));
+
+        assert!(result.expect_err("should fail").has_code(&ErrorCode::Url));
+    }
+
+    #[test]
+    fn builder_default() {
+        let builder = ValidatorsBuilder::default();
+        let chain = builder.build();
+
+        assert!(
+            chain
+                .validate(&Value::Text("ok".into()), &Context::standalone("x"))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn chain_validator_debug() {
+        let chain = Validators::new().required().email().build();
+
+        let debug = format!("{chain:?}");
+
+        assert!(debug.contains("ChainValidator"));
+        assert!(debug.contains("validator_count: 2"));
+        assert!(debug.contains("stop_on_first: false"));
+    }
+
+    #[test]
+    fn validators_builder_debug() {
+        let builder = Validators::new().required();
+
+        let debug = format!("{builder:?}");
+
+        assert!(debug.contains("ValidatorsBuilder"));
+        assert!(debug.contains("validator_count: 1"));
+    }
 }
