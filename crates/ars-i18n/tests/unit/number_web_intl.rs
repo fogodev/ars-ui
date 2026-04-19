@@ -3,7 +3,7 @@
 //! Run with:
 //! `wasm-pack test --headless --chrome crates/ars-i18n --no-default-features --features std,web-intl`.
 
-use alloc::{collections::BTreeSet, string::String};
+use alloc::{collections::BTreeSet, format, string::String};
 use core::num::NonZeroU8;
 
 use js_sys::{
@@ -168,6 +168,21 @@ fn web_intl_currency_and_decimal_output_round_trip_through_parse() {
 
     assert_eq!(de.parse(&decimal_text), Some(1234.56));
     assert_eq!(currency.parse(&currency_text), Some(1234.5));
+}
+
+#[wasm_bindgen_test]
+fn web_intl_parse_accepts_unicode_minus_from_browser_shaped_output() {
+    let formatter = NumberFormatter::new(&locale("sv-SE"), ArsNumberFormatOptions::default());
+
+    let positive = formatter.format(1234.5);
+    let negative = formatter.format(-1234.5);
+    let browser_shaped_negative = if negative.contains('\u{2212}') {
+        negative
+    } else {
+        format!("−{positive}")
+    };
+
+    assert_eq!(formatter.parse(&browser_shaped_negative), Some(-1234.5));
 }
 
 #[wasm_bindgen_test]

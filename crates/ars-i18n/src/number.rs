@@ -588,6 +588,7 @@ fn filter_numeric_characters(input: &str, decimal_sep: char, group_sep: char) ->
         .filter(|c| {
             c.is_ascii_digit()
                 || matches!(*c, '+' | '-' | '.' | ',')
+                || *c == '\u{2212}'
                 || matches!(*c, '\u{066B}' | '\u{066C}' | '\u{00A0}' | '\u{202F}')
                 || c.is_ascii_whitespace()
                 || *c == decimal_sep
@@ -604,8 +605,8 @@ fn normalize_numeric_syntax(input: &str, decimal_separator: Option<char>) -> Str
     for c in input.chars() {
         if c.is_ascii_digit() {
             normalized.push(c);
-        } else if matches!(c, '+' | '-') && !seen_sign && normalized.is_empty() {
-            normalized.push(c);
+        } else if matches!(c, '+' | '-' | '\u{2212}') && !seen_sign && normalized.is_empty() {
+            normalized.push(if c == '\u{2212}' { '-' } else { c });
 
             seen_sign = true;
         } else if Some(c) == decimal_separator {
@@ -1189,6 +1190,7 @@ mod tests {
         let ar = locales::ar();
 
         assert_eq!(parse_locale_number("-1,234.56", &en_us), Some(-1234.56));
+        assert_eq!(parse_locale_number("−1,234.56", &en_us), Some(-1234.56));
         assert_eq!(parse_locale_number("+1,234,567", &en_us), Some(1234567.0));
         assert_eq!(parse_locale_number("+1.234", &de_de), Some(1234.0));
         assert_eq!(parse_locale_number("١٬٢٣٤", &ar), Some(1234.0));
