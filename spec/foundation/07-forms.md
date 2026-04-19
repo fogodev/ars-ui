@@ -1048,12 +1048,11 @@ impl ValidatorsBuilder {
         Self { validators: Vec::new() }
     }
 
-/// Add a validator.
-pub fn add(mut self, v: impl Validator + 'static) -> Self {
-    let v: Box<dyn Validator> = Box::new(v);
-    self.validators.push(Arc::from(v));
-    self
-}
+    /// Add a validator.
+    pub fn add(mut self, v: impl Validator + 'static) -> Self {
+        self.validators.push(boxed_validator(v));
+        self
+    }
 
     pub fn required(self) -> Self {
         self.add(RequiredValidator::default())
