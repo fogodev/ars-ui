@@ -913,8 +913,14 @@ impl CalendarDateTime {
         date_fields: &CalendarDateFields,
         time_fields: TimeFields,
     ) -> Result<Self, CalendarError> {
+        let next_date = if calendar_fields_are_empty(date_fields) {
+            self.date.clone()
+        } else {
+            self.date.set(date_fields)?
+        };
+
         Ok(Self {
-            date: self.date.set(date_fields)?,
+            date: next_date,
             time: self
                 .time
                 .set(time_fields)
@@ -1056,15 +1062,17 @@ impl ZonedDateTime {
         let temporal_time_zone = time_zone.to_temporal()?;
 
         let temporal_date_time = temporal_date_time_for(date_time)?;
+        let calendar_fields = temporal_calendar_fields(&CalendarDateFields {
+            era: date_time.date.era.clone(),
+            year: Some(date_time.date.year()),
+            month: Some(date_time.date.month()),
+            month_code: date_time.date.month_code(),
+            day: Some(date_time.date.day()),
+        })?;
 
         let mut parsed = PartialZonedDateTime::new()
             .with_timezone(Some(temporal_time_zone))
-            .with_calendar_fields(
-                CalendarFields::new()
-                    .with_year(date_time.date.year())
-                    .with_month(date_time.date.month())
-                    .with_day(date_time.date.day()),
-            )
+            .with_calendar_fields(calendar_fields)
             .with_time(temporal_partial_time(TimeFields {
                 hour: Some(date_time.time.hour),
                 minute: Some(date_time.time.minute),
@@ -1480,25 +1488,27 @@ fn temporal_partial_date(
     Ok(partial)
 }
 
-fn temporal_calendar_fields(fields: &CalendarDateFields) -> Result<CalendarFields, CalendarError> {
-    if fields.year.is_none()
+const fn calendar_fields_are_empty(fields: &CalendarDateFields) -> bool {
+    fields.era.is_none()
+        && fields.year.is_none()
         && fields.month.is_none()
         && fields.month_code.is_none()
         && fields.day.is_none()
-        && fields.era.is_none()
-    {
+}
+
+fn temporal_calendar_fields(fields: &CalendarDateFields) -> Result<CalendarFields, CalendarError> {
+    if calendar_fields_are_empty(fields) {
         return Err(CalendarError::Arithmetic(String::from(
             "at least one calendar field is required",
         )));
     }
 
-    let mut temporal = CalendarFields::new()
-        .with_optional_year(fields.year)
-        .with_optional_month(fields.month)
-        .with_optional_month_code(fields.month_code.map(MonthCode::to_temporal))
-        .with_optional_day(fields.day);
-
     if let Some(era) = &fields.era {
+        let mut temporal = CalendarFields::new()
+            .with_optional_month(fields.month)
+            .with_optional_month_code(fields.month_code.map(MonthCode::to_temporal))
+            .with_optional_day(fields.day);
+
         let era_code = match era.code.as_str() {
             "bc" => "bce",
 
@@ -1513,9 +1523,15 @@ fn temporal_calendar_fields(fields: &CalendarDateFields) -> Result<CalendarField
         temporal = temporal
             .with_era(Some(era_value))
             .with_era_year(fields.year);
+
+        return Ok(temporal);
     }
 
-    Ok(temporal)
+    Ok(CalendarFields::new()
+        .with_optional_year(fields.year)
+        .with_optional_month(fields.month)
+        .with_optional_month_code(fields.month_code.map(MonthCode::to_temporal))
+        .with_optional_day(fields.day))
 }
 
 fn temporal_date_for(date: &CalendarDate) -> Result<PlainDate, CalendarError> {
@@ -1961,6 +1977,28 @@ mod tests {
     }
 
     #[test]
+    fn calendar_date_time_set_allows_time_only_updates() {
+        let date_time = CalendarDateTime::new(
+            gregorian_date(2024, 3, 15),
+            Time::new(9, 30, 45, 125).expect("time should validate"),
+        );
+
+        let updated = date_time
+            .set(
+                &CalendarDateFields::default(),
+                TimeFields {
+                    minute: Some(5),
+                    ..TimeFields::default()
+                },
+            )
+            .expect("time-only set should succeed");
+
+        assert_eq!(updated.date(), date_time.date());
+        assert_eq!(updated.time().hour(), 9);
+        assert_eq!(updated.time().minute(), 5);
+    }
+
+    #[test]
     fn date_time_helpers_cover_subtract_set_errors_and_additional_cycles() {
         let date_time = CalendarDateTime::new(
             gregorian_date(2024, 3, 15),
@@ -2171,6 +2209,72 @@ mod tests {
         );
         assert_eq!(utc.time_zone().as_str(), "UTC");
         assert_eq!(japanese.time_zone().as_str(), "America/New_York");
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn zoned_date_time_new_preserves_era_based_calendar_fields() {
+        let heisei = CalendarDate::new(
+            CalendarSystem::Japanese,
+            &CalendarDateFields {
+                era: Some(Era {
+                    code: String::from("heisei"),
+                    display_name: String::from("Heisei"),
+                }),
+                year: Some(2),
+                month: Some(1),
+                day: Some(8),
+                ..CalendarDateFields::default()
+            },
+        )
+        .expect("Japanese fixture should validate");
+
+        let bce = CalendarDate::new(
+            CalendarSystem::Gregorian,
+            &CalendarDateFields {
+                era: Some(Era {
+                    code: String::from("bc"),
+                    display_name: String::from("BC"),
+                }),
+                year: Some(1),
+                month: Some(1),
+                day: Some(1),
+                ..CalendarDateFields::default()
+            },
+        )
+        .expect("BCE Gregorian fixture should validate");
+
+        let time = Time::new(9, 30, 0, 0).expect("time should validate");
+        let utc = TimeZoneId::new("UTC").expect("UTC should validate");
+
+        let japanese_zoned = ZonedDateTime::new(
+            &CalendarDateTime::new(heisei.clone(), time),
+            utc.clone(),
+            Disambiguation::Compatible,
+        )
+        .expect("Japanese zoned date-time should validate");
+
+        let gregorian_zoned = ZonedDateTime::new(
+            &CalendarDateTime::new(bce.clone(), time),
+            utc,
+            Disambiguation::Compatible,
+        )
+        .expect("BCE Gregorian zoned date-time should validate");
+
+        let japanese_roundtrip = from_temporal_datetime(
+            CalendarSystem::Japanese,
+            &japanese_zoned.inner.to_plain_date_time(),
+        )
+        .expect("Japanese temporal roundtrip should succeed");
+
+        let gregorian_roundtrip = from_temporal_datetime(
+            CalendarSystem::Gregorian,
+            &gregorian_zoned.inner.to_plain_date_time(),
+        )
+        .expect("Gregorian temporal roundtrip should succeed");
+
+        assert_eq!(japanese_roundtrip.date(), &heisei);
+        assert_eq!(gregorian_roundtrip.date(), &bce);
     }
 
     #[cfg(feature = "std")]
