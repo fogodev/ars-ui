@@ -299,6 +299,10 @@ mod wasm_tests {
 
     wasm_bindgen_test_configure!(run_in_browser);
 
+    fn assert_reflect_set_succeeds(result: &Result<bool, JsValue>, context: &str) {
+        assert!(matches!(result, Ok(true)), "{context}: {result:?}");
+    }
+
     struct MatchMediaGuard {
         window: web_sys::Window,
         original: JsValue,
@@ -313,7 +317,7 @@ mod wasm_tests {
                 &self.original,
             );
 
-            assert!(result.is_ok(), "restoring window.matchMedia must succeed");
+            assert_reflect_set_succeeds(&result, "restoring window.matchMedia must succeed");
 
             let _ = &self.stub;
         }
@@ -348,10 +352,7 @@ mod wasm_tests {
                 getter.as_ref().unchecked_ref(),
             );
 
-            assert!(
-                getter_result.is_ok(),
-                "defining the matches getter must succeed"
-            );
+            assert_reflect_set_succeeds(&getter_result, "defining the matches getter must succeed");
 
             let configurable_result = Reflect::set(
                 &descriptor,
@@ -359,9 +360,9 @@ mod wasm_tests {
                 &JsValue::TRUE,
             );
 
-            assert!(
-                configurable_result.is_ok(),
-                "marking the matches getter configurable must succeed"
+            assert_reflect_set_succeeds(
+                &configurable_result,
+                "marking the matches getter configurable must succeed",
             );
 
             let media_query_list = Object::new();
@@ -401,9 +402,9 @@ mod wasm_tests {
                 stub.as_ref().unchecked_ref(),
             );
 
-            assert!(
-                install_result.is_ok(),
-                "installing window.matchMedia must succeed"
+            assert_reflect_set_succeeds(
+                &install_result,
+                "installing window.matchMedia must succeed",
             );
 
             Self {
