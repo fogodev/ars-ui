@@ -406,7 +406,7 @@ Validation rules:
 - Callers may omit `era`; `CalendarSystem::default_era()` resolves the newest public era for era-bearing calendars.
 - `MonthCode` is authoritative for leap-month calendars. A supplied `month_code` must agree with the resolved month ordinal.
 - `CalendarSystem::supported_calendars()` is the adapter-facing metadata list used for runtime validation and UI configuration.
-- `CalendarSystem::from_bcp47("islamic")` resolves to `IslamicUmmAlQura` as a legacy input alias.
+- Unsupported BCP 47 calendar identifiers return `None` from `CalendarSystem::from_bcp47(...)`; locale resolution then falls back to Gregorian.
 
 #### 1.1.3 Parsing and Query Helpers
 

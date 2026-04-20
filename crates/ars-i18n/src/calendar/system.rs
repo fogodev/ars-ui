@@ -76,7 +76,7 @@ impl CalendarSystem {
             "buddhist" => Some(Self::Buddhist),
             "japanese" | "japanext" => Some(Self::Japanese),
             "hebrew" => Some(Self::Hebrew),
-            "islamic" | "islamic-umalqura" => Some(Self::IslamicUmmAlQura),
+            "islamic-umalqura" => Some(Self::IslamicUmmAlQura),
             "islamic-civil" => Some(Self::IslamicCivil),
             "persian" => Some(Self::Persian),
             "indian" => Some(Self::Indian),
@@ -996,16 +996,13 @@ mod tests {
     }
 
     #[test]
-    fn islamic_legacy_identifier_aliases_to_umm_al_qura() {
-        assert_eq!(
-            CalendarSystem::from_bcp47("islamic"),
-            Some(CalendarSystem::IslamicUmmAlQura)
-        );
+    fn unsupported_islamic_identifier_falls_back_to_default_locale_calendar() {
+        assert_eq!(CalendarSystem::from_bcp47("islamic"), None);
         assert_eq!(
             CalendarSystem::from_locale(
                 &Locale::parse("en-u-ca-islamic").expect("locale should parse")
             ),
-            CalendarSystem::IslamicUmmAlQura
+            CalendarSystem::Gregorian
         );
         assert!(
             CalendarSystem::supported_calendars()

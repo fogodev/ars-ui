@@ -1583,7 +1583,8 @@ The invariants enforced by `CalendarDate::new(...)` are:
 - `MonthCode` is authoritative for Hebrew, Chinese, and Dangi leap-month construction
 - cross-calendar conversions preserve the canonical ISO date and re-project display fields in the
   target calendar
-- `CalendarSystem::from_bcp47("islamic")` resolves to `IslamicUmmAlQura` as a legacy input alias
+- unsupported BCP 47 calendar identifiers return `None` from `CalendarSystem::from_bcp47(...)`,
+  and `CalendarSystem::from_locale(...)` then falls back to Gregorian
 
 ### 5.3 Week Information
 
