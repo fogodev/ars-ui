@@ -486,10 +486,10 @@ On mobile browsers, the virtual keyboard reduces the visible area without changi
             .unwrap_or_else(|| {
                 window.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(0.0)
             });
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "debug")]
         if width == 0.0 {
-            web_sys::console::warn_1(
-                &"ars-dom: viewport_width() returned 0 — window may not be fully initialized".into(),
+            log::warn!(
+                "[ars-dom] viewport_width() returned 0.0; window may not be fully initialized"
             );
         }
         width
@@ -501,15 +501,37 @@ On mobile browsers, the virtual keyboard reduces the visible area without changi
             .unwrap_or_else(|| {
                 window.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(0.0)
             });
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "debug")]
         if height == 0.0 {
-            web_sys::console::warn_1(
-                &"ars-dom: viewport_height() returned 0 — window may not be fully initialized".into(),
+            log::warn!(
+                "[ars-dom] viewport_height() returned 0.0; window may not be fully initialized"
             );
         }
         height
     }
+
+    fn viewport_rect(window: &web_sys::Window) -> Rect {
+        if let Some(vv) = window.visual_viewport() {
+            Rect {
+                x: vv.offset_left(),
+                y: vv.offset_top(),
+                width: vv.width(),
+                height: vv.height(),
+            }
+        } else {
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                width: window.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(0.0),
+                height: window.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(0.0),
+            }
+        }
+    }
     ```
+
+    `viewport_width()` and `viewport_height()` expose only the effective dimensions.
+    `viewport_rect()` is the API that carries the visual viewport origin via
+    `offsetLeft` / `offsetTop` when the browser exposes it.
 
 3. **`keyboard_aware` positioning option**: Add to `PositioningOptions`:
 
@@ -522,7 +544,10 @@ On mobile browsers, the virtual keyboard reduces the visible area without changi
 
 4. **Scroll lock adjustment**: Dialog scroll lock (see `components/overlay/dialog.md`) MUST account for `visualViewport.offsetTop` when computing the scroll position to preserve. On iOS Safari, `visualViewport.offsetTop` reflects the amount the page has been scrolled to accommodate the keyboard.
 
-5. **SSR Safety**: All `visualViewport` access MUST be gated behind `#[cfg(target_arch = "wasm32")]`.
+5. **SSR Safety**: All `visualViewport` access MUST be gated behind
+   `#[cfg(all(feature = "web", target_arch = "wasm32"))]`. Host and SSR builds
+   MUST keep the fallback logic in pure helpers or internal stubs rather than
+   exposing browser-only types in non-web public APIs.
 
 ### 2.3 Algorithm
 
@@ -628,12 +653,7 @@ let floating_dom = floating.get_bounding_client_rect();
 let floating_rect = Rect { x: 0.0, y: 0.0, // only width/height used
     width: floating_dom.width(), height: floating_dom.height() };
 let window = web_sys::window().expect("window must exist in browser context");
-let viewport_rect = Rect {
-    x: 0.0,
-    y: 0.0,
-    width: viewport_width(&window),   // see §2.2.1 for visual viewport preference
-    height: viewport_height(&window), // see §2.2.1 for visual viewport preference
-};
+let viewport = viewport_rect(&window); // see §2.2.2 for visual viewport preference
 ```
 
 > **Visual Viewport on Mobile:** `window.innerWidth`/`innerHeight` return the
@@ -642,7 +662,10 @@ let viewport_rect = Rect {
 > is smaller than the layout viewport, so floating elements positioned against
 > `innerWidth`/`innerHeight` may overflow the screen. When available, prefer
 > `window.visualViewport.width` / `window.visualViewport.height` plus
-> `visualViewport.offsetLeft` / `offsetTop` for the viewport rect. This ensures
+> `visualViewport.offsetLeft` / `offsetTop` for the viewport rect. This means
+> `viewport_rect().x` and `.y` track the visible origin, while
+> `viewport_width()` / `viewport_height()` continue to report dimensions only.
+> This ensures
 > the floating element stays within the user-visible area even while zoomed.
 > Feature-detect with `if window.visual_viewport.is_some()` and fall back to
 > `innerWidth`/`innerHeight` when the API is absent (e.g., older WebViews).
