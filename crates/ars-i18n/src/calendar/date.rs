@@ -940,11 +940,17 @@ impl CalendarDateTime {
         amount: i64,
         options: CycleTimeOptions,
     ) -> Result<Self, CalendarError> {
+        let narrowed_date_amount = || {
+            i32::try_from(amount).map_err(|_| {
+                CalendarError::Arithmetic(String::from("date-time cycle amount exceeds i32 range"))
+            })
+        };
+
         match field {
             DateTimeField::Year => Ok(Self {
                 date: self.date.cycle(
                     DateField::Year,
-                    amount as i32,
+                    narrowed_date_amount()?,
                     CycleOptions { wrap: options.wrap },
                 )?,
                 time: self.time,
@@ -953,7 +959,7 @@ impl CalendarDateTime {
             DateTimeField::Month => Ok(Self {
                 date: self.date.cycle(
                     DateField::Month,
-                    amount as i32,
+                    narrowed_date_amount()?,
                     CycleOptions { wrap: options.wrap },
                 )?,
                 time: self.time,
@@ -962,7 +968,7 @@ impl CalendarDateTime {
             DateTimeField::Day => Ok(Self {
                 date: self.date.cycle(
                     DateField::Day,
-                    amount as i32,
+                    narrowed_date_amount()?,
                     CycleOptions { wrap: options.wrap },
                 )?,
                 time: self.time,
@@ -2047,6 +2053,18 @@ mod tests {
                 .day(),
             14
         );
+
+        let overflow = date_time.cycle(
+            DateTimeField::Month,
+            i64::from(i32::MAX) + 1,
+            CycleTimeOptions { wrap: false },
+        );
+
+        assert!(matches!(
+            overflow,
+            Err(CalendarError::Arithmetic(message))
+                if message == "date-time cycle amount exceeds i32 range"
+        ));
     }
 
     #[test]
