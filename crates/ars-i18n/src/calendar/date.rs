@@ -382,17 +382,33 @@ impl CalendarDate {
 
             DateField::Month => {
                 if options.wrap {
-                    let months_in_year = i32::from(self.calendar.months_in_year(self));
+                    let minimum_month = i32::from(self.minimum_month_in_year());
+                    let maximum_month = i32::from(self.calendar.months_in_year(self));
+                    let months_in_year = maximum_month - minimum_month + 1;
 
-                    let next_month =
-                        (i32::from(self.month) - 1 + amount).rem_euclid(months_in_year) + 1;
-
-                    self.set(&CalendarDateFields {
-                        month: Some(u8::try_from(next_month).map_err(|_| {
+                    let next_month = (i32::from(self.month) - minimum_month + amount)
+                        .rem_euclid(months_in_year)
+                        + minimum_month;
+                    let delta = next_month - i32::from(self.month);
+                    let total_months = i64::from(self.iso_year) * 12 + i64::from(self.iso_month)
+                        - 1
+                        + i64::from(delta);
+                    let target_iso_year =
+                        i32::try_from(total_months.div_euclid(12)).map_err(|_| {
                             CalendarError::Arithmetic(String::from("month cycle overflow"))
-                        })?),
-                        ..CalendarDateFields::default()
-                    })
+                        })?;
+                    let target_iso_month =
+                        u8::try_from(total_months.rem_euclid(12) + 1).map_err(|_| {
+                            CalendarError::Arithmetic(String::from("month cycle overflow"))
+                        })?;
+
+                    build_from_iso_parts(
+                        self.calendar,
+                        target_iso_year,
+                        target_iso_month,
+                        self.iso_day,
+                    )
+                    .map_err(|error| CalendarError::Arithmetic(error.to_string()))
                 } else {
                     self.add(DateDuration {
                         months: amount,
@@ -403,16 +419,22 @@ impl CalendarDate {
 
             DateField::Day => {
                 if options.wrap {
-                    let days_in_month = i32::from(self.calendar.days_in_month(self));
+                    let minimum_day = i32::from(self.minimum_day_in_month());
+                    let maximum_day = i32::from(self.calendar.days_in_month(self));
+                    let days_in_month = maximum_day - minimum_day + 1;
 
-                    let next_day = (i32::from(self.day) - 1 + amount).rem_euclid(days_in_month) + 1;
-
-                    self.set(&CalendarDateFields {
-                        day: Some(u8::try_from(next_day).map_err(|_| {
+                    let next_day = (i32::from(self.day) - minimum_day + amount)
+                        .rem_euclid(days_in_month)
+                        + minimum_day;
+                    build_from_iso_parts(
+                        self.calendar,
+                        self.iso_year,
+                        self.iso_month,
+                        u8::try_from(next_day).map_err(|_| {
                             CalendarError::Arithmetic(String::from("day cycle overflow"))
-                        })?),
-                        ..CalendarDateFields::default()
-                    })
+                        })?,
+                    )
+                    .map_err(|error| CalendarError::Arithmetic(error.to_string()))
                 } else {
                     self.add(DateDuration {
                         days: amount,
@@ -2138,6 +2160,52 @@ mod tests {
         assert_eq!(gregorian_date(2024, 3, 13).weekday(), Weekday::Wednesday);
         assert_eq!(gregorian_date(2024, 3, 14).weekday(), Weekday::Thursday);
         assert!(!date.is_between(&gregorian_date(2024, 3, 16), &gregorian_date(2024, 3, 31)));
+
+        let reiwa_start = build_calendar_date(
+            CalendarSystem::Japanese,
+            &CalendarDateFields {
+                era: Some(Era {
+                    code: String::from("reiwa"),
+                    display_name: String::from("Reiwa"),
+                }),
+                year: Some(1),
+                month: Some(5),
+                day: Some(1),
+                ..CalendarDateFields::default()
+            },
+            Overflow::Reject,
+        )
+        .expect("Reiwa start should validate");
+        assert_eq!(
+            reiwa_start
+                .cycle(DateField::Month, -1, CycleOptions { wrap: true })
+                .expect("wrapping month cycle should honor the minimum month")
+                .month(),
+            12
+        );
+
+        let heisei_start_month = build_calendar_date(
+            CalendarSystem::Japanese,
+            &CalendarDateFields {
+                era: Some(Era {
+                    code: String::from("heisei"),
+                    display_name: String::from("Heisei"),
+                }),
+                year: Some(1),
+                month: Some(1),
+                day: Some(8),
+                ..CalendarDateFields::default()
+            },
+            Overflow::Reject,
+        )
+        .expect("Heisei start month should validate");
+        assert_eq!(
+            heisei_start_month
+                .cycle(DateField::Day, -1, CycleOptions { wrap: true })
+                .expect("wrapping day cycle should honor the minimum day")
+                .day(),
+            31
+        );
 
         let month_mismatch = build_calendar_date(
             CalendarSystem::Gregorian,
