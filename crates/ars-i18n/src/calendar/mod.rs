@@ -16,6 +16,8 @@ mod tests;
 
 #[cfg(feature = "std")]
 pub use date::ZonedDateTime;
+#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+pub(crate) use date::build_from_iso_parts;
 pub use date::{
     CalendarDate, CalendarDateFields, CalendarDateTime, CycleOptions, CycleTimeOptions,
     DateDuration, DateField, DateTimeDuration, DateTimeField, DateValue, Disambiguation, Time,

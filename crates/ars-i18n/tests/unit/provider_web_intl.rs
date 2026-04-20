@@ -1334,6 +1334,27 @@ fn web_intl_bridge_convert_handles_non_gregorian_sources() {
 }
 
 #[wasm_bindgen_test]
+fn web_intl_bridge_convert_preserves_gregorian_bce_targets() {
+    use crate::provider::web_intl::bridge_convert;
+
+    let buddhist = calendar_date(CalendarSystem::Buddhist, None, 493, 3, 15);
+
+    let gregorian = bridge_convert(&buddhist, CalendarSystem::Gregorian)
+        .expect("Buddhist 493 should convert to Gregorian 51 BC");
+
+    let era = gregorian
+        .era()
+        .cloned()
+        .expect("Gregorian BCE targets must carry an era");
+
+    assert_eq!(gregorian.calendar(), CalendarSystem::Gregorian);
+    assert_eq!(era.code, "bc");
+    assert_eq!(gregorian.year(), 51, "Buddhist 493 = Gregorian 51 BC");
+    assert_eq!(gregorian.month(), 3);
+    assert_eq!(gregorian.day(), 15);
+}
+
+#[wasm_bindgen_test]
 fn web_intl_resolve_named_month_recovers_when_2_digit_returns_names() {
     // Regression (Codex PR #563 comment 3103083388, P1): when the
     // `month: "2-digit"` probe emits a non-numeric label — Node.js /

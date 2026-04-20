@@ -1,7 +1,4 @@
-#[cfg(any(
-    test,
-    all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x"))
-))]
+#[cfg(test)]
 use alloc::string::String;
 use alloc::string::ToString;
 
@@ -115,13 +112,6 @@ impl CalendarDate {
     #[cfg(test)]
     pub(crate) fn weekday(&self) -> Weekday {
         Weekday::from_icu_weekday(self.inner.weekday())
-    }
-
-    /// Returns the era code when one is present.
-    #[must_use]
-    #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
-    pub(crate) fn era(&self) -> Option<String> {
-        self.inner.year().era().map(|era| era.era.to_string())
     }
 
     /// Adds a whole-day offset to the date.

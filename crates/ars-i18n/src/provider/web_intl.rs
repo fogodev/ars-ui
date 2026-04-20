@@ -17,8 +17,8 @@ use wasm_bindgen::{JsCast, JsValue};
 use crate::{
     CalendarDate, CalendarSystem, Era, HourCycle, IcuProvider, Locale, WeekInfo, Weekday,
     calendar::{
-        bounded_days_in_month, bounded_months_in_year, default_era_for, gregorian_days_in_month,
-        infer_public_era,
+        bounded_days_in_month, bounded_months_in_year, build_from_iso_parts, default_era_for,
+        gregorian_days_in_month, infer_public_era,
     },
     normalize_digits,
 };
@@ -1199,23 +1199,15 @@ pub(crate) fn bridge_convert(date: &CalendarDate, target: CalendarSystem) -> Opt
     let internal = crate::calendar::internal::CalendarDate::try_from(date).ok()?;
 
     let converted = internal.to_calendar(target);
+    let iso = converted.inner.to_calendar(icu::calendar::Iso);
 
-    Some(normalize_public_date(
+    build_from_iso_parts(
         target,
-        converted
-            .era()
-            .filter(|_| target.has_custom_eras())
-            .map(|code| Era {
-                code: code.clone(),
-                display_name: code,
-            }),
-        converted.year(),
-        converted.month(),
-        converted.day(),
-        date.iso_year,
-        date.iso_month,
-        date.iso_day,
-    ))
+        iso.year().era_year_or_related_iso(),
+        iso.month().ordinal,
+        iso.day_of_month().0,
+    )
+    .ok()
 }
 
 pub(crate) fn canonical_era_code(label: &str) -> String {
