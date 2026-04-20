@@ -41,6 +41,8 @@ use crate::CalendarDateFields;
 use crate::calendar::ZonedDateTime;
 #[cfg(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32")))]
 use crate::calendar::internal::CalendarDate as InternalCalendarDate;
+#[cfg(feature = "std")]
+use crate::to_zoned_date_time;
 use crate::{
     CalendarDate, CalendarDateTime, CalendarSystem, Era, HourCycle, IcuProvider, Locale, Time,
     TimeZoneId, Weekday, default_provider,
@@ -506,6 +508,14 @@ impl DateFormatter {
             value.time(),
             self.effective_time_fields(),
             self.resolved.time_zone.as_ref(),
+            #[cfg(feature = "std")]
+            self.resolved.time_zone.as_ref().and_then(|time_zone| {
+                to_zoned_date_time(value, time_zone, crate::Disambiguation::Compatible)
+                    .ok()
+                    .map(|zoned| zoned.offset_minutes())
+            }),
+            #[cfg(not(feature = "std"))]
+            None,
         );
 
         if !parts.is_empty() && !time_parts.is_empty() {
@@ -528,6 +538,7 @@ impl DateFormatter {
             value,
             self.effective_time_fields(),
             self.resolved.time_zone.as_ref(),
+            None,
         )
     }
 
@@ -556,6 +567,7 @@ impl DateFormatter {
             &time,
             self.effective_time_fields(),
             Some(zoned.time_zone()),
+            Some(zoned.offset_minutes()),
         );
 
         if !parts.is_empty() && !time_parts.is_empty() {
@@ -1042,6 +1054,7 @@ fn render_time_parts(
     time: &Time,
     fields: EffectiveTimeFields,
     time_zone: Option<&TimeZoneId>,
+    utc_offset_minutes: Option<i32>,
 ) -> Vec<DateFormatterPart> {
     let mut parts = Vec::new();
 
@@ -1088,7 +1101,7 @@ fn render_time_parts(
 
         parts.push(DateFormatterPart {
             kind: DateFormatterPartKind::TimeZoneName,
-            value: format_time_zone_name(time_zone, zone_format),
+            value: format_time_zone_name(time_zone, zone_format, utc_offset_minutes),
         });
     }
 
@@ -1309,12 +1322,47 @@ fn truncate_graphemes(value: &str, count: usize) -> String {
     value.graphemes(true).take(count).collect()
 }
 
-fn format_time_zone_name(time_zone: &TimeZoneId, format_kind: TimeZoneNameFormat) -> String {
+fn format_time_zone_name(
+    time_zone: &TimeZoneId,
+    format_kind: TimeZoneNameFormat,
+    utc_offset_minutes: Option<i32>,
+) -> String {
     match format_kind {
         TimeZoneNameFormat::Short | TimeZoneNameFormat::Long => String::from(time_zone.as_str()),
-        TimeZoneNameFormat::ShortOffset => format!("GMT {}", time_zone.as_str()),
-        TimeZoneNameFormat::LongOffset => format!("GMT offset {}", time_zone.as_str()),
+        TimeZoneNameFormat::ShortOffset => utc_offset_minutes.map_or_else(
+            || format!("GMT {}", time_zone.as_str()),
+            |minutes| format_utc_offset(minutes, false),
+        ),
+        TimeZoneNameFormat::LongOffset => utc_offset_minutes.map_or_else(
+            || format!("GMT offset {}", time_zone.as_str()),
+            |minutes| format_utc_offset(minutes, true),
+        ),
     }
+}
+
+fn format_utc_offset(utc_offset_minutes: i32, long: bool) -> String {
+    if utc_offset_minutes == 0 {
+        return String::from("GMT");
+    }
+
+    let sign = if utc_offset_minutes.is_negative() {
+        '-'
+    } else {
+        '+'
+    };
+    let absolute_minutes = utc_offset_minutes.abs();
+    let hours = absolute_minutes / 60;
+    let minutes = absolute_minutes % 60;
+
+    if long {
+        return format!("GMT{sign}{hours:02}:{minutes:02}");
+    }
+
+    if minutes == 0 {
+        return format!("GMT{sign}{hours}");
+    }
+
+    format!("GMT{sign}{hours}:{minutes:02}")
 }
 
 #[cfg(feature = "std")]
@@ -1542,8 +1590,8 @@ mod tests {
     #[cfg(all(feature = "std", feature = "icu4x"))]
     use super::{
         DateOrder, date_from_zoned, date_order, era_label, format_hour, format_month,
-        format_numeric, format_time_zone_name, format_year, literal_part, push_date_field,
-        time_from_zoned, title_case_ascii, truncate_graphemes, weekday_label,
+        format_numeric, format_time_zone_name, format_utc_offset, format_year, literal_part,
+        push_date_field, time_from_zoned, title_case_ascii, truncate_graphemes, weekday_label,
     };
     #[cfg(feature = "icu4x")]
     use crate::StubIcuProvider;
@@ -2170,6 +2218,7 @@ mod tests {
                 hour_cycle: HourCycle::H12,
             },
             Some(&TimeZoneId::new("America/New_York").expect("time zone should parse")),
+            Some(-4 * 60),
         );
 
         let identical_range = range_parts_from_parts(&date_parts, &date_parts);
@@ -2184,7 +2233,7 @@ mod tests {
 
         assert!(join_parts(&date_parts).contains("Mar"));
         assert!(join_parts(&time_parts).contains("PM"));
-        assert!(join_parts(&time_parts).contains("GMT"));
+        assert!(join_parts(&time_parts).contains("GMT-4"));
         assert!(
             identical_range
                 .iter()
@@ -2237,6 +2286,46 @@ mod tests {
         assert!(formatted_date_time.contains("5:05:09 PM"));
         assert_eq!(formatted_time, "5:05:09 PM");
         assert!(formatted_zoned.contains("America/New_York"));
+    }
+
+    #[cfg(all(feature = "std", feature = "icu4x"))]
+    #[test]
+    fn formatter_public_entrypoints_render_numeric_offset_zone_labels() {
+        let formatter = DateFormatter::new_with_options(
+            &locales::en_us(),
+            DateFormatterOptions {
+                hour: Some(NumericWidth::Numeric),
+                minute: Some(NumericWidth::TwoDigit),
+                hour_cycle: Some(HourCycle::H12),
+                time_zone: Some(
+                    TimeZoneId::new("America/New_York").expect("time zone should parse"),
+                ),
+                time_zone_name: Some(TimeZoneNameFormat::ShortOffset),
+                ..DateFormatterOptions::default()
+            },
+        );
+
+        let date_time = CalendarDateTime::new(
+            march_2024(),
+            Time::new(17, 5, 9, 0).expect("time should validate"),
+        );
+
+        let zoned = ZonedDateTime::new(
+            &date_time,
+            TimeZoneId::new("America/New_York").expect("time zone should parse"),
+            crate::Disambiguation::Compatible,
+        )
+        .expect("zoned date-time should validate");
+
+        assert!(formatter.format_date_time(&date_time).contains("GMT-4"));
+        assert_eq!(
+            format_time_zone_name(
+                zoned.time_zone(),
+                TimeZoneNameFormat::LongOffset,
+                Some(zoned.offset_minutes())
+            ),
+            "GMT-04:00"
+        );
     }
 
     #[cfg(all(feature = "std", feature = "icu4x"))]
@@ -2313,9 +2402,16 @@ mod tests {
         assert_eq!(era_label(&era, TextWidth::Narrow), "R");
         assert_eq!(truncate_graphemes("école", 2), "éc");
         assert_eq!(
-            format_time_zone_name(zoned.time_zone(), TimeZoneNameFormat::LongOffset),
-            "GMT offset America/New_York"
+            format_time_zone_name(
+                zoned.time_zone(),
+                TimeZoneNameFormat::LongOffset,
+                Some(zoned.offset_minutes())
+            ),
+            "GMT-04:00"
         );
+        assert_eq!(format_utc_offset(-4 * 60, false), "GMT-4");
+        assert_eq!(format_utc_offset(5 * 60 + 30, false), "GMT+5:30");
+        assert_eq!(format_utc_offset(-4 * 60, true), "GMT-04:00");
         assert_eq!(title_case_ascii("reiwa"), "Reiwa");
         assert_eq!(title_case_ascii(""), "");
         assert_eq!(date_from_zoned(&zoned).to_iso8601(), "2024-03-15");

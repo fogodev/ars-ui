@@ -447,8 +447,10 @@ impl CalendarDate {
     #[must_use]
     pub fn to_iso8601(&self) -> String {
         format!(
-            "{:04}-{:02}-{:02}",
-            self.iso_year, self.iso_month, self.iso_day
+            "{}-{:02}-{:02}",
+            format_iso_year(self.iso_year),
+            self.iso_month,
+            self.iso_day
         )
     }
 
@@ -1675,6 +1677,19 @@ impl DateTimeDuration {
     }
 }
 
+fn format_iso_year(year: i32) -> String {
+    if (0..=9999).contains(&year) {
+        return format!("{year:04}");
+    }
+
+    let absolute_year = i64::from(year).abs();
+
+    format!(
+        "{}{absolute_year:06}",
+        if year.is_negative() { "-" } else { "+" }
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1727,6 +1742,15 @@ mod tests {
         assert_eq!(later.to_iso8601(), "2024-03-15");
         assert_eq!(earlier.days_until(&later).expect("date difference"), 5);
         assert!(earlier.is_before(&later).expect("chronological comparison"));
+    }
+
+    #[test]
+    fn calendar_date_to_iso8601_uses_expanded_years_outside_four_digit_range() {
+        let bce = gregorian_date(-50, 1, 2);
+        let large = gregorian_date(10_000, 12, 31);
+
+        assert_eq!(bce.to_iso8601(), "-000050-01-02");
+        assert_eq!(large.to_iso8601(), "+010000-12-31");
     }
 
     #[test]
