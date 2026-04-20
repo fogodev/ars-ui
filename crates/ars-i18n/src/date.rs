@@ -1483,31 +1483,44 @@ fn fallback_format_date(_locale: &Locale, length: FormatLength, date: &CalendarD
         return date.to_iso8601();
     }
 
-    let year = date.year;
-
     let month = date.month;
 
     let day = date.day;
+    let (display_year, era_suffix) = fallback_gregorian_year_for_display(date);
 
     match length {
-        FormatLength::Short => format!("{month}/{day}/{:02}", year.rem_euclid(100)),
+        FormatLength::Short => format!(
+            "{month}/{day}/{:02}{}",
+            display_year.rem_euclid(100),
+            era_suffix
+        ),
 
-        FormatLength::Medium => {
-            format!("{} {day}, {year}", english_month_short(month))
-        }
+        FormatLength::Medium => format!(
+            "{} {day}, {display_year}{era_suffix}",
+            english_month_short(month)
+        ),
 
-        FormatLength::Long => {
-            format!("{} {day}, {year}", english_month_long(month))
-        }
+        FormatLength::Long => format!(
+            "{} {day}, {display_year}{era_suffix}",
+            english_month_long(month)
+        ),
 
         FormatLength::Full => {
             format!(
-                "{}, {} {day}, {year}",
+                "{}, {} {day}, {display_year}{era_suffix}",
                 english_weekday_long(date.weekday()),
                 english_month_long(month)
             )
         }
     }
+}
+
+const fn fallback_gregorian_year_for_display(date: &CalendarDate) -> (i32, &'static str) {
+    if date.iso_year <= 0 {
+        return (1 - date.iso_year, " BC");
+    }
+
+    (date.year, "")
 }
 
 const fn english_month_short(month: u8) -> &'static str {
@@ -2549,6 +2562,38 @@ mod tests {
         assert_eq!(
             fallback_format_date(&locale, FormatLength::Long, &japanese),
             japanese.to_iso8601()
+        );
+
+        let gregorian_bce = CalendarDate::new(
+            CalendarSystem::Gregorian,
+            &crate::CalendarDateFields {
+                era: Some(Era {
+                    code: String::from("bc"),
+                    display_name: String::from("BC"),
+                }),
+                year: Some(1),
+                month: Some(1),
+                day: Some(1),
+                ..crate::CalendarDateFields::default()
+            },
+        )
+        .expect("BCE Gregorian fixture should validate");
+
+        assert_eq!(
+            fallback_format_date(&locale, FormatLength::Short, &gregorian_bce),
+            "1/1/01 BC"
+        );
+        assert_eq!(
+            fallback_format_date(&locale, FormatLength::Medium, &gregorian_bce),
+            "Jan 1, 1 BC"
+        );
+        assert_eq!(
+            fallback_format_date(&locale, FormatLength::Long, &gregorian_bce),
+            "January 1, 1 BC"
+        );
+        assert_eq!(
+            fallback_format_date(&locale, FormatLength::Full, &gregorian_bce),
+            "Saturday, January 1, 1 BC"
         );
     }
 
