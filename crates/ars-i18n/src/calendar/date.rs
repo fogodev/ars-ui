@@ -389,24 +389,27 @@ impl CalendarDate {
                     let next_month = (i32::from(self.month) - minimum_month + amount)
                         .rem_euclid(months_in_year)
                         + minimum_month;
-                    let delta = next_month - i32::from(self.month);
-                    let total_months = i64::from(self.iso_year) * 12 + i64::from(self.iso_month)
-                        - 1
-                        + i64::from(delta);
-                    let target_iso_year =
-                        i32::try_from(total_months.div_euclid(12)).map_err(|_| {
-                            CalendarError::Arithmetic(String::from("month cycle overflow"))
-                        })?;
-                    let target_iso_month =
-                        u8::try_from(total_months.rem_euclid(12) + 1).map_err(|_| {
-                            CalendarError::Arithmetic(String::from("month cycle overflow"))
-                        })?;
+                    let current = temporal_date_for(self)?;
+                    let next = current
+                        .with(
+                            CalendarFields::new()
+                                .with_optional_month(Some(u8::try_from(next_month).map_err(
+                                    |_| {
+                                        CalendarError::Arithmetic(String::from(
+                                            "month cycle overflow",
+                                        ))
+                                    },
+                                )?))
+                                .with_optional_day(Some(self.day)),
+                            Some(Overflow::Reject),
+                        )
+                        .map_err(|error| CalendarError::Arithmetic(error.to_string()))?;
 
                     build_from_iso_parts(
                         self.calendar,
-                        target_iso_year,
-                        target_iso_month,
-                        self.iso_day,
+                        next.with_calendar(Calendar::ISO).year(),
+                        next.with_calendar(Calendar::ISO).month(),
+                        next.with_calendar(Calendar::ISO).day(),
                     )
                     .map_err(|error| CalendarError::Arithmetic(error.to_string()))
                 } else {
@@ -426,13 +429,23 @@ impl CalendarDate {
                     let next_day = (i32::from(self.day) - minimum_day + amount)
                         .rem_euclid(days_in_month)
                         + minimum_day;
+                    let current = temporal_date_for(self)?;
+                    let next = current
+                        .with(
+                            CalendarFields::new().with_optional_day(Some(
+                                u8::try_from(next_day).map_err(|_| {
+                                    CalendarError::Arithmetic(String::from("day cycle overflow"))
+                                })?,
+                            )),
+                            Some(Overflow::Reject),
+                        )
+                        .map_err(|error| CalendarError::Arithmetic(error.to_string()))?;
+
                     build_from_iso_parts(
                         self.calendar,
-                        self.iso_year,
-                        self.iso_month,
-                        u8::try_from(next_day).map_err(|_| {
-                            CalendarError::Arithmetic(String::from("day cycle overflow"))
-                        })?,
+                        next.with_calendar(Calendar::ISO).year(),
+                        next.with_calendar(Calendar::ISO).month(),
+                        next.with_calendar(Calendar::ISO).day(),
                     )
                     .map_err(|error| CalendarError::Arithmetic(error.to_string()))
                 } else {
