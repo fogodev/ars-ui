@@ -54,6 +54,8 @@ pub use positioning::{
     Alignment, Axis, Boundary, Offset, Overflow, Placement, PositioningOptions, PositioningResult,
     Rect, Side, Strategy, VirtualElement, compute_position,
 };
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+pub use positioning::{viewport_height, viewport_rect, viewport_width};
 pub use scroll::{ScrollIntoViewOptions, ScrollLogicalPosition, supports_scroll_into_view_options};
 #[cfg(feature = "web")]
 pub use scroll::{nearest_scrollable_ancestor, scroll_into_view_if_needed, scrollable_ancestors};
