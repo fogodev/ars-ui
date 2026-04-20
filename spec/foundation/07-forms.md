@@ -1356,6 +1356,16 @@ impl DebouncedAsyncValidator {
     }
 }
 
+/// Cancels any pending debounce timer on teardown, preventing stale
+/// async validation work from being spawned after the owner is dropped.
+impl Drop for DebouncedAsyncValidator {
+    fn drop(&mut self) {
+        if let Some(handle) = self.pending_timer.take() {
+            handle.cancel();
+        }
+    }
+}
+
 /// `OwnedContext` is defined in §3.1 above. The `as_ref()` method
 /// converts it back to a borrowed `Context<'_>` for passing to
 /// `AsyncValidator::validate_async()`.

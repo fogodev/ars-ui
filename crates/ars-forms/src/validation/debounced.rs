@@ -133,6 +133,14 @@ impl DebouncedAsyncValidator {
     }
 }
 
+impl Drop for DebouncedAsyncValidator {
+    fn drop(&mut self) {
+        if let Some(handle) = self.pending_timer.take() {
+            handle.cancel();
+        }
+    }
+}
+
 impl Debug for DebouncedAsyncValidator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DebouncedAsyncValidator")
@@ -473,6 +481,44 @@ mod tests {
         assert!(
             debug.contains("250"),
             "Debug output should contain delay_ms"
+        );
+    }
+
+    #[test]
+    fn debounced_drop_cancels_pending_timer() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+
+        let validator = Arc::new(StubAsyncValidator) as BoxedAsyncValidator;
+        let spawn_async = Arc::new(|_v: BoxedAsyncValidator, _val: Value, _ctx: OwnedContext| {});
+
+        let mut debounced = DebouncedAsyncValidator::new(validator, 100, spawn_async);
+        let ctx = Context::standalone("field");
+
+        let cancelled_clone = Arc::clone(&cancelled);
+        debounced.validate_debounced(
+            &Value::Text("test".to_string()),
+            ctx.field_name,
+            ctx.form_values,
+            ctx.locale,
+            |_delay_ms, _callback| {
+                let flag = Arc::clone(&cancelled_clone);
+                TimerHandle::new(Box::new(move || {
+                    flag.store(true, Ordering::Relaxed);
+                }))
+            },
+        );
+
+        assert!(
+            !cancelled.load(Ordering::Relaxed),
+            "timer should not be cancelled yet"
+        );
+
+        // Drop the debounced validator — should cancel the pending timer
+        drop(debounced);
+
+        assert!(
+            cancelled.load(Ordering::Relaxed),
+            "dropping DebouncedAsyncValidator should cancel pending timer"
         );
     }
 
