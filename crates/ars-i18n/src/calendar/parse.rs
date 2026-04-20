@@ -1,43 +1,65 @@
 //! Parsing and current-time helpers for calendar values.
 
-use alloc::{format, string::ToString};
+use alloc::{
+    format,
+    string::{String, ToString},
+};
 use core::str::FromStr;
 
 #[cfg(feature = "std")]
 use temporal_rs::{Instant, Temporal};
 use temporal_rs::{PlainDate, PlainDateTime, PlainTime};
 
-use super::{CalendarDate, CalendarDateTime, CalendarError, DateTimeDuration, Time};
 #[cfg(feature = "std")]
-use super::{CalendarSystem, TimeZoneId};
+use super::TimeZoneId;
+use super::{
+    CalendarDate, CalendarDateTime, CalendarError, CalendarSystem, DateTimeDuration, Time,
+    date::build_from_iso_parts,
+};
 
 /// Parses a date string.
 ///
 /// # Errors
 ///
-/// Returns an error if `input` is not a valid Temporal date string.
+/// Returns an error if `input` is not a valid Temporal date string or if the
+/// parsed calendar cannot be represented publicly.
 pub fn parse_date(input: &str) -> Result<CalendarDate, CalendarError> {
     let parsed =
         PlainDate::from_str(input).map_err(|error| CalendarError::Arithmetic(error.to_string()))?;
 
+    let calendar = CalendarSystem::from_bcp47(parsed.calendar().identifier()).ok_or_else(|| {
+        CalendarError::Arithmetic(String::from(
+            "parsed calendar is not representable by CalendarSystem",
+        ))
+    })?;
+
     let iso = parsed.with_calendar(temporal_rs::Calendar::ISO);
 
-    CalendarDate::new_iso8601(iso.year(), iso.month(), iso.day())
+    build_from_iso_parts(calendar, iso.year(), iso.month(), iso.day())
+        .map_err(|error| CalendarError::Arithmetic(error.to_string()))
 }
 
 /// Parses a date-time string.
 ///
 /// # Errors
 ///
-/// Returns an error if `input` is not a valid Temporal date-time string.
+/// Returns an error if `input` is not a valid Temporal date-time string or if
+/// the parsed calendar cannot be represented publicly.
 pub fn parse_date_time(input: &str) -> Result<CalendarDateTime, CalendarError> {
     let parsed = PlainDateTime::from_str(input)
         .map_err(|error| CalendarError::Arithmetic(error.to_string()))?;
 
+    let calendar = CalendarSystem::from_bcp47(parsed.calendar().identifier()).ok_or_else(|| {
+        CalendarError::Arithmetic(String::from(
+            "parsed calendar is not representable by CalendarSystem",
+        ))
+    })?;
+
     let iso = parsed.with_calendar(temporal_rs::Calendar::ISO);
 
     Ok(CalendarDateTime::new(
-        CalendarDate::new_iso8601(iso.year(), iso.month(), iso.day())?,
+        build_from_iso_parts(calendar, iso.year(), iso.month(), iso.day())
+            .map_err(|error| CalendarError::Arithmetic(error.to_string()))?,
         Time::from_temporal(iso.to_plain_time()),
     ))
 }
@@ -109,8 +131,11 @@ pub fn parse_zoned_date_time(input: &str) -> Result<super::ZonedDateTime, Calend
     )
     .map_err(|error| CalendarError::Arithmetic(error.to_string()))?;
 
-    let calendar = CalendarSystem::from_bcp47(parsed.calendar().identifier())
-        .unwrap_or(CalendarSystem::Iso8601);
+    let calendar = CalendarSystem::from_bcp47(parsed.calendar().identifier()).ok_or_else(|| {
+        CalendarError::Arithmetic(String::from(
+            "parsed calendar is not representable by CalendarSystem",
+        ))
+    })?;
 
     let time_zone = TimeZoneId::new(
         parsed
@@ -311,12 +336,46 @@ mod tests {
         assert_eq!(duration.time.nanoseconds, 10);
     }
 
+    #[test]
+    fn parsing_helpers_preserve_supported_calendar_annotations() {
+        let japanese_date =
+            parse_date("1990-01-08[u-ca=japanese]").expect("annotated date should parse");
+
+        assert_eq!(japanese_date.calendar(), CalendarSystem::Japanese);
+        assert_eq!(
+            japanese_date.era().map(|era| era.code.as_str()),
+            Some("heisei")
+        );
+        assert_eq!(japanese_date.year(), 2);
+        assert_eq!(japanese_date.month(), 1);
+        assert_eq!(japanese_date.day(), 8);
+
+        let japanese_date_time = parse_date_time("1990-01-08T09:30:00[u-ca=japanese]")
+            .expect("annotated date-time should parse");
+
+        assert_eq!(
+            japanese_date_time.date().calendar(),
+            CalendarSystem::Japanese
+        );
+        assert_eq!(
+            japanese_date_time.date().era().map(|era| era.code.as_str()),
+            Some("heisei")
+        );
+        assert_eq!(japanese_date_time.date().year(), 2);
+        assert_eq!(japanese_date_time.time().hour(), 9);
+        assert_eq!(japanese_date_time.time().minute(), 30);
+    }
+
     #[cfg(feature = "std")]
     #[test]
     fn zoned_and_absolute_parsing_reject_invalid_inputs() {
         let time_zone = TimeZoneId::new("America/New_York").expect("zone should validate");
 
         assert!(parse_zoned_date_time("2024-03-10T01:30").is_err());
+        assert!(
+            parse_zoned_date_time("2024-03-10T01:30-05:00[America/New_York][u-ca=islamic-tbla]")
+                .is_err()
+        );
         assert!(parse_absolute("2024-03-10T07:45:00", &time_zone).is_err());
         assert!(parse_absolute_to_local("not-a-timestamp").is_err());
     }

@@ -1388,7 +1388,7 @@ fn build_calendar_date(
     Ok(built)
 }
 
-fn build_from_iso_parts(
+pub(crate) fn build_from_iso_parts(
     calendar: CalendarSystem,
     iso_year: i32,
     iso_month: u8,

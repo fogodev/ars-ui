@@ -1631,9 +1631,10 @@ The locale-sensitive query contract is:
 
 The shared parsing helpers also distinguish absolute timestamps from fully zoned strings:
 
+- `parse_date(input)` and `parse_date_time(input)` preserve supported IXDTF calendar annotations instead of coercing annotated input to ISO.
 - `parse_absolute(input, time_zone)` parses an ISO 8601 absolute timestamp with `Z` or an explicit offset and projects the instant into the supplied display time zone.
 - `parse_absolute_to_local(input)` resolves the local time zone through `get_local_time_zone()` and delegates to `parse_absolute(...)`.
-- `parse_zoned_date_time(input)` remains the entry point for IXDTF-style strings that already include a bracketed IANA time-zone identifier.
+- `parse_zoned_date_time(input)` remains the entry point for IXDTF-style strings that already include a bracketed IANA time-zone identifier, and it rejects parsed calendar annotations that cannot be represented by `CalendarSystem`.
 
 ### 5.4 DateFormatter
 

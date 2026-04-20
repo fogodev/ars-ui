@@ -480,9 +480,10 @@ Query semantics:
 - `get_day_of_week` returns `0..=6`, where `0` is the locale's first day of week from provider-backed `WeekInfo`. When the locale carries a `u-fw-*` Unicode extension, that explicit first-day override takes precedence over the locale default.
 - `get_hours_in_day` uses real zoned day-boundary math and returns `23`, `24`, or `25` when DST changes alter the local day length.
 - `is_weekend` and `is_weekday` use locale weekend metadata rather than a hard-coded Saturday/Sunday rule.
+- `parse_date` and `parse_date_time` preserve supported IXDTF calendar annotations rather than coercing annotated input to ISO.
 - `parse_absolute` parses an ISO 8601 absolute timestamp with `Z` or an explicit offset and projects the instant into the supplied display time zone.
 - `parse_absolute_to_local` resolves the local time zone through `get_local_time_zone()` and delegates to `parse_absolute`.
-- `parse_zoned_date_time` remains the entry point for strings that already carry an explicit bracketed IANA zone identifier.
+- `parse_zoned_date_time` remains the entry point for strings that already carry an explicit bracketed IANA zone identifier, and it rejects parsed calendar annotations that cannot be represented by `CalendarSystem`.
 - `to_calendar_date_time` pairs a date with an explicit time or defaults to midnight when the time is omitted.
 - `to_zoned` is the shorthand midnight conversion from a `CalendarDate` into a `ZonedDateTime`.
 - `to_zoned_date_time` is the explicit local-to-zoned conversion entry point and applies the supplied time-zone disambiguation strategy.
