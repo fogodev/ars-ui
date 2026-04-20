@@ -1171,16 +1171,30 @@ impl ChainValidator {
 
 ## 4. Async Validation
 
-All async validation types require `Send + Sync` unconditionally. On wasm32
-(single-threaded), `Send + Sync` is trivially satisfied — the same convention
-used by `PlatformEffects` and `ModalityContext` in `ars-core`.
+The `AsyncValidator` trait and all shared-ownership types (`BoxedAsyncValidator`,
+`TimerHandle`, `DebouncedAsyncValidator`) require `Send + Sync` unconditionally.
+On wasm32 (single-threaded), `Send + Sync` is trivially satisfied — the same
+convention used by `PlatformEffects` and `ModalityContext` in `ars-core`.
+
+The **returned future** type has a platform-specific `Send` bound: on native
+targets the future must be `Send` so it can be spawned on multi-threaded
+runtimes; on wasm32 the bound is omitted because browser-side validators
+commonly await `JsFuture` (from `wasm-bindgen-futures`) which is `!Send`.
+This cfg-gating applies to the `AsyncValidationFuture` type alias and to the
+`Fut` bound on `AsyncFnValidator`.
 
 ```rust
 use std::{collections::BTreeMap, pin::Pin, sync::Arc};
 use ars_i18n::Locale;
 
 /// The future type returned by `AsyncValidator::validate_async`.
+///
+/// `Send` only on native targets — on wasm32, browser-side validators
+/// may await `!Send` JS futures (`JsFuture`, etc.).
+#[cfg(not(target_arch = "wasm32"))]
 type AsyncValidationFuture<'a> = dyn Future<Output = Result> + Send + 'a;
+#[cfg(target_arch = "wasm32")]
+type AsyncValidationFuture<'a> = dyn Future<Output = Result> + 'a;
 
 /// Async validation trait.
 ///
@@ -1202,6 +1216,8 @@ pub struct AsyncFnValidator<F> {
     pub f: F,
 }
 
+// Two cfg-gated impl blocks: `Fut: Send` only on native.
+#[cfg(not(target_arch = "wasm32"))]
 impl<F, Fut> AsyncValidator for AsyncFnValidator<F>
 where
     F: Fn(String, OwnedContext) -> Fut + Send + Sync + 'static,
@@ -1218,20 +1234,42 @@ where
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+impl<F, Fut> AsyncValidator for AsyncFnValidator<F>
+where
+    F: Fn(String, OwnedContext) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result> + 'static,
+{
+    fn validate_async<'a>(
+        &'a self,
+        value: &'a Value,
+        ctx: &'a Context<'a>,
+    ) -> Pin<Box<AsyncValidationFuture<'a>>> {
+        let text = value.to_string_for_validation();
+        let owned_ctx = ctx.snapshot();
+        Box::pin((self.f)(text, owned_ctx))
+    }
+}
+
+// Convenience methods — same cfg-gating as above.
+#[cfg(not(target_arch = "wasm32"))]
 impl<F, Fut> AsyncFnValidator<F>
 where
     F: Fn(String, OwnedContext) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result> + Send + 'static,
 {
-    /// Wraps a closure as an async validator value.
-    pub const fn new(f: F) -> Self {
-        Self { f }
-    }
+    pub const fn new(f: F) -> Self { Self { f } }
+    pub fn boxed(self) -> BoxedAsyncValidator { Arc::new(self) }
+}
 
-    /// Boxes the validator behind the standard shared pointer type.
-    pub fn boxed(self) -> BoxedAsyncValidator {
-        Arc::new(self)
-    }
+#[cfg(target_arch = "wasm32")]
+impl<F, Fut> AsyncFnValidator<F>
+where
+    F: Fn(String, OwnedContext) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result> + 'static,
+{
+    pub const fn new(f: F) -> Self { Self { f } }
+    pub fn boxed(self) -> BoxedAsyncValidator { Arc::new(self) }
 }
 
 /// Timer handle returned by the adapter's platform timer abstraction.

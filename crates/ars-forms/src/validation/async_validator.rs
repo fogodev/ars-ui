@@ -18,7 +18,17 @@ use super::{
 use crate::field::Value;
 
 /// The future type returned by [`AsyncValidator::validate_async`].
+///
+/// On native targets the future must be `Send` so it can be spawned on
+/// multi-threaded runtimes. On `wasm32` the `Send` bound is omitted
+/// because common browser-side validators await `JsFuture` (from
+/// `wasm-bindgen-futures`) which is `!Send`.
+#[cfg(not(target_arch = "wasm32"))]
 type AsyncValidationFuture<'a> = dyn Future<Output = Result> + Send + 'a;
+
+/// See the non-wasm variant for documentation.
+#[cfg(target_arch = "wasm32")]
+type AsyncValidationFuture<'a> = dyn Future<Output = Result> + 'a;
 
 /// Async validation trait.
 ///
@@ -57,6 +67,11 @@ impl<F> Debug for AsyncFnValidator<F> {
     }
 }
 
+// Two cfg-gated impl blocks: the `Fut` bound requires `Send` only on
+// native targets, matching `AsyncValidationFuture`. On wasm32 the bound
+// is relaxed so validators can return futures containing `!Send` JS types.
+
+#[cfg(not(target_arch = "wasm32"))]
 impl<F, Fut> AsyncValidator for AsyncFnValidator<F>
 where
     F: Fn(String, OwnedContext) -> Fut + Send + Sync + 'static,
@@ -68,17 +83,52 @@ where
         ctx: &'a Context<'a>,
     ) -> Pin<Box<AsyncValidationFuture<'a>>> {
         let text = value.to_string_for_validation();
-
         let owned_ctx = ctx.snapshot();
-
         Box::pin((self.f)(text, owned_ctx))
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+impl<F, Fut> AsyncValidator for AsyncFnValidator<F>
+where
+    F: Fn(String, OwnedContext) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result> + 'static,
+{
+    fn validate_async<'a>(
+        &'a self,
+        value: &'a Value,
+        ctx: &'a Context<'a>,
+    ) -> Pin<Box<AsyncValidationFuture<'a>>> {
+        let text = value.to_string_for_validation();
+        let owned_ctx = ctx.snapshot();
+        Box::pin((self.f)(text, owned_ctx))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl<F, Fut> AsyncFnValidator<F>
 where
     F: Fn(String, OwnedContext) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result> + Send + 'static,
+{
+    /// Wraps a closure as an async validator value.
+    #[must_use]
+    pub const fn new(f: F) -> Self {
+        Self { f }
+    }
+
+    /// Boxes the validator behind the standard shared pointer type.
+    #[must_use]
+    pub fn boxed(self) -> BoxedAsyncValidator {
+        Arc::new(self)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<F, Fut> AsyncFnValidator<F>
+where
+    F: Fn(String, OwnedContext) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result> + 'static,
 {
     /// Wraps a closure as an async validator value.
     #[must_use]
@@ -303,5 +353,22 @@ mod tests {
             debug.contains("AsyncFnValidator"),
             "Debug output should contain type name"
         );
+    }
+
+    /// On native targets the future returned by `validate_async` must be
+    /// `Send` so it can be spawned on multi-threaded runtimes. On wasm32
+    /// this bound is relaxed (cfg-gated out) because browser-side
+    /// validators commonly await `!Send` JS futures.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn async_fn_validator_future_is_send() {
+        fn assert_send<T: Send>(_: &T) {}
+
+        let validator = AsyncFnValidator::new(|_text: String, _ctx: OwnedContext| async { Ok(()) });
+        let value = Value::Text("test".to_string());
+        let ctx = Context::standalone("field");
+        let future = validator.validate_async(&value, &ctx);
+
+        assert_send(&future);
     }
 }
