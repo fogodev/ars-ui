@@ -420,7 +420,13 @@ pub(crate) fn platform_today_iso() -> Result<(i32, u8, u8), String> {
     Ok(epoch_days_to_iso(days + UNIX_EPOCH_DAYS_FROM_CE))
 }
 
-#[cfg(all(test, target_arch = "wasm32", feature = "web-intl"))]
+#[cfg(all(
+    test,
+    target_arch = "wasm32",
+    feature = "web-intl",
+    feature = "std",
+    feature = "icu4x"
+))]
 pub(crate) fn platform_today_iso() -> Result<(i32, u8, u8), String> {
     let date = js_sys::Date::new_0();
 

@@ -181,7 +181,7 @@ impl CalendarDate {
     }
 
     /// Returns today's date in the requested calendar system.
-    #[cfg(all(test, feature = "std"))]
+    #[cfg(all(test, feature = "std", feature = "icu4x"))]
     pub(crate) fn today(calendar: CalendarSystem) -> Result<Self, CalendarError> {
         use super::helpers::platform_today_iso;
 
@@ -509,11 +509,11 @@ mod tests {
 
         assert!(bad_japanese.is_err());
 
-        #[cfg(feature = "std")]
+        #[cfg(all(feature = "std", feature = "icu4x"))]
         let today = CalendarDate::today(CalendarSystem::Persian)
             .expect("today should project into the requested calendar");
 
-        #[cfg(feature = "std")]
+        #[cfg(all(feature = "std", feature = "icu4x"))]
         assert_eq!(
             today.inner.calendar().kind(),
             any_calendar_for(CalendarSystem::Persian).kind()

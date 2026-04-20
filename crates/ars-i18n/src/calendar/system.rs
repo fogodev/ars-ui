@@ -585,21 +585,32 @@ impl WeekInfo {
     /// is unavailable.
     #[must_use]
     pub fn for_locale(locale: &Locale) -> Self {
-        let (default_first_day, weekend_start, weekend_end, minimal_days_in_first_week) =
-            match locale.region() {
-                Some("US" | "CA" | "AU" | "NZ" | "PH" | "BR" | "JP" | "TH") => {
-                    (Weekday::Sunday, Weekday::Saturday, Weekday::Sunday, 1)
-                }
+        let (default_first_day, weekend_start, weekend_end) = match locale.region() {
+            Some("US" | "CA" | "AU" | "NZ" | "PH" | "BR" | "JP" | "TH") => {
+                (Weekday::Sunday, Weekday::Saturday, Weekday::Sunday)
+            }
 
-                Some("IL") => (Weekday::Sunday, Weekday::Friday, Weekday::Saturday, 1),
+            Some("IL") => (Weekday::Sunday, Weekday::Friday, Weekday::Saturday),
 
-                Some(
-                    "AE" | "BH" | "DZ" | "EG" | "IQ" | "JO" | "KW" | "LY" | "OM" | "QA" | "SA"
-                    | "SD" | "SY" | "YE",
-                ) => (Weekday::Saturday, Weekday::Friday, Weekday::Saturday, 1),
+            Some(
+                "AE" | "BH" | "DZ" | "EG" | "IQ" | "JO" | "KW" | "LY" | "OM" | "QA" | "SA" | "SD"
+                | "SY" | "YE",
+            ) => (Weekday::Saturday, Weekday::Friday, Weekday::Saturday),
 
-                _ => (Weekday::Monday, Weekday::Saturday, Weekday::Sunday, 4),
-            };
+            _ => (Weekday::Monday, Weekday::Saturday, Weekday::Sunday),
+        };
+
+        // Mirrors CLDR supplemental/weekData minDays territory data:
+        // unlisted regions inherit the `001` default of 1, while this explicit set uses 4.
+        let minimal_days_in_first_week = match locale.region() {
+            Some(
+                "AD" | "AN" | "AT" | "AX" | "BE" | "BG" | "CH" | "CZ" | "DE" | "DK" | "EE" | "ES"
+                | "FI" | "FJ" | "FO" | "FR" | "GB" | "GF" | "GG" | "GI" | "GP" | "GR" | "HU" | "IE"
+                | "IM" | "IS" | "IT" | "JE" | "LI" | "LT" | "LU" | "MC" | "MQ" | "NL" | "NO" | "PL"
+                | "PT" | "RE" | "RU" | "SE" | "SJ" | "SK" | "SM" | "VA",
+            ) => 4,
+            _ => 1,
+        };
 
         let first_day = locale
             .first_day_of_week_extension()
@@ -1029,6 +1040,14 @@ mod tests {
 
         let ae = WeekInfo::for_locale(&Locale::parse("ar-AE").expect("locale should parse"));
 
+        let china = WeekInfo::for_locale(&Locale::parse("zh-CN").expect("locale should parse"));
+
+        let korea = WeekInfo::for_locale(&Locale::parse("ko-KR").expect("locale should parse"));
+
+        let turkey = WeekInfo::for_locale(&Locale::parse("tr-TR").expect("locale should parse"));
+
+        let indonesia = WeekInfo::for_locale(&Locale::parse("id-ID").expect("locale should parse"));
+
         let override_locale =
             WeekInfo::for_locale(&Locale::parse("en-US-u-fw-mon").expect("locale should parse"));
 
@@ -1052,6 +1071,10 @@ mod tests {
                 .minimal_days_in_first_week,
             4
         );
+        assert_eq!(china.minimal_days_in_first_week, 1);
+        assert_eq!(korea.minimal_days_in_first_week, 1);
+        assert_eq!(turkey.minimal_days_in_first_week, 1);
+        assert_eq!(indonesia.minimal_days_in_first_week, 1);
         assert_eq!(override_locale.minimal_days_in_first_week, 1);
     }
 
