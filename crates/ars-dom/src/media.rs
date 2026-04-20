@@ -26,15 +26,14 @@
 //!
 //! - `spec/foundation/05-interactions.md` §10 — forced-colors interaction styling
 //! - `spec/foundation/03-accessibility.md` §6.1 — high contrast and forced colors
-//! - `spec/foundation/11-dom-utilities.md` §9 — media query utilities
+//! - `spec/foundation/11-dom-utilities.md` §10 — media query utilities
 //!
 //! # Re-export note
 //!
-//! The spec (`03-accessibility.md` §6.1) says these functions should be
-//! re-exported by `ars-a11y` behind `#[cfg(feature = "dom")]`. However,
-//! `ars-dom` already depends on `ars-a11y`, so adding a back-dependency would
-//! create a circular dependency. Consumers import directly from
-//! `ars_dom::media` instead. The spec should be updated to reflect this.
+//! `03-accessibility.md` §6.1 now points to `11-dom-utilities.md` §10 as the
+//! canonical location for these APIs. Consumers import directly from
+//! `ars_dom::media` because `ars-dom` already depends on `ars-a11y`, and an
+//! `ars-a11y` re-export would create a circular dependency.
 
 // ── Cached matchMedia infrastructure (wasm32 + web only) ────────────────
 
@@ -199,6 +198,7 @@ pub const fn prefers_color_scheme() -> ColorScheme {
 pub enum ColorScheme {
     /// Light color scheme (default when preference is unknown).
     Light,
+
     /// Dark color scheme.
     Dark,
 }
@@ -233,6 +233,34 @@ mod tests {
     }
 
     #[test]
+    fn media_queries_return_stable_defaults_without_browser() {
+        let forced_colors = is_forced_colors_active();
+
+        assert!(!forced_colors);
+        assert_eq!(forced_colors, is_forced_colors_active());
+
+        let high_contrast = prefers_high_contrast();
+
+        assert!(!high_contrast);
+        assert_eq!(high_contrast, prefers_high_contrast());
+
+        let reduced_motion = prefers_reduced_motion();
+
+        assert!(!reduced_motion);
+        assert_eq!(reduced_motion, prefers_reduced_motion());
+
+        let reduced_transparency = prefers_reduced_transparency();
+
+        assert!(!reduced_transparency);
+        assert_eq!(reduced_transparency, prefers_reduced_transparency());
+
+        let color_scheme = prefers_color_scheme();
+
+        assert_eq!(color_scheme, ColorScheme::Light);
+        assert_eq!(color_scheme, prefers_color_scheme());
+    }
+
+    #[test]
     fn color_scheme_equality() {
         assert_eq!(ColorScheme::Light, ColorScheme::Light);
         assert_eq!(ColorScheme::Dark, ColorScheme::Dark);
@@ -242,9 +270,12 @@ mod tests {
     #[test]
     fn color_scheme_clone_and_copy() {
         let scheme = ColorScheme::Dark;
+
         #[expect(clippy::clone_on_copy, reason = "explicitly testing Clone impl")]
         let cloned = scheme.clone();
+
         let copied = scheme;
+
         assert_eq!(scheme, cloned);
         assert_eq!(scheme, copied);
     }
@@ -258,92 +289,237 @@ mod tests {
 
 #[cfg(all(test, feature = "web", target_arch = "wasm32"))]
 mod wasm_tests {
+    use std::{cell::Cell, rc::Rc};
+
+    use js_sys::{Object, Reflect};
+    use wasm_bindgen::{JsCast, JsValue, closure::Closure};
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
     use super::*;
 
     wasm_bindgen_test_configure!(run_in_browser);
 
-    // ── is_forced_colors_active ─────────────────────────────────────────
+    struct MatchMediaGuard {
+        window: web_sys::Window,
+        original: JsValue,
+        stub: Closure<dyn FnMut(JsValue) -> JsValue>,
+    }
 
-    #[wasm_bindgen_test]
-    fn is_forced_colors_active_returns_bool_in_browser() {
-        // In a standard browser environment, forced colors is typically inactive.
-        // The important thing is that the function executes without panic and
-        // exercises the cached_matches → window().match_media() → .matches() path.
-        let result = is_forced_colors_active();
-        // Standard test browsers don't have forced colors enabled.
-        assert!(!result);
+    impl Drop for MatchMediaGuard {
+        fn drop(&mut self) {
+            let result = Reflect::set(
+                self.window.as_ref(),
+                &JsValue::from_str("matchMedia"),
+                &self.original,
+            );
+
+            assert!(result.is_ok(), "restoring window.matchMedia must succeed");
+
+            let _ = &self.stub;
+        }
+    }
+
+    struct StubbedMediaQuery {
+        _guard: MatchMediaGuard,
+        matches: Rc<Cell<bool>>,
+        call_count: Rc<Cell<u32>>,
+    }
+
+    impl StubbedMediaQuery {
+        fn install(query: &'static str, initial: bool) -> Self {
+            let window = web_sys::window().expect("browser window must exist");
+
+            let original = Reflect::get(window.as_ref(), &JsValue::from_str("matchMedia"))
+                .expect("window.matchMedia must be readable");
+
+            let matches = Rc::new(Cell::new(initial));
+
+            let getter_state = Rc::clone(&matches);
+
+            let descriptor = Object::new();
+
+            let getter = Closure::<dyn FnMut() -> JsValue>::wrap(Box::new(move || {
+                JsValue::from_bool(getter_state.get())
+            }));
+
+            let getter_result = Reflect::set(
+                &descriptor,
+                &JsValue::from_str("get"),
+                getter.as_ref().unchecked_ref(),
+            );
+
+            assert!(
+                getter_result.is_ok(),
+                "defining the matches getter must succeed"
+            );
+
+            let configurable_result = Reflect::set(
+                &descriptor,
+                &JsValue::from_str("configurable"),
+                &JsValue::TRUE,
+            );
+
+            assert!(
+                configurable_result.is_ok(),
+                "marking the matches getter configurable must succeed"
+            );
+
+            let media_query_list = Object::new();
+
+            Object::define_property(
+                &media_query_list,
+                &JsValue::from_str("matches"),
+                &descriptor,
+            );
+
+            getter.forget();
+
+            let target_query = query.to_owned();
+
+            let query_object = media_query_list.clone();
+
+            let call_count = Rc::new(Cell::new(0));
+
+            let call_counter = Rc::clone(&call_count);
+
+            let stub = Closure::wrap(Box::new(move |requested_query: JsValue| -> JsValue {
+                let Some(requested_query) = requested_query.as_string() else {
+                    return JsValue::NULL;
+                };
+
+                if requested_query == target_query {
+                    call_counter.set(call_counter.get() + 1);
+                    query_object.clone().into()
+                } else {
+                    JsValue::NULL
+                }
+            }) as Box<dyn FnMut(JsValue) -> JsValue>);
+
+            let install_result = Reflect::set(
+                window.as_ref(),
+                &JsValue::from_str("matchMedia"),
+                stub.as_ref().unchecked_ref(),
+            );
+
+            assert!(
+                install_result.is_ok(),
+                "installing window.matchMedia must succeed"
+            );
+
+            Self {
+                _guard: MatchMediaGuard {
+                    window,
+                    original,
+                    stub,
+                },
+                matches,
+                call_count,
+            }
+        }
+
+        fn set_matches(&self, value: bool) {
+            self.matches.set(value);
+        }
+
+        fn call_count(&self) -> u32 {
+            self.call_count.get()
+        }
     }
 
     #[wasm_bindgen_test]
-    fn is_forced_colors_active_caches_across_calls() {
-        // Calling twice exercises the OnceCell cache-hit path.
-        let first = is_forced_colors_active();
-        let second = is_forced_colors_active();
-        assert_eq!(first, second);
+    fn is_forced_colors_active_uses_live_cached_media_query_list() {
+        let stub = StubbedMediaQuery::install("(forced-colors: active)", true);
+
+        assert!(is_forced_colors_active());
+        assert_eq!(stub.call_count(), 1);
+
+        stub.set_matches(false);
+
+        assert!(!is_forced_colors_active());
+        assert_eq!(stub.call_count(), 1);
     }
 
     // ── prefers_high_contrast ───────────────────────────────────────────
 
     #[wasm_bindgen_test]
-    fn prefers_high_contrast_returns_bool_in_browser() {
-        let result = prefers_high_contrast();
-        // Standard test browsers don't have high contrast preference.
-        assert!(!result);
-    }
+    fn prefers_high_contrast_uses_live_cached_media_query_list() {
+        let stub = StubbedMediaQuery::install("(prefers-contrast: more)", true);
 
-    #[wasm_bindgen_test]
-    fn prefers_high_contrast_caches_across_calls() {
-        let first = prefers_high_contrast();
-        let second = prefers_high_contrast();
-        assert_eq!(first, second);
+        assert!(prefers_high_contrast());
+        assert_eq!(stub.call_count(), 1);
+
+        stub.set_matches(false);
+
+        assert!(!prefers_high_contrast());
+        assert_eq!(stub.call_count(), 1);
     }
 
     // ── prefers_reduced_motion ──────────────────────────────────────────
 
     #[wasm_bindgen_test]
-    fn prefers_reduced_motion_returns_bool_in_browser() {
-        // Result depends on browser/OS settings; we just verify no panic.
-        let _result = prefers_reduced_motion();
-    }
+    fn prefers_reduced_motion_uses_live_cached_media_query_list() {
+        let stub = StubbedMediaQuery::install("(prefers-reduced-motion: reduce)", true);
 
-    #[wasm_bindgen_test]
-    fn prefers_reduced_motion_caches_across_calls() {
-        let first = prefers_reduced_motion();
-        let second = prefers_reduced_motion();
-        assert_eq!(first, second);
+        assert!(prefers_reduced_motion());
+        assert_eq!(stub.call_count(), 1);
+
+        stub.set_matches(false);
+
+        assert!(!prefers_reduced_motion());
+        assert_eq!(stub.call_count(), 1);
     }
 
     // ── prefers_reduced_transparency ────────────────────────────────────
 
     #[wasm_bindgen_test]
-    fn prefers_reduced_transparency_returns_bool_in_browser() {
-        let result = prefers_reduced_transparency();
-        // Standard test browsers don't have reduced transparency preference.
-        assert!(!result);
-    }
+    fn prefers_reduced_transparency_uses_live_cached_media_query_list() {
+        let stub = StubbedMediaQuery::install("(prefers-reduced-transparency: reduce)", true);
 
-    #[wasm_bindgen_test]
-    fn prefers_reduced_transparency_caches_across_calls() {
-        let first = prefers_reduced_transparency();
-        let second = prefers_reduced_transparency();
-        assert_eq!(first, second);
+        assert!(prefers_reduced_transparency());
+        assert_eq!(stub.call_count(), 1);
+
+        stub.set_matches(false);
+
+        assert!(!prefers_reduced_transparency());
+        assert_eq!(stub.call_count(), 1);
     }
 
     // ── prefers_color_scheme ────────────────────────────────────────────
 
     #[wasm_bindgen_test]
-    fn prefers_color_scheme_returns_valid_variant_in_browser() {
-        let scheme = prefers_color_scheme();
-        // The result is either Light or Dark — both are valid.
-        assert!(scheme == ColorScheme::Light || scheme == ColorScheme::Dark);
+    fn prefers_color_scheme_uses_live_cached_media_query_list() {
+        let stub = StubbedMediaQuery::install("(prefers-color-scheme: dark)", true);
+
+        assert_eq!(prefers_color_scheme(), ColorScheme::Dark);
+        assert_eq!(stub.call_count(), 1);
+
+        stub.set_matches(false);
+
+        assert_eq!(prefers_color_scheme(), ColorScheme::Light);
+        assert_eq!(stub.call_count(), 1);
     }
 
     #[wasm_bindgen_test]
-    fn prefers_color_scheme_caches_across_calls() {
-        let first = prefers_color_scheme();
-        let second = prefers_color_scheme();
-        assert_eq!(first, second);
+    fn stubbed_match_media_returns_null_for_non_string_and_unknown_queries() {
+        let _stub = StubbedMediaQuery::install("(prefers-reduced-motion: reduce)", true);
+
+        let window = web_sys::window().expect("browser window must exist");
+
+        let match_media = Reflect::get(window.as_ref(), &JsValue::from_str("matchMedia"))
+            .expect("window.matchMedia must be readable")
+            .dyn_into::<js_sys::Function>()
+            .expect("window.matchMedia must be callable");
+
+        let non_string = match_media
+            .call1(window.as_ref(), &JsValue::NULL)
+            .expect("calling the stubbed matchMedia with null must succeed");
+
+        assert!(non_string.is_null());
+
+        let unknown_query = match_media
+            .call1(window.as_ref(), &JsValue::from_str("(unknown-query: true)"))
+            .expect("calling the stubbed matchMedia with an unknown query must succeed");
+
+        assert!(unknown_query.is_null());
     }
 }
