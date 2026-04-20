@@ -1259,16 +1259,6 @@ mod tests {
         struct StubAsync;
 
         impl AsyncValidator for StubAsync {
-            #[cfg(target_arch = "wasm32")]
-            fn validate_async<'a>(
-                &'a self,
-                _value: &'a Value,
-                _ctx: &'a ValContext<'a>,
-            ) -> Pin<Box<dyn Future<Output = Result> + 'a>> {
-                Box::pin(async { Ok(()) })
-            }
-
-            #[cfg(not(target_arch = "wasm32"))]
             fn validate_async<'a>(
                 &'a self,
                 _value: &'a Value,
