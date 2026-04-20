@@ -146,14 +146,14 @@ pub fn release() {
             Some(n.saturating_sub(1))
         })
         .unwrap_or(0);
-    if prev == 1 {
-        if let Some(saved) = SCROLL_LOCK_SAVED
+
+    if prev == 1
+        && let Some(saved) = SCROLL_LOCK_SAVED
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take()
-        {
-            restore_scroll_state(saved);
-        }
+    {
+        restore_scroll_state(saved);
     }
 }
 
@@ -516,16 +516,15 @@ pub fn scrollbar_width() -> f64 {
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn apply_scrollbar_compensation() {
     let width = scrollbar_width();
-    if width > 0.0 {
-        if let Some(body) = web_sys::window()
+    if width > 0.0
+        && let Some(body) = web_sys::window()
             .and_then(|w| w.document())
             .and_then(|d| d.body())
-        {
-            drop(
-                body.style()
-                    .set_property("padding-right", &format!("{width}px")),
-            );
-        }
+    {
+        drop(
+            body.style()
+                .set_property("padding-right", &format!("{width}px")),
+        );
     }
 }
 

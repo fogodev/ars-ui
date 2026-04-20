@@ -3,7 +3,10 @@
 //! Implements the [`IcuProvider`](crate::IcuProvider) contract using ICU4X 2.x
 //! compiled data. See spec §9.5.2.
 
-use alloc::string::{String, ToString};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::num::NonZero;
 
 use fixed_decimal::Decimal;
@@ -25,11 +28,8 @@ use icu::{
 };
 
 use crate::{
-    CalendarDate, CalendarSystem, Era, HourCycle, IcuProvider, Locale, Weekday,
-    calendar::{
-        bounded_days_in_month, bounded_months_in_year, default_era_for, minimum_day_in_month,
-        minimum_month_in_year, years_in_era,
-    },
+    CalendarDate, CalendarSystem, Era, HourCycle, IcuProvider, Locale, WeekInfo, Weekday,
+    calendar::{bounded_days_in_month, bounded_months_in_year, default_era_for},
 };
 
 /// Production ICU4X-backed provider with full CLDR data.
@@ -119,8 +119,11 @@ impl IcuProvider for Icu4xProvider {
             .expect("compiled_data guarantees time formatter availability");
 
         let am_time = Time::try_new(1, 0, 0, 0).expect("01:00 is a valid time");
+
         let pm_time = Time::try_new(13, 0, 0, 0).expect("13:00 is a valid time");
+
         let am_formatted = formatter.format(&am_time).to_string();
+
         let pm_formatted = formatter.format(&pm_time).to_string();
 
         extract_day_period_label(is_pm, &am_formatted, &pm_formatted)
@@ -128,7 +131,9 @@ impl IcuProvider for Icu4xProvider {
 
     fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
         let am_label = self.day_period_label(false, locale);
+
         let pm_label = self.day_period_label(true, locale);
+
         match_day_period_initial(ch, &am_label, &pm_label)
     }
 
@@ -196,15 +201,15 @@ impl IcuProvider for Icu4xProvider {
     }
 
     fn years_in_era(&self, date: &CalendarDate) -> Option<i32> {
-        years_in_era(date)
+        date.years_in_era()
     }
 
     fn minimum_month_in_year(&self, date: &CalendarDate) -> u8 {
-        minimum_month_in_year(date)
+        date.minimum_month_in_year()
     }
 
     fn minimum_day_in_month(&self, date: &CalendarDate) -> u8 {
-        minimum_day_in_month(date)
+        date.minimum_day_in_month()
     }
 
     fn hour_cycle(&self, locale: &Locale) -> HourCycle {
@@ -247,43 +252,31 @@ impl IcuProvider for Icu4xProvider {
         }
     }
 
-    fn first_day_of_week(&self, locale: &Locale) -> Weekday {
-        if let Some(weekday) = locale.first_day_of_week_extension() {
-            return weekday;
-        }
-
+    fn week_info(&self, locale: &Locale) -> WeekInfo {
         let week_info = WeekInformation::try_new(WeekPreferences::from(locale.as_icu()))
             .expect("compiled_data guarantees week information data for any locale");
 
-        Weekday::from_icu_weekday(week_info.first_weekday)
+        let weekend = week_info
+            .weekend()
+            .map(Weekday::from_icu_weekday)
+            .collect::<Vec<_>>();
+
+        let (weekend_start, weekend_end) = weekend_bounds(&weekend);
+
+        WeekInfo {
+            first_day: Weekday::from_icu_weekday(week_info.first_weekday),
+            weekend_start,
+            weekend_end,
+            minimal_days_in_first_week: 1,
+        }
+    }
+
+    fn first_day_of_week(&self, locale: &Locale) -> Weekday {
+        self.week_info(locale).first_day
     }
 
     fn convert_date(&self, date: &CalendarDate, target: CalendarSystem) -> CalendarDate {
-        if date.calendar == target {
-            return date.clone();
-        }
-
-        let Ok(internal) = crate::calendar::internal::CalendarDate::try_from(date) else {
-            return date.clone();
-        };
-
-        let converted = internal.to_calendar(target);
-
-        CalendarDate {
-            calendar: target,
-            era: converted
-                .era()
-                .filter(|_| target.has_custom_eras())
-                .map(|code| Era {
-                    code: code.clone(),
-                    display_name: code,
-                }),
-            year: converted.year(),
-            month: NonZero::new(converted.month())
-                .expect("internal calendar conversion yields a 1-based month"),
-            day: NonZero::new(converted.day())
-                .expect("internal calendar conversion yields a 1-based day"),
-        }
+        date.to_calendar(target).unwrap_or_else(|_| date.clone())
     }
 }
 
@@ -311,10 +304,12 @@ pub(crate) fn match_day_period_initial(ch: char, am_label: &str, pm_label: &str)
         .to_lowercase()
         .next()
         .expect("to_lowercase always yields at least one char");
+
     let am_lower = am_char
         .to_lowercase()
         .next()
         .expect("to_lowercase always yields at least one char");
+
     let pm_lower = pm_char
         .to_lowercase()
         .next()
@@ -337,6 +332,60 @@ pub(crate) fn match_day_period_initial(ch: char, am_label: &str, pm_label: &str)
     }
 }
 
+fn weekend_bounds(weekend: &[Weekday]) -> (Weekday, Weekday) {
+    if weekend.is_empty() {
+        return (Weekday::Saturday, Weekday::Sunday);
+    }
+
+    const ISO_ORDER: [Weekday; 7] = [
+        Weekday::Monday,
+        Weekday::Tuesday,
+        Weekday::Wednesday,
+        Weekday::Thursday,
+        Weekday::Friday,
+        Weekday::Saturday,
+        Weekday::Sunday,
+    ];
+
+    let contains = |weekday: Weekday| weekend.contains(&weekday);
+
+    let start = ISO_ORDER
+        .into_iter()
+        .find(|weekday| contains(*weekday) && !contains(previous_weekday(*weekday)))
+        .unwrap_or(weekend[0]);
+
+    let end = ISO_ORDER
+        .into_iter()
+        .find(|weekday| contains(*weekday) && !contains(next_weekday(*weekday)))
+        .unwrap_or(start);
+
+    (start, end)
+}
+
+const fn previous_weekday(weekday: Weekday) -> Weekday {
+    match weekday {
+        Weekday::Monday => Weekday::Sunday,
+        Weekday::Tuesday => Weekday::Monday,
+        Weekday::Wednesday => Weekday::Tuesday,
+        Weekday::Thursday => Weekday::Wednesday,
+        Weekday::Friday => Weekday::Thursday,
+        Weekday::Saturday => Weekday::Friday,
+        Weekday::Sunday => Weekday::Saturday,
+    }
+}
+
+const fn next_weekday(weekday: Weekday) -> Weekday {
+    match weekday {
+        Weekday::Monday => Weekday::Tuesday,
+        Weekday::Tuesday => Weekday::Wednesday,
+        Weekday::Wednesday => Weekday::Thursday,
+        Weekday::Thursday => Weekday::Friday,
+        Weekday::Friday => Weekday::Saturday,
+        Weekday::Saturday => Weekday::Sunday,
+        Weekday::Sunday => Weekday::Monday,
+    }
+}
+
 /// Returns the first contiguous run of Unicode numerals from `s`, or
 /// an empty slice when the string contains none.
 ///
@@ -353,10 +402,12 @@ pub(crate) fn first_numeric_run(s: &str) -> &str {
     else {
         return "";
     };
+
     let end = s[start..]
         .char_indices()
         .find_map(|(i, c)| (!c.is_numeric()).then_some(start + i))
         .unwrap_or(s.len());
+
     &s[start..end]
 }
 
@@ -374,10 +425,12 @@ pub(crate) fn unique_span_diff<'a>(
     pm_formatted: &'a str,
 ) -> (&'a str, &'a str) {
     let mut prefix_len = 0_usize;
+
     for (ach, pch) in am_formatted.chars().zip(pm_formatted.chars()) {
         if ach != pch {
             break;
         }
+
         prefix_len += ach.len_utf8();
     }
 
@@ -385,6 +438,7 @@ pub(crate) fn unique_span_diff<'a>(
     let pm_rest = &pm_formatted[prefix_len..];
 
     let mut suffix_len = 0_usize;
+
     for (ach, pch) in am_rest.chars().rev().zip(pm_rest.chars().rev()) {
         if ach != pch {
             break;
@@ -393,9 +447,13 @@ pub(crate) fn unique_span_diff<'a>(
     }
 
     let am_end = am_formatted.len().saturating_sub(suffix_len);
+
     let pm_end = pm_formatted.len().saturating_sub(suffix_len);
+
     let am_end = am_end.max(prefix_len);
+
     let pm_end = pm_end.max(prefix_len);
+
     (
         &am_formatted[prefix_len..am_end],
         &pm_formatted[prefix_len..pm_end],
@@ -408,10 +466,12 @@ fn first_numeric_run_range(s: &str) -> Option<(usize, usize)> {
     let start = s
         .char_indices()
         .find_map(|(i, c)| c.is_numeric().then_some(i))?;
+
     let end = s[start..]
         .char_indices()
         .find_map(|(i, c)| (!c.is_numeric()).then_some(start + i))
         .unwrap_or(s.len());
+
     Some((start, end))
 }
 
@@ -457,7 +517,9 @@ pub(crate) fn extract_day_period_label(
     ) {
         let am_before = am_formatted[..am_start].trim();
         let pm_before = pm_formatted[..pm_start].trim();
+
         let selected_start = if is_pm { pm_start } else { am_start };
+
         let selected_before = selected[..selected_start].trim();
 
         if !selected_before.is_empty() && am_before != pm_before {
@@ -468,6 +530,7 @@ pub(crate) fn extract_day_period_label(
         let pm_after_raw = pm_formatted[pm_end..].trim_start();
 
         let mut common_prefix_len = 0_usize;
+
         for (ach, pch) in am_after_raw.chars().zip(pm_after_raw.chars()) {
             if ach != pch {
                 break;
@@ -488,6 +551,8 @@ pub(crate) fn extract_day_period_label(
     }
 
     let (am_unique, pm_unique) = unique_span_diff(am_formatted, pm_formatted);
+
     let unique = if is_pm { pm_unique } else { am_unique };
+
     unique.trim().to_string()
 }

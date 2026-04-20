@@ -203,25 +203,37 @@ impl State {
 
         let selected_keys = match self.mode {
             Mode::None => return self.clone(),
+
             Mode::Single => Set::Single(key.clone()),
+
             Mode::Multiple => match self.behavior {
                 Behavior::Toggle => {
                     let mut selected = match &self.selected_keys {
                         Set::Multiple(existing) => existing.clone(),
+
                         Set::Single(existing) => {
                             let mut keys = BTreeSet::new();
+
                             keys.insert(existing.clone());
+
                             keys
                         }
+
                         Set::All => return self.clone(),
+
                         Set::Empty => BTreeSet::new(),
                     };
+
                     selected.insert(key.clone());
+
                     Set::Multiple(selected)
                 }
+
                 Behavior::Replace => {
                     let mut selected = BTreeSet::new();
+
                     selected.insert(key.clone());
+
                     Set::Multiple(selected)
                 }
             },
@@ -239,6 +251,7 @@ impl State {
     pub fn deselect(&self, key: &Key) -> Self {
         let selected_keys = match &self.selected_keys {
             Set::All | Set::Empty => return self.clone(),
+
             Set::Single(selected) => {
                 if selected == key {
                     Set::Empty
@@ -246,9 +259,12 @@ impl State {
                     return self.clone();
                 }
             }
+
             Set::Multiple(selected) => {
                 let mut next = selected.clone();
+
                 next.remove(key);
+
                 if next.is_empty() {
                     Set::Empty
                 } else {
@@ -274,11 +290,13 @@ impl State {
                     .filter(|candidate| *candidate != key)
                     .cloned()
                     .collect();
+
                 Self {
                     selected_keys: Set::Multiple(remaining),
                     ..self.clone()
                 }
             }
+
             _ => self.deselect(key),
         }
     }
@@ -289,6 +307,7 @@ impl State {
         if self.is_selected(&key) {
             match &self.selected_keys {
                 Set::All => self.deselect_from_all(&key, collection),
+
                 _ => self.deselect(&key),
             }
         } else {
@@ -326,6 +345,7 @@ impl State {
         if self.mode == Mode::None {
             return self.clone();
         }
+
         if self.mode == Mode::Single {
             return self.select(key);
         }
@@ -352,6 +372,7 @@ impl State {
 
             if is_anchor || is_target {
                 in_range = !in_range;
+
                 if !self.is_disabled(&node.key) {
                     range_keys.insert(node.key.clone());
                 }
@@ -368,6 +389,7 @@ impl State {
             Set::Multiple(selected) => selected.clone(),
             _ => BTreeSet::new(),
         };
+
         let merged = existing.into_iter().chain(range_keys).collect();
 
         Self {
@@ -439,12 +461,16 @@ mod tests {
     #[test]
     fn set_helpers_cover_all_variants() {
         let mut selected = BTreeSet::new();
+
         selected.insert(Key::int(1));
         selected.insert(Key::int(2));
 
         let empty = Set::Empty;
+
         let single = Set::Single(Key::int(3));
+
         let multiple = Set::Multiple(selected);
+
         let all = Set::All;
 
         assert!(!empty.contains(&Key::int(1)));
@@ -470,8 +496,11 @@ mod tests {
         assert_eq!(single.len(), 1);
 
         let empty_keys = empty.keys().cloned().collect::<Vec<_>>();
+
         let single_keys = single.keys().cloned().collect::<Vec<_>>();
+
         let multiple_keys = multiple.keys().cloned().collect::<Vec<_>>();
+
         let all_keys = all.keys().cloned().collect::<Vec<_>>();
 
         assert!(empty_keys.is_empty());
@@ -483,6 +512,7 @@ mod tests {
     #[test]
     fn state_new_sets_mode_and_behavior() {
         let state = State::new(Mode::Single, Behavior::Replace);
+
         assert_eq!(state.mode, Mode::Single);
         assert_eq!(state.behavior, Behavior::Replace);
         assert_eq!(state.selected_keys, Set::Empty);
@@ -496,12 +526,14 @@ mod tests {
     #[test]
     fn select_is_noop_in_none_mode() {
         let state = State::new(Mode::None, Behavior::Toggle);
+
         assert_eq!(state.select(Key::int(1)), state);
     }
 
     #[test]
     fn select_replaces_in_single_mode() {
         let state = State::new(Mode::Single, Behavior::Toggle).select(Key::int(1));
+
         let next = state.select(Key::int(2));
 
         assert_eq!(next.selected_keys, Set::Single(Key::int(2)));
@@ -517,6 +549,7 @@ mod tests {
         let Set::Multiple(selected) = state.selected_keys else {
             panic!("expected multiple selection");
         };
+
         assert_eq!(
             selected.into_iter().collect::<Vec<_>>(),
             vec![Key::int(1), Key::int(2)]
@@ -531,9 +564,11 @@ mod tests {
         };
 
         let next = state.select(Key::int(2));
+
         let Set::Multiple(selected) = next.selected_keys else {
             panic!("expected multiple selection");
         };
+
         assert_eq!(
             selected.into_iter().collect::<Vec<_>>(),
             vec![Key::int(1), Key::int(2)]
@@ -560,6 +595,7 @@ mod tests {
         let Set::Multiple(selected) = state.selected_keys else {
             panic!("expected multiple selection");
         };
+
         assert_eq!(selected.into_iter().collect::<Vec<_>>(), vec![Key::int(2)]);
     }
 
@@ -567,7 +603,9 @@ mod tests {
     fn select_is_noop_for_disabled_key() {
         let state = State::new(Mode::Multiple, Behavior::Toggle).with_disabled({
             let mut disabled = BTreeSet::new();
+
             disabled.insert(Key::int(2));
+
             disabled
         });
 
@@ -583,6 +621,7 @@ mod tests {
         };
 
         let next = state.deselect(&Key::int(1));
+
         assert_eq!(next.selected_keys, Set::Empty);
         assert!(!next.selection_mode_active);
     }
@@ -590,12 +629,14 @@ mod tests {
     #[test]
     fn deselect_is_noop_for_empty_and_all_selection() {
         let empty = multiple_toggle_state();
+
         assert_eq!(empty.deselect(&Key::int(1)), empty);
 
         let all = State {
             selected_keys: Set::All,
             ..multiple_toggle_state()
         };
+
         assert_eq!(all.deselect(&Key::int(1)), all);
     }
 
@@ -618,6 +659,7 @@ mod tests {
         };
 
         let next = state.deselect(&Key::int(2));
+
         assert_eq!(
             next.selected_keys,
             Set::Multiple(BTreeSet::from([Key::int(1)]))
@@ -634,6 +676,7 @@ mod tests {
         };
 
         let next = state.deselect(&Key::int(2));
+
         assert_eq!(next.selected_keys, Set::Empty);
         assert!(!next.selection_mode_active);
     }
@@ -680,12 +723,14 @@ mod tests {
     #[test]
     fn toggle_from_all_uses_collection_complement() {
         let collection = fixture_collection();
+
         let state = State {
             selected_keys: Set::All,
             ..multiple_toggle_state()
         };
 
         let next = state.toggle(Key::int(3), &collection);
+
         let Set::Multiple(selected) = next.selected_keys else {
             panic!("expected concrete selection");
         };
@@ -697,12 +742,14 @@ mod tests {
     #[test]
     fn toggle_deselects_selected_key_from_concrete_selection() {
         let collection = fixture_collection();
+
         let state = State {
             selected_keys: Set::Multiple(BTreeSet::from([Key::int(1), Key::int(2)])),
             ..multiple_toggle_state()
         };
 
         let next = state.toggle(Key::int(2), &collection);
+
         assert_eq!(
             next.selected_keys,
             Set::Multiple(BTreeSet::from([Key::int(1)]))
@@ -712,9 +759,11 @@ mod tests {
     #[test]
     fn toggle_selects_unselected_key() {
         let collection = fixture_collection();
+
         let state = multiple_toggle_state().select(Key::int(1));
 
         let next = state.toggle(Key::int(2), &collection);
+
         assert_eq!(
             next.selected_keys,
             Set::Multiple(BTreeSet::from([Key::int(1), Key::int(2)]))
@@ -724,6 +773,7 @@ mod tests {
     #[test]
     fn select_all_only_applies_in_multiple_mode() {
         let single = State::new(Mode::Single, Behavior::Toggle).select_all();
+
         let multiple = multiple_toggle_state().select_all();
 
         assert_eq!(single.selected_keys, Set::Empty);
@@ -740,6 +790,7 @@ mod tests {
         };
 
         let next = state.clear();
+
         assert_eq!(next.selected_keys, Set::Empty);
         assert_eq!(next.anchor_key, None);
         assert!(!next.selection_mode_active);
@@ -748,6 +799,7 @@ mod tests {
     #[test]
     fn extend_selection_collects_focusable_range() {
         let collection = fixture_collection();
+
         let state = State {
             anchor_key: Some(Key::int(2)),
             selected_keys: Set::Single(Key::int(2)),
@@ -755,6 +807,7 @@ mod tests {
         };
 
         let next = state.extend_selection(Key::int(5), &collection);
+
         let Set::Multiple(selected) = next.selected_keys else {
             panic!("expected multiple selection");
         };
@@ -770,6 +823,7 @@ mod tests {
     #[test]
     fn extend_selection_is_noop_in_none_mode() {
         let collection = fixture_collection();
+
         let state = State {
             anchor_key: Some(Key::int(2)),
             ..State::new(Mode::None, Behavior::Toggle)
@@ -781,12 +835,14 @@ mod tests {
     #[test]
     fn extend_selection_delegates_to_select_in_single_mode() {
         let collection = fixture_collection();
+
         let state = State {
             anchor_key: Some(Key::int(2)),
             ..State::new(Mode::Single, Behavior::Toggle)
         };
 
         let next = state.extend_selection(Key::int(5), &collection);
+
         assert_eq!(next.selected_keys, Set::Single(Key::int(5)));
         assert_eq!(next.anchor_key, Some(Key::int(5)));
     }
@@ -794,6 +850,7 @@ mod tests {
     #[test]
     fn extend_selection_skips_disabled_keys() {
         let collection = fixture_collection();
+
         let state = State {
             anchor_key: Some(Key::int(2)),
             disabled_keys: BTreeSet::from([Key::int(3)]),
@@ -802,6 +859,7 @@ mod tests {
         };
 
         let next = state.extend_selection(Key::int(4), &collection);
+
         let Set::Multiple(selected) = next.selected_keys else {
             panic!("expected multiple selection");
         };
@@ -815,12 +873,14 @@ mod tests {
     #[test]
     fn extend_selection_same_key_yields_single_item_range() {
         let collection = fixture_collection();
+
         let state = State {
             anchor_key: Some(Key::int(3)),
             ..multiple_toggle_state()
         };
 
         let next = state.extend_selection(Key::int(3), &collection);
+
         let Set::Multiple(selected) = next.selected_keys else {
             panic!("expected multiple selection");
         };
@@ -831,6 +891,7 @@ mod tests {
     #[test]
     fn extend_selection_merges_range_with_existing_multiple_selection() {
         let collection = fixture_collection();
+
         let state = State {
             anchor_key: Some(Key::int(3)),
             selected_keys: Set::Multiple(BTreeSet::from([Key::int(1)])),
@@ -838,6 +899,7 @@ mod tests {
         };
 
         let next = state.extend_selection(Key::int(5), &collection);
+
         assert_eq!(
             next.selected_keys,
             Set::Multiple(BTreeSet::from([
@@ -852,12 +914,14 @@ mod tests {
     #[test]
     fn extend_selection_falls_back_when_anchor_is_stale() {
         let collection = fixture_collection();
+
         let state = State {
             anchor_key: Some(Key::int(999)),
             ..multiple_toggle_state()
         };
 
         let next = state.extend_selection(Key::int(4), &collection);
+
         assert_eq!(
             next.selected_keys,
             Set::Multiple(BTreeSet::from([Key::int(4)]))
@@ -868,9 +932,11 @@ mod tests {
     #[test]
     fn extend_selection_without_anchor_falls_back_to_select() {
         let collection = fixture_collection();
+
         let state = multiple_toggle_state();
 
         let next = state.extend_selection(Key::int(1), &collection);
+
         assert_eq!(
             next.selected_keys,
             Set::Multiple(BTreeSet::from([Key::int(1)]))
@@ -881,6 +947,7 @@ mod tests {
     #[test]
     fn set_focus_updates_only_focus() {
         let state = multiple_toggle_state().set_focus(Key::int(4));
+
         assert_eq!(state.focused_key, Some(Key::int(4)));
         assert_eq!(state.selected_keys, Set::Empty);
     }
@@ -888,7 +955,8 @@ mod tests {
     #[test]
     fn on_action_uses_callback_abstraction() {
         let called = Arc::new(AtomicBool::new(false));
-        let callback: Option<Callback<dyn Fn(Key)>> = {
+
+        let callback = {
             let called = Arc::clone(&called);
             Some(Callback::new(move |key| {
                 if key == Key::int(7) {
@@ -896,10 +964,13 @@ mod tests {
                 }
             }))
         };
+
         let on_action: OnAction = callback.clone();
 
         assert!(on_action.is_some());
+
         on_action.expect("OnAction should exist")(Key::int(7));
+
         assert!(called.load(Ordering::Relaxed));
     }
 }

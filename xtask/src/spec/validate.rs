@@ -33,13 +33,13 @@ pub fn execute(root: &SpecRoot) -> Result<String, Error> {
         if let Some(frontmatter) = manifest::extract_frontmatter(&content) {
             match manifest::parse_frontmatter_yaml(&frontmatter) {
                 Ok(fm) => {
-                    if let Some(fm_cat) = &fm.category {
-                        if fm_cat != &comp.category {
-                            errors.push(format!(
-                                "[{name}] category mismatch: manifest='{}' file='{fm_cat}'",
-                                comp.category
-                            ));
-                        }
+                    if let Some(fm_cat) = &fm.category
+                        && fm_cat != &comp.category
+                    {
+                        errors.push(format!(
+                            "[{name}] category mismatch: manifest='{}' file='{fm_cat}'",
+                            comp.category
+                        ));
                     }
                     if let Some(fm_fdeps) = &fm.foundation_deps {
                         let mut manifest_deps = comp.foundation_deps.clone();

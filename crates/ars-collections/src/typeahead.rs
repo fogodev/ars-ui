@@ -122,11 +122,12 @@ impl State {
         // FocusOnly: disabled items are focusable, so include them in the scan.
         // Skip: disabled items are excluded from the scan.
         let skip_disabled = disabled_behavior == DisabledBehavior::Skip;
-        let all_item_keys: Vec<Key> = collection
+
+        let all_item_keys = collection
             .nodes()
             .filter(|n| n.is_focusable() && (!skip_disabled || !disabled_keys.contains(&n.key)))
             .map(|n| n.key.clone())
-            .collect();
+            .collect::<Vec<_>>();
 
         if all_item_keys.is_empty() {
             return None;
@@ -156,10 +157,10 @@ impl State {
 
             let key = &all_item_keys[idx];
 
-            if let Some(text) = collection.text_value_of(key) {
-                if text.to_lowercase().starts_with(&query) {
-                    return Some(key.clone());
-                }
+            if let Some(text) = collection.text_value_of(key)
+                && text.to_lowercase().starts_with(&query)
+            {
+                return Some(key.clone());
             }
         }
 
@@ -256,11 +257,12 @@ impl State {
         // FocusOnly: disabled items are focusable, so include them in the scan.
         // Skip: disabled items are excluded from the scan.
         let skip_disabled = disabled_behavior == DisabledBehavior::Skip;
-        let all_item_keys: Vec<Key> = collection
+
+        let all_item_keys = collection
             .nodes()
             .filter(|n| n.is_focusable() && (!skip_disabled || !disabled_keys.contains(&n.key)))
             .map(|n| n.key.clone())
-            .collect();
+            .collect::<Vec<_>>();
 
         if all_item_keys.is_empty() {
             return None;
@@ -290,13 +292,12 @@ impl State {
 
             let key = &all_item_keys[idx];
 
-            if let Some(text) = collection.text_value_of(key) {
-                if case_mapper
+            if let Some(text) = collection.text_value_of(key)
+                && case_mapper
                     .lowercase_to_string(text, langid)
                     .starts_with(query.as_ref())
-                {
-                    return Some(key.clone());
-                }
+            {
+                return Some(key.clone());
             }
         }
 
@@ -359,16 +360,19 @@ mod tests {
         // Type 'b' at t=100
         let (state, _) =
             state.process_char('b', 100, None, &c, &no_disabled(), DisabledBehavior::Skip);
+
         assert_eq!(state.search, "b");
 
         // Type 'a' at t=200 (within timeout)
         let (state, _) =
             state.process_char('a', 200, None, &c, &no_disabled(), DisabledBehavior::Skip);
+
         assert_eq!(state.search, "ba");
 
         // Type 'n' at t=300 (within timeout)
         let (state, _) =
             state.process_char('n', 300, None, &c, &no_disabled(), DisabledBehavior::Skip);
+
         assert_eq!(state.search, "ban");
     }
 
@@ -385,11 +389,13 @@ mod tests {
         // Type 'a' at t=100
         let (state, _) =
             state.process_char('a', 100, None, &c, &no_disabled(), DisabledBehavior::Skip);
+
         assert_eq!(state.search, "a");
 
         // Type 'b' at t=700 (600ms later, > 500ms timeout)
         let (state, _) =
             state.process_char('b', 700, None, &c, &no_disabled(), DisabledBehavior::Skip);
+
         assert_eq!(state.search, "b");
     }
 
@@ -406,6 +412,7 @@ mod tests {
         // Type 'p' at t=599 (499ms later, < 500ms timeout)
         let (state, _) =
             state.process_char('p', 599, None, &c, &no_disabled(), DisabledBehavior::Skip);
+
         assert_eq!(state.search, "ap");
     }
 
@@ -422,8 +429,10 @@ mod tests {
         // Type "ban" — should match "Banana"
         let (state, _) =
             state.process_char('b', 100, None, &c, &no_disabled(), DisabledBehavior::Skip);
+
         let (state, _) =
             state.process_char('a', 200, None, &c, &no_disabled(), DisabledBehavior::Skip);
+
         let (_, found) =
             state.process_char('n', 300, None, &c, &no_disabled(), DisabledBehavior::Skip);
 
@@ -439,6 +448,7 @@ mod tests {
         // Type 'B' (uppercase) — should still match "Banana" or "Blueberry"
         let (_, found) =
             state.process_char('B', 100, None, &c, &no_disabled(), DisabledBehavior::Skip);
+
         assert!(found.is_some());
     }
 
@@ -451,8 +461,10 @@ mod tests {
         // Type "xyz" — no match
         let (state, _) =
             state.process_char('x', 100, None, &c, &no_disabled(), DisabledBehavior::Skip);
+
         let (state, _) =
             state.process_char('y', 200, None, &c, &no_disabled(), DisabledBehavior::Skip);
+
         let (_, found) =
             state.process_char('z', 300, None, &c, &no_disabled(), DisabledBehavior::Skip);
 
@@ -478,6 +490,7 @@ mod tests {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(found, Some(Key::int(1)));
     }
 
@@ -502,6 +515,7 @@ mod tests {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         let (_, found) = state.process_char(
             'p',
             200,
@@ -529,6 +543,7 @@ mod tests {
         // even though focus is now ON Banana.
         let (state, found) =
             state.process_char('b', 100, None, &c, &no_disabled(), DisabledBehavior::Skip);
+
         assert_eq!(found, Some(Key::int(2))); // Banana
 
         // Component moved focus to Banana; pass it as current_focus.
@@ -540,6 +555,7 @@ mod tests {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(found, Some(Key::int(2))); // Still Banana — "ba" matches
     }
 
@@ -591,6 +607,7 @@ mod tests {
         // Type 'b' — should match Banana (key=2, first 'b' item)
         let (state, found) =
             state.process_char('b', 100, None, &c, &no_disabled(), DisabledBehavior::Skip);
+
         assert_eq!(found, Some(Key::int(2))); // Banana
 
         // Type 'b' again after timeout — should cycle to Blueberry (key=3)
@@ -602,6 +619,7 @@ mod tests {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(found, Some(Key::int(3))); // Blueberry
     }
 
@@ -621,6 +639,7 @@ mod tests {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(found, Some(Key::int(2)));
     }
 
@@ -638,6 +657,7 @@ mod tests {
         // No focusable item starts with 'f', so result is None.
         let (_, found) =
             state.process_char('f', 100, None, &c, &no_disabled(), DisabledBehavior::Skip);
+
         assert_eq!(found, None);
     }
 
@@ -650,10 +670,12 @@ mod tests {
         let c = fruit_collection();
 
         let state = State::default();
+
         let disabled = BTreeSet::from([Key::int(2)]); // Banana disabled
 
         // Type 'b' — Banana is disabled, should skip to Blueberry
         let (_, found) = state.process_char('b', 100, None, &c, &disabled, DisabledBehavior::Skip);
+
         assert_eq!(found, Some(Key::int(3))); // Blueberry, not Banana
     }
 
@@ -662,11 +684,13 @@ mod tests {
         let c = fruit_collection();
 
         let state = State::default();
+
         // Disable both 'b' items
         let disabled = BTreeSet::from([Key::int(2), Key::int(3)]);
 
         // Type 'b' — both Banana and Blueberry disabled, no match
         let (_, found) = state.process_char('b', 100, None, &c, &disabled, DisabledBehavior::Skip);
+
         assert_eq!(found, None);
     }
 
@@ -675,11 +699,13 @@ mod tests {
         let c = fruit_collection();
 
         let state = State::default();
+
         let disabled = BTreeSet::from([Key::int(2)]); // Banana disabled
 
         // With FocusOnly, disabled items are still focusable — Banana should match
         let (_, found) =
             state.process_char('b', 100, None, &c, &disabled, DisabledBehavior::FocusOnly);
+
         assert_eq!(found, Some(Key::int(2))); // Banana, even though disabled
     }
 
@@ -689,12 +715,13 @@ mod tests {
 
     #[test]
     fn empty_collection_returns_none() {
-        let c: crate::StaticCollection<&str> = CollectionBuilder::new().build();
+        let c = CollectionBuilder::<&str>::new().build();
 
         let state = State::default();
 
         let (_, found) =
             state.process_char('a', 100, None, &c, &no_disabled(), DisabledBehavior::Skip);
+
         assert_eq!(found, None);
     }
 
@@ -731,6 +758,7 @@ mod tests {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(state.search_start_key, Some(Key::int(1)));
 
         // Type 'a' at t=200 — same search session, start key preserved
@@ -742,6 +770,7 @@ mod tests {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(state.search_start_key, Some(Key::int(1)));
     }
 
@@ -760,6 +789,7 @@ mod tests {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(state.search_start_key, Some(Key::int(1)));
 
         // Type 'c' at t=700 (after timeout) with focus on Banana
@@ -771,6 +801,7 @@ mod tests {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(state.search_start_key, Some(Key::int(2)));
     }
 }
@@ -829,6 +860,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(state.search, "b");
 
         let (state, _) = state.process_char(
@@ -840,6 +872,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(state.search, "ba");
     }
 
@@ -860,6 +893,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(state.search, "a");
 
         // 600ms later, > 500ms timeout
@@ -872,6 +906,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(state.search, "b");
     }
 
@@ -892,6 +927,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         let (state, _) = state.process_char(
             'a',
             200,
@@ -901,6 +937,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         let (_, found) = state.process_char(
             'n',
             300,
@@ -932,6 +969,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert!(found.is_some());
     }
 
@@ -953,6 +991,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(found, Some(Key::int(1)));
     }
 
@@ -974,6 +1013,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(found, Some(Key::int(2)));
 
         let (_, found) = state.process_char(
@@ -985,6 +1025,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(found, Some(Key::int(2))); // Still Banana
     }
 
@@ -1006,6 +1047,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         let (state, _) = state.process_char(
             'y',
             200,
@@ -1015,6 +1057,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         let (_, found) = state.process_char(
             'z',
             300,
@@ -1047,12 +1090,13 @@ mod tests_i18n {
             &disabled,
             DisabledBehavior::Skip,
         );
+
         assert_eq!(found, Some(Key::int(3))); // Blueberry, not Banana
     }
 
     #[test]
     fn i18n_empty_collection_returns_none() {
-        let c: crate::StaticCollection<&str> = CollectionBuilder::new().build();
+        let c = CollectionBuilder::<&str>::new().build();
 
         let locale = en_locale();
 
@@ -1067,6 +1111,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(found, None);
     }
 
@@ -1088,6 +1133,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(state.search_start_key, Some(Key::int(1)));
 
         // Type 'a' at t=200 — same search session, start key preserved
@@ -1100,6 +1146,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(state.search_start_key, Some(Key::int(1)));
     }
 
@@ -1138,6 +1185,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(found, Some(Key::int(1))); // ılık, not igloo
     }
 
@@ -1164,6 +1212,7 @@ mod tests_i18n {
             &no_disabled(),
             DisabledBehavior::Skip,
         );
+
         assert_eq!(found, Some(Key::int(1))); // igloo
     }
 }

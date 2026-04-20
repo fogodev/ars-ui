@@ -1,6 +1,7 @@
 // ars-collections/src/static_collection.rs
 
 use alloc::{string::String, vec::Vec};
+use core::fmt::{self, Debug};
 
 use hashbrown::DefaultHashBuilder;
 use indexmap::IndexMap;
@@ -168,8 +169,8 @@ impl<T: Clone> Clone for StaticCollection<T> {
 
 /// Manual `Debug` avoids requiring `T: Debug`. Prints size only, since the
 /// payload `T` is opaque to the machine layer.
-impl<T> core::fmt::Debug for StaticCollection<T> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl<T> Debug for StaticCollection<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StaticCollection")
             .field("size", &self.nodes.len())
             .finish()
@@ -195,13 +196,13 @@ impl<T: Clone + PartialEq> PartialEq for StaticCollection<T> {
 impl<T: CollectionItem> StaticCollection<T> {
     /// Number of items.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.nodes.len()
     }
 
     /// Returns `true` when the collection contains no items.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
@@ -252,6 +253,7 @@ impl<T: CollectionItem> StaticCollection<T> {
     /// [`Separator`]: crate::node::NodeType::Separator
     pub fn replace(&mut self, item: T) -> Option<T> {
         let idx = *self.key_to_index.get(item.key())?;
+
         let value_slot = &mut self.nodes[idx].value;
 
         // Refuse to overwrite structural nodes (Section/Header/Separator),

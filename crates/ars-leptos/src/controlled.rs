@@ -14,18 +14,24 @@ pub fn use_controlled_prop<T, E>(
     T: Clone + PartialEq + Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
-    let prev: StoredValue<Option<T>> = StoredValue::new(None);
+    let prev = StoredValue::new(None::<T>);
+
     let effect = ImmediateEffect::new_isomorphic(move || {
         let new_value = signal.get();
+
         let should_send = prev.with_value(|current| current.as_ref() != Some(&new_value));
+
         if should_send {
             let is_initial = prev.with_value(Option::is_none);
+
             if !is_initial {
                 send.run(event_fn(new_value.clone()));
             }
+
             prev.set_value(Some(new_value));
         }
     });
+
     on_cleanup(move || drop(effect));
 }
 
@@ -38,20 +44,26 @@ mod tests {
     #[test]
     fn use_controlled_prop_skips_initial_value_and_dispatches_on_change() {
         let owner = Owner::new();
+
         owner.with(|| {
             let (value, set_value) = signal(1u32);
-            let events: StoredValue<Vec<u32>> = StoredValue::new(Vec::new());
+
+            let events = StoredValue::new(Vec::<u32>::new());
+
             let send = Callback::new(move |next: u32| {
                 events.update_value(|captured| captured.push(next));
             });
 
             use_controlled_prop(value.into(), send, |next| next);
+
             assert!(events.with_value(Vec::is_empty));
 
             set_value.set(2);
+
             assert_eq!(events.with_value(Clone::clone), vec![2]);
 
             set_value.set(2);
+
             assert_eq!(events.with_value(Clone::clone), vec![2]);
 
             assert_eq!(value.get_untracked(), 2);
@@ -71,14 +83,18 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn use_controlled_prop_skips_initial_value_and_dispatches_on_change_on_wasm() {
         let owner = Owner::new();
+
         owner.with(|| {
             let (value, set_value) = signal(1u32);
-            let events: StoredValue<Vec<u32>> = StoredValue::new(Vec::new());
+
+            let events = StoredValue::new(Vec::<u32>::new());
+
             let send = Callback::new(move |next: u32| {
                 events.update_value(|captured| captured.push(next));
             });
 
             use_controlled_prop(value.into(), send, |next| next);
+
             assert!(events.with_value(Vec::is_empty));
 
             set_value.set(2);

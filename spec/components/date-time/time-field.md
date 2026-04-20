@@ -99,18 +99,13 @@ pub struct Context {
 }
 
 impl Context {
-    /// Resolve the hour cycle based on the locale.
-    pub fn resolved_hour_cycle(&self) -> HourCycle {
-        self.hour_cycle.resolve(&self.locale)
-    }
-
     /// Build segments from hour_cycle, granularity, and current value.
     ///
     /// When `self.force_leading_zeros` is true, numeric segments (hour,
     /// minute, second) are always zero-padded to 2 digits. When false,
     /// formatting uses locale-aware defaults.
     pub fn rebuild_segments(&mut self) {
-        let cycle   = self.resolved_hour_cycle();
+        let cycle   = self.hour_cycle;
         let value   = self.value.get().clone();
         let pad     = self.force_leading_zeros;
         let mut segs = Vec::new();
@@ -182,7 +177,7 @@ impl Context {
 
     /// Assemble a Time from current segment values.
     pub fn assemble_time(&self) -> Option<Time> {
-        let cycle      = self.resolved_hour_cycle();
+        let cycle      = self.hour_cycle;
         let raw_hour   = self.get_seg(DateSegmentKind::Hour)? as u8;
         let minute     = self.get_seg(DateSegmentKind::Minute)? as u8;
         let second     = self.get_seg(DateSegmentKind::Second).unwrap_or(0) as u8;
@@ -299,9 +294,9 @@ pub struct Props {
     pub granularity: TimeGranularity,
     /// Hour cycle override. When `Some`, overrides the locale's default hour cycle.
     /// `H12` forces 12-hour display with AM/PM; `H23` forces 24-hour display.
-    /// When the `HourCycle` variant is `Auto` or this field is the default, the locale's
-    /// preferred hour cycle is used (e.g., `H12` for `en-US`, `H23` for `de-DE`).
-    pub hour_cycle: HourCycle,
+    /// When this field is `None`, the locale's preferred hour cycle is used
+    /// (e.g., `H12` for `en-US`, `H23` for `de-DE`).
+    pub hour_cycle: Option<HourCycle>,
     /// When `true`, the time zone segment (if present) is omitted from the rendered segments.
     /// Useful when the time zone is displayed elsewhere in the UI or is not relevant.
     /// Default: `false`.
@@ -342,7 +337,7 @@ impl Default for Props {
             value: None,
             default_value: None,
             granularity: TimeGranularity::Minute,
-            hour_cycle: HourCycle::Auto,
+            hour_cycle: None,
             hide_time_zone: false,
             disabled: false,
             readonly: false,
@@ -556,13 +551,9 @@ impl ars_core::Machine for Machine {
         let messages = messages.clone();
         let provider = env.icu_provider.clone();
 
-        // When hour_cycle is explicitly set (not Auto), override the locale default.
-        let resolved_cycle = match props.hour_cycle {
-            HourCycle::Auto => {
-                locale.hour_cycle(&*provider)
-            }
-            explicit => explicit,
-        };
+        let resolved_cycle = props
+            .hour_cycle
+            .unwrap_or_else(|| locale.hour_cycle(&*provider));
         let mut ctx = Context {
             value: match &props.value {
                 Some(v) => Bindable::controlled(*v),

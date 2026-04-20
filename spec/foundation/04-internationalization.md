@@ -1328,752 +1328,493 @@ conditional public API.
 
 ### 5.1 CalendarDate Abstraction
 
+The public calendar contract is defined in [spec/shared/date-time-types.md](./../shared/date-time-types.md).
+This foundation section describes the implementation architecture behind that contract.
+
+`ars-i18n` now uses `temporal_rs` as the primary calendar/date-time engine for all pure calendar
+arithmetic, parsing, conversion, and zoned date-time behavior. ICU4X remains part of the stack for
+locale data, formatting, week metadata, collation, segmentation, and related i18n services, but it
+no longer owns the public calendar arithmetic model.
+
+The public `CalendarDate`, `Time`, `CalendarDateTime`, and `ZonedDateTime` types are opaque validated
+wrappers. Their internal representation is canonical ISO data plus a projected public calendar view.
+
 ```rust
-// ICU4X 2.x: `Date<AnyCalendar>` replaces the 1.x `AnyCalendarDate` type.
-use icu::calendar::{
-    AnyCalendar,
-    Date,
-    Gregorian,
-    types::{
-        DayOfMonth,
-        MonthInfo,
-        Weekday,
-        YearInfo,
-    },
-};
-
-/// A date that can be in any calendar system.
-///
-/// **Disambiguation:** This is the `pub(crate)` ICU4X-wrapper type used internally
-/// by `ars-i18n`. It is NOT the public API type. The public API type is
-/// `shared::CalendarDate` (defined in `date-time-types.md`) which uses raw fields.
-/// `IcuProvider` trait methods accept and return `shared::CalendarDate`.
-/// Methods like `add_days`, `days_until`, `is_before`, `today` on this internal type
-/// delegate to ICU4X; the shared type has its own implementations.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct CalendarDate {
-    inner: Date<AnyCalendar>,
+pub struct CalendarDate {
+    calendar: CalendarSystem,
+    era: Option<Era>,
+    year: i32,
+    month: u8,
+    month_code: Option<MonthCode>,
+    day: u8,
+    iso_year: i32,
+    iso_month: u8,
+    iso_day: u8,
 }
 
-impl CalendarDate {
-    /// Create from ISO components (year, month, day) in Gregorian calendar.
-    pub fn from_iso(year: i32, month: u8, day: u8) -> Result<Self, DateError> {
-        let date = Date::try_new_gregorian(year, month, day)
-            .map_err(|_| DateError::InvalidDate)?;
-        Ok(Self {
-            inner: date.to_any(),
-        })
-    }
-
-    /// Create from components in a specific calendar system.
-    ///
-    /// For single-era calendars this constructs from an extended year. For
-    /// multi-era calendars, omitted eras default to the current era in the same
-    /// way React Aria's `CalendarDate` constructor defaults to
-    /// `calendar.getEras().last()`.
-    pub(crate) fn from_calendar(
-        year: i32,
-        month: u8,
-        day: u8,
-        calendar: CalendarSystem,
-    ) -> Result<Self, CalendarConversionError> {
-        let year = default_year_input(calendar, year);
-        Self::from_calendar_parts(year, month, day, calendar)
-    }
-
-    /// Create from components in a specific calendar system and an explicit era.
-    ///
-    /// This path is required for Japanese and other multi-era calendars when
-    /// round-tripping the public `shared::CalendarDate`, because raw
-    /// `(calendar, year, month, day)` fields are otherwise ambiguous.
-    pub(crate) fn from_calendar_with_era(
-        era: &str,
-        year: i32,
-        month: u8,
-        day: u8,
-        calendar: CalendarSystem,
-    ) -> Result<Self, CalendarConversionError> {
-        Self::from_calendar_parts(YearInput::EraYear(era, year), month, day, calendar)
-    }
-
-    fn from_calendar_parts(
-        year: YearInput<'_>,
-        month: u8,
-        day: u8,
-        calendar: CalendarSystem,
-    ) -> Result<Self, CalendarConversionError> {
-        let any_cal = AnyCalendar::new(calendar.to_icu_kind());
-        let date = Date::try_new(year, icu::calendar::types::Month::new(month), day, any_cal)
-            .map_err(|e| CalendarConversionError::Icu(e.to_string()))?;
-        Ok(Self { inner: date })
-    }
-
-    /// Convert to a different calendar system.
-    pub fn to_calendar(&self, calendar: CalendarSystem) -> CalendarDate {
-        let any_cal = AnyCalendar::new(calendar.to_icu_kind());
-        CalendarDate {
-            inner: self.inner.to_calendar(any_cal),
-        }
-    }
-
-    pub fn year(&self) -> i32 {
-        // ICU4X 2.x: YearInfo is an enum; era_year_or_related_iso() returns
-        // the displayable year number (era year for era-based, related ISO for cyclic).
-        self.inner.year().era_year_or_related_iso()
-    }
-
-    pub fn month(&self) -> u8 {
-        // Safe: month ordinals never exceed 13 (max for lunisolar calendars).
-        // ICU4X 2.x: MonthInfo provides month_number() for the 1-based ordinal.
-        // Note: Both `MonthInfo.ordinal` (public field) and `.month_number()` method
-        // are valid accessors. This spec uses `.month_number()` consistently. For leap
-        // months (e.g., Hebrew Adar II), `.month_number()` equals `.ordinal`.
-        let ordinal = self.inner.month().month_number();
-        debug_assert!(ordinal <= 13, "month ordinal {ordinal} exceeds expected max of 13");
-        ordinal
-    }
-
-    pub fn day(&self) -> u8 {
-        // ICU4X 2.x: DayOfMonth is a newtype wrapping u8; access via `.0`.
-        self.inner.day_of_month().0
-    }
-
-    /// Day of week.
-    /// ICU4X `day_of_week()` returns `Weekday` (ISO 8601: Monday=1, Sunday=7).
-    pub fn weekday(&self) -> Weekday {
-        Weekday::from_icu_weekday(self.inner.day_of_week())
-    }
-
-    /// Era name (relevant for Japanese calendar: Reiwa, Heisei, etc.)
-    /// ICU4X 2.x: YearInfo::era() returns Option<EraYear>; EraYear.era is TinyAsciiStr<16>.
-    pub fn era(&self) -> Option<String> {
-        self.inner.year().era().map(|e| e.era.to_string())
-    }
-
-    /// Add days to this date, returning a new `CalendarDate`.
-    ///
-    /// Strategy: convert to ISO, perform arithmetic on the ISO date (which is
-    /// a simple proleptic Gregorian with fixed month lengths), then convert back
-    /// to the original calendar system.
-    pub fn add_days(&self, days: i32) -> Result<CalendarDate, CalendarError> {
-        use icu::calendar::{Date, Iso};
-
-        // Convert to ISO for arithmetic (ICU4X Date<Iso> supports day offset).
-        let iso: Date<Iso> = self.inner.to_iso();
-        // ICU4X Date<Iso> doesn't expose direct day-add, so reconstruct via
-        // epoch-day arithmetic. ISO epoch day: days since 0001-01-01.
-        let iso_year = iso.year().era_year_or_related_iso();
-        let iso_month = iso.month().month_number();
-        let iso_day = iso.day_of_month().0;
-
-        // Convert to a simple day count, add offset, convert back.
-        let epoch_days = iso_to_epoch_days(iso_year, iso_month, iso_day);
-        let new_epoch = epoch_days + days as i64;
-        let (new_y, new_m, new_d) = epoch_days_to_iso(new_epoch);
-
-        let new_iso = Date::try_new_iso(new_y, new_m, new_d)
-            .map_err(|e| CalendarError::Arithmetic(e.to_string()))?;
-
-        // Convert back to the original calendar.
-        let any_cal = self.inner.calendar().clone();
-        Ok(CalendarDate {
-            inner: new_iso.to_any().to_calendar(any_cal),
-        })
-    }
-
-    /// Days between this date and `other` (positive if `other` is later).
-    ///
-    /// Both dates are converted to ISO for epoch-day subtraction, so this
-    /// works correctly across different calendar systems.
-    pub fn days_until(&self, other: &CalendarDate) -> Result<i32, CalendarError> {
-        let self_iso = self.inner.to_iso();
-        let other_iso = other.inner.to_iso();
-
-        let self_epoch = iso_to_epoch_days(
-            self_iso.year().era_year_or_related_iso(),
-            self_iso.month().month_number(),
-            self_iso.day_of_month().0,
-        );
-        let other_epoch = iso_to_epoch_days(
-            other_iso.year().era_year_or_related_iso(),
-            other_iso.month().month_number(),
-            other_iso.day_of_month().0,
-        );
-
-        let diff = other_epoch - self_epoch;
-        i32::try_from(diff).map_err(|_| CalendarError::Arithmetic(
-            "date difference exceeds i32 range".into()
-        ))
-    }
-
-    /// Whether this date is chronologically before `other`.
-    ///
-    /// Comparison is performed via ISO epoch days, so it works correctly
-    /// across different calendar systems.
-    pub fn is_before(&self, other: &CalendarDate) -> Result<bool, CalendarError> {
-        self.days_until(other).map(|diff| diff > 0)
-    }
-
-    /// Today's date in the given calendar system.
-    ///
-    /// On WASM targets, uses `js_sys::Date::now()` to get the current UTC
-    /// timestamp. On native targets, uses `std::time::SystemTime`.
-    pub fn today(calendar: CalendarSystem) -> Result<CalendarDate, CalendarError> {
-        let (year, month, day) = platform_today_iso()
-            .map_err(|e| CalendarError::Arithmetic(e))?;
-
-        let iso = icu::calendar::Date::try_new_iso(year, month, day)
-            .map_err(|e| CalendarError::Arithmetic(e.to_string()))?;
-
-        let any_cal = AnyCalendar::new(calendar.to_icu_kind());
-        Ok(CalendarDate {
-            inner: iso.to_any().to_calendar(any_cal),
-        })
-    }
+pub struct Time {
+    hour: u8,
+    minute: u8,
+    second: u8,
+    millisecond: u16,
+    microsecond: u16,
+    nanosecond: u16,
 }
 
-/// Convert an ISO date (year, month, day) to an epoch day count.
-/// Epoch: day 0 = 0000-03-01 (shifted March epoch avoids leap-day edge cases).
-fn iso_to_epoch_days(year: i32, month: u8, day: u8) -> i64 {
-    let y = if month <= 2 { year as i64 - 1 } else { year as i64 };
-    let m = if month <= 2 { month as i64 + 9 } else { month as i64 - 3 };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let doy = (153 * m + 2) / 5 + day as i64 - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146097 + doe - 719468 // shift to Unix-like epoch (0001-01-01)
+pub struct CalendarDateTime {
+    date: CalendarDate,
+    time: Time,
 }
 
-/// Convert an epoch day count back to an ISO (year, month, day) triple.
-fn epoch_days_to_iso(epoch: i64) -> (i32, u8, u8) {
-    let z = epoch + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = if m <= 2 { y + 1 } else { y };
-    (year as i32, m as u8, d as u8)
-}
-
-/// Get today's ISO date components from the platform clock.
-#[cfg(target_arch = "wasm32")]
-fn platform_today_iso() -> Result<(i32, u8, u8), String> {
-    let now = js_sys::Date::new_0();
-    let year = now.get_full_year() as i32;
-    let month = (now.get_month() + 1) as u8; // JS months are 0-indexed; get_month() returns u32
-    let day = now.get_date() as u8;
-    Ok((year, month, day))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn platform_today_iso() -> Result<(i32, u8, u8), String> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
-        .as_secs();
-    let days = (secs / 86400) as i64;
-    let (y, m, d) = epoch_days_to_iso(days);
-    Ok((y, m, d))
-}
-
-// `Weekday` — specified in `shared/date-time-types.md` and implemented in `ars-i18n`.
-// The following extension methods are provided on that canonical type.
-
-impl Weekday {
-    // `from_sunday_zero()` and `from_iso_8601()` are defined on the canonical
-    // `Weekday` type in `shared/date-time-types.md`. `ars-core` may re-export
-    // the type for convenience, but `ars-i18n` owns the implementation.
-
-    pub fn from_icu_str(s: &str) -> Option<Self> {
-        match s {
-            "mon" => Some(Weekday::Monday),
-            "tue" => Some(Weekday::Tuesday),
-            "wed" => Some(Weekday::Wednesday),
-            "thu" => Some(Weekday::Thursday),
-            "fri" => Some(Weekday::Friday),
-            "sat" => Some(Weekday::Saturday),
-            "sun" => Some(Weekday::Sunday),
-            _ => None,
-        }
-    }
-
-    /// Parse from BCP 47 `-u-fw-` extension value (e.g., "mon", "sun").
-    pub fn from_bcp47_fw(s: &str) -> Option<Self> {
-        Self::from_icu_str(s)
-    }
-
-    /// Convert from ICU4X `icu::calendar::types::Weekday` to our `Weekday`.
-    pub fn from_icu_weekday(iwd: icu::calendar::types::Weekday) -> Self {
-        match iwd {
-            icu::calendar::types::Weekday::Monday    => Self::Monday,
-            icu::calendar::types::Weekday::Tuesday   => Self::Tuesday,
-            icu::calendar::types::Weekday::Wednesday => Self::Wednesday,
-            icu::calendar::types::Weekday::Thursday  => Self::Thursday,
-            icu::calendar::types::Weekday::Friday    => Self::Friday,
-            icu::calendar::types::Weekday::Saturday  => Self::Saturday,
-            icu::calendar::types::Weekday::Sunday    => Self::Sunday,
-        }
-    }
-
-    /// Short (abbreviated) day-of-week label for display.
-    /// Canonical implementation is in `shared/date-time-types.md`. These convenience methods delegate to IcuProvider.
-    // ICU4X: Use DateSymbols API to access weekday names. The exact API depends on ICU4X version.
-    pub fn short_label(&self, provider: &dyn IcuProvider, locale: &Locale) -> String {
-        provider.weekday_short_label(*self, locale)
-    }
-
-    /// Full day-of-week label for display.
-    /// Canonical implementation is in `shared/date-time-types.md`. These convenience methods delegate to IcuProvider.
-    // ICU4X: Use DateSymbols API to access weekday names. The exact API depends on ICU4X version.
-    pub fn long_label(&self, provider: &dyn IcuProvider, locale: &Locale) -> String {
-        provider.weekday_long_label(*self, locale)
-    }
-
-    /// Convert to ICU4X `Weekday` for use with formatters.
-    fn to_icu_weekday(&self) -> icu::calendar::types::Weekday {
-        match self {
-            Weekday::Monday    => icu::calendar::types::Weekday::Monday,
-            Weekday::Tuesday   => icu::calendar::types::Weekday::Tuesday,
-            Weekday::Wednesday => icu::calendar::types::Weekday::Wednesday,
-            Weekday::Thursday  => icu::calendar::types::Weekday::Thursday,
-            Weekday::Friday    => icu::calendar::types::Weekday::Friday,
-            Weekday::Saturday  => icu::calendar::types::Weekday::Saturday,
-            Weekday::Sunday    => icu::calendar::types::Weekday::Sunday,
-        }
-    }
-
-    /// English abbreviated day name (private fallback helper).
-    fn english_short_label(&self) -> &'static str {
-        match self {
-            Weekday::Monday    => "Mon",
-            Weekday::Tuesday   => "Tue",
-            Weekday::Wednesday => "Wed",
-            Weekday::Thursday  => "Thu",
-            Weekday::Friday    => "Fri",
-            Weekday::Saturday  => "Sat",
-            Weekday::Sunday    => "Sun",
-        }
-    }
-
-    /// English full day name (private fallback helper).
-    fn english_long_label(&self) -> &'static str {
-        match self {
-            Weekday::Monday    => "Monday",
-            Weekday::Tuesday   => "Tuesday",
-            Weekday::Wednesday => "Wednesday",
-            Weekday::Thursday  => "Thursday",
-            Weekday::Friday    => "Friday",
-            Weekday::Saturday  => "Saturday",
-            Weekday::Sunday    => "Sunday",
-        }
-    }
+#[cfg(feature = "std")]
+pub struct ZonedDateTime {
+    inner: temporal_rs::ZonedDateTime,
+    calendar: CalendarSystem,
+    time_zone: TimeZoneId,
 }
 ```
 
-#### 5.1.1 Typed Calendar Views
+This representation establishes three invariants:
 
-The public `shared::CalendarDate` remains the dynamic boundary type, but
-calendar-specific methods SHOULD be exposed through a typed wrapper:
+- all cross-calendar comparison is performed through canonical ISO slots
+- the projected calendar fields always match the canonical ISO date exactly
+- pure calendar math does not require `IcuProvider`
+
+The public constructor and arithmetic surface is therefore method-oriented and pure:
 
 ```rust
-use crate::{
-    CalendarDate, CalendarKind, CalendarTypeError, DirectDayArithmetic,
-    DirectWeekdayComputation, Gregorian, IcuProvider, TypedCalendarDate,
-};
+impl CalendarDate {
+    pub fn new(calendar: CalendarSystem, fields: CalendarDateFields) -> Result<Self, CalendarError>;
+    pub fn new_iso8601(year: i32, month: u8, day: u8) -> Result<Self, CalendarError>;
+    pub fn new_gregorian(year: i32, month: u8, day: u8) -> Result<Self, CalendarError>;
+
+    pub fn add(&self, duration: DateDuration) -> Result<Self, CalendarError>;
+    pub fn subtract(&self, duration: DateDuration) -> Result<Self, CalendarError>;
+    pub fn set(&self, fields: &CalendarDateFields) -> Result<Self, CalendarError>;
+    pub fn cycle(&self, field: DateField, amount: i32, options: CycleOptions) -> Result<Self, CalendarError>;
+    pub fn to_calendar(&self, target: CalendarSystem) -> Result<Self, CalendarConversionError>;
+    pub fn compare(&self, other: &Self) -> core::cmp::Ordering;
+    pub fn to_iso8601(&self) -> String;
+    pub fn weekday(&self) -> Weekday;
+    #[cfg(feature = "std")]
+    pub fn to_system_time(&self, time_zone: &TimeZoneId) -> Result<std::time::SystemTime, CalendarError>;
+}
+
+impl Time {
+    pub fn new(hour: u8, minute: u8, second: u8, millisecond: u16) -> Result<Self, DateError>;
+    pub fn to_iso8601(&self) -> String;
+    pub fn add(&self, duration: TimeDuration) -> Result<Self, DateError>;
+    pub fn subtract(&self, duration: TimeDuration) -> Result<Self, DateError>;
+    pub fn set(&self, fields: TimeFields) -> Result<Self, DateError>;
+    pub fn cycle(&self, field: TimeField, amount: i64, options: CycleTimeOptions) -> Result<Self, DateError>;
+}
+
+impl CalendarDateTime {
+    pub fn new(date: CalendarDate, time: Time) -> Self;
+    pub fn add(&self, duration: DateTimeDuration) -> Result<Self, CalendarError>;
+    pub fn subtract(&self, duration: DateTimeDuration) -> Result<Self, CalendarError>;
+    pub fn set(&self, date_fields: &CalendarDateFields, time_fields: TimeFields) -> Result<Self, CalendarError>;
+    pub fn cycle(&self, field: DateTimeField, amount: i64, options: CycleTimeOptions) -> Result<Self, CalendarError>;
+    pub fn to_calendar(&self, target: CalendarSystem) -> Result<Self, CalendarConversionError>;
+    #[cfg(feature = "std")]
+    pub fn to_system_time(
+        &self,
+        time_zone: &TimeZoneId,
+        disambiguation: Disambiguation,
+    ) -> Result<std::time::SystemTime, CalendarError>;
+}
+
+pub fn to_calendar_date_time(date: &CalendarDate, time: Option<Time>) -> CalendarDateTime;
+
+#[cfg(feature = "std")]
+pub fn to_zoned(
+    date: &CalendarDate,
+    time_zone: &TimeZoneId,
+) -> Result<ZonedDateTime, CalendarError>;
+
+#[cfg(feature = "std")]
+pub fn to_zoned_date_time(
+    date_time: &CalendarDateTime,
+    time_zone: &TimeZoneId,
+    disambiguation: Disambiguation,
+) -> Result<ZonedDateTime, CalendarError>;
+
+#[cfg(feature = "std")]
+impl ZonedDateTime {
+    pub fn to_system_time(&self) -> Result<std::time::SystemTime, CalendarError>;
+}
+```
+
+`CalendarDate::new(...)` is strict: if the caller supplies `era`, `year`, `month`, `day`, or
+`month_code`, the resolved projected date must match those fields exactly. This is how era-boundary
+validation, leap-month validation, and `Gregorian` vs `Iso8601` behavior are enforced.
+
+`CalendarDate::constrain()` and `balance()` remain part of the public contract, but because the
+public types are already opaque validated values they are normalization-preserving operations in the
+current implementation rather than raw-field repair helpers.
+
+The conversion convenience layer is intentionally thin:
+
+- `to_calendar_date_time(...)` combines a `CalendarDate` with an explicit time or defaults to midnight.
+- `to_zoned(...)` is the shorthand midnight conversion from a date into a zoned value.
+- `to_zoned_date_time(...)` is the explicit local-to-zoned conversion entry point and applies the requested `Disambiguation`.
+- `CalendarDate::to_system_time(...)` converts the date at local midnight in the supplied zone.
+- `CalendarDateTime::to_system_time(...)` converts the local date-time in the supplied zone and applies the requested gap/overlap policy.
+- `ZonedDateTime::to_system_time()` preserves the represented instant exactly without exposing Temporal internals.
+
+#### 5.1.1 Typed Calendar Views
+
+Typed wrappers are still supported for statically-known calendar systems.
+
+```rust
+pub trait CalendarKind {
+    const SYSTEM: CalendarSystem;
+}
+
+pub trait DirectDayArithmetic: CalendarKind {}
+pub trait DirectWeekdayComputation: CalendarKind {}
+
+pub struct TypedCalendarDate<C: CalendarKind> { /* private */ }
 
 impl CalendarDate {
     pub fn typed<C: CalendarKind>(&self) -> Result<TypedCalendarDate<C>, CalendarTypeError>;
     pub fn into_typed<C: CalendarKind>(self) -> Result<TypedCalendarDate<C>, CalendarTypeError>;
-    pub fn to_calendar_type<C: CalendarKind>(&self, provider: &dyn IcuProvider) -> TypedCalendarDate<C>;
+    pub fn to_calendar_type<C: CalendarKind>(&self) -> Result<TypedCalendarDate<C>, CalendarConversionError>;
 }
 
 impl<C: CalendarKind> TypedCalendarDate<C> {
     pub fn from_raw(raw: CalendarDate) -> Result<Self, CalendarTypeError>;
-    pub fn add_months(&self, provider: &dyn IcuProvider, n: i32) -> Option<Self>;
-    pub fn add_days_with_provider(&self, provider: &dyn IcuProvider, n: i32) -> Self;
-    pub fn to_calendar<T: CalendarKind>(&self, provider: &dyn IcuProvider) -> TypedCalendarDate<T>;
+    pub fn as_raw(&self) -> &CalendarDate;
+    pub fn into_raw(self) -> CalendarDate;
+    pub fn add_months(&self, month_delta: i32) -> Result<Self, CalendarError>;
+    pub fn to_calendar<T: CalendarKind>(&self) -> Result<TypedCalendarDate<T>, CalendarConversionError>;
 }
 
 impl<C: DirectDayArithmetic> TypedCalendarDate<C> {
-    pub fn add_days(&self, n: i32) -> Option<Self>;
-}
-
-impl<C: DirectWeekdayComputation> TypedCalendarDate<C> {
-    pub fn weekday(&self) -> Weekday;
-}
-
-impl TypedCalendarDate<Gregorian> {
-    pub fn new(year: i32, month: NonZero<u8>, day: NonZero<u8>) -> Self;
+    pub fn add_days(&self, day_delta: i32) -> Result<Self, CalendarError>;
 }
 ```
 
-This is the preferred surface for calendar-specific behavior:
-
-- `TypedCalendarDate<Gregorian>` exposes `weekday()` and direct `add_days()`,
-  but preserves the underlying `Option` result at supported date bounds.
-- Other typed calendars do not expose those methods unless they implement the
-  relevant capability traits.
-- Dynamic `CalendarDate::weekday()` and `CalendarDate::add_days()` remain
-  compatibility shims over the same Gregorian-only behavior, but new code should
-  prefer the typed view.
+Typed views are an ergonomics layer over the same canonical ISO-backed representation. They do not
+introduce a second calendar engine.
 
 ### 5.2 Calendar Systems
 
-> `CalendarSystem` — defined in `shared/date-time-types.md`
+`CalendarSystem` is the canonical runtime calendar identifier and now distinguishes `Iso8601` from
+`Gregorian`.
 
-The following extension methods are provided by `ars-i18n` on the canonical `CalendarSystem` type:
+```rust
+pub enum CalendarSystem {
+    Iso8601,
+    Gregorian,
+    Buddhist,
+    Japanese,
+    Hebrew,
+    IslamicCivil,
+    IslamicUmmAlQura,
+    Persian,
+    Indian,
+    Chinese,
+    Coptic,
+    Dangi,
+    Ethiopic,
+    EthiopicAmeteAlem,
+    Roc,
+}
+```
+
+Key semantic rules:
+
+- `Iso8601` is era-less and represents ISO calendar semantics only.
+- `Gregorian` is distinct and publicly exposes `bc` / `ad` eras.
+- named-era calendars resolve omitted eras through `CalendarSystem::default_era()`.
+- `Chinese` and `Dangi` use month codes instead of public eras.
+- the public era lists are normalized to ars-i18n's stable codes, even if the underlying engine or
+  browser returns different internal identifiers.
+
+The calendar-level query surface is pure and operates on validated `CalendarDate` values:
 
 ```rust
 impl CalendarSystem {
-    /// Get from BCP 47 calendar extension value.
-    ///
-    /// Public variants are mapped from their CLDR/BCP-47 `ca` extension keys,
-    /// with deprecated aliases normalized onto the supported surface.
-    /// Reference: Unicode LDML §3.6 "Calendar Algorithm" and IANA BCP-47
-    /// `u-ca` subtag registry.
-    pub fn from_bcp47(s: &str) -> Option<Self> {
-        match s {
-            "gregory" | "gregorian" => Some(Self::Gregorian),
-            "buddhist" => Some(Self::Buddhist),
-            "japanese" | "japanext" => Some(Self::Japanese),
-            "hebrew" => Some(Self::Hebrew),
-            "islamic" => Some(Self::Islamic),
-            "islamic-civil" => Some(Self::IslamicCivil),
-            "islamic-umalqura" => Some(Self::IslamicUmmAlQura),
-            "persian" => Some(Self::Persian),
-            "indian" => Some(Self::Indian),
-            "chinese" => Some(Self::Chinese),
-            "coptic" => Some(Self::Coptic),
-            "dangi" => Some(Self::Dangi),
-            "ethiopic" => Some(Self::Ethiopic),
-            "ethioaa" => Some(Self::EthiopicAmeteAlem),
-            "roc" => Some(Self::Roc),
-            _ => None,
-        }
-    }
+    pub fn from_bcp47(identifier: &str) -> Option<Self>;
+    pub const fn to_bcp47_value(self) -> &'static str;
+    pub fn from_locale(locale: &Locale) -> Self;
+    pub const fn to_icu_kind(self) -> icu::calendar::AnyCalendarKind;
+    pub const fn has_custom_eras(self) -> bool;
+    pub const fn japanese_eras() -> &'static [JapaneseEra];
+    pub const fn supported_calendars() -> &'static [CalendarMetadata];
 
-    /// Get the calendar from a locale's extension.
-    pub fn from_locale(locale: &Locale) -> Self {
-        locale.calendar_extension()
-            .and_then(Self::from_bcp47)
-            .unwrap_or(Self::Gregorian)
-    }
-
-    /// ICU4X AnyCalendarKind representation.
-    ///
-    /// Maps each `CalendarSystem` variant to the corresponding ICU4X
-    /// `AnyCalendarKind` discriminant. This is used when constructing
-    /// an `icu::calendar::AnyCalendar` for date arithmetic and formatting.
-    pub fn to_icu_kind(&self) -> icu::calendar::AnyCalendarKind {
-        use icu::calendar::AnyCalendarKind::*;
-        match self {
-            Self::Gregorian => Gregorian,
-            Self::Buddhist => Buddhist,
-            Self::Japanese => Japanese,
-            Self::Hebrew => Hebrew,
-            Self::Islamic => HijriSimulatedMecca,
-            Self::IslamicCivil => HijriTabularTypeIIFriday,
-            Self::IslamicUmmAlQura => HijriUmmAlQura,
-            Self::Persian => Persian,
-            Self::Indian => Indian,
-            Self::Chinese => Chinese,
-            Self::Coptic => Coptic,
-            Self::Dangi => Dangi,
-            Self::Ethiopic => Ethiopian,
-            Self::EthiopicAmeteAlem => EthiopianAmeteAlem,
-            Self::Roc => Roc,
-        }
-    }
-
-    /// Whether this calendar uses an era system other than AD/BC.
-    pub fn has_custom_eras(&self) -> bool {
-        matches!(self,
-            Self::Japanese
-            | Self::Ethiopic | Self::EthiopicAmeteAlem
-            | Self::Coptic
-            | Self::Hebrew | Self::Persian
-            | Self::Islamic | Self::IslamicCivil | Self::IslamicUmmAlQura
-            | Self::Roc  // ROC uses the Minguo era
-            // Note: Chinese/Dangi are intentionally excluded — they use sexagenary
-            // cycles rather than named eras in the traditional sense.
-            // Note: Buddhist and Indian use simple epoch offsets (BE/Saka), not
-            // named eras like Japanese. They are excluded to avoid generating
-            // spurious Era structs in CalendarDate when the year already encodes
-            // the era offset.
-        )
-    }
-
-    /// Japanese era names.
-    pub fn japanese_eras() -> &'static [JapaneseEra] {
-        &[
-            JapaneseEra { name: "Meiji",  start_year: 1868 },
-            JapaneseEra { name: "Taisho", start_year: 1912 },
-            JapaneseEra { name: "Showa",  start_year: 1926 },
-            JapaneseEra { name: "Heisei", start_year: 1989 },
-            JapaneseEra { name: "Reiwa",  start_year: 2019 },
-        ]
-    }
+    pub fn eras(self) -> Vec<Era>;
+    pub fn default_era(self) -> Option<Era>;
+    pub fn months_in_year(self, date: &CalendarDate) -> u8;
+    pub fn days_in_month(self, date: &CalendarDate) -> u8;
+    pub fn years_in_era(self, date: &CalendarDate) -> Option<i32>;
+    pub fn minimum_month_in_year(self, date: &CalendarDate) -> u8;
+    pub fn minimum_day_in_month(self, date: &CalendarDate) -> u8;
 }
 ```
 
 #### 5.2.1 Calendar System Constraints
 
-The `CalendarSystem` enum MUST provide a `supported_calendars()` method returning metadata for each supported calendar:
+The supported public calendar surface is summarized below.
 
-```rust
-impl CalendarSystem {
-    /// Returns the list of supported calendar systems with their constraints.
-    pub fn supported_calendars() -> &'static [CalendarMetadata] { /* ... */ }
-}
+| Calendar | Public eras | Month-code support | Notes |
+| --- | --- | --- | --- |
+| `Iso8601` | none | no | canonical ISO slots |
+| `Gregorian` | `bc`, `ad` | no | distinct from `Iso8601` |
+| `Buddhist` | `be` | no | Gregorian-aligned month/day structure |
+| `Japanese` | modern imperial eras | no | bounded modern era list |
+| `Hebrew` | `am` | yes | leap months require `MonthCode` correctness |
+| `IslamicCivil` | `ah` | no | tabular civil calendar |
+| `IslamicUmmAlQura` | `ah` | no | Umm al-Qura |
+| `Persian` | `ap` | no | Solar Hijri |
+| `Indian` | `shaka` | no | Indian national calendar |
+| `Chinese` | none | yes | leap-month calendar |
+| `Coptic` | `bce`, `ce` | no | inverse-era behavior |
+| `Dangi` | none | yes | leap-month calendar |
+| `Ethiopic` | `aa`, `am` | no | ordered-era rollover |
+| `EthiopicAmeteAlem` | `aa` | no | single-era public view |
+| `Roc` | `broc`, `roc` | no | inverse-era rollover |
 
-pub struct CalendarMetadata {
-    pub system: CalendarSystem,
-    pub month_range: RangeInclusive<u8>,    // e.g., 1..=12 for Gregorian, 1..=13 for Hebrew (leap)
-    pub has_leap_months: bool,
-    pub era_required: bool,
-    pub typical_year_lengths: &'static [u16], // e.g., [365, 366] for Gregorian
-}
-```
+The invariants enforced by `CalendarDate::new(...)` are:
 
-| Calendar  | Months | Leap Rule                                          | Era Required | Notes                                                  |
-| --------- | ------ | -------------------------------------------------- | ------------ | ------------------------------------------------------ |
-| Gregorian | 1–12   | Feb 29 if divisible by 4 (not 100, except 400)     | No           | Default calendar                                       |
-| Islamic   | 1–12   | 30-year cycle: years 2,5,7,10,13,16,18,21,24,26,29 | No           | Month length 29–30 days; 354/355-day year              |
-| Hebrew    | 1–13   | 19-year Metonic cycle: years 3,6,8,11,14,17,19     | No           | Month 13 (Adar II) only in leap years                  |
-| Japanese  | 1–12   | Same as Gregorian                                  | **Yes**      | Era changes on emperor accession (Reiwa, Heisei, etc.) |
-| Buddhist  | 1–12   | Same as Gregorian                                  | No           | Year = Gregorian + 543 (BE)                            |
-| ROC       | 1–12   | Same as Gregorian                                  | No           | Year = Gregorian − 1911 (Minguo)                       |
-
-Components receiving a `CalendarSystem` MUST validate month/day values against the constraints above. For example, setting month=13 on a non-leap Hebrew year MUST return a validation error.
-
-```rust
-pub struct JapaneseEra {
-    pub name: &'static str,
-    pub start_year: u32,
-}
-
-impl JapaneseEra {
-    /// Returns the era name in the appropriate script for the locale.
-    /// Japanese locale returns native script (e.g., "令和"),
-    /// others return romanized form (e.g., "Reiwa").
-    pub fn localized_name(&self, locale: &Locale) -> String {
-        if locale.language() == "ja" {
-            self.native_name().to_string()
-        } else {
-            self.romanized_name().to_string()
-        }
-    }
-
-    /// Romanized era name (used for non-Japanese locales).
-    pub fn romanized_name(&self) -> &str {
-        self.name
-    }
-
-    /// Native Japanese script era name.
-    fn native_name(&self) -> &str {
-        match self.name {
-            "Reiwa"  => "令和",
-            "Heisei" => "平成",
-            "Showa"  => "昭和",
-            "Taisho" => "大正",
-            "Meiji"  => "明治",
-            other    => other, // Fallback to romanized for unknown eras
-        }
-    }
-}
-```
+- the projected date must exactly match any supplied era, year, month, day, and month code
+- omitted eras are resolved through the calendar's default public era
+- `MonthCode` is authoritative for Hebrew, Chinese, and Dangi leap-month construction
+- cross-calendar conversions preserve the canonical ISO date and re-project display fields in the
+  target calendar
+- `CalendarSystem::from_bcp47("islamic")` resolves to `IslamicUmmAlQura` as a legacy input alias
 
 ### 5.3 Week Information
 
+Week preferences are locale-driven metadata, not part of the pure calendar engine. They remain in
+`ars-i18n` because component layout and keyboard behavior need them even when the calendar engine is
+not ICU4X-driven.
+
 ```rust
-/// Week numbering information for a locale.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct WeekInfo {
-    /// First day of the week (Monday in ISO, Sunday in US).
     pub first_day: Weekday,
-    /// Minimum days in the first week of the year (ISO: 4, US: 1).
-    pub min_days_in_first_week: u8,
+    pub weekend_start: Weekday,
+    pub weekend_end: Weekday,
+    pub minimal_days_in_first_week: u8,
 }
 
 impl WeekInfo {
-    /// Get week info for a locale.
-    pub fn for_locale(locale: &Locale) -> Self {
-        // Look up min_days from the locale's region regardless of fw extension.
-        // The fw extension only overrides first_day, not min_days_in_first_week.
-        let region = locale.region().unwrap_or("");
-        let min_days = match region {
-            "US" | "CA" | "MX" | "AU" | "JP" | "CN" | "TW" | "HK" | "KR" | "SG"
-            | "AF" | "IR" | "SA" | "AE" | "EG" | "DZ" | "MA" | "TN" | "LY" => 1,
-            _ => 4, // ISO 8601 default
-        };
-
-        // Check explicit fw extension — overrides ONLY first_day.
-        if let Some(fw) = locale.first_day_of_week_extension() {
-            return Self { first_day: fw, min_days_in_first_week: min_days };
-        }
-
-        // Then infer from region
-        match region {
-            "US" | "CA" | "MX" | "AU" | "JP" | "CN" | "TW" | "HK" | "KR" | "SG" => {
-                Self { first_day: Weekday::Sunday, min_days_in_first_week: 1 }
-            }
-            "AF" | "IR" | "SA" | "AE" | "EG" | "DZ" | "MA" | "TN" | "LY" => {
-                Self { first_day: Weekday::Saturday, min_days_in_first_week: 1 }
-            }
-            _ => Self { first_day: Weekday::Monday, min_days_in_first_week: 4 }, // ISO 8601
-        }
-    }
-
-    /// Ordered weekdays starting from first_day.
-    pub fn ordered_weekdays(&self) -> [Weekday; 7] {
-        let all = [
-            Weekday::Sunday, Weekday::Monday, Weekday::Tuesday,
-            Weekday::Wednesday, Weekday::Thursday, Weekday::Friday, Weekday::Saturday,
-        ];
-        // Monday (index 1) is the ISO 8601 default. The lookup can only fail if
-        // self.first_day is somehow not in the Weekday enum, which is impossible —
-        // but we use a safe fallback rather than panicking.
-        let start = all.iter().position(|&w| w == self.first_day).unwrap_or(1);
-        let mut result = [Weekday::Monday; 7];
-        for i in 0..7 {
-            result[i] = all[(start + i) % 7];
-        }
-        result
-    }
+    pub fn for_locale(locale: &Locale) -> Self;
 }
 ```
 
-> **First Day of Week in Calendar Layout:** Calendar grid rendering MUST start on the locale's first day of week as determined by `WeekInfo::for_locale()`. US calendars (`en-US`) start on Sunday; most European locales start on Monday; Arabic locales (`ar-SA`) start on Saturday. The `ordered_weekdays()` method provides the correctly-ordered weekday array for rendering the calendar header row. Cross-reference: see `components/date-time/calendar.md` for grid rendering details. Test: `ar-SA` → first column is Saturday; `en-US` → first column is Sunday; `de-DE` → first column is Monday.
+`WeekInfo::for_locale(...)` is the fallback contract. Runtime providers may return richer locale
+week data, but the public type is fixed to these four fields.
+
+Pure calendar queries use the new `calendar::queries` helpers, while locale-sensitive week helpers
+still accept `&dyn IcuProvider`:
+
+```rust
+pub fn start_of_week<T: DateValue>(date: &T, locale: &Locale, provider: &dyn IcuProvider) -> T;
+pub fn end_of_week<T: DateValue>(date: &T, locale: &Locale, provider: &dyn IcuProvider) -> T;
+pub fn get_day_of_week(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvider) -> u8;
+pub fn get_weeks_in_month(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvider) -> u8;
+pub fn is_weekend(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvider) -> bool;
+pub fn is_weekday(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvider) -> bool;
+```
+
+The locale-sensitive query contract is:
+
+- `is_same_*` compares year/month/day display fields in the first argument's calendar and era after converting the second argument into that calendar.
+- `is_equal_*` requires the same calendar and era and compares the exposed display fields directly.
+- `get_day_of_week(...)` returns `0..=6`, where `0` is the locale's first day of week.
+- a locale `u-fw-*` Unicode extension overrides the locale default first day for `start_of_week(...)`, `end_of_week(...)`, `get_day_of_week(...)`, and `get_weeks_in_month(...)`.
+- `is_weekend(...)` and `is_weekday(...)` use provider-backed locale weekend metadata instead of a fixed Saturday/Sunday rule.
+
+The shared parsing helpers also distinguish absolute timestamps from fully zoned strings:
+
+- `parse_absolute(input, time_zone)` parses an ISO 8601 absolute timestamp with `Z` or an explicit offset and projects the instant into the supplied display time zone.
+- `parse_absolute_to_local(input)` resolves the local time zone through `get_local_time_zone()` and delegates to `parse_absolute(...)`.
+- `parse_zoned_date_time(input)` remains the entry point for IXDTF-style strings that already include a bracketed IANA time-zone identifier.
 
 ### 5.4 DateFormatter
 
 ```rust
-use icu::datetime::{
-    DateTimeFormatter,
-    DateTimeFormatterPreferences,
-    fieldsets::{YMD, YMDE, T},
-};
-
-/// Length of the formatted date/time string.
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+/// Style-based date/time formatting shortcut.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum FormatLength {
-    Full,    // "Wednesday, March 15, 2024" — uses YMDE::long() (weekday + date)
-    Long,    // "March 15, 2024"
+    Full,
+    Long,
     #[default]
-    Medium,  // "Mar 15, 2024"
-    Short,   // "3/15/24"
+    Medium,
+    Short,
 }
 
-impl FormatLength {
-    /// Returns the ICU4X 2.x field set for date-only formatting.
-    /// `Full` uses `YMDE` (includes weekday); others use `YMD`.
-    fn to_icu_date_field_set(&self) -> YMD {
-        debug_assert!(!self.is_full(), "Full must use to_icu_full_date_field_set() instead");
-        match self {
-            // Full is handled separately via to_icu_full_date_field_set()
-            // because YMDE is a different type than YMD.
-            // Full is handled at the caller level; if reached here, fall back to Long.
-            Self::Full => YMD::long(),
-            Self::Long => YMD::long(),
-            Self::Medium => YMD::medium(),
-            Self::Short => YMD::short(),
-        }
-    }
-
-    /// Returns the YMDE field set for Full length (includes weekday).
-    fn to_icu_full_date_field_set(&self) -> YMDE {
-        YMDE::long()
-    }
-
-    fn is_full(&self) -> bool {
-        matches!(self, Self::Full)
-    }
-
-    /// Returns the ICU4X 2.x field set for time-only formatting.
-    /// ICU4X 2.x `T` fieldset uses precision-based constructors rather than
-    /// length-based ones: `T::hms()` (hour+minute+second) and `T::hm()` (hour+minute).
-    /// There are no `T::short()`/`T::medium()`/`T::long()`/`T::full()` methods.
-    fn to_icu_time_field_set(&self) -> T {
-        match self {
-            Self::Full | Self::Long => T::hms(),
-            Self::Medium | Self::Short => T::hm(),
-        }
-    }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextWidth {
+    Narrow,
+    Short,
+    Long,
 }
 
-/// Internal wrapper: Full uses YMDE (includes weekday), others use YMD.
-enum DateFormatterInner {
-    Ymd(DateTimeFormatter<YMD>),
-    Ymde(DateTimeFormatter<YMDE>),
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NumericWidth {
+    Numeric,
+    TwoDigit,
 }
 
-pub struct DateFormatter {
-    locale: Locale,
-    length: FormatLength,
-    inner: DateFormatterInner,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MonthFormat {
+    Numeric,
+    TwoDigit,
+    Narrow,
+    Short,
+    Long,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TimeZoneNameFormat {
+    Short,
+    Long,
+    ShortOffset,
+    LongOffset,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DateFormatterOptions {
+    pub date_style: Option<FormatLength>,
+    pub time_style: Option<FormatLength>,
+    pub weekday: Option<TextWidth>,
+    pub era: Option<TextWidth>,
+    pub year: Option<NumericWidth>,
+    pub month: Option<MonthFormat>,
+    pub day: Option<NumericWidth>,
+    pub hour: Option<NumericWidth>,
+    pub minute: Option<NumericWidth>,
+    pub second: Option<NumericWidth>,
+    pub hour_cycle: Option<HourCycle>,
+    pub time_zone: Option<TimeZoneId>,
+    pub time_zone_name: Option<TimeZoneNameFormat>,
+    pub calendar: Option<CalendarSystem>,
+    pub numbering_system: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DateFormatterPartKind {
+    Era,
+    Year,
+    Month,
+    Day,
+    Weekday,
+    DayPeriod,
+    Hour,
+    Minute,
+    Second,
+    FractionalSecond,
+    TimeZoneName,
+    Literal,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DateFormatterPart {
+    pub kind: DateFormatterPartKind,
+    pub value: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DateRangePartSource {
+    Shared,
+    Start,
+    End,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DateRangeFormatterPart {
+    pub kind: DateFormatterPartKind,
+    pub value: String,
+    pub source: DateRangePartSource,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedDateFormatterOptions {
+    pub locale: Locale,
+    pub calendar: CalendarSystem,
+    pub numbering_system: Option<String>,
+    pub time_zone: Option<TimeZoneId>,
+    pub hour_cycle: Option<HourCycle>,
+    pub date_style: Option<FormatLength>,
+    pub time_style: Option<FormatLength>,
+}
+
+pub struct DateFormatter { /* private fields */ }
 
 impl DateFormatter {
-    /// Create a new locale-aware date formatter.
-    ///
-    /// With the `compiled_data` feature (our default), `DateTimeFormatter::try_new()`
-    /// cannot fail — CLDR data is baked into the binary for all locales.
-    pub fn new(locale: &Locale, length: FormatLength) -> Self {
-        let prefs = DateTimeFormatterPreferences::from(&locale.0);
-        let inner = if length.is_full() {
-            // Full: include weekday via YMDE field set
-            DateFormatterInner::Ymde(
-                DateTimeFormatter::try_new(prefs, length.to_icu_full_date_field_set())
-                    .expect("compiled_data guarantees date formatter is available for all locales")
-            )
-        } else {
-            DateFormatterInner::Ymd(
-                DateTimeFormatter::try_new(prefs, length.to_icu_date_field_set())
-                    .expect("compiled_data guarantees date formatter is available for all locales")
-            )
-        };
+    pub fn new(locale: &Locale, length: FormatLength) -> Self;
+    pub fn new_with_options(locale: &Locale, options: DateFormatterOptions) -> Self;
 
-        Self { locale: locale.clone(), length, inner }
-    }
+    pub fn format(&self, date: &shared::CalendarDate) -> String;
+    pub fn format_date(&self, value: &shared::CalendarDate) -> String;
+    pub fn format_date_time(&self, value: &shared::CalendarDateTime) -> String;
+    pub fn format_time(&self, value: &shared::Time) -> String;
+    #[cfg(feature = "std")]
+    pub fn format_zoned(&self, value: &shared::ZonedDateTime) -> String;
+    pub fn format_date_range(&self, start: &shared::CalendarDate, end: &shared::CalendarDate) -> String;
+    pub fn format_date_time_range(
+        &self,
+        start: &shared::CalendarDateTime,
+        end: &shared::CalendarDateTime,
+    ) -> String;
+    #[cfg(feature = "std")]
+    pub fn format_zoned_range(
+        &self,
+        start: &shared::ZonedDateTime,
+        end: &shared::ZonedDateTime,
+    ) -> String;
 
-    pub fn format(&self, date: &shared::CalendarDate) -> String {
-        let internal = CalendarDate::try_from(date)
-            .expect("CalendarDate should be valid for formatting");
-        match &self.inner {
-            DateFormatterInner::Ymd(fmt) => fmt.format(&internal.inner).to_string(),
-            DateFormatterInner::Ymde(fmt) => fmt.format(&internal.inner).to_string(),
-        }
-    }
-}
+    pub fn format_date_to_parts(&self, value: &shared::CalendarDate) -> Vec<DateFormatterPart>;
+    pub fn format_date_time_to_parts(
+        &self,
+        value: &shared::CalendarDateTime,
+    ) -> Vec<DateFormatterPart>;
+    pub fn format_time_to_parts(&self, value: &shared::Time) -> Vec<DateFormatterPart>;
+    #[cfg(feature = "std")]
+    pub fn format_zoned_to_parts(
+        &self,
+        value: &shared::ZonedDateTime,
+    ) -> Vec<DateFormatterPart>;
+    pub fn format_date_range_to_parts(
+        &self,
+        start: &shared::CalendarDate,
+        end: &shared::CalendarDate,
+    ) -> Vec<DateRangeFormatterPart>;
+    pub fn format_date_time_range_to_parts(
+        &self,
+        start: &shared::CalendarDateTime,
+        end: &shared::CalendarDateTime,
+    ) -> Vec<DateRangeFormatterPart>;
+    #[cfg(feature = "std")]
+    pub fn format_zoned_range_to_parts(
+        &self,
+        start: &shared::ZonedDateTime,
+        end: &shared::ZonedDateTime,
+    ) -> Vec<DateRangeFormatterPart>;
 
-impl TryFrom<&shared::CalendarDate> for CalendarDate {
-    type Error = CalendarConversionError;
-
-    fn try_from(shared: &shared::CalendarDate) -> Result<Self, Self::Error> {
-        if let Some(era) = &shared.era {
-            return CalendarDate::from_calendar_with_era(
-                &era.code,
-                shared.year,
-                shared.month.get(),
-                shared.day.get(),
-                shared.calendar,
-            );
-        }
-        match shared.calendar {
-            CalendarSystem::Gregorian => {
-                CalendarDate::from_iso(shared.year, shared.month.get(), shared.day.get())
-                    .map_err(|_| CalendarConversionError::InvalidDate)
-            }
-            other => CalendarDate::from_calendar(shared.year, shared.month.get(), shared.day.get(), other),
-        }
-    }
+    pub fn resolved_options(&self) -> ResolvedDateFormatterOptions;
 }
 ```
+
+Normative behavior:
+
+- `DateFormatter::new(locale, length)` remains the compatibility constructor for simple date-only formatting. Existing callers continue to use the backend-native simple style path.
+- `new_with_options(...)` is the canonical public constructor for the richer formatter surface.
+- `format_*_to_parts(...)` returns a backend-stable normalized part model. ICU4X and browser `Intl` may tokenize internally in different ways, but the public `DateFormatterPartKind` contract is shared.
+- `format_*_range(...)` collapses identical leading and trailing segments into a single shared rendering and inserts a shared separator between differing middle segments.
+- `format_*_range_to_parts(...)` exposes the same collapsed rendering with explicit `Shared`, `Start`, and `End` range-part metadata.
+- `resolved_options()` reports the effective locale, calendar, numbering system, time zone, hour cycle, and style shortcuts after locale defaults and explicit overrides are applied.
+- The `calendar` option overrides the locale calendar for display purposes. Date-like inputs are projected into the resolved display calendar before field parts are produced.
+- The `hour_cycle` option overrides locale hour-cycle defaults when time formatting is in use.
+- `format_zoned(...)` and `format_zoned_to_parts(...)` are available only on `std` builds because `ZonedDateTime` is only available there.
+- `format_zoned_range(...)` and `format_zoned_range_to_parts(...)` are also `std`-only for the same reason.
+- `Short` and `Narrow` textual month and weekday widths are normalized backend-stable labels; callers must not rely on raw ICU4X and raw browser tokenization being byte-for-byte identical.
+- `TimeZoneNameFormat` exposes a stable time-zone label surface. Backends may normalize exact wording while preserving the chosen label category.
+- `queries::get_hours_in_day(date, time_zone)` measures the elapsed hours between the resolved start of `date` and the resolved start of the next calendar day in the supplied time zone, so DST transitions yield `23` or `25` instead of a fixed `24`.
 
 ### 5.5 RelativeTimeFormatter
 
@@ -3286,35 +3027,29 @@ impl StringCollator {
 ```toml
 # ars-i18n/Cargo.toml
 [dependencies]
-# Umbrella crate — re-exports icu::calendar, icu::collator, icu::datetime, etc.
-# All code uses icu::* paths; no need for individual icu_* crates in [dependencies].
-# The lightweight locale/provider portions may be used unconditionally because
-# `Locale` parsing and metadata access are part of the core contract on every target.
 icu = { version = "2.1", default-features = false }
 icu_experimental = { version = "0.4", default-features = false }
 fixed_decimal = { version = "0.7", default-features = false, features = ["ryu"] }
 tinystr = { version = "0.8", default-features = false }
+temporal_rs = { version = "0.2.3", default-features = false }
 
-# Infrastructure crates — not re-exported by the umbrella
 icu_provider = { version = "2.1", default-features = false }
 icu_datagen = { version = "2.1", optional = true }
 
 [features]
 default = ["std", "icu4x"]
-# `icu4x` enables formatter backends and compiled CLDR data. ICU4X 2.1's
-# experimental measurement, currency, and percent formatters are provided by
-# the direct `icu_experimental` dependency rather than the umbrella crate.
-# This is an intentional implementation detail of the current ICU4X release,
-# not a public ars-i18n API distinction.
-icu4x = ["icu/compiled_data", "icu_experimental/compiled_data"]
-web-intl = ["dep:wasm-bindgen", "dep:js-sys"]
+std = ["temporal_rs/sys-local"]
+icu4x = ["icu/compiled_data", "icu_experimental/compiled_data", "temporal_rs/compiled_data"]
+web-intl = ["dep:wasm-bindgen", "dep:js-sys", "temporal_rs/sys"]
 ```
 
-Calendar support is part of the unconditional public API. `ars-i18n` does not
-expose one Cargo feature per calendar. If a product needs to trim binary size,
-that optimization happens by selecting the backend (`icu4x` vs `web-intl`) and,
-for ICU4X, by using a custom data build rather than by removing public calendar
-types from the crate.
+The dependency split is now deliberate:
+
+- `temporal_rs` owns calendar math, parsing, conversion, and zoned date-time behavior
+- ICU4X owns locale data, formatting, week metadata, collation, segmentation, and related i18n services
+- `web-intl` remains the browser formatting backend, but public calendar arithmetic is no longer implemented by browser `Intl`
+
+Calendar support remains part of the unconditional public API. Cargo features select runtime backends and time-zone capabilities, not which public calendar identifiers exist.
 
 ### 9.2 Compiled Data for WASM
 
@@ -3508,1310 +3243,59 @@ impl CollationFormat for StringCollator {
 
 ### 9.5 Calendar/Locale Provider Trait (`IcuProvider`)
 
-Date-time components need locale-aware calendar data (weekday names, month names, day
-period labels, digit formatting, month counts, hour cycles, first-day-of-week). Rather
-than coupling directly to ICU4X types, all calendar/locale queries go through the
-`IcuProvider` trait. This gives us:
+`IcuProvider` is no longer the source of truth for calendar arithmetic.
 
-- **Testability** — unit tests use `StubIcuProvider` (English-only, zero dependencies).
-- **Flexibility** — production uses `Icu4xProvider` backed by CLDR data; WASM clients
-  could use a `WebIntlProvider` that delegates to the browser.
-- **Feature-flag gating** — the `icu4x` feature enables `Icu4xProvider`; without it,
-  only the stub is available.
+The authoritative calendar engine is the pure `CalendarSystem` / `CalendarDate` / `Time` /
+`CalendarDateTime` / `ZonedDateTime` surface backed by `temporal_rs`. `IcuProvider` now serves two
+roles:
+
+- locale-aware formatting and labels
+- provider-backed labels, formatting, and locale metadata layered over the pure calendar model
+
+The trait therefore remains public, and its calendar methods are adapters over the pure calendar
+model rather than the owner of calendar semantics.
 
 ```rust
-// ars-i18n/src/provider.rs
-
-use crate::{CalendarSystem, Era, HourCycle, Locale, Weekday};
-use crate::shared::CalendarDate;
-
-/// Trait abstracting ICU4X data provider for calendar/locale operations.
-///
-/// Production uses `Icu4xProvider` with CLDR data; tests use `StubIcuProvider`.
-/// All date-time components accept `&dyn IcuProvider` so they remain
-/// backend-agnostic.
 pub trait IcuProvider: Send + Sync + 'static {
-    /// Short weekday label (abbreviated format): "Mo", "Tu", "We", …
-    /// ICU4X: `DateSymbols::weekday_names(FieldLength::Abbreviated)`
     fn weekday_short_label(&self, weekday: Weekday, locale: &Locale) -> String;
-
-    /// Long weekday label (wide format): "Monday", "Tuesday", …
-    /// ICU4X: `DateSymbols::weekday_names(FieldLength::Wide)`
     fn weekday_long_label(&self, weekday: Weekday, locale: &Locale) -> String;
-
-    /// Full month name: "January", "Février", "مارس", …
-    /// ICU4X: `DateSymbols::month_names(FieldLength::Wide)`
     fn month_long_name(&self, month: u8, locale: &Locale) -> String;
-
-    /// AM/PM label for the locale: "AM"/"PM", "午前"/"午後", "ص"/"م", …
-    /// ICU4X 2.x: Extract by formatting known AM/PM times via `NoCalendarFormatter` with `T::hm()`.
     fn day_period_label(&self, is_pm: bool, locale: &Locale) -> String;
-
-    /// Map a typed character to a day-period value: 'a'→Some(false), 'p'→Some(true).
-    /// Locale-aware: Arabic ص→AM, م→PM; CJK input not character-based so returns None.
-    /// ICU4X 2.x: Reverse-lookup against first characters of formatted AM/PM labels.
     fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool>;
-
-    /// Format a numeric segment with locale-appropriate digits and zero-padding.
-    /// Arabic-Indic ٠١٢٣٤٥٦٧٨٩, Persian ۰۱۲۳۴۵۶۷۸۹, Bengali ০১২৩৪৫৬৭৮৯, etc.
-    /// ICU4X: `DecimalFormatter` with the locale's default numbering system.
     fn format_segment_digits(&self, value: u32, min_digits: NonZero<u8>, locale: &Locale) -> String;
 
-    /// Maximum number of months in a year for the given calendar and year.
-    /// Most calendars return 12; Hebrew leap years return 13; Chinese/Dangi may return 13.
-    /// Multi-era calendars may return a smaller value in the final year of an era
-    /// (e.g. Japanese Heisei year 31 ends in month 4).
-    /// ICU4X: constructs a date in the requested calendar/era and queries the
-    /// calendar's year shape.
     fn max_months_in_year(&self, calendar: &CalendarSystem, year: i32, era: Option<&str>) -> u8;
-
-    /// Days in a specific month for the given calendar, year, and month.
-    /// Multi-era calendars may return a smaller value in the final month of an era
-    /// (e.g. Japanese Heisei year 31 month 4 ends on day 30).
-    /// ICU4X: constructs a date in the requested calendar/era and queries the
-    /// calendar's month shape.
     fn days_in_month(&self, calendar: &CalendarSystem, year: i32, month: u8, era: Option<&str>) -> u8;
-
-    /// Default era when callers omit one for a multi-era calendar.
-    ///
-    /// This follows React Aria's `calendar.getEras().last()` behavior so
-    /// `CalendarDate::new(provider, CalendarSystem::Japanese, None, 6, 3, 15)`
-    /// resolves to Reiwa 6.
     fn default_era(&self, calendar: &CalendarSystem) -> Option<Era>;
-
-    /// Maximum year value in the date's current era, if the era is bounded.
-    ///
-    /// Example: Heisei has 31 years; Reiwa is currently open-ended.
     fn years_in_era(&self, date: &CalendarDate) -> Option<i32>;
-
-    /// Minimum month ordinal allowed in the date's current year.
-    ///
-    /// Example: Japanese Heisei year 1 starts in month 1; Reiwa year 1 starts in month 5.
     fn minimum_month_in_year(&self, date: &CalendarDate) -> u8;
-
-    /// Minimum day ordinal allowed in the date's current month.
-    ///
-    /// Example: Japanese Heisei year 1 month 1 starts on day 8.
     fn minimum_day_in_month(&self, date: &CalendarDate) -> u8;
 
-    /// Preferred hour cycle for the locale (H12, H23, etc.).
-    /// ICU4X: `HourCycle` preference from CLDR `timeData` via `icu::datetime`.
     fn hour_cycle(&self, locale: &Locale) -> HourCycle;
-
-    /// First day of the week for the locale (Monday, Saturday, Sunday, etc.).
-    /// ICU4X: `WeekInformation::first_weekday` field via CLDR `weekData`.
+    fn week_info(&self, locale: &Locale) -> WeekInfo;
     fn first_day_of_week(&self, locale: &Locale) -> Weekday;
-
-    /// Convert a `CalendarDate` from its current calendar system to the
-    /// `target` calendar system. Used by `CalendarDate::to_calendar()` for
-    /// non-Gregorian conversions.
-    /// ICU4X: `AnyCalendar::convert()` via `icu::calendar`.
     fn convert_date(&self, date: &CalendarDate, target: CalendarSystem) -> CalendarDate;
 }
 ```
 
-#### 9.5.1 Stub implementation (test/no-ICU4X builds)
+Current behavior requirements:
 
-The stub preserves the current English-only behavior. It is the default when the `icu4x`
-feature is disabled.
+- the pure calendar API must work without `IcuProvider`
+- default trait implementations for calendar methods delegate to the pure calendar API
+- backend providers may override those methods for performance or platform normalization, but must preserve the public `CalendarDate` contract
+- locale-week queries such as `start_of_week(...)`, `end_of_week(...)`, and `get_weeks_in_month(...)` still rely on provider week data
+- `week_info(...)` is the provider entry point for locale first-day-of-week and weekend metadata; `first_day_of_week(...)` is a convenience wrapper over it
+- formatting concerns such as month labels, weekday labels, digit shaping, day periods, and hour-cycle preferences remain provider responsibilities
 
-```rust
-// ars-i18n/src/provider/stub.rs
+#### 9.5.1 Stub implementation
 
-/// English-only stub provider for tests and no-ICU4X builds.
-///
-/// All methods return hardcoded English values, matching the behavior of the
-/// original non-ICU4X implementations. This is the default provider when the
-/// `icu4x` feature flag is not enabled.
-pub struct StubIcuProvider;
+`StubIcuProvider` remains the default no-backend provider. It supplies English fallback labels and delegates calendar compatibility methods to the pure shared calendar API.
 
-impl IcuProvider for StubIcuProvider {
-    fn weekday_short_label(&self, weekday: Weekday, _locale: &Locale) -> String {
-        match weekday {
-            Weekday::Sunday    => "Su",
-            Weekday::Monday    => "Mo",
-            Weekday::Tuesday   => "Tu",
-            Weekday::Wednesday => "We",
-            Weekday::Thursday  => "Th",
-            Weekday::Friday    => "Fr",
-            Weekday::Saturday  => "Sa",
-        }.to_string()
-    }
+#### 9.5.2 ICU4X provider
 
-    fn weekday_long_label(&self, weekday: Weekday, _locale: &Locale) -> String {
-        match weekday {
-            Weekday::Sunday    => "Sunday",
-            Weekday::Monday    => "Monday",
-            Weekday::Tuesday   => "Tuesday",
-            Weekday::Wednesday => "Wednesday",
-            Weekday::Thursday  => "Thursday",
-            Weekday::Friday    => "Friday",
-            Weekday::Saturday  => "Saturday",
-        }.to_string()
-    }
+`Icu4xProvider` is the production locale-data backend for native and compiled-data builds.
+It may use ICU4X data for formatting, week info, and locale preferences, but calendar conversion and validation must still resolve to the same public `CalendarDate` semantics as the pure engine.
 
-    fn month_long_name(&self, month: u8, _locale: &Locale) -> String {
-        match month {
-            1 => "January", 2 => "February", 3 => "March",
-            4 => "April", 5 => "May", 6 => "June",
-            7 => "July", 8 => "August", 9 => "September",
-            10 => "October", 11 => "November", 12 => "December",
-            _ => "Unknown",
-        }.to_string()
-    }
+#### 9.5.3 Web Intl provider
 
-    fn day_period_label(&self, is_pm: bool, _locale: &Locale) -> String {
-        if is_pm { "PM".to_string() } else { "AM".to_string() }
-    }
-
-    fn day_period_from_char(&self, ch: char, _locale: &Locale) -> Option<bool> {
-        match ch.to_ascii_lowercase() {
-            'a' => Some(false), // AM
-            'p' => Some(true),  // PM
-            _ => None,
-        }
-    }
-
-    fn format_segment_digits(&self, value: u32, min_digits: NonZero<u8>, _locale: &Locale) -> String {
-        match min_digits.get() {
-            4 => format!("{:04}", value),
-            2 => format!("{:02}", value),
-            _ => format!("{}", value),
-        }
-    }
-
-    fn max_months_in_year(&self, calendar: &CalendarSystem, year: i32, era: Option<&str>) -> u8 {
-        if let Some(months) = default_bounded_months_in_year(calendar, year, era) {
-            return months;
-        }
-        match calendar {
-            // No cfg gates — CalendarSystem enum is always fully available (runtime dispatch).
-            CalendarSystem::Gregorian => 12,
-            CalendarSystem::Hebrew => {
-                let cycle_year = year.rem_euclid(19);
-                // Metonic cycle leap years: 3, 6, 8, 11, 14, 17, 19
-                // Here 0 == 19 mod 19, i.e., year 19 of the cycle
-                if [3, 6, 8, 11, 14, 17, 0 /* = year 19 */].contains(&cycle_year) { 13 } else { 12 }
-            }
-            CalendarSystem::Ethiopic => 13,
-            CalendarSystem::Coptic => 13,
-            CalendarSystem::Chinese => 13,
-            CalendarSystem::Dangi => 13,
-            _ => 12,
-        }
-    }
-
-    fn days_in_month(&self, calendar: &CalendarSystem, year: i32, month: u8, era: Option<&str>) -> u8 {
-        if let Some(days) = default_bounded_days_in_month(calendar, year, month, era) {
-            return days;
-        }
-        use ars_core::date_time::gregorian_days_in_month;
-        gregorian_days_in_month(year, month)
-    }
-
-    fn default_era(&self, calendar: &CalendarSystem) -> Option<Era> {
-        default_era_for(calendar)
-    }
-
-    fn years_in_era(&self, date: &CalendarDate) -> Option<i32> {
-        default_years_in_era(date)
-    }
-
-    fn minimum_month_in_year(&self, date: &CalendarDate) -> u8 {
-        default_minimum_month_in_year(date)
-    }
-
-    fn minimum_day_in_month(&self, date: &CalendarDate) -> u8 {
-        default_minimum_day_in_month(date)
-    }
-
-    fn hour_cycle(&self, locale: &Locale) -> HourCycle {
-        // Return H12 for locales that conventionally use 12-hour time
-        // (English, Korean, etc.) to avoid silent test failures.
-        match locale.language() {
-            "en" | "ko" => HourCycle::H12,
-            _ => HourCycle::H23,
-        }
-    }
-
-    fn first_day_of_week(&self, _locale: &Locale) -> Weekday {
-        Weekday::Monday // ISO 8601 default
-    }
-
-    fn convert_date(&self, date: &CalendarDate, target: CalendarSystem) -> CalendarDate {
-        // Stub: only supports Gregorian identity conversion.
-        // Non-Gregorian conversion panics in tests — use Icu4xProvider for production.
-        panic!("StubIcuProvider does not support non-Gregorian calendar conversion; use Icu4xProvider")
-    }
-}
-```
-
-#### 9.5.2 Production implementation (`Icu4xProvider`)
-
-Enabled by the `icu4x` feature flag. Uses compiled CLDR data via ICU4X's
-`compiled_data` feature or `BlobDataProvider`.
-
-```rust
-// ars-i18n/src/provider/icu4x_impl.rs
-
-#[cfg(feature = "icu4x")]
-use {
-    icu::{
-        calendar::{
-            AnyCalendar,
-            Date,
-            types::MonthCode,
-            // NOTE: WeekInformation path at icu::calendar::week::WeekInformation
-            // verified against icu_calendar 2.1.1 docs.
-            week::{
-                WeekInformation,
-                WeekPreferences,
-            },
-        },
-        datetime::{
-            DateTimeFormatter,
-            DateTimeFormatterPreferences,
-            NoCalendarFormatter,
-            fieldsets::{YMD, T},
-        },
-        decimal::{
-            DecimalFormatter,
-            DecimalFormatterPreferences,
-        },
-        time::Time,
-    },
-    fixed_decimal::Decimal,
-    tinystr::TinyAsciiStr,
-};
-
-/// Production ICU4X-backed provider with full CLDR data.
-///
-/// Under the `compiled_data` feature the ICU4X data provider is a zero-sized
-/// type, so `Icu4xProvider` is itself a unit struct. Callers construct it as
-/// `Icu4xProvider` or via `Icu4xProvider::default()`; no explicit `new`
-/// constructor is needed. Dynamically loaded data (`BlobDataProvider` or
-/// similar) would add fields and bring back an explicit constructor.
-#[cfg(feature = "icu4x")]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Icu4xProvider;
-
-#[cfg(feature = "icu4x")]
-impl Icu4xProvider {
-    fn english_month_name_fallback(month: u8) -> &'static str {
-        match month {
-            1 => "January", 2 => "February", 3 => "March",
-            4 => "April", 5 => "May", 6 => "June",
-            7 => "July", 8 => "August", 9 => "September",
-            10 => "October", 11 => "November", 12 => "December",
-            _ => "Unknown",
-        }
-    }
-
-    /// Map Weekday to January 2024 day-of-month for format-and-extract.
-    /// January 1, 2024 = Monday, January 7, 2024 = Sunday.
-    fn weekday_to_jan2024_day(weekday: Weekday) -> u8 {
-        match weekday {
-            Weekday::Monday    => 1,
-            Weekday::Tuesday   => 2,
-            Weekday::Wednesday => 3,
-            Weekday::Thursday  => 4,
-            Weekday::Friday    => 5,
-            Weekday::Saturday  => 6,
-            Weekday::Sunday    => 7,
-        }
-    }
-}
-
-#[cfg(feature = "icu4x")]
-impl IcuProvider for Icu4xProvider {
-    fn weekday_short_label(&self, weekday: Weekday, locale: &Locale) -> String {
-        // Format-and-extract: use DateTimeFormatter with E (weekday-only) field set,
-        // format a date that falls on the target weekday, return the formatted string.
-        use icu::datetime::{DateTimeFormatter, fieldsets::E};
-        use icu::calendar::{Date, Iso};
-        let fmt = DateTimeFormatter::try_new(
-            DateTimeFormatterPreferences::from(&locale.0),
-            E::short(),
-        ).expect("weekday formatter should be constructible for any supported locale");
-        // January 1, 2024 = Monday; January 7, 2024 = Sunday.
-        let iso_day = Self::weekday_to_jan2024_day(weekday);
-        let date = Date::try_new_iso(2024, 1, iso_day)
-            .expect("2024-01-01..07 are valid ISO dates");
-        fmt.format(&date).to_string()
-    }
-
-    fn weekday_long_label(&self, weekday: Weekday, locale: &Locale) -> String {
-        use icu::datetime::{DateTimeFormatter, fieldsets::E};
-        use icu::calendar::{Date, Iso};
-        let fmt = DateTimeFormatter::try_new(
-            DateTimeFormatterPreferences::from(&locale.0),
-            E::long(),
-        ).expect("weekday formatter should be constructible for any supported locale");
-        let iso_day = Self::weekday_to_jan2024_day(weekday);
-        let date = Date::try_new_iso(2024, 1, iso_day)
-            .expect("2024-01-01..07 are valid ISO dates");
-        fmt.format(&date).to_string()
-    }
-
-    fn month_long_name(&self, month: u8, locale: &Locale) -> String {
-        use icu::datetime::{DateTimeFormatter, fieldsets::M};
-        use icu::calendar::{Date, Iso};
-        let fmt = DateTimeFormatter::try_new(
-            DateTimeFormatterPreferences::from(&locale.0),
-            M::long(),
-        ).expect("month formatter should be constructible for any supported locale");
-        // Day 1 of the target month in 2024 (non-leap year is fine; month name doesn't depend on day).
-        let date = Date::try_new_iso(2024, month, 1)
-            .expect("month 1-12, day 1 is always valid");
-        fmt.format(&date).to_string()
-    }
-
-    fn day_period_label(&self, is_pm: bool, locale: &Locale) -> String {
-        // Returns locale-appropriate AM/PM strings:
-        //   en: "AM"/"PM", ja: "午前"/"午後", ar: "ص"/"م", ko: "오전"/"오후"
-        // ICU4X 2.x does not expose `DayPeriodNames` as a standalone API.
-        // Extract day period labels by formatting known times and parsing the output.
-        //
-        // Force HourCycle::H12 so 24-hour-default locales (`de-DE`,
-        // `fr-FR`, `ja-JP`, …) still emit a day-period token. Without
-        // this override the formatted probe contains only digits and
-        // separators, `day_period_from_char` then has no usable label
-        // to compare against, and the stripped output is empty.
-        let mut prefs = DateTimeFormatterPreferences::from(&locale.0);
-        prefs.hour_cycle = Some(HourCycle::H12);
-        let formatter = NoCalendarFormatter::try_new(prefs, T::hm())
-            .expect("locale data available");
-        let test_time = if is_pm {
-            Time::try_new(13, 0, 0, 0).expect("13:00 is a valid time")
-        } else {
-            Time::try_new(1, 0, 0, 0).expect("01:00 is a valid time")
-        };
-        // Extract the day period string from the formatted output.
-        // This is a heuristic — production code should cache these results.
-        // NoCalendarFormatter formats Time values directly — no Date needed.
-        let formatted = formatter.format(&test_time).to_string();
-        // Strip numeric/separator characters to isolate the day period text.
-        // Limitation: This heuristic may fail for locales where AM/PM labels contain
-        // digits. Consider using ICU4X DateSymbols API for direct day period
-        // name access when available.
-        // Note: ICU4X 2.x does not expose a direct day-period names API.
-        // This heuristic is the specified approach and is functionally correct.
-        formatted.chars()
-            .filter(|c| !c.is_ascii_digit() && *c != ':')
-            .collect::<String>()
-            .trim()
-            .to_string()
-    }
-
-    fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
-        // Reverse-lookup against the first character of the locale's AM/PM strings.
-        let am_label = self.day_period_label(false, locale);
-        let pm_label = self.day_period_label(true, locale);
-        let am_char = am_label.chars().next()?;
-        let pm_char = pm_label.chars().next()?;
-        let ch_lower = ch.to_lowercase().next().expect("to_lowercase always yields at least one char");
-        if ch_lower == am_char.to_lowercase().next().expect("to_lowercase always yields at least one char") {
-            Some(false) // AM
-        } else if ch_lower == pm_char.to_lowercase().next().expect("to_lowercase always yields at least one char") {
-            Some(true) // PM
-        } else {
-            None
-        }
-    }
-
-    fn format_segment_digits(&self, value: u32, min_digits: NonZero<u8>, locale: &Locale) -> String {
-        // Automatically handles native digit substitution via locale numbering system:
-        //   ar → ٠١٢٣٤٥٦٧٨٩, fa → ۰۱۲۳۴۵۶۷۸۹, bn → ০১২৩৪৫৬৭৮৯, my → ၀၁၂၃၄၅၆၇၈၉
-        let fmt = DecimalFormatter::try_new(
-            DecimalFormatterPreferences::from(&locale.0),
-            Default::default(),
-        ).expect("locale data available");
-        let mut fd = Decimal::from(value as i64);
-        // `Decimal` is `Signed<UnsignedDecimal>`; `.absolute` access verified for fixed_decimal 0.7.x.
-        // `pad_start(n)` grows the integer part to at least `n` digits, filling
-        // leading positions with zeros (e.g. pad_start(2) → "05"), so we pass
-        // the requested minimum digit count directly.
-        fd.absolute.pad_start(min_digits.get() as i16);
-        fmt.format(&fd).to_string()
-    }
-
-    // Note: Verify exact ICU4X API — some versions provide months_in_year() on the calendar object rather than on a date.
-    fn max_months_in_year(&self, calendar: &CalendarSystem, year: i32, era: Option<&str>) -> u8 {
-        // Hebrew calendar has 13 months in leap years; Chinese/Dangi have
-        // intercalary months. ICU4X handles all of these correctly.
-        // Note: `year` is in the target calendar's numbering. We construct
-        // a date directly in that calendar to avoid ISO year mismatch.
-        let cal = AnyCalendar::new(calendar.to_icu_kind());
-        let month_code = MonthCode::new_normal(1).expect("valid month number");
-        match Date::try_new_from_codes(era, year, month_code, 1, cal) {
-            Ok(cal_date) => cal_date.months_in_year(),
-            Err(_) => 12, // Fallback for unresolvable year/era
-        }
-    }
-
-    fn days_in_month(&self, calendar: &CalendarSystem, year: i32, month: u8, era: Option<&str>) -> u8 {
-        let cal = AnyCalendar::new(calendar.to_icu_kind());
-        // Note: MonthCode::new_normal(month) works for standard months (M01-M12)
-        // but will produce wrong codes for leap months (e.g., Hebrew Adar II = M06L,
-        // Chinese intercalary months). Production code needs a helper like:
-        //   fn month_ordinal_to_code(cal: &CalendarSystem, year: i32, ordinal: u8) -> MonthCode
-        // that handles: Hebrew (month 6 in leap year → M06L), Chinese/Dangi
-        // (intercalary month N → M0{N}L), and standard calendars (M01-M12).
-        let month_code = MonthCode::new_normal(month).expect("valid month number");
-        let date = Date::try_new_from_codes(era, year, month_code, 1, cal);
-        match date {
-            Ok(d) => d.days_in_month(),
-            Err(_) => 30, // Fallback for invalid year/month/era
-        }
-    }
-
-    fn hour_cycle(&self, locale: &Locale) -> HourCycle {
-        // Query CLDR timeData for the locale's preferred hour cycle.
-        // ICU4X exposes hour cycle preferences through the locale's
-        // "hc" Unicode extension keyword or CLDR supplemental data.
-        let formatter = NoCalendarFormatter::try_new(
-            DateTimeFormatterPreferences::from(&locale.0),
-            T::hm(),
-        ).expect("locale data available");
-        // Determine hour cycle from the locale's CLDR preferences.
-        // Format a known PM time (13:00) and inspect the output.
-        // NoCalendarFormatter formats Time values directly — no Date needed.
-        let test_time = Time::try_new(13, 0, 0, 0).expect("13:00 is a valid time");
-        let formatted = formatter.format(&test_time).to_string();
-        // If formatted output contains non-digit, non-separator characters,
-        // it has a day period marker (AM/PM equivalent), indicating 12-hour format.
-        // NOTE: This heuristic may produce false positives for CJK locales where
-        // time separators or era markers contain non-ASCII characters. A more robust
-        // approach would compare the numeric hour portion (e.g., "1" vs "13") to
-        // distinguish 12h from 24h format. Acceptable for current use cases.
-        let has_day_period = formatted.chars().any(|c| !c.is_ascii_digit() && c != ':' && !c.is_ascii_whitespace());
-        if has_day_period { HourCycle::H12 } else { HourCycle::H23 }
-    }
-
-    fn first_day_of_week(&self, locale: &Locale) -> Weekday {
-        // Check explicit -u-fw- extension in locale tag first.
-        if let Some(weekday) = locale.first_day_of_week_extension() {
-            return weekday;
-        }
-        // Fall back to CLDR weekData for the locale's region.
-        let week_info = WeekInformation::try_new(WeekPreferences::from(&locale.0))
-            .expect("locale data available");
-        Weekday::from_icu_weekday(week_info.first_weekday)
-    }
-
-    fn convert_date(&self, date: &CalendarDate, target: CalendarSystem) -> CalendarDate {
-        // Returns shared::CalendarDate (public fields), not i18n::CalendarDate (AnyCalendarDate wrapper)
-        // Use ICU4X AnyCalendar to convert between arbitrary calendar systems.
-        let source_cal = AnyCalendar::new(date.calendar.to_icu_kind());
-        let target_cal = AnyCalendar::new(target.to_icu_kind());
-        // See days_in_month() note: MonthCode::new_normal() is wrong for leap months.
-        // Production code needs calendar-specific month-to-MonthCode mapping.
-        let month_code = MonthCode::new_normal(date.month.get()).expect("valid month number");
-        let era_str = date.era.as_ref().map(|e| e.code.as_str());
-        let icu_date = Date::try_new_from_codes(
-            era_str, date.year, month_code, date.day.get(), source_cal
-        ).expect("valid date codes");
-        let converted = icu_date.to_calendar(&target_cal);
-        let converted_era = converted.year().era();
-        CalendarDate {
-            calendar: target,
-            // display_name is set to the era code as a fallback;
-            // callers should resolve a localized display name via the IcuProvider.
-            // `YearInfo::era()` returns `Option<EraYear>` — None for calendars
-            // without eras (e.g., ISO/Gregorian) or cyclic calendars (Chinese).
-            era: converted_era.map(|e| Era {
-                code: e.era.as_str().to_string(),
-                display_name: e.era.as_str().to_string(),
-            }).filter(|_| target.has_custom_eras()),
-            year: converted.year().era_year_or_related_iso(),
-            month: NonZero::new(converted.month().month_number())
-                .expect("ICU4X month_number() is 1-based"),
-            day: NonZero::new(converted.day_of_month().0)
-                .expect("ICU4X day_of_month() is 1-based"),
-        }
-    }
-}
-```
-
-#### 9.5.3 Default provider resolution
-
-```rust
-// ars-i18n/src/provider.rs
-
-/// Returns the default IcuProvider for the current feature-flag configuration.
-///
-/// - With `icu4x` feature: returns `Icu4xProvider` (full CLDR data).
-/// - With `web-intl` feature on `wasm32`: returns `WebIntlProvider`
-///   (browser-backed).
-/// - Without either: returns `StubIcuProvider` (English-only).
-///
-/// The `web-intl` arm must be gated on `target_arch = "wasm32"` because
-/// `WebIntlProvider` wraps `Intl.*` APIs that only exist in a JavaScript
-/// runtime. Native `web-intl` builds keep `StubIcuProvider` so the crate
-/// still compiles in test and documentation contexts.
-pub fn default_provider() -> Box<dyn IcuProvider> {
-    #[cfg(feature = "icu4x")]
-    { Box::new(Icu4xProvider) }
-    #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
-    { Box::new(WebIntlProvider) }
-    #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
-    { Box::new(StubIcuProvider) }
-}
-```
-
-#### 9.5.4 Browser implementation (`WebIntlProvider`)
-
-The `web-intl` backend implements `IcuProvider` using browser `Intl` APIs for WASM client
-builds. This mirrors `Icu4xProvider` (§9.5.2) but delegates to browser-native ICU data,
-keeping browser-native formatting as the source of localized output. For
-non-Gregorian public `CalendarDate` values, the formatter and provider layers
-use a Rust-side calendar conversion bridge to resolve an absolute day before
-handing that day to `Intl.DateTimeFormat`. This bridge does not require
-`icu/compiled_data`.
-
-For the public formatter surface, `DateFormatter` and `RelativeTimeFormatter` remain the
-backend-neutral APIs. The implementation chooses ICU4X or browser `Intl` internally rather
-than exposing public `JsIntl*` wrapper types.
-
-`RelativeTimeFormatter` maps cleanly to `Intl.RelativeTimeFormat`. `DateFormatter` maps
-cleanly to `Intl.DateTimeFormat` by converting public `CalendarDate` values to their
-absolute Gregorian day first, then formatting that day under the locale's active
-calendar, including `u-ca-*` Unicode extension preferences.
-
-**Browser API mapping:**
-
-| IcuProvider method      | Browser API                                                     | Strategy     |
-| ----------------------- | --------------------------------------------------------------- | ------------ |
-| `weekday_short_label`   | `Intl.DateTimeFormat(locale, {weekday:'short'}).format(date)`   | Clean        |
-| `weekday_long_label`    | `Intl.DateTimeFormat(locale, {weekday:'long'}).format(date)`    | Clean        |
-| `month_long_name`       | `Intl.DateTimeFormat(locale, {month:'long'}).format(date)`      | Clean        |
-| `day_period_label`      | `Intl.DateTimeFormat` `formatToParts()` → `dayPeriod` part      | Clean        |
-| `day_period_from_char`  | Parse against cached AM/PM labels from `formatToParts()`        | Lookup       |
-| `format_segment_digits` | `Intl.NumberFormat(locale, {minimumIntegerDigits}).format()`    | Clean        |
-| `max_months_in_year`    | Lookup table keyed by calendar system, with date probing        | Lookup       |
-| `days_in_month`         | Date arithmetic (Gregorian direct; other calendars via probing) | Lookup       |
-| `hour_cycle`            | `Intl.DateTimeFormat(locale).resolvedOptions().hourCycle`       | Clean        |
-| `first_day_of_week`     | `Intl.Locale(locale).getWeekInfo().firstDay`                    | Clean+table  |
-| `convert_date`          | `Intl.DateTimeFormat` with target calendar → format+reparse     | Format+parse |
-
-**Strategy legend:**
-
-- **Clean** — Direct browser API call, 1:1 mapping to our return type.
-- **Lookup** — No single browser API; uses lookup tables or date arithmetic probing.
-- **Clean+table** — Browser API exists (`getWeekInfo()`) but is newer; falls back to a
-  static table for browsers that don't support it.
-- **Format+parse** — Formats a date with `Intl.DateTimeFormat` using the target calendar's
-  `calendar` option, then parses the formatted parts back into structured fields.
-
-```rust
-#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct WebIntlProvider;
-
-#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
-impl WebIntlProvider {
-    /// Format a known date to extract a weekday/month/period label from the browser.
-    /// Creates a DateTimeFormat with the specified options and formats a reference date.
-    fn format_date_part(locale: &Locale, date: &js_sys::Date, opts: &js_sys::Object) -> String {
-        use js_sys::{Array, Intl};
-        let locales = Array::of1(&wasm_bindgen::JsValue::from_str(&locale.to_bcp47()));
-        let fmt = Intl::DateTimeFormat::new(&locales, opts);
-        fmt.format(date).as_string().unwrap_or_default()
-    }
-
-    /// Build a JS Date for a known weekday. January 2024 starts on Monday:
-    /// Mon=1, Tue=2, ..., Sun=7 → day offset from Jan 1, 2024.
-    fn date_for_weekday(weekday: Weekday) -> js_sys::Date {
-        // January 1, 2024 is a Monday (ISO weekday 1).
-        let day = match weekday {
-            Weekday::Monday => 1,
-            Weekday::Tuesday => 2,
-            Weekday::Wednesday => 3,
-            Weekday::Thursday => 4,
-            Weekday::Friday => 5,
-            Weekday::Saturday => 6,
-            Weekday::Sunday => 7,
-        };
-        js_sys::Date::new_with_year_month_day(2024, 0, day) // month is 0-indexed
-    }
-
-    /// Build a JS Date for a known month (1-indexed).
-    fn date_for_month(month: u8) -> js_sys::Date {
-        js_sys::Date::new_with_year_month_day(2024, (month - 1) as i32, 15)
-    }
-
-    /// Probe the number of months in a year by incrementing months until the
-    /// year changes. Uses Intl.DateTimeFormat with the target calendar.
-    fn probe_max_months(locale: &Locale, calendar: &CalendarSystem, year: i32) -> u8 {
-        use js_sys::{Array, Object, Reflect, Intl};
-        use wasm_bindgen::JsValue;
-
-        let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
-        let opts = Object::new();
-        Reflect::set(&opts, &"calendar".into(),
-            &JsValue::from_str(&calendar.to_bcp47_value()))
-            .expect("Reflect::set on JS object");
-        Reflect::set(&opts, &"year".into(), &"numeric".into())
-            .expect("Reflect::set on JS object");
-        Reflect::set(&opts, &"month".into(), &"numeric".into())
-            .expect("Reflect::set on JS object");
-
-        let fmt = Intl::DateTimeFormat::new(&locales, &opts);
-
-        // Start from month 12 and probe upward for calendars with 13 months.
-        // Most calendars have 12; Hebrew leap years have 13.
-        for m in (12..=14).rev() {
-            let date = js_sys::Date::new_with_year_month_day(year, m - 1, 1);
-            let parts = fmt.format_to_parts(&date);
-            // Check if the formatted year still matches — if month overflows,
-            // the year will increment.
-            // (Implementation detail: parse year from parts and compare.)
-            let _ = parts; // sketch — full implementation extracts year from parts
-        }
-        12 // conservative default
-    }
-}
-
-#[cfg(feature = "web-intl")]
-impl IcuProvider for WebIntlProvider {
-    fn weekday_short_label(&self, weekday: Weekday, locale: &Locale) -> String {
-        use js_sys::{Object, Reflect};
-        use wasm_bindgen::JsValue;
-        let opts = Object::new();
-        Reflect::set(&opts, &"weekday".into(), &JsValue::from_str("short"))
-            .expect("Reflect::set on JS object");
-        Self::format_date_part(locale, &Self::date_for_weekday(weekday), &opts)
-    }
-
-    fn weekday_long_label(&self, weekday: Weekday, locale: &Locale) -> String {
-        use js_sys::{Object, Reflect};
-        use wasm_bindgen::JsValue;
-        let opts = Object::new();
-        Reflect::set(&opts, &"weekday".into(), &JsValue::from_str("long"))
-            .expect("Reflect::set on JS object");
-        Self::format_date_part(locale, &Self::date_for_weekday(weekday), &opts)
-    }
-
-    fn month_long_name(&self, month: u8, locale: &Locale) -> String {
-        use js_sys::{Object, Reflect};
-        use wasm_bindgen::JsValue;
-        let opts = Object::new();
-        Reflect::set(&opts, &"month".into(), &JsValue::from_str("long"))
-            .expect("Reflect::set on JS object");
-        Self::format_date_part(locale, &Self::date_for_month(month), &opts)
-    }
-
-    fn day_period_label(&self, is_pm: bool, locale: &Locale) -> String {
-        use js_sys::{Array, Object, Reflect, Intl};
-        use wasm_bindgen::JsValue;
-
-        let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
-        let opts = Object::new();
-        Reflect::set(&opts, &"hour".into(), &JsValue::from_str("numeric"))
-            .expect("Reflect::set on JS object");
-        Reflect::set(&opts, &"hour12".into(), &JsValue::TRUE)
-            .expect("Reflect::set on JS object");
-        let fmt = Intl::DateTimeFormat::new(&locales, &opts);
-
-        // 6:00 for AM, 18:00 for PM
-        let date = js_sys::Date::new_with_year_month_day_hr(2024, 0, 1, if is_pm { 18 } else { 6 });
-        let parts = fmt.format_to_parts(&date);
-
-        // Extract the dayPeriod part from formatToParts result.
-        for i in 0..parts.length() {
-            let part = parts.get(i);
-            let part_type = Reflect::get(&part, &"type".into())
-                .ok()
-                .and_then(|v| v.as_string());
-            if part_type.as_deref() == Some("dayPeriod") {
-                return Reflect::get(&part, &"value".into())
-                    .ok()
-                    .and_then(|v| v.as_string())
-                    .unwrap_or_default();
-            }
-        }
-        if is_pm { "PM".into() } else { "AM".into() } // fallback
-    }
-
-    fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
-        // Compare against the first character of AM/PM labels for this locale.
-        let am_label = self.day_period_label(false, locale);
-        let pm_label = self.day_period_label(true, locale);
-        let ch_lower = ch.to_lowercase().next().unwrap_or(ch);
-        if am_label.chars().next().map(|c| c.to_lowercase().next().unwrap_or(c)) == Some(ch_lower) {
-            Some(false)
-        } else if pm_label.chars().next().map(|c| c.to_lowercase().next().unwrap_or(c)) == Some(ch_lower) {
-            Some(true)
-        } else {
-            None
-        }
-    }
-
-    fn format_segment_digits(&self, value: u32, min_digits: core::num::NonZero<u8>, locale: &Locale) -> String {
-        use js_sys::{Array, Object, Reflect, Intl};
-        use wasm_bindgen::JsValue;
-
-        let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
-        let opts = Object::new();
-        Reflect::set(&opts, &"minimumIntegerDigits".into(),
-            &JsValue::from_f64(min_digits.get() as f64))
-            .expect("Reflect::set on JS object");
-        Reflect::set(&opts, &"useGrouping".into(), &JsValue::FALSE)
-            .expect("Reflect::set on JS object");
-        let fmt = Intl::NumberFormat::new(&locales, &opts);
-        fmt.format(value as f64).as_string().unwrap_or_default()
-    }
-
-    fn max_months_in_year(&self, calendar: &CalendarSystem, year: i32, _era: Option<&str>) -> u8 {
-        // Most calendars have 12 months. Hebrew leap years have 13.
-        // Use a static lookup table since the browser has no direct API.
-        match calendar {
-            CalendarSystem::Hebrew => {
-                // Hebrew leap years add Adar I (month 6).
-                // Leap years occur in years 3, 6, 8, 11, 14, 17, 19 of the 19-year cycle.
-                let year_in_cycle = ((year % 19) + 19) % 19;
-                if [0, 3, 6, 8, 11, 14, 17].contains(&year_in_cycle) { 13 } else { 12 }
-            }
-            _ => 12,
-        }
-    }
-
-    fn days_in_month(&self, calendar: &CalendarSystem, year: i32, month: u8, _era: Option<&str>) -> u8 {
-        match calendar {
-            CalendarSystem::Gregorian | CalendarSystem::Iso => {
-                // Standard date arithmetic: day 0 of next month = last day of this month.
-                let date = js_sys::Date::new_with_year_month_day(year, month as i32, 0);
-                date.get_date() as u8
-            }
-            _ => {
-                // For non-Gregorian calendars, probe via Intl.DateTimeFormat:
-                // format increasing day numbers until the month changes.
-                // Conservative fallback for the sketch:
-                30
-            }
-        }
-    }
-
-    fn hour_cycle(&self, locale: &Locale) -> HourCycle {
-        use js_sys::{Array, Object, Intl, Reflect};
-        use wasm_bindgen::JsValue;
-
-        let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
-        // `resolvedOptions().hourCycle` is only populated when `hour` is
-        // requested in the options bag — otherwise the browser leaves it
-        // undefined and the locale's preferred cycle is hidden. Requesting
-        // `hour: "numeric"` forces the engine to materialize it.
-        let opts = Object::new();
-        Reflect::set(&opts, &"hour".into(), &JsValue::from_str("numeric"))
-            .expect("Reflect::set on a fresh Object never fails");
-        let fmt = Intl::DateTimeFormat::new(&locales, &opts);
-        let resolved = fmt.resolved_options();
-        let cycle = Reflect::get(&resolved, &"hourCycle".into())
-            .ok()
-            .and_then(|v| v.as_string())
-            .unwrap_or_default();
-        match cycle.as_str() {
-            "h11" => HourCycle::H11,
-            "h12" => HourCycle::H12,
-            "h23" => HourCycle::H23,
-            "h24" => HourCycle::H24,
-            _ => HourCycle::H23, // fallback to 24-hour
-        }
-    }
-
-    fn first_day_of_week(&self, locale: &Locale) -> Weekday {
-        use wasm_bindgen::JsValue;
-
-        // Try Intl.Locale.getWeekInfo() (available in modern browsers).
-        // Falls back to a static lookup table for older browsers.
-        let js_locale = js_sys::Intl::Locale::new(&JsValue::from_str(&locale.to_bcp47()));
-        if let Ok(week_info) = js_sys::Reflect::get(&js_locale, &"getWeekInfo".into()) {
-            if week_info.is_function() {
-                let func: js_sys::Function = week_info.unchecked_into();
-                if let Ok(info) = func.call0(&js_locale) {
-                    if let Ok(first_day) = js_sys::Reflect::get(&info, &"firstDay".into()) {
-                        if let Some(day) = first_day.as_f64() {
-                            return match day as u8 {
-                                1 => Weekday::Monday,
-                                2 => Weekday::Tuesday,
-                                3 => Weekday::Wednesday,
-                                4 => Weekday::Thursday,
-                                5 => Weekday::Friday,
-                                6 => Weekday::Saturday,
-                                7 => Weekday::Sunday,
-                                _ => Weekday::Monday, // ISO default
-                            };
-                        }
-                    }
-                }
-            }
-        }
-
-        // Static fallback table: covers the most common first-day-of-week rules.
-        // Sunday-first: US, CA, JP, IL, SA, etc.
-        // Saturday-first: AF, IR, etc.
-        // Monday-first: most of Europe, Asia, Oceania.
-        match locale.region().unwrap_or("001") {
-            "US" | "CA" | "JP" | "IL" | "SA" | "KR" | "TW" | "PH" | "IN" | "BR"
-                => Weekday::Sunday,
-            "AF" | "IR" => Weekday::Saturday,
-            _ => Weekday::Monday,
-        }
-    }
-
-    fn convert_date(&self, date: &CalendarDate, target: CalendarSystem) -> CalendarDate {
-        use js_sys::{Array, Object, Reflect, Intl};
-        use wasm_bindgen::JsValue;
-
-        // Strategy: use Intl.DateTimeFormat with the target calendar to format the
-        // source date, then parse the formatted parts back into CalendarDate fields.
-        //
-        // 1. Create a JS Date from the source CalendarDate's ISO representation.
-        // 2. Format with Intl.DateTimeFormat({ calendar: target, year: 'numeric',
-        //    month: 'numeric', day: 'numeric' }).
-        // 3. Extract year/month/day from formatToParts().
-        // 4. Construct a CalendarDate from the extracted components.
-        //
-        // This approach leverages the browser's full calendar conversion engine
-        // without shipping any calendar data in the WASM bundle.
-
-        let locales = Array::of1(&JsValue::from_str("en-US")); // locale for parsing, not display
-        let opts = Object::new();
-        Reflect::set(&opts, &"calendar".into(),
-            &JsValue::from_str(&target.to_bcp47_value()))
-            .expect("Reflect::set on JS object");
-        Reflect::set(&opts, &"year".into(), &JsValue::from_str("numeric"))
-            .expect("Reflect::set on JS object");
-        Reflect::set(&opts, &"month".into(), &JsValue::from_str("numeric"))
-            .expect("Reflect::set on JS object");
-        Reflect::set(&opts, &"day".into(), &JsValue::from_str("numeric"))
-            .expect("Reflect::set on JS object");
-
-        let fmt = Intl::DateTimeFormat::new(&locales, &opts);
-
-        // Convert source date to JS Date via ISO epoch milliseconds.
-        let js_date = js_sys::Date::new_with_year_month_day(
-            date.year(), (date.month() - 1) as i32, date.day() as i32,
-        );
-
-        let parts = fmt.format_to_parts(&js_date);
-        let mut year = 0i32;
-        let mut month = 0u8;
-        let mut day = 0u8;
-
-        for i in 0..parts.length() {
-            let part = parts.get(i);
-            let part_type = Reflect::get(&part, &"type".into())
-                .ok().and_then(|v| v.as_string()).unwrap_or_default();
-            let value = Reflect::get(&part, &"value".into())
-                .ok().and_then(|v| v.as_string()).unwrap_or_default();
-            match part_type.as_str() {
-                "year" | "relatedYear" => { year = value.parse().unwrap_or(0); }
-                "month" => { month = value.parse().unwrap_or(0); }
-                "day" => { day = value.parse().unwrap_or(0); }
-                _ => {}
-            }
-        }
-
-        CalendarDate::from_calendar(year, month, day, target)
-            .unwrap_or_else(|_| date.clone())
-    }
-}
-```
-
----
-
-## 10. Framework Integration: Locale via ArsProvider
-
-Locale is provided by `ArsProvider` — the single root provider. The formerly
-separate `LocaleProvider` is subsumed. See `01-architecture.md` §6.4 for the full
-`ArsContext` shape and `08-adapter-leptos.md` §13 / `09-adapter-dioxus.md` §16
-for the reactive adapter context types.
-
-### 10.1 Leptos
-
-```rust
-// ars-leptos/src/i18n.rs
-
-use leptos::prelude::*;
-use ars_i18n::{Locale, Direction};
-
-// ArsContext is defined in 08-adapter-leptos.md §13.
-// It carries Signal<Locale>, Memo<Direction>, and other environment values.
-
-/// Access the current locale in a Leptos component.
-/// Falls back to `en-US` if no `ArsProvider` is present.
-///
-/// **Important:** Do not call inside reactive closures or effects.
-pub fn use_locale() -> Signal<Locale> {
-    use_context::<ArsContext>()
-        .map(|ctx| ctx.locale)
-        .unwrap_or_else(|| {
-            warn_missing_provider("use_locale");
-            Signal::stored(Locale::parse("en-US").expect("en-US is always a valid BCP 47 locale"))
-        })
-}
-
-/// Access the current direction.
-pub fn use_direction() -> Memo<Direction> {
-    use_context::<ArsContext>()
-        .map(|ctx| ctx.direction)
-        .unwrap_or_else(|| {
-            warn_missing_provider("use_direction");
-            Memo::new(|_| Direction::Ltr)
-        })
-}
-```
-
-### 10.2 Dioxus
-
-```rust
-// ars-dioxus/src/i18n.rs
-
-use dioxus::prelude::*;
-use ars_i18n::{Locale, Direction};
-
-// ArsContext is defined in 09-adapter-dioxus.md §16.
-// It carries Signal<Locale>, Memo<Direction>, and other environment values.
-
-/// Access the current locale in a Dioxus component.
-/// Falls back to `en-US` if no `ArsProvider` is present.
-pub fn use_locale() -> Signal<Locale> {
-    let fallback = use_signal(|| Locale::parse("en-US").expect("en-US is always a valid BCP 47 locale"));
-    try_use_context::<ArsContext>()
-        .map(|ctx| ctx.locale)
-        .unwrap_or_else(|| {
-            warn_missing_provider("use_locale");
-            fallback
-        })
-}
-```
-
-### 10.3 Server-Side Locale Detection
-
-```rust
-#[cfg(feature = "std")]
-/// Detect locale from HTTP Accept-Language header.
-///
-/// Returns the best matching locale from the accept header.
-pub fn locale_from_accept_language(accept_language: &str, supported: &[Locale]) -> Locale {
-    #[derive(Clone)]
-    enum PreferenceTag {
-        Wildcard,
-        Locale(Locale),
-        Language(String),
-    }
-
-    fn matches_locale_range(supported_locale: &Locale, locale_range: &Locale) -> bool {
-        if supported_locale == locale_range {
-            return true;
-        }
-
-        let supported_locale = supported_locale.to_bcp47();
-        let locale_range = locale_range.to_bcp47();
-
-        supported_locale
-            .strip_prefix(&locale_range)
-            .is_some_and(|suffix| suffix.starts_with('-'))
-    }
-
-    fn matches_language_fallback(
-        supported_locale: &Locale,
-        language: &str,
-        explicit_locale_ranges: &[&Locale],
-    ) -> bool {
-        supported_locale.language() == language
-            && !explicit_locale_ranges
-                .iter()
-                .any(|tag| matches_locale_range(supported_locale, tag))
-    }
-
-    fn parse_qvalue(value: &str) -> Option<f32> {
-        fn parse_fraction(fraction: &str) -> Option<u16> {
-            if fraction.len() > 3 || !fraction.as_bytes().iter().all(u8::is_ascii_digit) {
-                return None;
-            }
-
-            let mut scaled = 0_u16;
-
-            for digit in fraction.bytes() {
-                scaled = scaled.checked_mul(10)?;
-                scaled = scaled.checked_add(u16::from(digit - b'0'))?;
-            }
-
-            for _ in fraction.len()..3 {
-                scaled = scaled.checked_mul(10)?;
-            }
-
-            Some(scaled)
-        }
-
-        if value == "0" || value == "0." {
-            return Some(0.0);
-        }
-
-        if value == "1" || value == "1." {
-            return Some(1.0);
-        }
-
-        if let Some(fraction) = value.strip_prefix("0.") {
-            return parse_fraction(fraction).map(|fraction| fraction as f32 / 1_000.0);
-        }
-
-        if let Some(fraction) = value.strip_prefix("1.") {
-            let fraction = parse_fraction(fraction)?;
-
-            return (fraction == 0).then_some(1.0);
-        }
-
-        None
-    }
-
-    let mut preferences: Vec<(PreferenceTag, f32)> = accept_language
-        .split(',')
-        .filter_map(|part| {
-            let mut segments = part.trim().split(';');
-            let tag = segments.next()?.trim();
-            if tag.is_empty() {
-                return None;
-            }
-
-            let quality = segments
-                .find_map(|parameter| {
-                    let (name, value) = parameter.split_once('=')?;
-
-                    if name.trim().eq_ignore_ascii_case("q") {
-                        parse_qvalue(value.trim())
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(1.0);
-
-            let tag = if tag == "*" {
-                PreferenceTag::Wildcard
-            } else if let Ok(locale) = Locale::parse(tag) {
-                if tag.eq_ignore_ascii_case(locale.language()) {
-                    PreferenceTag::Language(locale.language().to_string())
-                } else {
-                    PreferenceTag::Locale(locale)
-                }
-            } else {
-                return None;
-            };
-
-            Some((tag, quality))
-        })
-        .collect();
-
-    // Sort by quality descending
-    // Malformed or out-of-range q= values fall back to the default weight of 1.0.
-    preferences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    let specific_ranges: Vec<_> = preferences
-        .iter()
-        .filter_map(|(tag, _)| match tag {
-            PreferenceTag::Wildcard => None,
-            specific => Some(specific),
-        })
-        .collect();
-    let explicit_locale_ranges: Vec<_> = preferences
-        .iter()
-        .filter_map(|(tag, _)| match tag {
-            PreferenceTag::Locale(locale) => Some(locale),
-            PreferenceTag::Wildcard | PreferenceTag::Language(_) => None,
-        })
-        .collect();
-
-    // Find first supported locale
-    for (tag, quality) in &preferences {
-        if *quality <= 0.0 {
-            continue;
-        }
-
-        match tag {
-            PreferenceTag::Wildcard => {
-                if let Some(matched) = supported.iter().find(|locale| {
-                    !specific_ranges.iter().any(|range| match range {
-                        PreferenceTag::Wildcard => false,
-                        PreferenceTag::Locale(tag) => matches_locale_range(locale, tag),
-                        PreferenceTag::Language(language) => locale.language() == *language,
-                    })
-                }) {
-                    return matched.clone();
-                }
-            }
-            PreferenceTag::Locale(locale) => {
-                if supported.contains(locale) {
-                    return locale.clone();
-                }
-
-                if let Some(matched) = supported.iter().find(|s| matches_locale_range(s, locale)) {
-                    return matched.clone();
-                }
-
-                if let Some(matched) = supported.iter().find(|s| {
-                    matches_language_fallback(s, locale.language(), &explicit_locale_ranges)
-                }) {
-                    return matched.clone();
-                }
-            }
-            PreferenceTag::Language(language) => {
-                if let Some(matched) = supported
-                    .iter()
-                    .find(|s| matches_language_fallback(s, language, &explicit_locale_ranges))
-                {
-                    return matched.clone();
-                }
-            }
-        }
-    }
-
-    // Fall back to first supported locale
-    supported.first().cloned().unwrap_or_else(|| Locale::parse("en-US").expect("en-US is valid locale"))
-}
-```
-
----
-
-## 11. Component-Specific i18n Behavior
-
-### 11.1 NumberInput
-
-- Decimal separator: `.` (en-US) vs `,` (de-DE) — use `parse_locale_number`
-- Grouping separator: `,` (en-US) vs `.` (de-DE) vs ` ` (fr-FR)
-- Increment/decrement labels use locale-formatted values in `aria-valuetext`
-- RTL: increment/decrement button visual order flips
-
-### 11.2 Slider
-
-- `aria-valuetext` uses `NumberFormatter` with user-provided format options
-- Range slider: both values formatted with range separator (`–`)
-- RTL: value increases from right to left; arrow key semantics flip
-
-### 11.3 Calendar / DatePicker
-
-- Month/weekday names from `DateFormatter` (locale language)
-- First day of week from `WeekInfo::for_locale()`
-- Calendar system from locale extension or explicit prop
-- Japanese calendar: show era name + year-in-era (e.g., "令和6年")
-- Hebrew calendar: different month count in leap years
-
-### 11.4 Select / Combobox
-
-- Type-ahead search: use `StringCollator` for locale-aware matching
-- Option sorting (if enabled): use `StringCollator.sort_by_key`
-- Selected count label: use `SelectMessages.selected_count` with plural rules
-
-### 11.5 Pagination
-
-- Page numbers: use locale's number system (Arabic-Indic, Devanagari, etc.)
-- RTL: visual order of page numbers may reverse
-
-### 11.6 Table
-
-- Column sort: `StringCollator` for string columns
-- Date/number cells: formatted with locale formatters
-- RTL: column order and sort indicator direction reverse
-
-#### 11.6.1 Locale-Aware Sorting Requirements
-
-Table column sorting MUST always use `StringCollator` (from `ars-i18n`) with locale-aware rules. Raw
-`String::cmp()` or byte-level comparison is NEVER acceptable for user-visible sorting.
-
-**String columns**: Use `StringCollator` with the current locale. The `collation_strength`
-prop allows consumers to control comparison sensitivity. Uses `CollationStrength` from §8
-(`Primary`, `Secondary`, `Tertiary`, `Quaternary`) — defined in §8 above; `06-collections.md` re-exports this type.
-
-**Date columns**: Sort by the underlying calendar value (epoch timestamp or
-`CalendarDate` comparison), NOT by the formatted display string. Formatted strings
-vary by locale and calendar system, making string comparison unreliable.
-
-**Number columns**: Sort by the numeric value, not the formatted string. Locale
-formatting adds grouping separators and decimal variants that break lexicographic sort.
-
-**Mixed-type columns**: When a column contains heterogeneous data, define a sort key
-function that extracts a comparable value, then use `StringCollator::sort_by_key`.
-
-### 11.7 TagsInput
-
-- Delimiter detection: some locales use different separator conventions
-- Tag display order: RTL users expect right-to-left tag addition
-
----
-
-## 12. Error Types
-
-```rust
-#[derive(Debug)]
-pub struct LocaleParseError(pub icu::locale::ParseError);
-
-#[derive(Debug)]
-pub enum DateError {
-    InvalidDate,
-    OutOfRange,
-    CalendarError(String),
-}
-
-/// Error returned by `CalendarDate` arithmetic and query methods
-/// (e.g., `add_days`, `days_until`, `today`, `is_before`) when the
-/// operation is not yet implemented for the underlying calendar system.
-#[derive(Debug)]
-pub enum CalendarError {
-    /// An ICU4X calendar arithmetic error.
-    Arithmetic(String),
-}
-
-impl core::fmt::Display for CalendarError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Arithmetic(msg) => write!(f, "calendar arithmetic error: {msg}"),
-        }
-    }
-}
-
-/// Error returned by `CalendarDate::from_calendar()` when conversion to a
-/// specific calendar system fails.
-#[derive(Debug)]
-pub enum CalendarConversionError {
-    /// The date components are invalid for the target calendar.
-    InvalidDate,
-    /// ICU4X conversion error.
-    Icu(String),
-}
-
-impl core::fmt::Display for CalendarConversionError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::InvalidDate => write!(f, "invalid date for target calendar"),
-            Self::Icu(msg) => write!(f, "ICU4X calendar conversion error: {msg}"),
-        }
-    }
-}
-```
-
----
-
-## 13. Locale Resolution Algorithm
-
-Locale resolution follows this priority order:
-
-1. Component-level `locale` prop (highest priority).
-2. Nearest ancestor `ArsProvider` context (via `use_locale()`).
-3. HTML `lang` attribute on document root (`document.documentElement.lang`).
-4. Navigator language (`navigator.language`).
-5. Fallback: `'en-US'`.
-
-Resolution is cached per component lifecycle and invalidated when `ArsProvider` context changes.
-
-## 14. Number Formatting and Non-Uniform Digit Grouping
-
-Number formatting delegates to ICU4X `NumberFormatter` which handles non-uniform grouping (e.g., Indian: 12,34,567) automatically based on locale. Parsing must also accept locale-specific grouping separators. Components must not hardcode grouping assumptions (e.g., every 3 digits).
-
-## 15. Text Expansion Margins for Localized Components
-
-Adapter styling guidance must account for text expansion ratios across locales (English→German: ~+35%, English→Chinese: ~-30%, English→Arabic: ~+25%). Fixed-width containers (buttons, badges, tabs) should use `min-width` rather than fixed width. Adapters should test layouts with pseudo-localization (e.g., doubling all strings) during development.
-
-## 16. Currency Formatting for Mixed LTR/RTL Content
-
-Currency formatting in mixed-direction content must wrap formatted values in Unicode BiDi isolates (U+2066 LRI ... U+2069 PDI) or HTML `<bdi>` elements. `NumberFormatter` output does not implicitly insert directional isolates. Components displaying monetary values in RTL contexts must not rely on CSS `direction` alone — explicit BiDi isolation prevents digit reordering.
+`WebIntlProvider` is the browser-facing formatting backend for `wasm32` builds. It may normalize browser `Intl` output back into ars-i18n's public era and month-code model, but it does not redefine the public calendar contract.

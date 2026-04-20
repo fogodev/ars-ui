@@ -85,7 +85,9 @@ impl<'a, T: Clone> CollationSupport for &'a StaticCollection<T> {
         // SortedCollection::new comparator receives &Node<T>; extract &T via value.
         SortedCollection::new(self, |a, b| {
             let a_text = text_fn(a.value.as_ref().expect("item node"));
+
             let b_text = text_fn(b.value.as_ref().expect("item node"));
+
             collator.compare(a_text, b_text)
         })
     }
@@ -102,7 +104,9 @@ impl<'a, T: Clone> CollationSupport for &'a TreeCollection<T> {
     {
         SortedCollection::new(self, |a, b| {
             let a_text = text_fn(a.value.as_ref().expect("item node"));
+
             let b_text = text_fn(b.value.as_ref().expect("item node"));
+
             collator.compare(a_text, b_text)
         })
     }
@@ -117,7 +121,9 @@ impl<'a, T: Clone, C: Collection<T>> CollationSupport for &'a FilteredCollection
     {
         SortedCollection::new(self, |a, b| {
             let a_text = text_fn(a.value.as_ref().expect("item node"));
+
             let b_text = text_fn(b.value.as_ref().expect("item node"));
+
             collator.compare(a_text, b_text)
         })
     }
@@ -237,15 +243,16 @@ mod tests {
             .build();
 
         let locale = locales::de();
+
         let collator = StringCollator::new(&locale, Default::default());
 
         let sorted = (&collection).with_collation(&collator, |item: &TextItem| &item.label);
 
-        let texts: Vec<_> = sorted
+        let texts = sorted
             .nodes()
             .filter(|n: &&Node<TextItem>| n.is_focusable())
             .map(|n| n.text_value.as_str())
-            .collect();
+            .collect::<Vec<_>>();
 
         // German locale: Ä has the same primary weight as A.
         // Primary comparison: Är-g-er vs Ar-t → g < t, so Ärger < Art.
@@ -285,15 +292,16 @@ mod tests {
         ]);
 
         let locale = locales::en();
+
         let collator = StringCollator::new(&locale, Default::default());
 
         let sorted = (&tree).with_collation(&collator, |item: &TextItem| &item.label);
 
-        let texts: Vec<_> = sorted
+        let texts = sorted
             .nodes()
             .filter(|n: &&Node<TextItem>| n.is_focusable())
             .map(|n| n.text_value.as_str())
-            .collect();
+            .collect::<Vec<_>>();
 
         assert_eq!(texts, vec!["Apple", "Banana", "Cherry"]);
     }
@@ -315,15 +323,16 @@ mod tests {
         let filtered = FilteredCollection::new(&collection, |n| n.text_value != "Date");
 
         let locale = locales::en();
+
         let collator = StringCollator::new(&locale, Default::default());
 
         let sorted = (&filtered).with_collation(&collator, |item: &TextItem| &item.label);
 
-        let texts: Vec<_> = sorted
+        let texts = sorted
             .nodes()
             .filter(|n: &&Node<TextItem>| n.is_focusable())
             .map(|n| n.text_value.as_str())
-            .collect();
+            .collect::<Vec<_>>();
 
         // Date is filtered out; remaining sorted: Apple, Banana, Cherry.
         assert_eq!(texts, vec!["Apple", "Banana", "Cherry"]);
@@ -339,6 +348,7 @@ mod tests {
 
         // Debug output should show zero entries.
         let debug = alloc::format!("{cache:?}");
+
         assert!(debug.contains("CollatorCache"));
         assert!(debug.contains('0'));
     }
@@ -346,6 +356,7 @@ mod tests {
     #[test]
     fn collator_cache_returns_same_instance() {
         let mut cache = CollatorCache::new();
+
         let locale = locales::de();
 
         let first = cache.get_or_create(&locale, CollationStrength::Secondary);
@@ -363,6 +374,7 @@ mod tests {
     #[test]
     fn collator_cache_different_strength_creates_new() {
         let mut cache = CollatorCache::new();
+
         let locale = locales::en();
 
         let primary = cache.get_or_create(&locale, CollationStrength::Primary);
@@ -380,9 +392,11 @@ mod tests {
     #[test]
     fn collator_cache_default_equals_new() {
         let from_new = CollatorCache::new();
+
         let from_default = CollatorCache::default();
 
         let new_debug = alloc::format!("{from_new:?}");
+
         let default_debug = alloc::format!("{from_default:?}");
 
         assert_eq!(new_debug, default_debug);
@@ -397,6 +411,7 @@ mod tests {
         let collection = CollectionBuilder::<TextItem>::new().build();
 
         let locale = locales::en();
+
         let collator = StringCollator::new(&locale, Default::default());
 
         let sorted = (&collection).with_collation(&collator, |item: &TextItem| &item.label);
@@ -419,16 +434,17 @@ mod tests {
             .build();
 
         let locale = locales::en();
+
         let collator = StringCollator::new(&locale, Default::default());
 
         let sorted = (&collection).with_collation(&collator, |item: &TextItem| &item.label);
 
         // Items within each section are sorted independently.
-        let item_texts: Vec<_> = sorted
+        let item_texts = sorted
             .nodes()
             .filter(|n: &&Node<TextItem>| n.is_focusable())
             .map(|n| n.text_value.as_str())
-            .collect();
+            .collect::<Vec<_>>();
 
         assert_eq!(item_texts, vec!["Apple", "Cherry", "Artichoke", "Carrot"]);
     }
@@ -442,17 +458,19 @@ mod tests {
             .build();
 
         let mut cache = CollatorCache::new();
+
         let locale = locales::en();
 
         // Use cached collator with the convenience trait.
         let collator = cache.get_or_create(&locale, CollationStrength::Tertiary);
+
         let sorted = (&collection).with_collation(collator, |item: &TextItem| &item.label);
 
-        let texts: Vec<_> = sorted
+        let texts = sorted
             .nodes()
             .filter(|n: &&Node<TextItem>| n.is_focusable())
             .map(|n| n.text_value.as_str())
-            .collect();
+            .collect::<Vec<_>>();
 
         assert_eq!(texts, vec!["Apple", "Banana", "Cherry"]);
     }

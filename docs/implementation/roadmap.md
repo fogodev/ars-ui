@@ -329,6 +329,8 @@ Exit criteria:
 
 External deps: All depend on ars-i18n (Epic #54) for CalendarDate, DateFormatter, WeekInfo. Date fields and pickers depend on ars-forms (Epic #5) for form integration.
 
+Calendar parity note (Epic #54, umbrella issue #545): ars-i18n is prioritizing locale week/weekend semantics, absolute timestamp parsing, formatter improvements, DST-aware day-length logic, and ergonomic conversion/native interop. React Aria parity items intentionally deferred until explicitly requested are a runtime-extensible custom calendar interface and a full Adobe-style `DateFormatter` compatibility clone.
+
 Status (2026-04-10): Epic #224 created with 8 sub-issue tasks (#262–#292).
 
 ### Phase 13: Leptos utility adapter components

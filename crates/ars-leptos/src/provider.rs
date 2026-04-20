@@ -205,12 +205,13 @@ where
         let mut resolved_formatter = None;
 
         cache.update_value(|cached| {
-            if let Some((cached_locale, cached_options, cached_formatter)) = cached {
-                if *cached_locale == resolved_locale && *cached_options == resolved_options {
-                    resolved_formatter = Some(cached_formatter.clone());
+            if let Some((cached_locale, cached_options, cached_formatter)) = cached
+                && *cached_locale == resolved_locale
+                && *cached_options == resolved_options
+            {
+                resolved_formatter = Some(cached_formatter.clone());
 
-                    return;
-                }
+                return;
             }
 
             let next_formatter = NumberFormatter::new(&resolved_locale, resolved_options.clone());

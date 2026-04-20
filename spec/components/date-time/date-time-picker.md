@@ -303,8 +303,8 @@ pub struct Props {
     pub name: Option<String>,
     /// Calendar system (Gregorian, Buddhist, etc.).
     pub calendar: CalendarSystem,
-    /// Hour cycle override. `HourCycle::Auto` uses the locale default.
-    pub hour_cycle: HourCycle,
+    /// Hour cycle override. `None` uses the locale default.
+    pub hour_cycle: Option<HourCycle>,
     /// Whether the field is required.
     pub required: bool,
     /// Label text.
@@ -334,7 +334,7 @@ impl Default for Props {
             readonly: false,
             name: None,
             calendar: CalendarSystem::Gregorian,
-            hour_cycle: HourCycle::Auto,
+            hour_cycle: None,
             required: false,
             label: String::new(),
             description: None,
@@ -516,10 +516,7 @@ impl ars_core::Machine for Machine {
         let date_value = value.get().as_ref().map(|dt| dt.date.clone());
         let time_value = value.get().as_ref().map(|dt| dt.time);
 
-        let resolved_cycle = match props.hour_cycle {
-            HourCycle::Auto => locale.hour_cycle(),
-            explicit => explicit,
-        };
+        let resolved_cycle = props.hour_cycle.unwrap_or_else(|| locale.hour_cycle(&*env.icu_provider));
 
         let date_segments = Machine::build_date_segments(&locale, &date_value);
         let time_segments = Machine::build_time_segments(
@@ -1482,7 +1479,7 @@ impl Default for Messages {
 impl ComponentMessages for Messages {}
 ```
 
-All user-visible text is provided via the `Messages` struct. Individual segment labels (e.g., "Year", "Hour", "AM/PM") are inherited from the `DateSegmentKind::aria_label()` method defined in date-field's segment types. Date segment order and separators are locale-dependent (see `Machine::build_date_segments()`). Time segment display uses the locale's preferred hour cycle when `HourCycle::Auto` is set.
+All user-visible text is provided via the `Messages` struct. Individual segment labels (e.g., "Year", "Hour", "AM/PM") are inherited from the `DateSegmentKind::aria_label()` method defined in date-field's segment types. Date segment order and separators are locale-dependent (see `Machine::build_date_segments()`). Time segment display uses the locale's preferred hour cycle when `hour_cycle` is `None`.
 
 ## 5. Form Integration
 
