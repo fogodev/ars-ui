@@ -1171,87 +1171,151 @@ impl ChainValidator {
 
 ## 4. Async Validation
 
+The `AsyncValidator` trait and all shared-ownership types (`BoxedAsyncValidator`,
+`TimerHandle`, `DebouncedAsyncValidator`) require `Send + Sync` unconditionally.
+On wasm32 (single-threaded), `Send + Sync` is trivially satisfied — the same
+convention used by `PlatformEffects` and `ModalityContext` in `ars-core`.
+
+The **returned future** type has a platform-specific `Send` bound: on native
+targets the future must be `Send` so it can be spawned on multi-threaded
+runtimes; on wasm32 the bound is omitted because browser-side validators
+commonly await `JsFuture` (from `wasm-bindgen-futures`) which is `!Send`.
+This cfg-gating applies to the `AsyncValidationFuture` type alias and to the
+`Fut` bound on `AsyncFnValidator`.
+
 ```rust
-use core::pin::Pin;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, pin::Pin, sync::Arc};
 use ars_i18n::Locale;
+
+/// The future type returned by `AsyncValidator::validate_async`.
+///
+/// `Send` only on native targets — on wasm32, browser-side validators
+/// may await `!Send` JS futures (`JsFuture`, etc.).
+#[cfg(not(target_arch = "wasm32"))]
+type AsyncValidationFuture<'a> = dyn Future<Output = Result> + Send + 'a;
+#[cfg(target_arch = "wasm32")]
+type AsyncValidationFuture<'a> = dyn Future<Output = Result> + 'a;
 
 /// Async validation trait.
 ///
-/// Native targets require async validators and their returned futures to be
-/// `Send`; `wasm32` preserves browser futures that are intentionally `!Send`.
-#[cfg(target_arch = "wasm32")]
-pub trait AsyncValidator {
-    fn validate_async<'a>(
-        &'a self,
-        value: &'a Value,
-        ctx: &'a Context<'a>,
-    ) -> Pin<Box<dyn Future<Output = Result> + 'a>>;
-}
-
-#[cfg(not(target_arch = "wasm32"))]
+/// Requires `Send + Sync` on all targets. On wasm32 (single-threaded),
+/// `Send + Sync` is trivially satisfied.
 pub trait AsyncValidator: Send + Sync {
     fn validate_async<'a>(
         &'a self,
         value: &'a Value,
         ctx: &'a Context<'a>,
-    ) -> Pin<Box<dyn Future<Output = Result> + Send + 'a>>;
+    ) -> Pin<Box<AsyncValidationFuture<'a>>>;
 }
+
+/// A type-erased async validator.
+pub type BoxedAsyncValidator = Arc<dyn AsyncValidator>;
 
 /// Wrap a closure as an async validator.
 pub struct AsyncFnValidator<F> {
     pub f: F,
 }
 
+// Two cfg-gated impl blocks: `Fut: Send` only on native.
+#[cfg(not(target_arch = "wasm32"))]
 impl<F, Fut> AsyncValidator for AsyncFnValidator<F>
 where
-    F: Fn(String, OwnedContext) -> Fut + 'static,
-    Fut: Future<Output = Result> + 'static,
+    F: Fn(String, OwnedContext) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result> + Send + 'static,
 {
-    #[cfg(target_arch = "wasm32")]
     fn validate_async<'a>(
         &'a self,
         value: &'a Value,
         ctx: &'a Context<'a>,
-    ) -> Pin<Box<dyn Future<Output = Result> + 'a>> {
+    ) -> Pin<Box<AsyncValidationFuture<'a>>> {
         let text = value.to_string_for_validation();
         let owned_ctx = ctx.snapshot();
-        let fut = (self.f)(text, owned_ctx);
-        Box::pin(fut)
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn validate_async<'a>(
-        &'a self,
-        value: &'a Value,
-        ctx: &'a Context<'a>,
-    ) -> Pin<Box<dyn Future<Output = Result> + Send + 'a>>
-    where
-        F: Send + Sync,
-        Fut: Send,
-    {
-        let text = value.to_string_for_validation();
-        let owned_ctx = ctx.snapshot();
-        let fut = (self.f)(text, owned_ctx);
-        Box::pin(fut)
+        Box::pin((self.f)(text, owned_ctx))
     }
 }
 
-/// Debounced async validator — waits for `delay` of inactivity before calling.
+#[cfg(target_arch = "wasm32")]
+impl<F, Fut> AsyncValidator for AsyncFnValidator<F>
+where
+    F: Fn(String, OwnedContext) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result> + 'static,
+{
+    fn validate_async<'a>(
+        &'a self,
+        value: &'a Value,
+        ctx: &'a Context<'a>,
+    ) -> Pin<Box<AsyncValidationFuture<'a>>> {
+        let text = value.to_string_for_validation();
+        let owned_ctx = ctx.snapshot();
+        Box::pin((self.f)(text, owned_ctx))
+    }
+}
+
+// Convenience methods — same cfg-gating as above.
+#[cfg(not(target_arch = "wasm32"))]
+impl<F, Fut> AsyncFnValidator<F>
+where
+    F: Fn(String, OwnedContext) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result> + Send + 'static,
+{
+    pub const fn new(f: F) -> Self { Self { f } }
+    pub fn boxed(self) -> BoxedAsyncValidator { Arc::new(self) }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<F, Fut> AsyncFnValidator<F>
+where
+    F: Fn(String, OwnedContext) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result> + 'static,
+{
+    pub const fn new(f: F) -> Self { Self { f } }
+    pub fn boxed(self) -> BoxedAsyncValidator { Arc::new(self) }
+}
+
+/// Timer handle returned by the adapter's platform timer abstraction.
+/// On WASM, wraps `setTimeout`; on native, wraps `tokio::time::sleep` or similar.
+pub struct TimerHandle {
+    cancel_fn: Box<dyn FnOnce() + Send + Sync>,
+}
+
+impl TimerHandle {
+    pub fn new(cancel_fn: Box<dyn FnOnce() + Send + Sync>) -> Self {
+        Self { cancel_fn }
+    }
+    pub fn cancel(self) {
+        (self.cancel_fn)()
+    }
+}
+
+/// Debounced async validator — waits for `delay_ms` of inactivity before calling.
 pub struct DebouncedAsyncValidator {
-    pub validator: Arc<dyn AsyncValidator>,
+    pub validator: BoxedAsyncValidator,
     pub delay_ms: u32,
     /// Adapter-provided callback that spawns an async future to completion.
     /// On native: wraps `tokio::spawn`; on WASM: wraps `wasm_bindgen_futures::spawn_local`.
     /// The callback takes ownership of the `OwnedContext` and the future,
     /// avoiding lifetime issues with borrowed `Context`.
-    pub spawn_async_validation: Arc<dyn Fn(Arc<dyn AsyncValidator>, Value, OwnedContext) + Send + Sync>,
+    pub spawn_async_validation: Arc<dyn Fn(BoxedAsyncValidator, Value, OwnedContext) + Send + Sync>,
     /// Handle to the currently pending debounce timer, if any.
     /// Used to cancel the previous timer when new input arrives.
     pending_timer: Option<TimerHandle>,
 }
 
 impl DebouncedAsyncValidator {
+    /// Creates a new debounced validator wrapping the given inner validator.
+    pub fn new(
+        validator: BoxedAsyncValidator,
+        delay_ms: u32,
+        spawn_async_validation: Arc<dyn Fn(BoxedAsyncValidator, Value, OwnedContext) + Send + Sync>,
+    ) -> Self {
+        Self {
+            validator,
+            delay_ms,
+            spawn_async_validation,
+            pending_timer: None,
+        }
+    }
+
     /// Cancel any pending debounce timer and start a new one.
     /// After `delay_ms`, delegates to the inner `AsyncValidator::validate_async`.
     /// The adapter provides `TimerHandle` via its platform timer abstraction
@@ -1275,15 +1339,14 @@ impl DebouncedAsyncValidator {
         if let Some(handle) = self.pending_timer.take() {
             handle.cancel();
         }
-        let validator = self.validator.clone();
+        let validator = Arc::clone(&self.validator);
         let value = value.clone();
-        let name = name.to_string();
         let owned_ctx = OwnedContext {
-            field_name: name.clone(),
+            field_name: name.to_string(),
             form_values: form_values.clone(),
             locale: locale.cloned(),
         };
-        let spawn_async = self.spawn_async_validation.clone();
+        let spawn_async = Arc::clone(&self.spawn_async_validation);
         self.pending_timer = Some(spawn_timer(self.delay_ms, Box::new(move || {
             // After delay, spawn the async validator. The spawn callback takes
             // ownership of all data and constructs the Context internally,
@@ -1293,26 +1356,13 @@ impl DebouncedAsyncValidator {
     }
 }
 
-/// Timer handle returned by the adapter's platform timer abstraction.
-/// On WASM, wraps `setTimeout`; on native, wraps `tokio::time::sleep` or similar.
-pub struct TimerHandle {
-    #[cfg(target_arch = "wasm32")]
-    cancel_fn: Box<dyn FnOnce()>,
-    #[cfg(not(target_arch = "wasm32"))]
-    cancel_fn: Box<dyn FnOnce() + Send + Sync>,
-}
-
-impl TimerHandle {
-    #[cfg(target_arch = "wasm32")]
-    pub fn new(cancel_fn: Box<dyn FnOnce()>) -> Self {
-        Self { cancel_fn }
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn new(cancel_fn: Box<dyn FnOnce() + Send + Sync>) -> Self {
-        Self { cancel_fn }
-    }
-    pub fn cancel(self) {
-        (self.cancel_fn)()
+/// Cancels any pending debounce timer on teardown, preventing stale
+/// async validation work from being spawned after the owner is dropped.
+impl Drop for DebouncedAsyncValidator {
+    fn drop(&mut self) {
+        if let Some(handle) = self.pending_timer.take() {
+            handle.cancel();
+        }
     }
 }
 

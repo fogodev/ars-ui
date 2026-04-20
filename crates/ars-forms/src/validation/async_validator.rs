@@ -5,36 +5,37 @@
 //! [`FormContext`](crate::FormContext) to support async validation (e.g.,
 //! server-side uniqueness checks).
 
-use std::{pin::Pin, sync::Arc};
+use std::{
+    fmt::{self, Debug},
+    pin::Pin,
+    sync::Arc,
+};
 
-use super::{result::Result, validator::Context};
+use super::{
+    result::Result,
+    validator::{Context, OwnedContext},
+};
 use crate::field::Value;
 
-#[cfg(target_arch = "wasm32")]
-type AsyncValidationFuture<'a> = dyn Future<Output = Result> + 'a;
-
+/// The future type returned by [`AsyncValidator::validate_async`].
+///
+/// On native targets the future must be `Send` so it can be spawned on
+/// multi-threaded runtimes. On `wasm32` the `Send` bound is omitted
+/// because common browser-side validators await `JsFuture` (from
+/// `wasm-bindgen-futures`) which is `!Send`.
 #[cfg(not(target_arch = "wasm32"))]
 type AsyncValidationFuture<'a> = dyn Future<Output = Result> + Send + 'a;
 
-/// Async validation trait.
-///
-/// Native targets require async validators and their returned futures to be
-/// `Send + Sync`; `wasm32` preserves single-threaded browser futures.
+/// See the non-wasm variant for documentation.
 #[cfg(target_arch = "wasm32")]
-pub trait AsyncValidator {
-    /// Validates the given value asynchronously.
-    fn validate_async<'a>(
-        &'a self,
-        value: &'a Value,
-        ctx: &'a Context<'a>,
-    ) -> Pin<Box<AsyncValidationFuture<'a>>>;
-}
+type AsyncValidationFuture<'a> = dyn Future<Output = Result> + 'a;
 
 /// Async validation trait.
 ///
-/// Native targets require async validators and their returned futures to be
-/// `Send + Sync`; `wasm32` preserves single-threaded browser futures.
-#[cfg(not(target_arch = "wasm32"))]
+/// Requires `Send + Sync` on all targets. On wasm32 (single-threaded),
+/// `Send + Sync` is trivially satisfied — the same convention used by
+/// [`PlatformEffects`](ars_core::PlatformEffects) and
+/// [`ModalityContext`](ars_core::ModalityContext).
 pub trait AsyncValidator: Send + Sync {
     /// Validates the given value asynchronously.
     fn validate_async<'a>(
@@ -49,6 +50,99 @@ pub trait AsyncValidator: Send + Sync {
 /// Uses [`Arc`](std::sync::Arc) on all targets for cheap shared ownership.
 pub type BoxedAsyncValidator = Arc<dyn AsyncValidator>;
 
+/// Closure-backed async validator for custom asynchronous validation logic.
+///
+/// Wraps a function `F(String, OwnedContext) -> Future<Output = Result>` as an
+/// [`AsyncValidator`]. The closure receives owned data (the stringified value
+/// and a snapshot of the context) so the returned future can outlive the
+/// original borrows.
+pub struct AsyncFnValidator<F> {
+    /// The closure implementing async validation behavior.
+    pub f: F,
+}
+
+impl<F> Debug for AsyncFnValidator<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AsyncFnValidator").finish_non_exhaustive()
+    }
+}
+
+// Two cfg-gated impl blocks: the `Fut` bound requires `Send` only on
+// native targets, matching `AsyncValidationFuture`. On wasm32 the bound
+// is relaxed so validators can return futures containing `!Send` JS types.
+
+#[cfg(not(target_arch = "wasm32"))]
+impl<F, Fut> AsyncValidator for AsyncFnValidator<F>
+where
+    F: Fn(String, OwnedContext) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result> + Send + 'static,
+{
+    fn validate_async<'a>(
+        &'a self,
+        value: &'a Value,
+        ctx: &'a Context<'a>,
+    ) -> Pin<Box<AsyncValidationFuture<'a>>> {
+        let text = value.to_string_for_validation();
+        let owned_ctx = ctx.snapshot();
+        Box::pin((self.f)(text, owned_ctx))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<F, Fut> AsyncValidator for AsyncFnValidator<F>
+where
+    F: Fn(String, OwnedContext) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result> + 'static,
+{
+    fn validate_async<'a>(
+        &'a self,
+        value: &'a Value,
+        ctx: &'a Context<'a>,
+    ) -> Pin<Box<AsyncValidationFuture<'a>>> {
+        let text = value.to_string_for_validation();
+        let owned_ctx = ctx.snapshot();
+        Box::pin((self.f)(text, owned_ctx))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl<F, Fut> AsyncFnValidator<F>
+where
+    F: Fn(String, OwnedContext) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result> + Send + 'static,
+{
+    /// Wraps a closure as an async validator value.
+    #[must_use]
+    pub const fn new(f: F) -> Self {
+        Self { f }
+    }
+
+    /// Boxes the validator behind the standard shared pointer type.
+    #[must_use]
+    pub fn boxed(self) -> BoxedAsyncValidator {
+        Arc::new(self)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<F, Fut> AsyncFnValidator<F>
+where
+    F: Fn(String, OwnedContext) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result> + 'static,
+{
+    /// Wraps a closure as an async validator value.
+    #[must_use]
+    pub const fn new(f: F) -> Self {
+        Self { f }
+    }
+
+    /// Boxes the validator behind the standard shared pointer type.
+    #[must_use]
+    pub fn boxed(self) -> BoxedAsyncValidator {
+        Arc::new(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use core::{
@@ -58,7 +152,13 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::field::Value;
+    use crate::{
+        field::Value,
+        validation::{
+            error::{Error, ErrorCode, Errors},
+            validator::OwnedContext,
+        },
+    };
 
     fn block_on_ready<F>(future: F) -> F::Output
     where
@@ -105,45 +205,170 @@ mod tests {
         assert_eq!(result, Ok(()));
     }
 
-    #[cfg(target_arch = "wasm32")]
     #[test]
-    #[expect(
-        clippy::arc_with_non_send_sync,
-        reason = "BoxedAsyncValidator intentionally preserves single-threaded wasm validators"
-    )]
-    fn boxed_async_validator_allows_non_send_futures_on_wasm() {
-        use std::{cell::RefCell, rc::Rc};
+    fn async_fn_validator_compiles() {
+        let validator = AsyncFnValidator::new(|_text: String, _ctx: OwnedContext| async { Ok(()) });
 
-        struct RcAsyncValidator {
-            hits: Rc<RefCell<u8>>,
-        }
+        let _boxed: BoxedAsyncValidator = Arc::new(validator);
+    }
 
-        impl AsyncValidator for RcAsyncValidator {
-            fn validate_async<'a>(
-                &'a self,
-                _value: &'a Value,
-                _ctx: &'a Context<'a>,
-            ) -> Pin<Box<AsyncValidationFuture<'a>>> {
-                let hits = Rc::clone(&self.hits);
-                Box::pin(async move {
-                    *hits.borrow_mut() += 1;
-                    Ok(())
-                })
+    #[test]
+    fn async_fn_validator_validate() {
+        let validator = AsyncFnValidator::new(|text: String, _ctx: OwnedContext| async move {
+            if text == "valid" {
+                Ok(())
+            } else {
+                Err(Errors(vec![Error {
+                    code: ErrorCode::Custom("invalid".to_string()),
+                    message: "not valid".to_string(),
+                }]))
             }
-        }
-
-        let hits = Rc::new(RefCell::new(0));
-        let validator: BoxedAsyncValidator = Arc::new(RcAsyncValidator {
-            hits: Rc::clone(&hits),
         });
 
-        let value = Value::Text(String::from("hello"));
-        let ctx = Context::standalone("email");
+        let valid = Value::Text("valid".to_string());
+
+        let invalid = Value::Text("invalid".to_string());
+
+        let ctx = Context::standalone("test");
 
         assert_eq!(
-            block_on_ready(validator.validate_async(&value, &ctx)),
+            block_on_ready(validator.validate_async(&valid, &ctx)),
             Ok(())
         );
-        assert_eq!(*hits.borrow(), 1);
+        assert!(block_on_ready(validator.validate_async(&invalid, &ctx)).is_err());
+    }
+
+    #[test]
+    fn async_fn_validator_converts_value_and_context() {
+        use std::sync::Mutex;
+
+        let captured = Arc::new(Mutex::new(None::<(String, OwnedContext)>));
+
+        let captured_clone = Arc::clone(&captured);
+
+        let validator = AsyncFnValidator::new(move |text: String, ctx: OwnedContext| {
+            let captured = Arc::clone(&captured_clone);
+            async move {
+                *captured.lock().expect("lock poisoned") = Some((text, ctx));
+                Ok(())
+            }
+        });
+
+        let value = Value::Text("hello".to_string());
+
+        let ctx = Context::standalone("email");
+
+        let result = block_on_ready(validator.validate_async(&value, &ctx));
+
+        assert_eq!(result, Ok(()));
+
+        let guard = captured.lock().expect("lock poisoned");
+
+        let (text, owned_ctx) = guard.as_ref().expect("closure not called");
+
+        assert_eq!(text, "hello");
+        assert_eq!(owned_ctx.field_name, "email");
+    }
+
+    #[test]
+    fn async_fn_validator_boxed() {
+        let validator = AsyncFnValidator::new(|_text: String, _ctx: OwnedContext| async { Ok(()) });
+
+        let _boxed: BoxedAsyncValidator = validator.boxed();
+    }
+
+    #[test]
+    fn async_fn_validator_with_number_value() {
+        use std::sync::Mutex;
+
+        let captured = Arc::new(Mutex::new(None::<String>));
+
+        let captured_clone = Arc::clone(&captured);
+
+        let validator = AsyncFnValidator::new(move |text: String, _ctx: OwnedContext| {
+            let captured = Arc::clone(&captured_clone);
+            async move {
+                *captured.lock().expect("lock poisoned") = Some(text);
+                Ok(())
+            }
+        });
+
+        let value = Value::Number(Some(42.5));
+
+        let ctx = Context::standalone("age");
+
+        let result = block_on_ready(validator.validate_async(&value, &ctx));
+
+        assert_eq!(result, Ok(()));
+
+        let guard = captured.lock().expect("lock poisoned");
+
+        assert_eq!(
+            guard.as_deref(),
+            Some("42.5"),
+            "Number value should be stringified via to_string_for_validation"
+        );
+    }
+
+    #[test]
+    fn async_fn_validator_with_none_number_value() {
+        use std::sync::Mutex;
+
+        let captured = Arc::new(Mutex::new(None::<String>));
+
+        let captured_clone = Arc::clone(&captured);
+
+        let validator = AsyncFnValidator::new(move |text: String, _ctx: OwnedContext| {
+            let captured = Arc::clone(&captured_clone);
+            async move {
+                *captured.lock().expect("lock poisoned") = Some(text);
+                Ok(())
+            }
+        });
+
+        let value = Value::Number(None);
+
+        let ctx = Context::standalone("quantity");
+
+        let result = block_on_ready(validator.validate_async(&value, &ctx));
+
+        assert_eq!(result, Ok(()));
+
+        let guard = captured.lock().expect("lock poisoned");
+
+        assert_eq!(
+            guard.as_deref(),
+            Some(""),
+            "Number(None) should produce empty string"
+        );
+    }
+
+    #[test]
+    fn async_fn_validator_debug() {
+        let validator = AsyncFnValidator::new(|_text: String, _ctx: OwnedContext| async { Ok(()) });
+
+        let debug = format!("{validator:?}");
+
+        assert!(
+            debug.contains("AsyncFnValidator"),
+            "Debug output should contain type name"
+        );
+    }
+
+    /// On native targets the future returned by `validate_async` must be
+    /// `Send` so it can be spawned on multi-threaded runtimes. On wasm32
+    /// this bound is relaxed (cfg-gated out) because browser-side
+    /// validators commonly await `!Send` JS futures.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn async_fn_validator_future_is_send() {
+        fn assert_send<T: Send>(_: &T) {}
+
+        let validator = AsyncFnValidator::new(|_text: String, _ctx: OwnedContext| async { Ok(()) });
+        let value = Value::Text("test".to_string());
+        let ctx = Context::standalone("field");
+        let future = validator.validate_async(&value, &ctx);
+
+        assert_send(&future);
     }
 }
