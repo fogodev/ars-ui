@@ -1243,12 +1243,101 @@ enum DateOrder {
 }
 
 fn date_order(locale: &Locale) -> DateOrder {
-    match locale.language() {
-        "ja" | "zh" | "ko" => DateOrder::YearMonthDay,
+    #[cfg(feature = "icu4x")]
+    if let Some(order) = icu_date_order(locale) {
+        return order;
+    }
 
-        _ if matches!(locale.region(), Some("US" | "FM" | "PW")) => DateOrder::MonthDayYear,
+    #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
+    if let Some(order) = js_date_order(locale) {
+        return order;
+    }
 
+    fallback_date_order(locale)
+}
+
+#[cfg(feature = "icu4x")]
+fn icu_date_order(locale: &Locale) -> Option<DateOrder> {
+    let probe = CalendarDate::new_gregorian(2006, 11, 22).ok()?;
+    let formatter = build_icu_date_formatter(locale, FormatLength::Short);
+    let formatted = format_icu_date(locale, FormatLength::Short, &formatter, &probe);
+    numeric_field_order_from_formatted(&formatted)
+}
+
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
+fn js_date_order(locale: &Locale) -> Option<DateOrder> {
+    let probe = CalendarDate::new_gregorian(2006, 11, 22).ok()?;
+    let formatter = build_js_date_formatter(locale, FormatLength::Short);
+    let formatted = format_js_date(locale, FormatLength::Short, &formatter, &probe);
+    numeric_field_order_from_formatted(&formatted)
+}
+
+fn fallback_date_order(locale: &Locale) -> DateOrder {
+    if matches!(locale.language(), "ja" | "zh" | "ko") {
+        return DateOrder::YearMonthDay;
+    }
+
+    match locale.region() {
+        Some("US" | "FM" | "PW") => DateOrder::MonthDayYear,
+        Some("CA" | "CN" | "HU" | "JP" | "KR" | "LT" | "MN" | "TW") => DateOrder::YearMonthDay,
         _ => DateOrder::DayMonthYear,
+    }
+}
+
+#[cfg(any(
+    feature = "icu4x",
+    all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x"))
+))]
+fn numeric_field_order_from_formatted(formatted: &str) -> Option<DateOrder> {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum DateComponent {
+        Month,
+        Day,
+        Year,
+    }
+
+    let mut numeric_runs = Vec::new();
+    let mut current: Option<u32> = None;
+
+    for ch in formatted.chars() {
+        if let Some(digit) = ch.to_digit(10) {
+            current = Some(current.unwrap_or(0).checked_mul(10)?.checked_add(digit)?);
+        } else if let Some(value) = current.take() {
+            numeric_runs.push(value);
+        }
+    }
+
+    if let Some(value) = current {
+        numeric_runs.push(value);
+    }
+
+    let components: Vec<_> = numeric_runs
+        .into_iter()
+        .filter_map(|value| match value {
+            11 => Some(DateComponent::Month),
+            22 => Some(DateComponent::Day),
+            6 | 2006 => Some(DateComponent::Year),
+            _ => None,
+        })
+        .collect();
+
+    match components.as_slice() {
+        [
+            DateComponent::Month,
+            DateComponent::Day,
+            DateComponent::Year,
+        ] => Some(DateOrder::MonthDayYear),
+        [
+            DateComponent::Day,
+            DateComponent::Month,
+            DateComponent::Year,
+        ] => Some(DateOrder::DayMonthYear),
+        [
+            DateComponent::Year,
+            DateComponent::Month,
+            DateComponent::Day,
+        ] => Some(DateOrder::YearMonthDay),
+        _ => None,
     }
 }
 
@@ -1593,10 +1682,28 @@ mod tests {
         )
     ))]
     use alloc::string::String;
+    use alloc::{vec, vec::Vec};
 
     #[cfg(feature = "icu4x")]
     use icu::datetime::fieldsets::{T, YMD, YMDE};
 
+    use super::{
+        DateFormatter, DateFormatterOptions, DateFormatterPartKind, MonthFormat, NumericWidth,
+    };
+    #[cfg(feature = "icu4x")]
+    use super::{
+        DateFormatterPart, DateRangePartSource, EffectiveDateFields, EffectiveTimeFields,
+        TextWidth, TimeZoneNameFormat, date_fields_from_style, join_parts, join_range_parts,
+        range_parts_from_parts, render_date_parts, render_time_parts, resolve_options,
+        time_fields_from_style,
+    };
+    #[cfg(all(feature = "std", feature = "icu4x"))]
+    use super::{
+        DateOrder, date_from_zoned, date_order, era_label, fixed_offset_minutes_for_time_zone,
+        format_hour, format_month, format_numeric, format_time_zone_name, format_utc_offset,
+        format_year, literal_part, push_date_field, time_from_zoned, title_case_ascii,
+        truncate_graphemes, weekday_label,
+    };
     #[cfg(any(
         feature = "icu4x",
         not(any(feature = "icu4x", feature = "web-intl")),
@@ -1607,23 +1714,8 @@ mod tests {
         )
     ))]
     use super::{
-        DateFormatter, FormatLength, english_month_long, english_month_short, english_weekday_long,
+        FormatLength, english_month_long, english_month_short, english_weekday_long,
         fallback_format_date,
-    };
-    #[cfg(feature = "icu4x")]
-    use super::{
-        DateFormatterOptions, DateFormatterPart, DateFormatterPartKind, DateRangePartSource,
-        EffectiveDateFields, EffectiveTimeFields, MonthFormat, NumericWidth, TextWidth,
-        TimeZoneNameFormat, date_fields_from_style, join_parts, join_range_parts,
-        range_parts_from_parts, render_date_parts, render_time_parts, resolve_options,
-        time_fields_from_style,
-    };
-    #[cfg(all(feature = "std", feature = "icu4x"))]
-    use super::{
-        DateOrder, date_from_zoned, date_order, era_label, fixed_offset_minutes_for_time_zone,
-        format_hour, format_month, format_numeric, format_time_zone_name, format_utc_offset,
-        format_year, literal_part, push_date_field, time_from_zoned, title_case_ascii,
-        truncate_graphemes, weekday_label,
     };
     #[cfg(feature = "icu4x")]
     use crate::StubIcuProvider;
@@ -1647,6 +1739,12 @@ mod tests {
         )
     ))]
     use crate::locales;
+    use crate::{CalendarDate, Locale};
+    #[cfg(feature = "icu4x")]
+    use crate::{
+        CalendarDateTime, CalendarSystem as PublicCalendarSystem, HourCycle, Time, TimeZoneId,
+        Weekday, locales,
+    };
     #[cfg(any(
         feature = "icu4x",
         not(any(feature = "icu4x", feature = "web-intl")),
@@ -1656,12 +1754,7 @@ mod tests {
             not(feature = "icu4x")
         )
     ))]
-    use crate::{CalendarDate, CalendarSystem, Era};
-    #[cfg(feature = "icu4x")]
-    use crate::{
-        CalendarDateTime, CalendarSystem as PublicCalendarSystem, HourCycle, Locale, Time,
-        TimeZoneId, Weekday, locales,
-    };
+    use crate::{CalendarSystem, Era};
 
     #[cfg(feature = "icu4x")]
     fn march_2024() -> CalendarDate {
@@ -2430,6 +2523,10 @@ mod tests {
             DateOrder::MonthDayYear
         ));
         assert!(matches!(
+            date_order(&Locale::parse("en-CA").expect("locale should parse")),
+            DateOrder::YearMonthDay
+        ));
+        assert!(matches!(
             date_order(&Locale::parse("de-DE").expect("locale should parse")),
             DateOrder::DayMonthYear
         ));
@@ -2503,6 +2600,38 @@ mod tests {
         assert_eq!(date_from_zoned(&zoned).to_iso8601(), "2024-03-15");
         assert_eq!(time_from_zoned(&zoned).millisecond(), 250);
         assert_eq!(join_parts(&pushed), "month / day");
+    }
+
+    #[test]
+    fn formatter_uses_locale_derived_date_field_order_for_option_based_dates() {
+        let locale = Locale::parse("en-CA").expect("locale should parse");
+        let formatter = DateFormatter::new_with_options(
+            &locale,
+            DateFormatterOptions {
+                year: Some(NumericWidth::Numeric),
+                month: Some(MonthFormat::Numeric),
+                day: Some(NumericWidth::Numeric),
+                ..DateFormatterOptions::default()
+            },
+        );
+        let date = CalendarDate::new_gregorian(2006, 11, 22).expect("fixture should validate");
+        let kinds: Vec<_> = formatter
+            .format_date_to_parts(&date)
+            .into_iter()
+            .filter_map(|part| match part.kind {
+                DateFormatterPartKind::Literal => None,
+                kind => Some(kind),
+            })
+            .collect();
+
+        assert_eq!(
+            kinds,
+            vec![
+                DateFormatterPartKind::Year,
+                DateFormatterPartKind::Month,
+                DateFormatterPartKind::Day,
+            ]
+        );
     }
 
     #[cfg(any(

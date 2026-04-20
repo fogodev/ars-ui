@@ -327,10 +327,10 @@ impl CalendarDate {
     /// calendar.
     pub fn subtract(&self, duration: DateDuration) -> Result<Self, CalendarError> {
         self.add(DateDuration {
-            years: -duration.years,
-            months: -duration.months,
-            weeks: -duration.weeks,
-            days: -duration.days,
+            years: checked_neg_i32_for_calendar(duration.years, "year")?,
+            months: checked_neg_i32_for_calendar(duration.months, "month")?,
+            weeks: checked_neg_i32_for_calendar(duration.weeks, "week")?,
+            days: checked_neg_i32_for_calendar(duration.days, "day")?,
         })
     }
 
@@ -708,12 +708,12 @@ impl Time {
     /// wall-clock time.
     pub fn subtract(&self, duration: TimeDuration) -> Result<Self, DateError> {
         self.add(TimeDuration {
-            hours: -duration.hours,
-            minutes: -duration.minutes,
-            seconds: -duration.seconds,
-            milliseconds: -duration.milliseconds,
-            microseconds: -duration.microseconds,
-            nanoseconds: -duration.nanoseconds,
+            hours: checked_neg_i64_for_date(duration.hours, "hour")?,
+            minutes: checked_neg_i64_for_date(duration.minutes, "minute")?,
+            seconds: checked_neg_i64_for_date(duration.seconds, "second")?,
+            milliseconds: checked_neg_i64_for_date(duration.milliseconds, "millisecond")?,
+            microseconds: checked_neg_i64_for_date(duration.microseconds, "microsecond")?,
+            nanoseconds: checked_neg_i64_for_date(duration.nanoseconds, "nanosecond")?,
         })
     }
 
@@ -886,18 +886,24 @@ impl CalendarDateTime {
     pub fn subtract(&self, duration: DateTimeDuration) -> Result<Self, CalendarError> {
         self.add(DateTimeDuration {
             date: DateDuration {
-                years: -duration.date.years,
-                months: -duration.date.months,
-                weeks: -duration.date.weeks,
-                days: -duration.date.days,
+                years: checked_neg_i32_for_calendar(duration.date.years, "year")?,
+                months: checked_neg_i32_for_calendar(duration.date.months, "month")?,
+                weeks: checked_neg_i32_for_calendar(duration.date.weeks, "week")?,
+                days: checked_neg_i32_for_calendar(duration.date.days, "day")?,
             },
             time: TimeDuration {
-                hours: -duration.time.hours,
-                minutes: -duration.time.minutes,
-                seconds: -duration.time.seconds,
-                milliseconds: -duration.time.milliseconds,
-                microseconds: -duration.time.microseconds,
-                nanoseconds: -duration.time.nanoseconds,
+                hours: checked_neg_i64_for_calendar(duration.time.hours, "hour")?,
+                minutes: checked_neg_i64_for_calendar(duration.time.minutes, "minute")?,
+                seconds: checked_neg_i64_for_calendar(duration.time.seconds, "second")?,
+                milliseconds: checked_neg_i64_for_calendar(
+                    duration.time.milliseconds,
+                    "millisecond",
+                )?,
+                microseconds: checked_neg_i64_for_calendar(
+                    duration.time.microseconds,
+                    "microsecond",
+                )?,
+                nanoseconds: checked_neg_i64_for_calendar(duration.time.nanoseconds, "nanosecond")?,
             },
         })
     }
@@ -1334,6 +1340,24 @@ pub(crate) fn projected_date_for_calendar(
         month_code: Some(month_code_from_temporal(temporal.month_code())),
         months_in_year: u8::try_from(temporal.months_in_year()).ok()?,
         days_in_month: u8::try_from(temporal.days_in_month()).ok()?,
+    })
+}
+
+fn checked_neg_i32_for_calendar(value: i32, component: &str) -> Result<i32, CalendarError> {
+    value.checked_neg().ok_or_else(|| {
+        CalendarError::Arithmetic(format!("{component} duration overflow while subtracting"))
+    })
+}
+
+fn checked_neg_i64_for_calendar(value: i64, component: &str) -> Result<i64, CalendarError> {
+    value.checked_neg().ok_or_else(|| {
+        CalendarError::Arithmetic(format!("{component} duration overflow while subtracting"))
+    })
+}
+
+fn checked_neg_i64_for_date(value: i64, component: &str) -> Result<i64, DateError> {
+    value.checked_neg().ok_or_else(|| {
+        DateError::CalendarError(format!("{component} duration overflow while subtracting"))
     })
 }
 
@@ -1941,6 +1965,14 @@ mod tests {
         );
         assert_eq!(time.to_iso8601(), "09:30:45.125");
         assert_eq!(precise.to_iso8601(), "09:30:45.12522233");
+        assert!(matches!(
+            time.subtract(TimeDuration {
+                hours: i64::MIN,
+                ..TimeDuration::default()
+            }),
+            Err(DateError::CalendarError(message))
+                if message == "hour duration overflow while subtracting"
+        ));
     }
 
     #[test]
@@ -2065,6 +2097,17 @@ mod tests {
             Err(CalendarError::Arithmetic(message))
                 if message == "date-time cycle amount exceeds i32 range"
         ));
+        assert!(matches!(
+            date_time.subtract(DateTimeDuration {
+                time: TimeDuration {
+                    hours: i64::MIN,
+                    ..TimeDuration::default()
+                },
+                ..DateTimeDuration::default()
+            }),
+            Err(CalendarError::Arithmetic(message))
+                if message == "hour duration overflow while subtracting"
+        ));
     }
 
     #[test]
@@ -2083,6 +2126,14 @@ mod tests {
                 .day(),
             4
         );
+        assert!(matches!(
+            date.subtract(DateDuration {
+                years: i32::MIN,
+                ..DateDuration::default()
+            }),
+            Err(CalendarError::Arithmetic(message))
+                if message == "year duration overflow while subtracting"
+        ));
         assert_eq!(gregorian_date(2024, 3, 12).weekday(), Weekday::Tuesday);
         assert_eq!(gregorian_date(2024, 3, 13).weekday(), Weekday::Wednesday);
         assert_eq!(gregorian_date(2024, 3, 14).weekday(), Weekday::Thursday);
