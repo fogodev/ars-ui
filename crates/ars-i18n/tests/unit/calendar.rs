@@ -1,5 +1,8 @@
 use alloc::vec;
 
+#[cfg(feature = "std")]
+use temporal_rs::sys::Temporal;
+
 use super::{
     CalendarDate, CalendarDateFields, CalendarDateTime, CalendarSystem, CycleOptions,
     CycleTimeOptions, DateDuration, DateField, DateTimeDuration, DateTimeField, Era, MonthCode,
@@ -657,6 +660,28 @@ fn zoned_date_time_and_local_zone_override_work() {
     assert!(parse::parse_absolute("not-a-timestamp", &time_zone).is_err());
 
     parse::reset_local_time_zone_override();
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn get_local_time_zone_uses_local_host_zone_when_no_override_is_set() {
+    parse::reset_local_time_zone_override();
+
+    let expected = TimeZoneId::new(
+        Temporal::local_now()
+            .time_zone()
+            .expect("local host zone should resolve")
+            .identifier()
+            .expect("local host zone should expose an identifier"),
+    )
+    .expect("local host zone identifier should validate");
+
+    assert_eq!(
+        parse::get_local_time_zone()
+            .expect("local time zone should resolve without override")
+            .as_str(),
+        expected.as_str()
+    );
 }
 
 #[cfg(feature = "std")]

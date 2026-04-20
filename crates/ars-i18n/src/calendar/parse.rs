@@ -243,7 +243,7 @@ pub fn get_local_time_zone() -> Result<TimeZoneId, CalendarError> {
         return Ok(time_zone);
     }
 
-    let zone = Temporal::utc_now()
+    let zone = Temporal::local_now()
         .time_zone()
         .map_err(|error| CalendarError::Arithmetic(error.to_string()))?;
 

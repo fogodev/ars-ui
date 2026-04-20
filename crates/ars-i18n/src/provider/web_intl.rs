@@ -5,6 +5,7 @@
 //! targets with the `web-intl` feature.
 
 use alloc::{
+    format,
     string::{String, ToString},
     vec::Vec,
 };
@@ -257,7 +258,7 @@ impl WebIntlProvider {
 
         for probe_year in probe_years {
             for probe_month in 0_i32..12 {
-                let probe = noon_utc_js_date(probe_year, probe_month, 15);
+                let probe = noon_utc_js_date(probe_year as i32, probe_month, 15);
 
                 let long_label = month_part_value(&long_formatter.format_to_parts(&probe));
 
@@ -667,25 +668,10 @@ impl IcuProvider for WebIntlProvider {
 
         let formatter = Intl::DateTimeFormat::new(&locales, &opts);
 
-        // `js_sys::Date`'s `setUTCFullYear` accepts any integer year,
-        // but the browser path only works when the formatted parts
-        // ordering matches our positive-year assumptions. For BCE
-        // Gregorian inputs (`date.year() < 0`) the safest option is the
-        // shared ICU4X calendar-arithmetic bridge: it handles negative
-        // year arithmetic directly and produces the target calendar's
-        // correct civil-order fields without going through
-        // `Intl.DateTimeFormat` at all. Previously we returned the
-        // source date unchanged here, which violated the
-        // `IcuProvider::convert_date` contract by handing the caller
-        // back a date in the *source* calendar.
-        let Ok(year_u32) = u32::try_from(date.year()) else {
-            return bridge_convert(date, target).unwrap_or_else(|| date.clone());
-        };
-
         let js_date = noon_utc_js_date(
-            year_u32,
-            i32::from(date.month().saturating_sub(1)),
-            i32::from(date.day()),
+            date.iso_year,
+            i32::from(date.iso_month.saturating_sub(1)),
+            i32::from(date.iso_day),
         );
 
         let parts = formatter.format_to_parts(&js_date);
@@ -1049,19 +1035,29 @@ const fn next_weekday(weekday: Weekday) -> Weekday {
 /// The noon anchor keeps the instant away from midnight so any
 /// formatter that, for whatever reason, doesn't honour `timeZone:
 /// "UTC"` still lands on the intended day in the browser's local
-/// timezone. `year` is a `u32` because `Date::set_utc_full_year_*`
-/// rejects negative inputs; callers that need BCE support handle the
-/// out-of-range case before reaching this helper.
-pub(crate) fn noon_utc_js_date(year: u32, month: i32, day: i32) -> js_sys::Date {
-    let js_date = js_sys::Date::new_0();
+/// timezone. The helper accepts the full ISO year range, including BCE
+/// years, by constructing a canonical ISO-8601 string rather than
+/// relying on the legacy `Date(year, month)` / `setUTCFullYear`
+/// pathways.
+pub(crate) fn noon_utc_js_date(year: i32, month: i32, day: i32) -> js_sys::Date {
+    let iso = format!(
+        "{}-{:02}-{:02}T12:00:00.000Z",
+        js_iso_year(year),
+        month + 1,
+        day
+    );
 
-    js_date.set_utc_full_year_with_month_date(year, month, day);
-    js_date.set_utc_hours(12);
-    js_date.set_utc_minutes(0);
-    js_date.set_utc_seconds(0);
-    js_date.set_utc_milliseconds(0);
+    js_sys::Date::new(&JsValue::from_str(&iso))
+}
 
-    js_date
+fn js_iso_year(year: i32) -> String {
+    if (0..=9_999).contains(&year) {
+        format!("{year:04}")
+    } else if year < 0 {
+        format!("-{:06}", year.unsigned_abs())
+    } else {
+        format!("+{year:06}")
+    }
 }
 
 /// Returns `true` if the given Hebrew year is a leap year of the 19-year

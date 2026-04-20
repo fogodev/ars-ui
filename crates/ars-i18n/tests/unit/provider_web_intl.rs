@@ -395,20 +395,24 @@ fn web_intl_convert_date_routes_bce_gregorian_through_bridge() {
     let buddhist = provider.convert_date(&gregorian, CalendarSystem::Buddhist);
 
     // Buddhist Era year = Gregorian year + 543. -50 CE → Buddhist 493.
-    // When the bridge accepts the input, we must land in Buddhist
-    // with a sensible year — never in Gregorian — and we must never
-    // return the source date.
-    if buddhist.calendar() != CalendarSystem::Gregorian {
-        assert_eq!(
-            buddhist.calendar(),
-            CalendarSystem::Buddhist,
-            "BCE Gregorian must convert to Buddhist via the bridge, not be echoed back"
-        );
-        assert_ne!(
-            buddhist, gregorian,
-            "BCE Gregorian must not be returned as the source date"
-        );
-    }
+    // The browser path must use the canonical ISO year (-50), not the
+    // era-relative public year (51 BC). Otherwise the conversion lands
+    // in Buddhist 594 instead of Buddhist 493.
+    assert_eq!(
+        buddhist.calendar(),
+        CalendarSystem::Buddhist,
+        "BCE Gregorian must convert to Buddhist via the bridge, not be echoed back"
+    );
+    assert_eq!(
+        buddhist.year(),
+        493,
+        "Gregorian 51 BC corresponds to Buddhist 493; got {}",
+        buddhist.year()
+    );
+    assert_ne!(
+        buddhist, gregorian,
+        "BCE Gregorian must not be returned as the source date"
+    );
 }
 
 #[wasm_bindgen_test]
