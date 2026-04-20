@@ -70,12 +70,12 @@ fn extract_section(content: &str, heading_prefixes: &[&str]) -> Option<String> {
     let mut start_level = 0;
 
     for (i, line) in lines.iter().enumerate() {
-        if let Some((level, text)) = manifest::parse_heading(line) {
-            if heading_prefixes.iter().any(|prefix| text.contains(prefix)) {
-                start_idx = Some(i + 1);
-                start_level = level;
-                break;
-            }
+        if let Some((level, text)) = manifest::parse_heading(line)
+            && heading_prefixes.iter().any(|prefix| text.contains(prefix))
+        {
+            start_idx = Some(i + 1);
+            start_level = level;
+            break;
         }
     }
 
@@ -83,11 +83,11 @@ fn extract_section(content: &str, heading_prefixes: &[&str]) -> Option<String> {
     let mut end = lines.len();
 
     for (i, line) in lines.iter().enumerate().skip(start) {
-        if let Some((level, _)) = manifest::parse_heading(line) {
-            if level <= start_level {
-                end = i;
-                break;
-            }
+        if let Some((level, _)) = manifest::parse_heading(line)
+            && level <= start_level
+        {
+            end = i;
+            break;
         }
     }
 

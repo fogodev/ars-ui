@@ -51,6 +51,7 @@ pub fn normalize_scroll_left_rtl(
             // Chrome/Firefox: raw is -max..0. Negate to get 0..max.
             raw.abs().clamp(0.0, max_scroll)
         }
+
         RtlScrollMode::Positive => {
             // Safari: raw is 0 (far-left / inline-end) to max (far-right /
             // inline-start). Convert to inline-start distance: max - raw.
@@ -78,6 +79,7 @@ pub enum LayoutStrategy {
     Grid {
         /// Pixel height of each row.
         item_height: f64,
+
         /// Number of columns in the grid.
         columns: NonZeroUsize,
     },
@@ -86,12 +88,16 @@ pub enum LayoutStrategy {
     GridLayout {
         /// Minimum item width in pixels.
         min_item_width: f64,
+
         /// Maximum item width in pixels.
         max_item_width: f64,
+
         /// Minimum item height in pixels.
         min_item_height: f64,
+
         /// Optional maximum item height in pixels.
         max_item_height: Option<f64>,
+
         /// Gap between items in pixels.
         gap: f64,
     },
@@ -100,10 +106,13 @@ pub enum LayoutStrategy {
     WaterfallLayout {
         /// Minimum item width in pixels.
         min_item_width: f64,
+
         /// Maximum item width in pixels.
         max_item_width: f64,
+
         /// Minimum item height in pixels.
         min_item_height: f64,
+
         /// Gap between items in pixels.
         gap: f64,
     },
@@ -112,10 +121,13 @@ pub enum LayoutStrategy {
     TableLayout {
         /// Estimated height of each data row in pixels.
         row_height: f64,
+
         /// Height of the sticky header row in pixels.
         header_height: f64,
+
         /// Width of each visible column in pixels.
         column_widths: Vec<f64>,
+
         /// Vertical gap between rows in pixels.
         row_gap: f64,
     },
@@ -215,6 +227,8 @@ pub struct Virtualizer {
     /// Currently focused index, if any.
     pub focused_index: Option<usize>,
 
+    /// Measured heights of items.
+    /// Keyed by flat index.
     measured_heights: BTreeMap<usize, f64>,
 }
 
@@ -278,6 +292,7 @@ impl Virtualizer {
         self.total_count = total_count;
 
         self.measured_heights.clear();
+
         self.focused_index = None;
     }
 
@@ -320,6 +335,7 @@ impl Virtualizer {
             } => {
                 let row_start = (scroll_offset / item_height).floor() as usize;
                 let row_end = ((scroll_offset + viewport_extent) / item_height).ceil() as usize;
+
                 let cols = columns.get();
 
                 (row_start * cols, (row_end * cols).min(self.total_count))
@@ -332,8 +348,11 @@ impl Virtualizer {
                 ..
             } => {
                 let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+
                 let cols = self.responsive_columns(cross_size, *gap);
+
                 let row_stride = main_size + gap;
+
                 let row_start = (scroll_offset / row_stride).floor() as usize;
                 let row_end = ((scroll_offset + viewport_extent) / row_stride).ceil() as usize;
 
@@ -347,7 +366,9 @@ impl Virtualizer {
                 ..
             } => {
                 let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+
                 let positions = self.waterfall_positions(cross_size, main_size, *gap);
+
                 let mut first = self.total_count;
                 let mut last = 0;
 
@@ -380,8 +401,10 @@ impl Virtualizer {
             } => match self.orientation {
                 Orientation::Vertical => {
                     let row_stride = row_height + row_gap;
+
                     let data_offset = (scroll_offset - header_height).max(0.0);
                     let data_end = (scroll_offset + viewport_extent - header_height).max(0.0);
+
                     let first = (data_offset / row_stride).floor() as usize;
                     let last = (data_end / row_stride).ceil() as usize;
 
@@ -389,8 +412,10 @@ impl Virtualizer {
                 }
                 Orientation::Horizontal => {
                     let mut cumulative = 0.0_f64;
+
                     let mut first = column_widths.len();
                     let mut found_first = false;
+
                     let mut last = column_widths.len();
 
                     for (i, &w) in column_widths.iter().enumerate() {
@@ -398,7 +423,9 @@ impl Virtualizer {
                             first = i;
                             found_first = true;
                         }
+
                         cumulative += w;
+
                         if cumulative >= scroll_offset + viewport_extent {
                             last = i + 1;
                             break;
@@ -416,6 +443,7 @@ impl Virtualizer {
             (LayoutStrategy::TableLayout { column_widths, .. }, Orientation::Horizontal) => {
                 column_widths.len()
             }
+
             _ => self.total_count,
         };
 
@@ -423,11 +451,11 @@ impl Virtualizer {
 
         let mut end = last_visible.saturating_add(self.overscan).min(item_count);
 
-        if let Some(focused_index) = self.focused_index {
-            if focused_index < item_count {
-                start = start.min(focused_index);
-                end = end.max(focused_index + 1);
-            }
+        if let Some(focused_index) = self.focused_index
+            && focused_index < item_count
+        {
+            start = start.min(focused_index);
+            end = end.max(focused_index + 1);
         }
 
         start..end
@@ -471,6 +499,7 @@ impl Virtualizer {
                 ..
             } => {
                 let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+
                 let cols = self.responsive_columns(cross_size, *gap);
 
                 (index / cols) as f64 * (main_size + gap)
@@ -483,6 +512,7 @@ impl Virtualizer {
                 ..
             } => {
                 let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+
                 self.waterfall_positions(cross_size, main_size, *gap)
                     .get(index)
                     .copied()
@@ -523,7 +553,9 @@ impl Virtualizer {
                 columns,
             } => {
                 let cols = columns.get();
+
                 let rows = self.total_count.div_ceil(cols);
+
                 rows as f64 * item_height
             }
 
@@ -538,7 +570,9 @@ impl Virtualizer {
                 }
 
                 let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+
                 let cols = self.responsive_columns(cross_size, *gap);
+
                 let rows = self.total_count.div_ceil(cols);
 
                 rows as f64 * (main_size + gap) - gap
@@ -551,6 +585,7 @@ impl Virtualizer {
                 ..
             } => {
                 let (main_size, cross_size) = self.axis_sizes(*min_item_width, *min_item_height);
+
                 self.waterfall_total_height(cross_size, main_size, *gap)
             }
 
@@ -598,6 +633,7 @@ impl Virtualizer {
                 ..
             } => {
                 let main_size = self.axis_sizes(*min_item_width, *min_item_height).0;
+
                 self.measured_heights
                     .get(&index)
                     .copied()
@@ -615,8 +651,11 @@ impl Virtualizer {
         };
 
         let viewport_extent = self.viewport_extent();
+
         let max_scroll = (self.total_main_axis_extent() - viewport_extent).max(0.0);
+
         let clamped_scroll_offset = self.clamped_scroll_offset(viewport_extent);
+
         let item_end = offset + item_extent;
 
         let target_offset = match align {
@@ -694,8 +733,10 @@ impl Virtualizer {
     fn total_main_axis_extent(&self) -> f64 {
         match self.orientation {
             Orientation::Vertical => self.total_height_px(),
+
             Orientation::Horizontal => match &self.layout {
                 LayoutStrategy::TableLayout { column_widths, .. } => column_widths.iter().sum(),
+
                 _ => self.total_height_px(),
             },
         }
@@ -781,6 +822,7 @@ impl Virtualizer {
         let columns = self.responsive_columns(cross_item_size, gap);
 
         let mut column_heights = vec![0.0_f64; columns];
+
         let mut positions = Vec::with_capacity(self.total_count);
 
         for i in 0..self.total_count {
@@ -791,6 +833,7 @@ impl Virtualizer {
                 .unwrap_or((0, &0.0));
 
             let y = column_heights[min_col];
+
             positions.push(y);
 
             let item_main = self
@@ -813,6 +856,7 @@ impl Virtualizer {
         }
 
         let columns = self.responsive_columns(cross_item_size, gap);
+
         let mut column_heights = vec![0.0_f64; columns];
 
         for i in 0..self.total_count {
@@ -959,6 +1003,7 @@ mod tests {
         let mut virt = Virtualizer::new(4, LayoutStrategy::FixedHeight { item_height: 40.0 });
 
         virt.set_scroll_state_mut(500.0, 0.0, 50.0, 0.0);
+
         virt.overscan = 0;
 
         assert_eq!(virt.scroll_to_index(3, ScrollAlign::Auto), 110.0);
@@ -1060,6 +1105,7 @@ mod tests {
         let mut virt = fixed_height_virt();
 
         virt.focused_index = Some(8);
+
         virt.apply_collection_change_mut(3);
 
         assert_eq!(virt.total_count, 3);
@@ -1076,6 +1122,7 @@ mod tests {
         );
 
         baseline.focused_index = Some(1);
+
         baseline.report_item_height_mut(0, 60.0);
 
         let updated = baseline.apply_collection_change(6);
@@ -1094,6 +1141,7 @@ mod tests {
         let mut virt = fixed_height_virt();
 
         virt.focused_index = Some(5);
+
         virt.apply_collection_change_mut(100);
 
         assert_eq!(virt.focused_index, None);
@@ -1123,6 +1171,7 @@ mod tests {
         );
 
         virt.viewport_height = 100.0;
+
         virt.report_item_height_mut(0, 60.0);
         virt.report_item_height_mut(1, 50.0);
 
@@ -1139,7 +1188,9 @@ mod tests {
         );
 
         virt.set_scroll_state_mut(70.0, 0.0, 100.0, 0.0);
+
         virt.overscan = 0;
+
         virt.report_item_height_mut(0, 60.0);
 
         assert_eq!(virt.visible_range(), 1..4);
@@ -1155,6 +1206,7 @@ mod tests {
         );
 
         virt.set_scroll_state_mut(500.0, 0.0, 50.0, 0.0);
+
         virt.overscan = 0;
 
         assert_eq!(virt.visible_range(), 2..4);
@@ -1209,6 +1261,7 @@ mod tests {
 
         virt.orientation = Orientation::Horizontal;
         virt.overscan = 0;
+
         virt.set_scroll_state_mut(400.0, 120.0, 40.0, 80.0);
 
         assert_eq!(virt.visible_range(), 3..5);
@@ -1219,6 +1272,7 @@ mod tests {
         let mut virt = fixed_height_virt();
 
         virt.orientation = Orientation::Horizontal;
+
         virt.set_scroll_state_mut(400.0, 80.0, 40.0, 80.0);
 
         assert_eq!(virt.scroll_to_index(4, ScrollAlign::Auto), 120.0);
@@ -1231,6 +1285,7 @@ mod tests {
         let mut virt = Virtualizer::new(4, LayoutStrategy::FixedHeight { item_height: 40.0 });
 
         virt.orientation = Orientation::Horizontal;
+
         virt.set_scroll_state_mut(0.0, 0.0, 40.0, 50.0);
 
         assert_eq!(virt.scroll_to_index(3, ScrollAlign::Top), 110.0);
@@ -1241,6 +1296,7 @@ mod tests {
         let mut virt = Virtualizer::new(4, LayoutStrategy::FixedHeight { item_height: 40.0 });
 
         virt.set_scroll_state_mut(500.0, 0.0, 50.0, 0.0);
+
         virt.overscan = 0;
 
         assert_eq!(virt.visible_range(), 2..4);
@@ -1281,6 +1337,7 @@ mod tests {
         );
 
         virt.set_scroll_state_mut(0.0, 0.0, 200.0, 500.0);
+
         virt.overscan = 2;
 
         virt
@@ -1407,6 +1464,7 @@ mod tests {
         // rows (along main axis) = ceil(12/4) = 3
         // total main = 3 * 110 - 10 = 320
         virt.set_scroll_state_mut(0.0, 110.0, 200.0, 150.0);
+
         virt.overscan = 0;
 
         // scroll_left=110, viewport_width=150, main_stride=110
@@ -1434,6 +1492,7 @@ mod tests {
         );
 
         virt.set_scroll_state_mut(0.0, 0.0, 200.0, 400.0);
+
         virt.overscan = 0;
 
         virt
@@ -1511,6 +1570,7 @@ mod tests {
         // viewport_width=400 → 3 columns
         // All uniform: rows at Y=0, Y=57, Y=114
         virt.set_scroll_state_mut(50.0, 0.0, 70.0, 400.0);
+
         virt.overscan = 0;
 
         // Viewport [50, 120): items at Y=0 have bottom 45 < 50 → not visible
@@ -1544,6 +1604,7 @@ mod tests {
         // viewport_width=400 → 3 columns. scroll_top=46 with height=10 sits
         // entirely inside the 45→57 gap between row 0 and row 1.
         virt.set_scroll_state_mut(46.0, 0.0, 10.0, 400.0);
+
         virt.overscan = 0;
 
         assert_eq!(virt.visible_range(), 0..0);
@@ -1650,6 +1711,7 @@ mod tests {
         let mut virt = table_virt();
 
         virt.set_scroll_state_mut(0.0, 0.0, 100.0, 400.0);
+
         virt.overscan = 0;
 
         // Data starts at Y=24, row stride=39
@@ -1668,6 +1730,7 @@ mod tests {
         // row stride = 39, header = 24
         // item 0 at Y=24, item 1 at Y=63, item 2 at Y=102, item 3 at Y=141
         virt.set_scroll_state_mut(60.0, 0.0, 80.0, 400.0);
+
         virt.overscan = 1;
 
         // first = floor((60 - 24) / 39) = floor(36/39) = 0
@@ -1711,6 +1774,7 @@ mod tests {
         );
 
         virt.orientation = Orientation::Horizontal;
+
         // viewport_width = 200 for horizontal scroll
         virt.set_scroll_state_mut(0.0, 0.0, 300.0, 200.0);
 

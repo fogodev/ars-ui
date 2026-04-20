@@ -1,1506 +1,704 @@
-use alloc::string::{String, ToString};
-use core::{cmp::Ordering, num::NonZero};
+use alloc::vec;
 
-#[cfg(any(feature = "icu4x", feature = "web-intl"))]
-use super::internal::CalendarDate as InternalCalendarDate;
-#[cfg(any(feature = "icu4x", feature = "web-intl"))]
-use super::internal::{
-    days_in_month as internal_days_in_month, months_in_year as internal_months_in_year,
-};
+#[cfg(feature = "std")]
+use temporal_rs::sys::Temporal;
+
 use super::{
-    CalendarConversionError, CalendarDate, CalendarError, CalendarSystem, CalendarTypeError,
-    DateError, DateRange, Era, Gregorian, HourCycle, Japanese, JapaneseEra, Month, Time,
-    TypedCalendarDate, WeekInfo, bounded_days_in_month, bounded_months_in_year,
-    coptic_like_days_in_month, default_era_for, epoch_days_to_iso, gregorian_days_in_month,
-    iso_to_epoch_days, minimum_day_in_month, minimum_month_in_year, years_in_era,
+    CalendarDate, CalendarDateFields, CalendarDateTime, CalendarSystem, CycleOptions,
+    CycleTimeOptions, DateDuration, DateField, DateTimeDuration, DateTimeField, Era, MonthCode,
+    Time, TimeDuration, TimeField, TimeFields, parse, queries,
 };
-use crate::{IcuProvider, Locale, StubIcuProvider, Weekday};
+#[cfg(feature = "std")]
+use super::{Disambiguation, TimeZoneId, to_calendar_date_time, to_zoned, to_zoned_date_time};
+use crate::{Locale, StubIcuProvider};
 
-#[cfg(any(feature = "icu4x", feature = "web-intl"))]
-#[test]
-fn internal_calendar_date_from_iso_exposes_components() {
-    let date = InternalCalendarDate::from_iso(2024, 3, 15).expect("date should be valid");
-
-    assert_eq!(date.year(), 2024);
-    assert_eq!(date.month(), 3);
-    assert_eq!(date.day(), 15);
-    assert_eq!(date.weekday(), Weekday::Friday);
+fn gregorian_date(year: i32, month: u8, day: u8) -> CalendarDate {
+    CalendarDate::new_gregorian(year, month, day).expect("Gregorian fixture should validate")
 }
 
-#[cfg(any(feature = "icu4x", feature = "web-intl"))]
-#[test]
-fn internal_calendar_date_from_calendar_accepts_gregorian_fields() {
-    let date = InternalCalendarDate::from_calendar(2024, 3, 15, CalendarSystem::Gregorian)
-        .expect("gregorian conversion should succeed");
-
-    assert_eq!(date.year(), 2024);
-    assert_eq!(date.month(), 3);
-    assert_eq!(date.day(), 15);
-}
-
-#[cfg(any(feature = "icu4x", feature = "web-intl"))]
-#[test]
-fn internal_calendar_date_from_calendar_uses_ordinal_months_for_chinese() {
-    let date = InternalCalendarDate::from_calendar(2023, 3, 1, CalendarSystem::Chinese)
-        .expect("Chinese ordinal month should construct");
-
-    assert_eq!(date.month(), 3);
-}
-
-#[cfg(any(feature = "icu4x", feature = "web-intl"))]
-#[test]
-fn internal_calendar_date_from_calendar_defaults_japanese_to_current_era() {
-    let date = InternalCalendarDate::from_calendar(6, 3, 15, CalendarSystem::Japanese)
-        .expect("japanese current-era conversion should succeed");
-    let gregorian = date.to_calendar(CalendarSystem::Gregorian);
-
-    assert_eq!(date.era(), Some(String::from("reiwa")));
-    assert_eq!(gregorian.year(), 2024);
-    assert_eq!(gregorian.month(), 3);
-    assert_eq!(gregorian.day(), 15);
-}
-
-#[cfg(any(feature = "icu4x", feature = "web-intl"))]
-#[test]
-fn stub_provider_uses_year_dependent_chinese_month_counts() {
-    let provider = StubIcuProvider;
-
-    let leap_year = (2020..=2030)
-        .find(|year| {
-            InternalCalendarDate::from_calendar(*year, 13, 1, CalendarSystem::Chinese).is_ok()
-        })
-        .expect("fixture range should include a Chinese leap-month year");
-    let common_year = (2020..=2030)
-        .find(|year| {
-            InternalCalendarDate::from_calendar(*year, 13, 1, CalendarSystem::Chinese).is_err()
-        })
-        .expect("fixture range should include a Chinese common year");
-
-    assert_eq!(
-        provider.max_months_in_year(&CalendarSystem::Chinese, leap_year, None),
-        13
-    );
-    assert_eq!(
-        provider.max_months_in_year(&CalendarSystem::Chinese, common_year, None),
-        12
-    );
-    assert!(
-        CalendarDate::new(&provider, CalendarSystem::Chinese, None, leap_year, 13, 1).is_some()
-    );
-    assert!(
-        CalendarDate::new(&provider, CalendarSystem::Chinese, None, common_year, 13, 1).is_none()
-    );
+fn japanese_era(code: &str, display_name: &str) -> Era {
+    Era {
+        code: code.into(),
+        display_name: display_name.into(),
+    }
 }
 
 #[test]
-fn stub_provider_rejects_invalid_coptic_and_ethiopic_epagomenal_days() {
-    let provider = StubIcuProvider;
-
-    assert!(
-        CalendarDate::new(&provider, CalendarSystem::Coptic, None, 1738, 13, 6).is_none(),
-        "common Coptic year month 13 only has five days"
-    );
-    assert!(
-        CalendarDate::new(&provider, CalendarSystem::Coptic, None, 1739, 13, 6).is_some(),
-        "leap Coptic year month 13 has six days"
-    );
-    assert!(
-        CalendarDate::new(&provider, CalendarSystem::Ethiopic, None, 2016, 13, 6).is_none(),
-        "common Ethiopic year month 13 only has five days"
-    );
-    assert!(
-        CalendarDate::new(&provider, CalendarSystem::Ethiopic, None, 2015, 13, 6).is_some(),
-        "leap Ethiopic year month 13 has six days"
-    );
-    assert!(
-        CalendarDate::new(&provider, CalendarSystem::Coptic, None, i32::MAX, 13, 6).is_some(),
-        "the accepted maximum year should not overflow Coptic leap-year validation"
-    );
-    assert!(
-        CalendarDate::new(&provider, CalendarSystem::Coptic, None, i32::MAX, 13, 7).is_none(),
-        "month 13 must still reject days beyond the widened leap-year bound"
-    );
-}
-
-#[cfg(any(feature = "icu4x", feature = "web-intl"))]
-#[test]
-fn internal_calendar_date_from_calendar_with_era_preserves_japanese_era() {
-    let date =
-        InternalCalendarDate::from_calendar_with_era("heisei", 31, 4, 30, CalendarSystem::Japanese)
-            .expect("japanese era-aware conversion should succeed");
-    let gregorian = date.to_calendar(CalendarSystem::Gregorian);
-
-    assert_eq!(date.era(), Some(String::from("heisei")));
-    assert_eq!(gregorian.year(), 2019);
-    assert_eq!(gregorian.month(), 4);
-    assert_eq!(gregorian.day(), 30);
-}
-
-#[cfg(any(feature = "icu4x", feature = "web-intl"))]
-#[test]
-fn internal_calendar_date_add_days_and_ordering_work() {
-    let start = InternalCalendarDate::from_iso(2024, 3, 15).expect("date should be valid");
-    let end = start.add_days(3).expect("date arithmetic should succeed");
-
-    assert_eq!(start.days_until(&end), Ok(3));
-    assert_eq!(start.is_before(&end), Ok(true));
-    assert_eq!(end.day(), 18);
-}
-
-#[cfg(any(feature = "icu4x", feature = "web-intl"))]
-#[test]
-fn internal_calendar_date_conversion_and_era_helpers_are_callable() {
-    let gregorian = InternalCalendarDate::from_iso(2024, 3, 15).expect("date should be valid");
-    let converted = gregorian.to_calendar(CalendarSystem::Gregorian);
-
-    assert_eq!(converted.year(), 2024);
-    assert_eq!(converted.era(), Some(String::from("ce")));
-}
-
-#[cfg(all(any(feature = "icu4x", feature = "web-intl"), feature = "std"))]
-#[test]
-fn internal_calendar_date_today_returns_a_valid_date() {
-    let today =
-        InternalCalendarDate::today(CalendarSystem::Gregorian).expect("today should resolve");
-
-    assert!((1..=12).contains(&today.month()));
-    assert!((1..=31).contains(&today.day()));
-}
-
-#[test]
-fn calendar_system_from_bcp47_and_locale_cover_spec_examples() {
-    assert_eq!(
-        CalendarSystem::from_bcp47("islamic-civil"),
-        Some(CalendarSystem::IslamicCivil)
-    );
-
-    let locale =
-        Locale::parse("en-US-u-ca-japanese").expect("locale should include calendar extension");
-
-    assert_eq!(
-        CalendarSystem::from_locale(&locale),
-        CalendarSystem::Japanese
-    );
-
-    let fallback = Locale::parse("en-US").expect("locale should parse");
-
-    assert_eq!(
-        CalendarSystem::from_locale(&fallback),
-        CalendarSystem::Gregorian
-    );
-}
-
-#[test]
-fn supported_calendars_include_hebrew_and_japanese_metadata() {
-    let calendars = CalendarSystem::supported_calendars();
-
-    let hebrew = calendars
-        .iter()
-        .find(|metadata| metadata.system == CalendarSystem::Hebrew)
-        .expect("hebrew metadata should exist");
-
-    let japanese = calendars
-        .iter()
-        .find(|metadata| metadata.system == CalendarSystem::Japanese)
-        .expect("japanese metadata should exist");
-
-    assert_eq!(hebrew.month_range, 1..=13);
-    assert!(hebrew.has_leap_months);
-    assert!(japanese.era_required);
-}
-
-#[test]
-fn calendar_system_helpers_cover_remaining_mappings() {
-    for (tag, expected) in [
+fn calendar_system_bcp47_roundtrips_and_lists_supported_calendars() {
+    for (identifier, calendar) in [
+        ("iso8601", CalendarSystem::Iso8601),
         ("gregory", CalendarSystem::Gregorian),
-        ("gregorian", CalendarSystem::Gregorian),
-        ("buddhist", CalendarSystem::Buddhist),
+        ("japanese", CalendarSystem::Japanese),
         ("hebrew", CalendarSystem::Hebrew),
-        ("islamic", CalendarSystem::Islamic),
+        ("roc", CalendarSystem::Roc),
     ] {
-        assert_eq!(CalendarSystem::from_bcp47(tag), Some(expected));
+        assert_eq!(CalendarSystem::from_bcp47(identifier), Some(calendar));
+        assert_eq!(calendar.to_bcp47_value(), identifier);
     }
 
-    assert_eq!(
-        CalendarSystem::from_bcp47("japanext"),
-        Some(CalendarSystem::Japanese)
+    assert!(
+        CalendarSystem::supported_calendars()
+            .iter()
+            .any(|metadata| metadata.calendar == CalendarSystem::Iso8601)
     );
-    assert_eq!(
-        CalendarSystem::from_bcp47("islamic-umalqura"),
-        Some(CalendarSystem::IslamicUmmAlQura)
-    );
-    assert_eq!(
-        CalendarSystem::from_bcp47("ethioaa"),
-        Some(CalendarSystem::EthiopicAmeteAlem)
-    );
-    assert_eq!(CalendarSystem::from_bcp47("unknown"), None);
-    assert!(CalendarSystem::Japanese.has_custom_eras());
-    assert!(CalendarSystem::Roc.has_custom_eras());
-    assert!(!CalendarSystem::Gregorian.has_custom_eras());
-    assert!(!CalendarSystem::Chinese.has_custom_eras());
-    assert_eq!(CalendarSystem::supported_calendars().len(), 15);
-}
-
-#[test]
-fn calendar_system_metadata_and_japanese_names_cover_remaining_variants() {
-    let calendars = CalendarSystem::supported_calendars();
-
-    let chinese = calendars
-        .iter()
-        .find(|metadata| metadata.system == CalendarSystem::Chinese)
-        .expect("Chinese metadata should exist");
-    let dangi = calendars
-        .iter()
-        .find(|metadata| metadata.system == CalendarSystem::Dangi)
-        .expect("Dangi metadata should exist");
-    let coptic = calendars
-        .iter()
-        .find(|metadata| metadata.system == CalendarSystem::Coptic)
-        .expect("Coptic metadata should exist");
-    let roc = calendars
-        .iter()
-        .find(|metadata| metadata.system == CalendarSystem::Roc)
-        .expect("Roc metadata should exist");
-
-    assert_eq!(chinese.month_range, 1..=13);
-    assert!(chinese.has_leap_months);
-    assert_eq!(dangi.month_range, 1..=13);
-    assert!(dangi.has_leap_months);
-    assert_eq!(coptic.month_range, 1..=13);
-    assert!(!coptic.has_leap_months);
-    assert_eq!(roc.month_range, 1..=12);
-    assert!(!roc.era_required);
-
-    for (era, expected_native) in [
-        (
-            JapaneseEra {
-                name: "Meiji",
-                start_year: 1868,
-            },
-            "明治",
-        ),
-        (
-            JapaneseEra {
-                name: "Taisho",
-                start_year: 1912,
-            },
-            "大正",
-        ),
-        (
-            JapaneseEra {
-                name: "Showa",
-                start_year: 1926,
-            },
-            "昭和",
-        ),
-        (
-            JapaneseEra {
-                name: "Heisei",
-                start_year: 1989,
-            },
-            "平成",
-        ),
-    ] {
-        let locale = Locale::parse("ja-JP").expect("locale should parse");
-        assert_eq!(era.localized_name(&locale), expected_native);
-    }
-}
-
-#[test]
-fn japanese_eras_localize_for_japanese_and_non_japanese_locales() {
-    let reiwa = JapaneseEra {
-        name: "Reiwa",
-        start_year: 2019,
-    };
-
-    let custom = JapaneseEra {
-        name: "Custom",
-        start_year: 2030,
-    };
-
-    let ja = Locale::parse("ja-JP").expect("locale should parse");
-
-    let en = Locale::parse("en-US").expect("locale should parse");
-
-    assert_eq!(reiwa.localized_name(&ja), "令和");
-    assert_eq!(reiwa.localized_name(&en), "Reiwa");
-    assert_eq!(custom.localized_name(&ja), "Custom");
-    assert_eq!(reiwa.romanized_name(), "Reiwa");
-    assert_eq!(CalendarSystem::japanese_eras().last().copied(), Some(reiwa));
-}
-
-#[test]
-fn week_info_for_locale_uses_region_defaults_and_fw_override() {
-    let en_us = Locale::parse("en-US").expect("locale should parse");
-
-    let de_de = Locale::parse("de-DE").expect("locale should parse");
-
-    let ar_sa = Locale::parse("ar-SA").expect("locale should parse");
-
-    let override_locale =
-        Locale::parse("en-US-u-fw-mon").expect("locale should parse with fw extension");
-
-    assert_eq!(
-        WeekInfo::for_locale(&en_us),
-        WeekInfo {
-            first_day: Weekday::Sunday,
-            min_days_in_first_week: 1,
-        }
-    );
-    assert_eq!(
-        WeekInfo::for_locale(&de_de),
-        WeekInfo {
-            first_day: Weekday::Monday,
-            min_days_in_first_week: 4,
-        }
-    );
-    assert_eq!(
-        WeekInfo::for_locale(&ar_sa),
-        WeekInfo {
-            first_day: Weekday::Saturday,
-            min_days_in_first_week: 1,
-        }
-    );
-    assert_eq!(
-        WeekInfo::for_locale(&override_locale),
-        WeekInfo {
-            first_day: Weekday::Monday,
-            min_days_in_first_week: 1,
-        }
+    assert!(
+        CalendarSystem::supported_calendars()
+            .iter()
+            .any(|metadata| {
+                metadata.calendar == CalendarSystem::Gregorian && metadata.has_custom_eras
+            })
     );
 }
 
 #[test]
-fn ordered_weekdays_rotates_from_first_day() {
-    let sunday = WeekInfo {
-        first_day: Weekday::Sunday,
-        min_days_in_first_week: 1,
-    };
-
-    let saturday = WeekInfo {
-        first_day: Weekday::Saturday,
-        min_days_in_first_week: 1,
-    };
-
+fn calendar_system_public_eras_cover_gregorian_and_japanese() {
     assert_eq!(
-        sunday.ordered_weekdays(),
-        [
-            Weekday::Sunday,
-            Weekday::Monday,
-            Weekday::Tuesday,
-            Weekday::Wednesday,
-            Weekday::Thursday,
-            Weekday::Friday,
-            Weekday::Saturday,
+        CalendarSystem::Gregorian.eras(),
+        vec![
+            Era {
+                code: "bc".into(),
+                display_name: "BC".into(),
+            },
+            Era {
+                code: "ad".into(),
+                display_name: "AD".into(),
+            },
         ]
     );
     assert_eq!(
-        saturday.ordered_weekdays(),
-        [
-            Weekday::Saturday,
-            Weekday::Sunday,
-            Weekday::Monday,
-            Weekday::Tuesday,
-            Weekday::Wednesday,
-            Weekday::Thursday,
-            Weekday::Friday,
-        ]
-    );
-}
-
-#[test]
-fn public_calendar_date_replaces_placeholder_shape() {
-    let date = CalendarDate::new_gregorian(
-        2024,
-        NonZero::new(3).expect("month is non-zero"),
-        NonZero::new(15).expect("day is non-zero"),
-    );
-
-    assert_eq!(date.calendar, CalendarSystem::Gregorian);
-    assert_eq!(date.era, None);
-    assert_eq!(date.to_iso8601(), "2024-03-15");
-}
-
-#[test]
-fn public_calendar_date_new_gregorian_validates_bounds() {
-    #[cfg(feature = "std")]
-    {
-        let invalid_month = std::panic::catch_unwind(|| {
-            CalendarDate::new_gregorian(
-                2024,
-                NonZero::new(13).expect("month is non-zero"),
-                NonZero::new(1).expect("day is non-zero"),
-            )
-        });
-
-        let invalid_day = std::panic::catch_unwind(|| {
-            CalendarDate::new_gregorian(
-                2024,
-                NonZero::new(4).expect("month is non-zero"),
-                NonZero::new(31).expect("day is non-zero"),
-            )
-        });
-
-        let invalid_year = std::panic::catch_unwind(|| {
-            CalendarDate::new_gregorian(
-                0,
-                NonZero::new(1).expect("month is non-zero"),
-                NonZero::new(1).expect("day is non-zero"),
-            )
-        });
-
-        assert!(invalid_month.is_err());
-        assert!(invalid_day.is_err());
-        assert!(invalid_year.is_err());
-    }
-}
-
-#[test]
-fn typed_calendar_date_wraps_matching_dynamic_date() {
-    let raw = CalendarDate::new_gregorian(
-        2024,
-        NonZero::new(3).expect("month is non-zero"),
-        NonZero::new(15).expect("day is non-zero"),
-    );
-
-    let typed = raw
-        .typed::<Gregorian>()
-        .expect("calendar marker should match");
-
-    assert_eq!(typed.year(), 2024);
-    assert_eq!(typed.month().get(), 3);
-    assert_eq!(typed.day().get(), 15);
-    assert_eq!(typed.as_raw().calendar, CalendarSystem::Gregorian);
-    assert_eq!(
-        TypedCalendarDate::<Gregorian>::calendar_system(),
-        CalendarSystem::Gregorian
-    );
-}
-
-#[test]
-fn typed_calendar_date_rejects_mismatched_calendar_marker() {
-    let raw = CalendarDate {
-        calendar: CalendarSystem::Japanese,
-        era: Some(Era {
-            code: String::from("reiwa"),
-            display_name: String::from("Reiwa"),
-        }),
-        year: 6,
-        month: NonZero::new(3).expect("month is non-zero"),
-        day: NonZero::new(15).expect("day is non-zero"),
-    };
-
-    let error = raw
-        .into_typed::<Gregorian>()
-        .expect_err("marker mismatch should fail");
-
-    assert_eq!(
-        error,
-        CalendarTypeError {
-            expected: CalendarSystem::Gregorian,
-            found: CalendarSystem::Japanese,
-        }
-    );
-}
-
-#[test]
-fn typed_gregorian_date_exposes_compile_time_gated_methods() {
-    let date = TypedCalendarDate::<Gregorian>::new(
-        2024,
-        NonZero::new(3).expect("month is non-zero"),
-        NonZero::new(15).expect("day is non-zero"),
-    );
-
-    let shifted = date
-        .add_days(10)
-        .expect("typed Gregorian arithmetic should succeed");
-
-    assert_eq!(date.weekday(), Weekday::Friday);
-    assert_eq!(shifted.into_raw().to_iso8601(), "2024-03-25");
-}
-
-#[test]
-fn typed_gregorian_date_add_days_propagates_lower_bound_failure() {
-    let minimum = TypedCalendarDate::<Gregorian>::new(
-        1,
-        NonZero::new(1).expect("month is non-zero"),
-        NonZero::new(1).expect("day is non-zero"),
-    );
-
-    assert_eq!(minimum.add_days(-1), None);
-}
-
-#[test]
-fn typed_calendar_date_converts_between_static_calendar_markers() {
-    #[derive(Debug)]
-    struct TestProvider;
-
-    impl IcuProvider for TestProvider {
-        fn convert_date(&self, date: &CalendarDate, target: CalendarSystem) -> CalendarDate {
-            match (date.calendar, target) {
-                (CalendarSystem::Japanese, CalendarSystem::Gregorian) => {
-                    CalendarDate::new_gregorian(
-                        2024,
-                        NonZero::new(3).expect("month should be non-zero"),
-                        NonZero::new(15).expect("day should be non-zero"),
-                    )
-                }
-                _ => date.clone(),
-            }
-        }
-    }
-
-    let provider = TestProvider;
-
-    let typed = TypedCalendarDate::<Japanese>::from_raw(CalendarDate {
-        calendar: CalendarSystem::Japanese,
-        era: Some(Era {
-            code: String::from("reiwa"),
-            display_name: String::from("Reiwa"),
-        }),
-        year: 6,
-        month: NonZero::new(3).expect("month is non-zero"),
-        day: NonZero::new(15).expect("day is non-zero"),
-    })
-    .expect("calendar marker should match");
-
-    let gregorian = typed.to_calendar::<Gregorian>(&provider);
-
-    assert_eq!(gregorian.as_raw().calendar, CalendarSystem::Gregorian);
-    assert_eq!(gregorian.into_raw().to_iso8601(), "2024-03-15");
-}
-
-#[test]
-fn typed_calendar_date_forwarders_and_conversions_cover_wrapper_paths() {
-    let provider = StubIcuProvider;
-
-    let raw = CalendarDate::new_gregorian(
-        2024,
-        NonZero::new(1).expect("month should be non-zero"),
-        NonZero::new(31).expect("day should be non-zero"),
-    );
-
-    let typed = raw
-        .clone()
-        .typed::<Gregorian>()
-        .expect("calendar marker should match");
-
-    let shifted_month = typed
-        .add_months(&provider, 1)
-        .expect("Gregorian month arithmetic should succeed");
-
-    let shifted_day = typed.add_days_with_provider(&provider, 1);
-
-    let converted = raw.to_calendar_type::<Gregorian>(&provider);
-
-    let via_from = CalendarDate::from(typed.clone());
-
-    assert_eq!(typed.days_in_month(&provider), 31);
-    assert_eq!(shifted_month.as_raw().to_iso8601(), "2024-02-29");
-    assert_eq!(shifted_day.as_raw().to_iso8601(), "2024-02-01");
-    assert_eq!(
-        typed.compare_within_calendar(&converted),
-        Some(Ordering::Equal)
-    );
-    assert_eq!(typed.as_ref().to_iso8601(), "2024-01-31");
-    assert_eq!(via_from.to_iso8601(), "2024-01-31");
-}
-
-#[test]
-fn typed_calendar_date_helpers_expose_era_and_mismatch_display() {
-    let japanese = TypedCalendarDate::<Japanese>::from_raw(CalendarDate {
-        calendar: CalendarSystem::Japanese,
-        era: Some(Era {
-            code: String::from("reiwa"),
-            display_name: String::from("Reiwa"),
-        }),
-        year: 6,
-        month: NonZero::new(3).expect("month is non-zero"),
-        day: NonZero::new(15).expect("day is non-zero"),
-    })
-    .expect("calendar marker should match");
-
-    assert_eq!(japanese.era().map(|era| era.code.as_str()), Some("reiwa"));
-    assert_eq!(
-        CalendarTypeError {
-            expected: CalendarSystem::Gregorian,
-            found: CalendarSystem::Japanese,
-        }
-        .to_string(),
-        "calendar type mismatch: expected Gregorian, found Japanese"
-    );
-}
-
-#[test]
-fn public_calendar_date_compare_within_calendar_respects_era_and_calendar() {
-    let base = CalendarDate::new_gregorian(
-        2024,
-        NonZero::new(3).expect("month is non-zero"),
-        NonZero::new(15).expect("day is non-zero"),
-    );
-
-    let later = CalendarDate::new_gregorian(
-        2024,
-        NonZero::new(3).expect("month is non-zero"),
-        NonZero::new(16).expect("day is non-zero"),
-    );
-
-    let japanese = CalendarDate {
-        calendar: CalendarSystem::Japanese,
-        era: Some(Era {
-            code: String::from("reiwa"),
-            display_name: String::from("Reiwa"),
-        }),
-        year: 6,
-        month: NonZero::new(3).expect("month is non-zero"),
-        day: NonZero::new(15).expect("day is non-zero"),
-    };
-
-    let japanese_localized = CalendarDate {
-        calendar: CalendarSystem::Japanese,
-        era: Some(Era {
-            code: String::from("reiwa"),
-            display_name: String::from("令和"),
-        }),
-        year: 6,
-        month: NonZero::new(3).expect("month is non-zero"),
-        day: NonZero::new(15).expect("day is non-zero"),
-    };
-
-    assert_eq!(base.compare_within_calendar(&later), Some(Ordering::Less));
-    assert_eq!(base.compare_within_calendar(&japanese), None);
-    assert_eq!(
-        japanese.compare_within_calendar(&japanese_localized),
-        Some(Ordering::Equal)
-    );
-
-    let heisei = CalendarDate {
-        calendar: CalendarSystem::Japanese,
-        era: Some(Era {
-            code: String::from("heisei"),
-            display_name: String::from("Heisei"),
-        }),
-        year: 31,
-        month: NonZero::new(4).expect("month is non-zero"),
-        day: NonZero::new(30).expect("day is non-zero"),
-    };
-
-    assert_eq!(japanese.compare_within_calendar(&heisei), None);
-    assert_eq!(
-        japanese.compare_within_calendar(&japanese.clone()),
-        Some(Ordering::Equal)
-    );
-}
-
-#[test]
-fn date_range_and_time_iso_helpers_are_non_placeholder() {
-    let start = CalendarDate::new_gregorian(
-        2024,
-        NonZero::new(3).expect("month is non-zero"),
-        NonZero::new(15).expect("day is non-zero"),
-    );
-
-    let end = CalendarDate::new_gregorian(
-        2024,
-        NonZero::new(3).expect("month is non-zero"),
-        NonZero::new(20).expect("day is non-zero"),
-    );
-
-    let range = DateRange::new(start.clone(), end.clone()).expect("range should be ordered");
-
-    let time = Time::new(14, 30, 0);
-
-    let precise = Time {
-        hour: 14,
-        minute: 30,
-        second: 0,
-        millisecond: 125,
-    };
-
-    assert!(range.contains(&start));
-    assert!(!range.contains(&CalendarDate::new_gregorian(
-        2024,
-        NonZero::new(3).expect("month is non-zero"),
-        NonZero::new(21).expect("day is non-zero"),
-    )));
-    assert!(!japanese_range_example().is_between(&start, &end));
-    assert_eq!(
-        DateRange::normalized(end.clone(), start.clone()),
-        Some(range.clone())
-    );
-    assert_eq!(
-        DateRange::normalized(end.clone(), end.clone()),
-        Some(DateRange {
-            start: end.clone(),
-            end: end.clone(),
-        })
-    );
-    assert_eq!(range.to_iso8601(), "2024-03-15/2024-03-20");
-    assert_eq!(time.to_iso8601(), "14:30:00");
-    assert_eq!(precise.to_iso8601(), "14:30:00.125");
-    assert_eq!(time.hour_12(), 2);
-    assert!(time.is_pm());
-    assert_eq!(HourCycle::H11.display_hour_range(), (0, 11));
-    assert_eq!(HourCycle::H12.display_hour_range(), (1, 12));
-    assert!(HourCycle::H12.has_day_period());
-    assert!(!HourCycle::H23.has_day_period());
-    assert_eq!(HourCycle::H24.display_hour_range(), (1, 24));
-    assert_eq!(DateRange::new(end.clone(), start.clone()), None);
-    assert_eq!(DateRange::normalized(start, japanese_range_example()), None);
-}
-
-#[test]
-fn public_calendar_date_validated_constructor_uses_provider_rules() {
-    let provider = StubIcuProvider;
-
-    let gregorian = CalendarDate::new(&provider, CalendarSystem::Gregorian, None, 2024, 2, 29);
-
-    let invalid = CalendarDate::new(&provider, CalendarSystem::Gregorian, None, 2024, 2, 30);
-
-    let invalid_year = CalendarDate::new(&provider, CalendarSystem::Gregorian, None, 0, 2, 29);
-
-    let hebrew_leap = CalendarDate::new(&provider, CalendarSystem::Hebrew, None, 5784, 13, 1);
-
-    let hebrew_common = CalendarDate::new(&provider, CalendarSystem::Hebrew, None, 5785, 13, 1);
-
-    assert!(gregorian.is_some());
-    assert!(invalid.is_none());
-    assert!(invalid_year.is_none());
-    assert!(hebrew_leap.is_some());
-    assert!(hebrew_common.is_none());
-}
-
-#[test]
-fn public_calendar_date_new_defaults_japanese_to_current_era() {
-    let provider = StubIcuProvider;
-
-    let date = CalendarDate::new(&provider, CalendarSystem::Japanese, None, 6, 3, 15)
-        .expect("missing Japanese era should default to the current era");
-
-    assert_eq!(date.calendar, CalendarSystem::Japanese);
-    assert_eq!(
-        date.era,
+        CalendarSystem::Gregorian.default_era(),
         Some(Era {
-            code: String::from("reiwa"),
-            display_name: String::from("Reiwa"),
+            code: "ad".into(),
+            display_name: "AD".into(),
         })
     );
-    assert_eq!(date.year, 6);
-    assert_eq!(date.month.get(), 3);
-    assert_eq!(date.day.get(), 15);
-}
 
-#[test]
-fn public_calendar_date_new_rejects_japanese_dates_outside_era_bounds() {
-    let provider = StubIcuProvider;
-
-    let heisei = Some(Era {
-        code: String::from("heisei"),
-        display_name: String::from("Heisei"),
-    });
-
-    let reiwa = Some(Era {
-        code: String::from("reiwa"),
-        display_name: String::from("Reiwa"),
-    });
-
-    assert!(
-        CalendarDate::new(&provider, CalendarSystem::Japanese, heisei.clone(), 1, 1, 7,).is_none()
-    );
-    assert!(
-        CalendarDate::new(&provider, CalendarSystem::Japanese, reiwa.clone(), 1, 4, 30,).is_none()
-    );
-    assert!(CalendarDate::new(&provider, CalendarSystem::Japanese, heisei, 31, 5, 1,).is_none());
-    assert!(
-        CalendarDate::new(
-            &provider,
-            CalendarSystem::Japanese,
-            Some(Era {
-                code: String::from("bogus"),
-                display_name: String::from("Bogus"),
-            }),
-            1,
-            5,
-            1,
-        )
-        .is_none()
-    );
-    assert!(
-        CalendarDate::new(
-            &provider,
-            CalendarSystem::Gregorian,
-            Some(Era {
-                code: String::from("reiwa"),
-                display_name: String::from("Reiwa"),
-            }),
-            2024,
-            3,
-            15,
-        )
-        .is_none()
-    );
-    assert!(
-        CalendarDate::new(
-            &provider,
-            CalendarSystem::Japanese,
-            reiwa.clone(),
-            i32::MAX,
-            5,
-            1,
-        )
-        .is_none()
-    );
-    assert!(CalendarDate::new(&provider, CalendarSystem::Japanese, reiwa, 1, 5, 1).is_some());
-}
-
-#[test]
-fn public_calendar_date_arithmetic_helpers_match_shared_spec_shape() {
-    let provider = StubIcuProvider;
-
-    let date = CalendarDate::new_gregorian(
-        2024,
-        NonZero::new(1).expect("month should be non-zero"),
-        NonZero::new(31).expect("day should be non-zero"),
-    );
-
-    assert_eq!(date.days_in_month(&provider), 31);
-    assert_eq!(
-        date.add_months(&provider, 1),
-        Some(CalendarDate::new_gregorian(
-            2024,
-            NonZero::new(2).expect("month should be non-zero"),
-            NonZero::new(29).expect("day should be non-zero"),
-        ))
-    );
-    assert_eq!(
-        date.add_days(1),
-        Some(CalendarDate::new_gregorian(
-            2024,
-            NonZero::new(2).expect("month should be non-zero"),
-            NonZero::new(1).expect("day should be non-zero"),
-        ))
-    );
-    assert_eq!(
-        date.add_days_with_provider(&provider, 1),
-        CalendarDate::new_gregorian(
-            2024,
-            NonZero::new(2).expect("month should be non-zero"),
-            NonZero::new(1).expect("day should be non-zero"),
-        )
-    );
-    assert_eq!(date.to_calendar(&provider, CalendarSystem::Gregorian), date);
-
-    let minimum = CalendarDate::new_gregorian(
-        1,
-        NonZero::new(1).expect("month should be non-zero"),
-        NonZero::new(1).expect("day should be non-zero"),
-    );
-
-    assert_eq!(minimum.add_days(-1), None);
-
-    #[cfg(feature = "std")]
-    {
-        let panic = std::panic::catch_unwind(|| minimum.add_days_with_provider(&provider, -1))
-            .expect_err("Gregorian provider-backed arithmetic should reject year-zero underflow");
-        let message = panic
-            .downcast_ref::<String>()
-            .map(String::as_str)
-            .or_else(|| panic.downcast_ref::<&'static str>().copied())
-            .expect("panic payload should be a string");
-
-        assert!(message.contains("supported year range"));
-    }
-}
-
-#[test]
-fn public_calendar_date_add_months_handles_large_gregorian_deltas_without_overflow() {
-    let provider = StubIcuProvider;
-
-    let date = CalendarDate::new_gregorian(
-        2024,
-        NonZero::new(1).expect("month should be non-zero"),
-        NonZero::new(31).expect("day should be non-zero"),
-    );
+    let japanese = CalendarSystem::Japanese.eras();
 
     assert_eq!(
-        date.add_months(&provider, i32::MAX),
-        Some(CalendarDate::new_gregorian(
-            178_958_994,
-            NonZero::new(8).expect("month should be non-zero"),
-            NonZero::new(31).expect("day should be non-zero"),
-        ))
+        japanese.first().map(|value| value.code.as_str()),
+        Some("meiji")
     );
-}
-
-#[test]
-fn public_calendar_date_add_months_respects_era_boundaries() {
-    let provider = StubIcuProvider;
-
-    let heisei = Era {
-        code: String::from("heisei"),
-        display_name: String::from("Heisei"),
-    };
-
-    let same_era_rollover = CalendarDate::new(
-        &provider,
-        CalendarSystem::Japanese,
-        Some(heisei.clone()),
-        1,
-        12,
-        15,
-    )
-    .expect("Heisei year 1 December should be valid");
-
-    let cross_era_rollover = CalendarDate::new(
-        &provider,
-        CalendarSystem::Japanese,
-        Some(heisei.clone()),
-        31,
-        4,
-        15,
-    )
-    .expect("Heisei year 31 April should be valid");
-
-    let negative_rollover = CalendarDate::new(
-        &provider,
-        CalendarSystem::Japanese,
-        Some(heisei.clone()),
-        2,
-        1,
-        15,
-    )
-    .expect("Heisei year 2 January should be valid");
-
-    let boundary_clamp = CalendarDate::new(
-        &provider,
-        CalendarSystem::Japanese,
-        Some(heisei.clone()),
-        2,
-        1,
-        1,
-    )
-    .expect("Heisei year 2 January should be valid");
-
-    let era_start = CalendarDate::new(
-        &provider,
-        CalendarSystem::Japanese,
+    assert_eq!(
+        japanese.last().map(|value| value.code.as_str()),
+        Some("reiwa")
+    );
+    assert_eq!(
+        CalendarSystem::Japanese.default_era(),
         Some(Era {
-            code: String::from("reiwa"),
-            display_name: String::from("Reiwa"),
-        }),
-        1,
-        5,
-        1,
+            code: "reiwa".into(),
+            display_name: "Reiwa".into(),
+        })
+    );
+}
+
+#[test]
+fn calendar_date_supports_iso8601_and_gregorian_eras() {
+    let iso = CalendarDate::new_iso8601(2024, 3, 15).expect("ISO date should validate");
+
+    assert_eq!(iso.calendar(), CalendarSystem::Iso8601);
+    assert_eq!(iso.to_iso8601(), "2024-03-15");
+    assert_eq!(iso.era(), None);
+
+    let ad = CalendarDate::new(
+        CalendarSystem::Gregorian,
+        &CalendarDateFields {
+            era: Some(Era {
+                code: "ad".into(),
+                display_name: "AD".into(),
+            }),
+            year: Some(2024),
+            month: Some(3),
+            day: Some(15),
+            ..CalendarDateFields::default()
+        },
     )
-    .expect("Reiwa year 1 start date should be valid");
+    .expect("Gregorian AD date should validate");
 
-    assert_eq!(
-        same_era_rollover.add_months(&provider, 1),
-        Some(CalendarDate {
-            calendar: CalendarSystem::Japanese,
-            era: Some(heisei.clone()),
-            year: 2,
-            month: NonZero::new(1).expect("month should be non-zero"),
-            day: NonZero::new(15).expect("day should be non-zero"),
-        })
-    );
-    assert_eq!(
-        negative_rollover.add_months(&provider, -1),
-        Some(CalendarDate {
-            calendar: CalendarSystem::Japanese,
-            era: Some(heisei.clone()),
-            year: 1,
-            month: NonZero::new(12).expect("month should be non-zero"),
-            day: NonZero::new(15).expect("day should be non-zero"),
-        })
-    );
-    assert_eq!(
-        boundary_clamp.add_months(&provider, -12),
-        Some(CalendarDate {
-            calendar: CalendarSystem::Japanese,
-            era: Some(heisei),
-            year: 1,
-            month: NonZero::new(1).expect("month should be non-zero"),
-            day: NonZero::new(8).expect("day should be non-zero"),
-        })
-    );
-    assert_eq!(cross_era_rollover.add_months(&provider, 1), None);
-    assert_eq!(era_start.add_months(&provider, -1), None);
+    assert_eq!(ad.era().map(|value| value.code.as_str()), Some("ad"));
+    assert_eq!(ad.to_iso8601(), "2024-03-15");
+
+    let bc = CalendarDate::new(
+        CalendarSystem::Gregorian,
+        &CalendarDateFields {
+            era: Some(Era {
+                code: "bc".into(),
+                display_name: "BC".into(),
+            }),
+            year: Some(1),
+            month: Some(1),
+            day: Some(1),
+            ..CalendarDateFields::default()
+        },
+    )
+    .expect("Gregorian BC date should validate");
+
+    assert_eq!(bc.era().map(|value| value.code.as_str()), Some("bc"));
+    assert_eq!(bc.to_iso8601(), "0000-01-01");
 }
 
 #[test]
-fn public_calendar_date_non_gregorian_provider_paths_delegate() {
-    #[derive(Debug)]
-    struct TestProvider;
+fn calendar_date_validates_japanese_era_boundaries() {
+    let heisei = japanese_era("heisei", "Heisei");
 
-    impl IcuProvider for TestProvider {
-        fn convert_date(&self, date: &CalendarDate, target: CalendarSystem) -> CalendarDate {
-            match (date.calendar, target) {
-                (CalendarSystem::Japanese, CalendarSystem::Gregorian) => {
-                    CalendarDate::new_gregorian(
-                        2024,
-                        NonZero::new(3).expect("month should be non-zero"),
-                        NonZero::new(15).expect("day should be non-zero"),
-                    )
-                }
+    let reiwa = japanese_era("reiwa", "Reiwa");
 
-                (CalendarSystem::Gregorian, CalendarSystem::Japanese) => CalendarDate {
-                    calendar: CalendarSystem::Japanese,
-                    era: Some(Era {
-                        code: String::from("reiwa"),
-                        display_name: String::from("Reiwa"),
-                    }),
-                    year: 6,
-                    month: NonZero::new(3).expect("month should be non-zero"),
-                    day: date.day,
-                },
-
-                _ => date.clone(),
-            }
-        }
-    }
-
-    let provider = TestProvider;
-
-    let japanese = CalendarDate {
-        calendar: CalendarSystem::Japanese,
-        era: Some(Era {
-            code: String::from("reiwa"),
-            display_name: String::from("Reiwa"),
-        }),
-        year: 6,
-        month: NonZero::new(3).expect("month should be non-zero"),
-        day: NonZero::new(15).expect("day should be non-zero"),
-    };
-
-    assert_eq!(
-        japanese.to_calendar(&provider, CalendarSystem::Gregorian),
-        CalendarDate::new_gregorian(
-            2024,
-            NonZero::new(3).expect("month should be non-zero"),
-            NonZero::new(15).expect("day should be non-zero"),
+    assert!(
+        CalendarDate::new(
+            CalendarSystem::Japanese,
+            &CalendarDateFields {
+                era: Some(heisei.clone()),
+                year: Some(1),
+                month: Some(1),
+                day: Some(8),
+                ..CalendarDateFields::default()
+            },
         )
-    );
-    assert_eq!(japanese.add_days(1), None);
-    assert_eq!(
-        japanese.add_days_with_provider(&provider, 1),
-        CalendarDate {
-            calendar: CalendarSystem::Japanese,
-            era: Some(Era {
-                code: String::from("reiwa"),
-                display_name: String::from("Reiwa"),
-            }),
-            year: 6,
-            month: NonZero::new(3).expect("month should be non-zero"),
-            day: NonZero::new(16).expect("day should be non-zero"),
-        }
-    );
-}
-
-#[cfg(any(feature = "icu4x", feature = "web-intl"))]
-#[test]
-fn public_calendar_date_to_internal_preserves_explicit_japanese_era() {
-    let heisei = CalendarDate {
-        calendar: CalendarSystem::Japanese,
-        era: Some(Era {
-            code: String::from("heisei"),
-            display_name: String::from("Heisei"),
-        }),
-        year: 31,
-        month: NonZero::new(4).expect("month should be non-zero"),
-        day: NonZero::new(30).expect("day should be non-zero"),
-    };
-
-    let internal = InternalCalendarDate::try_from(&heisei)
-        .expect("era-aware public conversion should succeed");
-
-    let gregorian = internal.to_calendar(CalendarSystem::Gregorian);
-
-    assert_eq!(internal.era(), Some(String::from("heisei")));
-    assert_eq!(gregorian.year(), 2019);
-    assert_eq!(gregorian.month(), 4);
-    assert_eq!(gregorian.day(), 30);
-}
-
-#[test]
-fn public_calendar_date_weekday_handles_january_and_february() {
-    let january = CalendarDate::new_gregorian(
-        2024,
-        NonZero::new(1).expect("month should be non-zero"),
-        NonZero::new(1).expect("day should be non-zero"),
-    );
-
-    let february = CalendarDate::new_gregorian(
-        2024,
-        NonZero::new(2).expect("month should be non-zero"),
-        NonZero::new(29).expect("day should be non-zero"),
-    );
-
-    assert_eq!(january.weekday(), Weekday::Monday);
-    assert_eq!(february.weekday(), Weekday::Thursday);
-}
-
-#[test]
-fn public_calendar_date_weekday_handles_large_gregorian_years_without_overflow() {
-    let large = CalendarDate::new_gregorian(
-        i32::MAX,
-        NonZero::new(12).expect("month should be non-zero"),
-        NonZero::new(31).expect("day should be non-zero"),
-    );
-
-    let epoch_days = iso_to_epoch_days(i32::MAX, 12, 31);
-    let expected =
-        Weekday::from_sunday_zero(epoch_days.checked_add(1).unwrap().rem_euclid(7) as u8);
-
-    assert_eq!(large.weekday(), expected);
-}
-
-#[test]
-fn month_type_validates_shared_range() {
-    assert_eq!(Month::new(1).map(Month::get), Some(1));
-    assert_eq!(Month::new(13).map(Month::get), Some(13));
-    assert_eq!(Month::new(0), None);
-    assert_eq!(Month::new(14), None);
-    assert_eq!(Month::try_from(7).ok().map(Month::get), Some(7));
-    assert!(Month::try_from(0).is_err());
-}
-
-#[test]
-fn hour_cycle_auto_resolves_via_locale_provider() {
-    let provider = StubIcuProvider;
-
-    let en_us = Locale::parse("en-US").expect("locale should parse");
-
-    let de_de = Locale::parse("de-DE").expect("locale should parse");
-
-    assert_eq!(HourCycle::Auto.resolve(&provider, &en_us), HourCycle::H12);
-    assert_eq!(HourCycle::Auto.resolve(&provider, &de_de), HourCycle::H23);
-    assert_eq!(en_us.hour_cycle(&provider), HourCycle::H12);
-}
-
-#[test]
-fn epoch_day_helpers_use_the_spec_epoch() {
-    assert_eq!(iso_to_epoch_days(1, 1, 1), 0);
-    assert_eq!(epoch_days_to_iso(0), (1, 1, 1));
-    assert_eq!(iso_to_epoch_days(1970, 1, 1), 719_162);
-    assert_eq!(epoch_days_to_iso(719_162), (1970, 1, 1));
-    assert_eq!(gregorian_days_in_month(2024, 2), 29);
-    assert_eq!(gregorian_days_in_month(2023, 2), 28);
-    assert_eq!(gregorian_days_in_month(2024, 0), 30);
-    assert_eq!(gregorian_days_in_month(2024, 13), 30);
-    assert_eq!(coptic_like_days_in_month(1738, 13), 5);
-    assert_eq!(coptic_like_days_in_month(1739, 13), 6);
-    assert_eq!(coptic_like_days_in_month(1739, 1), 30);
-    assert_eq!(coptic_like_days_in_month(1739, 14), 0);
-}
-
-#[test]
-fn date_and_calendar_errors_format_as_specified() {
-    assert_eq!(DateError::InvalidDate.to_string(), "invalid date");
-    assert_eq!(
-        DateError::CalendarError(String::from("bad month")).to_string(),
-        "calendar error: bad month"
-    );
-    assert_eq!(
-        CalendarError::Arithmetic(String::from("overflow")).to_string(),
-        "calendar arithmetic error: overflow"
-    );
-    assert_eq!(
-        CalendarConversionError::InvalidDate.to_string(),
-        "invalid date for target calendar"
-    );
-    assert_eq!(
-        CalendarConversionError::Icu(String::from("failed")).to_string(),
-        "ICU4X calendar conversion error: failed"
-    );
-}
-
-#[test]
-fn japanese_era_helper_functions_cover_bounded_and_fallback_paths() {
-    let reiwa = CalendarDate {
-        calendar: CalendarSystem::Japanese,
-        era: Some(Era {
-            code: String::from("reiwa"),
-            display_name: String::from("Reiwa"),
-        }),
-        year: 1,
-        month: NonZero::new(5).expect("month should be non-zero"),
-        day: NonZero::new(1).expect("day should be non-zero"),
-    };
-
-    let heisei = CalendarDate {
-        calendar: CalendarSystem::Japanese,
-        era: Some(Era {
-            code: String::from("heisei"),
-            display_name: String::from("Heisei"),
-        }),
-        year: 31,
-        month: NonZero::new(4).expect("month should be non-zero"),
-        day: NonZero::new(30).expect("day should be non-zero"),
-    };
-
-    let unknown_era = CalendarDate {
-        calendar: CalendarSystem::Japanese,
-        era: Some(Era {
-            code: String::from("unknown"),
-            display_name: String::from("Unknown"),
-        }),
-        year: 1,
-        month: NonZero::new(1).expect("month should be non-zero"),
-        day: NonZero::new(1).expect("day should be non-zero"),
-    };
-
-    assert_eq!(
-        default_era_for(CalendarSystem::Japanese).map(|era| era.code),
-        Some(String::from("reiwa"))
-    );
-    assert_eq!(default_era_for(CalendarSystem::Gregorian), None);
-    assert_eq!(years_in_era(&heisei), Some(31));
-    assert_eq!(years_in_era(&unknown_era), None);
-    assert_eq!(minimum_month_in_year(&reiwa), 5);
-    assert_eq!(minimum_day_in_month(&reiwa), 1);
-    assert_eq!(minimum_month_in_year(&unknown_era), 1);
-    assert_eq!(minimum_day_in_month(&unknown_era), 1);
-    assert_eq!(reiwa.days_in_month(&StubIcuProvider), 31);
-    assert_eq!(
-        bounded_months_in_year(CalendarSystem::Japanese, 31, Some("heisei")),
-        Some(4)
-    );
-    assert_eq!(
-        bounded_months_in_year(CalendarSystem::Japanese, 1, None),
-        None
-    );
-    assert_eq!(
-        bounded_days_in_month(CalendarSystem::Japanese, 31, 4, Some("heisei")),
-        Some(30)
-    );
-    assert_eq!(
-        bounded_days_in_month(CalendarSystem::Japanese, i32::MAX, 5, Some("reiwa")),
-        None
-    );
-    assert_eq!(
-        bounded_days_in_month(CalendarSystem::Gregorian, 2024, 2, None),
-        None
-    );
-}
-
-#[test]
-fn japanese_helper_functions_cover_non_terminal_and_non_japanese_paths() {
-    let non_terminal_year = CalendarDate {
-        calendar: CalendarSystem::Japanese,
-        era: Some(Era {
-            code: String::from("heisei"),
-            display_name: String::from("Heisei"),
-        }),
-        year: 30,
-        month: NonZero::new(3).expect("month should be non-zero"),
-        day: NonZero::new(15).expect("day should be non-zero"),
-    };
-
-    let gregorian = CalendarDate::new_gregorian(
-        2024,
-        NonZero::new(3).expect("month should be non-zero"),
-        NonZero::new(15).expect("day should be non-zero"),
-    );
-
-    assert_eq!(years_in_era(&gregorian), None);
-    assert_eq!(minimum_month_in_year(&gregorian), 1);
-    assert_eq!(minimum_day_in_month(&gregorian), 1);
-    assert_eq!(
-        bounded_months_in_year(CalendarSystem::Japanese, 30, Some("heisei")),
-        Some(12)
-    );
-    assert_eq!(
-        bounded_days_in_month(CalendarSystem::Japanese, 30, 3, Some("heisei")),
-        Some(31)
-    );
-    assert_eq!(minimum_month_in_year(&non_terminal_year), 1);
-    assert_eq!(minimum_day_in_month(&non_terminal_year), 1);
-}
-
-#[test]
-fn stub_provider_fallback_helpers_cover_remaining_calendar_defaults() {
-    let provider = StubIcuProvider;
-    let locale = Locale::parse("ko-KR").expect("locale should parse");
-    let gregorian = CalendarDate::new_gregorian(
-        2024,
-        NonZero::new(3).expect("month should be non-zero"),
-        NonZero::new(15).expect("day should be non-zero"),
-    );
-
-    assert_eq!(
-        provider.max_months_in_year(&CalendarSystem::Chinese, 2024, None),
-        12
-    );
-    assert_eq!(
-        provider.max_months_in_year(&CalendarSystem::EthiopicAmeteAlem, 2015, None),
-        13
-    );
-    assert_eq!(
-        provider.days_in_month(&CalendarSystem::EthiopicAmeteAlem, 2015, 13, None),
-        6
-    );
-    #[cfg(any(feature = "icu4x", feature = "web-intl"))]
-    assert_eq!(
-        provider.days_in_month(&CalendarSystem::Roc, 113, 2, None),
-        29
-    );
-    #[cfg(not(any(feature = "icu4x", feature = "web-intl")))]
-    assert_eq!(
-        provider.days_in_month(&CalendarSystem::Roc, 113, 2, None),
-        28
-    );
-    assert!(provider.default_era(&CalendarSystem::Japanese).is_some());
-    assert_eq!(provider.default_era(&CalendarSystem::Gregorian), None);
-    assert_eq!(provider.years_in_era(&gregorian), None);
-    assert_eq!(provider.minimum_month_in_year(&gregorian), 1);
-    assert_eq!(provider.minimum_day_in_month(&gregorian), 1);
-    assert_eq!(provider.hour_cycle(&locale), HourCycle::H12);
-    assert_eq!(provider.first_day_of_week(&locale), Weekday::Sunday);
-}
-
-#[cfg(any(feature = "icu4x", feature = "web-intl"))]
-#[test]
-fn internal_calendar_shape_helpers_cover_remaining_icu_backed_paths() {
-    let leap_month_year = (2020..=2030)
-        .find(|year| internal_months_in_year(*year, CalendarSystem::Chinese, None) == Some(13))
-        .expect("fixture range should include a Chinese leap-month year");
-    let common_year = (2020..=2030)
-        .find(|year| internal_months_in_year(*year, CalendarSystem::Chinese, None) == Some(12))
-        .expect("fixture range should include a Chinese common year");
-
-    assert_eq!(
-        internal_days_in_month(1739, 13, CalendarSystem::Coptic, Some("am")),
-        Some(6)
-    );
-    assert_eq!(
-        internal_days_in_month(1738, 13, CalendarSystem::Coptic, Some("am")),
-        Some(5)
-    );
-    assert_eq!(
-        internal_months_in_year(leap_month_year, CalendarSystem::Chinese, None),
-        Some(13)
-    );
-    assert_eq!(
-        internal_months_in_year(common_year, CalendarSystem::Chinese, None),
-        Some(12)
-    );
-    assert_eq!(
-        internal_days_in_month(2024, 14, CalendarSystem::Gregorian, None),
-        None
-    );
-}
-
-#[cfg(any(feature = "icu4x", feature = "web-intl"))]
-#[test]
-fn internal_calendar_date_invalid_construction_paths_return_errors() {
-    assert_eq!(
-        InternalCalendarDate::from_iso(2024, 2, 30),
-        Err(DateError::InvalidDate)
+        .is_ok()
     );
     assert!(
-        InternalCalendarDate::from_calendar_with_era("bogus", 1, 1, 1, CalendarSystem::Japanese)
-            .is_err()
+        CalendarDate::new(
+            CalendarSystem::Japanese,
+            &CalendarDateFields {
+                era: Some(heisei),
+                year: Some(1),
+                month: Some(1),
+                day: Some(7),
+                ..CalendarDateFields::default()
+            },
+        )
+        .is_err()
     );
     assert!(
-        InternalCalendarDate::try_from(&CalendarDate {
-            calendar: CalendarSystem::Japanese,
-            era: Some(Era {
-                code: String::from("bogus"),
-                display_name: String::from("Bogus"),
-            }),
-            year: 1,
-            month: NonZero::new(1).expect("month should be non-zero"),
-            day: NonZero::new(1).expect("day should be non-zero"),
-        })
+        CalendarDate::new(
+            CalendarSystem::Japanese,
+            &CalendarDateFields {
+                era: Some(reiwa.clone()),
+                year: Some(1),
+                month: Some(5),
+                day: Some(1),
+                ..CalendarDateFields::default()
+            },
+        )
+        .is_ok()
+    );
+    assert!(
+        CalendarDate::new(
+            CalendarSystem::Japanese,
+            &CalendarDateFields {
+                era: Some(reiwa),
+                year: Some(1),
+                month: Some(4),
+                day: Some(30),
+                ..CalendarDateFields::default()
+            },
+        )
         .is_err()
     );
 }
 
-#[cfg(all(any(feature = "icu4x", feature = "web-intl"), feature = "std"))]
 #[test]
-fn internal_calendar_date_additional_paths_cover_identity_and_ordering() {
-    let start = InternalCalendarDate::from_iso(2024, 3, 15).expect("date should be valid");
+fn calendar_system_queries_cover_hebrew_leap_months_and_japanese_bounds() {
+    let hebrew_leap = CalendarDate::new(
+        CalendarSystem::Hebrew,
+        &CalendarDateFields {
+            year: Some(5784),
+            month: Some(13),
+            day: Some(1),
+            ..CalendarDateFields::default()
+        },
+    )
+    .expect("Hebrew leap-year month 13 should validate");
 
-    let same = start.to_calendar(CalendarSystem::Gregorian);
+    let hebrew_common = CalendarDate::new(
+        CalendarSystem::Hebrew,
+        &CalendarDateFields {
+            year: Some(5785),
+            month: Some(12),
+            day: Some(1),
+            ..CalendarDateFields::default()
+        },
+    )
+    .expect("Hebrew common-year month 12 should validate");
 
-    let previous = start.add_days(-3).expect("date arithmetic should succeed");
+    assert_eq!(CalendarSystem::Hebrew.months_in_year(&hebrew_leap), 13);
+    assert_eq!(CalendarSystem::Hebrew.months_in_year(&hebrew_common), 12);
+    assert!(hebrew_leap.month_code().is_some());
 
-    let japanese_today =
-        InternalCalendarDate::today(CalendarSystem::Japanese).expect("today should resolve");
+    let reiwa = CalendarDate::new(
+        CalendarSystem::Japanese,
+        &CalendarDateFields {
+            era: Some(japanese_era("reiwa", "Reiwa")),
+            year: Some(1),
+            month: Some(5),
+            day: Some(1),
+            ..CalendarDateFields::default()
+        },
+    )
+    .expect("Reiwa start should validate");
 
-    assert_eq!(same.year(), 2024);
-    assert_eq!(start.days_until(&previous), Ok(-3));
-    assert_eq!(start.is_before(&previous), Ok(false));
-    assert!(japanese_today.era().is_some());
+    let heisei = CalendarDate::new(
+        CalendarSystem::Japanese,
+        &CalendarDateFields {
+            era: Some(japanese_era("heisei", "Heisei")),
+            year: Some(31),
+            month: Some(4),
+            day: Some(30),
+            ..CalendarDateFields::default()
+        },
+    )
+    .expect("Heisei end should validate");
+
+    assert_eq!(reiwa.minimum_month_in_year(), 5);
+    assert_eq!(reiwa.minimum_day_in_month(), 1);
+    assert_eq!(heisei.years_in_era(), Some(31));
+    assert_eq!(CalendarSystem::Japanese.months_in_year(&heisei), 4);
+    assert_eq!(CalendarSystem::Japanese.days_in_month(&heisei), 30);
 }
 
 #[test]
-fn weekday_helpers_cover_remaining_variants() {
-    assert_eq!(Weekday::from_sunday_zero(0), Weekday::Sunday);
-    assert_eq!(Weekday::from_sunday_zero(8), Weekday::Monday);
+fn calendar_date_arithmetic_and_cycle_follow_temporal_style_operations() {
+    let date = gregorian_date(2024, 1, 31);
 
-    assert_eq!(Weekday::from_iso_8601(1), Some(Weekday::Monday));
-    assert_eq!(Weekday::from_iso_8601(2), Some(Weekday::Tuesday));
-    assert_eq!(Weekday::from_iso_8601(3), Some(Weekday::Wednesday));
-    assert_eq!(Weekday::from_iso_8601(4), Some(Weekday::Thursday));
-    assert_eq!(Weekday::from_iso_8601(5), Some(Weekday::Friday));
-    assert_eq!(Weekday::from_iso_8601(6), Some(Weekday::Saturday));
-    assert_eq!(Weekday::from_iso_8601(7), Some(Weekday::Sunday));
-    assert_eq!(Weekday::from_iso_8601(0), None);
-    assert_eq!(Weekday::from_iso_8601(8), None);
+    let next_month = date
+        .add(DateDuration {
+            months: 1,
+            ..DateDuration::default()
+        })
+        .expect("month addition should succeed");
 
-    assert_eq!(Weekday::from_icu_str("mon"), Some(Weekday::Monday));
-    assert_eq!(Weekday::from_icu_str("tue"), Some(Weekday::Tuesday));
-    assert_eq!(Weekday::from_icu_str("wed"), Some(Weekday::Wednesday));
-    assert_eq!(Weekday::from_icu_str("thu"), Some(Weekday::Thursday));
-    assert_eq!(Weekday::from_icu_str("fri"), Some(Weekday::Friday));
-    assert_eq!(Weekday::from_icu_str("sat"), Some(Weekday::Saturday));
-    assert_eq!(Weekday::from_icu_str("sun"), Some(Weekday::Sunday));
-    assert_eq!(Weekday::from_icu_str("bad"), None);
+    assert_eq!(next_month.to_iso8601(), "2024-02-29");
 
-    assert_eq!(Weekday::from_bcp47_fw("sun"), Some(Weekday::Sunday));
-    assert_eq!(Weekday::from_bcp47_fw("mon"), Some(Weekday::Monday));
+    let prior = next_month
+        .subtract(DateDuration {
+            days: 28,
+            ..DateDuration::default()
+        })
+        .expect("day subtraction should succeed");
 
+    assert_eq!(prior.to_iso8601(), "2024-02-01");
+
+    let cycled = prior
+        .cycle(DateField::Day, 30, CycleOptions { wrap: true })
+        .expect("day cycle should wrap within the month");
+
+    assert_eq!(cycled.day(), 2);
+}
+
+#[test]
+fn calendar_date_converts_between_calendars() {
+    let gregorian = gregorian_date(2024, 3, 15);
+
+    let japanese = gregorian
+        .to_calendar(CalendarSystem::Japanese)
+        .expect("Gregorian to Japanese conversion should succeed");
+
+    assert_eq!(japanese.calendar(), CalendarSystem::Japanese);
     assert_eq!(
-        Weekday::from_icu_weekday(icu::calendar::types::Weekday::Monday),
-        Weekday::Monday
+        japanese.era().map(|value| value.code.as_str()),
+        Some("reiwa")
     );
+    assert_eq!(japanese.year(), 6);
+    assert_eq!(japanese.month(), 3);
+    assert_eq!(japanese.day(), 15);
     assert_eq!(
-        Weekday::from_icu_weekday(icu::calendar::types::Weekday::Tuesday),
-        Weekday::Tuesday
-    );
-    assert_eq!(
-        Weekday::from_icu_weekday(icu::calendar::types::Weekday::Wednesday),
-        Weekday::Wednesday
-    );
-    assert_eq!(
-        Weekday::from_icu_weekday(icu::calendar::types::Weekday::Thursday),
-        Weekday::Thursday
-    );
-    assert_eq!(
-        Weekday::from_icu_weekday(icu::calendar::types::Weekday::Friday),
-        Weekday::Friday
-    );
-    assert_eq!(
-        Weekday::from_icu_weekday(icu::calendar::types::Weekday::Saturday),
-        Weekday::Saturday
-    );
-    assert_eq!(
-        Weekday::from_icu_weekday(icu::calendar::types::Weekday::Sunday),
-        Weekday::Sunday
+        japanese
+            .to_calendar(CalendarSystem::Gregorian)
+            .expect("round-trip Gregorian conversion should succeed"),
+        gregorian
     );
 }
 
-fn japanese_range_example() -> CalendarDate {
-    CalendarDate {
-        calendar: CalendarSystem::Japanese,
-        era: Some(Era {
-            code: String::from("reiwa"),
-            display_name: String::from("Reiwa"),
-        }),
-        year: 6,
-        month: NonZero::new(3).expect("month should be non-zero"),
-        day: NonZero::new(15).expect("day should be non-zero"),
-    }
+#[test]
+fn time_and_date_time_support_add_set_and_cycle() {
+    let time = Time::new(23, 45, 10, 250).expect("time should validate");
+
+    let rolled = time
+        .add(TimeDuration {
+            minutes: 30,
+            ..TimeDuration::default()
+        })
+        .expect("time addition should succeed");
+
+    assert_eq!(rolled.hour(), 0);
+    assert_eq!(rolled.minute(), 15);
+
+    let cycled = rolled
+        .cycle(TimeField::Hour, -1, CycleTimeOptions { wrap: true })
+        .expect("hour cycle should wrap");
+
+    assert_eq!(cycled.hour(), 23);
+
+    let date_time = CalendarDateTime::new(gregorian_date(2024, 3, 15), time);
+
+    let next = date_time
+        .add(DateTimeDuration {
+            date: DateDuration {
+                days: 1,
+                ..DateDuration::default()
+            },
+            time: TimeDuration {
+                minutes: 30,
+                ..TimeDuration::default()
+            },
+        })
+        .expect("date-time arithmetic should succeed");
+
+    assert_eq!(next.date().to_iso8601(), "2024-03-17");
+    assert_eq!(next.time().hour(), 0);
+    assert_eq!(next.time().minute(), 15);
+
+    let changed = next
+        .set(
+            &CalendarDateFields {
+                day: Some(20),
+                ..CalendarDateFields::default()
+            },
+            TimeFields {
+                hour: Some(9),
+                minute: Some(30),
+                ..TimeFields::default()
+            },
+        )
+        .expect("date-time set should succeed");
+
+    assert_eq!(changed.date().day(), 20);
+    assert_eq!(changed.time().hour(), 9);
+
+    let cycled_dt = changed
+        .cycle(DateTimeField::Month, 1, CycleTimeOptions { wrap: false })
+        .expect("date-time month cycle should succeed");
+
+    assert_eq!(cycled_dt.date().month(), 4);
+}
+
+#[test]
+fn query_helpers_operate_on_calendar_dates_and_date_times() {
+    let provider = StubIcuProvider;
+
+    let locale = Locale::parse("en-US").expect("test locale should parse");
+
+    let date = gregorian_date(2024, 3, 15);
+
+    let time = Time::new(9, 30, 0, 0).expect("time should validate");
+
+    let date_time = CalendarDateTime::new(date.clone(), time);
+
+    assert!(queries::is_same_day(&date, &date_time));
+    assert!(queries::is_same_month(&date, &date_time));
+    assert!(queries::is_same_year(&date, &date_time));
+
+    let month_start = queries::start_of_month(&date);
+
+    let month_end = queries::end_of_month(&date);
+
+    let year_start = queries::start_of_year(&date);
+
+    let year_end = queries::end_of_year(&date);
+
+    assert_eq!(month_start.to_iso8601(), "2024-03-01");
+    assert_eq!(month_end.to_iso8601(), "2024-03-31");
+    assert_eq!(year_start.to_iso8601(), "2024-01-01");
+    assert_eq!(year_end.to_iso8601(), "2024-12-31");
+
+    let week_start = queries::start_of_week(&date_time, &locale, &provider);
+
+    let week_end = queries::end_of_week(&date_time, &locale, &provider);
+
+    assert_eq!(week_start.date().to_iso8601(), "2024-03-10");
+    assert_eq!(week_end.date().to_iso8601(), "2024-03-16");
+    assert_eq!(week_start.time().hour(), 9);
+    assert_eq!(queries::get_day_of_week(&date, &locale, &provider), 5);
+    assert_eq!(queries::get_weeks_in_month(&date, &locale, &provider), 6);
+    assert!(queries::is_weekday(&date, &locale, &provider));
+    assert!(!queries::is_weekend(&date, &locale, &provider));
+    assert_eq!(queries::min_date(&date, &month_end), date);
+    assert_eq!(queries::max_date(&date, &month_end), month_end);
+}
+
+#[test]
+fn query_helpers_follow_react_aria_calendar_and_locale_semantics() {
+    let provider = StubIcuProvider;
+
+    let en_us = Locale::parse("en-US").expect("test locale should parse");
+
+    let fr_fr = Locale::parse("fr-FR").expect("test locale should parse");
+
+    let he_il = Locale::parse("he-IL").expect("test locale should parse");
+
+    let en_us_monday = Locale::parse("en-US-u-fw-mon").expect("test locale should parse");
+
+    let gregorian = gregorian_date(2024, 3, 10);
+
+    let islamic = gregorian
+        .to_calendar(CalendarSystem::IslamicUmmAlQura)
+        .expect("Gregorian to Umm al-Qura conversion should succeed");
+
+    assert!(queries::is_same_month(&gregorian, &islamic));
+    assert!(!queries::is_equal_month(&gregorian, &islamic));
+
+    assert_eq!(queries::get_day_of_week(&gregorian, &en_us, &provider), 0);
+    assert_eq!(queries::get_day_of_week(&gregorian, &fr_fr, &provider), 6);
+
+    assert!(queries::is_weekend(&gregorian, &en_us, &provider));
+    assert!(!queries::is_weekend(&gregorian, &he_il, &provider));
+    assert!(queries::is_weekday(&gregorian, &he_il, &provider));
+    assert_eq!(
+        queries::start_of_week(&gregorian, &en_us_monday, &provider).to_iso8601(),
+        "2024-03-04"
+    );
+    assert_eq!(
+        queries::get_day_of_week(&gregorian, &en_us_monday, &provider),
+        6
+    );
+
+    let march = gregorian_date(2024, 3, 15);
+
+    assert_eq!(queries::get_weeks_in_month(&march, &en_us, &provider), 6);
+    assert_eq!(queries::get_weeks_in_month(&march, &fr_fr, &provider), 5);
+    assert_eq!(
+        queries::get_weeks_in_month(&march, &en_us_monday, &provider),
+        5
+    );
+}
+
+#[test]
+fn parsing_helpers_cover_date_time_duration_and_month_code() {
+    let date = parse::parse_date("2024-03-15").expect("date parse should succeed");
+
+    assert_eq!(date.to_iso8601(), "2024-03-15");
+
+    let time = parse::parse_time("23:45:10.250").expect("time parse should succeed");
+
+    assert_eq!(time.hour(), 23);
+    assert_eq!(time.minute(), 45);
+    assert_eq!(time.second(), 10);
+    assert_eq!(time.millisecond(), 250);
+
+    let date_time =
+        parse::parse_date_time("2024-03-15T23:45:10.250").expect("date-time parse should succeed");
+
+    assert_eq!(date_time.date().to_iso8601(), "2024-03-15");
+    assert_eq!(date_time.time().hour(), 23);
+
+    let duration =
+        parse::parse_duration("P1Y2M3DT4H5M6.007008009S").expect("duration parse should succeed");
+
+    assert_eq!(duration.date.years, 1);
+    assert_eq!(duration.date.months, 2);
+    assert_eq!(duration.date.days, 3);
+    assert_eq!(duration.time.hours, 4);
+    assert_eq!(duration.time.minutes, 5);
+    assert_eq!(duration.time.seconds, 6);
+
+    let month_code = MonthCode::new("M05L").expect("month code should validate");
+
+    assert_eq!(month_code.as_str(), "M05L");
+    assert!(month_code.is_leap_month());
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn conversion_helpers_cover_common_date_and_zone_conversions() {
+    let date = gregorian_date(2024, 3, 15);
+
+    let time = Time::new(9, 30, 0, 0).expect("time should validate");
+
+    let midnight = to_calendar_date_time(&date, None);
+
+    assert_eq!(midnight.date(), &date);
+    assert_eq!(midnight.time().hour(), 0);
+    assert_eq!(midnight.time().minute(), 0);
+
+    let preserved = to_calendar_date_time(&date, Some(time));
+
+    assert_eq!(preserved.date(), &date);
+    assert_eq!(preserved.time(), &time);
+
+    let time_zone = TimeZoneId::new("America/New_York").expect("zone should validate");
+
+    let zoned = to_zoned(&date, &time_zone).expect("date to zoned conversion should succeed");
+
+    let zoned_date_time = zoned.inner.to_plain_date_time();
+
+    assert_eq!(zoned.time_zone(), &time_zone);
+    assert_eq!(zoned_date_time.year(), 2024);
+    assert_eq!(zoned_date_time.month(), 3);
+    assert_eq!(zoned_date_time.day(), 15);
+    assert_eq!(zoned_date_time.hour(), 0);
+    assert_eq!(zoned_date_time.minute(), 0);
+
+    let skipped = CalendarDateTime::new(
+        gregorian_date(2024, 3, 10),
+        Time::new(2, 30, 0, 0).expect("time should validate"),
+    );
+
+    assert!(
+        to_zoned_date_time(&skipped, &time_zone, Disambiguation::Reject).is_err(),
+        "reject should fail for skipped local times"
+    );
+    assert!(
+        to_zoned_date_time(&skipped, &time_zone, Disambiguation::Compatible).is_ok(),
+        "compatible should resolve skipped local times"
+    );
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn native_interop_helpers_convert_to_system_time_without_exposing_temporal_types() {
+    use std::time::{Duration, UNIX_EPOCH};
+
+    let time_zone = TimeZoneId::new("America/New_York").expect("zone should validate");
+
+    let date = gregorian_date(2024, 3, 15);
+
+    let date_system_time = date
+        .to_system_time(&time_zone)
+        .expect("date system time conversion should succeed");
+
+    assert_eq!(
+        date_system_time,
+        UNIX_EPOCH + Duration::from_secs(1_710_475_200)
+    );
+
+    let skipped = CalendarDateTime::new(
+        gregorian_date(2024, 3, 10),
+        Time::new(2, 30, 0, 0).expect("time should validate"),
+    );
+
+    assert!(
+        skipped
+            .to_system_time(&time_zone, Disambiguation::Reject)
+            .is_err(),
+        "reject should fail for skipped local times"
+    );
+    assert_eq!(
+        skipped
+            .to_system_time(&time_zone, Disambiguation::Compatible)
+            .expect("compatible should resolve skipped local times"),
+        UNIX_EPOCH + Duration::from_secs(1_710_055_800)
+    );
+
+    let zoned = parse::parse_absolute("2024-03-10T07:45:00Z", &time_zone)
+        .expect("absolute parse should succeed");
+
+    assert_eq!(
+        zoned
+            .to_system_time()
+            .expect("zoned system time conversion should succeed"),
+        UNIX_EPOCH + Duration::from_secs(1_710_056_700)
+    );
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn zoned_date_time_and_local_zone_override_work() {
+    let time_zone = TimeZoneId::new("America/New_York").expect("zone should validate");
+    let local = CalendarDateTime::new(
+        gregorian_date(2024, 3, 10),
+        Time::new(1, 30, 0, 0).expect("time should validate"),
+    );
+
+    let zoned = super::ZonedDateTime::new(&local, time_zone.clone(), Disambiguation::Compatible)
+        .expect("zoned date-time construction should succeed");
+
+    assert_eq!(zoned.time_zone(), &time_zone);
+
+    let reparsed = parse::parse_zoned_date_time("2024-03-10T01:30-05:00[America/New_York]")
+        .expect("zoned parse should succeed");
+
+    assert_eq!(reparsed.time_zone().as_str(), "America/New_York");
+
+    parse::set_local_time_zone_override(time_zone.clone());
+
+    assert_eq!(
+        parse::get_local_time_zone()
+            .expect("local override should read back")
+            .as_str(),
+        "America/New_York"
+    );
+    assert_eq!(
+        parse::now(None)
+            .expect("now() should honor the override")
+            .time_zone()
+            .as_str(),
+        "America/New_York"
+    );
+
+    let absolute = parse::parse_absolute("2024-03-10T07:45:00Z", &time_zone)
+        .expect("absolute parse should succeed");
+
+    let absolute_date_time = absolute.inner.to_plain_date_time();
+
+    assert_eq!(absolute.time_zone().as_str(), "America/New_York");
+    assert_eq!(absolute_date_time.year(), 2024);
+    assert_eq!(absolute_date_time.month(), 3);
+    assert_eq!(absolute_date_time.day(), 10);
+    assert_eq!(absolute_date_time.hour(), 3);
+    assert_eq!(absolute_date_time.minute(), 45);
+
+    let converted = parse::parse_absolute(
+        "2024-03-10T07:45:00-05:00",
+        &TimeZoneId::new("America/Los_Angeles").expect("zone should validate"),
+    )
+    .expect("offset absolute parse should succeed");
+
+    let converted_date_time = converted.inner.to_plain_date_time();
+
+    assert_eq!(converted.time_zone().as_str(), "America/Los_Angeles");
+    assert_eq!(converted_date_time.year(), 2024);
+    assert_eq!(converted_date_time.month(), 3);
+    assert_eq!(converted_date_time.day(), 10);
+    assert_eq!(converted_date_time.hour(), 5);
+    assert_eq!(converted_date_time.minute(), 45);
+
+    let local = parse::parse_absolute_to_local("2024-03-10T07:45:00Z")
+        .expect("local absolute parse should use the override");
+
+    assert_eq!(local.time_zone().as_str(), "America/New_York");
+
+    assert!(parse::parse_absolute("not-a-timestamp", &time_zone).is_err());
+
+    parse::reset_local_time_zone_override();
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn get_local_time_zone_uses_local_host_zone_when_no_override_is_set() {
+    parse::reset_local_time_zone_override();
+
+    let expected = TimeZoneId::new(
+        Temporal::local_now()
+            .time_zone()
+            .expect("local host zone should resolve")
+            .identifier()
+            .expect("local host zone should expose an identifier"),
+    )
+    .expect("local host zone identifier should validate");
+
+    assert_eq!(
+        parse::get_local_time_zone()
+            .expect("local time zone should resolve without override")
+            .as_str(),
+        expected.as_str()
+    );
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn get_hours_in_day_tracks_dst_boundaries() {
+    let time_zone = TimeZoneId::new("America/New_York").expect("zone should validate");
+
+    let spring_forward =
+        queries::get_hours_in_day(&gregorian_date(2024, 3, 10), &time_zone).expect("DST day");
+
+    let fall_back =
+        queries::get_hours_in_day(&gregorian_date(2024, 11, 3), &time_zone).expect("DST day");
+
+    let normal_day =
+        queries::get_hours_in_day(&gregorian_date(2024, 3, 11), &time_zone).expect("normal day");
+
+    assert_eq!(spring_forward, 23);
+    assert_eq!(fall_back, 25);
+    assert_eq!(normal_day, 24);
 }

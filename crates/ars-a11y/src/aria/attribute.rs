@@ -1,4 +1,5 @@
 use alloc::{string::String, vec::Vec};
+use core::fmt::{self, Display};
 
 use ars_core::{AriaAttr, AttrMap, AttrValue, HtmlAttr};
 
@@ -26,22 +27,25 @@ impl AriaIdList {
 
     /// Returns `true` if the list contains no IDs.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 }
 
-impl core::fmt::Display for AriaIdList {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl Display for AriaIdList {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut first = true;
+
         for id in &self.0 {
             if first {
                 first = false;
             } else {
                 f.write_str(" ")?;
             }
+
             f.write_str(id)?;
         }
+
         Ok(())
     }
 }
@@ -51,10 +55,13 @@ impl core::fmt::Display for AriaIdList {
 pub enum AriaAutocomplete {
     /// No autocompletion.
     None,
+
     /// Inline completion suggestion after the caret.
     Inline,
+
     /// A list of completion values is presented.
     List,
+
     /// Both inline and list completion.
     Both,
 }
@@ -77,16 +84,22 @@ impl AriaAutocomplete {
 pub enum AriaCurrent {
     /// Not the current item.
     False,
+
     /// The current item (generic).
     True,
+
     /// The current page within a set of pages.
     Page,
+
     /// The current step within a process.
     Step,
+
     /// The current location within an environment or context.
     Location,
+
     /// The current date within a date range.
     Date,
+
     /// The current time within a time range.
     Time,
 }
@@ -112,16 +125,22 @@ impl AriaCurrent {
 pub enum AriaHasPopup {
     /// No popup.
     False,
+
     /// Has a popup (generic).
     True,
+
     /// Has a menu popup.
     Menu,
+
     /// Has a listbox popup.
     Listbox,
+
     /// Has a tree popup.
     Tree,
+
     /// Has a grid popup.
     Grid,
+
     /// Has a dialog popup.
     Dialog,
 }
@@ -147,10 +166,13 @@ impl AriaHasPopup {
 pub enum AriaInvalid {
     /// The value is not invalid.
     False,
+
     /// The value is invalid.
     True,
+
     /// A grammatical error was detected.
     Grammar,
+
     /// A spelling error was detected.
     Spelling,
 }
@@ -173,8 +195,10 @@ impl AriaInvalid {
 pub enum AriaLive {
     /// Updates will not be announced.
     Off,
+
     /// Updates will be announced at the next graceful opportunity.
     Polite,
+
     /// Updates will be announced immediately.
     Assertive,
 }
@@ -196,8 +220,10 @@ impl AriaLive {
 pub enum AriaOrientation {
     /// The element is oriented horizontally.
     Horizontal,
+
     /// The element is oriented vertically.
     Vertical,
+
     /// The orientation is unknown or ambiguous.
     Undefined,
 }
@@ -219,8 +245,10 @@ impl AriaOrientation {
 pub enum AriaPressed {
     /// The button is not pressed.
     False,
+
     /// The button is pressed.
     True,
+
     /// The button is in a mixed pressed state.
     Mixed,
 }
@@ -242,8 +270,10 @@ impl AriaPressed {
 pub enum AriaChecked {
     /// The element is not checked.
     False,
+
     /// The element is checked.
     True,
+
     /// The element is in a mixed (indeterminate) checked state.
     Mixed,
 }
@@ -265,10 +295,13 @@ impl AriaChecked {
 pub enum AriaSort {
     /// Items are not sorted.
     None,
+
     /// Items are sorted in ascending order.
     Ascending,
+
     /// Items are sorted in descending order.
     Descending,
+
     /// Items are sorted in an order other than ascending or descending.
     Other,
 }
@@ -292,38 +325,48 @@ impl AriaSort {
 pub struct AriaRelevant {
     /// Node additions are relevant.
     pub additions: bool,
+
     /// Node removals are relevant.
     pub removals: bool,
+
     /// Text content changes are relevant.
     pub text: bool,
 }
 
-impl core::fmt::Display for AriaRelevant {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl Display for AriaRelevant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut parts = Vec::new();
+
         if self.additions {
             parts.push("additions");
         }
+
         if self.removals {
             parts.push("removals");
         }
+
         if self.text {
             parts.push("text");
         }
+
         if parts.is_empty() {
             // All-false returns empty string so the attribute is omitted, letting
             // the browser apply its default (`additions text`).
             return write!(f, "");
         }
+
         let mut first = true;
+
         for part in &parts {
             if first {
                 first = false;
             } else {
                 f.write_str(" ")?;
             }
+
             f.write_str(part)?;
         }
+
         Ok(())
     }
 }
@@ -348,14 +391,19 @@ impl Default for AriaRelevant {
 pub enum AriaDropeffect {
     /// No drop effect.
     None,
+
     /// A copy of the source will be placed at the target.
     Copy,
+
     /// A function will be executed using the drag source.
     Execute,
+
     /// A reference to the source will be created at the target.
     Link,
+
     /// The source will be moved to the target.
     Move,
+
     /// A popup menu or dialog is presented for user selection.
     Popup,
 }
@@ -582,13 +630,18 @@ impl AriaAttribute {
         use alloc::string::ToString;
         match self {
             Self::ActiveDescendant(id) => id.as_ref().map(|id| id.0.clone()),
+
             Self::AutoComplete(v) => Some(v.as_str().into()),
+
             Self::Controls(ids) => Some(ids.to_string()),
+
             Self::Current(v) => Some(v.as_str().into()),
+
             Self::DescribedBy(ids) => {
                 let s = ids.to_string();
                 if s.is_empty() { None } else { Some(s) }
             }
+
             Self::Description(s) => {
                 if s.is_empty() {
                     None
@@ -596,59 +649,107 @@ impl AriaAttribute {
                     Some(s.clone())
                 }
             }
+
             Self::Details(id) => Some(id.0.clone()),
+
             Self::Disabled(v) => Some(v.to_string()),
+
             Self::FlowTo(ids) => Some(ids.to_string()),
+
             Self::HasPopup(v) => Some(v.as_str().into()),
+
             Self::Hidden(None) => None,
+
             Self::Hidden(Some(v)) => Some(v.to_string()),
+
             Self::Invalid(v) => Some(v.as_str().into()),
+
             Self::Label(s) => Some(s.clone()),
+
             Self::LabelledBy(ids) => {
                 let s = ids.to_string();
                 if s.is_empty() { None } else { Some(s) }
             }
+
             Self::Level(n) => Some(n.to_string()),
+
             Self::Modal(v) => Some(v.to_string()),
+
             Self::MultiLine(v) => Some(v.to_string()),
+
             Self::MultiSelectable(v) => Some(v.to_string()),
+
             Self::Orientation(v) => Some(v.as_str().into()),
+
             Self::Owns(ids) => Some(ids.to_string()),
+
             Self::Placeholder(s) => Some(s.clone()),
+
             Self::PosInSet(n) => Some(n.to_string()),
+
             Self::Pressed(None) => None,
+
             Self::Pressed(Some(v)) => Some(v.as_str().into()),
+
             Self::ReadOnly(v) => Some(v.to_string()),
+
             Self::Required(v) => Some(v.to_string()),
+
             Self::RoleDescription(s) => Some(s.clone()),
+
             Self::Selected(None) => None,
+
             Self::Selected(Some(v)) => Some(v.to_string()),
+
             Self::SetSize(n) => Some(n.to_string()),
+
             Self::Sort(v) => Some(v.as_str().into()),
+
             Self::ValueMax(n) => Some(n.to_string()),
+
             Self::ValueMin(n) => Some(n.to_string()),
+
             Self::ValueNow(n) => Some(n.to_string()),
+
             Self::ValueText(s) => Some(s.clone()),
+
             Self::Atomic(v) => Some(v.to_string()),
+
             Self::Busy(v) => Some(v.to_string()),
+
             Self::Live(v) => Some(v.as_str().into()),
+
             Self::Relevant(v) => Some(v.to_string()),
+
             #[cfg(feature = "aria-drag-drop-compat")]
             Self::DropEffect(v) => Some(v.as_str().into()),
+
             Self::ErrorMessage(id) => Some(id.0.clone()),
+
             Self::Checked(v) => Some(v.as_str().into()),
+
             Self::Expanded(None) => None,
+
             Self::Expanded(Some(v)) => Some(v.to_string()),
+
             #[cfg(feature = "aria-drag-drop-compat")]
             Self::Grabbed(None) => None,
+
             #[cfg(feature = "aria-drag-drop-compat")]
             Self::Grabbed(Some(v)) => Some(v.to_string()),
+
             Self::ColCount(n) => Some(n.to_string()),
+
             Self::ColIndex(n) => Some(n.to_string()),
+
             Self::ColSpan(n) => Some(n.to_string()),
+
             Self::RowCount(n) => Some(n.to_string()),
+
             Self::RowIndex(n) => Some(n.to_string()),
+
             Self::RowSpan(n) => Some(n.to_string()),
+
             Self::KeyShortcuts(s) => Some(s.clone()),
         }
     }
@@ -675,13 +776,11 @@ impl AriaAttribute {
     /// [`AttrValue::None`] so the adapter knows to remove the attribute from the DOM.
     pub fn apply_to(&self, attrs: &mut AttrMap) {
         let key = self.to_html_attr();
-        match self.to_attr_value() {
-            Some(value) => {
-                attrs.set(key, value);
-            }
-            None => {
-                attrs.set(key, AttrValue::None);
-            }
+
+        if let Some(value) = self.to_attr_value() {
+            attrs.set(key, value);
+        } else {
+            attrs.set(key, AttrValue::None);
         }
     }
 }
@@ -834,8 +933,10 @@ mod tests {
     #[test]
     fn aria_id_list_display() {
         let mut list = AriaIdList::new();
+
         list.push("a");
         list.push("b");
+
         assert_eq!(list.to_string(), "a b");
     }
 
@@ -855,6 +956,7 @@ mod tests {
             (AriaAutocomplete::List, "list"),
             (AriaAutocomplete::Both, "both"),
         ];
+
         for (value, expected) in autocomplete {
             assert_eq!(value.as_str(), expected);
         }
@@ -868,6 +970,7 @@ mod tests {
             (AriaCurrent::Date, "date"),
             (AriaCurrent::Time, "time"),
         ];
+
         for (value, expected) in current {
             assert_eq!(value.as_str(), expected);
         }
@@ -881,6 +984,7 @@ mod tests {
             (AriaHasPopup::Grid, "grid"),
             (AriaHasPopup::Dialog, "dialog"),
         ];
+
         for (value, expected) in has_popup {
             assert_eq!(value.as_str(), expected);
         }
@@ -891,6 +995,7 @@ mod tests {
             (AriaInvalid::Grammar, "grammar"),
             (AriaInvalid::Spelling, "spelling"),
         ];
+
         for (value, expected) in invalid {
             assert_eq!(value.as_str(), expected);
         }
@@ -900,6 +1005,7 @@ mod tests {
             (AriaLive::Polite, "polite"),
             (AriaLive::Assertive, "assertive"),
         ];
+
         for (value, expected) in live {
             assert_eq!(value.as_str(), expected);
         }
@@ -909,6 +1015,7 @@ mod tests {
             (AriaOrientation::Vertical, "vertical"),
             (AriaOrientation::Undefined, "undefined"),
         ];
+
         for (value, expected) in orientation {
             assert_eq!(value.as_str(), expected);
         }
@@ -918,6 +1025,7 @@ mod tests {
             (AriaPressed::True, "true"),
             (AriaPressed::Mixed, "mixed"),
         ];
+
         for (value, expected) in pressed {
             assert_eq!(value.as_str(), expected);
         }
@@ -927,6 +1035,7 @@ mod tests {
             (AriaChecked::True, "true"),
             (AriaChecked::Mixed, "mixed"),
         ];
+
         for (value, expected) in checked {
             assert_eq!(value.as_str(), expected);
         }
@@ -937,6 +1046,7 @@ mod tests {
             (AriaSort::Descending, "descending"),
             (AriaSort::Other, "other"),
         ];
+
         for (value, expected) in sort {
             assert_eq!(value.as_str(), expected);
         }
@@ -962,24 +1072,28 @@ mod tests {
     #[test]
     fn aria_attribute_disabled_to_attr_value() {
         let attr = AriaAttribute::Disabled(true);
+
         assert_eq!(attr.to_attr_value(), Some("true".into()));
     }
 
     #[test]
     fn aria_attribute_hidden_none_removes() {
         let attr = AriaAttribute::Hidden(None);
+
         assert_eq!(attr.to_attr_value(), None);
     }
 
     #[test]
     fn aria_attribute_pressed_mixed() {
         let attr = AriaAttribute::Pressed(Some(AriaPressed::Mixed));
+
         assert_eq!(attr.to_attr_value(), Some("mixed".into()));
     }
 
     #[test]
     fn aria_relevant_default() {
         let relevant = AriaRelevant::default();
+
         assert_eq!(relevant.to_string(), "additions text");
     }
 
@@ -1035,6 +1149,7 @@ mod tests {
     #[test]
     fn to_attr_value_serializes_representative_attributes() {
         let mut ids = AriaIdList::new();
+
         ids.push("item-1");
         ids.push("item-2");
 
@@ -1151,6 +1266,7 @@ mod tests {
     #[test]
     fn compat_attributes_serialize_and_round_trip() {
         let drop_effect = AriaAttribute::DropEffect(AriaDropeffect::Popup);
+
         assert_eq!(drop_effect.to_attr_value().as_deref(), Some("popup"));
         assert_eq!(
             drop_effect.to_html_attr(),
@@ -1159,6 +1275,7 @@ mod tests {
         assert_eq!(AriaAttr::from(&drop_effect), AriaAttr::DropEffect);
 
         let grabbed_true = AriaAttribute::Grabbed(Some(true));
+
         assert_eq!(grabbed_true.to_attr_value().as_deref(), Some("true"));
         assert_eq!(
             grabbed_true.to_html_attr(),
@@ -1167,10 +1284,13 @@ mod tests {
         assert_eq!(AriaAttr::from(&grabbed_true), AriaAttr::Grabbed);
 
         let grabbed_none = AriaAttribute::Grabbed(None);
+
         assert_eq!(grabbed_none.to_attr_value(), None);
 
         let mut attrs = AttrMap::new();
+
         grabbed_none.apply_to(&mut attrs);
+
         assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Grabbed)));
     }
 
@@ -1197,6 +1317,7 @@ mod tests {
     #[test]
     fn to_html_attr_wraps_in_aria_variant() {
         use ars_core::{AriaAttr, HtmlAttr};
+
         assert_eq!(
             AriaAttribute::Checked(AriaChecked::True).to_html_attr(),
             HtmlAttr::Aria(AriaAttr::Checked),
@@ -1214,42 +1335,58 @@ mod tests {
     #[test]
     fn apply_to_sets_string_value_on_attr_map() {
         use ars_core::{AriaAttr, AttrMap, HtmlAttr};
+
         let mut attrs = AttrMap::new();
+
         AriaAttribute::Disabled(true).apply_to(&mut attrs);
+
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"),);
     }
 
     #[test]
     fn apply_to_removes_nullable_absent_attrs() {
         use ars_core::{AriaAttr, AttrMap, HtmlAttr};
+
         let mut attrs = AttrMap::new();
+
         // Pre-set to verify removal
         attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
+
         AriaAttribute::Hidden(None).apply_to(&mut attrs);
+
         assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Hidden)));
     }
 
     #[test]
     fn apply_to_pressed_none_removes_attr() {
         use ars_core::{AriaAttr, AttrMap, HtmlAttr};
+
         let mut attrs = AttrMap::new();
+
         AriaAttribute::Pressed(None).apply_to(&mut attrs);
+
         assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Pressed)));
     }
 
     #[test]
     fn apply_to_selected_none_removes_attr() {
         use ars_core::{AriaAttr, AttrMap, HtmlAttr};
+
         let mut attrs = AttrMap::new();
+
         AriaAttribute::Selected(None).apply_to(&mut attrs);
+
         assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Selected)));
     }
 
     #[test]
     fn apply_to_label_string() {
         use ars_core::{AriaAttr, AttrMap, HtmlAttr};
+
         let mut attrs = AttrMap::new();
+
         AriaAttribute::Label("Close dialog".into()).apply_to(&mut attrs);
+
         assert_eq!(
             attrs.get(&HtmlAttr::Aria(AriaAttr::Label)),
             Some("Close dialog"),
@@ -1259,6 +1396,7 @@ mod tests {
     #[test]
     fn from_aria_attr_produces_default_values() {
         use ars_core::AriaAttr;
+
         assert_eq!(
             AriaAttribute::from(AriaAttr::Disabled),
             AriaAttribute::Disabled(false),
@@ -1414,6 +1552,7 @@ mod tests {
     #[test]
     fn from_aria_attribute_ref_extracts_discriminant() {
         use ars_core::AriaAttr;
+
         assert_eq!(
             AriaAttr::from(&AriaAttribute::Disabled(true)),
             AriaAttr::Disabled,
@@ -1431,7 +1570,9 @@ mod tests {
     #[test]
     fn try_from_html_attr_aria_succeeds() {
         use ars_core::{AriaAttr, HtmlAttr};
+
         let result = AriaAttribute::try_from(HtmlAttr::Aria(AriaAttr::Busy));
+
         assert!(result.is_ok());
         assert_eq!(result.expect("should be Ok"), AriaAttribute::Busy(false));
     }
@@ -1439,17 +1580,23 @@ mod tests {
     #[test]
     fn try_from_html_attr_non_aria_fails() {
         use ars_core::HtmlAttr;
+
         let result = AriaAttribute::try_from(HtmlAttr::Class);
+
         assert_eq!(result, Err(HtmlAttr::Class));
     }
 
     #[test]
     fn round_trip_discriminant_preserves_identity() {
         use ars_core::AriaAttr;
+
         // AriaAttr → AriaAttribute → AriaAttr round-trip
         let original = AriaAttr::Orientation;
+
         let typed = AriaAttribute::from(original);
+
         let back = AriaAttr::from(&typed);
+
         assert_eq!(original, back);
     }
 
@@ -1507,6 +1654,7 @@ mod tests {
 
         for attr in attrs {
             let key = AriaAttr::from(&attr);
+
             assert_eq!(attr.to_html_attr(), HtmlAttr::Aria(key), "{attr:?}");
             assert_eq!(
                 AriaAttribute::from(key).attr_name(),

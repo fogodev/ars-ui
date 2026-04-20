@@ -11,6 +11,7 @@ use crate::{AriaAttribute, AriaRole};
 pub struct AriaValidationContext<'a> {
     /// The DOM IDs currently present in the validated subtree.
     pub known_ids: &'a [&'a str],
+
     /// The direct owned child roles currently present under the validated role owner.
     pub owned_roles: &'a [AriaRole],
 }
@@ -46,28 +47,35 @@ pub enum AriaValidationError {
     MissingRequiredAttribute {
         /// The role being validated.
         role: &'static str,
+
         /// The missing required ARIA attribute.
         missing_attr: &'static str,
     },
+
     /// An abstract role was used on a DOM element.
     AbstractRoleUsed {
         /// The abstract role name.
         role: &'static str,
     },
+
     /// A required owned element is missing.
     MissingRequiredOwnedElement {
         /// The role whose ownership contract was violated.
         role: &'static str,
+
         /// One of the role groups that would satisfy the ownership rule.
         required_one_of: Vec<&'static str>,
     },
+
     /// `aria-labelledby` or `aria-describedby` references a non-existent ID.
     DanglingIdReference {
         /// The ARIA relationship attribute containing the bad reference.
         attribute: &'static str,
+
         /// The missing DOM ID.
         id: String,
     },
+
     /// `aria-activedescendant` used on a role that does not support it.
     ActiveDescendantOnUnsupportedRole {
         /// The unsupported role name.
@@ -82,13 +90,17 @@ pub enum AriaValidationWarning {
     RedundantRole {
         /// The native element type.
         element: &'static str,
+
         /// The redundant role.
         role: &'static str,
     },
+
     /// `aria-label` used alongside visible text (prefer `aria-labelledby`).
     AriaLabelWithVisibleText,
+
     /// `aria-disabled` used on a native form element (prefer `disabled`).
     AriaDisabledOnNativeFormElement,
+
     /// General advisory hint from the validator.
     Hint {
         /// The advisory message.
@@ -123,9 +135,11 @@ impl AriaValidator {
                 AriaRole::Separator if !has_tabindex => Some(
                     "AriaRole::Separator requires tabindex for focusable separator. Use AriaRole::StructuralSeparator for non-focusable separators.",
                 ),
+
                 AriaRole::StructuralSeparator if has_tabindex => Some(
                     "AriaRole::StructuralSeparator is the non-focusable separator role. Use AriaRole::Separator for focusable separators with tabindex.",
                 ),
+
                 _ => None,
             };
 
@@ -135,6 +149,7 @@ impl AriaValidator {
         }
 
         self.check_required_attrs_for_role(role, attrs);
+
         self.check_required_owned_elements_for_role(role, owned_roles);
     }
 
@@ -154,6 +169,7 @@ impl AriaValidator {
 
     fn check_required_owned_elements_for_role(&mut self, role: AriaRole, owned_roles: &[AriaRole]) {
         let required_groups = role.required_owned_elements();
+
         if required_groups.is_empty() {
             return;
         }
@@ -169,9 +185,11 @@ impl AriaValidator {
         }
 
         let mut required_one_of = Vec::new();
+
         for group in required_groups {
             for required_role in *group {
                 let role_name = required_role.name();
+
                 if !required_one_of.contains(&role_name) {
                     required_one_of.push(role_name);
                 }
@@ -187,20 +205,20 @@ impl AriaValidator {
 
     /// Returns `true` when validation has recorded any errors.
     #[must_use]
-    pub fn has_errors(&self) -> bool {
+    pub const fn has_errors(&self) -> bool {
         !self.errors.is_empty()
     }
 
     /// Returns the accumulated validation errors.
     #[must_use]
-    pub fn errors(&self) -> &[AriaValidationError] {
-        &self.errors
+    pub const fn errors(&self) -> &[AriaValidationError] {
+        self.errors.as_slice()
     }
 
     /// Returns the accumulated validation warnings.
     #[must_use]
-    pub fn warnings(&self) -> &[AriaValidationWarning] {
-        &self.warnings
+    pub const fn warnings(&self) -> &[AriaValidationWarning] {
+        self.warnings.as_slice()
     }
 }
 
@@ -243,6 +261,7 @@ fn supported_aria_attribute(attr: AriaAttr) -> Option<AriaAttribute> {
     match attr {
         #[cfg(not(feature = "aria-drag-drop-compat"))]
         AriaAttr::DropEffect | AriaAttr::Grabbed => None,
+
         _ => Some(AriaAttribute::from(attr)),
     }
 }
@@ -271,13 +290,13 @@ pub fn validate_attr_map(
 ) -> AriaValidator {
     let mut validator = AriaValidator::new();
 
-    let aria_attrs: Vec<AriaAttribute> = attr_map
+    let aria_attrs = attr_map
         .iter_attrs()
         .filter_map(|(key, _)| match key {
             HtmlAttr::Aria(attr) => supported_aria_attribute(*attr),
             _ => None,
         })
-        .collect();
+        .collect::<Vec<_>>();
 
     let has_tabindex = attr_map.contains(&HtmlAttr::TabIndex);
 
@@ -535,6 +554,7 @@ mod tests {
     #[test]
     fn separator_with_tabindex_and_required_attrs_is_valid() {
         let mut validator = AriaValidator::new();
+
         let attrs = [
             AriaAttribute::ValueNow(5.0),
             AriaAttribute::ValueMin(0.0),

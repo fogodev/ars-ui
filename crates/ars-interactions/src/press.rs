@@ -340,10 +340,10 @@ impl PressResult {
                 return;
             }
 
-            if active_presses.is_empty() {
-                if let Some(flag) = &self.config.long_press_cancel_flag {
-                    flag.set(None);
-                }
+            if active_presses.is_empty()
+                && let Some(flag) = &self.config.long_press_cancel_flag
+            {
+                flag.set(None);
             }
 
             *self.state.borrow_mut() = PressState::Pressing { pointer_type };
@@ -423,10 +423,8 @@ impl PressResult {
 
         self.pressed = pressed;
 
-        if changed {
-            if let Some(callback) = &self.config.on_press_change {
-                callback(within_element);
-            }
+        if changed && let Some(callback) = &self.config.on_press_change {
+            callback(within_element);
         }
     }
 

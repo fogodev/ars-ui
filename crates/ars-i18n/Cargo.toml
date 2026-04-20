@@ -15,14 +15,15 @@ icu_experimental     = { version = "0.5", default-features = false }
 icu_provider         = { version = "2.2", default-features = false }
 js-sys               = { version = "0.3", optional = true }
 tinystr              = { version = "0.8", default-features = false }
+temporal_rs          = { version = "0.2.3", default-features = false }
 unicode-segmentation = "1.13"
 wasm-bindgen         = { version = "0.2", optional = true }
 
 [features]
-default             = ["std", "icu4x"]
-std                 = []
-icu4x               = ["icu/compiled_data", "icu_experimental/compiled_data"]
-web-intl            = ["dep:js-sys", "dep:wasm-bindgen"]
+default  = ["std", "icu4x"]
+std      = ["temporal_rs/sys-local"]
+icu4x    = ["icu/compiled_data", "icu_experimental/compiled_data", "temporal_rs/compiled_data"]
+web-intl = ["dep:js-sys", "dep:wasm-bindgen", "temporal_rs/sys"]
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"

@@ -52,6 +52,7 @@ impl ServerHandler for McpServer {
                 McpTool::new(t.name().to_owned(), t.description().to_owned(), schema_obj)
             })
             .collect();
+
         future::ready(Ok(ListToolsResult::with_all_items(tools)))
     }
 
@@ -61,21 +62,22 @@ impl ServerHandler for McpServer {
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<CallToolResult, ErrorData>> + Send + '_ {
         let name = request.name.clone();
-        let result = match self.registry.find(&name) {
-            Some(tool) => {
-                let input: serde_json::Value = request
-                    .arguments
-                    .map(serde_json::Value::Object)
-                    .unwrap_or(json!({}));
-                match tool.execute(input) {
-                    Ok(output) => Ok(CallToolResult::success(vec![Content::text(output)])),
-                    Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
-                }
+
+        let result = if let Some(tool) = self.registry.find(&name) {
+            let input = request
+                .arguments
+                .map(serde_json::Value::Object)
+                .unwrap_or(json!({}));
+
+            match tool.execute(input) {
+                Ok(output) => Ok(CallToolResult::success(vec![Content::text(output)])),
+                Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
             }
-            None => Err(ErrorData::invalid_params(
+        } else {
+            Err(ErrorData::invalid_params(
                 format!("unknown tool: {name}"),
                 None,
-            )),
+            ))
         };
         future::ready(result)
     }
@@ -92,16 +94,20 @@ impl ServerHandler for McpServer {
 /// transport error.
 pub async fn serve(root: Arc<SpecRoot>) -> anyhow::Result<()> {
     let mut registry = ToolRegistry::new();
+
     crate::spec::tools::register_all(&mut registry, &root);
 
     let server = McpServer { registry };
+
     let service = server
         .serve(stdio())
         .await
         .map_err(|e| anyhow::anyhow!("MCP server failed to start: {e}"))?;
+
     service
         .waiting()
         .await
         .map_err(|e| anyhow::anyhow!("MCP server error: {e}"))?;
+
     Ok(())
 }

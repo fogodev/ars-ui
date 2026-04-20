@@ -18,11 +18,14 @@ compile_error!("features `icu4x` and `web-intl` are mutually exclusive");
 
 extern crate alloc;
 
-use alloc::{format, string::String};
+use alloc::{
+    format,
+    string::{String, ToString},
+};
 use core::num::NonZero;
 
 mod bidi;
-mod calendar;
+pub mod calendar;
 #[cfg(any(feature = "icu4x", feature = "web-intl"))]
 mod case;
 mod collation;
@@ -41,16 +44,24 @@ mod weekday;
 
 pub use bidi::{IsolateDirection, isolate_text_safe};
 pub use calendar::{
-    Buddhist, CalendarConversionError, CalendarDate, CalendarError, CalendarKind, CalendarMetadata,
-    CalendarSystem, CalendarTypeError, Chinese, Coptic, Dangi, DateError, DateRange,
-    DirectDayArithmetic, DirectWeekdayComputation, Era, Ethiopic, EthiopicAmeteAlem, Gregorian,
-    Hebrew, HourCycle, Indian, Islamic, IslamicCivil, IslamicUmmAlQura, Japanese, JapaneseEra,
-    Month, Persian, Roc, Time, TypedCalendarDate, WeekInfo,
+    Buddhist, CalendarConversionError, CalendarDate, CalendarDateFields, CalendarDateTime,
+    CalendarError, CalendarKind, CalendarMetadata, CalendarSystem, CalendarTypeError, Chinese,
+    Coptic, Dangi, DateDuration, DateError, DateField, DateRange, DateTimeDuration, DateTimeField,
+    DateValue, DirectDayArithmetic, DirectWeekdayComputation, Disambiguation, Era, Ethiopic,
+    EthiopicAmeteAlem, Gregorian, Hebrew, HourCycle, Indian, IslamicCivil, IslamicUmmAlQura,
+    Japanese, JapaneseEra, Month, MonthCode, Persian, Roc, Time, TimeDuration, TimeField,
+    TimeFields, TimeZoneId, TypedCalendarDate, WeekInfo, to_calendar_date_time,
 };
+#[cfg(feature = "std")]
+pub use calendar::{to_zoned, to_zoned_date_time};
 #[cfg(any(feature = "icu4x", feature = "web-intl"))]
 pub use case::{to_lowercase, to_uppercase};
 pub use collation::{CollationFormat, CollationOptions, CollationStrength, StringCollator};
-pub use date::{DateFormatter, FormatLength};
+pub use date::{
+    DateFormatter, DateFormatterOptions, DateFormatterPart, DateFormatterPartKind,
+    DateRangeFormatterPart, DateRangePartSource, FormatLength, MonthFormat, NumericWidth,
+    ResolvedDateFormatterOptions, TextWidth, TimeZoneNameFormat,
+};
 #[cfg(feature = "std")]
 pub use detect::locale_from_accept_language;
 pub use layout::{LogicalRect, LogicalSide, PhysicalRect, PhysicalSide};
@@ -83,8 +94,10 @@ pub enum Direction {
     /// Left-to-right text direction (default for most Latin-script locales).
     #[default]
     Ltr,
+
     /// Right-to-left text direction (used by Arabic, Hebrew, and related scripts).
     Rtl,
+
     /// Automatic direction detection (resolved by the platform adapter before use).
     Auto,
 }
@@ -94,9 +107,9 @@ impl Direction {
     #[must_use]
     pub const fn as_css(&self) -> &'static str {
         match self {
-            Direction::Ltr => "ltr",
-            Direction::Rtl => "rtl",
-            Direction::Auto => "auto",
+            Self::Ltr => "ltr",
+            Self::Rtl => "rtl",
+            Self::Auto => "auto",
         }
     }
 
@@ -109,7 +122,7 @@ impl Direction {
     /// Returns `true` if this direction is right-to-left.
     #[must_use]
     pub fn is_rtl(&self) -> bool {
-        *self == Direction::Rtl
+        *self == Self::Rtl
     }
 
     /// Flip a side for RTL.
@@ -126,9 +139,9 @@ impl Direction {
     #[must_use]
     pub const fn resolve(self, fallback: ResolvedDirection) -> ResolvedDirection {
         match self {
-            Direction::Ltr => ResolvedDirection::Ltr,
-            Direction::Rtl => ResolvedDirection::Rtl,
-            Direction::Auto => fallback,
+            Self::Ltr => ResolvedDirection::Ltr,
+            Self::Rtl => ResolvedDirection::Rtl,
+            Self::Auto => fallback,
         }
     }
 }
@@ -143,6 +156,7 @@ pub enum ResolvedDirection {
     /// Left-to-right.
     #[default]
     Ltr,
+
     /// Right-to-left.
     Rtl,
 }
@@ -152,8 +166,8 @@ impl ResolvedDirection {
     #[must_use]
     pub const fn as_css(self) -> &'static str {
         match self {
-            ResolvedDirection::Ltr => "ltr",
-            ResolvedDirection::Rtl => "rtl",
+            Self::Ltr => "ltr",
+            Self::Rtl => "rtl",
         }
     }
 
@@ -166,7 +180,7 @@ impl ResolvedDirection {
     /// Returns `true` if this direction is right-to-left.
     #[must_use]
     pub const fn is_rtl(self) -> bool {
-        matches!(self, ResolvedDirection::Rtl)
+        matches!(self, Self::Rtl)
     }
 
     /// Returns `true` when inline-start maps to the right side.
@@ -179,8 +193,8 @@ impl ResolvedDirection {
 impl From<ResolvedDirection> for Direction {
     fn from(resolved: ResolvedDirection) -> Self {
         match resolved {
-            ResolvedDirection::Ltr => Direction::Ltr,
-            ResolvedDirection::Rtl => Direction::Rtl,
+            ResolvedDirection::Ltr => Self::Ltr,
+            ResolvedDirection::Rtl => Self::Rtl,
         }
     }
 }
@@ -191,6 +205,7 @@ pub enum Orientation {
     /// Children are laid out along the horizontal axis (default).
     #[default]
     Horizontal,
+
     /// Children are laid out along the vertical axis.
     Vertical,
 }
@@ -283,81 +298,79 @@ pub trait IcuProvider: Send + Sync + 'static {
     }
 
     /// Maximum number of months in a year for the given calendar and year.
-    fn max_months_in_year(&self, calendar: &CalendarSystem, year: i32, _era: Option<&str>) -> u8 {
-        if let Some(months) = calendar::bounded_months_in_year(*calendar, year, _era) {
-            return months;
+    fn max_months_in_year(&self, calendar: &CalendarSystem, year: i32, era: Option<&str>) -> u8 {
+        if let Some(bounded) = calendar::bounded_months_in_year(*calendar, year, era) {
+            return bounded;
         }
 
-        #[cfg(any(feature = "icu4x", feature = "web-intl"))]
-        if let Some(months) = calendar::internal::months_in_year(year, *calendar, _era) {
-            return months;
-        }
+        let date = CalendarDate::new(
+            *calendar,
+            &CalendarDateFields {
+                era: era.map(|code| Era {
+                    code: code.to_string(),
+                    display_name: code.to_string(),
+                }),
+                year: Some(year),
+                month: Some(1),
+                day: Some(1),
+                ..CalendarDateFields::default()
+            },
+        )
+        .or_else(|_| CalendarDate::new_iso8601(1970, 1, 1))
+        .expect("hard-coded fallback date is valid");
 
-        match calendar {
-            CalendarSystem::Hebrew => {
-                let cycle_year = year.rem_euclid(19);
-                if [3, 6, 8, 11, 14, 17, 0].contains(&cycle_year) {
-                    13
-                } else {
-                    12
-                }
-            }
-            CalendarSystem::Ethiopic
-            | CalendarSystem::EthiopicAmeteAlem
-            | CalendarSystem::Coptic => 13,
-            _ => 12,
-        }
+        calendar.months_in_year(&date)
     }
 
     /// Days in a specific month for the given calendar, year, and month.
     fn days_in_month(
         &self,
-        _calendar: &CalendarSystem,
+        calendar: &CalendarSystem,
         year: i32,
         month: u8,
-        _era: Option<&str>,
+        era: Option<&str>,
     ) -> u8 {
-        if let Some(days) = calendar::bounded_days_in_month(*_calendar, year, month, _era) {
-            return days;
+        if let Some(bounded) = calendar::bounded_days_in_month(*calendar, year, month, era) {
+            return bounded;
         }
 
-        #[cfg(any(feature = "icu4x", feature = "web-intl"))]
-        if let Some(days) = calendar::internal::days_in_month(year, month, *_calendar, _era) {
-            return days;
-        }
+        let date = CalendarDate::new(
+            *calendar,
+            &CalendarDateFields {
+                era: era.map(|code| Era {
+                    code: code.to_string(),
+                    display_name: code.to_string(),
+                }),
+                year: Some(year),
+                month: Some(month),
+                day: Some(1),
+                ..CalendarDateFields::default()
+            },
+        )
+        .or_else(|_| CalendarDate::new_iso8601(1970, 1, 1))
+        .expect("hard-coded fallback date is valid");
 
-        if matches!(_calendar, CalendarSystem::Japanese) {
-            return 0;
-        }
-
-        if matches!(
-            _calendar,
-            CalendarSystem::Coptic | CalendarSystem::Ethiopic | CalendarSystem::EthiopicAmeteAlem
-        ) {
-            return calendar::coptic_like_days_in_month(year, month);
-        }
-
-        calendar::gregorian_days_in_month(year, month)
+        calendar.days_in_month(&date)
     }
 
     /// Returns the calendar's default era when callers omit one.
     fn default_era(&self, calendar: &CalendarSystem) -> Option<Era> {
-        calendar::default_era_for(*calendar)
+        calendar.default_era()
     }
 
     /// Returns the maximum year value in the date's current era, if bounded.
     fn years_in_era(&self, date: &CalendarDate) -> Option<i32> {
-        calendar::years_in_era(date)
+        date.years_in_era()
     }
 
     /// Returns the minimum allowed month ordinal for the date's current year.
     fn minimum_month_in_year(&self, date: &CalendarDate) -> u8 {
-        calendar::minimum_month_in_year(date)
+        date.minimum_month_in_year()
     }
 
     /// Returns the minimum allowed day ordinal for the date's current month.
     fn minimum_day_in_month(&self, date: &CalendarDate) -> u8 {
-        calendar::minimum_day_in_month(date)
+        date.minimum_day_in_month()
     }
 
     /// Preferred hour cycle for the locale.
@@ -368,45 +381,19 @@ pub trait IcuProvider: Send + Sync + 'static {
         }
     }
 
+    /// Locale week information including first-day and weekend metadata.
+    fn week_info(&self, locale: &Locale) -> WeekInfo {
+        WeekInfo::for_locale(locale)
+    }
+
     /// First day of the week for the locale.
     fn first_day_of_week(&self, locale: &Locale) -> Weekday {
-        WeekInfo::for_locale(locale).first_day
+        self.week_info(locale).first_day
     }
 
     /// Converts a public calendar date into the target calendar system.
     fn convert_date(&self, date: &CalendarDate, target: CalendarSystem) -> CalendarDate {
-        if date.calendar == target {
-            return date.clone();
-        }
-
-        #[cfg(any(feature = "icu4x", feature = "web-intl"))]
-        {
-            let Ok(internal) = calendar::internal::CalendarDate::try_from(date) else {
-                return date.clone();
-            };
-            let converted = internal.to_calendar(target);
-
-            CalendarDate {
-                calendar: target,
-                era: converted
-                    .era()
-                    .filter(|_| target.has_custom_eras())
-                    .map(|code| Era {
-                        code: code.clone(),
-                        display_name: code,
-                    }),
-                year: converted.year(),
-                month: NonZero::new(converted.month())
-                    .expect("internal calendar conversion yields a 1-based month"),
-                day: NonZero::new(converted.day())
-                    .expect("internal calendar conversion yields a 1-based day"),
-            }
-        }
-
-        #[cfg(not(any(feature = "icu4x", feature = "web-intl")))]
-        panic!(
-            "StubIcuProvider does not support non-Gregorian calendar conversion; use Icu4xProvider"
-        );
+        date.to_calendar(target).unwrap_or_else(|_| date.clone())
     }
 }
 
@@ -414,8 +401,6 @@ pub trait IcuProvider: Send + Sync + 'static {
 mod tests {
     use alloc::{string::ToString, vec, vec::Vec};
     use core::num::NonZero;
-    #[cfg(all(feature = "std", not(any(feature = "icu4x", feature = "web-intl"))))]
-    use std::panic::catch_unwind;
 
     use super::*;
 
@@ -554,6 +539,7 @@ mod tests {
     #[test]
     fn locale_accessors_roundtrip() {
         let locale = Locale::parse("zh-Hans-CN").expect("zh-Hans-CN is valid");
+
         assert_eq!(locale.to_bcp47(), "zh-Hans-CN");
         assert_eq!(locale.language(), "zh");
         assert_eq!(locale.script(), Some("Hans"));
@@ -564,6 +550,7 @@ mod tests {
     fn locale_extensions_are_exposed() {
         let locale =
             Locale::parse("ja-JP-u-ca-japanese-fw-mon").expect("locale with unicode extensions");
+
         assert_eq!(locale.calendar_extension(), Some("japanese"));
         assert_eq!(locale.first_day_of_week_extension(), Some(Weekday::Monday));
     }
@@ -571,6 +558,7 @@ mod tests {
     #[test]
     fn locale_accessors_return_none_when_subtags_are_absent() {
         let locale = Locale::parse("en").expect("en is valid");
+
         assert_eq!(locale.script(), None);
         assert_eq!(locale.region(), None);
         assert_eq!(locale.calendar_extension(), None);
@@ -582,13 +570,16 @@ mod tests {
         let langid = "en-US"
             .parse::<icu::locale::LanguageIdentifier>()
             .expect("en-US langid is valid");
+
         let locale = Locale::from_langid(langid);
+
         assert_eq!(locale.to_bcp47(), "en-US");
     }
 
     #[test]
     fn locale_to_data_locale_roundtrips_to_string() {
         let locale = Locale::parse("en-US").expect("en-US is valid");
+
         assert_eq!(locale.to_data_locale().to_string(), "en-US");
     }
 
@@ -599,11 +590,14 @@ mod tests {
             Locale::parse("de-DE").expect("de-DE is valid"),
             Locale::parse("en-US").expect("en-US is valid"),
         ];
+
         locales.sort();
+
         let sorted = locales
             .into_iter()
             .map(|locale| locale.to_bcp47())
             .collect::<Vec<_>>();
+
         assert_eq!(sorted, vec!["de-DE", "en-US", "fr-FR"]);
     }
 
@@ -611,6 +605,7 @@ mod tests {
     fn locale_direction_detects_rtl_scripts() {
         for locale in ["ar", "he", "fa", "ar-EG"] {
             let locale = Locale::parse(locale).expect("locale should parse");
+
             assert_eq!(
                 locale.direction(),
                 ResolvedDirection::Rtl,
@@ -625,6 +620,7 @@ mod tests {
     fn locale_direction_infers_scripts_for_rtl_languages() {
         for locale in ["dv", "nqo", "pa-PK", "ku-IQ", "yi", "ks"] {
             let locale = Locale::parse(locale).expect("locale should parse");
+
             assert_eq!(
                 locale.direction(),
                 ResolvedDirection::Rtl,
@@ -638,6 +634,7 @@ mod tests {
     #[test]
     fn locale_direction_defaults_to_ltr_when_not_rtl() {
         let locale = Locale::parse("en-US").expect("en-US is valid");
+
         assert_eq!(locale.direction(), ResolvedDirection::Ltr);
         assert!(!locale.is_rtl());
     }
@@ -645,6 +642,7 @@ mod tests {
     #[test]
     fn locale_parse_error_display() {
         let err = Locale::parse("").unwrap_err();
+
         assert_eq!(
             err.to_string(),
             "ars-ui locale parse error: The given language subtag is invalid"
@@ -679,6 +677,7 @@ mod tests {
     #[test]
     fn locale_wrapper_helpers_delegate_to_stub_provider_defaults() {
         let locale = Locale::parse("en-US").expect("en-US is valid");
+
         let provider = StubIcuProvider;
 
         assert_eq!(locale.first_day_of_week(&provider), Weekday::Sunday);
@@ -693,6 +692,7 @@ mod tests {
     #[test]
     fn stub_icu_provider_default_helpers_cover_fallback_paths() {
         let provider = StubIcuProvider;
+
         let locale = Locale::parse("en-US").expect("en-US is valid");
 
         for (weekday, short, long) in [
@@ -747,7 +747,7 @@ mod tests {
             provider.max_months_in_year(&CalendarSystem::Hebrew, 5785, None),
             12
         );
-        #[cfg(any(feature = "icu4x", feature = "web-intl"))]
+        #[cfg(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32")))]
         assert_eq!(
             provider.max_months_in_year(&CalendarSystem::Dangi, 2024, None),
             calendar::internal::months_in_year(2024, CalendarSystem::Dangi, None)
@@ -762,6 +762,10 @@ mod tests {
             provider.max_months_in_year(&CalendarSystem::Gregorian, 2024, None),
             12
         );
+        assert_eq!(
+            provider.max_months_in_year(&CalendarSystem::Japanese, 31, Some("heisei")),
+            4
+        );
 
         assert_eq!(
             provider.days_in_month(&CalendarSystem::Gregorian, 2024, 2, None),
@@ -775,7 +779,10 @@ mod tests {
             provider.days_in_month(&CalendarSystem::Japanese, 1, 5, Some("reiwa")),
             31
         );
-
+        assert_eq!(
+            provider.days_in_month(&CalendarSystem::Japanese, 31, 4, Some("heisei")),
+            30
+        );
         assert_eq!(
             provider.default_era(&CalendarSystem::Japanese),
             Some(Era {
@@ -783,31 +790,43 @@ mod tests {
                 display_name: "Reiwa".to_string(),
             })
         );
-        assert_eq!(provider.default_era(&CalendarSystem::Gregorian), None);
+        assert_eq!(
+            provider.default_era(&CalendarSystem::Gregorian),
+            Some(Era {
+                code: "ad".to_string(),
+                display_name: "AD".to_string(),
+            })
+        );
 
         let japanese = CalendarDate::new(
-            &provider,
             CalendarSystem::Japanese,
-            Some(Era {
-                code: "heisei".to_string(),
-                display_name: "Heisei".to_string(),
-            }),
-            1,
-            1,
-            8,
+            &CalendarDateFields {
+                era: Some(Era {
+                    code: "heisei".to_string(),
+                    display_name: "Heisei".to_string(),
+                }),
+                year: Some(1),
+                month: Some(1),
+                day: Some(8),
+                ..CalendarDateFields::default()
+            },
         )
         .expect("Japanese date should validate");
+
         assert_eq!(provider.years_in_era(&japanese), Some(31));
         assert_eq!(provider.minimum_month_in_year(&japanese), 1);
         assert_eq!(provider.minimum_day_in_month(&japanese), 8);
 
-        let gregorian = CalendarDate::new(&provider, CalendarSystem::Gregorian, None, 2024, 3, 15)
-            .expect("Gregorian date should validate");
+        let gregorian =
+            CalendarDate::new_gregorian(2024, 3, 15).expect("Gregorian date should validate");
+
         assert_eq!(provider.minimum_month_in_year(&gregorian), 1);
         assert_eq!(provider.minimum_day_in_month(&gregorian), 1);
 
         assert_eq!(provider.hour_cycle(&locale), HourCycle::H12);
+
         let german = Locale::parse("de-DE").expect("de-DE is valid");
+
         assert_eq!(provider.hour_cycle(&german), HourCycle::H23);
         assert_eq!(provider.first_day_of_week(&locale), Weekday::Sunday);
         assert_eq!(provider.first_day_of_week(&german), Weekday::Monday);
@@ -823,26 +842,32 @@ mod tests {
     fn stub_icu_provider_convert_date_supports_non_identity_conversions_when_internal_calendar_is_available()
      {
         let provider = StubIcuProvider;
-        let gregorian = CalendarDate::new(&provider, CalendarSystem::Gregorian, None, 2024, 3, 15)
-            .expect("Gregorian date should validate");
+
+        let gregorian =
+            CalendarDate::new_gregorian(2024, 3, 15).expect("Gregorian date should validate");
+
         let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+
         let round_trip = provider.convert_date(&japanese, CalendarSystem::Gregorian);
 
         assert_eq!(
             japanese,
             CalendarDate::new(
-                &provider,
                 CalendarSystem::Japanese,
-                Some(Era {
-                    code: String::from("reiwa"),
-                    display_name: String::from("reiwa"),
-                }),
-                6,
-                3,
-                15,
+                &CalendarDateFields {
+                    era: Some(Era {
+                        code: String::from("reiwa"),
+                        display_name: String::from("Reiwa"),
+                    }),
+                    year: Some(6),
+                    month: Some(3),
+                    day: Some(15),
+                    ..CalendarDateFields::default()
+                },
             )
             .expect("converted Japanese date should validate")
         );
+
         assert_eq!(round_trip, gregorian);
     }
 
@@ -850,23 +875,41 @@ mod tests {
     #[test]
     fn stub_icu_provider_convert_date_preserves_bce_gregorian_years() {
         let provider = StubIcuProvider;
-        let buddhist = CalendarDate::new(&provider, CalendarSystem::Buddhist, None, 1, 1, 1)
-            .expect("Buddhist date should validate");
+
+        let buddhist = CalendarDate::new(
+            CalendarSystem::Buddhist,
+            &CalendarDateFields {
+                year: Some(1),
+                month: Some(1),
+                day: Some(1),
+                ..CalendarDateFields::default()
+            },
+        )
+        .expect("Buddhist date should validate");
 
         let gregorian = provider.convert_date(&buddhist, CalendarSystem::Gregorian);
 
         assert_eq!(
             gregorian,
-            CalendarDate {
-                calendar: CalendarSystem::Gregorian,
-                era: None,
-                year: -542,
-                month: NonZero::new(1).expect("one is non-zero"),
-                day: NonZero::new(1).expect("one is non-zero"),
-            }
+            CalendarDate::new(
+                CalendarSystem::Gregorian,
+                &CalendarDateFields {
+                    era: Some(Era {
+                        code: "bc".to_string(),
+                        display_name: "BC".to_string(),
+                    }),
+                    year: Some(543),
+                    month: Some(1),
+                    day: Some(1),
+                    ..CalendarDateFields::default()
+                },
+            )
+            .expect("Gregorian BCE date should validate")
         );
         assert_eq!(
-            buddhist.to_calendar(&provider, CalendarSystem::Gregorian),
+            buddhist
+                .to_calendar(CalendarSystem::Gregorian)
+                .expect("direct Gregorian conversion should succeed"),
             gregorian
         );
         assert_eq!(
@@ -879,41 +922,33 @@ mod tests {
     #[test]
     fn stub_icu_provider_convert_date_falls_back_for_inputs_outside_internal_bridge_range() {
         let provider = StubIcuProvider;
-        let gregorian = CalendarDate::new_gregorian(
-            10_000,
-            NonZero::new(1).expect("one is non-zero"),
-            NonZero::new(1).expect("one is non-zero"),
-        );
 
+        let gregorian =
+            CalendarDate::new_gregorian(10_000, 1, 1).expect("Gregorian date should validate");
+
+        let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+
+        assert_eq!(japanese.calendar(), CalendarSystem::Japanese);
         assert_eq!(
-            provider.convert_date(&gregorian, CalendarSystem::Japanese),
-            gregorian
-        );
-        assert_eq!(
-            gregorian.to_calendar(&provider, CalendarSystem::Japanese),
+            provider.convert_date(&japanese, CalendarSystem::Gregorian),
             gregorian
         );
     }
 
     #[cfg(all(feature = "std", not(any(feature = "icu4x", feature = "web-intl"))))]
     #[test]
-    fn stub_icu_provider_convert_date_panics_for_non_identity_conversions_without_calendar_backend()
-    {
+    fn stub_icu_provider_convert_date_uses_public_calendar_conversion_without_calendar_backend() {
         let provider = StubIcuProvider;
-        let gregorian = CalendarDate::new(&provider, CalendarSystem::Gregorian, None, 2024, 3, 15)
-            .expect("Gregorian date should validate");
 
-        let panic = catch_unwind(|| provider.convert_date(&gregorian, CalendarSystem::Japanese))
-            .expect_err("stub provider should panic for unsupported conversion");
-        let message = panic
-            .downcast_ref::<String>()
-            .map(String::as_str)
-            .or_else(|| panic.downcast_ref::<&'static str>().copied())
-            .expect("panic payload should be a string");
+        let gregorian =
+            CalendarDate::new_gregorian(2024, 3, 15).expect("Gregorian date should validate");
 
+        let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+
+        assert_eq!(japanese.calendar(), CalendarSystem::Japanese);
         assert_eq!(
-            message,
-            "StubIcuProvider does not support non-Gregorian calendar conversion; use Icu4xProvider"
+            provider.convert_date(&japanese, CalendarSystem::Gregorian),
+            gregorian
         );
     }
 
@@ -1023,12 +1058,15 @@ mod tests {
     #[test]
     fn isolate_text_safe_preserves_zwj_sequences() {
         let family = "👨‍👩‍👧";
+
         let isolated = isolate_text_safe(family, IsolateDirection::FirstStrong);
+
         let stripped = isolated
             .strip_prefix('\u{2068}')
             .expect("must start with FSI")
             .strip_suffix('\u{2069}')
             .expect("must end with PDI");
+
         assert_eq!(stripped, family);
     }
 }

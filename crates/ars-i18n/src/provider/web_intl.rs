@@ -4,18 +4,23 @@
 //! browser's `Intl.*` APIs. See spec §9.5.4. Available only on `wasm32`
 //! targets with the `web-intl` feature.
 
-use alloc::string::{String, ToString};
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::num::NonZero;
 
 use js_sys::{Array, Function, Intl, Object, Reflect};
 use wasm_bindgen::{JsCast, JsValue};
 
 use crate::{
-    CalendarDate, CalendarSystem, Era, HourCycle, IcuProvider, Locale, Weekday,
+    CalendarDate, CalendarSystem, Era, HourCycle, IcuProvider, Locale, WeekInfo, Weekday,
     calendar::{
-        bounded_days_in_month, bounded_months_in_year, default_era_for, gregorian_days_in_month,
-        minimum_day_in_month, minimum_month_in_year, years_in_era,
+        bounded_days_in_month, bounded_months_in_year, build_from_iso_parts, default_era_for,
+        gregorian_days_in_month, infer_public_era,
     },
+    normalize_digits,
 };
 
 /// Browser-backed provider for WASM client builds with the `web-intl`
@@ -28,13 +33,58 @@ use crate::{
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WebIntlProvider;
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "provider bridge normalization currently receives a flat record from backend adapters"
+)]
+fn normalize_public_date(
+    calendar: CalendarSystem,
+    era: Option<Era>,
+    year: i32,
+    month: u8,
+    day: u8,
+    iso_year: i32,
+    iso_month: u8,
+    iso_day: u8,
+) -> CalendarDate {
+    let normalized_era = era
+        .map(|value| crate::calendar::canonical_era(calendar, value.code.as_str()))
+        .or_else(|| infer_public_era(calendar, iso_year, iso_month, iso_day));
+
+    CalendarDate::new(
+        calendar,
+        &crate::calendar::CalendarDateFields {
+            era: normalized_era,
+            year: Some(year),
+            month: Some(month),
+            day: Some(day),
+            ..crate::calendar::CalendarDateFields::default()
+        },
+    )
+    .unwrap_or_else(|_| {
+        CalendarDate::new(
+            CalendarSystem::Iso8601,
+            &crate::calendar::CalendarDateFields {
+                year: Some(1970),
+                month: Some(1),
+                day: Some(1),
+                ..crate::calendar::CalendarDateFields::default()
+            },
+        )
+        .expect("hard-coded ISO fallback date is valid")
+    })
+}
+
 impl WebIntlProvider {
     /// Formats a reference date through `Intl.DateTimeFormat` using the
     /// given locale and options bag, returning the formatted string.
     fn format_date_part(locale: &Locale, date: &js_sys::Date, opts: &Object) -> String {
         let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
+
         let formatter = Intl::DateTimeFormat::new(&locales, opts);
+
         let format_fn: Function = formatter.format();
+
         format_fn
             .call1(&JsValue::UNDEFINED, date.as_ref())
             .ok()
@@ -71,6 +121,41 @@ impl WebIntlProvider {
         Reflect::get(object, &JsValue::from_str(key))
             .ok()
             .and_then(|value| value.as_string())
+    }
+
+    /// Probes the browser's effective hour cycle by formatting the
+    /// start and end hour of a synthetic UTC day and reading the
+    /// rendered `hour` parts back out.
+    ///
+    /// This avoids the long-standing browser inconsistencies around
+    /// `resolvedOptions().hourCycle`, while still letting the runtime
+    /// choose its real locale-default pattern.
+    fn probe_hour_cycle(locale: &Locale) -> Option<HourCycle> {
+        let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
+
+        let opts = Object::new();
+
+        Reflect::set(&opts, &"hour".into(), &JsValue::from_str("numeric")).ok()?;
+
+        Reflect::set(&opts, &"timeZone".into(), &JsValue::from_str("UTC")).ok()?;
+
+        let formatter = Intl::DateTimeFormat::new(&locales, &opts);
+
+        let min = probe_hour_value(&formatter, 0)?;
+
+        let max = probe_hour_value(&formatter, 23)?;
+
+        match (min, max) {
+            (0, 23) => Some(HourCycle::H23),
+
+            (24, 23) => Some(HourCycle::H24),
+
+            (0, 11) => Some(HourCycle::H11),
+
+            (12, 11) => Some(HourCycle::H12),
+
+            _ => None,
+        }
     }
 
     /// Resolves a named month label emitted by `Intl.DateTimeFormat`
@@ -113,7 +198,9 @@ impl WebIntlProvider {
         }
 
         let locales = Array::of1(&JsValue::from_str("en-US"));
+
         let long_formatter = month_label_formatter(&locales, target, "long")?;
+
         let numeric_formatter = month_label_formatter(&locales, target, "2-digit")?;
 
         // Hebrew, Chinese, Dangi, Ethiopic, and other 13-month
@@ -155,22 +242,26 @@ impl WebIntlProvider {
             2018, 2032, 2034, // Chinese leap-month coverage for 7/8/10/11
             1987, 2006, 2044, 1995, 2014, 2052, 2033, 2099, 1968, 1957, 2042, 2063, 2039,
         ];
+
         let prefer_leap = matches!(
             target,
             CalendarSystem::Hebrew | CalendarSystem::Ethiopic | CalendarSystem::EthiopicAmeteAlem
         ) && is_hebrew_leap_year(target_year);
+
         let primary_years: [u32; 2] = if prefer_leap {
             [2024, 2025]
         } else {
             [2025, 2024]
         };
+
         let probe_years = primary_years.iter().chain(SWEEP_YEARS.iter()).copied();
 
         for probe_year in probe_years {
             for probe_month in 0_i32..12 {
-                let probe = noon_utc_js_date(probe_year, probe_month, 15);
+                let probe = noon_utc_js_date(probe_year as i32, probe_month, 15);
 
                 let long_label = month_part_value(&long_formatter.format_to_parts(&probe));
+
                 if long_label != label {
                     continue;
                 }
@@ -180,10 +271,12 @@ impl WebIntlProvider {
                 // instant — that's the target calendar's civil-order
                 // month number.
                 let numeric_value = month_part_value(&numeric_formatter.format_to_parts(&probe));
+
                 let leading: String = numeric_value
                     .chars()
                     .take_while(|c| c.is_numeric())
                     .collect();
+
                 if let Ok(ordinal) = leading.parse::<u8>()
                     && (1..=13).contains(&ordinal)
                 {
@@ -216,10 +309,12 @@ impl WebIntlProvider {
                     )
                 {
                     let ordinal = internal.to_calendar(target).month();
+
                     if (1..=13).contains(&ordinal) {
                         return Some(ordinal);
                     }
                 }
+
                 return None;
             }
         }
@@ -282,10 +377,10 @@ impl IcuProvider for WebIntlProvider {
         for i in 0..parts.length() {
             let part = parts.get(i);
 
-            if Self::string_property(&part, "type").as_deref() == Some("dayPeriod") {
-                if let Some(value) = Self::string_property(&part, "value") {
-                    return value;
-                }
+            if Self::string_property(&part, "type").as_deref() == Some("dayPeriod")
+                && let Some(value) = Self::string_property(&part, "value")
+            {
+                return value;
             }
         }
 
@@ -418,50 +513,56 @@ impl IcuProvider for WebIntlProvider {
     }
 
     fn years_in_era(&self, date: &CalendarDate) -> Option<i32> {
-        years_in_era(date)
+        date.years_in_era()
     }
 
     fn minimum_month_in_year(&self, date: &CalendarDate) -> u8 {
-        minimum_month_in_year(date)
+        date.minimum_month_in_year()
     }
 
     fn minimum_day_in_month(&self, date: &CalendarDate) -> u8 {
-        minimum_day_in_month(date)
+        date.minimum_day_in_month()
     }
 
     fn hour_cycle(&self, locale: &Locale) -> HourCycle {
-        let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
-
-        // `resolvedOptions().hourCycle` is only populated when `hour` is
-        // requested in the options bag — otherwise the browser leaves it
-        // undefined. Requesting `hour: "numeric"` forces the engine to
-        // materialize the locale's preferred cycle.
-        let opts = Object::new();
-
-        Reflect::set(&opts, &"hour".into(), &JsValue::from_str("numeric"))
-            .expect("Reflect::set on a fresh Object never fails");
-
-        let formatter = Intl::DateTimeFormat::new(&locales, &opts);
-
-        let resolved = formatter.resolved_options();
-
-        match Self::string_property(&resolved, "hourCycle")
-            .as_deref()
-            .unwrap_or("")
-        {
-            "h11" => HourCycle::H11,
-            "h12" => HourCycle::H12,
-            "h24" => HourCycle::H24,
-            // "h23" and unknown both fall back to 24-hour without day-period.
-            _ => HourCycle::H23,
+        // Honour an explicit `-u-hc-*` override first. The browser
+        // probe below detects the engine's effective cycle, but it
+        // should not override an explicit caller request.
+        if let Some(explicit) = locale.hour_cycle_extension() {
+            return explicit;
         }
+
+        // Browser `resolvedOptions().hourCycle` is not reliable across
+        // engines. Probe actual formatted output instead, matching the
+        // normalization strategy React Aria uses for `Intl`.
+        Self::probe_hour_cycle(locale).unwrap_or_else(|| {
+            let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
+
+            let opts = Object::new();
+
+            Reflect::set(&opts, &"hour".into(), &JsValue::from_str("numeric"))
+                .expect("Reflect::set on a fresh Object never fails");
+
+            let formatter = Intl::DateTimeFormat::new(&locales, &opts);
+
+            let resolved = formatter.resolved_options();
+
+            match Self::string_property(&resolved, "hourCycle")
+                .as_deref()
+                .unwrap_or("")
+            {
+                "h11" => HourCycle::H11,
+
+                "h12" => HourCycle::H12,
+
+                "h24" => HourCycle::H24,
+
+                _ => HourCycle::H23,
+            }
+        })
     }
 
-    fn first_day_of_week(&self, locale: &Locale) -> Weekday {
-        if let Some(weekday) = locale.first_day_of_week_extension() {
-            return weekday;
-        }
-
+    fn week_info(&self, locale: &Locale) -> WeekInfo {
         // Two Intl.Locale shapes deliver week metadata:
         //
         // 1. `getWeekInfo()` — the original TC39 proposal shape, still
@@ -478,14 +579,28 @@ impl IcuProvider for WebIntlProvider {
         if let Ok(js_locale) = Intl::Locale::new(&locale.to_bcp47()) {
             let js_value: JsValue = js_locale.into();
 
-            if let Some(day) = read_week_info_first_day(&js_value) {
-                return weekday_from_iso_index(day);
+            if let Some(mut week_info) = read_week_info(&js_value) {
+                if let Some(weekday) = locale.first_day_of_week_extension() {
+                    week_info.first_day = weekday;
+                }
+
+                return week_info;
             }
         }
 
         // Fallback to the shared region-based table for older engines
         // that expose neither shape.
-        crate::WeekInfo::for_locale(locale).first_day
+        let mut week_info = WeekInfo::for_locale(locale);
+
+        if let Some(weekday) = locale.first_day_of_week_extension() {
+            week_info.first_day = weekday;
+        }
+
+        week_info
+    }
+
+    fn first_day_of_week(&self, locale: &Locale) -> Weekday {
+        self.week_info(locale).first_day
     }
 
     fn convert_date(&self, date: &CalendarDate, target: CalendarSystem) -> CalendarDate {
@@ -507,8 +622,8 @@ impl IcuProvider for WebIntlProvider {
         // Contract reminder: `IcuProvider::convert_date` returns a
         // [`CalendarDate`] in `target`. Silently returning the source
         // calendar for non-Gregorian inputs violates that contract,
-        // panics in `CalendarDate::add_days_with_provider` (Gregorian-
-        // only arithmetic) and lets `TypedCalendarDate::to_calendar`
+        // breaks public calendar arithmetic assumptions and lets
+        // `TypedCalendarDate::to_calendar`
         // wrap the wrong calendar in release builds (only guarded by
         // `debug_assert`). The bridge eliminates that footgun.
         if date.calendar != CalendarSystem::Gregorian {
@@ -553,34 +668,23 @@ impl IcuProvider for WebIntlProvider {
 
         let formatter = Intl::DateTimeFormat::new(&locales, &opts);
 
-        // `js_sys::Date`'s `setUTCFullYear` accepts any integer year,
-        // but the browser path only works when the formatted parts
-        // ordering matches our positive-year assumptions. For BCE
-        // Gregorian inputs (`date.year < 0`) the safest option is the
-        // shared ICU4X calendar-arithmetic bridge: it handles negative
-        // year arithmetic directly and produces the target calendar's
-        // correct civil-order fields without going through
-        // `Intl.DateTimeFormat` at all. Previously we returned the
-        // source date unchanged here, which violated the
-        // `IcuProvider::convert_date` contract by handing the caller
-        // back a date in the *source* calendar.
-        let Ok(year_u32) = u32::try_from(date.year) else {
-            return bridge_convert(date, target).unwrap_or_else(|| date.clone());
-        };
-
         let js_date = noon_utc_js_date(
-            year_u32,
-            i32::from(date.month.get().saturating_sub(1)),
-            i32::from(date.day.get()),
+            date.iso_year,
+            i32::from(date.iso_month.saturating_sub(1)),
+            i32::from(date.iso_day),
         );
 
         let parts = formatter.format_to_parts(&js_date);
 
         let mut year = 0_i32;
+
         let mut month: u8 = 0;
+
         let mut day: u8 = 0;
-        let mut era_label: Option<String> = None;
-        let mut month_label: Option<String> = None;
+
+        let mut era_label = None::<String>;
+
+        let mut month_label = None::<String>;
 
         for i in 0..parts.length() {
             let part = parts.get(i);
@@ -593,6 +697,7 @@ impl IcuProvider for WebIntlProvider {
                 "year" | "relatedYear" => year = value.parse().unwrap_or(0),
                 "month" => {
                     month = value.parse().unwrap_or(0);
+
                     if month == 0 {
                         // Chinese and Dangi leap months surface as
                         // `"6bis"` / `"06bis"` / `"06L"` from
@@ -610,18 +715,21 @@ impl IcuProvider for WebIntlProvider {
                         // wrong month into downstream validation.
                         let leading: String =
                             value.chars().take_while(|c| c.is_numeric()).collect();
+
                         let had_leap_marker =
                             !leading.is_empty() && leading.len() < value.trim().len();
-                        if !leading.is_empty() {
-                            if let Ok(base) = leading.parse::<u8>() {
-                                month = if had_leap_marker {
-                                    base.saturating_add(1).min(13)
-                                } else {
-                                    base
-                                };
-                            }
+
+                        if !leading.is_empty()
+                            && let Ok(base) = leading.parse::<u8>()
+                        {
+                            month = if had_leap_marker {
+                                base.saturating_add(1).min(13)
+                            } else {
+                                base
+                            };
                         }
                     }
+
                     if month == 0 {
                         // Non-numeric month label (e.g., Hebrew
                         // `"Adar II"`). Keep the label so we can
@@ -629,8 +737,11 @@ impl IcuProvider for WebIntlProvider {
                         month_label = Some(value);
                     }
                 }
+
                 "day" => day = value.parse().unwrap_or(0),
+
                 "era" => era_label = Some(value),
+
                 _ => {}
             }
         }
@@ -640,10 +751,10 @@ impl IcuProvider for WebIntlProvider {
         // where `Intl.DateTimeFormat('en-US', { calendar: 'hebrew',
         // month: 'numeric' })` can still emit `Adar I`/`Adar II` instead
         // of a number.
-        if month == 0 {
-            if let Some(label) = month_label {
-                month = Self::resolve_named_month(target, year, &label).unwrap_or(0);
-            }
+        if month == 0
+            && let Some(label) = month_label
+        {
+            month = Self::resolve_named_month(target, year, &label).unwrap_or(0);
         }
 
         let (Some(month_nz), Some(day_nz)) = (NonZero::new(month), NonZero::new(day)) else {
@@ -686,29 +797,32 @@ impl IcuProvider for WebIntlProvider {
         //    browser told us the date actually lives in the target
         //    calendar's default era.
         let era = if target.has_custom_eras() {
-            match era_label.as_deref() {
-                Some(label) => match era_code_for_calendar(target, label) {
-                    Some(code) => Some(Era {
+            if let Some(label) = era_label.as_deref() {
+                if let Some(code) = era_code_for_calendar(target, label) {
+                    Some(Era {
                         code,
                         display_name: label.to_string(),
-                    }),
-                    None => {
-                        return bridge_convert(date, target).unwrap_or_else(|| date.clone());
-                    }
-                },
-                None => default_era_for(target),
+                    })
+                } else {
+                    return bridge_convert(date, target).unwrap_or_else(|| date.clone());
+                }
+            } else {
+                default_era_for(target)
             }
         } else {
             None
         };
 
-        CalendarDate {
-            calendar: target,
+        normalize_public_date(
+            target,
             era,
             year,
-            month: month_nz,
-            day: day_nz,
-        }
+            month_nz.get(),
+            day_nz.get(),
+            date.iso_year,
+            date.iso_month,
+            date.iso_day,
+        )
     }
 }
 
@@ -733,14 +847,18 @@ impl IcuProvider for WebIntlProvider {
 pub(crate) fn parse_english_ordinal_month_label(label: &str) -> Option<u8> {
     // Detect and strip the leap-month marker, remembering whether it
     // was present so we can bump the ordinal by 1 below.
-    let (core, is_leap) = match label.strip_suffix("bis") {
-        Some(rest) => (rest, true),
-        None => (label, false),
+    let (core, is_leap) = if let Some(rest) = label.strip_suffix("bis") {
+        (rest, true)
+    } else {
+        (label, false)
     };
+
     // Strip " Month" suffix; accept both with and without to stay
     // tolerant of future CLDR wording tweaks.
     let core = core.trim();
+
     let core = core.strip_suffix(" Month").unwrap_or(core);
+
     let base = match core.trim() {
         "First" => Some(1_u8),
         "Second" => Some(2),
@@ -757,6 +875,7 @@ pub(crate) fn parse_english_ordinal_month_label(label: &str) -> Option<u8> {
         "Thirteenth" => Some(13),
         _ => None,
     }?;
+
     if is_leap {
         Some(base.saturating_add(1).min(13))
     } else {
@@ -764,36 +883,45 @@ pub(crate) fn parse_english_ordinal_month_label(label: &str) -> Option<u8> {
     }
 }
 
-/// Reads the `firstDay` field from an `Intl.Locale` instance by
-/// probing both known shapes: the `getWeekInfo()` method form and
-/// the `weekInfo` property form. Returns the 1..=7 ISO day index
-/// (Monday=1, Sunday=7) if either shape delivers a number, or
-/// `None` if the engine exposes neither.
-pub(crate) fn read_week_info_first_day(js_locale_value: &JsValue) -> Option<u8> {
+pub(crate) fn read_week_info(js_locale_value: &JsValue) -> Option<WeekInfo> {
     // Form 1: `getWeekInfo()` method (Chrome, Safari, Node).
-    if let Ok(get_week_info) = Reflect::get(js_locale_value, &JsValue::from_str("getWeekInfo")) {
-        if get_week_info.is_function() {
-            if let Ok(func) = get_week_info.dyn_into::<Function>() {
-                if let Ok(info) = func.call0(js_locale_value) {
-                    if let Some(day) = read_first_day(&info) {
-                        return Some(day);
-                    }
-                }
-            }
-        }
+    if let Ok(get_week_info) = Reflect::get(js_locale_value, &JsValue::from_str("getWeekInfo"))
+        && get_week_info.is_function()
+        && let Ok(func) = get_week_info.dyn_into::<Function>()
+        && let Ok(info) = func.call0(js_locale_value)
+        && let Some(week_info) = read_week_info_value(&info)
+    {
+        return Some(week_info);
     }
 
     // Form 2: `weekInfo` getter/property (Firefox and other engines
     // that implement the TC39 proposal's property shape).
-    if let Ok(info) = Reflect::get(js_locale_value, &JsValue::from_str("weekInfo")) {
-        if !info.is_undefined() && !info.is_null() {
-            if let Some(day) = read_first_day(&info) {
-                return Some(day);
-            }
-        }
+    if let Ok(info) = Reflect::get(js_locale_value, &JsValue::from_str("weekInfo"))
+        && !info.is_undefined()
+        && !info.is_null()
+        && let Some(week_info) = read_week_info_value(&info)
+    {
+        return Some(week_info);
     }
 
     None
+}
+
+fn read_week_info_value(info: &JsValue) -> Option<WeekInfo> {
+    let first_day = weekday_from_iso_index(read_first_day(info)?);
+
+    let weekend = read_weekend(info);
+
+    let minimal_days_in_first_week = read_minimal_days(info).unwrap_or(1);
+
+    let (weekend_start, weekend_end) = weekend_bounds(&weekend);
+
+    Some(WeekInfo {
+        first_day,
+        weekend_start,
+        weekend_end,
+        minimal_days_in_first_week,
+    })
 }
 
 fn read_first_day(info: &JsValue) -> Option<u8> {
@@ -801,6 +929,60 @@ fn read_first_day(info: &JsValue) -> Option<u8> {
         .ok()?
         .as_f64()
         .map(|day| day as u8)
+}
+
+fn read_weekend(info: &JsValue) -> Vec<Weekday> {
+    let Ok(value) = Reflect::get(info, &JsValue::from_str("weekend")) else {
+        return Vec::new();
+    };
+
+    if !Array::is_array(&value) {
+        return Vec::new();
+    }
+
+    let weekend = Array::from(&value);
+
+    weekend
+        .iter()
+        .filter_map(|day| day.as_f64().map(|day| weekday_from_iso_index(day as u8)))
+        .collect()
+}
+
+fn read_minimal_days(info: &JsValue) -> Option<u8> {
+    Reflect::get(info, &JsValue::from_str("minimalDays"))
+        .ok()?
+        .as_f64()
+        .map(|days| days as u8)
+}
+
+fn weekend_bounds(weekend: &[Weekday]) -> (Weekday, Weekday) {
+    if weekend.is_empty() {
+        return (Weekday::Saturday, Weekday::Sunday);
+    }
+
+    const ISO_ORDER: [Weekday; 7] = [
+        Weekday::Monday,
+        Weekday::Tuesday,
+        Weekday::Wednesday,
+        Weekday::Thursday,
+        Weekday::Friday,
+        Weekday::Saturday,
+        Weekday::Sunday,
+    ];
+
+    let contains = |weekday: Weekday| weekend.contains(&weekday);
+
+    let start = ISO_ORDER
+        .into_iter()
+        .find(|weekday| contains(*weekday) && !contains(previous_weekday(*weekday)))
+        .unwrap_or(weekend[0]);
+
+    let end = ISO_ORDER
+        .into_iter()
+        .find(|weekday| contains(*weekday) && !contains(next_weekday(*weekday)))
+        .unwrap_or(start);
+
+    (start, end)
 }
 
 /// Maps an ISO 8601 weekday index (1=Monday .. 7=Sunday) to a
@@ -814,10 +996,35 @@ pub(crate) const fn weekday_from_iso_index(day: u8) -> Weekday {
         5 => Weekday::Friday,
         6 => Weekday::Saturday,
         7 => Weekday::Sunday,
+
         // `getWeekInfo().firstDay` is documented as 1..=7 with
         // Monday=1; treat 1 and any unexpected value as Monday
         // (the ISO 8601 default).
         _ => Weekday::Monday,
+    }
+}
+
+const fn previous_weekday(weekday: Weekday) -> Weekday {
+    match weekday {
+        Weekday::Monday => Weekday::Sunday,
+        Weekday::Tuesday => Weekday::Monday,
+        Weekday::Wednesday => Weekday::Tuesday,
+        Weekday::Thursday => Weekday::Wednesday,
+        Weekday::Friday => Weekday::Thursday,
+        Weekday::Saturday => Weekday::Friday,
+        Weekday::Sunday => Weekday::Saturday,
+    }
+}
+
+const fn next_weekday(weekday: Weekday) -> Weekday {
+    match weekday {
+        Weekday::Monday => Weekday::Tuesday,
+        Weekday::Tuesday => Weekday::Wednesday,
+        Weekday::Wednesday => Weekday::Thursday,
+        Weekday::Thursday => Weekday::Friday,
+        Weekday::Friday => Weekday::Saturday,
+        Weekday::Saturday => Weekday::Sunday,
+        Weekday::Sunday => Weekday::Monday,
     }
 }
 
@@ -828,17 +1035,29 @@ pub(crate) const fn weekday_from_iso_index(day: u8) -> Weekday {
 /// The noon anchor keeps the instant away from midnight so any
 /// formatter that, for whatever reason, doesn't honour `timeZone:
 /// "UTC"` still lands on the intended day in the browser's local
-/// timezone. `year` is a `u32` because `Date::set_utc_full_year_*`
-/// rejects negative inputs; callers that need BCE support handle the
-/// out-of-range case before reaching this helper.
-pub(crate) fn noon_utc_js_date(year: u32, month: i32, day: i32) -> js_sys::Date {
-    let js_date = js_sys::Date::new_0();
-    js_date.set_utc_full_year_with_month_date(year, month, day);
-    js_date.set_utc_hours(12);
-    js_date.set_utc_minutes(0);
-    js_date.set_utc_seconds(0);
-    js_date.set_utc_milliseconds(0);
-    js_date
+/// timezone. The helper accepts the full ISO year range, including BCE
+/// years, by constructing a canonical ISO-8601 string rather than
+/// relying on the legacy `Date(year, month)` / `setUTCFullYear`
+/// pathways.
+pub(crate) fn noon_utc_js_date(year: i32, month: i32, day: i32) -> js_sys::Date {
+    let iso = format!(
+        "{}-{:02}-{:02}T12:00:00.000Z",
+        js_iso_year(year),
+        month + 1,
+        day
+    );
+
+    js_sys::Date::new(&JsValue::from_str(&iso))
+}
+
+fn js_iso_year(year: i32) -> String {
+    if (0..=9_999).contains(&year) {
+        format!("{year:04}")
+    } else if year < 0 {
+        format!("-{:06}", year.unsigned_abs())
+    } else {
+        format!("+{year:06}")
+    }
 }
 
 /// Returns `true` if the given Hebrew year is a leap year of the 19-year
@@ -858,14 +1077,18 @@ fn month_label_formatter(
     month_style: &str,
 ) -> Option<Intl::DateTimeFormat> {
     let opts = Object::new();
+
     Reflect::set(
         &opts,
         &"calendar".into(),
         &JsValue::from_str(target.to_bcp47_value()),
     )
     .ok()?;
+
     Reflect::set(&opts, &"month".into(), &JsValue::from_str(month_style)).ok()?;
+
     Reflect::set(&opts, &"timeZone".into(), &JsValue::from_str("UTC")).ok()?;
+
     Some(Intl::DateTimeFormat::new(locales, &opts))
 }
 
@@ -875,6 +1098,7 @@ fn month_label_formatter(
 fn month_part_value(parts: &Array) -> String {
     for i in 0..parts.length() {
         let part = parts.get(i);
+
         if Reflect::get(&part, &JsValue::from_str("type"))
             .ok()
             .and_then(|v| v.as_string())
@@ -887,7 +1111,56 @@ fn month_part_value(parts: &Array) -> String {
                 .unwrap_or_default();
         }
     }
+
     String::new()
+}
+
+/// Extracts and parses the `hour` part for a synthetic probe time
+/// from an `Intl.DateTimeFormat`.
+fn probe_hour_value(formatter: &Intl::DateTimeFormat, hour: u32) -> Option<u8> {
+    let date = hour_probe_utc_js_date(hour);
+
+    let parts = formatter.format_to_parts(&date);
+
+    let value = part_value(&parts, "hour")?;
+
+    let normalized = normalize_digits(&value);
+
+    normalized.parse::<u8>().ok()
+}
+
+/// Builds a stable UTC probe date whose rendered hour can be used to
+/// infer the browser's effective hour cycle.
+fn hour_probe_utc_js_date(hour: u32) -> js_sys::Date {
+    let js_date = noon_utc_js_date(2020, 2, 3);
+
+    js_date.set_utc_hours(hour);
+    js_date.set_utc_minutes(0);
+    js_date.set_utc_seconds(0);
+    js_date.set_utc_milliseconds(0);
+
+    js_date
+}
+
+/// Extracts the `value` string of the first part matching `part_type`
+/// from a `formatToParts` result.
+fn part_value(parts: &Array, part_type: &str) -> Option<String> {
+    for i in 0..parts.length() {
+        let part = parts.get(i);
+
+        if Reflect::get(&part, &JsValue::from_str("type"))
+            .ok()
+            .and_then(|v| v.as_string())
+            .as_deref()
+            == Some(part_type)
+        {
+            return Reflect::get(&part, &JsValue::from_str("value"))
+                .ok()
+                .and_then(|v| v.as_string());
+        }
+    }
+
+    None
 }
 
 /// Converts a browser-emitted era long label into its canonical CLDR
@@ -924,28 +1197,22 @@ fn month_part_value(parts: &Array) -> String {
 ///   like `Kansei`, `Meiwa`, `Bunsei`, `Tenpō`, etc.).
 pub(crate) fn bridge_convert(date: &CalendarDate, target: CalendarSystem) -> Option<CalendarDate> {
     let internal = crate::calendar::internal::CalendarDate::try_from(date).ok()?;
+
     let converted = internal.to_calendar(target);
+    let iso = converted.inner.to_calendar(icu::calendar::Iso);
 
-    let month_nz = NonZero::new(converted.month())?;
-    let day_nz = NonZero::new(converted.day())?;
-
-    Some(CalendarDate {
-        calendar: target,
-        era: converted
-            .era()
-            .filter(|_| target.has_custom_eras())
-            .map(|code| Era {
-                code: code.clone(),
-                display_name: code,
-            }),
-        year: converted.year(),
-        month: month_nz,
-        day: day_nz,
-    })
+    build_from_iso_parts(
+        target,
+        iso.year().era_year_or_related_iso(),
+        iso.month().ordinal,
+        iso.day_of_month().0,
+    )
+    .ok()
 }
 
 pub(crate) fn canonical_era_code(label: &str) -> String {
     let mut buf = String::with_capacity(label.len());
+
     for ch in label.chars() {
         let replacement = match ch {
             'ā' | 'Ā' => 'a',
@@ -955,10 +1222,12 @@ pub(crate) fn canonical_era_code(label: &str) -> String {
             'ū' | 'Ū' => 'u',
             other => other,
         };
+
         for lower in replacement.to_lowercase() {
             buf.push(lower);
         }
     }
+
     buf
 }
 
@@ -1003,6 +1272,7 @@ pub(crate) fn era_code_for_calendar(target: CalendarSystem, label: &str) -> Opti
             "reiwa" | "heisei" | "showa" | "taisho" | "meiji" => Some(normalized),
             _ => None,
         },
+
         CalendarSystem::Roc => match normalized.as_str() {
             // Post-1912: Intl emits `"Minguo"` (en-US) or the
             // abbreviation `"ROC"`.
@@ -1014,6 +1284,7 @@ pub(crate) fn era_code_for_calendar(target: CalendarSystem, label: &str) -> Opti
             "broc" | "beforeroc" | "beforeminguo" => Some(String::from("broc")),
             _ => None,
         },
+
         // Other custom-era calendars have Intl long labels that vary
         // too much to map without test coverage against real browser
         // output. Drop the era rather than persist garbage.
@@ -1023,5 +1294,6 @@ pub(crate) fn era_code_for_calendar(target: CalendarSystem, label: &str) -> Opti
 
 pub(crate) const fn is_hebrew_leap_year(year: i32) -> bool {
     let cycle_year = year.rem_euclid(19);
+
     matches!(cycle_year, 3 | 6 | 8 | 11 | 14 | 17 | 0)
 }

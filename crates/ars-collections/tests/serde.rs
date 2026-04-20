@@ -39,7 +39,7 @@ fn selection_state_round_trips_via_serde() {
 
     let json = serde_json::to_string(&set).expect("Set must serialize");
 
-    let restored: Set = serde_json::from_str(&json).expect("Set must deserialize");
+    let restored = serde_json::from_str::<Set>(&json).expect("Set must deserialize");
 
     assert_eq!(set, restored);
 }
@@ -106,7 +106,7 @@ fn node_round_trips_with_value() {
         index: 7,
     };
 
-    let restored: Node<String> = round_trip(&node);
+    let restored = round_trip::<Node<String>>(&node);
 
     assert_eq!(node.key, restored.key);
     assert_eq!(node.node_type, restored.node_type);
@@ -133,7 +133,7 @@ fn node_round_trips_without_value() {
         index: 0,
     };
 
-    let restored: Node<String> = round_trip(&node);
+    let restored = round_trip::<Node<String>>(&node);
 
     assert_eq!(node.key, restored.key);
     assert_eq!(node.node_type, restored.node_type);

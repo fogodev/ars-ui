@@ -9,7 +9,7 @@ use core::num::NonZero;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
 use crate::{
-    CalendarDate, CalendarSystem, Era, HourCycle, IcuProvider, Locale, StubIcuProvider,
+    CalendarDate, CalendarDateFields, CalendarSystem, Era, HourCycle, IcuProvider, Locale,
     WebIntlProvider, Weekday, default_provider,
 };
 
@@ -17,6 +17,30 @@ wasm_bindgen_test_configure!(run_in_browser);
 
 fn locale(tag: &str) -> Locale {
     Locale::parse(tag).expect("test locale should parse")
+}
+
+fn gregorian_date(year: i32, month: u8, day: u8) -> CalendarDate {
+    CalendarDate::new_gregorian(year, month, day).expect("Gregorian test date should validate")
+}
+
+fn calendar_date(
+    calendar: CalendarSystem,
+    era: Option<Era>,
+    year: i32,
+    month: u8,
+    day: u8,
+) -> CalendarDate {
+    CalendarDate::new(
+        calendar,
+        &CalendarDateFields {
+            era,
+            year: Some(year),
+            month: Some(month),
+            day: Some(day),
+            ..CalendarDateFields::default()
+        },
+    )
+    .expect("calendar test date should validate")
 }
 
 #[wasm_bindgen_test]
@@ -66,6 +90,27 @@ fn web_intl_hour_cycle_en_us_is_h12() {
 }
 
 #[wasm_bindgen_test]
+fn web_intl_hour_cycle_fr_fr_is_h23() {
+    let provider = WebIntlProvider;
+
+    assert_eq!(provider.hour_cycle(&locale("fr-FR")), HourCycle::H23);
+}
+
+#[wasm_bindgen_test]
+fn web_intl_hour_cycle_uses_formatted_parts_not_resolved_options() {
+    let provider = WebIntlProvider;
+
+    // Regression (#583): browser `resolvedOptions().hourCycle` is known
+    // to misreport some locales. Force Arabic-Indic digits so the
+    // provider must normalize the observed hour part and still infer
+    // French 24-hour output correctly.
+    assert_eq!(
+        provider.hour_cycle(&locale("fr-FR-u-nu-arab")),
+        HourCycle::H23
+    );
+}
+
+#[wasm_bindgen_test]
 fn web_intl_first_day_of_week_en_us_is_sunday() {
     let provider = WebIntlProvider;
 
@@ -83,6 +128,23 @@ fn web_intl_first_day_of_week_de_is_monday() {
         provider.first_day_of_week(&locale("de-DE")),
         Weekday::Monday
     );
+}
+
+#[wasm_bindgen_test]
+fn web_intl_week_info_reads_first_day_and_weekend_metadata() {
+    let provider = WebIntlProvider;
+
+    let us = provider.week_info(&locale("en-US"));
+
+    assert_eq!(us.first_day, Weekday::Sunday);
+    assert_eq!(us.weekend_start, Weekday::Saturday);
+    assert_eq!(us.weekend_end, Weekday::Sunday);
+
+    let israel = provider.week_info(&locale("he-IL"));
+
+    assert_eq!(israel.first_day, Weekday::Sunday);
+    assert_eq!(israel.weekend_start, Weekday::Friday);
+    assert_eq!(israel.weekend_end, Weekday::Saturday);
 }
 
 #[wasm_bindgen_test]
@@ -168,6 +230,7 @@ fn web_intl_weekday_short_label_covers_every_weekday() {
         Weekday::Sunday,
     ] {
         let label = provider.weekday_short_label(weekday, &en);
+
         assert!(!label.is_empty(), "empty short label for {weekday:?}");
     }
 }
@@ -197,11 +260,17 @@ fn web_intl_day_period_from_char_bails_when_labels_share_prefix() {
     // CLDR revision), the ambiguous char must resolve to `None`; if
     // it doesn't, the happy path is verified end-to-end.
     let provider = WebIntlProvider;
+
     let ja = locale("ja-JP");
+
     let am = provider.day_period_label(false, &ja);
+
     let pm = provider.day_period_label(true, &ja);
+
     let am_first = am.chars().next().expect("AM label non-empty");
+
     let pm_first = pm.chars().next().expect("PM label non-empty");
+
     if am_first == pm_first {
         assert_eq!(
             provider.day_period_from_char(am_first, &ja),
@@ -285,11 +354,17 @@ fn web_intl_max_months_in_year_resolves_persian_via_bridge() {
 fn web_intl_hour_cycle_honors_locale_extension() {
     let provider = WebIntlProvider;
 
-    // `-u-hc-h11` and `-u-hc-h24` force the browser's
-    // `resolvedOptions().hourCycle` to those values, exercising the
-    // `H11` and `H24` match arms that plain English or German locales
-    // won't hit.
+    // Explicit `-u-hc-*` overrides must short-circuit the probe logic
+    // so callers get the exact midnight behavior they requested.
     assert_eq!(provider.hour_cycle(&locale("ja-u-hc-h11")), HourCycle::H11);
+    assert_eq!(
+        provider.hour_cycle(&locale("en-US-u-hc-h12")),
+        HourCycle::H12
+    );
+    assert_eq!(
+        provider.hour_cycle(&locale("de-DE-u-hc-h23")),
+        HourCycle::H23
+    );
     assert_eq!(provider.hour_cycle(&locale("ja-u-hc-h24")), HourCycle::H24);
 }
 
@@ -306,30 +381,38 @@ fn web_intl_convert_date_routes_bce_gregorian_through_bridge() {
     // itself rejects the input.
     let provider = WebIntlProvider;
 
-    let gregorian = CalendarDate {
-        calendar: CalendarSystem::Gregorian,
-        era: None,
-        year: -50,
-        month: NonZero::new(3).expect("three is non-zero"),
-        day: NonZero::new(15).expect("fifteen is non-zero"),
-    };
+    let gregorian = calendar_date(
+        CalendarSystem::Gregorian,
+        Some(Era {
+            code: "bc".to_string(),
+            display_name: "BC".to_string(),
+        }),
+        51,
+        3,
+        15,
+    );
 
     let buddhist = provider.convert_date(&gregorian, CalendarSystem::Buddhist);
+
     // Buddhist Era year = Gregorian year + 543. -50 CE → Buddhist 493.
-    // When the bridge accepts the input, we must land in Buddhist
-    // with a sensible year — never in Gregorian — and we must never
-    // return the source date.
-    if buddhist.calendar != CalendarSystem::Gregorian {
-        assert_eq!(
-            buddhist.calendar,
-            CalendarSystem::Buddhist,
-            "BCE Gregorian must convert to Buddhist via the bridge, not be echoed back"
-        );
-        assert_ne!(
-            buddhist, gregorian,
-            "BCE Gregorian must not be returned as the source date"
-        );
-    }
+    // The browser path must use the canonical ISO year (-50), not the
+    // era-relative public year (51 BC). Otherwise the conversion lands
+    // in Buddhist 594 instead of Buddhist 493.
+    assert_eq!(
+        buddhist.calendar(),
+        CalendarSystem::Buddhist,
+        "BCE Gregorian must convert to Buddhist via the bridge, not be echoed back"
+    );
+    assert_eq!(
+        buddhist.year(),
+        493,
+        "Gregorian 51 BC corresponds to Buddhist 493; got {}",
+        buddhist.year()
+    );
+    assert_ne!(
+        buddhist, gregorian,
+        "BCE Gregorian must not be returned as the source date"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -348,6 +431,7 @@ fn web_intl_days_in_month_non_gregorian_uses_bridge_not_flat_30() {
     // 28..=30 is the full Hebrew-lunisolar range; assert the bridge
     // returns a real number inside it rather than the fabricated 30.
     let kislev = provider.days_in_month(&CalendarSystem::Hebrew, 5785, 3, None);
+
     assert!(
         (28..=30).contains(&kislev),
         "Hebrew 5785 Kislev length must be in the lunisolar range; got {kislev}"
@@ -356,6 +440,7 @@ fn web_intl_days_in_month_non_gregorian_uses_bridge_not_flat_30() {
     // Chinese month 2 in 2024 is 29 or 30 days — the bridge must
     // pick one, not default to the old flat 30.
     let chinese_2 = provider.days_in_month(&CalendarSystem::Chinese, 2024, 2, None);
+
     assert!(
         (29..=30).contains(&chinese_2),
         "Chinese 2024 civil month 2 length must be 29 or 30; got {chinese_2}"
@@ -375,6 +460,7 @@ fn web_intl_max_months_in_year_non_gregorian_uses_bridge_not_flat_12() {
 
     // Chinese 2020 is a leap-month year (闰四月, leap 4th) → 13.
     let months_2020 = provider.max_months_in_year(&CalendarSystem::Chinese, 2020, None);
+
     assert_eq!(
         months_2020, 13,
         "Chinese 2020 has leap month 4, so the year carries 13 civil ordinals"
@@ -382,6 +468,7 @@ fn web_intl_max_months_in_year_non_gregorian_uses_bridge_not_flat_12() {
 
     // Chinese 2021 is a non-leap year → 12.
     let months_2021 = provider.max_months_in_year(&CalendarSystem::Chinese, 2021, None);
+
     assert_eq!(
         months_2021, 12,
         "Chinese 2021 has no leap month, so the year carries 12 civil ordinals"
@@ -392,8 +479,6 @@ fn web_intl_max_months_in_year_non_gregorian_uses_bridge_not_flat_12() {
 fn web_intl_era_helpers_match_stub_behavior() {
     let provider = WebIntlProvider;
 
-    let stub = StubIcuProvider;
-
     assert_eq!(
         provider.default_era(&CalendarSystem::Japanese),
         Some(Era {
@@ -401,10 +486,15 @@ fn web_intl_era_helpers_match_stub_behavior() {
             display_name: "Reiwa".to_string(),
         })
     );
-    assert_eq!(provider.default_era(&CalendarSystem::Gregorian), None);
+    assert_eq!(
+        provider.default_era(&CalendarSystem::Gregorian),
+        Some(Era {
+            code: "ad".to_string(),
+            display_name: "AD".to_string(),
+        })
+    );
 
-    let heisei = CalendarDate::new(
-        &stub,
+    let heisei = calendar_date(
         CalendarSystem::Japanese,
         Some(Era {
             code: "heisei".to_string(),
@@ -413,8 +503,7 @@ fn web_intl_era_helpers_match_stub_behavior() {
         1,
         1,
         8,
-    )
-    .expect("Heisei 1-1-8 should validate");
+    );
 
     assert_eq!(provider.years_in_era(&heisei), Some(31));
     assert_eq!(provider.minimum_month_in_year(&heisei), 1);
@@ -436,10 +525,7 @@ fn web_intl_first_day_of_week_honors_unicode_extension() {
 fn web_intl_convert_date_same_calendar_is_identity() {
     let provider = WebIntlProvider;
 
-    let stub = StubIcuProvider;
-
-    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 2024, 3, 15)
-        .expect("Gregorian date should validate");
+    let gregorian = gregorian_date(2024, 3, 15);
 
     let converted = provider.convert_date(&gregorian, CalendarSystem::Gregorian);
 
@@ -450,19 +536,16 @@ fn web_intl_convert_date_same_calendar_is_identity() {
 fn web_intl_convert_date_crosses_calendars_via_browser() {
     let provider = WebIntlProvider;
 
-    let stub = StubIcuProvider;
-
-    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 2024, 3, 15)
-        .expect("Gregorian date should validate");
+    let gregorian = gregorian_date(2024, 3, 15);
 
     // Under `--features web-intl` without `icu4x`, this hits the
     // Intl.DateTimeFormat({ calendar }) → formatToParts reparse path.
     let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
 
-    assert_eq!(japanese.calendar, CalendarSystem::Japanese);
-    assert_eq!(japanese.year, 6);
-    assert_eq!(japanese.month.get(), 3);
-    assert_eq!(japanese.day.get(), 15);
+    assert_eq!(japanese.calendar(), CalendarSystem::Japanese);
+    assert_eq!(japanese.year(), 6);
+    assert_eq!(japanese.month(), 3);
+    assert_eq!(japanese.day(), 15);
 }
 
 #[wasm_bindgen_test]
@@ -473,17 +556,21 @@ fn web_intl_convert_date_preserves_historical_japanese_era() {
     // year=2. The fix requests `era: "long"` from `Intl.DateTimeFormat`
     // and maps the localized label back to the CLDR era code.
     let provider = WebIntlProvider;
-    let stub = StubIcuProvider;
 
-    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 1990, 6, 15)
-        .expect("Gregorian 1990-06-15 should validate");
+    let gregorian = gregorian_date(1990, 6, 15);
 
     let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
-    assert_eq!(japanese.calendar, CalendarSystem::Japanese);
-    assert_eq!(japanese.year, 2);
-    assert_eq!(japanese.month.get(), 6);
-    assert_eq!(japanese.day.get(), 15);
-    let era = japanese.era.expect("Japanese dates carry an era");
+
+    assert_eq!(japanese.calendar(), CalendarSystem::Japanese);
+    assert_eq!(japanese.year(), 2);
+    assert_eq!(japanese.month(), 6);
+    assert_eq!(japanese.day(), 15);
+
+    let era = japanese
+        .era()
+        .cloned()
+        .expect("Japanese dates carry an era");
+
     assert_eq!(
         era.code, "heisei",
         "1990 falls inside Heisei (1989-2019); got {era:?}"
@@ -500,13 +587,17 @@ fn web_intl_convert_date_canonicalizes_macronized_japanese_eras() {
     // silently returned incorrect bounds. `canonical_era_code` strips
     // the known Latin-macron letters before lowercasing.
     let provider = WebIntlProvider;
-    let stub = StubIcuProvider;
 
     // Shōwa: 1926-12-25 .. 1989-01-07. Gregorian 1970 is deep inside it.
-    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 1970, 6, 15)
-        .expect("Gregorian 1970-06-15 should validate");
+    let gregorian = gregorian_date(1970, 6, 15);
+
     let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
-    let era = japanese.era.expect("Japanese dates carry an era");
+
+    let era = japanese
+        .era()
+        .cloned()
+        .expect("Japanese dates carry an era");
+
     assert_eq!(
         era.code, "showa",
         "macron must be stripped; got era.code = {:?} (display_name = {:?})",
@@ -514,10 +605,15 @@ fn web_intl_convert_date_canonicalizes_macronized_japanese_eras() {
     );
 
     // Taishō: 1912-07-30 .. 1926-12-25. Gregorian 1920 is inside.
-    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 1920, 6, 15)
-        .expect("Gregorian 1920-06-15 should validate");
+    let gregorian = gregorian_date(1920, 6, 15);
+
     let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
-    let era = japanese.era.expect("Japanese dates carry an era");
+
+    let era = japanese
+        .era()
+        .cloned()
+        .expect("Japanese dates carry an era");
+
     assert_eq!(
         era.code, "taisho",
         "macron must be stripped; got era.code = {:?} (display_name = {:?})",
@@ -528,6 +624,7 @@ fn web_intl_convert_date_canonicalizes_macronized_japanese_eras() {
 #[wasm_bindgen_test]
 fn web_intl_canonical_era_code_strips_known_macrons() {
     use crate::provider::web_intl::canonical_era_code;
+
     // Direct unit coverage for the helper — stays meaningful even if a
     // future browser stops emitting macron long labels.
     assert_eq!(canonical_era_code("Shōwa"), "showa");
@@ -535,6 +632,7 @@ fn web_intl_canonical_era_code_strips_known_macrons() {
     assert_eq!(canonical_era_code("Heisei"), "heisei");
     assert_eq!(canonical_era_code("Reiwa"), "reiwa");
     assert_eq!(canonical_era_code("Meiji"), "meiji");
+
     // Non-macronized labels round-trip through the plain lowercase path.
     assert_eq!(canonical_era_code("CE"), "ce");
     assert_eq!(canonical_era_code("AH"), "ah");
@@ -558,20 +656,19 @@ fn web_intl_convert_date_recovers_chinese_leap_month_ordinal() {
     // weaker post-condition: the converted date must differ from the
     // source and must expose a non-zero month ordinal.
     let provider = WebIntlProvider;
-    let stub = StubIcuProvider;
 
-    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 2020, 5, 30)
-        .expect("Gregorian 2020-05-30 should validate");
+    let gregorian = gregorian_date(2020, 5, 30);
 
     let chinese = provider.convert_date(&gregorian, CalendarSystem::Chinese);
+
     assert_ne!(
         chinese, gregorian,
         "convert_date must not silently clone the source for Chinese leap-month dates"
     );
     assert!(
-        (1..=13).contains(&chinese.month.get()),
+        (1..=13).contains(&chinese.month()),
         "Chinese month must be 1..=13; got {}",
-        chinese.month.get()
+        chinese.month()
     );
 }
 
@@ -583,19 +680,20 @@ fn web_intl_convert_date_preserves_years_below_100() {
     // + `setUTCFullYear(..)` so a Gregorian year below 100 is passed
     // to `Intl.DateTimeFormat` as itself.
     let provider = WebIntlProvider;
-    let stub = StubIcuProvider;
 
-    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 90, 6, 15)
-        .expect("Gregorian 0090-06-15 should validate");
+    let gregorian = gregorian_date(90, 6, 15);
 
     let buddhist = provider.convert_date(&gregorian, CalendarSystem::Buddhist);
-    assert_eq!(buddhist.calendar, CalendarSystem::Buddhist);
+
+    assert_eq!(buddhist.calendar(), CalendarSystem::Buddhist);
+
     // Buddhist year = Gregorian year + 543. Year 90 CE ⇒ Buddhist 633,
     // not Buddhist 2533 (which the century-quirk bug would have produced).
     assert_eq!(
-        buddhist.year, 633,
+        buddhist.year(),
+        633,
         "expected Buddhist 633 for Gregorian year 90; got {}",
-        buddhist.year
+        buddhist.year()
     );
 }
 
@@ -608,23 +706,23 @@ fn web_intl_convert_date_resolves_hebrew_named_month() {
     // resolution path even in browsers that return a numeric month —
     // we just verify the result has a valid 1-based month ordinal.
     let provider = WebIntlProvider;
-    let stub = StubIcuProvider;
 
     // March 25, 2024 is Adar II 15, 5784 (Hebrew leap year).
-    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 2024, 3, 25)
-        .expect("Gregorian 2024-03-25 should validate");
+    let gregorian = gregorian_date(2024, 3, 25);
 
     let hebrew = provider.convert_date(&gregorian, CalendarSystem::Hebrew);
-    assert_eq!(hebrew.calendar, CalendarSystem::Hebrew);
-    assert_eq!(hebrew.year, 5784);
+
+    assert_eq!(hebrew.calendar(), CalendarSystem::Hebrew);
+    assert_eq!(hebrew.year(), 5784);
+
     // Whether the browser emitted numeric 7 (Adar II) or the name
     // "Adar II" that we then resolved, the final ordinal must be valid.
     assert!(
-        (1..=13).contains(&hebrew.month.get()),
+        (1..=13).contains(&hebrew.month()),
         "Hebrew month must be 1..=13; got {}",
-        hebrew.month.get()
+        hebrew.month()
     );
-    assert_eq!(hebrew.day.get(), 15);
+    assert_eq!(hebrew.day(), 15);
 }
 
 #[wasm_bindgen_test]
@@ -648,28 +746,31 @@ fn web_intl_convert_date_bridges_non_gregorian_sources_under_web_intl() {
     // under this feature, so Buddhist 2567 → Gregorian must resolve
     // to the real Gregorian equivalent, not echo the source back.
     let provider = WebIntlProvider;
-    let stub = StubIcuProvider;
 
-    let buddhist = CalendarDate::new(&stub, CalendarSystem::Buddhist, None, 2567, 6, 15)
-        .expect("Buddhist 2567-06-15 should validate");
+    let buddhist = calendar_date(CalendarSystem::Buddhist, None, 2567, 6, 15);
 
     let gregorian = provider.convert_date(&buddhist, CalendarSystem::Gregorian);
-    assert_eq!(gregorian.calendar, CalendarSystem::Gregorian);
+
+    assert_eq!(gregorian.calendar(), CalendarSystem::Gregorian);
     assert_eq!(
-        gregorian.year, 2024,
+        gregorian.year(),
+        2024,
         "Buddhist 2567 = Gregorian 2024 via the internal bridge; got {gregorian:?}"
     );
-    assert_eq!(gregorian.month.get(), 6);
-    assert_eq!(gregorian.day.get(), 15);
+    assert_eq!(gregorian.month(), 6);
+    assert_eq!(gregorian.day(), 15);
 }
 
 #[wasm_bindgen_test]
 fn web_intl_is_hebrew_leap_year_matches_19_cycle() {
     use crate::provider::web_intl::is_hebrew_leap_year;
+
     // Hebrew 5784 sits at position 8 of the 19-year Metonic cycle — leap.
     assert!(is_hebrew_leap_year(5784));
+
     // Hebrew 5785 sits at position 9 — common.
     assert!(!is_hebrew_leap_year(5785));
+
     // Cycle positions 3, 6, 8, 11, 14, 17, and year 19 (0 mod 19) are leap.
     for offset in [3, 6, 8, 11, 14, 17, 0] {
         assert!(
@@ -677,6 +778,7 @@ fn web_intl_is_hebrew_leap_year_matches_19_cycle() {
             "cycle offset {offset} should be leap"
         );
     }
+
     // Cycle position 1 must not be leap.
     assert!(!is_hebrew_leap_year(1));
 }
@@ -701,11 +803,13 @@ fn web_intl_resolve_named_month_returns_calendar_ordinal_not_probe_slot() {
     {
         assert_eq!(ordinal, 7, "Adar II must resolve to civil-order 7");
     }
+
     if let Some(ordinal) =
         WebIntlProvider::resolve_named_month(CalendarSystem::Hebrew, 5784, "Adar I")
     {
         assert_eq!(ordinal, 6, "Adar I must resolve to civil-order 6");
     }
+
     if let Some(ordinal) =
         WebIntlProvider::resolve_named_month(CalendarSystem::Hebrew, 5785, "Adar")
     {
@@ -730,6 +834,7 @@ fn web_intl_parse_english_ordinal_shifts_leap_ordinals_up_by_one() {
         parse_english_ordinal_month_label("Twelfth Monthbis"),
         Some(13)
     );
+
     // 13 + 1 saturates back to 13 so the result stays within the
     // `CalendarDate::month: NonZero<u8>` range allowed by the type.
     assert_eq!(
@@ -771,18 +876,22 @@ fn web_intl_parse_english_ordinal_month_label_covers_all_ordinals() {
             Some(expected),
             "label {label:?} should resolve to {expected}"
         );
+
         // Leap variant resolves to `expected + 1` (capped at 13):
         // the leap month always sits in the civil-order slot after
         // its base lunar month, matching the `DateFields.ordinal_month`
         // semantics of `CalendarDate::month`.
         let bis = format!("{label}bis");
+
         let leap_expected = expected.saturating_add(1).min(13);
+
         assert_eq!(
             parse_english_ordinal_month_label(&bis),
             Some(leap_expected),
             "leap label {bis:?} should resolve to {leap_expected}"
         );
     }
+
     // Nonsense inputs must return None so the caller falls back
     // through the probe sweep.
     assert_eq!(parse_english_ordinal_month_label("Adar II"), None);
@@ -805,6 +914,7 @@ fn web_intl_resolve_named_month_resolves_english_ordinal_labels_without_probe() 
         "Seventh Monthbis",
     ] {
         let ordinal = WebIntlProvider::resolve_named_month(CalendarSystem::Chinese, 2024, label);
+
         assert!(
             matches!(ordinal, Some(o) if (1..=13).contains(&o)),
             "{label:?} must resolve via direct English-ordinal parse; got {ordinal:?}"
@@ -828,13 +938,19 @@ fn web_intl_resolve_named_month_reaches_leap_7_8_10_11_years() {
         "Tenth Monthbis",
         "Eleventh Monthbis",
     ];
+
     let mut any_resolved = false;
+
     let mut any_invalid = false;
+
     for label in candidates {
         let ordinal = WebIntlProvider::resolve_named_month(CalendarSystem::Chinese, 2024, label);
+
         match ordinal {
             Some(o) if (1..=13).contains(&o) => any_resolved = true,
+
             Some(_) => any_invalid = true,
+
             None => {}
         }
     }
@@ -846,6 +962,7 @@ fn web_intl_resolve_named_month_reaches_leap_7_8_10_11_years() {
         !any_invalid,
         "resolver returned an out-of-range ordinal for a leap-month label"
     );
+
     let _ = any_resolved;
 }
 
@@ -860,6 +977,7 @@ fn web_intl_first_day_of_week_reads_week_info_property_shape() {
     // resolve to Sunday on real runtimes — whichever shape the
     // browser uses, the answer should be the CLDR value.
     let provider = WebIntlProvider;
+
     assert_eq!(
         provider.first_day_of_week(&locale("pt-BR")),
         Weekday::Sunday,
@@ -877,6 +995,7 @@ fn web_intl_weekday_from_iso_index_unit_coverage() {
     // stays correct even when no browser currently emits every
     // value.
     use crate::provider::web_intl::weekday_from_iso_index;
+
     assert_eq!(weekday_from_iso_index(1), Weekday::Monday);
     assert_eq!(weekday_from_iso_index(2), Weekday::Tuesday);
     assert_eq!(weekday_from_iso_index(3), Weekday::Wednesday);
@@ -884,6 +1003,7 @@ fn web_intl_weekday_from_iso_index_unit_coverage() {
     assert_eq!(weekday_from_iso_index(5), Weekday::Friday);
     assert_eq!(weekday_from_iso_index(6), Weekday::Saturday);
     assert_eq!(weekday_from_iso_index(7), Weekday::Sunday);
+
     // Out-of-range inputs collapse to Monday per the function doc.
     assert_eq!(weekday_from_iso_index(0), Weekday::Monday);
     assert_eq!(weekday_from_iso_index(8), Weekday::Monday);
@@ -912,12 +1032,14 @@ fn web_intl_resolve_named_month_sweeps_beyond_24_25() {
         "Sixth Monthbis",
         "Ninth Monthbis",
     ];
+
     let resolved = candidates.iter().any(|label| {
         matches!(
             WebIntlProvider::resolve_named_month(CalendarSystem::Chinese, 2024, label),
             Some(o) if (1..=13).contains(&o)
         )
     });
+
     // If none of the candidates match (runtime emits numeric or
     // native names), at least prove the resolver still returns
     // `None` safely rather than panicking.
@@ -944,6 +1066,7 @@ fn web_intl_resolve_named_month_matches_common_year_adar() {
         5785, // Common year — `rem_euclid(19) == 9`.
         "Adar",
     );
+
     assert!(
         matches!(ordinal, Some(o) if (1..=13).contains(&o)),
         "'Adar' must resolve to a 1..=13 ordinal under the dual-probe strategy; got {ordinal:?}"
@@ -976,6 +1099,7 @@ fn web_intl_resolve_named_month_resolves_known_hebrew_labels() {
             );
         }
     }
+
     // A nonsense label must not match any month slot.
     assert_eq!(
         WebIntlProvider::resolve_named_month(
@@ -1065,7 +1189,7 @@ fn web_intl_era_code_for_calendar_maps_japanese_allow_list() {
 
 #[wasm_bindgen_test]
 fn web_intl_era_code_for_calendar_drops_unmapped_custom_era_labels() {
-    // Hebrew / Ethiopic / Coptic / Islamic / Persian long labels vary
+    // Hebrew / Ethiopic / Coptic / Hijri / Persian long labels vary
     // too much across browsers to map without targeted test
     // coverage. For each of those custom-era calendars, the helper
     // must return `None` so `convert_date` does not persist display
@@ -1078,7 +1202,6 @@ fn web_intl_era_code_for_calendar_drops_unmapped_custom_era_labels() {
         CalendarSystem::EthiopicAmeteAlem,
         CalendarSystem::Coptic,
         CalendarSystem::Persian,
-        CalendarSystem::Islamic,
         CalendarSystem::IslamicCivil,
         CalendarSystem::IslamicUmmAlQura,
     ] {
@@ -1103,22 +1226,24 @@ fn web_intl_convert_date_preserves_roc_era_round_trip() {
     // 113) rather than a bogus `minguo` code that would fail the
     // internal-bridge round-trip.
     let provider = WebIntlProvider;
-    let stub = StubIcuProvider;
 
-    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 2024, 6, 15)
-        .expect("Gregorian 2024-06-15 should validate");
+    let gregorian = gregorian_date(2024, 6, 15);
 
     let roc = provider.convert_date(&gregorian, CalendarSystem::Roc);
-    assert_eq!(roc.calendar, CalendarSystem::Roc);
+
+    assert_eq!(roc.calendar(), CalendarSystem::Roc);
+
     // ROC year = Gregorian year - 1911. 2024 - 1911 = 113.
     assert_eq!(
-        roc.year, 113,
+        roc.year(),
+        113,
         "Gregorian 2024 corresponds to ROC 113; got {}",
-        roc.year
+        roc.year()
     );
+
     // Browsers that emit an era part must have it normalised to a
     // CLDR code — `roc` — and never left as `minguo`/`b.r.o.c.`.
-    if let Some(era) = roc.era {
+    if let Some(era) = roc.era().cloned() {
         assert_eq!(
             era.code, "roc",
             "post-1912 ROC date must carry the `roc` CLDR code; got {era:?}"
@@ -1142,15 +1267,18 @@ fn web_intl_convert_date_routes_japanese_historical_eras_through_bridge() {
     // resolves to a valid Japanese date with a Kansei / historical
     // CLDR code — never Reiwa.
     let provider = WebIntlProvider;
-    let stub = StubIcuProvider;
 
-    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 1800, 6, 15)
-        .expect("Gregorian 1800-06-15 should validate");
+    let gregorian = gregorian_date(1800, 6, 15);
 
     let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
-    assert_eq!(japanese.calendar, CalendarSystem::Japanese);
 
-    let era = japanese.era.expect("Japanese dates must carry an era");
+    assert_eq!(japanese.calendar(), CalendarSystem::Japanese);
+
+    let era = japanese
+        .era()
+        .cloned()
+        .expect("Japanese dates must carry an era");
+
     assert_ne!(
         era.code, "reiwa",
         "historical Gregorian 1800 must not be misattributed to Reiwa; got {era:?}"
@@ -1174,15 +1302,19 @@ fn web_intl_convert_date_preserves_modern_japanese_allow_list_hits() {
     // which still runs through `era_code_for_calendar` rather than
     // the bridge fallback.
     let provider = WebIntlProvider;
-    let stub = StubIcuProvider;
 
     // Gregorian 2020-06-15 is deep inside Reiwa (2019+).
-    let gregorian = CalendarDate::new(&stub, CalendarSystem::Gregorian, None, 2020, 6, 15)
-        .expect("Gregorian 2020-06-15 should validate");
+    let gregorian = gregorian_date(2020, 6, 15);
+
     let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
-    let era = japanese.era.expect("Japanese dates must carry an era");
+
+    let era = japanese
+        .era()
+        .cloned()
+        .expect("Japanese dates must carry an era");
+
     assert_eq!(era.code, "reiwa", "modern Gregorian 2020 must be Reiwa");
-    assert_eq!(japanese.year, 2);
+    assert_eq!(japanese.year(), 2);
 }
 
 #[wasm_bindgen_test]
@@ -1192,14 +1324,34 @@ fn web_intl_bridge_convert_handles_non_gregorian_sources() {
     // `convert_date` when the source calendar is not Gregorian.
     use crate::provider::web_intl::bridge_convert;
 
-    let stub = StubIcuProvider;
-    let buddhist = CalendarDate::new(&stub, CalendarSystem::Buddhist, None, 2567, 6, 15)
-        .expect("Buddhist 2567-06-15 should validate");
+    let buddhist = calendar_date(CalendarSystem::Buddhist, None, 2567, 6, 15);
 
     let gregorian = bridge_convert(&buddhist, CalendarSystem::Gregorian)
         .expect("Buddhist → Gregorian must succeed through the bridge");
-    assert_eq!(gregorian.calendar, CalendarSystem::Gregorian);
-    assert_eq!(gregorian.year, 2024, "Buddhist 2567 = Gregorian 2024");
+
+    assert_eq!(gregorian.calendar(), CalendarSystem::Gregorian);
+    assert_eq!(gregorian.year(), 2024, "Buddhist 2567 = Gregorian 2024");
+}
+
+#[wasm_bindgen_test]
+fn web_intl_bridge_convert_preserves_gregorian_bce_targets() {
+    use crate::provider::web_intl::bridge_convert;
+
+    let buddhist = calendar_date(CalendarSystem::Buddhist, None, 493, 3, 15);
+
+    let gregorian = bridge_convert(&buddhist, CalendarSystem::Gregorian)
+        .expect("Buddhist 493 should convert to Gregorian 51 BC");
+
+    let era = gregorian
+        .era()
+        .cloned()
+        .expect("Gregorian BCE targets must carry an era");
+
+    assert_eq!(gregorian.calendar(), CalendarSystem::Gregorian);
+    assert_eq!(era.code, "bc");
+    assert_eq!(gregorian.year(), 51, "Buddhist 493 = Gregorian 51 BC");
+    assert_eq!(gregorian.month(), 3);
+    assert_eq!(gregorian.day(), 15);
 }
 
 #[wasm_bindgen_test]
@@ -1221,6 +1373,7 @@ fn web_intl_resolve_named_month_recovers_when_2_digit_returns_names() {
     // regress the fast path — coverage of the fallback branch is
     // guaranteed on Node-backed test runners where this PR lands.
     let labels_and_expected = [("Adar I", 6_u8), ("Adar II", 7_u8)];
+
     for (label, expected) in labels_and_expected {
         if let Some(ordinal) =
             WebIntlProvider::resolve_named_month(CalendarSystem::Hebrew, 5784, label)

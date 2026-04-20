@@ -47,14 +47,14 @@ where
         // property is set by multiple interaction sources with different values.
         #[cfg(feature = "debug")]
         for (prop, new_value) in attrs.iter_styles() {
-            if let Ok(idx) = merged.styles().binary_search_by(|(k, _)| k.cmp(prop)) {
-                if merged.styles()[idx].1 != *new_value {
-                    log::warn!(
-                        "ars-interactions: style property '{prop}' set by multiple interactions \
+            if let Ok(idx) = merged.styles().binary_search_by(|(k, _)| k.cmp(prop))
+                && merged.styles()[idx].1 != *new_value
+            {
+                log::warn!(
+                    "ars-interactions: style property '{prop}' set by multiple interactions \
                          (existing: '{}', new: '{new_value}'). Last write wins.",
-                        merged.styles()[idx].1
-                    );
-                }
+                    merged.styles()[idx].1
+                );
             }
         }
         merged.merge(attrs);

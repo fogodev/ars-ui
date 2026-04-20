@@ -6,7 +6,7 @@
 //! metadata without relying on raw string literals throughout the codebase.
 
 use alloc::{string::String, vec::Vec};
-use core::fmt;
+use core::fmt::{self, Display};
 
 /// Typed `aria-*` attribute names used by [`HtmlAttr::Aria`].
 #[non_exhaustive]
@@ -14,100 +14,148 @@ use core::fmt;
 pub enum AriaAttr {
     /// `aria-activedescendant`
     ActiveDescendant,
+
     /// `aria-autocomplete`
     AutoComplete,
+
     /// `aria-checked`
     Checked,
+
     /// `aria-disabled`
     Disabled,
+
     /// `aria-errormessage`
     ErrorMessage,
+
     /// `aria-expanded`
     Expanded,
+
     /// `aria-haspopup`
     HasPopup,
+
     /// `aria-hidden`
     Hidden,
+
     /// `aria-invalid`
     Invalid,
+
     /// `aria-keyshortcuts`
     KeyShortcuts,
+
     /// `aria-label`
     Label,
+
     /// `aria-labelledby`
     LabelledBy,
+
     /// `aria-level`
     Level,
+
     /// `aria-modal`
     Modal,
+
     /// `aria-multiline`
     MultiLine,
+
     /// `aria-multiselectable`
     MultiSelectable,
+
     /// `aria-orientation`
     Orientation,
+
     /// `aria-placeholder`
     Placeholder,
+
     /// `aria-pressed`
     Pressed,
+
     /// `aria-readonly`
     ReadOnly,
+
     /// `aria-required`
     Required,
+
     /// `aria-roledescription`
     RoleDescription,
+
     /// `aria-selected`
     Selected,
+
     /// `aria-sort`
     Sort,
+
     /// `aria-valuemax`
     ValueMax,
+
     /// `aria-valuemin`
     ValueMin,
+
     /// `aria-valuenow`
     ValueNow,
+
     /// `aria-valuetext`
     ValueText,
+
     /// `aria-atomic`
     Atomic,
+
     /// `aria-busy`
     Busy,
+
     /// `aria-live`
     Live,
+
     /// `aria-relevant`
     Relevant,
+
     /// `aria-dropeffect`
     DropEffect,
+
     /// `aria-grabbed`
     Grabbed,
+
     /// `aria-colcount`
     ColCount,
+
     /// `aria-colindex`
     ColIndex,
+
     /// `aria-colspan`
     ColSpan,
+
     /// `aria-controls`
     Controls,
+
     /// `aria-current`
     Current,
+
     /// `aria-describedby`
     DescribedBy,
+
     /// `aria-description`
     Description,
+
     /// `aria-details`
     Details,
+
     /// `aria-flowto`
     FlowTo,
+
     /// `aria-owns`
     Owns,
+
     /// `aria-posinset`
     PosInSet,
+
     /// `aria-rowcount`
     RowCount,
+
     /// `aria-rowindex`
     RowIndex,
+
     /// `aria-rowspan`
     RowSpan,
+
     /// `aria-setsize`
     SetSize,
 }
@@ -170,7 +218,7 @@ impl AriaAttr {
     }
 }
 
-impl fmt::Display for AriaAttr {
+impl Display for AriaAttr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
@@ -182,286 +230,427 @@ impl fmt::Display for AriaAttr {
 pub enum HtmlAttr {
     /// `data-*` attributes with a compile-time suffix.
     Data(&'static str),
+
     /// `aria-*` attributes backed by [`AriaAttr`].
     Aria(AriaAttr),
+
     /// `accesskey`
     AccessKey,
+
     /// `autocapitalize`
     AutoCapitalize,
+
     /// `autocorrect`
     AutoCorrect,
+
     /// `autofocus`
     AutoFocus,
+
     /// `class`
     Class,
+
     /// `contenteditable`
     ContentEditable,
+
     /// `dir`
     Dir,
+
     /// `draggable`
     Draggable,
+
     /// `enterkeyhint`
     EnterKeyHint,
+
     /// `hidden`
     Hidden,
+
     /// `id`
     Id,
+
     /// `inert`
     Inert,
+
     /// `inputmode`
     InputMode,
+
     /// `is`
     Is,
+
     /// `itemid`
     ItemId,
+
     /// `itemprop`
     ItemProp,
+
     /// `itemref`
     ItemRef,
+
     /// `itemscope`
     ItemScope,
+
     /// `itemtype`
     ItemType,
+
     /// `lang`
     Lang,
+
     /// `nonce`
     Nonce,
+
     /// `popover`
     Popover,
+
     /// `role`
     Role,
+
     /// `slot`
     Slot,
+
     /// `spellcheck`
     SpellCheck,
+
     /// `tabindex`
     TabIndex,
+
     /// `title`
     Title,
+
     /// `translate`
     Translate,
+
     /// `writingsuggestions`
     WritingSuggestions,
+
     /// `accept`
     Accept,
+
     /// `accept-charset`
     AcceptCharset,
+
     /// `action`
     Action,
+
     /// `alpha`
     Alpha,
+
     /// `autocomplete`
     AutoComplete,
+
     /// `capture`
     Capture,
+
     /// `checked`
     Checked,
+
     /// `cols`
     Cols,
+
     /// `colorspace`
     ColorSpace,
+
     /// `command`
     Command,
+
     /// `commandfor`
     CommandFor,
+
     /// `disabled`
     Disabled,
+
     /// `dirname`
     DirName,
+
     /// `enctype`
     EncType,
+
     /// `for`
     For,
+
     /// `form`
     Form,
+
     /// `formaction`
     FormAction,
+
     /// `formenctype`
     FormEncType,
+
     /// `formmethod`
     FormMethod,
+
     /// `formnovalidate`
     FormNoValidate,
+
     /// `formtarget`
     FormTarget,
+
     /// `high`
     High,
+
     /// `list`
     List,
+
     /// `low`
     Low,
+
     /// `max`
     Max,
+
     /// `maxlength`
     MaxLength,
+
     /// `method`
     Method,
+
     /// `min`
     Min,
+
     /// `minlength`
     MinLength,
+
     /// `multiple`
     Multiple,
+
     /// `name`
     Name,
+
     /// `novalidate`
     NoValidate,
+
     /// `optimum`
     Optimum,
+
     /// `pattern`
     Pattern,
+
     /// `placeholder`
     Placeholder,
+
     /// `readonly`
     ReadOnly,
+
     /// `required`
     Required,
+
     /// `rows`
     Rows,
+
     /// `selected`
     Selected,
+
     /// `size`
     Size,
+
     /// `step`
     Step,
+
     /// `type`
     Type,
+
     /// `value`
     Value,
+
     /// `wrap`
     Wrap,
+
     /// `as`
     As,
+
     /// `async`
     Async,
+
     /// `blocking`
     Blocking,
+
     /// `charset`
     Charset,
+
     /// `color`
     Color,
+
     /// `defer`
     Defer,
+
     /// `http-equiv`
     HttpEquiv,
+
     /// `imagesizes`
     ImageSizes,
+
     /// `imagesrcset`
     ImageSrcSet,
+
     /// `allow`
     Allow,
+
     /// `alt`
     Alt,
+
     /// `autoplay`
     AutoPlay,
+
     /// `controls`
     Controls,
+
     /// `crossorigin`
     CrossOrigin,
+
     /// `decoding`
     Decoding,
+
     /// `default`
     Default,
+
     /// `download`
     Download,
+
     /// `fetchpriority`
     FetchPriority,
+
     /// `height`
     Height,
+
     /// `href`
     Href,
+
     /// `hreflang`
     HrefLang,
+
     /// `integrity`
     Integrity,
+
     /// `ismap`
     IsMap,
+
     /// `kind`
     Kind,
+
     /// `label`
     Label,
+
     /// `loading`
     Loading,
+
     /// `loop`
     Loop,
+
     /// `media`
     Media,
+
     /// `muted`
     Muted,
+
     /// The object element's `data` attribute.
     ObjectData,
+
     /// `ping`
     Ping,
+
     /// `playsinline`
     PlaysInline,
+
     /// `poster`
     Poster,
+
     /// `preload`
     Preload,
+
     /// `referrerpolicy`
     ReferrerPolicy,
+
     /// `rel`
     Rel,
+
     /// `sandbox`
     Sandbox,
+
     /// `shape`
     Shape,
+
     /// `sizes`
     Sizes,
+
     /// `src`
     Src,
+
     /// `srcdoc`
     SrcDoc,
+
     /// `srclang`
     SrcLang,
+
     /// `srcset`
     SrcSet,
+
     /// `target`
     Target,
+
     /// `usemap`
     UseMap,
+
     /// `width`
     Width,
+
     /// `abbr`
     Abbr,
+
     /// `colspan`
     ColSpan,
+
     /// `headers`
     Headers,
+
     /// `rowspan`
     RowSpan,
+
     /// `scope`
     Scope,
+
     /// `span`
     Span,
+
     /// `shadowrootclonable`
     ShadowRootClonable,
+
     /// `shadowrootcustomelementregistry`
     ShadowRootCustomElementRegistry,
+
     /// `shadowrootdelegatesfocus`
     ShadowRootDelegatesFocus,
+
     /// `shadowrootmode`
     ShadowRootMode,
+
     /// `shadowrootserializable`
     ShadowRootSerializable,
+
     /// `cite`
     Cite,
+
     /// `closedby`
     ClosedBy,
+
     /// `content`
     Content,
+
     /// `coords`
     Coords,
+
     /// `datetime`
     DateTime,
+
     /// `open`
     Open,
+
     /// `reversed`
     Reversed,
+
     /// `start`
     Start,
+
     /// `summary`
     Summary,
+
     /// `webkitdirectory`
     WebkitDirectory,
 }
@@ -619,7 +808,7 @@ impl HtmlAttr {
     }
 }
 
-impl fmt::Display for HtmlAttr {
+impl Display for HtmlAttr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Data(suffix) => write!(f, "data-{suffix}"),
@@ -637,193 +826,285 @@ impl fmt::Display for HtmlAttr {
 pub enum HtmlEvent {
     /// `auxclick`
     AuxClick,
+
     /// `click`
     Click,
+
     /// `contextmenu`
     ContextMenu,
+
     /// `dblclick`
     DblClick,
+
     /// `mousedown`
     MouseDown,
+
     /// `mouseenter`
     MouseEnter,
+
     /// `mouseleave`
     MouseLeave,
+
     /// `mousemove`
     MouseMove,
+
     /// `mouseout`
     MouseOut,
+
     /// `mouseover`
     MouseOver,
+
     /// `mouseup`
     MouseUp,
+
     /// `gotpointercapture`
     GotPointerCapture,
+
     /// `lostpointercapture`
     LostPointerCapture,
+
     /// `pointercancel`
     PointerCancel,
+
     /// `pointerdown`
     PointerDown,
+
     /// `pointerenter`
     PointerEnter,
+
     /// `pointerleave`
     PointerLeave,
+
     /// `pointermove`
     PointerMove,
+
     /// `pointerout`
     PointerOut,
+
     /// `pointerover`
     PointerOver,
+
     /// `pointerup`
     PointerUp,
+
     /// `keydown`
     KeyDown,
+
     /// `keyup`
     KeyUp,
+
     /// `blur`
     Blur,
+
     /// `focus`
     Focus,
+
     /// `focusin`
     FocusIn,
+
     /// `focusout`
     FocusOut,
+
     /// `change`
     Change,
+
     /// `input`
     Input,
+
     /// `beforeinput`
     BeforeInput,
+
     /// `invalid`
     Invalid,
+
     /// `reset`
     Reset,
+
     /// `select`
     Select,
+
     /// `submit`
     Submit,
+
     /// `drag`
     Drag,
+
     /// `dragend`
     DragEnd,
+
     /// `dragenter`
     DragEnter,
+
     /// `dragleave`
     DragLeave,
+
     /// `dragover`
     DragOver,
+
     /// `dragstart`
     DragStart,
+
     /// `drop`
     Drop,
+
     /// `touchcancel`
     TouchCancel,
+
     /// `touchend`
     TouchEnd,
+
     /// `touchmove`
     TouchMove,
+
     /// `touchstart`
     TouchStart,
+
     /// `scroll`
     Scroll,
+
     /// `scrollend`
     ScrollEnd,
+
     /// `wheel`
     Wheel,
+
     /// `copy`
     Copy,
+
     /// `cut`
     Cut,
+
     /// `paste`
     Paste,
+
     /// `compositionend`
     CompositionEnd,
+
     /// `compositionstart`
     CompositionStart,
+
     /// `compositionupdate`
     CompositionUpdate,
+
     /// `animationcancel`
     AnimationCancel,
+
     /// `animationend`
     AnimationEnd,
+
     /// `animationiteration`
     AnimationIteration,
+
     /// `animationstart`
     AnimationStart,
+
     /// `transitioncancel`
     TransitionCancel,
+
     /// `transitionend`
     TransitionEnd,
+
     /// `transitionrun`
     TransitionRun,
+
     /// `transitionstart`
     TransitionStart,
+
     /// `abort`
     Abort,
+
     /// `error`
     Error,
+
     /// `load`
     Load,
+
     /// `resize`
     Resize,
+
     /// `canplay`
     CanPlay,
+
     /// `canplaythrough`
     CanPlayThrough,
+
     /// `durationchange`
     DurationChange,
+
     /// `emptied`
     Emptied,
+
     /// `ended`
     Ended,
+
     /// `loadeddata`
     LoadedData,
+
     /// `loadedmetadata`
     LoadedMetaData,
+
     /// `loadstart`
     LoadStart,
+
     /// `pause`
     Pause,
+
     /// `play`
     Play,
+
     /// `playing`
     Playing,
+
     /// `progress`
     Progress,
+
     /// `ratechange`
     RateChange,
+
     /// `seeked`
     Seeked,
+
     /// `seeking`
     Seeking,
+
     /// `stalled`
     Stalled,
+
     /// `suspend`
     Suspend,
+
     /// `timeupdate`
     TimeUpdate,
+
     /// `volumechange`
     VolumeChange,
+
     /// `waiting`
     Waiting,
+
     /// `cancel`
     Cancel,
+
     /// `close`
     Close,
+
     /// `fullscreenchange`
     FullscreenChange,
+
     /// `fullscreenerror`
     FullscreenError,
+
     /// `selectionchange`
     SelectionChange,
+
     /// `slotchange`
     SlotChange,
+
     /// `toggle`
     Toggle,
 }
 
-impl fmt::Display for HtmlEvent {
+impl Display for HtmlEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let event = match self {
             Self::AuxClick => "auxclick",
@@ -931,325 +1212,483 @@ impl fmt::Display for HtmlEvent {
 pub enum CssProperty {
     /// CSS custom property names, rendered with a leading `--`.
     Custom(&'static str),
+
     /// `box-sizing`
     BoxSizing,
+
     /// `width`
     Width,
+
     /// `min-width`
     MinWidth,
+
     /// `max-width`
     MaxWidth,
+
     /// `height`
     Height,
+
     /// `min-height`
     MinHeight,
+
     /// `max-height`
     MaxHeight,
+
     /// `margin`
     Margin,
+
     /// `margin-top`
     MarginTop,
+
     /// `margin-right`
     MarginRight,
+
     /// `margin-bottom`
     MarginBottom,
+
     /// `margin-left`
     MarginLeft,
+
     /// `padding`
     Padding,
+
     /// `padding-top`
     PaddingTop,
+
     /// `padding-right`
     PaddingRight,
+
     /// `padding-bottom`
     PaddingBottom,
+
     /// `padding-left`
     PaddingLeft,
+
     /// `border`
     Border,
+
     /// `border-width`
     BorderWidth,
+
     /// `border-style`
     BorderStyle,
+
     /// `border-color`
     BorderColor,
+
     /// `border-radius`
     BorderRadius,
+
     /// `border-collapse`
     BorderCollapse,
+
     /// `border-spacing`
     BorderSpacing,
+
     /// `inline-size`
     InlineSize,
+
     /// `block-size`
     BlockSize,
+
     /// `min-inline-size`
     MinInlineSize,
+
     /// `max-inline-size`
     MaxInlineSize,
+
     /// `min-block-size`
     MinBlockSize,
+
     /// `max-block-size`
     MaxBlockSize,
+
     /// `margin-inline`
     MarginInline,
+
     /// `margin-inline-start`
     MarginInlineStart,
+
     /// `margin-inline-end`
     MarginInlineEnd,
+
     /// `margin-block`
     MarginBlock,
+
     /// `margin-block-start`
     MarginBlockStart,
+
     /// `margin-block-end`
     MarginBlockEnd,
+
     /// `padding-inline`
     PaddingInline,
+
     /// `padding-inline-start`
     PaddingInlineStart,
+
     /// `padding-inline-end`
     PaddingInlineEnd,
+
     /// `padding-block`
     PaddingBlock,
+
     /// `padding-block-start`
     PaddingBlockStart,
+
     /// `padding-block-end`
     PaddingBlockEnd,
+
     /// `inset-inline-start`
     InsetInlineStart,
+
     /// `inset-inline-end`
     InsetInlineEnd,
+
     /// `inset-block-start`
     InsetBlockStart,
+
     /// `inset-block-end`
     InsetBlockEnd,
+
     /// `position`
     Position,
+
     /// `top`
     Top,
+
     /// `right`
     Right,
+
     /// `bottom`
     Bottom,
+
     /// `left`
     Left,
+
     /// `z-index`
     ZIndex,
+
     /// `float`
     Float,
+
     /// `clear`
     Clear,
+
     /// `display`
     Display,
+
     /// `flex-direction`
     FlexDirection,
+
     /// `flex-wrap`
     FlexWrap,
+
     /// `flex-flow`
     FlexFlow,
+
     /// `flex-grow`
     FlexGrow,
+
     /// `flex-shrink`
     FlexShrink,
+
     /// `flex-basis`
     FlexBasis,
+
     /// `order`
     Order,
+
     /// `align-items`
     AlignItems,
+
     /// `align-self`
     AlignSelf,
+
     /// `align-content`
     AlignContent,
+
     /// `justify-content`
     JustifyContent,
+
     /// `justify-items`
     JustifyItems,
+
     /// `justify-self`
     JustifySelf,
+
     /// `place-items`
     PlaceItems,
+
     /// `place-content`
     PlaceContent,
+
     /// `gap`
     Gap,
+
     /// `row-gap`
     RowGap,
+
     /// `column-gap`
     ColumnGap,
+
     /// `grid-template-columns`
     GridTemplateColumns,
+
     /// `grid-template-rows`
     GridTemplateRows,
+
     /// `grid-column`
     GridColumn,
+
     /// `grid-row`
     GridRow,
+
     /// `grid-area`
     GridArea,
+
     /// `grid-auto-flow`
     GridAutoFlow,
+
     /// `grid-auto-columns`
     GridAutoColumns,
+
     /// `grid-auto-rows`
     GridAutoRows,
+
     /// `color`
     Color,
+
     /// `font-family`
     FontFamily,
+
     /// `font-size`
     FontSize,
+
     /// `font-weight`
     FontWeight,
+
     /// `font-style`
     FontStyle,
+
     /// `line-height`
     LineHeight,
+
     /// `text-align`
     TextAlign,
+
     /// `text-decoration`
     TextDecoration,
+
     /// `text-transform`
     TextTransform,
+
     /// `text-overflow`
     TextOverflow,
+
     /// `text-indent`
     TextIndent,
+
     /// `text-shadow`
     TextShadow,
+
     /// `white-space`
     WhiteSpace,
+
     /// `word-break`
     WordBreak,
+
     /// `word-wrap`
     WordWrap,
+
     /// `overflow-wrap`
     OverflowWrap,
+
     /// `letter-spacing`
     LetterSpacing,
+
     /// `word-spacing`
     WordSpacing,
+
     /// `background`
     Background,
+
     /// `background-color`
     BackgroundColor,
+
     /// `background-image`
     BackgroundImage,
+
     /// `background-position`
     BackgroundPosition,
+
     /// `background-size`
     BackgroundSize,
+
     /// `background-repeat`
     BackgroundRepeat,
+
     /// `opacity`
     Opacity,
+
     /// `visibility`
     Visibility,
+
     /// `box-shadow`
     BoxShadow,
+
     /// `outline`
     Outline,
+
     /// `outline-width`
     OutlineWidth,
+
     /// `outline-style`
     OutlineStyle,
+
     /// `outline-color`
     OutlineColor,
+
     /// `outline-offset`
     OutlineOffset,
+
     /// `cursor`
     Cursor,
+
     /// `pointer-events`
     PointerEvents,
+
     /// `user-select`
     UserSelect,
+
     /// `overflow`
     Overflow,
+
     /// `overflow-x`
     OverflowX,
+
     /// `overflow-y`
     OverflowY,
+
     /// `clip`
     Clip,
+
     /// `clip-path`
     ClipPath,
+
     /// `scroll-behavior`
     ScrollBehavior,
+
     /// `scroll-snap-type`
     ScrollSnapType,
+
     /// `scroll-snap-align`
     ScrollSnapAlign,
+
     /// `overscroll-behavior`
     OverscrollBehavior,
+
     /// `transform`
     Transform,
+
     /// `transform-origin`
     TransformOrigin,
+
     /// `transition`
     Transition,
+
     /// `transition-property`
     TransitionProperty,
+
     /// `transition-duration`
     TransitionDuration,
+
     /// `transition-timing-function`
     TransitionTimingFunction,
+
     /// `transition-delay`
     TransitionDelay,
+
     /// `animation`
     Animation,
+
     /// `animation-name`
     AnimationName,
+
     /// `animation-duration`
     AnimationDuration,
+
     /// `animation-timing-function`
     AnimationTimingFunction,
+
     /// `animation-delay`
     AnimationDelay,
+
     /// `animation-iteration-count`
     AnimationIterationCount,
+
     /// `animation-direction`
     AnimationDirection,
+
     /// `animation-fill-mode`
     AnimationFillMode,
+
     /// `animation-play-state`
     AnimationPlayState,
+
     /// `aspect-ratio`
     AspectRatio,
+
     /// `object-fit`
     ObjectFit,
+
     /// `object-position`
     ObjectPosition,
+
     /// `contain`
     Contain,
+
     /// `content-visibility`
     ContentVisibility,
+
     /// `will-change`
     WillChange,
+
     /// `appearance`
     Appearance,
+
     /// `resize`
     Resize,
+
     /// `touch-action`
     TouchAction,
+
     /// `filter`
     Filter,
+
     /// `backdrop-filter`
     BackdropFilter,
+
     /// `content`
     Content,
+
     /// `list-style`
     ListStyle,
+
     /// `list-style-type`
     ListStyleType,
+
     /// `list-style-position`
     ListStylePosition,
+
     /// `table-layout`
     TableLayout,
+
     /// `vertical-align`
     VerticalAlign,
 }
 
-impl fmt::Display for CssProperty {
+impl Display for CssProperty {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let property = match self {
             Self::Custom(name) => return write!(f, "--{name}"),
@@ -1434,7 +1873,7 @@ pub enum AttrValue {
 impl AttrValue {
     /// Returns the string representation of this value, or `None` for absent values.
     #[must_use]
-    pub fn as_str(&self) -> Option<&str> {
+    pub const fn as_str(&self) -> Option<&str> {
         match self {
             Self::String(value) => Some(value.as_str()),
             Self::Bool(true) => Some("true"),
@@ -1487,6 +1926,7 @@ pub struct AttrMap {
 pub struct AttrMapParts {
     /// Sorted typed HTML attributes.
     pub attrs: Vec<(HtmlAttr, AttrValue)>,
+
     /// Sorted typed CSS properties.
     pub styles: Vec<(CssProperty, String)>,
 }
@@ -1526,6 +1966,7 @@ impl AttrMap {
     /// [`AttrValue::None`] removes the attribute.
     pub fn set(&mut self, attr: HtmlAttr, value: impl Into<AttrValue>) -> &mut Self {
         let value = value.into();
+
         let is_space_separated = SPACE_SEPARATED.contains(&attr);
 
         match self.attrs.binary_search_by(|(key, _)| key.cmp(&attr)) {
@@ -1537,6 +1978,7 @@ impl AttrMap {
                         (AttrValue::String(existing), AttrValue::String(new_value)) => {
                             append_space_separated(existing, &new_value);
                         }
+
                         (slot, replacement) => *slot = replacement,
                     }
                 } else {
@@ -1556,10 +1998,12 @@ impl AttrMap {
     /// Sets a CSS property on the map, replacing any existing value for the property.
     pub fn set_style(&mut self, prop: CssProperty, value: impl Into<String>) -> &mut Self {
         let value = value.into();
+
         match self.styles.binary_search_by(|(key, _)| key.cmp(&prop)) {
             Ok(index) => self.styles[index].1 = value,
             Err(index) => self.styles.insert(index, (prop, value)),
         }
+
         self
     }
 
@@ -1657,7 +2101,9 @@ impl UserAttrs {
         if USER_BLOCKED.contains(&attr) {
             return self;
         }
+
         self.0.set(attr, value);
+
         self
     }
 
@@ -1672,7 +2118,9 @@ impl UserAttrs {
         if USER_BLOCKED.contains(&attr) {
             return self;
         }
+
         self.0.set_bool(attr, value);
+
         self
     }
 }
@@ -1684,8 +2132,10 @@ pub enum StyleStrategy {
     /// Render styles as inline `style` attributes.
     #[default]
     Inline,
+
     /// Apply styles at runtime via the CSSOM API.
     Cssom,
+
     /// Emit nonce-backed scoped CSS rules collected into a `<style>` block.
     Nonce(String),
 }
@@ -1699,6 +2149,7 @@ fn append_space_separated(existing: &mut String, new_value: &str) {
         if !existing.is_empty() {
             existing.push(' ');
         }
+
         existing.push_str(token);
     }
 }
@@ -1709,6 +2160,7 @@ fn append_space_separated(existing: &mut String, new_value: &str) {
 pub struct EventOptions {
     /// Whether the listener is passive.
     pub passive: bool,
+
     /// Whether the listener captures during the capture phase.
     pub capture: bool,
 }
@@ -1838,6 +2290,7 @@ mod tests {
     #[test]
     fn event_options_default_to_non_passive_bubbling_listener() {
         let options = EventOptions::default();
+
         assert!(!options.passive);
         assert!(!options.capture);
     }
@@ -1850,6 +2303,7 @@ mod tests {
     #[test]
     fn attr_map_set_and_get_store_typed_values() {
         let mut attrs = AttrMap::new();
+
         attrs.set(HtmlAttr::Id, "dialog-root");
         attrs.set_bool(HtmlAttr::Hidden, true);
 
@@ -1865,6 +2319,7 @@ mod tests {
     #[test]
     fn attr_map_set_none_removes_existing_value() {
         let mut attrs = AttrMap::new();
+
         attrs.set(HtmlAttr::Title, "before");
         attrs.set(HtmlAttr::Title, AttrValue::None);
 
@@ -1875,6 +2330,7 @@ mod tests {
     #[test]
     fn attr_map_space_separated_values_append_with_dedup() {
         let mut attrs = AttrMap::new();
+
         attrs.set(HtmlAttr::Class, "ars-visually-hidden");
         attrs.set(HtmlAttr::Class, "ars-touch-none");
         attrs.set(HtmlAttr::Class, "ars-touch-none");
@@ -1900,6 +2356,7 @@ mod tests {
     #[test]
     fn attr_map_styles_replace_by_property() {
         let mut attrs = AttrMap::new();
+
         attrs.set_style(CssProperty::Width, "10px");
         attrs.set_style(CssProperty::Width, "12px");
         attrs.set_style(CssProperty::Height, "20px");
@@ -1916,11 +2373,13 @@ mod tests {
     #[test]
     fn attr_map_merge_uses_typed_semantics() {
         let mut base = AttrMap::new();
+
         base.set(HtmlAttr::Role, "button");
         base.set(HtmlAttr::Class, "base");
         base.set_style(CssProperty::Width, "10px");
 
         let mut overlay = AttrMap::new();
+
         overlay.set(HtmlAttr::Role, "switch");
         overlay.set(HtmlAttr::Class, "overlay");
         overlay.set_style(CssProperty::Width, "20px");
@@ -1935,6 +2394,7 @@ mod tests {
     #[test]
     fn user_attrs_reject_blocked_keys() {
         let mut user = UserAttrs::new();
+
         user.set(HtmlAttr::Id, "user-id");
         user.set(HtmlAttr::Role, "button");
         user.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
@@ -1945,6 +2405,7 @@ mod tests {
         user.set_style(CssProperty::Width, "12px");
 
         let mut merged = AttrMap::new();
+
         merged.merge_user(user);
 
         assert!(!merged.contains(&HtmlAttr::Id));
@@ -1963,11 +2424,13 @@ mod tests {
     #[test]
     fn attr_map_into_parts_exposes_raw_sorted_vectors() {
         let mut attrs = AttrMap::new();
+
         attrs.set(HtmlAttr::Id, "root");
         attrs.set(HtmlAttr::Class, "alpha");
         attrs.set_style(CssProperty::Width, "10px");
 
         let parts = attrs.into_parts();
+
         assert_eq!(
             parts.attrs,
             vec![
@@ -1984,10 +2447,12 @@ mod tests {
     #[test]
     fn attr_map_iterators_expose_current_entries() {
         let mut attrs = AttrMap::new();
+
         attrs.set(HtmlAttr::Id, "root");
         attrs.set(HtmlAttr::Title, "tooltip");
 
         let keys = attrs.keys().copied().collect::<Vec<_>>();
+
         let iter_pairs = attrs
             .iter()
             .map(|(key, value)| (*key, value.clone()))
@@ -2027,11 +2492,13 @@ mod tests {
     #[test]
     fn attr_map_serializes_for_ssr() {
         let mut attrs = AttrMap::new();
+
         attrs.set(HtmlAttr::Id, "dialog-root");
         attrs.set(HtmlAttr::Class, "ars-visually-hidden");
         attrs.set_style(CssProperty::Width, "1px");
 
         let json = serde_json::to_string(&attrs).expect("AttrMap must serialize");
+
         assert!(json.contains("dialog-root"));
         assert!(json.contains("ars-visually-hidden"));
         assert!(json.contains("width"));
@@ -2042,6 +2509,7 @@ mod tests {
     fn style_strategy_serializes_nonce_variant() {
         let json = serde_json::to_string(&StyleStrategy::Nonce(String::from("nonce-123")))
             .expect("StyleStrategy must serialize");
+
         assert!(json.contains("nonce-123"));
     }
 }

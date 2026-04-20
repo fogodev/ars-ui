@@ -22,7 +22,7 @@ edition      = "2024"
 license      = "MIT OR Apache-2.0"
 description  = "Framework-agnostic UI component library built on state machines"
 repository   = "https://github.com/fogodev/ars-ui"
-rust-version = "1.85"
+rust-version = "1.90"
 
 [workspace.lints.rust]
 unsafe_code                   = "forbid"

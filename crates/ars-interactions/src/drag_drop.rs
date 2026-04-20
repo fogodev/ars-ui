@@ -1048,10 +1048,10 @@ impl DropResult {
             drop_position: self.config.drop_indicator_position,
         });
 
-        if let Some(on_drop) = &self.config.on_drop {
-            if let Some(event) = &event {
-                on_drop(event.clone());
-            }
+        if let Some(on_drop) = &self.config.on_drop
+            && let Some(event) = &event
+        {
+            on_drop(event.clone());
         }
 
         self.reset();
@@ -1198,10 +1198,10 @@ fn resolve_enter_operation(
         return DropOperation::Cancel;
     }
 
-    if let Some(accepted_operations) = &config.accepted_operations {
-        if !accepted_operations.contains(&offered_operation) {
-            return DropOperation::Cancel;
-        }
+    if let Some(accepted_operations) = &config.accepted_operations
+        && !accepted_operations.contains(&offered_operation)
+    {
+        return DropOperation::Cancel;
     }
 
     offered_operation
@@ -1236,10 +1236,10 @@ fn resolve_drag_over_operation(
         return DropOperation::Cancel;
     }
 
-    if let Some(accepted_operations) = &config.accepted_operations {
-        if !accepted_operations.contains(&operation) {
-            return DropOperation::Cancel;
-        }
+    if let Some(accepted_operations) = &config.accepted_operations
+        && !accepted_operations.contains(&operation)
+    {
+        return DropOperation::Cancel;
     }
 
     operation

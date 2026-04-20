@@ -140,6 +140,7 @@ pub enum NavigationEvent {
     FocusMoved {
         /// The previously focused index.
         from: usize,
+
         /// The newly focused index.
         to: usize,
     },
@@ -174,7 +175,7 @@ impl NavigationRecorder {
 
     /// Asserts that the recorded focus transitions match `expected` exactly.
     pub fn assert_focus_sequence(&self, expected: &[(usize, usize)]) {
-        let actual: Vec<(usize, usize)> = self
+        let actual = self
             .events
             .iter()
             .filter_map(|event| match event {
@@ -183,7 +184,7 @@ impl NavigationRecorder {
                 | NavigationEvent::Activated { .. }
                 | NavigationEvent::Escaped => None,
             })
-            .collect();
+            .collect::<Vec<_>>();
 
         assert_eq!(actual, expected, "Focus navigation sequence mismatch");
     }
@@ -237,12 +238,14 @@ impl FocusZoneTestHarness {
     /// not handled.
     pub fn send_key(&mut self, key: KeyboardKey) -> bool {
         let is_disabled = |index: usize| self.disabled_indices.contains(&index);
+
         let from = self.zone.active_index;
 
         self.current_index = from;
 
         if let Some(next) = self.zone.handle_key(key, false, is_disabled) {
             self.recorder.record_focus_move(from, next);
+
             self.current_index = next;
             self.zone.active_index = next;
 
@@ -282,10 +285,14 @@ mod tests {
     fn panic_message(payload: Box<dyn Any + Send>) -> String {
         match payload.downcast::<String>() {
             Ok(message) => *message,
-            Err(payload) => match payload.downcast::<&'static str>() {
-                Ok(message) => String::from(*message),
-                Err(_) => String::from("non-string panic payload"),
-            },
+
+            Err(payload) => {
+                if let Ok(message) = payload.downcast::<&'static str>() {
+                    String::from(*message)
+                } else {
+                    String::from("non-string panic payload")
+                }
+            }
         }
     }
 
@@ -295,11 +302,15 @@ mod tests {
         static PANIC_HOOK_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
         let lock = PANIC_HOOK_LOCK.get_or_init(|| Mutex::new(()));
+
         let _guard = lock.lock().expect("panic hook lock poisoned");
+
         let previous_hook = take_hook();
 
         set_hook(Box::new(|_| {}));
+
         let result = catch_unwind(f);
+
         set_hook(previous_hook);
 
         result
@@ -434,6 +445,7 @@ mod tests {
         let mut harness = FocusZoneTestHarness::new(FocusZoneOptions::default(), 5);
 
         assert!(harness.send_key(KeyboardKey::ArrowDown));
+
         harness.assert_at(1);
         harness.recorder.assert_focus_sequence(&[(0, 1)]);
     }
@@ -445,6 +457,7 @@ mod tests {
         harness.zone.active_index = 2;
 
         assert!(harness.send_key(KeyboardKey::ArrowDown));
+
         harness.assert_at(3);
         harness.recorder.assert_focus_sequence(&[(2, 3)]);
     }
@@ -454,17 +467,21 @@ mod tests {
         let mut harness = FocusZoneTestHarness::new(FocusZoneOptions::default(), 5);
 
         assert!(!harness.send_key(KeyboardKey::Tab));
+
         harness.assert_at(0);
+
         assert!(harness.recorder.events.is_empty());
     }
 
     #[test]
     fn send_key_skips_disabled_items() {
         let mut harness = FocusZoneTestHarness::new(FocusZoneOptions::default(), 5);
+
         harness.disable(1);
         harness.disable(2);
 
         assert!(harness.send_key(KeyboardKey::ArrowDown));
+
         harness.assert_at(3);
         harness.recorder.assert_focus_sequence(&[(0, 3)]);
     }
@@ -472,11 +489,14 @@ mod tests {
     #[test]
     fn send_key_returns_false_when_no_enabled_target_exists() {
         let mut harness = FocusZoneTestHarness::new(FocusZoneOptions::default(), 3);
+
         harness.disable(1);
         harness.disable(2);
 
         assert!(!harness.send_key(KeyboardKey::ArrowDown));
+
         harness.assert_at(0);
+
         assert!(harness.recorder.events.is_empty());
     }
 
@@ -501,6 +521,7 @@ mod tests {
             wrap: true,
             ..FocusZoneOptions::default()
         };
+
         let mut harness = FocusZoneTestHarness::new(options, 3);
 
         harness.send_key(KeyboardKey::ArrowDown);
@@ -516,6 +537,7 @@ mod tests {
     #[test]
     fn zone_skips_disabled_items() {
         let mut harness = FocusZoneTestHarness::new(FocusZoneOptions::default(), 5);
+
         harness.disable(1);
         harness.disable(2);
 

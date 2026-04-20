@@ -2,19 +2,15 @@ use alloc::{format, string::String};
 use core::cmp::Ordering;
 
 use super::{CalendarDate, CalendarSystem, Era};
-use crate::IcuProvider;
 
 /// `iso_to_epoch_days(0001-01-01)` is defined as 0. The conversion helpers use
 /// Julian day arithmetic internally, so this offset bridges the civil epoch used
 /// by the public API and the Julian day numbering used by the formula.
+#[cfg(test)]
 pub(super) const GREGORIAN_JDN_OFFSET: i64 = 1_721_426;
 
 /// Number of days between `0001-01-01` and the Unix epoch `1970-01-01`.
-#[cfg(all(
-    any(feature = "icu4x", feature = "web-intl"),
-    feature = "std",
-    not(target_arch = "wasm32")
-))]
+#[cfg(all(test, feature = "icu4x", feature = "std", not(target_arch = "wasm32")))]
 const UNIX_EPOCH_DAYS_FROM_CE: i64 = 719_162;
 
 /// Returns the number of days in a proleptic Gregorian month.
@@ -38,55 +34,11 @@ pub(crate) const fn gregorian_days_in_month(year: i32, month: u8) -> u8 {
     }
 }
 
-/// Returns `true` when a Coptic-style year carries a sixth epagomenal day.
-///
-/// Coptic and Ethiopic calendars insert the leap day into month 13, so the
-/// leap-year rule affects only that final month.
-pub(crate) const fn coptic_like_is_leap_year(year: i32) -> bool {
-    // Coptic-style leap years are the years whose following Gregorian-style
-    // ordinal would be divisible by four. Widen before adding so the accepted
-    // `i32::MAX` year remains well-defined instead of overflowing here.
-    ((year as i64) + 1) % 4 == 0
-}
-
-/// Returns the number of days in a Coptic or Ethiopic month.
-///
-/// Months 1-12 are always 30 days. Month 13 has 5 days in common years and
-/// 6 days in leap years.
-pub(crate) const fn coptic_like_days_in_month(year: i32, month: u8) -> u8 {
-    match month {
-        1..=12 => 30,
-        13 => 5 + coptic_like_is_leap_year(year) as u8,
-        _ => 0,
-    }
-}
-
-pub(super) fn max_months_in_year(
-    provider: &dyn IcuProvider,
-    calendar: CalendarSystem,
-    year: i32,
-    era: Option<&str>,
-) -> u8 {
-    provider.max_months_in_year(&calendar, year, era)
-}
-
-pub(super) fn days_in_month_for_calendar(
-    provider: &dyn IcuProvider,
-    calendar: CalendarSystem,
-    year: i32,
-    month: u8,
-    era: Option<&str>,
-) -> u8 {
-    provider.days_in_month(&calendar, year, month, era)
-}
-
-pub(super) fn era_code_is_valid(calendar: CalendarSystem, era: Option<&str>) -> bool {
-    match calendar {
-        CalendarSystem::Japanese => {
-            era.is_some_and(|era_code| japanese_era_boundary(era_code).is_some())
-        }
-        _ => era.is_none(),
-    }
+#[derive(Clone, Copy)]
+pub(crate) struct EraDefinition {
+    pub(crate) code: &'static str,
+    pub(crate) display_name: &'static str,
+    pub(crate) max_year: Option<i32>,
 }
 
 #[derive(Clone, Copy)]
@@ -94,8 +46,6 @@ struct EraBoundary {
     code: &'static str,
     display_name: &'static str,
     start_year: i32,
-    start_month: u8,
-    start_day: u8,
     end: Option<(i32, u8, u8)>,
 }
 
@@ -104,43 +54,165 @@ const JAPANESE_ERA_BOUNDARIES: [EraBoundary; 5] = [
         code: "meiji",
         display_name: "Meiji",
         start_year: 1868,
-        start_month: 9,
-        start_day: 8,
         end: Some((1912, 7, 29)),
     },
     EraBoundary {
         code: "taisho",
         display_name: "Taisho",
         start_year: 1912,
-        start_month: 7,
-        start_day: 30,
         end: Some((1926, 12, 24)),
     },
     EraBoundary {
         code: "showa",
         display_name: "Showa",
         start_year: 1926,
-        start_month: 12,
-        start_day: 25,
         end: Some((1989, 1, 7)),
     },
     EraBoundary {
         code: "heisei",
         display_name: "Heisei",
         start_year: 1989,
-        start_month: 1,
-        start_day: 8,
         end: Some((2019, 4, 30)),
     },
     EraBoundary {
         code: "reiwa",
         display_name: "Reiwa",
         start_year: 2019,
-        start_month: 5,
-        start_day: 1,
         end: None,
     },
 ];
+
+const BUDDHIST_ERAS: [EraDefinition; 1] = [EraDefinition {
+    code: "be",
+    display_name: "BE",
+    max_year: Some(9999),
+}];
+
+const GREGORIAN_ERAS: [EraDefinition; 2] = [
+    EraDefinition {
+        code: "bc",
+        display_name: "BC",
+        max_year: Some(9999),
+    },
+    EraDefinition {
+        code: "ad",
+        display_name: "AD",
+        max_year: Some(9999),
+    },
+];
+
+const HEBREW_ERAS: [EraDefinition; 1] = [EraDefinition {
+    code: "am",
+    display_name: "AM",
+    max_year: Some(9999),
+}];
+
+const ISLAMIC_ERAS: [EraDefinition; 1] = [EraDefinition {
+    code: "ah",
+    display_name: "AH",
+    max_year: Some(9665),
+}];
+
+const PERSIAN_ERAS: [EraDefinition; 1] = [EraDefinition {
+    code: "ap",
+    display_name: "AP",
+    max_year: Some(9377),
+}];
+
+const INDIAN_ERAS: [EraDefinition; 1] = [EraDefinition {
+    code: "shaka",
+    display_name: "Shaka",
+    max_year: Some(9919),
+}];
+
+const COPTIC_ERAS: [EraDefinition; 2] = [
+    EraDefinition {
+        code: "bce",
+        display_name: "BCE",
+        max_year: Some(9999),
+    },
+    EraDefinition {
+        code: "ce",
+        display_name: "CE",
+        max_year: Some(9715),
+    },
+];
+
+const ETHIOPIC_ERAS: [EraDefinition; 2] = [
+    EraDefinition {
+        code: "aa",
+        display_name: "AA",
+        max_year: Some(9999),
+    },
+    EraDefinition {
+        code: "am",
+        display_name: "AM",
+        max_year: Some(9991),
+    },
+];
+
+const ETHIOPIC_AMETE_ALEM_ERAS: [EraDefinition; 1] = [EraDefinition {
+    code: "aa",
+    display_name: "AA",
+    max_year: Some(9999),
+}];
+
+const ROC_ERAS: [EraDefinition; 2] = [
+    EraDefinition {
+        code: "broc",
+        display_name: "Before ROC",
+        max_year: Some(9999),
+    },
+    EraDefinition {
+        code: "roc",
+        display_name: "ROC",
+        max_year: Some(8088),
+    },
+];
+
+pub(crate) const fn era_definitions(calendar: CalendarSystem) -> &'static [EraDefinition] {
+    match calendar {
+        CalendarSystem::Gregorian => &GREGORIAN_ERAS,
+
+        CalendarSystem::Buddhist => &BUDDHIST_ERAS,
+
+        CalendarSystem::Hebrew => &HEBREW_ERAS,
+
+        CalendarSystem::IslamicCivil | CalendarSystem::IslamicUmmAlQura => &ISLAMIC_ERAS,
+
+        CalendarSystem::Persian => &PERSIAN_ERAS,
+
+        CalendarSystem::Indian => &INDIAN_ERAS,
+
+        CalendarSystem::Coptic => &COPTIC_ERAS,
+
+        CalendarSystem::Ethiopic => &ETHIOPIC_ERAS,
+
+        CalendarSystem::EthiopicAmeteAlem => &ETHIOPIC_AMETE_ALEM_ERAS,
+
+        CalendarSystem::Roc => &ROC_ERAS,
+
+        CalendarSystem::Iso8601
+        | CalendarSystem::Japanese
+        | CalendarSystem::Chinese
+        | CalendarSystem::Dangi => &[],
+    }
+}
+
+pub(crate) fn era_definition(calendar: CalendarSystem, era_code: &str) -> Option<EraDefinition> {
+    if calendar == CalendarSystem::Japanese {
+        return japanese_era_boundary(era_code).map(|boundary| EraDefinition {
+            code: boundary.code,
+            display_name: boundary.display_name,
+            max_year: japanese_era_max_year(boundary),
+        });
+    }
+
+    era_definitions(calendar)
+        .iter()
+        .copied()
+        .find(|definition| definition.code == era_code)
+}
 
 fn japanese_era_boundary(code: &str) -> Option<&'static EraBoundary> {
     JAPANESE_ERA_BOUNDARIES
@@ -155,68 +227,17 @@ fn japanese_era_max_year(boundary: &EraBoundary) -> Option<i32> {
 }
 
 pub(crate) fn default_era_for(calendar: CalendarSystem) -> Option<Era> {
-    match calendar {
-        CalendarSystem::Japanese => JAPANESE_ERA_BOUNDARIES.last().map(|boundary| Era {
+    if calendar == CalendarSystem::Japanese {
+        return JAPANESE_ERA_BOUNDARIES.last().map(|boundary| Era {
             code: String::from(boundary.code),
             display_name: String::from(boundary.display_name),
-        }),
-
-        _ => None,
+        });
     }
-}
 
-pub(crate) fn years_in_era(date: &CalendarDate) -> Option<i32> {
-    match date.calendar {
-        CalendarSystem::Japanese => {
-            let era = date.era.as_ref()?;
-
-            japanese_era_max_year(japanese_era_boundary(era.code.as_str())?)
-        }
-
-        _ => None,
-    }
-}
-
-pub(crate) fn minimum_month_in_year(date: &CalendarDate) -> u8 {
-    match date.calendar {
-        CalendarSystem::Japanese => {
-            let Some(era) = date.era.as_ref() else {
-                return 1;
-            };
-
-            let Some(boundary) = japanese_era_boundary(era.code.as_str()) else {
-                return 1;
-            };
-
-            if date.year == 1 {
-                boundary.start_month
-            } else {
-                1
-            }
-        }
-        _ => 1,
-    }
-}
-
-pub(crate) fn minimum_day_in_month(date: &CalendarDate) -> u8 {
-    match date.calendar {
-        CalendarSystem::Japanese => {
-            let Some(era) = date.era.as_ref() else {
-                return 1;
-            };
-
-            let Some(boundary) = japanese_era_boundary(era.code.as_str()) else {
-                return 1;
-            };
-
-            if date.year == 1 && date.month.get() == boundary.start_month {
-                boundary.start_day
-            } else {
-                1
-            }
-        }
-        _ => 1,
-    }
+    era_definitions(calendar).last().map(|definition| Era {
+        code: String::from(definition.code),
+        display_name: String::from(definition.display_name),
+    })
 }
 
 pub(crate) fn bounded_months_in_year(
@@ -228,9 +249,12 @@ pub(crate) fn bounded_months_in_year(
         CalendarSystem::Japanese => {
             let boundary = japanese_era_boundary(era?)?;
 
-            match japanese_era_max_year(boundary) {
-                Some(max_year) if year == max_year => boundary.end.map(|(_, month, _)| month),
-                _ => Some(12),
+            if let Some(max_year) = japanese_era_max_year(boundary)
+                && year == max_year
+            {
+                boundary.end.map(|(_, month, _)| month)
+            } else {
+                Some(12)
             }
         }
 
@@ -324,11 +348,14 @@ impl DateRange {
 
 /// Converts an ISO date to a day count relative to `0001-01-01`.
 #[must_use]
+#[cfg(test)]
 pub(crate) fn iso_to_epoch_days(year: i32, month: u8, day: u8) -> i64 {
     // Shift Jan/Feb to the end of the previous year so the leap-day correction
     // can be handled uniformly with a March-based year.
     let year_adjustment = (14 - i64::from(month)) / 12;
+
     let march_based_year = i64::from(year) + 4800 - year_adjustment;
+
     let march_based_month = i64::from(month) + 12 * year_adjustment - 3;
 
     // The remaining constants are from the standard Gregorian civil-date to
@@ -348,6 +375,7 @@ pub(crate) fn iso_to_epoch_days(year: i32, month: u8, day: u8) -> i64 {
 
 /// Converts an epoch-day count back to an ISO date.
 #[must_use]
+#[cfg(test)]
 pub(crate) const fn epoch_days_to_iso(epoch_days: i64) -> (i32, u8, u8) {
     // First move back into the Julian-day numbering domain expected by the
     // inverse civil-date algorithm.
@@ -356,25 +384,27 @@ pub(crate) const fn epoch_days_to_iso(epoch_days: i64) -> (i32, u8, u8) {
     // Split the day number across the Gregorian 400-year cycle (`146_097`
     // days), then the 4-year subcycle (`1_461` days).
     let century_cycles = (4 * julian_day + 3) / 146_097;
+
     let days_of_century = julian_day - (146_097 * century_cycles) / 4;
+
     let quad_year_cycles = (4 * days_of_century + 3) / 1_461;
+
     let day_of_year_block = days_of_century - (1_461 * quad_year_cycles) / 4;
 
     // `153` again encodes the March-based month pattern used by the forward
     // conversion. Converting back from that index yields the ISO month/year.
     let month_index = (5 * day_of_year_block + 2) / 153;
+
     let day = (day_of_year_block - (153 * month_index + 2) / 5 + 1) as u8;
+
     let month = (month_index + 3 - 12 * (month_index / 10)) as u8;
+
     let year = (100 * century_cycles + quad_year_cycles - 4800 + month_index / 10) as i32;
 
     (year, month, day)
 }
 
-#[cfg(all(
-    any(feature = "icu4x", feature = "web-intl"),
-    feature = "std",
-    not(target_arch = "wasm32")
-))]
+#[cfg(all(test, feature = "icu4x", feature = "std", not(target_arch = "wasm32")))]
 pub(crate) fn platform_today_iso() -> Result<(i32, u8, u8), String> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -391,25 +421,12 @@ pub(crate) fn platform_today_iso() -> Result<(i32, u8, u8), String> {
 }
 
 #[cfg(all(
-    any(feature = "icu4x", feature = "web-intl"),
+    test,
+    target_arch = "wasm32",
+    feature = "web-intl",
     feature = "std",
-    not(target_arch = "wasm32")
+    feature = "icu4x"
 ))]
-// Keep the native `today()` plumbing reachable in library builds until the
-// full provider/default-provider tasks wire these helpers through normal
-// runtime call paths.
-const _: i64 = UNIX_EPOCH_DAYS_FROM_CE;
-
-#[cfg(all(
-    any(feature = "icu4x", feature = "web-intl"),
-    feature = "std",
-    not(target_arch = "wasm32")
-))]
-// This is the same reachability trick for the function item itself; remove it
-// once follow-up provider work gives `platform_today_iso()` a real caller.
-const _: fn() -> Result<(i32, u8, u8), String> = platform_today_iso;
-
-#[cfg(all(target_arch = "wasm32", feature = "web-intl"))]
 pub(crate) fn platform_today_iso() -> Result<(i32, u8, u8), String> {
     let date = js_sys::Date::new_0();
 
@@ -425,20 +442,129 @@ pub(crate) fn platform_today_iso() -> Result<(i32, u8, u8), String> {
     Ok((year, month, day))
 }
 
-#[cfg(all(feature = "icu4x", target_arch = "wasm32", not(feature = "web-intl")))]
+#[cfg(all(
+    test,
+    feature = "icu4x",
+    target_arch = "wasm32",
+    feature = "std",
+    not(feature = "web-intl")
+))]
 pub(crate) fn platform_today_iso() -> Result<(i32, u8, u8), String> {
     Err(String::from(
         "platform date unavailable on wasm32 without the `web-intl` feature",
     ))
 }
 
-#[cfg(all(
-    any(feature = "icu4x", feature = "web-intl"),
-    not(feature = "std"),
-    not(target_arch = "wasm32")
-))]
-pub(crate) fn platform_today_iso() -> Result<(i32, u8, u8), String> {
-    Err(String::from(
-        "platform date unavailable without the `std` feature",
-    ))
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::CalendarDateFields;
+
+    fn japanese_date(
+        era_code: &str,
+        display_name: &str,
+        year: i32,
+        month: u8,
+        day: u8,
+    ) -> CalendarDate {
+        CalendarDate::new(
+            CalendarSystem::Japanese,
+            &CalendarDateFields {
+                era: Some(Era {
+                    code: String::from(era_code),
+                    display_name: String::from(display_name),
+                }),
+                year: Some(year),
+                month: Some(month),
+                day: Some(day),
+                ..CalendarDateFields::default()
+            },
+        )
+        .expect("Japanese fixture should validate")
+    }
+
+    #[test]
+    fn month_length_helper_covers_gregorian_rules() {
+        assert_eq!(gregorian_days_in_month(2024, 2), 29);
+        assert_eq!(gregorian_days_in_month(2023, 2), 28);
+        assert_eq!(gregorian_days_in_month(2024, 13), 30);
+    }
+
+    #[test]
+    fn era_helpers_cover_defaults_and_unknown_codes() {
+        assert_eq!(
+            default_era_for(CalendarSystem::Japanese)
+                .expect("Japanese default era")
+                .code,
+            "reiwa"
+        );
+        assert_eq!(
+            era_definition(CalendarSystem::Japanese, "heisei")
+                .expect("Heisei definition")
+                .max_year,
+            Some(31)
+        );
+        assert!(era_definition(CalendarSystem::Japanese, "bogus").is_none());
+    }
+
+    #[test]
+    fn japanese_boundary_helpers_clamp_first_and_last_supported_months() {
+        let heisei_start = japanese_date("heisei", "Heisei", 1, 1, 8);
+
+        let heisei_second_year = japanese_date("heisei", "Heisei", 2, 1, 1);
+
+        let reiwa_start = japanese_date("reiwa", "Reiwa", 1, 5, 1);
+
+        assert_eq!(heisei_start.minimum_month_in_year(), 1);
+        assert_eq!(heisei_start.minimum_day_in_month(), 8);
+        assert_eq!(heisei_second_year.minimum_month_in_year(), 1);
+        assert_eq!(heisei_second_year.minimum_day_in_month(), 1);
+        assert_eq!(reiwa_start.minimum_month_in_year(), 5);
+        assert_eq!(reiwa_start.minimum_day_in_month(), 1);
+        assert_eq!(
+            bounded_months_in_year(CalendarSystem::Japanese, 31, Some("heisei")),
+            Some(4)
+        );
+        assert_eq!(
+            bounded_days_in_month(CalendarSystem::Japanese, 31, 4, Some("heisei")),
+            Some(30)
+        );
+        assert_eq!(
+            bounded_months_in_year(CalendarSystem::Japanese, 1, None),
+            None
+        );
+        assert_eq!(
+            bounded_days_in_month(CalendarSystem::Japanese, 1, 5, Some("reiwa")),
+            Some(31)
+        );
+    }
+
+    #[test]
+    fn date_range_and_epoch_day_helpers_roundtrip_iso_values() {
+        let start = CalendarDate::new_gregorian(2024, 3, 15).expect("Gregorian fixture");
+
+        let end = CalendarDate::new_gregorian(2024, 3, 20).expect("Gregorian fixture");
+
+        let earlier = CalendarDate::new_gregorian(2024, 3, 10).expect("Gregorian fixture");
+
+        let range = DateRange::new(start.clone(), end.clone()).expect("ordered range");
+
+        assert!(range.contains(&start));
+        assert!(range.contains(&end));
+        assert!(!range.contains(&earlier));
+        assert_eq!(range.to_iso8601(), "2024-03-15/2024-03-20");
+        assert!(DateRange::new(end.clone(), start.clone()).is_none());
+
+        let normalized = DateRange::normalized(end, start).expect("comparable dates");
+
+        assert_eq!(normalized.start.to_iso8601(), "2024-03-15");
+        assert_eq!(normalized.end.to_iso8601(), "2024-03-20");
+
+        assert_eq!(epoch_days_to_iso(0), (1, 1, 1));
+        assert_eq!(
+            epoch_days_to_iso(iso_to_epoch_days(2024, 3, 15)),
+            (2024, 3, 15)
+        );
+        assert_eq!(epoch_days_to_iso(iso_to_epoch_days(44, 3, 15)), (44, 3, 15));
+    }
 }

@@ -1,196 +1,77 @@
+use alloc::string::ToString;
 use core::{
     cmp::Ordering,
     fmt::{self, Display},
     marker::PhantomData,
-    num::NonZero,
 };
 
-use super::{CalendarDate, CalendarSystem, Era};
-use crate::{IcuProvider, Weekday};
+use super::{CalendarConversionError, CalendarDate, CalendarDateFields, CalendarSystem, Era};
 
 mod sealed {
     pub trait Sealed {}
 }
 
 /// Marker trait for a statically-known calendar system.
-///
-/// `CalendarDate` remains the dynamic, data-driven boundary type used by
-/// provider APIs and serialization. `CalendarKind` powers the typed calendar
-/// overlay that exposes calendar-specific methods only on compatible dates.
 pub trait CalendarKind: sealed::Sealed + Copy + Clone + Default + 'static {
     /// The dynamic calendar system represented by this marker type.
     const SYSTEM: CalendarSystem;
 }
 
-/// Capability trait for typed calendars that support direct day arithmetic
-/// without an [`IcuProvider`].
+/// Capability trait for typed calendars that support direct day arithmetic.
 pub trait DirectDayArithmetic: CalendarKind {}
 
-/// Capability trait for typed calendars that support direct weekday
-/// computation without an [`IcuProvider`].
+/// Capability trait for typed calendars that support direct weekday computation.
 pub trait DirectWeekdayComputation: CalendarKind {}
 
-/// Zero-sized marker for the Gregorian calendar system.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Gregorian;
+macro_rules! calendar_kind {
+    ($name:ident, $system:expr) => {
+        #[doc = concat!("Statically-known marker for the `", stringify!($system), "` calendar.")]
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+        pub struct $name;
 
-impl sealed::Sealed for Gregorian {}
+        impl sealed::Sealed for $name {}
 
-impl CalendarKind for Gregorian {
-    const SYSTEM: CalendarSystem = CalendarSystem::Gregorian;
+        impl CalendarKind for $name {
+            const SYSTEM: CalendarSystem = $system;
+        }
+    };
 }
 
-impl DirectDayArithmetic for Gregorian {}
-
-impl DirectWeekdayComputation for Gregorian {}
-
-/// Zero-sized marker for the Buddhist calendar system.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Buddhist;
-
-impl sealed::Sealed for Buddhist {}
-
-impl CalendarKind for Buddhist {
-    const SYSTEM: CalendarSystem = CalendarSystem::Buddhist;
+macro_rules! direct_day_arithmetic {
+    ($name:ident) => {
+        impl DirectDayArithmetic for $name {}
+    };
 }
 
-/// Zero-sized marker for the Japanese imperial calendar system.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Japanese;
-
-impl sealed::Sealed for Japanese {}
-
-impl CalendarKind for Japanese {
-    const SYSTEM: CalendarSystem = CalendarSystem::Japanese;
+macro_rules! direct_weekday_computation {
+    ($name:ident) => {
+        impl DirectWeekdayComputation for $name {}
+    };
 }
 
-/// Zero-sized marker for the Hebrew calendar system.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Hebrew;
+calendar_kind!(Gregorian, CalendarSystem::Gregorian);
+calendar_kind!(Buddhist, CalendarSystem::Buddhist);
+calendar_kind!(Japanese, CalendarSystem::Japanese);
+calendar_kind!(Hebrew, CalendarSystem::Hebrew);
+calendar_kind!(IslamicCivil, CalendarSystem::IslamicCivil);
+calendar_kind!(IslamicUmmAlQura, CalendarSystem::IslamicUmmAlQura);
+calendar_kind!(Persian, CalendarSystem::Persian);
+calendar_kind!(Indian, CalendarSystem::Indian);
+calendar_kind!(Chinese, CalendarSystem::Chinese);
+calendar_kind!(Coptic, CalendarSystem::Coptic);
+calendar_kind!(Dangi, CalendarSystem::Dangi);
+calendar_kind!(Ethiopic, CalendarSystem::Ethiopic);
+calendar_kind!(EthiopicAmeteAlem, CalendarSystem::EthiopicAmeteAlem);
+calendar_kind!(Roc, CalendarSystem::Roc);
 
-impl sealed::Sealed for Hebrew {}
+direct_day_arithmetic!(Gregorian);
+direct_weekday_computation!(Gregorian);
 
-impl CalendarKind for Hebrew {
-    const SYSTEM: CalendarSystem = CalendarSystem::Hebrew;
-}
-
-/// Zero-sized marker for the astronomical Hijri calendar system.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Islamic;
-
-impl sealed::Sealed for Islamic {}
-
-impl CalendarKind for Islamic {
-    const SYSTEM: CalendarSystem = CalendarSystem::Islamic;
-}
-
-/// Zero-sized marker for the tabular Hijri civil calendar system.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct IslamicCivil;
-
-impl sealed::Sealed for IslamicCivil {}
-
-impl CalendarKind for IslamicCivil {
-    const SYSTEM: CalendarSystem = CalendarSystem::IslamicCivil;
-}
-
-/// Zero-sized marker for the Umm al-Qura Hijri calendar system.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct IslamicUmmAlQura;
-
-impl sealed::Sealed for IslamicUmmAlQura {}
-
-impl CalendarKind for IslamicUmmAlQura {
-    const SYSTEM: CalendarSystem = CalendarSystem::IslamicUmmAlQura;
-}
-
-/// Zero-sized marker for the Persian Solar Hijri calendar system.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Persian;
-
-impl sealed::Sealed for Persian {}
-
-impl CalendarKind for Persian {
-    const SYSTEM: CalendarSystem = CalendarSystem::Persian;
-}
-
-/// Zero-sized marker for the Indian national calendar system.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Indian;
-
-impl sealed::Sealed for Indian {}
-
-impl CalendarKind for Indian {
-    const SYSTEM: CalendarSystem = CalendarSystem::Indian;
-}
-
-/// Zero-sized marker for the Chinese lunisolar calendar system.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Chinese;
-
-impl sealed::Sealed for Chinese {}
-
-impl CalendarKind for Chinese {
-    const SYSTEM: CalendarSystem = CalendarSystem::Chinese;
-}
-
-/// Zero-sized marker for the Coptic calendar system.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Coptic;
-
-impl sealed::Sealed for Coptic {}
-
-impl CalendarKind for Coptic {
-    const SYSTEM: CalendarSystem = CalendarSystem::Coptic;
-}
-
-/// Zero-sized marker for the Korean Dangi lunisolar calendar system.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Dangi;
-
-impl sealed::Sealed for Dangi {}
-
-impl CalendarKind for Dangi {
-    const SYSTEM: CalendarSystem = CalendarSystem::Dangi;
-}
-
-/// Zero-sized marker for the Ethiopic calendar system.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Ethiopic;
-
-impl sealed::Sealed for Ethiopic {}
-
-impl CalendarKind for Ethiopic {
-    const SYSTEM: CalendarSystem = CalendarSystem::Ethiopic;
-}
-
-/// Zero-sized marker for the Ethiopic Amete Alem calendar system.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct EthiopicAmeteAlem;
-
-impl sealed::Sealed for EthiopicAmeteAlem {}
-
-impl CalendarKind for EthiopicAmeteAlem {
-    const SYSTEM: CalendarSystem = CalendarSystem::EthiopicAmeteAlem;
-}
-
-/// Zero-sized marker for the Republic of China (Minguo) calendar system.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Roc;
-
-impl sealed::Sealed for Roc {}
-
-impl CalendarKind for Roc {
-    const SYSTEM: CalendarSystem = CalendarSystem::Roc;
-}
-
-/// Error returned when a dynamic [`CalendarDate`] is wrapped in the wrong typed
-/// calendar marker.
+/// Error returned when a dynamic [`CalendarDate`] is wrapped in the wrong typed calendar marker.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CalendarTypeError {
     /// The statically requested calendar system.
     pub expected: CalendarSystem,
-
     /// The actual runtime calendar system carried by the date.
     pub found: CalendarSystem,
 }
@@ -207,12 +88,7 @@ impl Display for CalendarTypeError {
 
 impl core::error::Error for CalendarTypeError {}
 
-/// A typed calendar date view whose available methods are constrained by the
-/// calendar marker `C`.
-///
-/// This sits on top of the dynamic [`CalendarDate`] boundary type. Use it when
-/// the calendar system is already known statically and calendar-specific
-/// operations should be enforced by the type system instead of runtime checks.
+/// A typed calendar-date view constrained by a marker type.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TypedCalendarDate<C: CalendarKind> {
     raw: CalendarDate,
@@ -220,40 +96,39 @@ pub struct TypedCalendarDate<C: CalendarKind> {
 }
 
 impl CalendarDate {
-    /// Wraps this dynamic date in a typed calendar view when the calendar
-    /// marker matches the stored calendar system.
+    /// Wraps this date in a typed calendar view when the marker matches.
     ///
     /// # Errors
     ///
-    /// Returns [`CalendarTypeError`] when `self.calendar` does not match
-    /// `C::SYSTEM`.
+    /// Returns an error if the requested marker does not match the runtime
+    /// calendar carried by this date.
     pub fn typed<C: CalendarKind>(&self) -> Result<TypedCalendarDate<C>, CalendarTypeError> {
-        TypedCalendarDate::try_from(self)
+        TypedCalendarDate::try_from(self.clone())
     }
 
-    /// Consumes this dynamic date and wraps it in a typed calendar view when
-    /// the calendar marker matches the stored calendar system.
+    /// Consumes this date and wraps it in a typed calendar view when the marker matches.
     ///
     /// # Errors
     ///
-    /// Returns [`CalendarTypeError`] when `self.calendar` does not match
-    /// `C::SYSTEM`.
+    /// Returns an error if the requested marker does not match the runtime
+    /// calendar carried by this date.
     pub fn into_typed<C: CalendarKind>(self) -> Result<TypedCalendarDate<C>, CalendarTypeError> {
         TypedCalendarDate::try_from(self)
     }
 
-    /// Converts this date through the provider into a statically-known target
-    /// calendar type.
-    #[must_use]
+    /// Converts this date into a statically-known calendar type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if calendar conversion fails or if the converted date
+    /// cannot be wrapped in the requested marker type.
     pub fn to_calendar_type<C: CalendarKind>(
         &self,
-        provider: &dyn IcuProvider,
-    ) -> TypedCalendarDate<C> {
-        let converted = self.to_calendar(provider, C::SYSTEM);
-
-        debug_assert_eq!(converted.calendar, C::SYSTEM);
-
-        TypedCalendarDate::from_raw_unchecked(converted)
+    ) -> Result<TypedCalendarDate<C>, CalendarConversionError> {
+        self.to_calendar(C::SYSTEM).and_then(|date| {
+            TypedCalendarDate::from_raw(date)
+                .map_err(|error| CalendarConversionError::Icu(error.to_string()))
+        })
     }
 }
 
@@ -265,25 +140,23 @@ impl<C: CalendarKind> TypedCalendarDate<C> {
         }
     }
 
-    /// Creates a typed calendar date from a dynamic date when the marker and
-    /// stored calendar agree.
+    /// Creates a typed date from a dynamic date when the marker and runtime calendar agree.
     ///
     /// # Errors
     ///
-    /// Returns [`CalendarTypeError`] when `raw.calendar` does not match
-    /// `C::SYSTEM`.
+    /// Returns an error if the marker and runtime calendar differ.
     pub fn from_raw(raw: CalendarDate) -> Result<Self, CalendarTypeError> {
-        if raw.calendar == C::SYSTEM {
+        if raw.calendar() == C::SYSTEM {
             Ok(Self::from_raw_unchecked(raw))
         } else {
             Err(CalendarTypeError {
                 expected: C::SYSTEM,
-                found: raw.calendar,
+                found: raw.calendar(),
             })
         }
     }
 
-    /// Returns the statically-known calendar system for this typed date.
+    /// Returns the statically-known calendar system.
     #[must_use]
     pub const fn calendar_system() -> CalendarSystem {
         C::SYSTEM
@@ -295,68 +168,68 @@ impl<C: CalendarKind> TypedCalendarDate<C> {
         &self.raw
     }
 
-    /// Consumes the typed wrapper and returns the underlying dynamic date.
+    /// Consumes the typed wrapper and returns the raw date.
     #[must_use]
     pub fn into_raw(self) -> CalendarDate {
         self.raw
     }
 
-    /// Returns the date's era when one is present.
+    /// Returns the stored era.
     #[must_use]
     pub const fn era(&self) -> Option<&Era> {
-        self.raw.era.as_ref()
+        self.raw.era()
     }
 
-    /// Returns the display year in the typed calendar.
+    /// Returns the display year.
     #[must_use]
     pub const fn year(&self) -> i32 {
-        self.raw.year
+        self.raw.year()
     }
 
-    /// Returns the 1-based month ordinal.
+    /// Returns the display month.
     #[must_use]
-    pub const fn month(&self) -> NonZero<u8> {
-        self.raw.month
+    pub const fn month(&self) -> u8 {
+        self.raw.month()
     }
 
-    /// Returns the 1-based day of month.
+    /// Returns the display day.
     #[must_use]
-    pub const fn day(&self) -> NonZero<u8> {
-        self.raw.day
+    pub const fn day(&self) -> u8 {
+        self.raw.day()
     }
 
     /// Returns the number of days in the current month.
     #[must_use]
-    pub fn days_in_month(&self, provider: &dyn IcuProvider) -> u8 {
-        self.raw.days_in_month(provider)
+    pub fn days_in_month(&self) -> u8 {
+        self.raw.days_in_month()
     }
 
-    /// Adds whole months within the same typed calendar.
-    #[must_use]
-    pub fn add_months(&self, provider: &dyn IcuProvider, month_delta: i32) -> Option<Self> {
+    /// Adds whole months.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying dynamic date arithmetic fails.
+    pub fn add_months(&self, month_delta: i32) -> Result<Self, super::CalendarError> {
         self.raw
-            .add_months(provider, month_delta)
+            .add(super::DateDuration {
+                months: month_delta,
+                ..super::DateDuration::default()
+            })
             .map(Self::from_raw_unchecked)
     }
 
-    /// Adds whole days using provider-backed cross-calendar conversion when
-    /// necessary.
-    #[must_use]
-    pub fn add_days_with_provider(&self, provider: &dyn IcuProvider, day_delta: i32) -> Self {
-        Self::from_raw_unchecked(self.raw.add_days_with_provider(provider, day_delta))
-    }
-
     /// Converts this typed date into another statically-known calendar type.
-    #[must_use]
-    pub fn to_calendar<T: CalendarKind>(&self, provider: &dyn IcuProvider) -> TypedCalendarDate<T> {
-        let converted = self.raw.to_calendar(provider, T::SYSTEM);
-
-        debug_assert_eq!(converted.calendar, T::SYSTEM);
-
-        TypedCalendarDate::from_raw_unchecked(converted)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying calendar conversion fails.
+    pub fn to_calendar<T: CalendarKind>(
+        &self,
+    ) -> Result<TypedCalendarDate<T>, CalendarConversionError> {
+        self.raw.to_calendar_type::<T>()
     }
 
-    /// Compares two typed dates when their raw field ordering is meaningful.
+    /// Compares two typed dates within the same calendar.
     #[must_use]
     pub fn compare_within_calendar(&self, other: &Self) -> Option<Ordering> {
         self.raw.compare_within_calendar(&other.raw)
@@ -364,29 +237,34 @@ impl<C: CalendarKind> TypedCalendarDate<C> {
 }
 
 impl<C: DirectDayArithmetic> TypedCalendarDate<C> {
-    /// Adds whole days using direct arithmetic supported by this calendar kind.
-    #[must_use]
-    pub fn add_days(&self, day_delta: i32) -> Option<Self> {
+    /// Adds whole days.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying dynamic date arithmetic fails.
+    pub fn add_days(&self, day_delta: i32) -> Result<Self, super::CalendarError> {
         self.raw.add_days(day_delta).map(Self::from_raw_unchecked)
     }
 }
 
-impl<C: DirectWeekdayComputation> TypedCalendarDate<C> {
-    /// Returns the weekday using direct calendar-specific computation.
-    #[must_use]
-    pub fn weekday(&self) -> Weekday {
-        self.raw.weekday()
-    }
-}
-
 impl TypedCalendarDate<Gregorian> {
-    /// Creates a typed Gregorian date from validated month and day components.
-    #[must_use]
-    pub fn new(year: i32, month: NonZero<u8>, day: NonZero<u8>) -> Self {
-        Self {
-            raw: CalendarDate::new_gregorian(year, month, day),
-            marker: PhantomData,
-        }
+    /// Creates a typed Gregorian date from ISO-compatible fields.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the supplied fields do not form a valid Gregorian
+    /// date.
+    pub fn new(year: i32, month: u8, day: u8) -> Result<Self, super::CalendarError> {
+        CalendarDate::new(
+            CalendarSystem::Gregorian,
+            &CalendarDateFields {
+                year: Some(year),
+                month: Some(month),
+                day: Some(day),
+                ..CalendarDateFields::default()
+            },
+        )
+        .map(Self::from_raw_unchecked)
     }
 }
 
@@ -445,5 +323,105 @@ impl TryFrom<u8> for Month {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         Self::new(value).ok_or(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::format;
+
+    use super::*;
+    use crate::CalendarError;
+
+    fn buddhist_fixture() -> CalendarDate {
+        CalendarDate::new(
+            CalendarSystem::Buddhist,
+            &CalendarDateFields {
+                year: Some(2567),
+                month: Some(3),
+                day: Some(15),
+                ..CalendarDateFields::default()
+            },
+        )
+        .expect("Buddhist fixture should validate")
+    }
+
+    #[test]
+    fn typed_calendar_date_roundtrips_and_exposes_raw_fields() {
+        let raw = CalendarDate::new_gregorian(2024, 3, 15).expect("Gregorian fixture");
+        let typed = raw.typed::<Gregorian>().expect("marker should match");
+
+        assert_eq!(
+            TypedCalendarDate::<Gregorian>::calendar_system(),
+            CalendarSystem::Gregorian
+        );
+        assert_eq!(typed.as_raw(), &raw);
+        assert_eq!(typed.year(), 2024);
+        assert_eq!(typed.month(), 3);
+        assert_eq!(typed.day(), 15);
+        assert_eq!(typed.clone().into_raw(), raw);
+        assert_eq!(CalendarDate::from(typed.clone()), raw);
+    }
+
+    #[test]
+    fn typed_calendar_date_reports_mismatched_marker_systems() {
+        let raw = buddhist_fixture();
+
+        let error = TypedCalendarDate::<Gregorian>::from_raw(raw.clone())
+            .expect_err("Buddhist date must not wrap as Gregorian");
+
+        assert_eq!(error.expected, CalendarSystem::Gregorian);
+        assert_eq!(error.found, CalendarSystem::Buddhist);
+        assert_eq!(
+            format!("{error}"),
+            "calendar type mismatch: expected Gregorian, found Buddhist"
+        );
+        assert_eq!(raw.to_calendar_type::<Gregorian>().unwrap().year(), 2024);
+    }
+
+    #[test]
+    fn typed_calendar_date_arithmetic_and_conversion_delegate_to_dynamic_api() {
+        let january = TypedCalendarDate::<Gregorian>::new(2024, 1, 31).expect("Gregorian fixture");
+
+        let february = january
+            .add_months(1)
+            .expect("month arithmetic should constrain");
+
+        let next_day = january.add_days(1).expect("day arithmetic should work");
+
+        let buddhist = january
+            .to_calendar::<Buddhist>()
+            .expect("calendar conversion should succeed");
+
+        assert_eq!(february.month(), 2);
+        assert_eq!(february.day(), 29);
+        assert_eq!(next_day.month(), 2);
+        assert_eq!(next_day.day(), 1);
+        assert_eq!(buddhist.as_raw().calendar(), CalendarSystem::Buddhist);
+        assert_eq!(
+            january.compare_within_calendar(&next_day),
+            Some(Ordering::Less)
+        );
+    }
+
+    #[test]
+    fn gregorian_typed_constructor_and_month_bounds_validate_inputs() {
+        assert_eq!(
+            TypedCalendarDate::<Gregorian>::new(2024, 2, 29)
+                .expect("leap-day Gregorian fixture")
+                .days_in_month(),
+            29
+        );
+        assert!(matches!(
+            TypedCalendarDate::<Gregorian>::new(2023, 2, 29),
+            Err(CalendarError::Arithmetic(_))
+        ));
+
+        assert_eq!(Month::new(0), None);
+        assert_eq!(Month::new(1).map(Month::get), Some(1));
+        assert_eq!(Month::new(13).map(Month::get), Some(13));
+        assert_eq!(Month::new(14), None);
+        assert_eq!(Month::try_from(13).map(Month::get), Ok(13));
+        assert_eq!(Month::try_from(14), Err(14));
     }
 }

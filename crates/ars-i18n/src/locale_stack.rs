@@ -29,24 +29,27 @@ impl LocaleStack {
     #[must_use]
     pub fn new(primary: Locale) -> Self {
         let mut secondary_locale = None;
+
         if primary.region().is_some()
             && let Some(script) = primary.script()
         {
             let lang_script = alloc::format!("{}-{script}", primary.language());
-            if let Ok(locale) = Locale::parse(&lang_script) {
-                if locale != primary {
-                    secondary_locale = Some(locale);
-                }
+
+            if let Ok(locale) = Locale::parse(&lang_script)
+                && locale != primary
+            {
+                secondary_locale = Some(locale);
             }
         }
 
         let mut tertiary_locale = None;
-        if primary.region().is_some() || primary.script().is_some() {
-            if let Ok(locale) = Locale::parse(primary.language()) {
-                if locale != primary && (secondary_locale.as_ref() != Some(&locale)) {
-                    tertiary_locale = Some(locale);
-                }
-            }
+
+        if (primary.region().is_some() || primary.script().is_some())
+            && let Ok(locale) = Locale::parse(primary.language())
+            && locale != primary
+            && (secondary_locale.as_ref() != Some(&locale))
+        {
+            tertiary_locale = Some(locale);
         }
 
         Self {
@@ -97,6 +100,7 @@ mod tests {
         let stack = LocaleStack::new(Locale::parse("zh-Hant-TW").expect("locale should parse"));
 
         let tags = stack.iter().map(Locale::to_bcp47).collect::<Vec<_>>();
+
         assert_eq!(tags, vec!["zh-Hant-TW", "zh-Hant", "zh"]);
     }
 
@@ -105,6 +109,7 @@ mod tests {
         let stack = LocaleStack::new(Locale::parse("pt-BR").expect("locale should parse"));
 
         let tags = stack.iter().map(Locale::to_bcp47).collect::<Vec<_>>();
+
         assert_eq!(tags, vec!["pt-BR", "pt"]);
     }
 
@@ -113,6 +118,7 @@ mod tests {
         let stack = LocaleStack::new(Locale::parse("zh-Hant").expect("locale should parse"));
 
         let tags = stack.iter().map(Locale::to_bcp47).collect::<Vec<_>>();
+
         assert_eq!(tags, vec!["zh-Hant", "zh"]);
     }
 
@@ -121,6 +127,7 @@ mod tests {
         let stack = LocaleStack::new(Locale::parse("en").expect("locale should parse"));
 
         let tags = stack.iter().map(Locale::to_bcp47).collect::<Vec<_>>();
+
         assert_eq!(tags, vec!["en"]);
     }
 
@@ -130,12 +137,14 @@ mod tests {
             .with_fallback(Locale::parse("en").expect("locale should parse"));
 
         let tags = stack.iter().map(Locale::to_bcp47).collect::<Vec<_>>();
+
         assert_eq!(tags, vec!["pt-BR", "pt", "en"]);
     }
 
     #[test]
     fn locale_stack_primary_returns_first_locale() {
         let stack = LocaleStack::new(Locale::parse("de-DE").expect("locale should parse"));
+
         assert_eq!(stack.primary().to_bcp47(), "de-DE");
     }
 
