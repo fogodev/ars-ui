@@ -538,6 +538,12 @@ impl DateFormatter {
             value,
             self.effective_time_fields(),
             self.resolved.time_zone.as_ref(),
+            #[cfg(feature = "std")]
+            self.resolved
+                .time_zone
+                .as_ref()
+                .and_then(fixed_offset_minutes_for_time_zone),
+            #[cfg(not(feature = "std"))]
             None,
         )
     }
@@ -1340,6 +1346,18 @@ fn format_time_zone_name(
     }
 }
 
+#[cfg(feature = "std")]
+fn fixed_offset_minutes_for_time_zone(time_zone: &TimeZoneId) -> Option<i32> {
+    if time_zone.as_str() == "UTC" {
+        return Some(0);
+    }
+
+    match temporal_rs::TimeZone::try_from_str(time_zone.as_str()).ok()? {
+        temporal_rs::TimeZone::UtcOffset(offset) => Some(i32::from(offset.minutes())),
+        temporal_rs::TimeZone::IanaIdentifier(_) => None,
+    }
+}
+
 fn format_utc_offset(utc_offset_minutes: i32, long: bool) -> String {
     if utc_offset_minutes == 0 {
         return String::from("GMT");
@@ -1589,9 +1607,10 @@ mod tests {
     };
     #[cfg(all(feature = "std", feature = "icu4x"))]
     use super::{
-        DateOrder, date_from_zoned, date_order, era_label, format_hour, format_month,
-        format_numeric, format_time_zone_name, format_utc_offset, format_year, literal_part,
-        push_date_field, time_from_zoned, title_case_ascii, truncate_graphemes, weekday_label,
+        DateOrder, date_from_zoned, date_order, era_label, fixed_offset_minutes_for_time_zone,
+        format_hour, format_month, format_numeric, format_time_zone_name, format_utc_offset,
+        format_year, literal_part, push_date_field, time_from_zoned, title_case_ascii,
+        truncate_graphemes, weekday_label,
     };
     #[cfg(feature = "icu4x")]
     use crate::StubIcuProvider;
@@ -2330,6 +2349,42 @@ mod tests {
 
     #[cfg(all(feature = "std", feature = "icu4x"))]
     #[test]
+    fn formatter_time_only_entrypoint_uses_numeric_offsets_for_fixed_offset_zones() {
+        let formatter = DateFormatter::new_with_options(
+            &locales::en_us(),
+            DateFormatterOptions {
+                hour: Some(NumericWidth::Numeric),
+                minute: Some(NumericWidth::TwoDigit),
+                time_zone: Some(TimeZoneId::new("UTC").expect("UTC should validate")),
+                time_zone_name: Some(TimeZoneNameFormat::ShortOffset),
+                ..DateFormatterOptions::default()
+            },
+        );
+
+        let time = Time::new(17, 5, 9, 0).expect("time should validate");
+        let formatted_utc = formatter.format_time(&time);
+
+        assert!(formatted_utc.contains("GMT"));
+        assert!(!formatted_utc.contains("GMT UTC"));
+
+        let offset_formatter = DateFormatter::new_with_options(
+            &locales::en_us(),
+            DateFormatterOptions {
+                hour: Some(NumericWidth::Numeric),
+                minute: Some(NumericWidth::TwoDigit),
+                time_zone: Some(
+                    TimeZoneId::new("+05:30").expect("offset time zone should validate"),
+                ),
+                time_zone_name: Some(TimeZoneNameFormat::LongOffset),
+                ..DateFormatterOptions::default()
+            },
+        );
+
+        assert!(offset_formatter.format_time(&time).contains("GMT+05:30"));
+    }
+
+    #[cfg(all(feature = "std", feature = "icu4x"))]
+    #[test]
     fn formatter_primitives_cover_numeric_and_projection_helpers() {
         let provider = StubIcuProvider;
 
@@ -2408,6 +2463,24 @@ mod tests {
                 Some(zoned.offset_minutes())
             ),
             "GMT-04:00"
+        );
+        assert_eq!(
+            fixed_offset_minutes_for_time_zone(
+                &TimeZoneId::new("UTC").expect("UTC should validate")
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            fixed_offset_minutes_for_time_zone(
+                &TimeZoneId::new("+05:30").expect("offset zone should validate")
+            ),
+            Some(5 * 60 + 30)
+        );
+        assert_eq!(
+            fixed_offset_minutes_for_time_zone(
+                &TimeZoneId::new("America/New_York").expect("time zone should parse")
+            ),
+            None
         );
         assert_eq!(format_utc_offset(-4 * 60, false), "GMT-4");
         assert_eq!(format_utc_offset(5 * 60 + 30, false), "GMT+5:30");
