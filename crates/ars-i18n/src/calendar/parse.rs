@@ -1,6 +1,6 @@
 //! Parsing and current-time helpers for calendar values.
 
-use alloc::string::ToString;
+use alloc::{format, string::ToString};
 use core::str::FromStr;
 
 #[cfg(feature = "std")]
@@ -65,19 +65,32 @@ pub fn parse_duration(input: &str) -> Result<DateTimeDuration, CalendarError> {
 
     Ok(DateTimeDuration {
         date: super::DateDuration {
-            years: i32::try_from(duration.years()).unwrap_or(0),
-            months: i32::try_from(duration.months()).unwrap_or(0),
-            weeks: i32::try_from(duration.weeks()).unwrap_or(0),
-            days: i32::try_from(duration.days()).unwrap_or(0),
+            years: try_duration_component("years", duration.years())?,
+            months: try_duration_component("months", duration.months())?,
+            weeks: try_duration_component("weeks", duration.weeks())?,
+            days: try_duration_component("days", duration.days())?,
         },
         time: super::TimeDuration {
             hours: duration.hours(),
             minutes: duration.minutes(),
             seconds: duration.seconds(),
             milliseconds: duration.milliseconds(),
-            microseconds: i64::try_from(duration.microseconds()).unwrap_or(0),
-            nanoseconds: i64::try_from(duration.nanoseconds()).unwrap_or(0),
+            microseconds: try_duration_component("microseconds", duration.microseconds())?,
+            nanoseconds: try_duration_component("nanoseconds", duration.nanoseconds())?,
         },
+    })
+}
+
+fn try_duration_component<T, U>(name: &str, value: T) -> Result<U, CalendarError>
+where
+    T: Copy + ToString,
+    U: TryFrom<T>,
+{
+    U::try_from(value).map_err(|_| {
+        CalendarError::Arithmetic(format!(
+            "duration {name} component is out of range: {}",
+            value.to_string()
+        ))
     })
 }
 
@@ -279,6 +292,7 @@ mod tests {
         assert!(parse_date_time("2024-03-15T25:00").is_err());
         assert!(parse_time("25:61").is_err());
         assert!(parse_duration("P-not-a-duration").is_err());
+        assert!(parse_duration("P2147483648Y").is_err());
     }
 
     #[test]

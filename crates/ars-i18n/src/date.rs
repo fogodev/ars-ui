@@ -1375,7 +1375,7 @@ fn title_case_ascii(value: &str) -> String {
 #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 fn js_date_from_calendar(date: &CalendarDate) -> Option<JsDate> {
     if date.calendar == CalendarSystem::Gregorian {
-        let js_date = js_date_from_ymd(date.year, date.month, date.day);
+        let js_date = js_date_from_ymd(date.iso_year, date.iso_month, date.iso_day);
 
         return js_date_is_valid(&js_date).then_some(js_date);
     }
@@ -2545,6 +2545,37 @@ mod web_intl_tests {
     }
 
     #[wasm_bindgen_test]
+    fn web_intl_date_formatter_preserves_bce_gregorian_dates() {
+        let locale = locales::en_us();
+        let formatter = DateFormatter::new(&locale, FormatLength::Long);
+        let date = CalendarDate::new(
+            CalendarSystem::Gregorian,
+            &crate::CalendarDateFields {
+                era: Some(crate::Era {
+                    code: String::from("bc"),
+                    display_name: String::from("BC"),
+                }),
+                year: Some(1),
+                month: Some(1),
+                day: Some(1),
+                ..crate::CalendarDateFields::default()
+            },
+        )
+        .expect("BCE Gregorian fixture should validate");
+
+        let converted =
+            js_date_from_calendar(&date).expect("BCE Gregorian fixture should map to a Date");
+        let expected = direct_browser_format_for_js_date(
+            &locale,
+            FormatLength::Long,
+            &js_date_from_ymd(0, 1, 1),
+        );
+
+        assert_eq!(converted.to_iso_string(), "0000-01-01T12:00:00.000Z");
+        assert_eq!(formatter.format(&date), expected);
+    }
+
+    #[wasm_bindgen_test]
     fn web_intl_date_helpers_preserve_astronomical_gregorian_years_from_non_gregorian_input() {
         let buddhist = CalendarDate::new(
             CalendarSystem::Buddhist,
@@ -2571,6 +2602,17 @@ mod web_intl_tests {
     }
 
     fn direct_browser_format(locale: &Locale, length: FormatLength, date: &CalendarDate) -> String {
+        let js_date =
+            js_date_from_calendar(date).expect("test fixtures should map to a browser Date");
+
+        direct_browser_format_for_js_date(locale, length, &js_date)
+    }
+
+    fn direct_browser_format_for_js_date(
+        locale: &Locale,
+        length: FormatLength,
+        js_date: &js_sys::Date,
+    ) -> String {
         use js_sys::{
             Array, Function,
             Intl::{DateTimeFormat as JsDateTimeFormat, DateTimeFormatOptions},
@@ -2587,9 +2629,6 @@ mod web_intl_tests {
         let formatter = JsDateTimeFormat::new(&locales, options.as_ref());
 
         let format: Function = formatter.format();
-
-        let js_date =
-            js_date_from_calendar(date).expect("test fixtures should map to a browser Date");
 
         format
             .call1(&JsValue::UNDEFINED, js_date.as_ref())
