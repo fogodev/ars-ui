@@ -292,10 +292,14 @@ fn icu4x_week_info_includes_weekend_metadata() {
     let provider = Icu4xProvider;
 
     let us = provider.week_info(&locale("en-US"));
+    let germany = provider.week_info(&locale("de-DE"));
 
     assert_eq!(us.first_day, Weekday::Sunday);
     assert_eq!(us.weekend_start, Weekday::Saturday);
     assert_eq!(us.weekend_end, Weekday::Sunday);
+    assert_eq!(us.minimal_days_in_first_week, 1);
+    assert_eq!(germany.first_day, Weekday::Monday);
+    assert_eq!(germany.minimal_days_in_first_week, 4);
 
     let israel = provider.week_info(&locale("he-IL"));
 

@@ -585,20 +585,21 @@ impl WeekInfo {
     /// is unavailable.
     #[must_use]
     pub fn for_locale(locale: &Locale) -> Self {
-        let (default_first_day, weekend_start, weekend_end) = match locale.region() {
-            Some("US" | "CA" | "AU" | "NZ" | "PH" | "BR" | "JP" | "TH") => {
-                (Weekday::Sunday, Weekday::Saturday, Weekday::Sunday)
-            }
+        let (default_first_day, weekend_start, weekend_end, minimal_days_in_first_week) =
+            match locale.region() {
+                Some("US" | "CA" | "AU" | "NZ" | "PH" | "BR" | "JP" | "TH") => {
+                    (Weekday::Sunday, Weekday::Saturday, Weekday::Sunday, 1)
+                }
 
-            Some("IL") => (Weekday::Sunday, Weekday::Friday, Weekday::Saturday),
+                Some("IL") => (Weekday::Sunday, Weekday::Friday, Weekday::Saturday, 1),
 
-            Some(
-                "AE" | "BH" | "DZ" | "EG" | "IQ" | "JO" | "KW" | "LY" | "OM" | "QA" | "SA" | "SD"
-                | "SY" | "YE",
-            ) => (Weekday::Saturday, Weekday::Friday, Weekday::Saturday),
+                Some(
+                    "AE" | "BH" | "DZ" | "EG" | "IQ" | "JO" | "KW" | "LY" | "OM" | "QA" | "SA"
+                    | "SD" | "SY" | "YE",
+                ) => (Weekday::Saturday, Weekday::Friday, Weekday::Saturday, 1),
 
-            _ => (Weekday::Monday, Weekday::Saturday, Weekday::Sunday),
-        };
+                _ => (Weekday::Monday, Weekday::Saturday, Weekday::Sunday, 4),
+            };
 
         let first_day = locale
             .first_day_of_week_extension()
@@ -608,7 +609,7 @@ impl WeekInfo {
             first_day,
             weekend_start,
             weekend_end,
-            minimal_days_in_first_week: 1,
+            minimal_days_in_first_week,
         }
     }
 }
@@ -1044,6 +1045,13 @@ mod tests {
             (Weekday::Saturday, Weekday::Friday, Weekday::Saturday)
         );
         assert_eq!(override_locale.first_day, Weekday::Monday);
+        assert_eq!(us.minimal_days_in_first_week, 1);
+        assert_eq!(ae.minimal_days_in_first_week, 1);
+        assert_eq!(
+            WeekInfo::for_locale(&Locale::parse("de-DE").expect("locale should parse"))
+                .minimal_days_in_first_week,
+            4
+        );
         assert_eq!(override_locale.minimal_days_in_first_week, 1);
     }
 

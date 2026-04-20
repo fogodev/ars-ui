@@ -80,7 +80,7 @@ pub fn is_equal_year(a: &impl DateValue, b: &impl DateValue) -> bool {
 #[cfg(feature = "std")]
 #[must_use]
 pub fn is_today(date: &impl DateValue, time_zone: &TimeZoneId) -> bool {
-    super::parse::today(Some(time_zone)).is_ok_and(|today| is_equal_day(&date.date_value(), &today))
+    super::parse::today(Some(time_zone)).is_ok_and(|today| is_same_day(&date.date_value(), &today))
 }
 
 /// Returns the first day of the month.
@@ -450,11 +450,14 @@ mod tests {
         let time_zone = TimeZoneId::new("UTC").expect("UTC should validate");
 
         let far_future = gregorian_date(2099, 1, 1);
+        let today = CalendarDate::today(CalendarSystem::Gregorian)
+            .expect("Gregorian today should resolve for the current instant");
 
         let earlier = gregorian_date(2024, 3, 10);
 
         let later = gregorian_date(2024, 3, 15);
 
+        assert!(is_today(&today, &time_zone));
         assert!(!is_today(&far_future, &time_zone));
         assert_eq!(min_date(&later, &earlier), earlier);
         assert_eq!(max_date(&earlier, &later), later);

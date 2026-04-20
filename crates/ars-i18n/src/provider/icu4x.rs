@@ -267,7 +267,7 @@ impl IcuProvider for Icu4xProvider {
             first_day: Weekday::from_icu_weekday(week_info.first_weekday),
             weekend_start,
             weekend_end,
-            minimal_days_in_first_week: 1,
+            minimal_days_in_first_week: WeekInfo::for_locale(locale).minimal_days_in_first_week,
         }
     }
 
