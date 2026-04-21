@@ -208,7 +208,7 @@ pub struct FormSketchProps {
 
 #[component]
 pub fn Form(props: FormSketchProps) -> Element {
-    let machine = use_machine::<form::Machine>(form::Props::default());
+    let machine = use_machine::<form::component::Machine>(form::component::Props::default());
     let root_attrs = machine.derive(|api| api.root_attrs());
     let status_attrs = machine.derive(|api| api.status_region_attrs());
     let status_message = machine.derive(|api| api.status_message().to_string());
@@ -224,9 +224,9 @@ pub fn Form(props: FormSketchProps) -> Element {
             ..root_attrs.read().clone(),
             onsubmit: move |ev| {
                 ev.prevent_default();
-                machine.send.call(form::Event::Submit);
+                machine.send.call(form::component::Event::Submit);
             },
-            onreset: move |_| machine.send.call(form::Event::Reset),
+            onreset: move |_| machine.send.call(form::component::Event::Reset),
             {props.children}
             div {
                 ..status_attrs.read().clone(),
@@ -240,7 +240,7 @@ pub fn Form(props: FormSketchProps) -> Element {
 ## 25. Reference Implementation Skeleton
 
 ```rust
-let machine = use_machine::<form::Machine>(props);
+let machine = use_machine::<form::component::Machine>(props);
 let form_ref = create_form_ref();
 let status_ref = create_status_region_ref();
 let registry = create_field_registration_helper();

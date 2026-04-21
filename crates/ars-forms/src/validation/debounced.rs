@@ -522,6 +522,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn stub_async_validator_validate_async_returns_ok() {
+        use core::task::{Context as TaskContext, Poll, Waker};
+
+        let validator = StubAsyncValidator;
+        let value = Value::Text("test".to_string());
+        let ctx = Context::standalone("field");
+        let mut future = validator.validate_async(&value, &ctx);
+        let mut task_ctx = TaskContext::from_waker(Waker::noop());
+
+        assert!(matches!(
+            future.as_mut().poll(&mut task_ctx),
+            Poll::Ready(Ok(()))
+        ));
+    }
+
     // --- Test helpers ---
 
     use super::super::{
@@ -531,6 +547,7 @@ mod tests {
 
     struct StubAsyncValidator;
 
+    #[cfg(not(target_arch = "wasm32"))]
     impl AsyncValidator for StubAsyncValidator {
         fn validate_async<'a>(
             &'a self,
@@ -538,6 +555,17 @@ mod tests {
             _ctx: &'a Context<'a>,
         ) -> std::pin::Pin<Box<dyn Future<Output = super::super::result::Result> + Send + 'a>>
         {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    impl AsyncValidator for StubAsyncValidator {
+        fn validate_async<'a>(
+            &'a self,
+            _value: &'a Value,
+            _ctx: &'a Context<'a>,
+        ) -> std::pin::Pin<Box<dyn Future<Output = super::super::result::Result> + 'a>> {
             Box::pin(async { Ok(()) })
         }
     }

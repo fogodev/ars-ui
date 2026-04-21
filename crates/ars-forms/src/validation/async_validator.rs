@@ -206,6 +206,13 @@ mod tests {
     }
 
     #[test]
+    fn block_on_ready_panics_for_pending_future() {
+        let result = std::panic::catch_unwind(|| block_on_ready(std::future::pending::<()>()));
+
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn async_fn_validator_compiles() {
         let validator = AsyncFnValidator::new(|_text: String, _ctx: OwnedContext| async { Ok(()) });
 

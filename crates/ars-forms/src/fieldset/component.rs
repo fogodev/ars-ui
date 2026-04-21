@@ -1,9 +1,9 @@
-//! Field component state machine and connect API.
+//! Fieldset component state machine and connect API.
 //!
-//! This module implements the framework-agnostic `Field` machine defined in
-//! `spec/foundation/07-forms.md` §13. The machine is intentionally stateless
-//! at the state-enum level and instead tracks required, validation, and ARIA
-//! wiring details in its context.
+//! This module implements the framework-agnostic `Fieldset` machine defined in
+//! `spec/foundation/07-forms.md` §12. The machine is intentionally stateless
+//! at the state-enum level and instead tracks disabled, invalid, readonly, and
+//! description/error wiring in its context.
 
 use core::fmt::{self, Debug};
 
@@ -14,27 +14,24 @@ use ars_core::{
 
 use crate::validation::Error;
 
-/// Single state for the field component machine.
+/// Single state for the fieldset machine.
 ///
-/// `Field` is effectively stateless. All meaningful changes are stored in
+/// `Fieldset` is effectively stateless. All meaningful changes are stored in
 /// [`Context`] and applied through context-only transitions.
 #[derive(Clone, Debug, PartialEq)]
 pub enum State {
-    /// The field is mounted and ready to expose its current context.
+    /// The fieldset is mounted and ready to expose its current context.
     Idle,
 }
 
-/// Events that update field component context.
+/// Events that update fieldset context.
 #[derive(Clone, Debug)]
 pub enum Event {
-    /// Replaces the current validation errors.
+    /// Replaces the current fieldset-level validation errors.
     SetErrors(Vec<Error>),
 
-    /// Clears all current validation errors.
+    /// Clears all fieldset-level validation errors.
     ClearErrors,
-
-    /// Tracks whether a description part is rendered.
-    SetHasDescription(bool),
 
     /// Synchronizes the disabled state from props.
     SetDisabled(bool),
@@ -45,38 +42,29 @@ pub enum Event {
     /// Synchronizes the readonly state from props.
     SetReadonly(bool),
 
-    /// Synchronizes the required state from props.
-    SetRequired(bool),
-
     /// Synchronizes the layout direction from props.
     SetDir(Option<Direction>),
 
-    /// Tracks whether async validation is currently running.
-    SetValidating(bool),
+    /// Tracks whether a description part is currently rendered.
+    SetHasDescription(bool),
 }
 
-/// Mutable machine context for the field component.
+/// Mutable machine context for the fieldset component.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Context {
-    /// Whether the field is required.
-    pub required: bool,
-
-    /// Whether the field is disabled.
+    /// Whether the entire fieldset and all contained inputs are disabled.
     pub disabled: bool,
 
-    /// Whether the field is read-only.
-    pub readonly: bool,
-
-    /// Whether the field is currently invalid.
+    /// Whether the fieldset is currently invalid.
     pub invalid: bool,
 
-    /// Whether an async validator is currently running.
-    pub validating: bool,
+    /// Whether the fieldset is read-only.
+    pub readonly: bool,
 
     /// The configured text direction for RTL-aware rendering.
     pub dir: Option<Direction>,
 
-    /// Field-level validation errors.
+    /// Fieldset-level validation errors.
     pub errors: Vec<Error>,
 
     /// Whether a description part is rendered and should be referenced by ARIA.
@@ -86,32 +74,29 @@ pub struct Context {
     pub ids: ComponentIds,
 }
 
-/// Immutable configuration for a field machine instance.
+/// Immutable configuration for a fieldset machine instance.
 #[derive(Clone, Debug, Default, PartialEq, ars_core::HasId)]
 pub struct Props {
-    /// Adapter-provided base ID for the field root.
+    /// Adapter-provided base ID for the fieldset root.
     ///
     /// This ID is immutable for the lifetime of a machine instance because
     /// [`Context::ids`] caches the derived part IDs during initialization.
     pub id: String,
 
-    /// Whether the field is required.
-    pub required: bool,
-
-    /// Whether the field is disabled.
+    /// Whether the entire fieldset and all contained inputs are disabled.
     pub disabled: bool,
 
-    /// Whether the field is read-only.
-    pub readonly: bool,
-
-    /// Whether the field is invalid before error-driven state is applied.
+    /// Whether the fieldset is invalid before error-driven state is applied.
     pub invalid: bool,
+
+    /// Whether the fieldset is read-only.
+    pub readonly: bool,
 
     /// The configured text direction for RTL-aware rendering.
     pub dir: Option<Direction>,
 }
 
-/// Framework-agnostic field component state machine.
+/// Framework-agnostic fieldset state machine.
 #[derive(Debug)]
 pub struct Machine;
 
@@ -131,11 +116,9 @@ impl ars_core::Machine for Machine {
         (
             State::Idle,
             Context {
-                required: props.required,
                 disabled: props.disabled,
-                readonly: props.readonly,
                 invalid: props.invalid,
-                validating: false,
+                readonly: props.readonly,
                 dir: props.dir,
                 errors: Vec::new(),
                 has_description: false,
@@ -147,7 +130,7 @@ impl ars_core::Machine for Machine {
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
         assert_eq!(
             old.id, new.id,
-            "field_component Props.id must remain stable after init"
+            "fieldset Props.id must remain stable after init"
         );
 
         let mut events = Vec::new();
@@ -162,10 +145,6 @@ impl ars_core::Machine for Machine {
 
         if old.readonly != new.readonly {
             events.push(Event::SetReadonly(new.readonly));
-        }
-
-        if old.required != new.required {
-            events.push(Event::SetRequired(new.required));
         }
 
         if old.dir != new.dir {
@@ -199,13 +178,6 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            Event::SetHasDescription(has_description) => {
-                let has_description = *has_description;
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.has_description = has_description;
-                }))
-            }
-
             Event::SetDisabled(disabled) => {
                 let disabled = *disabled;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
@@ -227,13 +199,6 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            Event::SetRequired(required) => {
-                let required = *required;
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.required = required;
-                }))
-            }
-
             Event::SetDir(dir) => {
                 let dir = *dir;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
@@ -241,10 +206,10 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            Event::SetValidating(validating) => {
-                let validating = *validating;
+            Event::SetHasDescription(has_description) => {
+                let has_description = *has_description;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.validating = validating;
+                    ctx.has_description = has_description;
                 }))
             }
         }
@@ -260,7 +225,7 @@ impl ars_core::Machine for Machine {
     }
 }
 
-/// Snapshot connect API for deriving field DOM attributes.
+/// Snapshot connect API for deriving fieldset DOM attributes.
 pub struct Api<'a> {
     ctx: &'a Context,
 }
@@ -271,24 +236,24 @@ impl Debug for Api<'_> {
     }
 }
 
-/// Structural parts exposed by the field connect API.
+/// Structural parts exposed by the fieldset connect API.
 #[derive(ComponentPart)]
-#[scope = "field"]
+#[scope = "fieldset"]
 pub enum Part {
-    /// The root container element.
+    /// The root `<fieldset>` element.
     Root,
 
-    /// The visible label element.
-    Label,
-
-    /// The input-like element receiving ARIA wiring.
-    Input,
+    /// The `<legend>` element naming the fieldset.
+    Legend,
 
     /// The optional descriptive text element.
     Description,
 
-    /// The field-level error message element.
+    /// The fieldset-level error message element.
     ErrorMessage,
+
+    /// The content wrapper for descendant fields.
+    Content,
 }
 
 impl ConnectApi for Api<'_> {
@@ -297,16 +262,16 @@ impl ConnectApi for Api<'_> {
     fn part_attrs(&self, part: Self::Part) -> AttrMap {
         match part {
             Part::Root => self.root_attrs(),
-            Part::Label => self.label_attrs(),
-            Part::Input => self.input_attrs(),
+            Part::Legend => self.legend_attrs(),
             Part::Description => self.description_attrs(),
             Part::ErrorMessage => self.error_message_attrs(),
+            Part::Content => self.content_attrs(),
         }
     }
 }
 
 impl<'a> Api<'a> {
-    /// Returns attributes for the root field container.
+    /// Returns attributes for the root `<fieldset>` element.
     #[must_use]
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
@@ -316,84 +281,43 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
 
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
+
         if let Some(dir) = self.ctx.dir {
             attrs.set(HtmlAttr::Dir, dir.as_html_attr());
         }
 
-        attrs
-    }
-
-    /// Returns attributes for the visible label element.
-    #[must_use]
-    pub fn label_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Label.data_attrs();
-
-        attrs.set(HtmlAttr::Id, self.ctx.ids.part("label"));
-        attrs.set(HtmlAttr::For, self.ctx.ids.part("input"));
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-
-        attrs
-    }
-
-    /// Returns attributes to apply to the input-like child element.
-    #[must_use]
-    pub fn input_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Input.data_attrs();
-
-        attrs.set(HtmlAttr::Id, self.ctx.ids.part("input"));
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(
-            HtmlAttr::Aria(AriaAttr::LabelledBy),
-            self.ctx.ids.part("label"),
-        );
-
-        let mut described_by = Vec::new();
+        let mut described_by_ids = Vec::new();
 
         if self.ctx.has_description {
-            described_by.push(self.ctx.ids.part("description"));
+            described_by_ids.push(self.ctx.ids.part("description"));
         }
 
         if !self.ctx.errors.is_empty() {
-            described_by.push(self.ctx.ids.part("error-message"));
+            described_by_ids.push(self.ctx.ids.part("error-message"));
         }
 
-        if !described_by.is_empty() {
+        if !described_by_ids.is_empty() {
             attrs.set(
                 HtmlAttr::Aria(AriaAttr::DescribedBy),
-                described_by.join(" "),
+                described_by_ids.join(" "),
             );
         }
 
-        if self.ctx.required {
-            attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
-        }
+        attrs
+    }
 
-        if self.ctx.invalid {
-            attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
+    /// Returns attributes for the `<legend>` element.
+    #[must_use]
+    pub fn legend_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Legend.data_attrs();
 
-            if !self.ctx.errors.is_empty() {
-                attrs.set(
-                    HtmlAttr::Aria(AriaAttr::ErrorMessage),
-                    self.ctx.ids.part("error-message"),
-                );
-            }
-        }
-
-        if self.ctx.disabled {
-            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
-        }
-
-        if self.ctx.readonly {
-            attrs.set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true");
-        }
-
-        if self.ctx.validating {
-            attrs.set(HtmlAttr::Aria(AriaAttr::Busy), "true");
-        }
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("legend"));
+        attrs.set(scope_attr, scope_val);
+        attrs.set(part_attr, part_val);
 
         attrs
     }
@@ -411,7 +335,7 @@ impl<'a> Api<'a> {
         attrs
     }
 
-    /// Returns attributes for the field error message element.
+    /// Returns attributes for the fieldset error message element.
     #[must_use]
     pub fn error_message_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
@@ -428,6 +352,42 @@ impl<'a> Api<'a> {
 
         attrs
     }
+
+    /// Returns attributes for the content wrapper.
+    #[must_use]
+    pub fn content_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Content.data_attrs();
+
+        attrs.set(scope_attr, scope_val);
+        attrs.set(part_attr, part_val);
+
+        attrs
+    }
+
+    /// Returns the current fieldset-level validation errors.
+    #[must_use]
+    pub fn errors(&self) -> &[Error] {
+        &self.ctx.errors
+    }
+
+    /// Returns whether the fieldset is disabled.
+    #[must_use]
+    pub const fn is_disabled(&self) -> bool {
+        self.ctx.disabled
+    }
+
+    /// Returns whether the fieldset is invalid.
+    #[must_use]
+    pub const fn is_invalid(&self) -> bool {
+        self.ctx.invalid
+    }
+
+    /// Returns whether the fieldset is read-only.
+    #[must_use]
+    pub const fn is_readonly(&self) -> bool {
+        self.ctx.readonly
+    }
 }
 
 #[cfg(test)]
@@ -438,7 +398,7 @@ mod tests {
 
     fn test_props() -> Props {
         Props {
-            id: "email".to_string(),
+            id: "billing".to_string(),
             ..Props::default()
         }
     }
@@ -451,39 +411,26 @@ mod tests {
     }
 
     fn custom_error() -> Error {
-        Error::custom("required", "Field is invalid")
+        Error::custom("group", "Group is invalid")
     }
 
     #[test]
-    fn field_init_default_props() {
+    fn fieldset_init_default_props() {
         let service = Service::<Machine>::new(test_props(), &Env::default(), &());
 
         assert_eq!(service.state(), &State::Idle);
-        assert!(!service.context().required);
         assert!(!service.context().disabled);
-        assert!(!service.context().readonly);
         assert!(!service.context().invalid);
-        assert!(!service.context().validating);
+        assert!(!service.context().readonly);
         assert_eq!(service.context().dir, None);
         assert!(service.context().errors.is_empty());
         assert!(!service.context().has_description);
-        assert_eq!(service.context().ids.id(), "email");
-        assert_eq!(service.context().ids.part("input"), "email-input");
+        assert_eq!(service.context().ids.id(), "billing");
+        assert_eq!(service.context().ids.part("legend"), "billing-legend");
     }
 
     #[test]
-    fn field_set_required_updates_context() {
-        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
-
-        let result = service.send(Event::SetRequired(true));
-
-        assert!(!result.state_changed);
-        assert!(result.context_changed);
-        assert!(service.context().required);
-    }
-
-    #[test]
-    fn field_set_disabled_updates_context() {
+    fn fieldset_set_disabled_updates_context() {
         let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
 
         let result = service.send(Event::SetDisabled(true));
@@ -494,7 +441,28 @@ mod tests {
     }
 
     #[test]
-    fn field_set_readonly_updates_context() {
+    fn fieldset_set_invalid_updates_context_without_errors() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        let result = service.send(Event::SetInvalid(true));
+
+        assert!(!result.state_changed);
+        assert!(result.context_changed);
+        assert!(service.context().invalid);
+    }
+
+    #[test]
+    fn fieldset_set_invalid_preserves_error_driven_invalidity() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetErrors(vec![custom_error()])));
+        drop(service.send(Event::SetInvalid(false)));
+
+        assert!(service.context().invalid);
+    }
+
+    #[test]
+    fn fieldset_set_readonly_updates_context() {
         let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
 
         let result = service.send(Event::SetReadonly(true));
@@ -505,240 +473,71 @@ mod tests {
     }
 
     #[test]
-    fn field_on_props_changed_emits_events() {
+    fn fieldset_set_dir_updates_context() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        let result = service.send(Event::SetDir(Some(Direction::Rtl)));
+
+        assert!(!result.state_changed);
+        assert!(result.context_changed);
+        assert_eq!(service.context().dir, Some(Direction::Rtl));
+    }
+
+    #[test]
+    fn fieldset_on_props_changed_emits_events() {
         let old = Props {
-            id: "email".to_string(),
-            required: false,
+            id: "billing".to_string(),
             disabled: false,
-            readonly: false,
             invalid: false,
+            readonly: false,
             dir: None,
         };
 
         let new = Props {
-            id: "email".to_string(),
-            required: true,
+            id: "billing".to_string(),
             disabled: true,
-            readonly: true,
             invalid: true,
+            readonly: true,
             dir: Some(Direction::Rtl),
         };
 
         let events = <Machine as ars_core::Machine>::on_props_changed(&old, &new);
 
-        assert_eq!(events.len(), 5);
+        assert_eq!(events.len(), 4);
         assert!(matches!(events[0], Event::SetDisabled(true)));
         assert!(matches!(events[1], Event::SetInvalid(true)));
         assert!(matches!(events[2], Event::SetReadonly(true)));
-        assert!(matches!(events[3], Event::SetRequired(true)));
-        assert!(matches!(events[4], Event::SetDir(Some(Direction::Rtl))));
+        assert!(matches!(events[3], Event::SetDir(Some(Direction::Rtl))));
     }
 
     #[test]
-    fn field_on_props_changed_no_changes_emits_no_events() {
-        let old = test_props();
-        let new = test_props();
-
-        let events = <Machine as ars_core::Machine>::on_props_changed(&old, &new);
-
-        assert!(events.is_empty());
-    }
-
-    #[test]
-    #[should_panic(expected = "field_component Props.id must remain stable after init")]
-    fn field_set_props_panics_when_id_changes() {
+    #[should_panic(expected = "fieldset Props.id must remain stable after init")]
+    fn fieldset_set_props_panics_when_id_changes() {
         let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
 
         let mut next = test_props();
 
-        next.id = "other".to_string();
+        next.id = "shipping".to_string();
 
         drop(service.set_props(next));
     }
 
     #[test]
-    fn field_label_attrs_for_attribute() {
-        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
-
-        let api = service.connect(&|_| {});
-
-        let attrs = api.label_attrs();
-
-        assert_eq!(attrs.get(&HtmlAttr::For), Some("email-input"));
-    }
-
-    #[test]
-    fn field_input_attrs_aria_required() {
-        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
-
-        drop(service.send(Event::SetRequired(true)));
-
-        let api = service.connect(&|_| {});
-
-        let attrs = api.input_attrs();
-
-        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Required)), Some("true"));
-    }
-
-    #[test]
-    fn field_input_attrs_aria_invalid() {
-        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
-
-        drop(service.send(Event::SetInvalid(true)));
-
-        let api = service.connect(&|_| {});
-
-        let attrs = api.input_attrs();
-
-        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Invalid)), Some("true"));
-    }
-
-    #[test]
-    fn field_input_attrs_invalid_without_errors_omits_aria_errormessage() {
-        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
-
-        drop(service.send(Event::SetInvalid(true)));
-
-        let api = service.connect(&|_| {});
-
-        let attrs = api.input_attrs();
-
-        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Invalid)), Some("true"));
-        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::ErrorMessage)));
-    }
-
-    #[test]
-    fn field_input_attrs_aria_disabled() {
+    fn fieldset_root_attrs_disabled() {
         let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
 
         drop(service.send(Event::SetDisabled(true)));
 
         let api = service.connect(&|_| {});
 
-        let attrs = api.input_attrs();
+        let attrs = api.root_attrs();
 
-        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+        assert_eq!(attrs.get(&HtmlAttr::Disabled), Some("true"));
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Disabled)));
     }
 
     #[test]
-    fn field_input_attrs_aria_readonly() {
-        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
-
-        drop(service.send(Event::SetReadonly(true)));
-
-        let api = service.connect(&|_| {});
-
-        let attrs = api.input_attrs();
-
-        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ReadOnly)), Some("true"));
-    }
-
-    #[test]
-    fn field_error_message_hidden_when_no_errors() {
-        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
-
-        let api = service.connect(&|_| {});
-
-        let attrs = api.error_message_attrs();
-
-        assert_eq!(attrs.get(&HtmlAttr::Hidden), Some("true"));
-    }
-
-    #[test]
-    fn field_error_message_visible_when_errors_present() {
-        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
-
-        drop(service.send(Event::SetErrors(vec![custom_error()])));
-
-        let api = service.connect(&|_| {});
-
-        let attrs = api.error_message_attrs();
-
-        assert_eq!(attrs.get(&HtmlAttr::Role), Some("alert"));
-        assert!(!attrs.contains(&HtmlAttr::Hidden));
-    }
-
-    #[test]
-    fn field_input_attrs_aria_busy_when_validating() {
-        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
-
-        drop(service.send(Event::SetValidating(true)));
-
-        let api = service.connect(&|_| {});
-
-        let attrs = api.input_attrs();
-
-        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Busy)), Some("true"));
-    }
-
-    #[test]
-    fn field_set_invalid_preserves_error_driven_invalidity() {
-        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
-
-        drop(service.send(Event::SetErrors(vec![custom_error()])));
-        drop(service.send(Event::SetInvalid(false)));
-
-        assert!(service.context().invalid);
-    }
-
-    #[test]
-    fn field_clear_errors_restores_prop_invalid() {
-        let mut service = Service::<Machine>::new(test_props_with_invalid(), &Env::default(), &());
-
-        drop(service.send(Event::SetErrors(vec![custom_error()])));
-        drop(service.send(Event::ClearErrors));
-
-        assert!(service.context().errors.is_empty());
-        assert!(service.context().invalid);
-    }
-
-    #[test]
-    fn field_set_errors_empty_preserves_prop_invalid() {
-        let mut service = Service::<Machine>::new(test_props_with_invalid(), &Env::default(), &());
-
-        drop(service.send(Event::SetErrors(vec![custom_error()])));
-        drop(service.send(Event::SetErrors(vec![])));
-
-        assert!(service.context().errors.is_empty());
-        assert!(service.context().invalid);
-    }
-
-    #[test]
-    fn field_input_attrs_sets_aria_errormessage_when_errors_present() {
-        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
-
-        drop(service.send(Event::SetInvalid(true)));
-        drop(service.send(Event::SetErrors(vec![custom_error()])));
-
-        let api = service.connect(&|_| {});
-
-        let attrs = api.input_attrs();
-
-        assert_eq!(
-            attrs.get(&HtmlAttr::Aria(AriaAttr::ErrorMessage)),
-            Some("email-error-message")
-        );
-    }
-
-    #[test]
-    fn field_input_attrs_describedby_orders_description_before_error() {
-        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
-
-        drop(service.send(Event::SetHasDescription(true)));
-        drop(service.send(Event::SetErrors(vec![custom_error()])));
-
-        let api = service.connect(&|_| {});
-
-        let attrs = api.input_attrs();
-
-        assert_eq!(
-            attrs.get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
-            Some("email-description email-error-message")
-        );
-    }
-
-    #[test]
-    fn field_root_attrs_sets_dir() {
+    fn fieldset_root_attrs_dir() {
         let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
 
         drop(service.send(Event::SetDir(Some(Direction::Rtl))));
@@ -751,23 +550,186 @@ mod tests {
     }
 
     #[test]
-    fn field_part_attrs_delegate_for_all_parts() {
+    fn fieldset_error_message_hidden_when_no_errors() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        let api = service.connect(&|_| {});
+
+        let attrs = api.error_message_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Hidden), Some("true"));
+    }
+
+    #[test]
+    fn fieldset_description_attrs_id() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        let api = service.connect(&|_| {});
+
+        let attrs = api.description_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Id), Some("billing-description"));
+    }
+
+    #[test]
+    fn fieldset_legend_attrs_id_and_data_attrs() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        let api = service.connect(&|_| {});
+
+        let attrs = api.legend_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Id), Some("billing-legend"));
+        assert_eq!(attrs.get(&HtmlAttr::Data("ars-scope")), Some("fieldset"));
+        assert_eq!(attrs.get(&HtmlAttr::Data("ars-part")), Some("legend"));
+    }
+
+    #[test]
+    fn fieldset_content_attrs_data_attrs() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        let api = service.connect(&|_| {});
+
+        let attrs = api.content_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Data("ars-scope")), Some("fieldset"));
+        assert_eq!(attrs.get(&HtmlAttr::Data("ars-part")), Some("content"));
+    }
+
+    #[test]
+    fn fieldset_context_propagation() {
+        let ctx: crate::field::Context = crate::fieldset::Context::default();
+
+        assert_eq!(
+            ctx,
+            crate::field::Context {
+                name: None,
+                disabled: false,
+                invalid: false,
+                readonly: false,
+            }
+        );
+
+        let named: crate::fieldset::Context = crate::field::Context {
+            name: Some("address".to_string()),
+            disabled: true,
+            invalid: true,
+            readonly: true,
+        };
+
+        assert_eq!(named.name.as_deref(), Some("address"));
+        assert!(named.disabled);
+        assert!(named.invalid);
+        assert!(named.readonly);
+    }
+
+    #[test]
+    fn fieldset_set_errors_forces_invalid() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetErrors(vec![custom_error()])));
+
+        assert!(service.context().invalid);
+        assert_eq!(service.context().errors.len(), 1);
+    }
+
+    #[test]
+    fn fieldset_clear_errors_restores_prop_invalid() {
+        let mut service = Service::<Machine>::new(test_props_with_invalid(), &Env::default(), &());
+
+        drop(service.send(Event::SetErrors(vec![custom_error()])));
+        drop(service.send(Event::ClearErrors));
+
+        assert!(service.context().errors.is_empty());
+        assert!(service.context().invalid);
+    }
+
+    #[test]
+    fn fieldset_set_errors_empty_preserves_prop_invalid() {
+        let mut service = Service::<Machine>::new(test_props_with_invalid(), &Env::default(), &());
+
+        drop(service.send(Event::SetErrors(vec![custom_error()])));
+        drop(service.send(Event::SetErrors(vec![])));
+
+        assert!(service.context().errors.is_empty());
+        assert!(service.context().invalid);
+    }
+
+    #[test]
+    fn fieldset_root_attrs_describedby_description_only() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetHasDescription(true)));
+
+        let api = service.connect(&|_| {});
+
+        let attrs = api.root_attrs();
+
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
+            Some("billing-description")
+        );
+    }
+
+    #[test]
+    fn fieldset_root_attrs_describedby_description_and_error() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetHasDescription(true)));
+        drop(service.send(Event::SetErrors(vec![custom_error()])));
+
+        let api = service.connect(&|_| {});
+
+        let attrs = api.root_attrs();
+
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
+            Some("billing-description billing-error-message")
+        );
+    }
+
+    #[test]
+    fn fieldset_root_attrs_omits_aria_invalid() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetErrors(vec![custom_error()])));
+
+        let api = service.connect(&|_| {});
+
+        let attrs = api.root_attrs();
+
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Invalid)));
+    }
+
+    #[test]
+    fn fieldset_error_message_attrs_role_alert() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        let api = service.connect(&|_| {});
+
+        let attrs = api.error_message_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Role), Some("alert"));
+    }
+
+    #[test]
+    fn fieldset_part_attrs_delegate_for_all_parts() {
         let service = Service::<Machine>::new(test_props(), &Env::default(), &());
 
         let api = service.connect(&|_| {});
 
         assert_eq!(api.part_attrs(Part::Root), api.root_attrs());
-        assert_eq!(api.part_attrs(Part::Label), api.label_attrs());
-        assert_eq!(api.part_attrs(Part::Input), api.input_attrs());
+        assert_eq!(api.part_attrs(Part::Legend), api.legend_attrs());
         assert_eq!(api.part_attrs(Part::Description), api.description_attrs());
         assert_eq!(
             api.part_attrs(Part::ErrorMessage),
             api.error_message_attrs()
         );
+        assert_eq!(api.part_attrs(Part::Content), api.content_attrs());
     }
 
     #[test]
-    fn field_api_debug_is_stable() {
+    fn fieldset_api_debug_is_stable() {
         let service = Service::<Machine>::new(test_props(), &Env::default(), &());
 
         let api = service.connect(&|_| {});
@@ -775,7 +737,23 @@ mod tests {
         let debug = format!("{api:?}");
 
         assert!(debug.contains("Api"));
-        assert!(debug.contains("email"));
+        assert!(debug.contains("billing"));
         assert!(debug.contains("Context"));
+    }
+
+    #[test]
+    fn fieldset_getters_reflect_context() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetDisabled(true)));
+        drop(service.send(Event::SetReadonly(true)));
+        drop(service.send(Event::SetErrors(vec![custom_error()])));
+
+        let api = service.connect(&|_| {});
+
+        assert!(api.is_disabled());
+        assert!(api.is_invalid());
+        assert!(api.is_readonly());
+        assert_eq!(api.errors(), &[custom_error()]);
     }
 }

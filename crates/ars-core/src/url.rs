@@ -5,15 +5,16 @@
 //! implements the spec allowlist for safe schemes and relative URL forms while
 //! rejecting dangerous or unknown schemes such as `javascript:`.
 
+use alloc::string::String;
 use core::fmt::{self, Display};
 
 /// Check whether a URL is safe for use in `href`, `action`, or `formaction`
 /// attributes.
 ///
-/// Safe URLs are limited to the explicit allowlist from the DOM utilities
-/// spec: `http://`, `https://`, `mailto:`, `tel:`, `/`, `./`, `../`, `#`,
-/// `?`, and relative paths with no scheme separator. Any URL containing `:`
-/// that does not match the allowlist is rejected.
+/// Safe URLs are limited to the explicit allowlist from the connect-pattern
+/// security contract: `http://`, `https://`, `mailto:`, `tel:`, `/`, `./`,
+/// `../`, `#`, `?`, and relative paths with no scheme separator. Any URL
+/// containing `:` that does not match the allowlist is rejected.
 #[must_use]
 pub fn is_safe_url(url: &str) -> bool {
     let trimmed = url.trim_start().as_bytes();
@@ -43,7 +44,7 @@ pub fn sanitize_url(url: &str) -> &str {
 /// A validated URL newtype.
 ///
 /// This type performs one-time validation at construction so components can
-/// store a URL value that is already guaranteed to satisfy the DOM utilities
+/// store a URL value that is already guaranteed to satisfy the safe-scheme
 /// allowlist.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SafeUrl(String);
@@ -101,6 +102,8 @@ fn starts_with_ignore_case(haystack: &[u8], needle: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{borrow::ToOwned as _, string::ToString as _};
+
     use super::{SafeUrl, UnsafeUrlError, is_safe_url, sanitize_url};
 
     #[test]

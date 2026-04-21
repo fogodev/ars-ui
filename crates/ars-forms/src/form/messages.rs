@@ -1,4 +1,13 @@
 //! Localizable messages for form submission and validation errors.
+//!
+//! This module defines [`Messages`], the form-domain i18n bundle used by
+//! validators, form submission announcements, and adapter-owned messaging
+//! helpers.
+//!
+//! It is intentionally distinct from [`crate::form::component::Machine`]`::Messages`.
+//! The form component machine keeps `type Messages = ()`; adapters resolve
+//! [`Messages`] separately and use it when formatting validation and status
+//! text around the machine.
 
 use ars_core::{ComponentMessages, MessageFn};
 use ars_i18n::Locale;
@@ -7,13 +16,18 @@ type LocaleMessage = dyn Fn(&Locale) -> String + Send + Sync;
 type CountLocaleMessage = dyn Fn(usize, &Locale) -> String + Send + Sync;
 type FloatLocaleMessage = dyn Fn(f64, &Locale) -> String + Send + Sync;
 
-/// Localizable messages for form component announcements and validator errors.
+/// Localizable messages for form submission announcements and validator errors.
 ///
-/// This struct follows the shared `ComponentMessages` pattern so adapters can
-/// provide a single locale-aware message bundle to all form components in a
+/// This type follows the shared `ComponentMessages` pattern so adapters can
+/// provide a single locale-aware message bundle to all form-related logic in a
 /// subtree while keeping English defaults available for zero-config usage.
+///
+/// This is a **domain-level** message bundle, not the associated
+/// `Machine::Messages` type for [`crate::form::component::Machine`]. The form
+/// component machine keeps `type Messages = ()`; adapters and validator helpers
+/// consume [`Messages`] separately when generating localized strings.
 #[derive(Clone, Debug)]
-pub struct FormMessages {
+pub struct Messages {
     /// Message announced via a status region on successful submission.
     pub submit_success: MessageFn<LocaleMessage>,
 
@@ -52,7 +66,7 @@ pub struct FormMessages {
     pub url_error: MessageFn<LocaleMessage>,
 }
 
-impl Default for FormMessages {
+impl Default for Messages {
     fn default() -> Self {
         Self {
             submit_success: MessageFn::new(|_locale: &Locale| {
@@ -100,17 +114,17 @@ impl Default for FormMessages {
     }
 }
 
-impl ComponentMessages for FormMessages {}
+impl ComponentMessages for Messages {}
 
 #[cfg(test)]
 mod tests {
     use ars_i18n::locales;
 
-    use super::FormMessages;
+    use super::Messages;
 
     #[test]
     fn form_messages_default_required() {
-        let messages = FormMessages::default();
+        let messages = Messages::default();
 
         assert_eq!(
             (messages.required_error)(&locales::en()),
@@ -120,7 +134,7 @@ mod tests {
 
     #[test]
     fn form_messages_default_submit_error_count_singular() {
-        let messages = FormMessages::default();
+        let messages = Messages::default();
 
         assert_eq!(
             (messages.submit_error_count)(1, &locales::en()),
@@ -130,7 +144,7 @@ mod tests {
 
     #[test]
     fn form_messages_default_submit_error_count_plural() {
-        let messages = FormMessages::default();
+        let messages = Messages::default();
 
         assert_eq!(
             (messages.submit_error_count)(3, &locales::en()),
@@ -140,7 +154,7 @@ mod tests {
 
     #[test]
     fn form_messages_default_submit_success() {
-        let messages = FormMessages::default();
+        let messages = Messages::default();
 
         assert_eq!(
             (messages.submit_success)(&locales::en()),
@@ -150,7 +164,7 @@ mod tests {
 
     #[test]
     fn form_messages_default_max_length() {
-        let messages = FormMessages::default();
+        let messages = Messages::default();
 
         assert_eq!(
             (messages.max_length_error)(8, &locales::en()),
@@ -160,14 +174,14 @@ mod tests {
 
     #[test]
     fn form_messages_default_pattern() {
-        let messages = FormMessages::default();
+        let messages = Messages::default();
 
         assert_eq!((messages.pattern_error)(&locales::en()), "Invalid format");
     }
 
     #[test]
     fn form_messages_default_min() {
-        let messages = FormMessages::default();
+        let messages = Messages::default();
 
         assert_eq!(
             (messages.min_error)(2.5, &locales::en()),
@@ -177,7 +191,7 @@ mod tests {
 
     #[test]
     fn form_messages_default_max() {
-        let messages = FormMessages::default();
+        let messages = Messages::default();
 
         assert_eq!(
             (messages.max_error)(9.5, &locales::en()),
@@ -187,7 +201,7 @@ mod tests {
 
     #[test]
     fn form_messages_default_email() {
-        let messages = FormMessages::default();
+        let messages = Messages::default();
 
         assert_eq!(
             (messages.email_error)(&locales::en()),
@@ -197,7 +211,7 @@ mod tests {
 
     #[test]
     fn form_messages_default_step() {
-        let messages = FormMessages::default();
+        let messages = Messages::default();
 
         assert_eq!(
             (messages.step_error)(0.25, &locales::en()),
@@ -207,7 +221,7 @@ mod tests {
 
     #[test]
     fn form_messages_default_url() {
-        let messages = FormMessages::default();
+        let messages = Messages::default();
 
         assert_eq!(
             (messages.url_error)(&locales::en()),

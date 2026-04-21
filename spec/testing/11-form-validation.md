@@ -797,80 +797,98 @@ async fn disabled_component_excluded_from_form_data() {
 
 Apply this pattern for all form-participating components: `Select`, `Checkbox`, `Switch`, `RadioGroup`, `TextField`, `NumberField`, `Slider`, `Combobox`, `DatePicker`, `ColorPicker`.
 
-## 5. form::Machine Tests
+## 5. form::component::Machine Tests
 
-The `form::Machine` manages the top-level form lifecycle with states `Idle` and `Submitting`. These tests verify transitions, server error handling, and status messages.
+The `form::component::Machine` manages the top-level form lifecycle with states `Idle` and `Submitting`. These tests verify transitions, server error handling, and status messages.
 
-> **Foundation reference:** `form::State`, `form::Event`, `form::Context` are defined in [07-forms.md](../foundation/07-forms.md) §14.
+> **Foundation reference:** `form::component::State`, `form::component::Event`, `form::component::Context` are defined in [07-forms.md](../foundation/07-forms.md) §14.
 
 ```rust
 use ars_core::Service;
 
 #[test]
 fn submit_transitions_from_idle_to_submitting() {
-    let props = form::Props::default();
-    let (state, ctx) = form::Machine::init(&props, &Env::default(), &Default::default());
-    assert_eq!(state, form::State::Idle);
+    let props = form::component::Props::default();
+    let (state, ctx) = form::component::Machine::init(&props, &Env::default(), &Default::default());
+    assert_eq!(state, form::component::State::Idle);
 
-    let plan = form::Machine::transition(&state, &form::Event::Submit, &ctx, &props)
+    let plan = form::component::Machine::transition(&state, &form::component::Event::Submit, &ctx, &props)
         .expect("Submit from Idle must produce a transition");
-    assert_eq!(plan.target, Some(form::State::Submitting));
+    assert_eq!(plan.target, Some(form::component::State::Submitting));
 }
 
 #[test]
 fn submit_complete_success_returns_to_idle() {
-    let props = form::Props::default();
+    let props = form::component::Props::default();
     let mut svc = Service::new(props, Env::default(), Default::default());
-    svc.send(form::Event::Submit);
-    assert_eq!(*svc.state(), form::State::Submitting);
+    svc.send(form::component::Event::Submit);
+    assert_eq!(*svc.state(), form::component::State::Submitting);
 
-    svc.send(form::Event::SubmitComplete { success: true });
-    assert_eq!(*svc.state(), form::State::Idle);
+    svc.send(form::component::Event::SubmitComplete { success: true });
+    assert_eq!(*svc.state(), form::component::State::Idle);
     assert_eq!(svc.context().last_submit_succeeded, Some(true));
 }
 
 #[test]
 fn submit_during_submitting_is_ignored() {
-    let props = form::Props::default();
+    let props = form::component::Props::default();
     let mut svc = Service::new(props, Env::default(), Default::default());
-    svc.send(form::Event::Submit);
-    assert_eq!(*svc.state(), form::State::Submitting);
+    svc.send(form::component::Event::Submit);
+    assert_eq!(*svc.state(), form::component::State::Submitting);
 
     // Second submit while already submitting — should be ignored (no transition)
-    let plan = form::Machine::transition(
-        svc.state(), &form::Event::Submit, svc.context(), &props
+    let plan = form::component::Machine::transition(
+        svc.state(), &form::component::Event::Submit, svc.context(), &props
     );
     assert!(plan.is_none(), "Submit during Submitting must be ignored");
 }
 
 #[test]
-fn reset_clears_server_errors_and_status() {
-    let props = form::Props::default();
+fn reset_restores_controlled_server_errors_and_clears_status() {
+    let props = form::component::Props {
+        validation_errors: BTreeMap::from([
+            ("email".into(), vec!["taken".into()]),
+        ]),
+        ..Default::default()
+    };
     let mut svc = Service::new(props, Env::default(), Default::default());
-    svc.send(form::Event::SetServerErrors(BTreeMap::from([
-        ("email".into(), vec!["taken".into()]),
-    ])));
-    svc.send(form::Event::SetStatusMessage(Some("Error occurred".into())));
+    svc.send(form::component::Event::SetStatusMessage(Some("Error occurred".into())));
 
-    svc.send(form::Event::Reset);
-    assert!(svc.context().server_errors.is_empty(), "Reset must clear server errors");
+    svc.send(form::component::Event::Reset);
+    assert_eq!(
+        svc.context().server_errors,
+        BTreeMap::from([("email".into(), vec!["taken".into()])]),
+        "Reset must preserve controlled server errors from props",
+    );
     assert!(svc.context().status_message.is_none(), "Reset must clear status message");
 }
 
 #[test]
+fn reset_clears_uncontrolled_server_errors() {
+    let props = form::component::Props::default();
+    let mut svc = Service::new(props, Env::default(), Default::default());
+    svc.send(form::component::Event::SetServerErrors(BTreeMap::from([
+        ("email".into(), vec!["taken".into()]),
+    ])));
+
+    svc.send(form::component::Event::Reset);
+    assert!(svc.context().server_errors.is_empty(), "Reset must clear transient server errors");
+}
+
+#[test]
 fn set_server_errors_works_from_any_state() {
-    let props = form::Props::default();
+    let props = form::component::Props::default();
     let mut svc = Service::new(props, Env::default(), Default::default());
 
     // From Idle
-    svc.send(form::Event::SetServerErrors(BTreeMap::from([
+    svc.send(form::component::Event::SetServerErrors(BTreeMap::from([
         ("name".into(), vec!["required".into()]),
     ])));
     assert!(!svc.context().server_errors.is_empty());
 
     // From Submitting
-    svc.send(form::Event::Submit);
-    svc.send(form::Event::SetServerErrors(BTreeMap::from([
+    svc.send(form::component::Event::Submit);
+    svc.send(form::component::Event::SetServerErrors(BTreeMap::from([
         ("email".into(), vec!["invalid".into()]),
     ])));
     assert!(svc.context().server_errors.contains_key("email"));
@@ -881,73 +899,75 @@ fn init_seeds_server_errors_from_props() {
     let mut errors = BTreeMap::new();
     errors.insert("email".into(), vec!["Invalid email".into()]);
     errors.insert("name".into(), vec!["Required".into()]);
-    let props = form::Props {
+    let props = form::component::Props {
         validation_errors: errors.clone(),
         ..Default::default()
     };
-    let (state, ctx) = form::Machine::init(&props, &Env::default(), &Default::default());
+    let (state, ctx) = form::component::Machine::init(&props, &Env::default(), &Default::default());
     assert_eq!(ctx.server_errors, errors, "init must seed server_errors from props.validation_errors");
 }
 
 #[test]
 fn on_props_changed_emits_set_server_errors() {
-    let old = form::Props::default();
+    let old = form::component::Props::default();
     let mut errors = BTreeMap::new();
     errors.insert("email".into(), vec!["Invalid".into()]);
-    let new = form::Props {
+    let new = form::component::Props {
         validation_errors: errors.clone(),
         ..Default::default()
     };
-    let events = form::Machine::on_props_changed(&old, &new);
-    assert_eq!(events, vec![form::Event::SetServerErrors(errors)]);
+    let events = form::component::Machine::on_props_changed(&old, &new);
+    assert_eq!(events, vec![form::component::Event::SetServerErrors(errors)]);
 }
 
 #[test]
 fn on_props_changed_emits_clear_server_errors() {
     let mut errors = BTreeMap::new();
     errors.insert("email".into(), vec!["Invalid".into()]);
-    let old = form::Props {
+    let old = form::component::Props {
         validation_errors: errors,
         ..Default::default()
     };
-    let new = form::Props::default();
-    let events = form::Machine::on_props_changed(&old, &new);
-    assert_eq!(events, vec![form::Event::ClearServerErrors]);
+    let new = form::component::Props::default();
+    let events = form::component::Machine::on_props_changed(&old, &new);
+    assert_eq!(events, vec![form::component::Event::ClearServerErrors]);
 }
 
 #[test]
 fn root_attrs_emits_action_attribute() {
-    let props = form::Props {
-        action: Some("https://example.com/submit".into()),
+    let props = form::component::Props {
+        action: Some("javascript:alert(1)".into()),
         ..Default::default()
     };
-    let (state, ctx) = form::Machine::init(&props, &Env::default(), &Default::default());
-    let api = form::Machine::connect(&state, &ctx, &props, &|_| {});
+    let (state, ctx) = form::component::Machine::init(&props, &Env::default(), &Default::default());
+    let api = form::component::Machine::connect(&state, &ctx, &props, &|_| {});
     let attrs = api.root_attrs();
-    assert_eq!(attrs.get(&HtmlAttr::Action), Some("https://example.com/submit"));
+    assert_eq!(attrs.get(&HtmlAttr::Action), Some("#"));
 }
 
 #[test]
 fn root_attrs_emits_role_attribute() {
-    let props = form::Props {
+    let props = form::component::Props {
         role: Some("search".into()),
         ..Default::default()
     };
-    let (state, ctx) = form::Machine::init(&props, &Env::default(), &Default::default());
-    let api = form::Machine::connect(&state, &ctx, &props, &|_| {});
+    let (state, ctx) = form::component::Machine::init(&props, &Env::default(), &Default::default());
+    let api = form::component::Machine::connect(&state, &ctx, &props, &|_| {});
     let attrs = api.root_attrs();
     assert_eq!(attrs.get(&HtmlAttr::Role), Some("search"));
 }
 
 #[test]
 fn on_props_changed_emits_set_validation_behavior() {
-    let old = form::Props::default();
-    let new = form::Props {
-        validation_behavior: ValidationBehavior::OnSubmit,
+    let old = form::component::Props::default();
+    let new = form::component::Props {
+        validation_behavior: form::component::ValidationBehavior::Native,
         ..Default::default()
     };
-    let events = form::Machine::on_props_changed(&old, &new);
-    assert!(events.contains(&form::Event::SetValidationBehavior(ValidationBehavior::OnSubmit)));
+    let events = form::component::Machine::on_props_changed(&old, &new);
+    assert!(events.contains(&form::component::Event::SetValidationBehavior(
+        form::component::ValidationBehavior::Native,
+    )));
 }
 ```
 

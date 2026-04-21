@@ -1,9 +1,14 @@
-//! Form context, submission data, cross-field validation, and focus helpers.
+//! Form runtime context, localized messages, component machine, and focus
+//! helpers.
 
+pub mod component;
 mod context;
+mod messages;
 
+pub use component::ValidationBehavior;
 pub use context::{AnyValidator, Context, CrossFieldValidator, Data, Mode};
 use indexmap::IndexMap;
+pub use messages::Messages;
 
 use crate::field::Descriptors;
 
@@ -124,5 +129,12 @@ mod tests {
             first_invalid_field_id(&form, &descriptors),
             Some("form-email-input".into())
         );
+    }
+
+    #[test]
+    fn reexports_validation_behavior() {
+        let behavior = ValidationBehavior::default();
+
+        assert_eq!(behavior, ValidationBehavior::Aria);
     }
 }

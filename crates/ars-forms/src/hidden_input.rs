@@ -120,6 +120,20 @@ mod tests {
         assert!(attrs(&config).is_none());
     }
 
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "Use multi_attrs for Value::Multiple")]
+    fn multiple_value_panics_in_debug() {
+        let config = Config {
+            name: "field".to_string(),
+            value: Value::Multiple(vec!["a".to_string(), "b".to_string()]),
+            form_id: None,
+            disabled: false,
+        };
+
+        drop(attrs(&config));
+    }
+
     #[test]
     fn disabled_attr_included() {
         let config = Config {

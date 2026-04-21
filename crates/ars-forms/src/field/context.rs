@@ -17,17 +17,21 @@
 /// - `effective_readonly = field_props.readonly || field_ctx.readonly`
 ///
 /// The merge happens at the **adapter layer** (not inside the core machine),
-/// because the core `field::Machine` has no access to framework context.
+/// because the core `field::component::Machine` has no access to framework
+/// context.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Context {
     /// Optional field name inherited from the parent group (e.g., checkbox group name).
     pub name: Option<String>,
+
     /// Whether the parent group is disabled. Child fields merge this with
     /// their own `disabled` prop.
     pub disabled: bool,
+
     /// Whether the parent group is invalid. Child fields merge this with
     /// their own `invalid` prop.
     pub invalid: bool,
+
     /// Whether the parent group is read-only. Child fields merge this with
     /// their own `readonly` prop.
     pub readonly: bool,
@@ -40,6 +44,7 @@ mod tests {
     #[test]
     fn default_all_false() {
         let ctx = Context::default();
+
         assert!(ctx.name.is_none());
         assert!(!ctx.disabled);
         assert!(!ctx.invalid);
@@ -55,6 +60,7 @@ mod tests {
             invalid: false,
             readonly: true,
         };
+
         let field_disabled = false;
         let field_invalid = true;
         let field_readonly = false;

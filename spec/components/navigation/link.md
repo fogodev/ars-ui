@@ -92,7 +92,7 @@ pub struct Props {
     /// Unique component identifier.
     pub id: String,
     /// The destination URL (validated via `SafeUrl` — rejects `javascript:`, `data:`, `vbscript:` schemes).
-    /// See `01-architecture.md` §Security for allowed schemes.
+    /// See `01-architecture.md` §3.1.1.1 for allowed schemes.
     pub href: SafeUrl,
     /// Optional browsing context target (e.g. `_blank`).
     pub target: Option<String>,

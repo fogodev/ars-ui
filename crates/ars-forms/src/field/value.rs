@@ -9,8 +9,10 @@
 pub struct FileRef {
     /// The original file name.
     pub name: String,
+
     /// The file size in bytes.
     pub size: u64,
+
     /// The MIME type of the file.
     pub mime_type: String,
 }
@@ -26,18 +28,25 @@ pub struct FileRef {
 pub enum Value {
     /// A text string value.
     Text(String),
+
     /// An optional numeric value.
     Number(Option<f64>),
+
     /// A boolean value (e.g., checkbox).
     Bool(bool),
+
     /// Multiple text values (e.g., multi-select as strings).
     MultipleText(Vec<String>),
+
     /// File references from a file-upload field.
     File(Vec<FileRef>),
+
     /// An optional calendar date.
     Date(Option<ars_i18n::CalendarDate>),
+
     /// An optional time of day.
     Time(Option<ars_i18n::Time>),
+
     /// An optional date range (start and end).
     DateRange(Option<ars_i18n::DateRange>),
 }
@@ -106,6 +115,7 @@ mod tests {
     #[test]
     fn as_text_extracts_text() {
         let v = Value::Text("hello".to_string());
+
         assert_eq!(v.as_text(), Some("hello"));
     }
 
@@ -118,6 +128,7 @@ mod tests {
     #[test]
     fn as_number_extracts_some() {
         let v = Value::Number(Some(42.0));
+
         assert_eq!(v.as_number(), Some(42.0));
     }
 
@@ -145,18 +156,21 @@ mod tests {
     #[test]
     fn to_string_for_validation_text() {
         let v = Value::Text("hello".to_string());
+
         assert_eq!(v.to_string_for_validation(), "hello");
     }
 
     #[test]
     fn to_string_for_validation_number_some() {
         let v = Value::Number(Some(42.0));
+
         assert_eq!(v.to_string_for_validation(), "42");
     }
 
     #[test]
     fn to_string_for_validation_number_none() {
         let v = Value::Number(None);
+
         assert_eq!(v.to_string_for_validation(), "");
     }
 
@@ -169,6 +183,7 @@ mod tests {
     #[test]
     fn to_string_for_validation_multiple_text() {
         let v = Value::MultipleText(vec!["a".to_string(), "b".to_string()]);
+
         assert_eq!(v.to_string_for_validation(), "a,b");
     }
 
@@ -186,6 +201,7 @@ mod tests {
                 mime_type: "text/plain".to_string(),
             },
         ]);
+
         assert_eq!(v.to_string_for_validation(), "2");
     }
 
@@ -194,5 +210,31 @@ mod tests {
         assert_eq!(Value::Date(None).to_string_for_validation(), "");
         assert_eq!(Value::Time(None).to_string_for_validation(), "");
         assert_eq!(Value::DateRange(None).to_string_for_validation(), "");
+    }
+
+    #[test]
+    fn to_string_for_validation_temporal_values() {
+        let date = ars_i18n::CalendarDate::new_gregorian(2024, 3, 15)
+            .expect("Gregorian fixture should validate");
+
+        let time = ars_i18n::Time::new(9, 30, 45, 125).expect("time fixture should validate");
+
+        let end = ars_i18n::CalendarDate::new_gregorian(2024, 3, 20)
+            .expect("Gregorian fixture should validate");
+
+        let range = ars_i18n::DateRange::new(date.clone(), end).expect("ordered range");
+
+        assert_eq!(
+            Value::Date(Some(date)).to_string_for_validation(),
+            "2024-03-15"
+        );
+        assert_eq!(
+            Value::Time(Some(time)).to_string_for_validation(),
+            "09:30:45.125"
+        );
+        assert_eq!(
+            Value::DateRange(Some(range)).to_string_for_validation(),
+            "2024-03-15/2024-03-20"
+        );
     }
 }

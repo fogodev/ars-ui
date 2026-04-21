@@ -178,12 +178,15 @@ impl AnyValidator {
 impl Validator for AnyValidator {
     fn validate(&self, value: &Value, ctx: &ValContext) -> Result {
         let mut all_errors = Errors::new();
+
         for v in &self.validators {
-            match v.validate(value, ctx) {
-                Ok(()) => return Ok(()),
-                Err(errs) => all_errors.0.extend(errs.0),
+            if let Err(errs) = v.validate(value, ctx) {
+                all_errors.0.extend(errs.0);
+            } else {
+                return Ok(());
             }
         }
+
         if all_errors.is_empty() {
             Ok(())
         } else {
@@ -334,6 +337,7 @@ impl Context {
         if let Some(field) = self.fields.get_mut(name) {
             field.touched = true;
         }
+
         if self.validation_mode.on_blur {
             self.run_field_validation(name);
         }
@@ -423,6 +427,7 @@ impl Context {
                 field.validation = Err(Errors(client_errs));
             }
         }
+
         self.server_errors = errors;
     }
 
@@ -515,7 +520,7 @@ impl Context {
     ///
     /// **Note:** `is_submitting` is only meaningful for the duration of the
     /// synchronous `handler` call. For async submission, use
-    /// `form_submit::Machine` (§8) or `form::Machine` (§14).
+    /// `form_submit::Machine` (§8) or `form::component::Machine` (§14).
     ///
     /// `collect_form_data()` includes all fields regardless of disabled state.
     /// If disabled fields must be excluded, the caller should filter
@@ -623,15 +628,13 @@ impl Context {
     }
 
     fn collect_all_errors(&self) -> Errors {
-        let mut all = Errors::new();
-
-        for field in self.fields.values() {
-            if let Some(errors) = field.validation.errors() {
-                all.0.extend(errors.0.clone());
-            }
-        }
-
-        all
+        Errors(
+            self.fields
+                .values()
+                .filter_map(|field| field.validation.errors().map(|e| e.0.clone()))
+                .flatten()
+                .collect(),
+        )
     }
 }
 
@@ -697,6 +700,39 @@ mod tests {
         }
 
         crate::validation::boxed_validator(RequiredV)
+    }
+
+    fn password_match_validate(value: &Value, ctx_inner: &ValContext) -> Result {
+        let password = ctx_inner
+            .form_values
+            .get("password")
+            .and_then(Value::as_text);
+
+        let confirm = value.as_text().unwrap_or_default();
+
+        if password.is_some_and(|p| p == confirm) {
+            Ok(())
+        } else {
+            Err(Errors(vec![Error::custom(
+                "confirm_match",
+                "Passwords do not match",
+            )]))
+        }
+    }
+
+    fn password_match_validator() -> CrossFieldValidator {
+        CrossFieldValidator {
+            depends_on: vec!["password".to_string()],
+            validate_fn: Arc::new(password_match_validate),
+        }
+    }
+
+    async fn always_ok_async(_text: String, _ctx: crate::validation::OwnedContext) -> Result {
+        Ok(())
+    }
+
+    fn boxed_async_ok_validator() -> BoxedAsyncValidator {
+        crate::validation::AsyncFnValidator::new(always_ok_async).boxed()
     }
 
     // ── Field registration order ────────────────────────────────────────
@@ -836,6 +872,7 @@ mod tests {
         ctx.register("name", text(""), Some(required_validator()), None);
 
         ctx.on_blur("name");
+
         assert!(ctx.field("name").expect("exists").touched);
         assert!(ctx.field("name").expect("exists").validation.is_err());
     }
@@ -904,9 +941,7 @@ mod tests {
 
         let mut called = false;
 
-        let result = ctx.submit(|_| {
-            called = true;
-        });
+        let result = ctx.submit(|_| called = true);
 
         assert!(!called);
         assert!(result.is_err());
@@ -975,28 +1010,7 @@ mod tests {
         ctx.register("password", text("secret"), None, None);
         ctx.register("confirm", text("secret"), None, None);
 
-        let cv = CrossFieldValidator {
-            depends_on: vec!["password".to_string()],
-            validate_fn: Arc::new(|value, ctx_inner| {
-                let password = ctx_inner
-                    .form_values
-                    .get("password")
-                    .and_then(Value::as_text);
-
-                let confirm = value.as_text().unwrap_or_default();
-
-                if password.is_some_and(|p| p == confirm) {
-                    Ok(())
-                } else {
-                    Err(Errors(vec![Error::custom(
-                        "confirm_match",
-                        "Passwords do not match",
-                    )]))
-                }
-            }),
-        };
-
-        ctx.register_cross_field_validator("confirm", cv);
+        ctx.register_cross_field_validator("confirm", password_match_validator());
 
         // Changing password triggers re-validation of confirm
         ctx.on_change("password", text("changed"));
@@ -1004,6 +1018,40 @@ mod tests {
         let confirm = ctx.field("confirm").expect("exists");
 
         assert!(confirm.validation.is_err());
+    }
+
+    #[test]
+    fn cross_field_validator_returns_ok_when_values_match() {
+        let mut ctx = Context::new(Mode::on_change());
+
+        ctx.register("password", text("secret"), None, None);
+        ctx.register("confirm", text("secret"), None, None);
+
+        ctx.register_cross_field_validator("confirm", password_match_validator());
+
+        ctx.on_change("password", text("secret"));
+
+        assert!(ctx.field("confirm").expect("exists").validation.is_ok());
+    }
+
+    #[test]
+    fn run_field_validation_ignores_stale_cross_field_target() {
+        let mut ctx = Context::new(Mode::on_change());
+
+        ctx.register("password", text("secret"), None, None);
+
+        ctx.cross_field_registry.insert(
+            "confirm".to_string(),
+            vec![CrossFieldValidator {
+                depends_on: vec!["password".to_string()],
+                validate_fn: Arc::new(|_value, _ctx| Ok(())),
+            }],
+        );
+
+        ctx.on_change("password", text("changed"));
+
+        assert!(ctx.field("password").expect("exists").validation.is_ok());
+        assert!(ctx.field("confirm").is_none());
     }
 
     // ── AnyValidator ────────────────────────────────────────────────────
@@ -1065,6 +1113,22 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(result.errors().expect("has errors").len(), 2);
+    }
+
+    #[test]
+    fn any_validator_with_no_validators_is_ok() {
+        let any = AnyValidator::new(Vec::new());
+        let ctx = ValContext::standalone("test");
+
+        assert!(any.validate(&text("x"), &ctx).is_ok());
+    }
+
+    #[test]
+    fn any_validator_debug_includes_validator_count() {
+        let debug = format!("{:?}", AnyValidator::new(Vec::new()));
+
+        assert!(debug.contains("AnyValidator"));
+        assert!(debug.contains("<0 validators>"));
     }
 
     // ── Data ────────────────────────────────────────────────────────
@@ -1252,21 +1316,9 @@ mod tests {
 
     #[test]
     fn register_and_collect_async_validators() {
-        use core::pin::Pin;
+        use core::task::{Context as TaskContext, Poll, Waker};
 
-        use crate::validation::{AsyncValidator, BoxedAsyncValidator};
-
-        struct StubAsync;
-
-        impl AsyncValidator for StubAsync {
-            fn validate_async<'a>(
-                &'a self,
-                _value: &'a Value,
-                _ctx: &'a ValContext<'a>,
-            ) -> Pin<Box<dyn Future<Output = Result> + Send + 'a>> {
-                Box::pin(async { Ok(()) })
-            }
-        }
+        use crate::validation::BoxedAsyncValidator;
 
         let mut ctx = Context::new(Mode::on_submit());
 
@@ -1274,7 +1326,7 @@ mod tests {
 
         assert!(!ctx.has_async_validators());
 
-        let boxed: BoxedAsyncValidator = Arc::new(StubAsync);
+        let boxed: BoxedAsyncValidator = boxed_async_ok_validator();
 
         ctx.register_async_validator("email", boxed);
 
@@ -1284,6 +1336,29 @@ mod tests {
 
         assert_eq!(collected.len(), 1);
         assert_eq!(collected[0].0, "email");
+
+        let value = text("ok");
+        let validation_ctx = ValContext::standalone("email");
+        let mut future = collected[0].1.validate_async(&value, &validation_ctx);
+        let mut task_ctx = TaskContext::from_waker(Waker::noop());
+
+        assert!(matches!(
+            future.as_mut().poll(&mut task_ctx),
+            Poll::Ready(Ok(()))
+        ));
+    }
+
+    #[test]
+    fn register_stores_inline_async_validator() {
+        use crate::validation::BoxedAsyncValidator;
+
+        let mut ctx = Context::new(Mode::on_submit());
+        let boxed: BoxedAsyncValidator = boxed_async_ok_validator();
+
+        ctx.register("email", text(""), None, Some(Arc::clone(&boxed)));
+
+        assert!(ctx.has_async_validators());
+        assert_eq!(ctx.collect_async_validators().len(), 1);
     }
 
     #[test]
@@ -1296,6 +1371,7 @@ mod tests {
         };
 
         assert_send_sync::<CrossFieldValidator>();
+
         assert!(
             validator
                 .validate(
@@ -1304,6 +1380,20 @@ mod tests {
                 )
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn cross_field_validator_debug_includes_dependencies() {
+        let validator = CrossFieldValidator {
+            depends_on: vec![String::from("password")],
+            validate_fn: Arc::new(|_value, _ctx| Ok(())),
+        };
+
+        let debug = format!("{validator:?}");
+
+        assert!(debug.contains("CrossFieldValidator"));
+        assert!(debug.contains("password"));
+        assert!(debug.contains("<fn>"));
     }
 
     // ── validate_all true path ──────────────────────────────────────────
