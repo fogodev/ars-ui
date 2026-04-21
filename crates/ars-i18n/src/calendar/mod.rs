@@ -14,6 +14,10 @@ pub(crate) mod internal;
 #[path = "../../tests/unit/calendar.rs"]
 mod tests;
 
+#[cfg(all(test, target_arch = "wasm32"))]
+#[path = "../../tests/unit/calendar_wasm.rs"]
+mod wasm_tests;
+
 #[cfg(feature = "std")]
 pub use date::ZonedDateTime;
 #[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
