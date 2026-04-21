@@ -3526,9 +3526,9 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
-    type Messages = Messages;
+    type Messages = ();
 
-    fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
+    fn init(props: &Self::Props, _env: &Env, _messages: &()) -> (Self::State, Self::Context) {
         let ctx = Context {
             required: props.required,
             disabled: props.disabled,
@@ -3625,12 +3625,12 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a Self::State,
+        _state: &'a Self::State,
         ctx: &'a Self::Context,
-        props: &'a Self::Props,
-        send: &'a dyn Fn(Self::Event),
+        _props: &'a Self::Props,
+        _send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
-        Api { state, ctx, props, send }
+        Api { ctx }
     }
 }
 ```
@@ -3639,10 +3639,7 @@ impl ars_core::Machine for Machine {
 
 ```rust
 pub struct Api<'a> {
-    state: &'a State,
     ctx: &'a Context,
-    props: &'a Props,
-    send: &'a dyn Fn(Event), // available for imperative event dispatch by adapter code
 }
 
 #[derive(ComponentPart)]
@@ -3670,6 +3667,9 @@ impl ConnectApi for Api<'_> {
 }
 
 impl<'a> Api<'a> {
+    // `Api` stores only the context because the documented field connect
+    // helpers derive their output entirely from current context state.
+
     /// Attributes for the root container.
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
