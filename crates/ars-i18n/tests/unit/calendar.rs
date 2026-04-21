@@ -4,12 +4,14 @@ use alloc::vec;
 use temporal_rs::sys::Temporal;
 
 use super::{
-    CalendarDate, CalendarDateFields, CalendarDateTime, CalendarSystem, CycleOptions,
-    CycleTimeOptions, DateDuration, DateField, DateTimeDuration, DateTimeField, Era, MonthCode,
-    Time, TimeDuration, TimeField, TimeFields, parse, queries,
+    CalendarDate, CalendarDateFields, CalendarDateTime, CalendarError, CalendarSystem,
+    CycleOptions, CycleTimeOptions, DateDuration, DateError, DateField, DateTimeDuration,
+    DateTimeField, Era, MonthCode, Time, TimeDuration, TimeField, TimeFields, parse, queries,
 };
 #[cfg(feature = "std")]
-use super::{Disambiguation, TimeZoneId, to_calendar_date_time, to_zoned, to_zoned_date_time};
+use super::{
+    Disambiguation, TimeZoneId, ZonedDateTime, to_calendar_date_time, to_zoned, to_zoned_date_time,
+};
 use crate::{Locale, StubIntlBackend};
 
 fn gregorian_date(year: i32, month: u8, day: u8) -> CalendarDate {
@@ -702,4 +704,223 @@ fn get_hours_in_day_tracks_dst_boundaries() {
     assert_eq!(spring_forward, 23);
     assert_eq!(fall_back, 25);
     assert_eq!(normal_day, 24);
+}
+
+#[test]
+fn cross_calendar_conversion_supports_every_supported_calendar_system() {
+    // Every variant exercises a distinct arm of `temporal_calendar_for`.
+    let gregorian = gregorian_date(2024, 3, 15);
+
+    for target in [
+        CalendarSystem::Iso8601,
+        CalendarSystem::Gregorian,
+        CalendarSystem::Buddhist,
+        CalendarSystem::Japanese,
+        CalendarSystem::Hebrew,
+        CalendarSystem::IslamicCivil,
+        CalendarSystem::IslamicUmmAlQura,
+        CalendarSystem::Persian,
+        CalendarSystem::Indian,
+        CalendarSystem::Chinese,
+        CalendarSystem::Coptic,
+        CalendarSystem::Dangi,
+        CalendarSystem::Ethiopic,
+        CalendarSystem::EthiopicAmeteAlem,
+        CalendarSystem::Roc,
+    ] {
+        let converted = gregorian
+            .to_calendar(target)
+            .expect("cross-calendar conversion should succeed");
+
+        assert_eq!(converted.calendar(), target);
+        // ISO projection is preserved regardless of display calendar.
+        assert_eq!(converted.to_iso8601(), "2024-03-15");
+    }
+}
+
+#[test]
+fn date_duration_to_temporal_errors_when_temporal_limits_are_exceeded() {
+    let date = gregorian_date(2024, 3, 15);
+
+    // Saturating every field with `i32::MAX` exceeds Temporal's total-duration
+    // magnitude limit; the resulting error surfaces through
+    // `DateDuration::to_temporal`'s `.map_err` closure.
+    let saturated = DateDuration {
+        years: i32::MAX,
+        months: i32::MAX,
+        weeks: i32::MAX,
+        days: i32::MAX,
+    };
+
+    assert!(matches!(
+        date.add(saturated),
+        Err(CalendarError::Arithmetic(_))
+    ));
+}
+
+#[test]
+fn time_duration_to_temporal_errors_when_temporal_limits_are_exceeded() {
+    let time = Time::new(9, 30, 0, 0).expect("time should validate");
+
+    // Saturating `hours` overwhelms Temporal's duration range in
+    // `TimeDuration::to_temporal`, mapping to `DateError::CalendarError`.
+    let saturated = TimeDuration {
+        hours: i64::MAX,
+        ..TimeDuration::default()
+    };
+
+    assert!(matches!(
+        time.add(saturated),
+        Err(DateError::CalendarError(_))
+    ));
+}
+
+#[test]
+fn date_time_duration_to_temporal_errors_when_temporal_limits_are_exceeded() {
+    let date_time = CalendarDateTime::new(
+        gregorian_date(2024, 3, 15),
+        Time::new(12, 0, 0, 0).expect("time should validate"),
+    );
+
+    // A saturated time-component forces `DateTimeDuration::to_temporal` to
+    // reject the combined duration and return `CalendarError::Arithmetic`.
+    let saturated = DateTimeDuration {
+        date: DateDuration::default(),
+        time: TimeDuration {
+            hours: i64::MAX,
+            ..TimeDuration::default()
+        },
+    };
+
+    assert!(matches!(
+        date_time.add(saturated),
+        Err(CalendarError::Arithmetic(_))
+    ));
+}
+
+#[test]
+fn calendar_date_set_rejects_invalid_day_in_target_month() {
+    let date = gregorian_date(2024, 1, 15);
+
+    // February 2024 has 29 days. Requesting day 31 under `Overflow::Reject`
+    // propagates Temporal's arithmetic failure through `CalendarDate::set`'s
+    // `.map_err` closure.
+    let result = date.set(&CalendarDateFields {
+        month: Some(2),
+        day: Some(31),
+        ..CalendarDateFields::default()
+    });
+
+    assert!(matches!(result, Err(CalendarError::Arithmetic(_))));
+}
+
+#[test]
+fn calendar_date_set_rejects_overly_long_era_codes() {
+    let date = gregorian_date(2024, 3, 15);
+
+    // Era codes longer than the 19-byte tinystr limit must fail inside
+    // `temporal_partial_date`, exercising its `.map_err` closure.
+    let result = date.set(&CalendarDateFields {
+        era: Some(japanese_era("extraordinarily-long-era-code", "Unsupported")),
+        year: Some(1),
+        month: Some(5),
+        day: Some(1),
+        ..CalendarDateFields::default()
+    });
+
+    assert!(matches!(result, Err(CalendarError::Arithmetic(_))));
+}
+
+#[test]
+fn calendar_date_time_set_propagates_invalid_time_fields() {
+    let date_time = CalendarDateTime::new(
+        gregorian_date(2024, 3, 15),
+        Time::new(9, 30, 45, 125).expect("time should validate"),
+    );
+
+    // Minute 75 is out of range; the `Time::set` error is remapped through
+    // `CalendarDateTime::set`'s `.map_err` closure to `CalendarError`.
+    let result = date_time.set(
+        &CalendarDateFields::default(),
+        TimeFields {
+            minute: Some(75),
+            ..TimeFields::default()
+        },
+    );
+
+    assert!(matches!(result, Err(CalendarError::Arithmetic(_))));
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn zoned_date_time_add_and_subtract_reject_saturated_durations() {
+    let local = CalendarDateTime::new(
+        gregorian_date(2024, 3, 15),
+        Time::new(9, 30, 0, 0).expect("time should validate"),
+    );
+
+    let zoned = ZonedDateTime::new(
+        &local,
+        TimeZoneId::new("America/New_York").expect("zone should validate"),
+        Disambiguation::Compatible,
+    )
+    .expect("zoned date-time should validate");
+
+    let saturated = DateTimeDuration {
+        date: DateDuration::default(),
+        time: TimeDuration {
+            hours: i64::MAX,
+            ..TimeDuration::default()
+        },
+    };
+
+    assert!(matches!(
+        zoned.add(saturated),
+        Err(CalendarError::Arithmetic(_))
+    ));
+    assert!(matches!(
+        zoned.subtract(saturated),
+        Err(CalendarError::Arithmetic(_))
+    ));
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn calendar_date_to_system_time_round_trips_through_zoned_date_time() {
+    let date = gregorian_date(2024, 3, 15);
+
+    let time_zone = TimeZoneId::new("UTC").expect("UTC should validate");
+
+    let system = date
+        .to_system_time(&time_zone)
+        .expect("SystemTime projection should succeed");
+
+    // Re-deriving via `to_zoned` must match, exercising the composed
+    // `ZonedDateTime::to_system_time` path end-to-end.
+    let zoned = to_zoned(&date, &time_zone).expect("zoned projection should succeed");
+
+    assert_eq!(zoned.to_system_time().expect("system time"), system);
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn to_calendar_date_time_composes_with_optional_time() {
+    let date = gregorian_date(2024, 3, 15);
+
+    let default_time = to_calendar_date_time(&date, None);
+    assert_eq!(default_time.time(), &Time::default());
+    assert_eq!(default_time.date(), &date);
+
+    let explicit_time = Time::new(9, 30, 45, 0).expect("time should validate");
+    let with_time = to_calendar_date_time(&date, Some(explicit_time));
+
+    assert_eq!(with_time.time(), &explicit_time);
+
+    // Feed it through `to_zoned_date_time` so the optional-time branch carries
+    // through the zoned construction helper as well.
+    let time_zone = TimeZoneId::new("UTC").expect("UTC should validate");
+    let zoned = to_zoned_date_time(&with_time, &time_zone, Disambiguation::Compatible)
+        .expect("zoned construction should succeed");
+
+    assert_eq!(zoned.time_zone().as_str(), "UTC");
 }
