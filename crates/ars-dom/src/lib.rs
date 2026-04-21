@@ -15,6 +15,7 @@
 )]
 
 mod announcer;
+mod debug;
 pub mod focus;
 pub mod media;
 pub mod modality;

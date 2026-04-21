@@ -456,7 +456,7 @@ Note: this seed task only covered baseline validation types and field state. Fol
 - Acceptance: DOM crate exists with web/ssr feature structure
 - Spec impact: `No spec change required`
 
-Note: this seed task only covered the baseline crate shell. Follow-on tasks delivered focus utilities (#39), scroll locking (#40), positioning engine (#66, #67, #115), z-index allocator (#68), scroll-into-view (#74), and modality manager (#72/partial). A full spec audit (2026-04-10) found `11-dom-utilities.md` is 2804 lines across 10 sections — far larger than the ~400 lines originally estimated. Sixteen sub-issues now cover the full spec. See [Epic #6](https://github.com/fogodev/ars-ui/issues/6) for the full decomposition.
+Note: this seed task only covered the baseline crate shell. Follow-on tasks delivered focus utilities (#39), scroll locking (#40), positioning engine (#66, #67, #115), z-index allocator (#68), scroll-into-view (#74), and the modality manager listener layer (implemented on `main` as part of PR #91, tracked by #72). A full spec audit (2026-04-10) found `11-dom-utilities.md` is 2804 lines across 10 sections — far larger than the ~400 lines originally estimated. Sixteen sub-issues now cover the full spec. See [Epic #6](https://github.com/fogodev/ars-ui/issues/6) for the full decomposition.
 
 ### #19: Add initial harness crates and locale-aware test harness shell
 

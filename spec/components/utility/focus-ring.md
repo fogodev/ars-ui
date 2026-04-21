@@ -133,7 +133,6 @@ FocusRing no longer depends on a process-global singleton. It consumes the same 
 ```rust
 // ars-dom/src/modality.rs
 
-use std::rc::Rc;
 use ars_a11y::FocusRing;
 use ars_core::{KeyboardKey, KeyModifiers, ModalityContext, PointerType};
 

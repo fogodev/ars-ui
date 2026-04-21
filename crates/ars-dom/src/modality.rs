@@ -1,9 +1,7 @@
 //! Web listener management for the shared modality context.
 
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-use std::cell::RefCell;
 use std::{
-    fmt,
+    fmt::{self, Debug},
     sync::{
         Arc,
         atomic::{self, AtomicBool, AtomicU32},
@@ -12,11 +10,17 @@ use std::{
 
 use ars_a11y::FocusRing;
 use ars_core::{KeyModifiers, KeyboardKey, ModalityContext, PointerType};
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+use {
+    std::cell::RefCell,
+    wasm_bindgen::{JsCast, closure::Closure},
+    web_sys::{Document, FocusEvent, KeyboardEvent, MouseEvent, PointerEvent, TouchEvent},
+};
 
 /// Adapter-facing coordinator that keeps shared modality and focus-visible state in sync.
 pub struct ModalityManager {
     modality: Arc<dyn ModalityContext>,
-    focus_ring: FocusRing,
+    focus_ring: Arc<FocusRing>,
     listeners_installed: AtomicBool,
     listener_refcount: AtomicU32,
     #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -29,7 +33,7 @@ impl ModalityManager {
     pub fn new(modality: Arc<dyn ModalityContext>) -> Self {
         Self {
             modality,
-            focus_ring: FocusRing::new(),
+            focus_ring: Arc::new(FocusRing::new()),
             listeners_installed: AtomicBool::new(false),
             listener_refcount: AtomicU32::new(0),
             #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -45,8 +49,8 @@ impl ModalityManager {
 
     /// Returns the accessibility focus-ring tracker kept in sync with modality events.
     #[must_use]
-    pub const fn focus_ring(&self) -> &FocusRing {
-        &self.focus_ring
+    pub fn focus_ring(&self) -> &FocusRing {
+        self.focus_ring.as_ref()
     }
 
     /// Records a keyboard interaction in both modality and focus-visible tracking.
@@ -72,6 +76,8 @@ impl ModalityManager {
         #[cfg(all(feature = "web", target_arch = "wasm32"))]
         {
             let Some(document) = document() else {
+                crate::debug::warn_skipped("ensure_listeners()", "window.document");
+
                 return;
             };
 
@@ -86,6 +92,8 @@ impl ModalityManager {
         #[cfg(all(feature = "web", target_arch = "wasm32"))]
         {
             let Some(document) = document() else {
+                crate::debug::warn_skipped("remove_listeners()", "window.document");
+
                 return;
             };
 
@@ -101,27 +109,32 @@ impl ModalityManager {
             .fetch_add(1, atomic::Ordering::Relaxed);
 
         let should_install = !self.listeners_installed.load(atomic::Ordering::Relaxed);
+
         if should_install {
             self.listeners_installed
                 .store(true, atomic::Ordering::Relaxed);
         }
+
         should_install
     }
 
     #[cfg(any(test, all(feature = "web", target_arch = "wasm32")))]
     fn release_listener_consumer(&self) -> bool {
         let count = self.listener_refcount.load(atomic::Ordering::Relaxed);
+
         if count == 0 {
             return false;
         }
 
         let next = count - 1;
+
         self.listener_refcount
             .store(next, atomic::Ordering::Relaxed);
 
         if next == 0 {
             self.listeners_installed
                 .store(false, atomic::Ordering::Relaxed);
+
             true
         } else {
             false
@@ -137,7 +150,7 @@ impl ModalityManager {
     }
 }
 
-impl fmt::Debug for ModalityManager {
+impl Debug for ModalityManager {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ModalityManager")
             .field("modality", &"<dyn ModalityContext>")
@@ -153,11 +166,6 @@ impl fmt::Debug for ModalityManager {
             .finish()
     }
 }
-
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-use wasm_bindgen::{JsCast, closure::Closure};
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-use web_sys::{Document, FocusEvent, KeyboardEvent, MouseEvent, PointerEvent, TouchEvent};
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 struct WasmListenerHandles {
@@ -177,38 +185,53 @@ fn document() -> Option<Document> {
 impl ModalityManager {
     fn install_wasm_listeners(&self, document: &Document) {
         let modality = self.modality();
-        let focus_ring = self.focus_ring.clone();
+
+        let focus_ring = Arc::clone(&self.focus_ring);
+
         let keydown = Closure::wrap(Box::new(move |event: KeyboardEvent| {
             let key = KeyboardKey::from_key_str(&event.key());
+
             let modifiers = KeyModifiers {
                 shift: event.shift_key(),
                 ctrl: event.ctrl_key(),
                 alt: event.alt_key(),
                 meta: event.meta_key(),
             };
+
             modality.on_key_down(key, modifiers);
+
             focus_ring.on_key_down(key, modifiers);
         }) as Box<dyn FnMut(KeyboardEvent)>);
 
         let modality = self.modality();
-        let focus_ring = self.focus_ring.clone();
+
+        let focus_ring = Arc::clone(&self.focus_ring);
+
         let pointerdown = Closure::wrap(Box::new(move |event: PointerEvent| {
             let pointer_type = pointer_type_from_web(&event.pointer_type());
+
             modality.on_pointer_down(pointer_type);
+
             focus_ring.on_pointer_down();
         }) as Box<dyn FnMut(PointerEvent)>);
 
         let modality = self.modality();
-        let focus_ring = self.focus_ring.clone();
+
+        let focus_ring = Arc::clone(&self.focus_ring);
+
         let mousedown = Closure::wrap(Box::new(move |_event: MouseEvent| {
             modality.on_pointer_down(PointerType::Mouse);
+
             focus_ring.on_pointer_down();
         }) as Box<dyn FnMut(MouseEvent)>);
 
         let modality = self.modality();
-        let focus_ring = self.focus_ring.clone();
+
+        let focus_ring = Arc::clone(&self.focus_ring);
+
         let touchstart = Closure::wrap(Box::new(move |_event: TouchEvent| {
             modality.on_pointer_down(PointerType::Touch);
+
             focus_ring.on_pointer_down();
         }) as Box<dyn FnMut(TouchEvent)>);
 
@@ -217,6 +240,7 @@ impl ModalityManager {
 
         let keydown_result =
             document.add_event_listener_with_callback("keydown", keydown.as_ref().unchecked_ref());
+
         debug_assert!(
             keydown_result.is_ok(),
             "failed to attach keydown modality listener"
@@ -224,6 +248,7 @@ impl ModalityManager {
 
         let pointerdown_result = document
             .add_event_listener_with_callback("pointerdown", pointerdown.as_ref().unchecked_ref());
+
         debug_assert!(
             pointerdown_result.is_ok(),
             "failed to attach pointerdown modality listener"
@@ -231,6 +256,7 @@ impl ModalityManager {
 
         let mousedown_result = document
             .add_event_listener_with_callback("mousedown", mousedown.as_ref().unchecked_ref());
+
         debug_assert!(
             mousedown_result.is_ok(),
             "failed to attach mousedown modality listener"
@@ -238,6 +264,7 @@ impl ModalityManager {
 
         let touchstart_result = document
             .add_event_listener_with_callback("touchstart", touchstart.as_ref().unchecked_ref());
+
         debug_assert!(
             touchstart_result.is_ok(),
             "failed to attach touchstart modality listener"
@@ -248,6 +275,7 @@ impl ModalityManager {
             focus.as_ref().unchecked_ref(),
             true,
         );
+
         debug_assert!(
             focus_result.is_ok(),
             "failed to attach focus modality listener"
@@ -268,6 +296,7 @@ impl ModalityManager {
                 "keydown",
                 handles.keydown.as_ref().unchecked_ref(),
             );
+
             debug_assert!(
                 keydown_result.is_ok(),
                 "failed to detach keydown modality listener"
@@ -277,6 +306,7 @@ impl ModalityManager {
                 "pointerdown",
                 handles.pointerdown.as_ref().unchecked_ref(),
             );
+
             debug_assert!(
                 pointerdown_result.is_ok(),
                 "failed to detach pointerdown modality listener"
@@ -286,6 +316,7 @@ impl ModalityManager {
                 "mousedown",
                 handles.mousedown.as_ref().unchecked_ref(),
             );
+
             debug_assert!(
                 mousedown_result.is_ok(),
                 "failed to detach mousedown modality listener"
@@ -295,6 +326,7 @@ impl ModalityManager {
                 "touchstart",
                 handles.touchstart.as_ref().unchecked_ref(),
             );
+
             debug_assert!(
                 touchstart_result.is_ok(),
                 "failed to detach touchstart modality listener"
@@ -305,6 +337,7 @@ impl ModalityManager {
                 handles.focus.as_ref().unchecked_ref(),
                 true,
             );
+
             debug_assert!(
                 focus_result.is_ok(),
                 "failed to detach focus modality listener"
@@ -331,6 +364,7 @@ mod tests {
     #[test]
     fn keydown_updates_modality_and_focus_ring() {
         let modality: Arc<dyn ModalityContext> = Arc::new(DefaultModalityContext::new());
+
         let manager = ModalityManager::new(Arc::clone(&modality));
 
         manager.on_key_down(KeyboardKey::Tab, KeyModifiers::default());
@@ -348,15 +382,18 @@ mod tests {
     #[test]
     fn modality_accessor_returns_shared_context() {
         let modality: Arc<dyn ModalityContext> = Arc::new(DefaultModalityContext::new());
+
         let manager = ModalityManager::new(Arc::clone(&modality));
 
         let owned = manager.modality();
+
         assert!(Arc::ptr_eq(&owned, &modality));
     }
 
     #[test]
     fn pointerdown_updates_modality_and_clears_focus_ring() {
         let modality: Arc<dyn ModalityContext> = Arc::new(DefaultModalityContext::new());
+
         let manager = ModalityManager::new(Arc::clone(&modality));
 
         manager.on_key_down(KeyboardKey::Enter, KeyModifiers::default());
@@ -370,6 +407,7 @@ mod tests {
     #[test]
     fn pen_pointerdown_counts_as_pointer_interaction() {
         let modality: Arc<dyn ModalityContext> = Arc::new(DefaultModalityContext::new());
+
         let manager = ModalityManager::new(Arc::clone(&modality));
 
         manager.on_pointer_down(PointerType::Pen);
@@ -382,6 +420,7 @@ mod tests {
     #[test]
     fn virtual_input_updates_both_trackers() {
         let modality = Arc::new(DefaultModalityContext::new());
+
         let manager = ModalityManager::new(modality);
 
         manager.on_virtual_input();
@@ -421,7 +460,209 @@ mod tests {
     #[test]
     fn host_listener_api_is_safe_to_call() {
         let manager = ModalityManager::new(Arc::new(DefaultModalityContext::new()));
+
         manager.ensure_listeners();
         manager.remove_listeners();
+    }
+
+    #[test]
+    fn debug_includes_listener_state_and_focus_ring() {
+        let manager = ModalityManager::new(Arc::new(DefaultModalityContext::new()));
+
+        let debug = format!("{manager:?}");
+
+        assert!(debug.contains("ModalityManager"));
+        assert!(debug.contains("focus_ring"));
+        assert!(debug.contains("listeners_installed"));
+        assert!(debug.contains("listener_refcount"));
+    }
+}
+
+#[cfg(all(test, feature = "web", target_arch = "wasm32"))]
+mod wasm_tests {
+    use ars_core::{DefaultModalityContext, ModalitySnapshot};
+    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+    use web_sys::KeyboardEventInit;
+
+    use super::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    fn document() -> Document {
+        super::document().expect("document must exist in browser tests")
+    }
+
+    fn dispatch_keydown(key: &str) {
+        let init = KeyboardEventInit::new();
+
+        init.set_key(key);
+
+        let event = KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init)
+            .expect("keyboard event creation must succeed");
+
+        document()
+            .dispatch_event(&event)
+            .expect("keydown dispatch must succeed");
+    }
+
+    fn dispatch_pointerdown() {
+        let event = PointerEvent::new("pointerdown").expect("pointer event creation must succeed");
+
+        document()
+            .dispatch_event(&event)
+            .expect("pointerdown dispatch must succeed");
+    }
+
+    fn dispatch_mousedown() {
+        let event = MouseEvent::new("mousedown").expect("mouse event creation must succeed");
+
+        document()
+            .dispatch_event(&event)
+            .expect("mousedown dispatch must succeed");
+    }
+
+    fn dispatch_touchstart() {
+        let event = TouchEvent::new("touchstart").expect("touch event creation must succeed");
+
+        document()
+            .dispatch_event(&event)
+            .expect("touchstart dispatch must succeed");
+    }
+
+    fn dispatch_focus() {
+        let event = FocusEvent::new("focus").expect("focus event creation must succeed");
+
+        document()
+            .dispatch_event(&event)
+            .expect("focus dispatch must succeed");
+    }
+
+    fn clear_manager_state(manager: &ModalityManager, modality: &DefaultModalityContext) {
+        manager.on_pointer_down(PointerType::Mouse);
+
+        modality.clear();
+    }
+
+    #[wasm_bindgen_test]
+    fn ensure_and_remove_listeners_manage_handles_and_refcount() {
+        let modality = Arc::new(DefaultModalityContext::new());
+
+        let manager = ModalityManager::new(modality);
+
+        assert_eq!(manager.listener_state(), (false, 0));
+        assert!(manager.listeners.borrow().is_none());
+
+        manager.ensure_listeners();
+
+        assert_eq!(manager.listener_state(), (true, 1));
+        assert!(manager.listeners.borrow().is_some());
+
+        manager.ensure_listeners();
+
+        assert_eq!(manager.listener_state(), (true, 2));
+        assert!(manager.listeners.borrow().is_some());
+
+        manager.remove_listeners();
+
+        assert_eq!(manager.listener_state(), (true, 1));
+        assert!(manager.listeners.borrow().is_some());
+
+        manager.remove_listeners();
+
+        assert_eq!(manager.listener_state(), (false, 0));
+        assert!(manager.listeners.borrow().is_none());
+
+        manager.remove_listeners();
+
+        assert_eq!(manager.listener_state(), (false, 0));
+        assert!(manager.listeners.borrow().is_none());
+    }
+
+    #[wasm_bindgen_test]
+    fn keydown_listener_updates_modality_and_focus_ring() {
+        let modality = Arc::new(DefaultModalityContext::new());
+
+        let manager = ModalityManager::new(Arc::<DefaultModalityContext>::clone(&modality));
+
+        manager.ensure_listeners();
+
+        dispatch_keydown("Tab");
+
+        assert_eq!(modality.last_pointer_type(), Some(PointerType::Keyboard));
+        assert!(manager.focus_ring().should_show_focus_ring());
+
+        manager.remove_listeners();
+    }
+
+    #[wasm_bindgen_test]
+    fn browser_listeners_drive_pointer_and_focus_semantics() {
+        let modality = Arc::new(DefaultModalityContext::new());
+
+        let manager = ModalityManager::new(Arc::<DefaultModalityContext>::clone(&modality));
+
+        manager.ensure_listeners();
+
+        dispatch_keydown("Tab");
+
+        assert!(manager.focus_ring().should_show_focus_ring());
+
+        dispatch_pointerdown();
+
+        assert_eq!(modality.last_pointer_type(), Some(PointerType::Mouse));
+        assert!(!manager.focus_ring().should_show_focus_ring());
+
+        dispatch_keydown("Tab");
+        dispatch_mousedown();
+
+        assert_eq!(modality.last_pointer_type(), Some(PointerType::Mouse));
+        assert!(!manager.focus_ring().should_show_focus_ring());
+
+        dispatch_keydown("Tab");
+        dispatch_touchstart();
+
+        assert_eq!(modality.last_pointer_type(), Some(PointerType::Touch));
+        assert!(!manager.focus_ring().should_show_focus_ring());
+
+        clear_manager_state(&manager, modality.as_ref());
+
+        dispatch_focus();
+
+        assert_eq!(modality.snapshot(), ModalitySnapshot::default());
+        assert!(!manager.focus_ring().should_show_focus_ring());
+
+        manager.remove_listeners();
+    }
+
+    #[wasm_bindgen_test]
+    fn removed_listeners_stop_dispatching_updates() {
+        let modality = Arc::new(DefaultModalityContext::new());
+
+        let manager = ModalityManager::new(Arc::<DefaultModalityContext>::clone(&modality));
+
+        manager.ensure_listeners();
+        manager.remove_listeners();
+
+        clear_manager_state(&manager, modality.as_ref());
+        dispatch_keydown("Tab");
+
+        assert_eq!(modality.snapshot(), ModalitySnapshot::default());
+        assert!(!manager.focus_ring().should_show_focus_ring());
+    }
+
+    #[wasm_bindgen_test]
+    fn uninstall_wasm_listeners_is_safe_without_handles() {
+        let manager = ModalityManager::new(Arc::new(DefaultModalityContext::new()));
+
+        manager.uninstall_wasm_listeners(&document());
+
+        assert!(manager.listeners.borrow().is_none());
+    }
+
+    #[wasm_bindgen_test]
+    fn pointer_type_from_web_maps_touch_pen_and_default() {
+        assert_eq!(pointer_type_from_web("touch"), PointerType::Touch);
+        assert_eq!(pointer_type_from_web("pen"), PointerType::Pen);
+        assert_eq!(pointer_type_from_web("mouse"), PointerType::Mouse);
+        assert_eq!(pointer_type_from_web(""), PointerType::Mouse);
     }
 }

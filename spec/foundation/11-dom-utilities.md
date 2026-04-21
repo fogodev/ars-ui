@@ -1850,31 +1850,21 @@ Overlay components (Dialog, Popover, Drawer, DatePicker) often need to prevent b
 The `ScrollLockManager` uses reference counting to ensure scroll locking remains active as long as any overlay holds a lock, and only restores scrolling when the last overlay releases its lock.
 
 ```rust
-use std::collections::HashMap;  // ars-dom is std-enabled (web-sys dependency); HashMap is valid here
+use std::collections::HashSet;  // ars-dom is std-enabled (web-sys dependency); HashSet is valid here
 
 /// Manages document scroll locking with reference counting.
 /// Ensures that nested overlays correctly coordinate scroll lock/unlock.
 pub struct ScrollLockManager {
-    /// Number of active scroll locks. Body overflow is locked when > 0.
-    lock_count: u32,
-    /// Scroll position captured when the first lock was acquired.
-    saved_scroll_x: f64,
-    saved_scroll_y: f64,
-    /// Original `overflow` style on the body element, restored on last unlock.
-    saved_overflow: String,
-    /// Tracks which overlay instance owns which lock, keyed by overlay ID.
-    /// Prevents double-lock from a single overlay and ensures cleanup on drop.
-    lock_owners: HashMap<String, bool>,
+    /// Tracks which overlay instances currently own a lock, keyed by overlay ID.
+    /// Prevents double-lock from a single overlay and lets the manager answer
+    /// whether it currently owns any locks.
+    lock_owners: HashSet<String>,
 }
 
 impl ScrollLockManager {
     pub fn new() -> Self {
         Self {
-            lock_count: 0,
-            saved_scroll_x: 0.0,
-            saved_scroll_y: 0.0,
-            saved_overflow: String::new(),
-            lock_owners: HashMap::new(),
+            lock_owners: HashSet::new(),
         }
     }
 
@@ -1885,25 +1875,11 @@ impl ScrollLockManager {
     /// Duplicate lock requests from the same overlay ID are ignored.
     pub fn lock(&mut self, overlay_id: &str) {
         // Prevent double-lock from the same overlay
-        if self.lock_owners.contains_key(overlay_id) {
+        if self.lock_owners.contains(overlay_id) {
             return;
         }
-        self.lock_owners.insert(overlay_id.to_string(), true);
-
-        if self.lock_count == 0 {
-            // First lock: capture current scroll position and body overflow
-            // In adapters, these read from the DOM:
-            //   self.saved_scroll_x = window.scroll_x();
-            //   self.saved_scroll_y = window.scroll_y();
-            //   self.saved_overflow = body.style().get_property_value("overflow");
-            //
-            // Apply scroll lock via requestAnimationFrame to ensure layout
-            // calculation is complete before modifying overflow:
-            //   request_animation_frame(move || {
-            //       body.style().set_property("overflow", "hidden");
-            //   });
-        }
-        self.lock_count += 1;
+        self.lock_owners.insert(overlay_id.to_string());
+        acquire();
     }
 
     /// Release the scroll lock for the given overlay.
@@ -1911,23 +1887,15 @@ impl ScrollLockManager {
     /// overflow style and scroll position are restored.
     /// Unlock requests for unknown overlay IDs are ignored.
     pub fn unlock(&mut self, overlay_id: &str) {
-        if self.lock_owners.remove(overlay_id).is_none() {
+        if !self.lock_owners.remove(overlay_id) {
             return; // Not locked by this overlay — no-op
         }
-
-        self.lock_count = self.lock_count.saturating_sub(1);
-
-        if self.lock_count == 0 {
-            // Last unlock: restore original overflow and scroll position
-            // In adapters:
-            //   body.style().set_property("overflow", &self.saved_overflow);
-            //   window.scroll_to(self.saved_scroll_x, self.saved_scroll_y);
-        }
+        release();
     }
 
     /// Returns `true` if scroll locking is currently active.
     pub fn is_locked(&self) -> bool {
-        self.lock_count > 0
+        !self.lock_owners.is_empty()
     }
 }
 ```
@@ -1937,6 +1905,7 @@ impl ScrollLockManager {
 - Overlay `PendingEffect::setup` calls `ScrollLockManager::lock(overlay_id)` as part of the open effect.
 - The cleanup closure returned by `setup` calls `ScrollLockManager::unlock(overlay_id)`.
 - The `ScrollLockManager` instance is stored in a thread-local or adapter-level singleton, shared across all overlay instances.
+- The DOM snapshot used to restore scroll position and styles is document-global state owned by the low-level `acquire()` / `release()` machinery, not per-manager state. This is required because all overlays coordinate the same `document.body` and viewport.
 - Scroll lock timing is an adapter-level concern. Overlays that perform positioning calculations before locking SHOULD schedule the `lock()` call via `requestAnimationFrame` to avoid measuring stale layout dimensions. The `acquire()` / `release()` low-level API applies styles synchronously — the adapter decides when to call them.
 
 ### 5.3 Low-Level API (acquire/release with depth counter)
@@ -2691,7 +2660,6 @@ Usage flow for a modal dialog:
 ```rust
 // ars-dom/src/modality.rs
 
-use std::rc::Rc;
 use ars_a11y::FocusRing;
 use ars_core::{KeyboardKey, KeyModifiers, ModalityContext, PointerType};
 
