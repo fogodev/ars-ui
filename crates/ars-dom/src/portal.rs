@@ -120,12 +120,12 @@ fn get_or_create_portal_root_impl() -> web_sys::Element {
             return existing;
         }
 
-        #[cfg(feature = "debug")]
-        log::warn!(
-            "[ars-dom] found #ars-portal-root without data-ars-managed; creating alternate root"
-        );
+        crate::debug::warn_message(format_args!(
+            "found #ars-portal-root without data-ars-managed; creating alternate root"
+        ));
 
         let suffix = (Math::random() * 1_000_000.0) as u32;
+
         return create_managed_root(&document, &format!("ars-portal-root-{suffix}"));
     }
 
@@ -142,20 +142,25 @@ fn create_managed_root(document: &web_sys::Document, id: &str) -> web_sys::Eleme
     let root = document
         .create_element("div")
         .expect("portal root creation must succeed");
+
     root.set_id(id);
+
     root.set_attribute("data-ars-managed", "")
         .expect("managed marker assignment must succeed");
+
     document
         .body()
         .expect("document must have body")
         .append_child(&root)
         .expect("portal root append must succeed");
+
     root
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn ensure_portal_mount_root_impl(owner_id: &str) -> web_sys::Element {
     let portal_root = get_or_create_portal_root_impl();
+
     let mount_id = portal_mount_id(owner_id);
 
     if let Some(existing) =
@@ -168,16 +173,21 @@ fn ensure_portal_mount_root_impl(owner_id: &str) -> web_sys::Element {
         .expect("document exists in browser context")
         .create_element("div")
         .expect("portal mount creation must succeed");
+
     mount.set_id(&mount_id);
+
     mount
         .set_attribute("data-ars-managed", "")
         .expect("managed marker assignment must succeed");
+
     mount
         .set_attribute("data-ars-portal-owner", owner_id)
         .expect("portal owner assignment must succeed");
+
     portal_root
         .append_child(&mount)
         .expect("portal mount append must succeed");
+
     mount
 }
 
@@ -207,28 +217,42 @@ const fn supports_inert_impl() -> bool {
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn set_background_inert_impl(portal_root_id: &str, inert_supported: bool) -> Box<dyn FnOnce()> {
     let Some(document) = document() else {
+        crate::debug::warn_skipped("set_background_inert()", "window.document");
+
         return Box::new(|| {});
     };
+
     let Some(body) = document.body() else {
+        crate::debug::warn_skipped("set_background_inert()", "document.body");
+
         return Box::new(|| {});
     };
     let Some(portal_root) = document.get_element_by_id(portal_root_id) else {
+        crate::debug::warn_message(format_args!(
+            "set_background_inert() skipped because portal root #{portal_root_id} was not found"
+        ));
+
         return Box::new(|| {});
     };
 
     let siblings = collect_body_siblings(&body, &portal_root);
+
     if siblings.is_empty() {
         return Box::new(|| {});
     }
 
     if inert_supported {
         let saved_siblings = apply_aria_hidden(&siblings);
+
         apply_inert(&siblings);
+
         return Box::new(move || restore_native_inert(saved_siblings));
     }
 
     let saved_tabbables = disable_tabbable_descendants(&siblings);
+
     let saved_siblings = apply_aria_hidden(&siblings);
+
     let focus_trap = install_focus_trap(&document, &portal_root);
 
     Box::new(move || {
@@ -247,6 +271,7 @@ fn collect_body_siblings(
     portal_root: &web_sys::Element,
 ) -> Vec<web_sys::Element> {
     let children = body.children();
+
     let mut siblings = Vec::new();
 
     for index in 0..children.length() {
@@ -270,9 +295,11 @@ fn apply_aria_hidden(siblings: &[web_sys::Element]) -> Vec<SavedSiblingAttrs> {
         .iter()
         .map(|sibling| {
             let previous_aria_hidden = sibling.get_attribute("aria-hidden");
+
             sibling
                 .set_attribute("aria-hidden", "true")
                 .expect("aria-hidden assignment must succeed");
+
             SavedSiblingAttrs {
                 element: sibling.clone(),
                 previous_inert: sibling.get_attribute("inert"),
@@ -298,9 +325,11 @@ fn disable_tabbable_descendants(siblings: &[web_sys::Element]) -> Vec<SavedTabIn
     for sibling in siblings {
         for tabbable in get_tabbable_elements(sibling) {
             let previous_tabindex = tabbable.get_attribute("tabindex");
+
             tabbable
                 .set_attribute("tabindex", "-1")
                 .expect("tabindex assignment must succeed");
+
             saved.push(SavedTabIndex {
                 element: tabbable,
                 previous_tabindex,
@@ -317,7 +346,9 @@ fn install_focus_trap(
     portal_root: &web_sys::Element,
 ) -> Option<FocusTrapListener> {
     let portal_root = portal_root.clone();
+
     let active_document = document.clone();
+
     let listener_document = document.clone();
 
     let listener = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
@@ -326,6 +357,7 @@ fn install_focus_trap(
         }
 
         let tabbables = get_tabbable_elements(&portal_root);
+
         if tabbables.is_empty() {
             return;
         }
@@ -336,6 +368,7 @@ fn install_focus_trap(
 
         let first = &tabbables[0];
         let last = tabbables.last().expect("non-empty tabbable list");
+
         let active_inside_portal = active_element
             .as_ref()
             .is_some_and(|element| portal_root.contains(Some(element.as_ref())));
@@ -357,6 +390,7 @@ fn install_focus_trap(
         }
 
         event.prevent_default();
+
         if event.shift_key() {
             focus_element(last, false);
         } else {
@@ -368,6 +402,8 @@ fn install_focus_trap(
         .add_event_listener_with_callback("keydown", listener.as_ref().unchecked_ref())
         .is_err()
     {
+        crate::debug::warn_message(format_args!("installing focus trap listener failed"));
+
         return None;
     }
 
@@ -375,17 +411,6 @@ fn install_focus_trap(
         document: listener_document,
         listener,
     })
-}
-
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn warn_on_dom_error(context: &str, result: Result<(), JsValue>) {
-    #[cfg(feature = "debug")]
-    if let Err(error) = result {
-        log::warn!("[ars-dom] {context} failed: {error:?}");
-    }
-
-    #[cfg(not(feature = "debug"))]
-    drop((context, result));
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -407,7 +432,7 @@ fn restore_polyfill_state(
     focus_trap: Option<FocusTrapListener>,
 ) {
     if let Some(FocusTrapListener { document, listener }) = focus_trap {
-        warn_on_dom_error(
+        crate::debug::warn_dom_error(
             "removing focus trap listener",
             document
                 .remove_event_listener_with_callback("keydown", listener.as_ref().unchecked_ref()),
@@ -435,13 +460,14 @@ fn restore_polyfill_state(
 fn restore_element_attribute(element: &web_sys::Element, name: &str, previous: Option<&str>) {
     match restore_action(previous) {
         RestoreAction::Remove => {
-            warn_on_dom_error(
+            crate::debug::warn_dom_error(
                 &format!("removing attribute {name} during portal cleanup"),
                 element.remove_attribute(name),
             );
         }
+
         RestoreAction::Set(value) => {
-            warn_on_dom_error(
+            crate::debug::warn_dom_error(
                 &format!("restoring attribute {name} during portal cleanup"),
                 element.set_attribute(name, &value),
             );
@@ -453,13 +479,14 @@ fn restore_element_attribute(element: &web_sys::Element, name: &str, previous: O
 fn restore_html_attribute(element: &web_sys::HtmlElement, name: &str, previous: Option<&str>) {
     match restore_action(previous) {
         RestoreAction::Remove => {
-            warn_on_dom_error(
+            crate::debug::warn_dom_error(
                 &format!("removing attribute {name} during portal cleanup"),
                 element.remove_attribute(name),
             );
         }
+
         RestoreAction::Set(value) => {
-            warn_on_dom_error(
+            crate::debug::warn_dom_error(
                 &format!("restoring attribute {name} during portal cleanup"),
                 element.set_attribute(name, &value),
             );
@@ -470,12 +497,22 @@ fn restore_html_attribute(element: &web_sys::HtmlElement, name: &str, previous: 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn remove_inert_from_siblings_impl(portal_id: &str) {
     let Some(document) = document() else {
+        crate::debug::warn_skipped("remove_inert_from_siblings()", "window.document");
+
         return;
     };
     let Some(portal) = document.get_element_by_id(portal_id) else {
+        crate::debug::warn_message(format_args!(
+            "remove_inert_from_siblings() skipped because portal #{portal_id} was not found"
+        ));
+
         return;
     };
     let Some(parent) = portal.parent_element() else {
+        crate::debug::warn_message(format_args!(
+            "remove_inert_from_siblings() skipped because portal #{portal_id} has no parent element"
+        ));
+
         return;
     };
 
@@ -484,15 +521,17 @@ fn remove_inert_from_siblings_impl(portal_id: &str) {
         let Some(child) = children.item(index) else {
             continue;
         };
+
         if child.is_same_node(Some(portal.as_ref())) {
             continue;
         }
 
-        warn_on_dom_error(
+        crate::debug::warn_dom_error(
             "removing inert from portal sibling",
             child.remove_attribute("inert"),
         );
-        warn_on_dom_error(
+
+        crate::debug::warn_dom_error(
             "removing aria-hidden from portal sibling",
             child.remove_attribute("aria-hidden"),
         );
@@ -538,9 +577,13 @@ mod host_tests {
     fn non_wasm_web_stubs_are_safe_to_call() {
         drop(get_or_create_portal_root());
         drop(ensure_portal_mount_root("dialog-1"));
+
         assert!(!supports_inert());
+
         let cleanup = set_background_inert("ars-portal-root");
+
         cleanup();
+
         remove_inert_from_siblings("ars-portal-root");
     }
 }
@@ -571,10 +614,13 @@ mod wasm_tests {
             .expect("div creation must succeed")
             .dyn_into::<web_sys::HtmlElement>()
             .expect("div must be HtmlElement");
+
         element.set_id(id);
+
         parent
             .append_child(&element)
             .expect("append_child must succeed");
+
         element
     }
 
@@ -588,15 +634,19 @@ mod wasm_tests {
             .expect("button creation must succeed")
             .dyn_into::<web_sys::HtmlElement>()
             .expect("button must be HtmlElement");
+
         button.set_id(id);
+
         if let Some(tabindex) = tabindex {
             button
                 .set_attribute("tabindex", tabindex)
                 .expect("tabindex assignment must succeed");
         }
+
         parent
             .append_child(&button)
             .expect("append_child must succeed");
+
         button
     }
 
@@ -612,6 +662,7 @@ mod wasm_tests {
         let extra_roots = document()
             .query_selector_all("[id^='ars-portal-root-']")
             .expect("selector must be valid");
+
         for index in 0..extra_roots.length() {
             if let Some(node) = extra_roots.item(index) {
                 node.unchecked_into::<web_sys::Element>().remove();
@@ -636,12 +687,15 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn existing_managed_root_is_reused() {
         clear_managed_portals();
+
         let managed = append_div(body().as_ref(), "ars-portal-root");
+
         managed
             .set_attribute("data-ars-managed", "")
             .expect("marker assignment must succeed");
 
         let found = get_or_create_portal_root();
+
         assert!(found.is_same_node(Some(managed.as_ref())));
 
         cleanup_node(managed.as_ref());
@@ -650,9 +704,11 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn unmanaged_root_creates_alternate_managed_root() {
         clear_managed_portals();
+
         let unmanaged = append_div(body().as_ref(), "ars-portal-root");
 
         let found = get_or_create_portal_root();
+
         assert_ne!(found.id(), "ars-portal-root");
         assert!(found.id().starts_with("ars-portal-root-"));
         assert!(found.has_attribute("data-ars-managed"));
@@ -666,6 +722,7 @@ mod wasm_tests {
         clear_managed_portals();
 
         let mount = ensure_portal_mount_root("dialog-1");
+
         let root = document()
             .get_element_by_id("ars-portal-root")
             .expect("shared root must exist");
@@ -692,6 +749,7 @@ mod wasm_tests {
         let root = document()
             .get_element_by_id("ars-portal-root")
             .expect("shared root must exist");
+
         cleanup_node(&root);
     }
 
@@ -711,6 +769,7 @@ mod wasm_tests {
         let root = document()
             .get_element_by_id("ars-portal-root")
             .expect("shared root must exist");
+
         cleanup_node(&root);
     }
 
@@ -719,10 +778,13 @@ mod wasm_tests {
         clear_managed_portals();
 
         let before = append_div(body().as_ref(), "before");
+
         before
             .set_attribute("aria-hidden", "false")
             .expect("aria-hidden assignment must succeed");
+
         let after = append_div(body().as_ref(), "after");
+
         let root = get_or_create_portal_root();
 
         let cleanup = set_background_inert("ars-portal-root");
@@ -752,17 +814,23 @@ mod wasm_tests {
         clear_managed_portals();
 
         let root = get_or_create_portal_root();
+
         let before = append_div(body().as_ref(), "before");
+
         before
             .set_attribute("inert", "")
             .expect("inert assignment must succeed");
+
         before
             .set_attribute("aria-hidden", "true")
             .expect("aria-hidden assignment must succeed");
+
         let after = append_div(body().as_ref(), "after");
+
         after
             .set_attribute("inert", "")
             .expect("inert assignment must succeed");
+
         after
             .set_attribute("aria-hidden", "true")
             .expect("aria-hidden assignment must succeed");
@@ -784,10 +852,13 @@ mod wasm_tests {
         clear_managed_portals();
 
         let background = append_div(body().as_ref(), "background");
+
         let with_tabindex = append_button(background.as_ref(), "with-tabindex", Some("3"));
+
         let without_tabindex = append_button(background.as_ref(), "without-tabindex", None);
 
         let root = get_or_create_portal_root();
+
         let _first = append_button(&root, "first", None);
         let _last = append_button(&root, "last", None);
 
@@ -825,36 +896,46 @@ mod wasm_tests {
 
         let background = append_div(body().as_ref(), "background");
         let background_button = append_button(background.as_ref(), "background-button", None);
+
         let root = get_or_create_portal_root();
+
         let first = append_button(&root, "first", None);
         let last = append_button(&root, "last", None);
 
         let cleanup = set_background_inert_impl("ars-portal-root", false);
 
         last.focus().expect("focus must succeed");
+
         let tab_init = web_sys::KeyboardEventInit::new();
+
         tab_init.set_key("Tab");
+
         let tab_event =
             web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &tab_init)
                 .expect("keyboard event creation must succeed");
         document()
             .dispatch_event(&tab_event)
             .expect("dispatch must succeed");
+
         assert_eq!(
             document().active_element().expect("active element").id(),
             "first"
         );
 
         first.focus().expect("focus must succeed");
+
         let shift_tab_init = web_sys::KeyboardEventInit::new();
+
         shift_tab_init.set_key("Tab");
         shift_tab_init.set_shift_key(true);
+
         let shift_tab_event =
             web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &shift_tab_init)
                 .expect("keyboard event creation must succeed");
         document()
             .dispatch_event(&shift_tab_event)
             .expect("dispatch must succeed");
+
         assert_eq!(
             document().active_element().expect("active element").id(),
             "last"
@@ -863,14 +944,19 @@ mod wasm_tests {
         background_button
             .focus()
             .expect("focus outside portal must succeed");
+
         let outside_tab_init = web_sys::KeyboardEventInit::new();
+
         outside_tab_init.set_key("Tab");
+
         let outside_tab_event =
             web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &outside_tab_init)
                 .expect("keyboard event creation must succeed");
+
         document()
             .dispatch_event(&outside_tab_event)
             .expect("dispatch must succeed");
+
         assert_eq!(
             document().active_element().expect("active element").id(),
             "first"
@@ -879,17 +965,22 @@ mod wasm_tests {
         background_button
             .focus()
             .expect("focus outside portal must succeed");
+
         let outside_shift_tab_init = web_sys::KeyboardEventInit::new();
+
         outside_shift_tab_init.set_key("Tab");
         outside_shift_tab_init.set_shift_key(true);
+
         let outside_shift_tab_event = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict(
             "keydown",
             &outside_shift_tab_init,
         )
         .expect("keyboard event creation must succeed");
+
         document()
             .dispatch_event(&outside_shift_tab_event)
             .expect("dispatch must succeed");
+
         assert_eq!(
             document().active_element().expect("active element").id(),
             "last"

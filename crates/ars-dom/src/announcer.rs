@@ -14,9 +14,11 @@ pub fn ensure_dom() {
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn ensure_dom_impl() {
     let Some(document) = document() else {
+        crate::debug::warn_skipped("ensure_dom()", "window.document");
         return;
     };
     let Some(body) = document.body() else {
+        crate::debug::warn_skipped("ensure_dom()", "document.body");
         return;
     };
 
@@ -72,22 +74,22 @@ fn apply_attr_map(element: &web_sys::Element, attrs: &AttrMap) {
 fn apply_attr_value(element: &web_sys::Element, attr: HtmlAttr, value: &AttrValue) {
     match value {
         AttrValue::String(value) => {
-            let result = element.set_attribute(&attr.to_string(), value);
-            debug_assert!(
-                result.is_ok(),
-                "live region attribute assignment must succeed"
+            crate::debug::warn_dom_error(
+                &format!("setting live region attribute {attr}"),
+                element.set_attribute(&attr.to_string(), value),
             );
         }
         AttrValue::Bool(true) => {
-            let result = element.set_attribute(&attr.to_string(), "");
-            debug_assert!(
-                result.is_ok(),
-                "live region boolean attribute assignment must succeed"
+            crate::debug::warn_dom_error(
+                &format!("setting live region boolean attribute {attr}"),
+                element.set_attribute(&attr.to_string(), ""),
             );
         }
         AttrValue::Bool(false) | AttrValue::None => {
-            let result = element.remove_attribute(&attr.to_string());
-            debug_assert!(result.is_ok(), "live region attribute removal must succeed");
+            crate::debug::warn_dom_error(
+                &format!("removing live region attribute {attr}"),
+                element.remove_attribute(&attr.to_string()),
+            );
         }
     }
 }
