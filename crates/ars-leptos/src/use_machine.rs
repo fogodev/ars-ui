@@ -16,7 +16,7 @@ use {ars_core::StrongSend, std::sync::Arc};
 
 use crate::{
     ephemeral::EphemeralRef,
-    provider::{resolve_locale, use_icu_provider, use_messages},
+    provider::{resolve_locale, use_intl_backend, use_messages},
     use_id,
 };
 
@@ -111,6 +111,7 @@ where
                 #[cfg(debug_assertions)]
                 panic!("Cannot send events inside with_api_snapshot — use event handlers instead");
             });
+
             f(&api)
         })
     }
@@ -137,12 +138,15 @@ where
             // Subscribe to both state and context_version so the memo
             // re-computes when either changes.
             state.track();
+
             context_version.track();
+
             service.with_value(|svc| {
                 let api = svc.connect(&|_e| {
                     #[cfg(debug_assertions)]
                     panic!("Cannot send events inside derive() — use event handlers instead");
                 });
+
                 f(&api)
             })
         })
@@ -159,7 +163,9 @@ where
         let send = self.send;
         self.service.with_value(|svc| {
             let send_fn = move |e| send.run(e);
+
             let api = svc.connect(&send_fn);
+
             f(EphemeralRef::new(api))
         })
     }
@@ -178,7 +184,8 @@ where
 /// pub fn Toggle() -> impl IntoView {
 ///     let machine = use_machine::<toggle::Machine>(toggle::Props::default());
 ///     let is_on = machine.derive(|api| api.is_on());
-///     view! {
+///
+///      view! {
 ///         <button on:click=move |_| machine.send.run(toggle::Event::Toggle)>
 ///             {move || if is_on.get() { "ON" } else { "OFF" }}
 ///         </button>
@@ -194,6 +201,7 @@ where
     M::Messages: Send + Sync + 'static,
 {
     let (result, ..) = use_machine_inner::<M>(props);
+
     result
 }
 
@@ -213,42 +221,57 @@ where
     M::Messages: Send + Sync + 'static,
 {
     let initial_props = props_signal.get();
+
     let (result, context_version_write, state_write, send_ref, effect_cleanups) =
         use_machine_inner::<M>(initial_props);
 
     let service = result.service;
+
     let prev_props = StoredValue::<Option<M::Props>>::new(None);
 
     let sync_effect = ImmediateEffect::new_isomorphic(move || {
         let new_props = props_signal.get();
+
         let should_sync = prev_props.with_value(|prev| prev.as_ref() != Some(&new_props));
+
         if should_sync {
             let is_initial = prev_props.with_value(Option::is_none);
+
             if !is_initial {
                 let mut extracted = None;
+
                 service.update_value(|svc| {
                     let send_result = svc.set_props(new_props.clone());
+
                     if send_result.state_changed {
                         state_write.set(svc.state().clone());
                     }
+
                     if send_result.context_changed {
                         context_version_write.update(|version| *version += 1);
                     }
+
                     let ctx = svc.context().clone();
+
                     let props = svc.props().clone();
+
                     extracted = Some((send_result, ctx, props));
                 });
 
                 let (send_result, ctx, props) =
                     extracted.expect("service update should extract send result");
+
                 #[cfg(feature = "ssr")]
                 handle_effects::<M>(&send_result, &ctx, &props, send_ref, effect_cleanups);
+
                 #[cfg(not(feature = "ssr"))]
                 handle_effects::<M>(send_result, &ctx, &props, send_ref, effect_cleanups);
             }
+
             prev_props.set_value(Some(new_props));
         }
     });
+
     on_cleanup(move || drop(sync_effect));
 
     result
@@ -278,18 +301,23 @@ where
 {
     let props = {
         let mut props = props;
+
         if props.id().is_empty() {
             props.set_id(use_id("component"));
         }
+
         props
     };
 
     let locale = resolve_locale(None);
-    let icu_provider = use_icu_provider();
+
+    let intl_backend = use_intl_backend();
+
     let messages = use_messages::<M::Messages>(None, Some(&locale));
+
     let env = Env {
         locale,
-        icu_provider,
+        intl_backend,
     };
 
     // Create the service once — runs only on component initialization.
@@ -297,6 +325,7 @@ where
 
     // Create a signal tracking the current state.
     let initial_state = service.with_value(|s| s.state().clone());
+
     let (state_read, state_write) = signal(initial_state);
 
     // Context version counter — incremented on every context change so that
@@ -304,6 +333,7 @@ where
     let (context_version_read, context_version_write) = signal(0u64);
 
     let effect_cleanups: EffectCleanupStore = StoredValue::new_local(HashMap::new());
+
     let send_ref: SendCallbackRef<M> = StoredValue::new(None);
 
     // Build the send callback. When an event is sent:
@@ -312,22 +342,30 @@ where
     // 3. Update signals if state/context changed
     let send = Callback::new(move |event: M::Event| {
         let mut extracted = None;
+
         service.update_value(|s| {
             let send_result = s.send(event);
+
             if send_result.state_changed {
                 state_write.set(s.state().clone());
             }
+
             if send_result.context_changed {
                 context_version_write.update(|version| *version += 1);
             }
+
             let ctx = s.context().clone();
+
             let props = s.props().clone();
+
             extracted = Some((send_result, ctx, props));
         });
 
         let (send_result, ctx, props) = extracted.expect("service update should extract result");
+
         #[cfg(feature = "ssr")]
         handle_effects::<M>(&send_result, &ctx, &props, send_ref, effect_cleanups);
+
         #[cfg(not(feature = "ssr"))]
         handle_effects::<M>(send_result, &ctx, &props, send_ref, effect_cleanups);
     });
@@ -337,9 +375,11 @@ where
     // Clean up effects when the component unmounts.
     on_cleanup(move || {
         let mut cleanups = Vec::new();
+
         effect_cleanups.update_value(|active| {
             cleanups.extend(active.drain().map(|(_, cleanup)| cleanup));
         });
+
         service.update_value(|svc| {
             svc.unmount(cleanups);
         });
@@ -408,6 +448,7 @@ fn handle_effects<M: Machine + 'static>(
                     cleanup();
                 }
             }
+
             for effect in &send_result.pending_effects {
                 if let Some(cleanup) = cleanups.remove(effect.name) {
                     cleanup();
@@ -422,9 +463,12 @@ fn handle_effects<M: Machine + 'static>(
 
     if let Some(send_callback) = send_ref.with_value(|slot| slot.as_ref().copied()) {
         let send_handle = callback_to_strong_send(send_callback);
+
         for effect in send_result.pending_effects {
             let name = effect.name;
+
             let cleanup = effect.run(ctx, props, Arc::clone(&send_handle));
+
             effect_cleanups.update_value(|cleanups| {
                 cleanups.insert(name, cleanup);
             });
@@ -441,9 +485,10 @@ mod tests {
     #[cfg(not(feature = "ssr"))]
     use ars_core::PendingEffect;
     use ars_core::{
-        AriaAttr, AttrMap, ComponentPart, ConnectApi, HasId, HtmlAttr, I18nRegistries, IcuProvider,
+        AriaAttr, AttrMap, ComponentPart, ConnectApi, HasId, HtmlAttr, I18nRegistries, IntlBackend,
         NullPlatformEffects, TransitionPlan,
     };
+    use ars_i18n::{Locale, StubIntlBackend};
     use leptos::reactive::traits::Get;
 
     use super::*;
@@ -501,6 +546,63 @@ mod tests {
         }
     }
 
+    #[test]
+    fn toggle_helper_types_and_test_backend_cover_contract_helpers() {
+        let mut props = ToggleProps {
+            id: String::from("toggle"),
+        }
+        .with_id(String::from("renamed"));
+
+        let locale = Locale::parse("en-US").expect("locale should parse");
+
+        let backend = TestIntlBackend;
+
+        assert_eq!(props.id(), "renamed");
+
+        props.set_id(String::from("updated"));
+
+        assert_eq!(props.id(), "updated");
+
+        assert_eq!(TogglePart::scope(), "toggle");
+        assert_eq!(TogglePart.name(), "root");
+        assert_eq!(TogglePart::all(), vec![TogglePart]);
+
+        assert_eq!(format!("{backend:?}"), "TestIntlBackend");
+        assert_eq!(
+            backend.weekday_short_label(ars_i18n::Weekday::Monday, &locale),
+            StubIntlBackend.weekday_short_label(ars_i18n::Weekday::Monday, &locale)
+        );
+        assert_eq!(
+            backend.weekday_long_label(ars_i18n::Weekday::Monday, &locale),
+            StubIntlBackend.weekday_long_label(ars_i18n::Weekday::Monday, &locale)
+        );
+        assert_eq!(
+            backend.month_long_name(5, &locale),
+            StubIntlBackend.month_long_name(5, &locale)
+        );
+        assert_eq!(
+            backend.day_period_label(true, &locale),
+            StubIntlBackend.day_period_label(true, &locale)
+        );
+        assert_eq!(backend.day_period_from_char('a', &locale), Some(false));
+        assert_eq!(
+            backend.format_segment_digits(
+                9,
+                core::num::NonZero::new(2).expect("minimum digits should be non-zero"),
+                &locale,
+            ),
+            "09"
+        );
+        assert_eq!(
+            backend.hour_cycle(&locale),
+            StubIntlBackend.hour_cycle(&locale)
+        );
+        assert_eq!(
+            backend.week_info(&locale),
+            StubIntlBackend.week_info(&locale)
+        );
+    }
+
     struct ToggleApi<'a> {
         is_on: bool,
         send: &'a dyn Fn(ToggleEvent),
@@ -521,7 +623,9 @@ mod tests {
 
         fn part_attrs(&self, _part: Self::Part) -> AttrMap {
             let mut attrs = AttrMap::new();
+
             attrs.set(HtmlAttr::Aria(AriaAttr::Pressed), self.is_on.to_string());
+
             attrs
         }
     }
@@ -577,16 +681,19 @@ mod tests {
         // This is a compile-time check — if UseMachineReturn<ToggleMachine> is
         // not Copy, this function won't compile.
         fn assert_copy<T: Copy>() {}
+
         assert_copy::<UseMachineReturn<ToggleMachine>>();
     }
 
     #[test]
     fn use_machine_return_type_clone_delegates_to_copy_fields() {
         let owner = Owner::new();
+
         owner.with(|| {
             let machine = use_machine::<ToggleMachine>(ToggleProps {
                 id: String::from("toggle"),
             });
+
             let cloned = <UseMachineReturn<ToggleMachine> as Clone>::clone(&machine);
 
             cloned.send.run(ToggleEvent::Toggle);
@@ -599,12 +706,14 @@ mod tests {
     #[test]
     fn use_machine_return_debug_names_the_type() {
         let owner = Owner::new();
+
         owner.with(|| {
             let machine = use_machine::<ToggleMachine>(ToggleProps {
                 id: String::from("toggle"),
             });
 
             let debug = format!("{machine:?}");
+
             assert!(debug.contains("UseMachineReturn"));
             assert!(debug.contains("context_version"));
         });
@@ -614,6 +723,7 @@ mod tests {
     fn use_machine_creates_service_with_initial_state() {
         // Test use_machine within a Leptos reactive Owner.
         let owner = Owner::new();
+
         owner.with(|| {
             let machine = use_machine::<ToggleMachine>(ToggleProps {
                 id: String::from("toggle"),
@@ -630,6 +740,7 @@ mod tests {
     #[test]
     fn use_machine_send_updates_state() {
         let owner = Owner::new();
+
         owner.with(|| {
             let machine = use_machine::<ToggleMachine>(ToggleProps {
                 id: String::from("toggle"),
@@ -638,9 +749,11 @@ mod tests {
             assert_eq!(machine.state.get_untracked(), ToggleState::Off);
 
             machine.send.run(ToggleEvent::Toggle);
+
             assert_eq!(machine.state.get_untracked(), ToggleState::On);
 
             machine.send.run(ToggleEvent::Toggle);
+
             assert_eq!(machine.state.get_untracked(), ToggleState::Off);
         });
     }
@@ -652,17 +765,20 @@ mod tests {
     )]
     fn with_api_snapshot_reads_current_state() {
         let owner = Owner::new();
+
         owner.with(|| {
             let machine = use_machine::<ToggleMachine>(ToggleProps {
                 id: String::from("toggle"),
             });
 
             let is_on = machine.with_api_snapshot(|api| api.is_on());
+
             assert!(!is_on);
 
             machine.send.run(ToggleEvent::Toggle);
 
             let is_on = machine.with_api_snapshot(|api| api.is_on());
+
             assert!(is_on);
         });
     }
@@ -675,6 +791,7 @@ mod tests {
     fn with_api_snapshot_rejects_callback_sends_events() {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let owner = Owner::new();
+
             owner.with(|| {
                 let machine = use_machine::<ToggleMachine>(ToggleProps {
                     id: String::from("toggle"),
@@ -697,10 +814,12 @@ mod tests {
     )]
     fn derive_tracks_connect_output() {
         let owner = Owner::new();
+
         owner.with(|| {
             let machine = use_machine::<ToggleMachine>(ToggleProps {
                 id: String::from("toggle"),
             });
+
             let is_on = machine.derive(|api| api.is_on());
 
             assert!(!is_on.get());
@@ -715,10 +834,12 @@ mod tests {
     fn derive_rejects_callback_sends_events() {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let owner = Owner::new();
+
             owner.with(|| {
                 let machine = use_machine::<ToggleMachine>(ToggleProps {
                     id: String::from("toggle"),
                 });
+
                 let derived = machine.derive(|api| {
                     api.trigger_toggle();
                     api.is_on()
@@ -737,43 +858,83 @@ mod tests {
     #[test]
     fn with_api_ephemeral_reads_current_state() {
         let owner = Owner::new();
+
         owner.with(|| {
             let machine = use_machine::<ToggleMachine>(ToggleProps {
                 id: String::from("toggle"),
             });
 
             let is_on = machine.with_api_ephemeral(|api| api.get().is_on());
+
             assert!(!is_on);
 
             machine.send.run(ToggleEvent::Toggle);
 
             let attrs = machine.with_api_ephemeral(|api| api.get().part_attrs(TogglePart));
+
             assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Pressed)), Some("true"));
         });
     }
 
     #[derive(Clone)]
-    struct TestIcuProvider;
+    struct TestIntlBackend;
 
-    impl Debug for TestIcuProvider {
+    impl Debug for TestIntlBackend {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("TestIcuProvider")
+            f.write_str("TestIntlBackend")
         }
     }
 
-    impl IcuProvider for TestIcuProvider {}
+    impl IntlBackend for TestIntlBackend {
+        fn weekday_short_label(&self, weekday: ars_i18n::Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_short_label(weekday, locale)
+        }
+
+        fn weekday_long_label(&self, weekday: ars_i18n::Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_long_label(weekday, locale)
+        }
+
+        fn month_long_name(&self, month: u8, locale: &Locale) -> String {
+            StubIntlBackend.month_long_name(month, locale)
+        }
+
+        fn day_period_label(&self, is_pm: bool, locale: &Locale) -> String {
+            StubIntlBackend.day_period_label(is_pm, locale)
+        }
+
+        fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
+            StubIntlBackend.day_period_from_char(ch, locale)
+        }
+
+        fn format_segment_digits(
+            &self,
+            value: u32,
+            min_digits: core::num::NonZero<u8>,
+            locale: &Locale,
+        ) -> String {
+            StubIntlBackend.format_segment_digits(value, min_digits, locale)
+        }
+
+        fn hour_cycle(&self, locale: &Locale) -> ars_i18n::HourCycle {
+            StubIntlBackend.hour_cycle(locale)
+        }
+
+        fn week_info(&self, locale: &Locale) -> ars_i18n::WeekInfo {
+            StubIntlBackend.week_info(locale)
+        }
+    }
 
     #[derive(Clone)]
     struct EnvContext {
         locale: String,
-        icu_provider: Arc<dyn IcuProvider>,
+        intl_backend: Arc<dyn IntlBackend>,
     }
 
     impl Debug for EnvContext {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             f.debug_struct("EnvContext")
                 .field("locale", &self.locale)
-                .field("icu_provider", &"Arc(..)")
+                .field("intl_backend", &"Arc(..)")
                 .finish()
         }
     }
@@ -816,7 +977,7 @@ mod tests {
                 (),
                 EnvContext {
                     locale: env.locale.to_bcp47(),
-                    icu_provider: Arc::clone(&env.icu_provider),
+                    intl_backend: Arc::clone(&env.intl_backend),
                 },
             )
         }
@@ -925,6 +1086,7 @@ mod tests {
                 } else {
                     PropState::Off
                 })),
+
                 PropEvent::SyncLabel => {
                     Some(TransitionPlan::new().apply(|ctx: &mut PropContext| {
                         ctx.sync_count += 1;
@@ -947,12 +1109,15 @@ mod tests {
 
         fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
             let mut events = Vec::new();
+
             if old.checked != new.checked {
                 events.push(PropEvent::SetChecked(new.checked));
             }
+
             if old.label != new.label {
                 events.push(PropEvent::SyncLabel);
             }
+
             events
         }
     }
@@ -973,14 +1138,16 @@ mod tests {
 
         fn part_attrs(&self, _part: Self::Part) -> AttrMap {
             let mut attrs = AttrMap::new();
+
             attrs.set(HtmlAttr::Aria(AriaAttr::Pressed), self.is_on.to_string());
+
             attrs
         }
     }
 
-    fn provide_test_context(locale: &str, icu_provider: Arc<dyn IcuProvider>) {
+    fn provide_test_context(locale: &str, intl_backend: Arc<dyn IntlBackend>) {
         crate::provide_ars_context(crate::ArsContext::new(
-            ars_i18n::Locale::parse(locale).expect("locale should parse"),
+            Locale::parse(locale).expect("locale should parse"),
             ars_i18n::Direction::Ltr,
             ars_core::ColorMode::System,
             false,
@@ -989,26 +1156,29 @@ mod tests {
             None,
             None,
             Arc::new(NullPlatformEffects),
-            icu_provider,
+            intl_backend,
             Arc::new(I18nRegistries::new()),
             ars_core::StyleStrategy::Inline,
         ));
     }
 
     #[test]
-    fn use_machine_inner_resolves_locale_and_icu_provider_from_context() {
+    fn use_machine_inner_resolves_locale_and_intl_backend_from_context() {
         let owner = Owner::new();
+
         owner.with(|| {
-            let expected_provider: Arc<dyn IcuProvider> = Arc::new(TestIcuProvider);
-            provide_test_context("es-ES", Arc::clone(&expected_provider));
+            let expected_backend: Arc<dyn IntlBackend> = Arc::new(TestIntlBackend);
+
+            provide_test_context("es-ES", Arc::clone(&expected_backend));
 
             let machine = use_machine::<EnvMachine>(EnvProps { id: String::new() });
+
             machine.service.with_value(|service| {
                 assert!(service.props().id().starts_with("component-"));
                 assert_eq!(service.context().locale, "es-ES");
                 assert!(Arc::ptr_eq(
-                    &service.context().icu_provider,
-                    &expected_provider
+                    &service.context().intl_backend,
+                    &expected_backend
                 ));
             });
         });
@@ -1017,6 +1187,7 @@ mod tests {
     #[test]
     fn use_machine_injects_generated_id_when_props_id_is_empty() {
         let owner = Owner::new();
+
         owner.with(|| {
             let machine = use_machine::<ToggleMachine>(ToggleProps { id: String::new() });
 
@@ -1029,6 +1200,7 @@ mod tests {
     #[test]
     fn use_machine_with_reactive_props_syncs_state_and_context_changes() {
         let owner = Owner::new();
+
         owner.with(|| {
             let (props, set_props) = signal(PropProps {
                 id: String::from("toggle"),
@@ -1037,6 +1209,7 @@ mod tests {
             });
 
             let machine = use_machine_with_reactive_props::<PropMachine>(props.into());
+
             assert_eq!(machine.state.get_untracked(), PropState::Off);
             assert_eq!(machine.context_version.get_untracked(), 0);
 
@@ -1045,6 +1218,7 @@ mod tests {
                 checked: true,
                 label: "a",
             });
+
             assert_eq!(machine.state.get_untracked(), PropState::On);
             assert_eq!(machine.context_version.get_untracked(), 0);
 
@@ -1053,8 +1227,10 @@ mod tests {
                 checked: true,
                 label: "b",
             });
+
             assert_eq!(machine.state.get_untracked(), PropState::On);
             assert_eq!(machine.context_version.get_untracked(), 1);
+
             machine.service.with_value(|service| {
                 assert_eq!(service.context().sync_count, 1);
             });
@@ -1068,12 +1244,14 @@ mod tests {
     )]
     fn derive_recomputes_when_only_context_changes() {
         let owner = Owner::new();
+
         owner.with(|| {
             let (props, set_props) = signal(PropProps {
                 id: String::from("toggle"),
                 checked: false,
                 label: "a",
             });
+
             let machine = use_machine_with_reactive_props::<PropMachine>(props.into());
             let sync_count = machine.derive(|api| api.sync_count());
 
@@ -1094,6 +1272,7 @@ mod tests {
     #[test]
     fn context_version_only_increments_on_context_changes() {
         let owner = Owner::new();
+
         owner.with(|| {
             let machine = use_machine::<ToggleMachine>(ToggleProps {
                 id: String::from("toggle"),
@@ -1102,9 +1281,11 @@ mod tests {
             assert_eq!(machine.context_version.get_untracked(), 0);
 
             machine.send.run(ToggleEvent::Toggle);
+
             assert_eq!(machine.context_version.get_untracked(), 0);
 
             machine.send.run(ToggleEvent::Toggle);
+
             assert_eq!(machine.context_version.get_untracked(), 0);
         });
     }
@@ -1218,13 +1399,17 @@ mod tests {
                         "cleanup:start",
                     )),
                 ),
+
                 EffectEvent::Replace => Some(TransitionPlan::new().with_effect(tracked_effect(
                     "timer",
                     "setup:replace",
                     "cleanup:replace",
                 ))),
+
                 EffectEvent::Cancel => Some(TransitionPlan::new().cancel_effect("timer")),
+
                 EffectEvent::Stop => Some(TransitionPlan::to(EffectState::Idle)),
+
                 EffectEvent::StartNotify => Some(
                     TransitionPlan::to(EffectState::Active).with_effect(PendingEffect::new(
                         "notify",
@@ -1233,8 +1418,11 @@ mod tests {
                                 .lock()
                                 .expect("log mutex should not be poisoned")
                                 .push("setup:notify");
+
                             send.call_if_alive(EffectEvent::Notify);
+
                             let log = Arc::clone(&ctx.log);
+
                             Box::new(move || {
                                 log.lock()
                                     .expect("log mutex should not be poisoned")
@@ -1243,6 +1431,7 @@ mod tests {
                         },
                     )),
                 ),
+
                 EffectEvent::Notify => {
                     Some(TransitionPlan::new().apply(|ctx: &mut EffectContext| {
                         ctx.notify_count += 1;
@@ -1274,7 +1463,9 @@ mod tests {
                     .lock()
                     .expect("log mutex should not be poisoned")
                     .push(setup_label);
+
                 let log = Arc::clone(&ctx.log);
+
                 Box::new(move || {
                     log.lock()
                         .expect("log mutex should not be poisoned")
@@ -1295,23 +1486,28 @@ mod tests {
     #[test]
     fn effect_lifecycle_replaces_cancels_and_unmounts_cleanups() {
         let owner = Owner::new();
+
         owner.with(|| {
             let log = Arc::new(Mutex::new(Vec::new()));
+
             let machine = use_machine::<EffectMachine>(EffectProps {
                 id: String::from("effects"),
                 log: Arc::clone(&log),
             });
 
             machine.send.run(EffectEvent::Start);
+
             assert_eq!(effect_log(&log), vec!["setup:start"]);
 
             machine.send.run(EffectEvent::Replace);
+
             assert_eq!(
                 effect_log(&log),
                 vec!["setup:start", "cleanup:start", "setup:replace"]
             );
 
             machine.send.run(EffectEvent::Cancel);
+
             assert_eq!(
                 effect_log(&log),
                 vec![
@@ -1323,6 +1519,7 @@ mod tests {
             );
 
             machine.send.run(EffectEvent::Start);
+
             assert_eq!(
                 effect_log(&log),
                 vec![
@@ -1335,6 +1532,7 @@ mod tests {
             );
 
             owner.cleanup();
+
             assert_eq!(
                 effect_log(&log),
                 vec![
@@ -1353,8 +1551,10 @@ mod tests {
     #[test]
     fn state_changes_drain_existing_effect_cleanups() {
         let owner = Owner::new();
+
         owner.with(|| {
             let log = Arc::new(Mutex::new(Vec::new()));
+
             let machine = use_machine::<EffectMachine>(EffectProps {
                 id: String::from("effects"),
                 log: Arc::clone(&log),
@@ -1372,8 +1572,10 @@ mod tests {
     #[test]
     fn effect_send_handle_dispatches_follow_up_events() {
         let owner = Owner::new();
+
         owner.with(|| {
             let log = Arc::new(Mutex::new(Vec::new()));
+
             let machine = use_machine::<EffectMachine>(EffectProps {
                 id: String::from("effects"),
                 log: Arc::clone(&log),
@@ -1383,9 +1585,11 @@ mod tests {
 
             assert_eq!(machine.state.get_untracked(), EffectState::Active);
             assert_eq!(machine.context_version.get_untracked(), 1);
+
             machine.service.with_value(|service| {
                 assert_eq!(service.context().notify_count, 1);
             });
+
             assert_eq!(effect_log(&log), vec!["setup:notify"]);
         });
     }
@@ -1406,7 +1610,9 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn callback_to_strong_send_uses_wasm_send_handle() {
         let calls = Arc::new(Mutex::new(Vec::new()));
+
         let callback_calls = Arc::clone(&calls);
+
         let callback = Callback::new(move |event: i32| {
             callback_calls
                 .lock()
@@ -1415,6 +1621,7 @@ mod wasm_tests {
         });
 
         let strong = callback_to_strong_send(callback);
+
         strong(7);
         strong(9);
 
@@ -1532,13 +1739,16 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn use_machine_updates_state_on_wasm() {
         let owner = Owner::new();
+
         owner.with(|| {
             let machine = use_machine::<ToggleMachine>(ToggleProps {
                 id: String::from("toggle"),
             });
 
             assert_eq!(machine.state.get_untracked(), ToggleState::Off);
+
             machine.send.run(ToggleEvent::Toggle);
+
             assert_eq!(machine.state.get_untracked(), ToggleState::On);
         });
     }
@@ -1597,7 +1807,9 @@ mod wasm_tests {
 
         fn part_attrs(&self, _part: Self::Part) -> AttrMap {
             let mut attrs = AttrMap::new();
+
             attrs.set(HtmlAttr::Aria(AriaAttr::Pressed), self.is_on.to_string());
+
             attrs
         }
     }
@@ -1639,6 +1851,7 @@ mod wasm_tests {
                 } else {
                     PropState::Off
                 })),
+
                 PropEvent::SyncLabel => {
                     Some(TransitionPlan::new().apply(|ctx: &mut PropContext| {
                         ctx.sync_count += 1;
@@ -1661,12 +1874,15 @@ mod wasm_tests {
 
         fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
             let mut events = Vec::new();
+
             if old.checked != new.checked {
                 events.push(PropEvent::SetChecked(new.checked));
             }
+
             if old.label != new.label {
                 events.push(PropEvent::SyncLabel);
             }
+
             events
         }
     }
@@ -1674,6 +1890,7 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn reactive_props_sync_state_and_context_on_wasm() {
         let owner = Owner::new();
+
         owner.with(|| {
             let (props, set_props) = signal(PropProps {
                 id: String::from("toggle"),
@@ -1682,6 +1899,7 @@ mod wasm_tests {
             });
 
             let machine = use_machine_with_reactive_props::<PropMachine>(props.into());
+
             assert_eq!(machine.state.get_untracked(), PropState::Off);
             assert_eq!(machine.context_version.get_untracked(), 0);
 
@@ -1690,6 +1908,7 @@ mod wasm_tests {
                 checked: true,
                 label: "a",
             });
+
             assert_eq!(machine.state.get_untracked(), PropState::On);
             assert_eq!(machine.context_version.get_untracked(), 0);
 
@@ -1698,7 +1917,9 @@ mod wasm_tests {
                 checked: true,
                 label: "b",
             });
+
             assert_eq!(machine.context_version.get_untracked(), 1);
+
             machine.service.with_value(|service| {
                 assert_eq!(service.context().sync_count, 1);
             });
@@ -1708,6 +1929,7 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn use_machine_injects_generated_id_on_wasm() {
         let owner = Owner::new();
+
         owner.with(|| {
             let machine = use_machine::<ToggleMachine>(ToggleProps { id: String::new() });
 
@@ -1724,13 +1946,16 @@ mod wasm_tests {
     )]
     fn derive_recomputes_when_only_context_changes_on_wasm() {
         let owner = Owner::new();
+
         owner.with(|| {
             let (props, set_props) = signal(PropProps {
                 id: String::from("toggle"),
                 checked: false,
                 label: "a",
             });
+
             let machine = use_machine_with_reactive_props::<PropMachine>(props.into());
+
             let sync_count = machine.derive(|api| api.sync_count());
 
             assert_eq!(sync_count.get(), 0);

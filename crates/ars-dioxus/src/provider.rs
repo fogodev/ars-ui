@@ -1,6 +1,11 @@
 //! Reactive `ArsProvider` context helpers for the Dioxus adapter.
 
-use std::{any::Any, pin::Pin, sync::Arc};
+use std::{
+    any::Any,
+    fmt::{self, Debug},
+    pin::Pin,
+    sync::Arc,
+};
 
 use ars_core::{
     ColorMode, I18nRegistries, PlatformEffects, Rect, StyleStrategy,
@@ -8,7 +13,7 @@ use ars_core::{
 };
 use ars_forms::field::FileRef;
 use ars_i18n::{
-    Direction, IcuProvider, Locale, NumberFormatOptions, NumberFormatter, StubIcuProvider,
+    Direction, IntlBackend, Locale, NumberFormatOptions, NumberFormatter, StubIntlBackend,
     Translate, locales,
 };
 use dioxus::prelude::*;
@@ -169,6 +174,7 @@ impl DioxusPlatform for NullPlatform {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
         format!("null-id-{}", COUNTER.fetch_add(1, Ordering::Relaxed))
     }
 
@@ -182,10 +188,12 @@ fn default_dioxus_platform() -> Arc<dyn DioxusPlatform> {
     {
         Arc::new(WebPlatform)
     }
+
     #[cfg(all(feature = "desktop", not(feature = "web")))]
     {
         Arc::new(DesktopPlatform)
     }
+
     #[cfg(not(any(feature = "web", feature = "desktop")))]
     {
         Arc::new(NullPlatform)
@@ -223,7 +231,7 @@ pub struct ArsContext {
     pub platform: Arc<dyn PlatformEffects>,
 
     /// ICU-backed locale data provider.
-    pub icu_provider: Arc<dyn IcuProvider>,
+    pub intl_backend: Arc<dyn IntlBackend>,
 
     /// Application-owned message registries.
     pub i18n_registries: Arc<I18nRegistries>,
@@ -235,8 +243,8 @@ pub struct ArsContext {
     style_strategy: StyleStrategy,
 }
 
-impl std::fmt::Debug for ArsContext {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Debug for ArsContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ArsContext")
             .field("locale", &self.locale)
             .field("direction", &self.direction)
@@ -247,7 +255,7 @@ impl std::fmt::Debug for ArsContext {
             .field("portal_container_id", &self.portal_container_id)
             .field("root_node_id", &self.root_node_id)
             .field("platform", &"Arc(..)")
-            .field("icu_provider", &"Arc(..)")
+            .field("intl_backend", &"Arc(..)")
             .field("i18n_registries", &"Arc(..)")
             .field("dioxus_platform", &"Arc(..)")
             .field("style_strategy", &self.style_strategy)
@@ -272,7 +280,7 @@ impl ArsContext {
         portal_container_id: Option<String>,
         root_node_id: Option<String>,
         platform: Arc<dyn PlatformEffects>,
-        icu_provider: Arc<dyn IcuProvider>,
+        intl_backend: Arc<dyn IntlBackend>,
         i18n_registries: Arc<I18nRegistries>,
         dioxus_platform: Arc<dyn DioxusPlatform>,
         style_strategy: StyleStrategy,
@@ -287,7 +295,7 @@ impl ArsContext {
             portal_container_id: Signal::new(portal_container_id),
             root_node_id: Signal::new(root_node_id),
             platform,
-            icu_provider,
+            intl_backend,
             i18n_registries,
             dioxus_platform,
             style_strategy,
@@ -355,7 +363,9 @@ where
     F: Fn() -> NumberFormatOptions + 'static,
 {
     let explicit_locale = adapter_props_locale.cloned();
+
     let locale = use_locale();
+
     let resolved_options = options();
 
     use_memo(use_reactive!(|explicit_locale, resolved_options| {
@@ -369,14 +379,14 @@ where
 
 /// Resolves the current ICU provider from provider context.
 #[must_use]
-pub fn use_icu_provider() -> Arc<dyn IcuProvider> {
+pub fn use_intl_backend() -> Arc<dyn IntlBackend> {
     try_use_context::<ArsContext>().map_or_else(
-        || -> Arc<dyn IcuProvider> {
-            warn_missing_provider("use_icu_provider");
+        || -> Arc<dyn IntlBackend> {
+            warn_missing_provider("use_intl_backend");
 
-            Arc::new(StubIcuProvider)
+            Arc::new(StubIntlBackend)
         },
-        |ctx| -> Arc<dyn IcuProvider> { Arc::clone(&ctx.icu_provider) },
+        |ctx| -> Arc<dyn IntlBackend> { Arc::clone(&ctx.intl_backend) },
     )
 }
 
@@ -422,9 +432,9 @@ pub fn t<T: Translate>(msg: T) -> String {
 
             let fallback = locales::en_us();
 
-            msg.translate(&fallback, &StubIcuProvider)
+            msg.translate(&fallback, &StubIntlBackend)
         },
-        |ctx| msg.translate(&ctx.locale.read(), &*ctx.icu_provider),
+        |ctx| msg.translate(&ctx.locale.read(), &*ctx.intl_backend),
     )
 }
 
@@ -440,7 +450,7 @@ mod tests {
 
     use ars_core::{ColorMode, I18nRegistries, NullPlatformEffects, StyleStrategy};
     use ars_i18n::{
-        Direction, IcuProvider, Locale, NumberFormatOptions, StubIcuProvider, Translate, locales,
+        Direction, IntlBackend, Locale, NumberFormatOptions, StubIntlBackend, Translate, locales,
     };
     use dioxus::dioxus_core::{NoOpMutations, ScopeId};
 
@@ -452,7 +462,7 @@ mod tests {
     }
 
     impl Translate for AppText {
-        fn translate(&self, locale: &Locale, _icu: &dyn IcuProvider) -> String {
+        fn translate(&self, locale: &Locale, _intl: &dyn IntlBackend) -> String {
             match locale.language() {
                 "es" => String::from("Hola"),
                 _ => String::from("Hello"),
@@ -460,9 +470,46 @@ mod tests {
         }
     }
 
-    struct TestIcuProvider;
+    struct TestIntlBackend;
 
-    impl IcuProvider for TestIcuProvider {}
+    impl IntlBackend for TestIntlBackend {
+        fn weekday_short_label(&self, weekday: ars_i18n::Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_short_label(weekday, locale)
+        }
+
+        fn weekday_long_label(&self, weekday: ars_i18n::Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_long_label(weekday, locale)
+        }
+
+        fn month_long_name(&self, month: u8, locale: &Locale) -> String {
+            StubIntlBackend.month_long_name(month, locale)
+        }
+
+        fn day_period_label(&self, is_pm: bool, locale: &Locale) -> String {
+            StubIntlBackend.day_period_label(is_pm, locale)
+        }
+
+        fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
+            StubIntlBackend.day_period_from_char(ch, locale)
+        }
+
+        fn format_segment_digits(
+            &self,
+            value: u32,
+            min_digits: core::num::NonZero<u8>,
+            locale: &Locale,
+        ) -> String {
+            StubIntlBackend.format_segment_digits(value, min_digits, locale)
+        }
+
+        fn hour_cycle(&self, locale: &Locale) -> ars_i18n::HourCycle {
+            StubIntlBackend.hour_cycle(locale)
+        }
+
+        fn week_info(&self, locale: &Locale) -> ars_i18n::WeekInfo {
+            StubIntlBackend.week_info(locale)
+        }
+    }
 
     #[derive(Clone, Debug, PartialEq)]
     struct TestMessages {
@@ -515,7 +562,7 @@ mod tests {
         }
     }
 
-    fn test_context(locale: Locale, icu_provider: Arc<dyn IcuProvider>) -> ArsContext {
+    fn test_context(locale: Locale, intl_backend: Arc<dyn IntlBackend>) -> ArsContext {
         ArsContext::new(
             locale,
             Direction::Ltr,
@@ -526,7 +573,7 @@ mod tests {
             None,
             None,
             Arc::new(NullPlatformEffects),
-            icu_provider,
+            intl_backend,
             Arc::new(I18nRegistries::new()),
             Arc::new(NullPlatform),
             StyleStrategy::Inline,
@@ -558,12 +605,12 @@ mod tests {
     }
 
     #[test]
-    fn use_icu_provider_falls_back_without_provider() {
+    fn use_intl_backend_falls_back_without_provider() {
         fn app() -> Element {
-            let provider = use_icu_provider();
+            let backend = use_intl_backend();
 
             assert_eq!(
-                AppText::Greeting.translate(&locales::en_us(), provider.as_ref()),
+                AppText::Greeting.translate(&locales::en_us(), backend.as_ref()),
                 "Hello"
             );
 
@@ -578,9 +625,9 @@ mod tests {
     }
 
     #[test]
-    fn use_icu_provider_reads_context_value() {
+    fn use_intl_backend_reads_context_value() {
         fn app() -> Element {
-            let expected: Arc<dyn IcuProvider> = Arc::new(TestIcuProvider);
+            let expected: Arc<dyn IntlBackend> = Arc::new(TestIntlBackend);
 
             let ctx = ArsContext::new(
                 locales::en_us(),
@@ -600,7 +647,7 @@ mod tests {
 
             use_context_provider(|| ctx);
 
-            assert!(Arc::ptr_eq(&use_icu_provider(), &expected));
+            assert!(Arc::ptr_eq(&use_intl_backend(), &expected));
 
             rsx! {
                 div {}
@@ -636,7 +683,7 @@ mod tests {
                 None,
                 None,
                 Arc::new(NullPlatformEffects),
-                Arc::new(StubIcuProvider),
+                Arc::new(StubIntlBackend),
                 Arc::new(registries),
                 Arc::new(NullPlatform),
                 StyleStrategy::Inline,
@@ -699,7 +746,7 @@ mod tests {
     #[test]
     fn use_number_formatter_reads_context_locale() {
         fn app() -> Element {
-            let ctx = test_context(locales::de_de(), Arc::new(StubIcuProvider));
+            let ctx = test_context(locales::de_de(), Arc::new(StubIntlBackend));
 
             use_context_provider(|| ctx);
 
@@ -727,7 +774,7 @@ mod tests {
         )]
         fn app(outputs: Rc<RefCell<Vec<String>>>) -> Element {
             let mut ctx =
-                use_context_provider(|| test_context(locales::en_us(), Arc::new(StubIcuProvider)));
+                use_context_provider(|| test_context(locales::en_us(), Arc::new(StubIntlBackend)));
 
             let mut phase = use_signal(|| 0u8);
 
@@ -759,7 +806,7 @@ mod tests {
     #[test]
     fn use_resolved_number_formatter_prefers_explicit_override() {
         fn app() -> Element {
-            let ctx = test_context(locales::fr(), Arc::new(StubIcuProvider));
+            let ctx = test_context(locales::fr(), Arc::new(StubIntlBackend));
 
             use_context_provider(|| ctx);
 
@@ -789,11 +836,12 @@ mod tests {
             reason = "Dioxus root props are moved into the render function."
         )]
         fn app(outputs: Rc<RefCell<Vec<String>>>) -> Element {
-            let ctx = test_context(locales::fr(), Arc::new(StubIcuProvider));
+            let ctx = test_context(locales::fr(), Arc::new(StubIntlBackend));
 
             use_context_provider(|| ctx);
 
             let mut phase = use_signal(|| 0u8);
+
             let mut use_german_locale = use_signal(|| false);
 
             let explicit = if use_german_locale() {
@@ -809,6 +857,7 @@ mod tests {
 
             if phase() == 0 {
                 phase.set(1);
+
                 use_german_locale.set(true);
             }
 
@@ -820,9 +869,7 @@ mod tests {
         let mut dom = VirtualDom::new_with_props(app, Rc::clone(&outputs));
 
         dom.rebuild_in_place();
-
         dom.mark_dirty(ScopeId::APP);
-
         dom.render_immediate(&mut NoOpMutations);
 
         assert_eq!(outputs.borrow().as_slice(), ["1,234.56", "1.234,56"]);
@@ -838,9 +885,10 @@ mod tests {
         )]
         fn app(outputs: Rc<RefCell<Vec<String>>>) -> Element {
             let _ctx =
-                use_context_provider(|| test_context(locales::en_us(), Arc::new(StubIcuProvider)));
+                use_context_provider(|| test_context(locales::en_us(), Arc::new(StubIntlBackend)));
 
             let mut phase = use_signal(|| 0u8);
+
             let mut use_percent = use_signal(|| false);
 
             let options = if use_percent() {
@@ -861,6 +909,7 @@ mod tests {
 
             if phase() == 0 {
                 phase.set(1);
+
                 use_percent.set(true);
             }
 
@@ -872,9 +921,7 @@ mod tests {
         let mut dom = VirtualDom::new_with_props(app, Rc::clone(&outputs));
 
         dom.rebuild_in_place();
-
         dom.mark_dirty(ScopeId::APP);
-
         dom.render_immediate(&mut NoOpMutations);
 
         assert_eq!(outputs.borrow().as_slice(), ["0.47", "47%"]);
@@ -900,7 +947,7 @@ mod tests {
                     None,
                     None,
                     Arc::new(NullPlatformEffects),
-                    Arc::new(StubIcuProvider),
+                    Arc::new(StubIntlBackend),
                     Arc::new(I18nRegistries::new()),
                     Arc::new(NullPlatform),
                     StyleStrategy::Inline,
@@ -928,9 +975,7 @@ mod tests {
         let mut dom = VirtualDom::new_with_props(app, Rc::clone(&outputs));
 
         dom.rebuild_in_place();
-
         dom.mark_dirty(ScopeId::APP);
-
         dom.render_immediate(&mut NoOpMutations);
 
         assert_eq!(outputs.borrow().as_slice(), ["Hello", "Hola"]);
@@ -956,7 +1001,7 @@ mod tests {
         fn app() -> Element {
             use crate::prelude::use_number_formatter as prelude_use_number_formatter;
 
-            let ctx = test_context(locales::en_us(), Arc::new(StubIcuProvider));
+            let ctx = test_context(locales::en_us(), Arc::new(StubIntlBackend));
 
             use_context_provider(|| ctx);
 
@@ -979,7 +1024,7 @@ mod tests {
         fn app() -> Element {
             let ctx = test_context(
                 Locale::parse("fr-FR").expect("locale should parse"),
-                Arc::new(StubIcuProvider),
+                Arc::new(StubIntlBackend),
             );
 
             use_context_provider(|| ctx);
@@ -1014,7 +1059,7 @@ mod tests {
                 None,
                 None,
                 Arc::new(NullPlatformEffects),
-                Arc::new(StubIcuProvider),
+                Arc::new(StubIntlBackend),
                 Arc::new(I18nRegistries::new()),
                 Arc::clone(&expected),
                 StyleStrategy::Inline,
@@ -1090,7 +1135,7 @@ mod tests {
     #[test]
     fn ars_context_debug_includes_struct_name() {
         fn app() -> Element {
-            let ctx = test_context(locales::en_us(), Arc::new(StubIcuProvider));
+            let ctx = test_context(locales::en_us(), Arc::new(StubIntlBackend));
 
             assert!(format!("{ctx:?}").contains("ArsContext"));
 
@@ -1111,7 +1156,7 @@ mod wasm_tests {
 
     use ars_core::{ColorMode, I18nRegistries, NullPlatformEffects, StyleStrategy};
     use ars_i18n::{
-        Direction, IcuProvider, Locale, NumberFormatOptions, StubIcuProvider, Translate, locales,
+        Direction, IntlBackend, Locale, NumberFormatOptions, StubIntlBackend, Translate, locales,
     };
     use dioxus::dioxus_core::{NoOpMutations, ScopeId};
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
@@ -1126,7 +1171,7 @@ mod wasm_tests {
     }
 
     impl Translate for AppText {
-        fn translate(&self, locale: &Locale, _icu: &dyn IcuProvider) -> String {
+        fn translate(&self, locale: &Locale, _intl: &dyn IntlBackend) -> String {
             match locale.language() {
                 "es" => String::from("Hola"),
                 _ => String::from("Hello"),
@@ -1134,11 +1179,48 @@ mod wasm_tests {
         }
     }
 
-    struct TestIcuProvider;
+    struct TestIntlBackend;
 
-    impl IcuProvider for TestIcuProvider {}
+    impl IntlBackend for TestIntlBackend {
+        fn weekday_short_label(&self, weekday: ars_i18n::Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_short_label(weekday, locale)
+        }
 
-    fn test_context(locale: Locale, icu_provider: Arc<dyn IcuProvider>) -> ArsContext {
+        fn weekday_long_label(&self, weekday: ars_i18n::Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_long_label(weekday, locale)
+        }
+
+        fn month_long_name(&self, month: u8, locale: &Locale) -> String {
+            StubIntlBackend.month_long_name(month, locale)
+        }
+
+        fn day_period_label(&self, is_pm: bool, locale: &Locale) -> String {
+            StubIntlBackend.day_period_label(is_pm, locale)
+        }
+
+        fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
+            StubIntlBackend.day_period_from_char(ch, locale)
+        }
+
+        fn format_segment_digits(
+            &self,
+            value: u32,
+            min_digits: core::num::NonZero<u8>,
+            locale: &Locale,
+        ) -> String {
+            StubIntlBackend.format_segment_digits(value, min_digits, locale)
+        }
+
+        fn hour_cycle(&self, locale: &Locale) -> ars_i18n::HourCycle {
+            StubIntlBackend.hour_cycle(locale)
+        }
+
+        fn week_info(&self, locale: &Locale) -> ars_i18n::WeekInfo {
+            StubIntlBackend.week_info(locale)
+        }
+    }
+
+    fn test_context(locale: Locale, intl_backend: Arc<dyn IntlBackend>) -> ArsContext {
         ArsContext::new(
             locale,
             Direction::Ltr,
@@ -1149,7 +1231,7 @@ mod wasm_tests {
             None,
             None,
             Arc::new(NullPlatformEffects),
-            icu_provider,
+            intl_backend,
             Arc::new(I18nRegistries::new()),
             Arc::new(NullPlatform),
             StyleStrategy::Inline,
@@ -1169,14 +1251,14 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
-    fn use_locale_and_icu_provider_fall_back_without_provider_on_wasm() {
+    fn use_locale_and_intl_backend_fall_back_without_provider_on_wasm() {
         fn app() -> Element {
             assert_eq!(use_locale()().to_bcp47(), "en-US");
 
-            let provider = use_icu_provider();
+            let backend = use_intl_backend();
 
             assert_eq!(
-                AppText::Greeting.translate(&locales::en_us(), &*provider),
+                AppText::Greeting.translate(&locales::en_us(), &*backend),
                 "Hello"
             );
 
@@ -1204,7 +1286,7 @@ mod wasm_tests {
         )]
         fn app(outputs: Rc<RefCell<Vec<String>>>) -> Element {
             let mut ctx =
-                use_context_provider(|| test_context(locales::en_us(), Arc::new(StubIcuProvider)));
+                use_context_provider(|| test_context(locales::en_us(), Arc::new(StubIntlBackend)));
 
             let mut phase = use_signal(|| 0u8);
 
@@ -1227,9 +1309,7 @@ mod wasm_tests {
         let mut dom = VirtualDom::new_with_props(app, Rc::clone(&outputs));
 
         dom.rebuild_in_place();
-
         dom.mark_dirty(ScopeId::APP);
-
         dom.render_immediate(&mut NoOpMutations);
 
         assert_eq!(outputs.borrow().as_slice(), ["Hello", "Hola"]);
@@ -1238,7 +1318,7 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn use_platform_and_explicit_locale_work_on_wasm() {
         fn app() -> Element {
-            let expected: Arc<dyn IcuProvider> = Arc::new(TestIcuProvider);
+            let expected: Arc<dyn IntlBackend> = Arc::new(TestIntlBackend);
 
             let ctx = test_context(locales::en_us(), Arc::clone(&expected));
 
@@ -1248,7 +1328,7 @@ mod wasm_tests {
 
             assert_eq!(resolve_locale(Some(&explicit)).to_bcp47(), "pt-BR");
             assert_eq!(resolve_locale(None).to_bcp47(), "en-US");
-            assert!(Arc::ptr_eq(&use_icu_provider(), &expected));
+            assert!(Arc::ptr_eq(&use_intl_backend(), &expected));
 
             let platform = use_platform();
 
@@ -1280,7 +1360,7 @@ mod wasm_tests {
         )]
         fn app(outputs: Rc<RefCell<Vec<String>>>) -> Element {
             let mut ctx =
-                use_context_provider(|| test_context(locales::en_us(), Arc::new(StubIcuProvider)));
+                use_context_provider(|| test_context(locales::en_us(), Arc::new(StubIntlBackend)));
 
             let mut phase = use_signal(|| 0u8);
 
@@ -1302,9 +1382,7 @@ mod wasm_tests {
         let mut dom = VirtualDom::new_with_props(app, Rc::clone(&outputs));
 
         dom.rebuild_in_place();
-
         dom.mark_dirty(ScopeId::APP);
-
         dom.render_immediate(&mut NoOpMutations);
 
         assert_eq!(outputs.borrow().as_slice(), ["1,234.56", "1.234,56"]);

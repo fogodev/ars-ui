@@ -1,6 +1,6 @@
-//! [`WebIntlProvider`] — browser-backed provider for WASM client builds.
+//! [`WebIntlBackend`] — browser-backed provider for WASM client builds.
 //!
-//! Implements the [`IcuProvider`](crate::IcuProvider) contract using the
+//! Implements the [`IntlBackend`](crate::IntlBackend) contract using the
 //! browser's `Intl.*` APIs. See spec §9.5.4. Available only on `wasm32`
 //! targets with the `web-intl` feature.
 
@@ -15,7 +15,7 @@ use js_sys::{Array, Function, Intl, Object, Reflect};
 use wasm_bindgen::{JsCast, JsValue};
 
 use crate::{
-    CalendarDate, CalendarSystem, Era, HourCycle, IcuProvider, Locale, WeekInfo, Weekday,
+    CalendarDate, CalendarSystem, Era, HourCycle, IntlBackend, Locale, WeekInfo, Weekday,
     calendar::{
         bounded_days_in_month, bounded_months_in_year, build_from_iso_parts, default_era_for,
         gregorian_days_in_month, infer_public_era,
@@ -31,7 +31,7 @@ use crate::{
 /// Calendar arithmetic and era-boundary queries are served by shared
 /// Rust-side helpers because browsers do not expose those directly.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct WebIntlProvider;
+pub struct WebIntlBackend;
 
 #[expect(
     clippy::too_many_arguments,
@@ -75,7 +75,7 @@ fn normalize_public_date(
     })
 }
 
-impl WebIntlProvider {
+impl WebIntlBackend {
     /// Formats a reference date through `Intl.DateTimeFormat` using the
     /// given locale and options bag, returning the formatted string.
     fn format_date_part(locale: &Locale, date: &js_sys::Date, opts: &Object) -> String {
@@ -95,7 +95,7 @@ impl WebIntlProvider {
     /// Builds a JS `Date` whose weekday matches `weekday` in January 2024.
     ///
     /// January 1, 2024 is a Monday, so Monday..=Sunday map to day-of-month
-    /// 1..=7. Mirrors the reference dates used by [`Icu4xProvider`].
+    /// 1..=7. Mirrors the reference dates used by [`Icu4xBackend`].
     fn date_for_weekday(weekday: Weekday) -> js_sys::Date {
         let day = match weekday {
             Weekday::Monday => 1,
@@ -323,7 +323,7 @@ impl WebIntlProvider {
     }
 }
 
-impl IcuProvider for WebIntlProvider {
+impl IntlBackend for WebIntlBackend {
     fn weekday_short_label(&self, weekday: Weekday, locale: &Locale) -> String {
         let opts = Object::new();
 
@@ -619,7 +619,7 @@ impl IcuProvider for WebIntlProvider {
         // under the same feature gate that compiles this provider and
         // does not require the `compiled_data` CLDR payload.
         //
-        // Contract reminder: `IcuProvider::convert_date` returns a
+        // Contract reminder: `IntlBackend::convert_date` returns a
         // [`CalendarDate`] in `target`. Silently returning the source
         // calendar for non-Gregorian inputs violates that contract,
         // breaks public calendar arithmetic assumptions and lets
@@ -1189,7 +1189,7 @@ fn part_value(parts: &Array, part_type: &str) -> Option<String> {
 /// path is always available under the same feature gate as the
 /// provider itself.
 ///
-/// Used in two places in [`WebIntlProvider::convert_date`]:
+/// Used in two places in [`WebIntlBackend::convert_date`]:
 /// - Non-Gregorian sources (the browser path only relabels Gregorian
 ///   instants, so it cannot convert a non-Gregorian source directly).
 /// - Gregorian sources whose browser era label falls outside the
@@ -1296,4 +1296,121 @@ pub(crate) const fn is_hebrew_leap_year(year: i32) -> bool {
     let cycle_year = year.rem_euclid(19);
 
     matches!(cycle_year, 3 | 6 | 8 | 11 | 14 | 17 | 0)
+}
+
+#[cfg(all(test, feature = "web-intl", target_arch = "wasm32"))]
+mod helper_tests {
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    use super::*;
+
+    fn part(part_type: &str, value: Option<&str>) -> JsValue {
+        let part = Object::new();
+
+        Reflect::set(
+            &part,
+            &JsValue::from_str("type"),
+            &JsValue::from_str(part_type),
+        )
+        .expect("fresh object accepts type");
+
+        if let Some(value) = value {
+            Reflect::set(
+                &part,
+                &JsValue::from_str("value"),
+                &JsValue::from_str(value),
+            )
+            .expect("fresh object accepts value");
+        }
+
+        part.into()
+    }
+
+    #[wasm_bindgen_test]
+    fn normalize_public_date_falls_back_to_epoch_for_invalid_public_fields() {
+        let normalized =
+            normalize_public_date(CalendarSystem::Gregorian, None, 2024, 13, 40, 1970, 1, 1);
+
+        assert_eq!(normalized.calendar(), CalendarSystem::Iso8601);
+        assert_eq!(normalized.year(), 1970);
+        assert_eq!(normalized.month(), 1);
+        assert_eq!(normalized.day(), 1);
+    }
+
+    #[wasm_bindgen_test]
+    fn read_week_info_supports_property_shape_and_weekend_defaults() {
+        let info = Object::new();
+
+        Reflect::set(
+            &info,
+            &JsValue::from_str("firstDay"),
+            &JsValue::from_f64(7.0),
+        )
+        .expect("fresh object accepts firstDay");
+
+        Reflect::set(
+            &info,
+            &JsValue::from_str("weekend"),
+            &JsValue::from_str("invalid"),
+        )
+        .expect("fresh object accepts weekend");
+
+        let locale = Object::new();
+
+        Reflect::set(&locale, &JsValue::from_str("weekInfo"), &info)
+            .expect("fresh object accepts weekInfo");
+
+        let week_info = read_week_info(&JsValue::from(locale)).expect("property shape must parse");
+
+        assert_eq!(week_info.first_day, Weekday::Sunday);
+        assert_eq!(week_info.weekend_start, Weekday::Saturday);
+        assert_eq!(week_info.weekend_end, Weekday::Sunday);
+        assert_eq!(week_info.minimal_days_in_first_week, 1);
+    }
+
+    #[wasm_bindgen_test]
+    fn read_week_info_returns_none_without_supported_shape() {
+        assert_eq!(read_week_info(&JsValue::from(Object::new())), None);
+    }
+
+    #[wasm_bindgen_test]
+    fn weekday_adjacency_helpers_cover_wraparound_cases() {
+        assert_eq!(previous_weekday(Weekday::Monday), Weekday::Sunday);
+        assert_eq!(previous_weekday(Weekday::Thursday), Weekday::Wednesday);
+        assert_eq!(previous_weekday(Weekday::Sunday), Weekday::Saturday);
+
+        assert_eq!(next_weekday(Weekday::Monday), Weekday::Tuesday);
+        assert_eq!(next_weekday(Weekday::Thursday), Weekday::Friday);
+        assert_eq!(next_weekday(Weekday::Sunday), Weekday::Monday);
+    }
+
+    #[wasm_bindgen_test]
+    fn js_iso_year_formats_basic_and_extended_years() {
+        assert_eq!(js_iso_year(2024), "2024");
+        assert_eq!(js_iso_year(-50), "-000050");
+        assert_eq!(js_iso_year(12_345), "+012345");
+    }
+
+    #[wasm_bindgen_test]
+    fn part_helpers_return_empty_or_none_for_missing_values() {
+        let parts_without_month = Array::new();
+
+        parts_without_month.push(&part("weekday", Some("Mon")));
+
+        assert_eq!(month_part_value(&parts_without_month), "");
+        assert_eq!(part_value(&parts_without_month, "hour"), None);
+
+        let parts_with_missing_values = Array::new();
+
+        parts_with_missing_values.push(&part("month", None));
+        parts_with_missing_values.push(&part("hour", None));
+
+        assert_eq!(month_part_value(&parts_with_missing_values), "");
+        assert_eq!(part_value(&parts_with_missing_values, "hour"), None);
+    }
+
+    #[wasm_bindgen_test]
+    fn canonical_era_code_strips_all_supported_macrons() {
+        assert_eq!(canonical_era_code("ĀĒĪŌŪāēīōū"), "aeiouaeiou");
+    }
 }

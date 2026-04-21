@@ -11,8 +11,8 @@ The current design is intentionally close to React Aria and ECMAScript Temporal:
 
 - calendar identifiers are explicit
 - dates are opaque validated values, not raw public structs
-- pure calendar arithmetic does not depend on `IcuProvider`
-- locale-aware week and formatting queries still use `IcuProvider`
+- pure calendar arithmetic does not depend on `IntlBackend`
+- locale-aware week and formatting queries still use `IntlBackend`
 - zoned and local-time behavior is available on `std` builds
 
 ### 1.1 Shared Types (`ars-i18n`)
@@ -22,7 +22,7 @@ The shared public surface is:
 ```rust
 use core::cmp::Ordering;
 
-use ars_i18n::{CalendarError, CalendarConversionError, DateError, IcuProvider, Locale, Weekday};
+use ars_i18n::{CalendarError, CalendarConversionError, DateError, IntlBackend, Locale, Weekday};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum CalendarSystem {
@@ -427,7 +427,7 @@ pub fn to_zoned_date_time(
 ) -> Result<ZonedDateTime, CalendarError>;
 
 pub mod queries {
-    use ars_i18n::{CalendarDate, CalendarError, DateValue, IcuProvider, Locale, TimeZoneId};
+    use ars_i18n::{CalendarDate, CalendarError, DateValue, IntlBackend, Locale, TimeZoneId};
 
     pub fn is_same_day(a: &impl DateValue, b: &impl DateValue) -> bool;
     pub fn is_same_month(a: &impl DateValue, b: &impl DateValue) -> bool;
@@ -441,17 +441,17 @@ pub mod queries {
     pub fn end_of_month<T: DateValue>(date: &T) -> T;
     pub fn start_of_year<T: DateValue>(date: &T) -> T;
     pub fn end_of_year<T: DateValue>(date: &T) -> T;
-    pub fn start_of_week<T: DateValue>(date: &T, locale: &Locale, provider: &dyn IcuProvider) -> T;
-    pub fn end_of_week<T: DateValue>(date: &T, locale: &Locale, provider: &dyn IcuProvider) -> T;
+    pub fn start_of_week<T: DateValue>(date: &T, locale: &Locale, backend: &dyn IntlBackend) -> T;
+    pub fn end_of_week<T: DateValue>(date: &T, locale: &Locale, backend: &dyn IntlBackend) -> T;
 
-    pub fn get_day_of_week(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvider) -> u8;
-    pub fn get_weeks_in_month(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvider) -> u8;
+    pub fn get_day_of_week(date: &CalendarDate, locale: &Locale, backend: &dyn IntlBackend) -> u8;
+    pub fn get_weeks_in_month(date: &CalendarDate, locale: &Locale, backend: &dyn IntlBackend) -> u8;
     pub fn get_hours_in_day(date: &CalendarDate, time_zone: &TimeZoneId) -> Result<u8, CalendarError>;
 
     pub fn min_date<T: DateValue>(a: &T, b: &T) -> T;
     pub fn max_date<T: DateValue>(a: &T, b: &T) -> T;
-    pub fn is_weekend(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvider) -> bool;
-    pub fn is_weekday(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvider) -> bool;
+    pub fn is_weekend(date: &CalendarDate, locale: &Locale, backend: &dyn IntlBackend) -> bool;
+    pub fn is_weekday(date: &CalendarDate, locale: &Locale, backend: &dyn IntlBackend) -> bool;
 }
 
 pub mod parse {
@@ -476,7 +476,7 @@ Query semantics:
 
 - `is_same_*` compares display fields in the first argument's calendar and era. If the second argument uses a different calendar, it is converted into the first argument's calendar before comparing year, month, and day fields.
 - `is_equal_*` requires the same calendar and era and compares the exposed display fields directly. Cross-calendar projections of the same ISO day are not equal.
-- `start_of_week`, `end_of_week`, `get_weeks_in_month`, `is_weekday`, and `is_weekend` are locale-aware and therefore still require `IcuProvider`.
+- `start_of_week`, `end_of_week`, `get_weeks_in_month`, `is_weekday`, and `is_weekend` are locale-aware and therefore still require `IntlBackend`.
 - `get_day_of_week` returns `0..=6`, where `0` is the locale's first day of week from provider-backed `WeekInfo`. When the locale carries a `u-fw-*` Unicode extension, that explicit first-day override takes precedence over the locale default.
 - `get_hours_in_day` uses real zoned day-boundary math and returns `23`, `24`, or `25` when DST changes alter the local day length.
 - `is_weekend` and `is_weekday` use locale weekend metadata rather than a hard-coded Saturday/Sunday rule.

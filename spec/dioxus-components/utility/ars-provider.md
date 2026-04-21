@@ -36,7 +36,7 @@ pub struct ArsProviderProps {
     #[props(optional)]
     pub platform: Option<Arc<dyn PlatformEffects>>,
     #[props(optional)]
-    pub icu_provider: Option<Arc<dyn IcuProvider>>,
+    pub intl_backend: Option<Arc<dyn IntlBackend>>,
     #[props(optional)]
     pub i18n_registries: Option<Arc<I18nRegistries>>,
     #[props(optional)]
@@ -222,7 +222,7 @@ pub struct ArsProviderSketchProps {
     #[props(optional)]
     pub platform: Option<Arc<dyn PlatformEffects>>,
     #[props(optional)]
-    pub icu_provider: Option<Arc<dyn IcuProvider>>,
+    pub intl_backend: Option<Arc<dyn IntlBackend>>,
     #[props(optional)]
     pub i18n_registries: Option<Arc<I18nRegistries>>,
     #[props(optional)]
@@ -246,7 +246,7 @@ pub fn ArsProvider(props: ArsProviderSketchProps) -> Element {
     let disabled = props.disabled.unwrap_or_else(|| use_signal(|| false));
     let read_only = props.read_only.unwrap_or_else(|| use_signal(|| false));
     let platform = props.platform.unwrap_or_else(|| resolve_platform_for_target());
-    let icu_provider = props.icu_provider.unwrap_or_else(|| Arc::new(StubIcuProvider));
+    let intl_backend = props.intl_backend.unwrap_or_else(|| Arc::new(StubIntlBackend));
     let i18n_registries = props.i18n_registries.unwrap_or_else(|| Rc::new(I18nRegistries::new()));
     let style_strategy = props.style_strategy.unwrap_or(StyleStrategy::Inline);
     let dioxus_platform = props.dioxus_platform.unwrap_or_else(|| {
@@ -268,7 +268,7 @@ pub fn ArsProvider(props: ArsProviderSketchProps) -> Element {
         portal_container_id: use_signal(|| props.portal_container_id),
         root_node_id: use_signal(|| props.root_node_id),
         platform,
-        icu_provider,
+        intl_backend,
         i18n_registries,
         style_strategy,
         dioxus_platform,

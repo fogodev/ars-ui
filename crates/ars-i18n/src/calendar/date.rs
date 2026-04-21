@@ -384,12 +384,15 @@ impl CalendarDate {
                 if options.wrap {
                     let minimum_month = i32::from(self.minimum_month_in_year());
                     let maximum_month = i32::from(self.calendar.months_in_year(self));
+
                     let months_in_year = maximum_month - minimum_month + 1;
 
                     let next_month = (i32::from(self.month) - minimum_month + amount)
                         .rem_euclid(months_in_year)
                         + minimum_month;
+
                     let current = temporal_date_for(self)?;
+
                     let next = current
                         .with(
                             CalendarFields::new()
@@ -424,12 +427,15 @@ impl CalendarDate {
                 if options.wrap {
                     let minimum_day = i32::from(self.minimum_day_in_month());
                     let maximum_day = i32::from(self.calendar.days_in_month(self));
+
                     let days_in_month = maximum_day - minimum_day + 1;
 
                     let next_day = (i32::from(self.day) - minimum_day + amount)
                         .rem_euclid(days_in_month)
                         + minimum_day;
+
                     let current = temporal_date_for(self)?;
+
                     let next = current
                         .with(
                             CalendarFields::new().with_optional_day(Some(
@@ -703,6 +709,7 @@ impl Time {
     #[must_use]
     pub fn to_iso8601(&self) -> String {
         let whole_seconds = format!("{:02}:{:02}:{:02}", self.hour, self.minute, self.second);
+
         let fractional = u32::from(self.millisecond) * 1_000_000
             + u32::from(self.microsecond) * 1_000
             + u32::from(self.nanosecond);
@@ -1109,6 +1116,7 @@ impl ZonedDateTime {
         let temporal_time_zone = time_zone.to_temporal()?;
 
         let temporal_date_time = temporal_date_time_for(date_time)?;
+
         let calendar_fields = temporal_calendar_fields(&CalendarDateFields {
             era: date_time.date.era.clone(),
             year: Some(date_time.date.year()),
@@ -1274,12 +1282,12 @@ pub fn to_zoned(
 }
 
 /// Converts a local date-time into a zoned date-time using the requested disambiguation.
-#[cfg(feature = "std")]
 ///
 /// # Errors
 ///
 /// Returns an error if the time zone is invalid or the local date-time cannot
 /// be resolved using the requested disambiguation strategy.
+#[cfg(feature = "std")]
 pub fn to_zoned_date_time(
     date_time: &CalendarDateTime,
     time_zone: &TimeZoneId,
@@ -1774,7 +1782,7 @@ fn format_iso_year(year: i32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Locale, StubIcuProvider};
+    use crate::{Locale, StubIntlBackend};
 
     fn gregorian_date(year: i32, month: u8, day: u8) -> CalendarDate {
         CalendarDate::new_gregorian(year, month, day).expect("Gregorian fixture should validate")
@@ -1828,6 +1836,7 @@ mod tests {
     #[test]
     fn calendar_date_to_iso8601_uses_expanded_years_outside_four_digit_range() {
         let bce = gregorian_date(-50, 1, 2);
+
         let large = gregorian_date(10_000, 12, 31);
 
         assert_eq!(bce.to_iso8601(), "-000050-01-02");
@@ -1943,6 +1952,7 @@ mod tests {
     #[test]
     fn time_helpers_cover_subtract_set_and_non_wrapping_cycles() {
         let time = Time::new(9, 30, 45, 125).expect("time should validate");
+
         let precise = time
             .set(TimeFields {
                 microsecond: Some(222),
@@ -2189,6 +2199,7 @@ mod tests {
             Overflow::Reject,
         )
         .expect("Reiwa start should validate");
+
         assert_eq!(
             reiwa_start
                 .cycle(DateField::Month, -1, CycleOptions { wrap: true })
@@ -2212,6 +2223,7 @@ mod tests {
             Overflow::Reject,
         )
         .expect("Heisei start month should validate");
+
         assert_eq!(
             heisei_start_month
                 .cycle(DateField::Day, -1, CycleOptions { wrap: true })
@@ -2395,6 +2407,7 @@ mod tests {
         .expect("BCE Gregorian fixture should validate");
 
         let time = Time::new(9, 30, 0, 0).expect("time should validate");
+
         let utc = TimeZoneId::new("UTC").expect("UTC should validate");
 
         let japanese_zoned = ZonedDateTime::new(
@@ -2497,15 +2510,15 @@ mod tests {
 
     #[test]
     fn provider_locale_semantics_cover_week_info_sensitive_calendar_helpers() {
-        let provider = StubIcuProvider;
+        let backend = StubIntlBackend;
 
         let locale = Locale::parse("en-US-u-fw-mon").expect("test locale should parse");
 
         let date = gregorian_date(2024, 3, 10);
 
-        let start = crate::calendar::queries::start_of_week(&date, &locale, &provider);
+        let start = crate::calendar::queries::start_of_week(&date, &locale, &backend);
 
-        let end = crate::calendar::queries::end_of_week(&date, &locale, &provider);
+        let end = crate::calendar::queries::end_of_week(&date, &locale, &backend);
 
         assert_eq!(start.to_iso8601(), "2024-03-04");
         assert_eq!(end.to_iso8601(), "2024-03-10");

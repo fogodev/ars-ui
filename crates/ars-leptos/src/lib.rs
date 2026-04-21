@@ -27,7 +27,7 @@ pub use ephemeral::EphemeralRef;
 pub use id::reset_id_counter;
 pub use id::use_id;
 pub use provider::{
-    ArsContext, provide_ars_context, resolve_locale, t, use_icu_provider, use_locale, use_messages,
+    ArsContext, provide_ars_context, resolve_locale, t, use_intl_backend, use_locale, use_messages,
     use_number_formatter, warn_missing_provider,
 };
 pub use use_machine::{UseMachineReturn, use_machine, use_machine_with_reactive_props};
@@ -40,6 +40,7 @@ pub const ADAPTER_NAME: &str = "leptos";
 pub struct AdapterCapabilities {
     /// `true` if server-side rendering is enabled.
     pub ssr: bool,
+
     /// `true` if client-side hydration of server-rendered markup is enabled.
     pub hydrate: bool,
 }

@@ -44,8 +44,8 @@ use crate::calendar::internal::CalendarDate as InternalCalendarDate;
 #[cfg(feature = "std")]
 use crate::to_zoned_date_time;
 use crate::{
-    CalendarDate, CalendarDateTime, CalendarSystem, Era, HourCycle, IcuProvider, Locale, Time,
-    TimeZoneId, Weekday, default_provider,
+    CalendarDate, CalendarDateTime, CalendarSystem, Era, HourCycle, IntlBackend, Locale, Time,
+    TimeZoneId, Weekday, default_backend,
 };
 
 /// Length of the formatted date/time string.
@@ -476,12 +476,12 @@ impl DateFormatter {
     /// Formats a calendar date into semantic parts.
     #[must_use]
     pub fn format_date_to_parts(&self, value: &CalendarDate) -> Vec<DateFormatterPart> {
-        let provider = default_provider();
+        let backend = default_backend();
 
         let date = self.convert_date_for_display(value);
 
         render_date_parts(
-            provider.as_ref(),
+            backend.as_ref(),
             &self.locale,
             &date,
             self.effective_date_fields(),
@@ -491,19 +491,19 @@ impl DateFormatter {
     /// Formats a calendar date-time into semantic parts.
     #[must_use]
     pub fn format_date_time_to_parts(&self, value: &CalendarDateTime) -> Vec<DateFormatterPart> {
-        let provider = default_provider();
+        let backend = default_backend();
 
         let date = self.convert_date_for_display(value.date());
 
         let mut parts = render_date_parts(
-            provider.as_ref(),
+            backend.as_ref(),
             &self.locale,
             &date,
             self.effective_date_fields(),
         );
 
         let time_parts = render_time_parts(
-            provider.as_ref(),
+            backend.as_ref(),
             &self.locale,
             value.time(),
             self.effective_time_fields(),
@@ -530,10 +530,10 @@ impl DateFormatter {
     /// Formats a wall-clock time into semantic parts.
     #[must_use]
     pub fn format_time_to_parts(&self, value: &Time) -> Vec<DateFormatterPart> {
-        let provider = default_provider();
+        let backend = default_backend();
 
         render_time_parts(
-            provider.as_ref(),
+            backend.as_ref(),
             &self.locale,
             value,
             self.effective_time_fields(),
@@ -552,7 +552,7 @@ impl DateFormatter {
     #[cfg(feature = "std")]
     #[must_use]
     pub fn format_zoned_to_parts(&self, value: &ZonedDateTime) -> Vec<DateFormatterPart> {
-        let provider = default_provider();
+        let backend = default_backend();
 
         let zoned = self.convert_zoned_for_display(value);
 
@@ -561,14 +561,14 @@ impl DateFormatter {
         let time = time_from_zoned(&zoned);
 
         let mut parts = render_date_parts(
-            provider.as_ref(),
+            backend.as_ref(),
             &self.locale,
             &date,
             self.effective_date_fields(),
         );
 
         let time_parts = render_time_parts(
-            provider.as_ref(),
+            backend.as_ref(),
             &self.locale,
             &time,
             self.effective_time_fields(),
@@ -766,7 +766,7 @@ fn resolve_options(
     locale: &Locale,
     options: &DateFormatterOptions,
 ) -> ResolvedDateFormatterOptions {
-    let provider = default_provider();
+    let backend = default_backend();
 
     let uses_time = options.time_style.is_some()
         || options.hour.is_some()
@@ -785,7 +785,7 @@ fn resolve_options(
         hour_cycle: uses_time.then(|| {
             options
                 .hour_cycle
-                .unwrap_or_else(|| locale.hour_cycle(provider.as_ref()))
+                .unwrap_or_else(|| locale.hour_cycle(backend.as_ref()))
         }),
         date_style: options.date_style,
         time_style: options.time_style,
@@ -927,7 +927,7 @@ fn format_js_date(
 }
 
 fn render_date_parts(
-    provider: &dyn IcuProvider,
+    backend: &dyn IntlBackend,
     locale: &Locale,
     date: &CalendarDate,
     fields: EffectiveDateFields,
@@ -937,7 +937,7 @@ fn render_date_parts(
     if let Some(weekday_width) = fields.weekday {
         parts.push(DateFormatterPart {
             kind: DateFormatterPartKind::Weekday,
-            value: weekday_label(provider, date.weekday(), locale, weekday_width),
+            value: weekday_label(backend, date.weekday(), locale, weekday_width),
         });
 
         if fields.era.is_some()
@@ -966,7 +966,7 @@ fn render_date_parts(
                 &mut ordered,
                 fields.month.map(|month| DateFormatterPart {
                     kind: DateFormatterPartKind::Month,
-                    value: format_month(provider, locale, date.month(), month),
+                    value: format_month(backend, locale, date.month(), month),
                 }),
                 " ",
             );
@@ -1004,7 +1004,7 @@ fn render_date_parts(
                 &mut ordered,
                 fields.month.map(|month| DateFormatterPart {
                     kind: DateFormatterPartKind::Month,
-                    value: format_month(provider, locale, date.month(), month),
+                    value: format_month(backend, locale, date.month(), month),
                 }),
                 " ",
             );
@@ -1033,7 +1033,7 @@ fn render_date_parts(
                 &mut ordered,
                 fields.month.map(|month| DateFormatterPart {
                     kind: DateFormatterPartKind::Month,
-                    value: format_month(provider, locale, date.month(), month),
+                    value: format_month(backend, locale, date.month(), month),
                 }),
                 " ",
             );
@@ -1055,7 +1055,7 @@ fn render_date_parts(
 }
 
 fn render_time_parts(
-    provider: &dyn IcuProvider,
+    backend: &dyn IntlBackend,
     locale: &Locale,
     time: &Time,
     fields: EffectiveTimeFields,
@@ -1097,7 +1097,7 @@ fn render_time_parts(
 
         parts.push(DateFormatterPart {
             kind: DateFormatterPartKind::DayPeriod,
-            value: provider.day_period_label(time.hour() >= 12, locale),
+            value: backend.day_period_label(time.hour() >= 12, locale),
         });
     }
     if let Some(zone_format) = fields.time_zone_name
@@ -1259,16 +1259,22 @@ fn date_order(locale: &Locale) -> DateOrder {
 #[cfg(feature = "icu4x")]
 fn icu_date_order(locale: &Locale) -> Option<DateOrder> {
     let probe = CalendarDate::new_gregorian(2006, 11, 22).ok()?;
+
     let formatter = build_icu_date_formatter(locale, FormatLength::Short);
+
     let formatted = format_icu_date(locale, FormatLength::Short, &formatter, &probe);
+
     numeric_field_order_from_formatted(&formatted)
 }
 
 #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
 fn js_date_order(locale: &Locale) -> Option<DateOrder> {
     let probe = CalendarDate::new_gregorian(2006, 11, 22).ok()?;
+
     let formatter = build_js_date_formatter(locale, FormatLength::Short);
+
     let formatted = format_js_date(locale, FormatLength::Short, &formatter, &probe);
+
     numeric_field_order_from_formatted(&formatted)
 }
 
@@ -1279,7 +1285,9 @@ fn fallback_date_order(locale: &Locale) -> DateOrder {
 
     match locale.region() {
         Some("US" | "FM" | "PW") => DateOrder::MonthDayYear,
+
         Some("CA" | "CN" | "HU" | "JP" | "KR" | "LT" | "MN" | "TW") => DateOrder::YearMonthDay,
+
         _ => DateOrder::DayMonthYear,
     }
 }
@@ -1297,6 +1305,7 @@ fn numeric_field_order_from_formatted(formatted: &str) -> Option<DateOrder> {
     }
 
     let mut numeric_runs = Vec::new();
+
     let mut current: Option<u32> = None;
 
     for ch in formatted.chars() {
@@ -1327,16 +1336,19 @@ fn numeric_field_order_from_formatted(formatted: &str) -> Option<DateOrder> {
             DateComponent::Day,
             DateComponent::Year,
         ] => Some(DateOrder::MonthDayYear),
+
         [
             DateComponent::Day,
             DateComponent::Month,
             DateComponent::Year,
         ] => Some(DateOrder::DayMonthYear),
+
         [
             DateComponent::Year,
             DateComponent::Month,
             DateComponent::Day,
         ] => Some(DateOrder::YearMonthDay),
+
         _ => None,
     }
 }
@@ -1379,7 +1391,7 @@ fn format_hour(hour: u8, width: NumericWidth, cycle: HourCycle) -> String {
 }
 
 fn format_month(
-    provider: &dyn IcuProvider,
+    backend: &dyn IntlBackend,
     locale: &Locale,
     month: u8,
     format_kind: MonthFormat,
@@ -1387,22 +1399,22 @@ fn format_month(
     match format_kind {
         MonthFormat::Numeric => month.to_string(),
         MonthFormat::TwoDigit => format!("{month:02}"),
-        MonthFormat::Long => provider.month_long_name(month, locale),
-        MonthFormat::Short => truncate_graphemes(&provider.month_long_name(month, locale), 3),
-        MonthFormat::Narrow => truncate_graphemes(&provider.month_long_name(month, locale), 1),
+        MonthFormat::Long => backend.month_long_name(month, locale),
+        MonthFormat::Short => truncate_graphemes(&backend.month_long_name(month, locale), 3),
+        MonthFormat::Narrow => truncate_graphemes(&backend.month_long_name(month, locale), 1),
     }
 }
 
 fn weekday_label(
-    provider: &dyn IcuProvider,
+    backend: &dyn IntlBackend,
     weekday: Weekday,
     locale: &Locale,
     width: TextWidth,
 ) -> String {
     match width {
-        TextWidth::Long => provider.weekday_long_label(weekday, locale),
-        TextWidth::Short => provider.weekday_short_label(weekday, locale),
-        TextWidth::Narrow => truncate_graphemes(&provider.weekday_short_label(weekday, locale), 1),
+        TextWidth::Long => backend.weekday_long_label(weekday, locale),
+        TextWidth::Short => backend.weekday_short_label(weekday, locale),
+        TextWidth::Narrow => truncate_graphemes(&backend.weekday_short_label(weekday, locale), 1),
     }
 }
 
@@ -1424,10 +1436,12 @@ fn format_time_zone_name(
 ) -> String {
     match format_kind {
         TimeZoneNameFormat::Short | TimeZoneNameFormat::Long => String::from(time_zone.as_str()),
+
         TimeZoneNameFormat::ShortOffset => utc_offset_minutes.map_or_else(
             || format!("GMT {}", time_zone.as_str()),
             |minutes| format_utc_offset(minutes, false),
         ),
+
         TimeZoneNameFormat::LongOffset => utc_offset_minutes.map_or_else(
             || format!("GMT offset {}", time_zone.as_str()),
             |minutes| format_utc_offset(minutes, true),
@@ -1457,8 +1471,11 @@ fn format_utc_offset(utc_offset_minutes: i32, long: bool) -> String {
     } else {
         '+'
     };
+
     let absolute_minutes = utc_offset_minutes.abs();
+
     let hours = absolute_minutes / 60;
+
     let minutes = absolute_minutes % 60;
 
     if long {
@@ -1575,6 +1592,7 @@ fn fallback_format_date(_locale: &Locale, length: FormatLength, date: &CalendarD
     let month = date.month;
 
     let day = date.day;
+
     let (display_year, era_suffix) = fallback_gregorian_year_for_display(date);
 
     match length {
@@ -1718,7 +1736,7 @@ mod tests {
         fallback_format_date,
     };
     #[cfg(feature = "icu4x")]
-    use crate::StubIcuProvider;
+    use crate::StubIntlBackend;
     #[cfg(any(
         not(any(feature = "icu4x", feature = "web-intl")),
         all(
@@ -2310,7 +2328,7 @@ mod tests {
     #[cfg(feature = "icu4x")]
     #[test]
     fn low_level_part_rendering_helpers_cover_shared_and_distinct_ranges() {
-        let provider = StubIcuProvider;
+        let backend = StubIntlBackend;
 
         let locale = locales::en_us();
 
@@ -2319,7 +2337,7 @@ mod tests {
         let time = Time::new(17, 5, 9, 0).expect("time should validate");
 
         let date_parts = render_date_parts(
-            &provider,
+            &backend,
             &locale,
             &date,
             EffectiveDateFields {
@@ -2332,7 +2350,7 @@ mod tests {
         );
 
         let time_parts = render_time_parts(
-            &provider,
+            &backend,
             &locale,
             &time,
             EffectiveTimeFields {
@@ -2468,6 +2486,7 @@ mod tests {
         );
 
         let time = Time::new(17, 5, 9, 0).expect("time should validate");
+
         let formatted_utc = formatter.format_time(&time);
 
         assert!(formatted_utc.contains("GMT"));
@@ -2492,7 +2511,7 @@ mod tests {
     #[cfg(all(feature = "std", feature = "icu4x"))]
     #[test]
     fn formatter_primitives_cover_numeric_and_projection_helpers() {
-        let provider = StubIcuProvider;
+        let backend = StubIntlBackend;
 
         let locale = locales::en_us();
 
@@ -2541,27 +2560,24 @@ mod tests {
         assert_eq!(format_hour(17, NumericWidth::Numeric, HourCycle::H23), "17");
         assert_eq!(format_hour(0, NumericWidth::Numeric, HourCycle::H24), "24");
         assert_eq!(
-            format_month(&provider, &locale, 3, MonthFormat::Numeric),
+            format_month(&backend, &locale, 3, MonthFormat::Numeric),
             "3"
         );
         assert_eq!(
-            format_month(&provider, &locale, 3, MonthFormat::TwoDigit),
+            format_month(&backend, &locale, 3, MonthFormat::TwoDigit),
             "03"
         );
         assert_eq!(
-            format_month(&provider, &locale, 3, MonthFormat::Long),
+            format_month(&backend, &locale, 3, MonthFormat::Long),
             "March"
         );
         assert_eq!(
-            format_month(&provider, &locale, 3, MonthFormat::Short),
+            format_month(&backend, &locale, 3, MonthFormat::Short),
             "Mar"
         );
+        assert_eq!(format_month(&backend, &locale, 3, MonthFormat::Narrow), "M");
         assert_eq!(
-            format_month(&provider, &locale, 3, MonthFormat::Narrow),
-            "M"
-        );
-        assert_eq!(
-            weekday_label(&provider, Weekday::Friday, &locale, TextWidth::Narrow),
+            weekday_label(&backend, Weekday::Friday, &locale, TextWidth::Narrow),
             "F"
         );
         assert_eq!(era_label(&era, TextWidth::Narrow), "R");
@@ -2605,6 +2621,7 @@ mod tests {
     #[test]
     fn formatter_uses_locale_derived_date_field_order_for_option_based_dates() {
         let locale = Locale::parse("en-CA").expect("locale should parse");
+
         let formatter = DateFormatter::new_with_options(
             &locale,
             DateFormatterOptions {
@@ -2614,7 +2631,9 @@ mod tests {
                 ..DateFormatterOptions::default()
             },
         );
+
         let date = CalendarDate::new_gregorian(2006, 11, 22).expect("fixture should validate");
+
         let kinds: Vec<_> = formatter
             .format_date_to_parts(&date)
             .into_iter()
@@ -2890,7 +2909,9 @@ mod web_intl_tests {
     #[wasm_bindgen_test]
     fn web_intl_date_formatter_preserves_bce_gregorian_dates() {
         let locale = locales::en_us();
+
         let formatter = DateFormatter::new(&locale, FormatLength::Long);
+
         let date = CalendarDate::new(
             CalendarSystem::Gregorian,
             &crate::CalendarDateFields {
@@ -2908,6 +2929,7 @@ mod web_intl_tests {
 
         let converted =
             js_date_from_calendar(&date).expect("BCE Gregorian fixture should map to a Date");
+
         let expected = direct_browser_format_for_js_date(
             &locale,
             FormatLength::Long,

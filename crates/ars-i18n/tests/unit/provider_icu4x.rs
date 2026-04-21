@@ -1,11 +1,11 @@
-//! Native `Icu4xProvider` tests (spec §9.5.2).
+//! Native `Icu4xBackend` tests (spec §9.5.2).
 
 use alloc::string::{String, ToString};
 use core::num::NonZero;
 
 use crate::{
-    CalendarDate, CalendarDateFields, CalendarSystem, Era, HourCycle, Icu4xProvider, IcuProvider,
-    Locale, Weekday, default_provider,
+    CalendarDate, CalendarDateFields, CalendarSystem, Era, HourCycle, Icu4xBackend, IntlBackend,
+    Locale, Weekday, default_backend,
 };
 
 fn locale(tag: &str) -> Locale {
@@ -14,9 +14,9 @@ fn locale(tag: &str) -> Locale {
 
 #[test]
 fn icu4x_weekday_short_label_localizes_in_arabic() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
-    let label = provider.weekday_short_label(Weekday::Monday, &locale("ar"));
+    let label = backend.weekday_short_label(Weekday::Monday, &locale("ar"));
 
     assert!(
         label
@@ -32,9 +32,9 @@ fn icu4x_weekday_short_label_localizes_in_arabic() {
 
 #[test]
 fn icu4x_weekday_long_label_localizes_in_japanese() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
-    let label = provider.weekday_long_label(Weekday::Monday, &locale("ja"));
+    let label = backend.weekday_long_label(Weekday::Monday, &locale("ja"));
 
     // Japanese long weekday labels always contain the kanji "曜".
     assert!(
@@ -45,16 +45,16 @@ fn icu4x_weekday_long_label_localizes_in_japanese() {
 
 #[test]
 fn icu4x_weekday_short_label_localizes_in_english() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
-    let label = provider.weekday_short_label(Weekday::Monday, &locale("en-US"));
+    let label = backend.weekday_short_label(Weekday::Monday, &locale("en-US"));
 
     assert_eq!(label, "Mon");
 }
 
 #[test]
 fn icu4x_weekday_short_label_covers_every_weekday() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     let en = locale("en-US");
 
@@ -69,7 +69,7 @@ fn icu4x_weekday_short_label_covers_every_weekday() {
         (Weekday::Sunday, "Sun"),
     ] {
         assert_eq!(
-            provider.weekday_short_label(weekday, &en),
+            backend.weekday_short_label(weekday, &en),
             expected,
             "short label for {weekday:?}"
         );
@@ -78,9 +78,9 @@ fn icu4x_weekday_short_label_covers_every_weekday() {
 
 #[test]
 fn icu4x_month_long_name_localizes_in_japanese() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
-    let name = provider.month_long_name(1, &locale("ja"));
+    let name = backend.month_long_name(1, &locale("ja"));
 
     // CLDR returns "1月" for month 1 in Japanese.
     assert!(
@@ -91,24 +91,24 @@ fn icu4x_month_long_name_localizes_in_japanese() {
 
 #[test]
 fn icu4x_month_long_name_returns_unknown_for_invalid_month() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     assert_eq!(
-        provider.month_long_name(0, &locale("en-US")),
+        backend.month_long_name(0, &locale("en-US")),
         String::from("Unknown")
     );
     assert_eq!(
-        provider.month_long_name(13, &locale("en-US")),
+        backend.month_long_name(13, &locale("en-US")),
         String::from("Unknown")
     );
 }
 
 #[test]
 fn icu4x_hour_cycle_reflects_locale() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
-    assert_eq!(provider.hour_cycle(&locale("en-US")), HourCycle::H12);
-    assert_eq!(provider.hour_cycle(&locale("de-DE")), HourCycle::H23);
+    assert_eq!(backend.hour_cycle(&locale("en-US")), HourCycle::H12);
+    assert_eq!(backend.hour_cycle(&locale("de-DE")), HourCycle::H23);
 }
 
 #[test]
@@ -120,19 +120,19 @@ fn icu4x_hour_cycle_honors_all_four_unicode_extension_overrides() {
     // before running the heuristic and returns the matching
     // `HourCycle` variant — crucial for consumers that distinguish
     // H11 vs H12 (midnight 0 vs 12) or H23 vs H24.
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
-    assert_eq!(provider.hour_cycle(&locale("ja-u-hc-h11")), HourCycle::H11);
+    assert_eq!(backend.hour_cycle(&locale("ja-u-hc-h11")), HourCycle::H11);
     assert_eq!(
-        provider.hour_cycle(&locale("en-US-u-hc-h12")),
+        backend.hour_cycle(&locale("en-US-u-hc-h12")),
         HourCycle::H12
     );
     assert_eq!(
-        provider.hour_cycle(&locale("de-DE-u-hc-h23")),
+        backend.hour_cycle(&locale("de-DE-u-hc-h23")),
         HourCycle::H23
     );
     assert_eq!(
-        provider.hour_cycle(&locale("de-DE-u-hc-h24")),
+        backend.hour_cycle(&locale("de-DE-u-hc-h24")),
         HourCycle::H24
     );
 }
@@ -147,10 +147,10 @@ fn icu4x_hour_cycle_ignores_locale_hour_literals() {
     // because of the non-digit trailing text. The new digit-run
     // comparison between the 01:00 and 13:00 probes cannot be fooled
     // by decoration.
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     assert_eq!(
-        provider.hour_cycle(&locale("bg-BG")),
+        backend.hour_cycle(&locale("bg-BG")),
         HourCycle::H23,
         "bg-BG must resolve to 24-hour despite the trailing ч. literal"
     );
@@ -158,7 +158,7 @@ fn icu4x_hour_cycle_ignores_locale_hour_literals() {
     // Explicit `-u-hc-h23` forces 24-hour formatting even for a
     // locale that would normally default to 12-hour.
     assert_eq!(
-        provider.hour_cycle(&locale("en-US-u-hc-h23")),
+        backend.hour_cycle(&locale("en-US-u-hc-h23")),
         HourCycle::H23,
         "en-US-u-hc-h23 must resolve to 24-hour"
     );
@@ -205,13 +205,13 @@ fn icu4x_day_period_label_survives_locale_hour_literals() {
     // `day_period_from_char` collapsed them together. The diff-based
     // extractor peels off everything shared between the two probes,
     // leaving only the day-period marker.
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     let bg = locale("bg-BG");
 
-    let am = provider.day_period_label(false, &bg);
+    let am = backend.day_period_label(false, &bg);
 
-    let pm = provider.day_period_label(true, &bg);
+    let pm = backend.day_period_label(true, &bg);
 
     assert!(!am.is_empty(), "bg-BG AM label empty");
     assert!(!pm.is_empty(), "bg-BG PM label empty");
@@ -226,8 +226,8 @@ fn icu4x_day_period_label_survives_locale_hour_literals() {
 
     let pm_first = pm.chars().next().expect("PM label non-empty");
 
-    assert_eq!(provider.day_period_from_char(am_first, &bg), Some(false));
-    assert_eq!(provider.day_period_from_char(pm_first, &bg), Some(true));
+    assert_eq!(backend.day_period_from_char(am_first, &bg), Some(false));
+    assert_eq!(backend.day_period_from_char(pm_first, &bg), Some(true));
 }
 
 #[test]
@@ -235,9 +235,9 @@ fn icu4x_hour_cycle_ignores_native_digits_in_24h_locales() {
     // Regression: before treating non-ASCII digits as numerals, fa-IR
     // was misclassified as H12 because its 24-hour display uses
     // Persian numerals (۱۳:۰۰) whose characters aren't ASCII digits.
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
-    assert_eq!(provider.hour_cycle(&locale("fa-IR")), HourCycle::H23);
+    assert_eq!(backend.hour_cycle(&locale("fa-IR")), HourCycle::H23);
 }
 
 #[test]
@@ -245,13 +245,13 @@ fn icu4x_day_period_from_char_disambiguates_arabic_labels() {
     // Regression: before stripping Unicode numerals from the formatted
     // reference time, ar-EG AM/PM labels both started with `١` and
     // `day_period_from_char` could not distinguish AM from PM.
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     let ar = locale("ar-EG");
 
-    let am_label = provider.day_period_label(false, &ar);
+    let am_label = backend.day_period_label(false, &ar);
 
-    let pm_label = provider.day_period_label(true, &ar);
+    let pm_label = backend.day_period_label(true, &ar);
 
     assert_ne!(
         am_label.chars().next(),
@@ -263,36 +263,31 @@ fn icu4x_day_period_from_char_disambiguates_arabic_labels() {
 
     let pm_char = pm_label.chars().next().expect("PM label is non-empty");
 
-    assert_eq!(provider.day_period_from_char(am_char, &ar), Some(false));
-    assert_eq!(provider.day_period_from_char(pm_char, &ar), Some(true));
+    assert_eq!(backend.day_period_from_char(am_char, &ar), Some(false));
+    assert_eq!(backend.day_period_from_char(pm_char, &ar), Some(true));
 }
 
 #[test]
 fn icu4x_first_day_of_week_from_cldr() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
-    assert_eq!(
-        provider.first_day_of_week(&locale("en-US")),
-        Weekday::Sunday
-    );
-    assert_eq!(
-        provider.first_day_of_week(&locale("de-DE")),
-        Weekday::Monday
-    );
+    assert_eq!(backend.first_day_of_week(&locale("en-US")), Weekday::Sunday);
+    assert_eq!(backend.first_day_of_week(&locale("de-DE")), Weekday::Monday);
 
     // `-u-fw-` extension overrides the CLDR default.
     assert_eq!(
-        provider.first_day_of_week(&locale("en-US-u-fw-mon")),
+        backend.first_day_of_week(&locale("en-US-u-fw-mon")),
         Weekday::Monday
     );
 }
 
 #[test]
 fn icu4x_week_info_includes_weekend_metadata() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
-    let us = provider.week_info(&locale("en-US"));
-    let germany = provider.week_info(&locale("de-DE"));
+    let us = backend.week_info(&locale("en-US"));
+
+    let germany = backend.week_info(&locale("de-DE"));
 
     assert_eq!(us.first_day, Weekday::Sunday);
     assert_eq!(us.weekend_start, Weekday::Saturday);
@@ -301,7 +296,7 @@ fn icu4x_week_info_includes_weekend_metadata() {
     assert_eq!(germany.first_day, Weekday::Monday);
     assert_eq!(germany.minimal_days_in_first_week, 4);
 
-    let israel = provider.week_info(&locale("he-IL"));
+    let israel = backend.week_info(&locale("he-IL"));
 
     assert_eq!(israel.first_day, Weekday::Sunday);
     assert_eq!(israel.weekend_start, Weekday::Friday);
@@ -310,13 +305,10 @@ fn icu4x_week_info_includes_weekend_metadata() {
 
 #[test]
 fn icu4x_format_segment_digits_uses_native_digits_in_arabic() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
-    let formatted = provider.format_segment_digits(
-        5,
-        NonZero::new(2).expect("2 is non-zero"),
-        &locale("ar-EG"),
-    );
+    let formatted =
+        backend.format_segment_digits(5, NonZero::new(2).expect("2 is non-zero"), &locale("ar-EG"));
 
     // ar-EG uses Arabic-Indic native digits (٠١٢٣٤٥٦٧٨٩) by default via CLDR.
     assert_eq!(formatted, "٠٥");
@@ -328,16 +320,16 @@ fn icu4x_format_segment_digits_never_groups_thousands() {
     // grouping enabled, so the segment formatter would happily return
     // `"2,024"` for a year — breaking both the segment contract
     // (contiguous digits with zero-padding only) and parity with
-    // `WebIntlProvider::format_segment_digits`, which passes
+    // `WebIntlBackend::format_segment_digits`, which passes
     // `useGrouping: false`. The provider now sets
     // `grouping_strategy = GroupingStrategy::Never` explicitly.
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     for tag in ["en-US", "de-DE", "fr-FR"] {
         let loc = locale(tag);
 
         let formatted =
-            provider.format_segment_digits(2024, NonZero::new(4).expect("4 is non-zero"), &loc);
+            backend.format_segment_digits(2024, NonZero::new(4).expect("4 is non-zero"), &loc);
 
         assert_eq!(
             formatted, "2024",
@@ -348,13 +340,10 @@ fn icu4x_format_segment_digits_never_groups_thousands() {
 
 #[test]
 fn icu4x_format_segment_digits_preserves_ascii_in_english() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
-    let formatted = provider.format_segment_digits(
-        7,
-        NonZero::new(2).expect("2 is non-zero"),
-        &locale("en-US"),
-    );
+    let formatted =
+        backend.format_segment_digits(7, NonZero::new(2).expect("2 is non-zero"), &locale("en-US"));
 
     assert_eq!(formatted, "07");
 }
@@ -368,14 +357,14 @@ fn icu4x_day_period_label_nonempty_for_24h_locales() {
     // could not disambiguate AM/PM for those locales. The fix forces
     // `HourCycle::H12` on the day-period formatter so every locale
     // surfaces a non-empty, distinct AM/PM pair.
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     for tag in ["de-DE", "fr-FR", "ja-JP"] {
         let loc = locale(tag);
 
-        let am = provider.day_period_label(false, &loc);
+        let am = backend.day_period_label(false, &loc);
 
-        let pm = provider.day_period_label(true, &loc);
+        let pm = backend.day_period_label(true, &loc);
 
         assert!(!am.is_empty(), "{tag} AM label empty");
         assert!(!pm.is_empty(), "{tag} PM label empty");
@@ -385,11 +374,11 @@ fn icu4x_day_period_label_nonempty_for_24h_locales() {
 
 #[test]
 fn icu4x_day_period_label_returns_nonempty() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
-    let am = provider.day_period_label(false, &locale("en-US"));
+    let am = backend.day_period_label(false, &locale("en-US"));
 
-    let pm = provider.day_period_label(true, &locale("en-US"));
+    let pm = backend.day_period_label(true, &locale("en-US"));
 
     assert!(!am.is_empty(), "AM label should not be empty");
     assert!(!pm.is_empty(), "PM label should not be empty");
@@ -398,71 +387,71 @@ fn icu4x_day_period_label_returns_nonempty() {
 
 #[test]
 fn icu4x_day_period_from_char_roundtrips_through_labels() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     assert_eq!(
-        provider.day_period_from_char('a', &locale("en-US")),
+        backend.day_period_from_char('a', &locale("en-US")),
         Some(false)
     );
     assert_eq!(
-        provider.day_period_from_char('P', &locale("en-US")),
+        backend.day_period_from_char('P', &locale("en-US")),
         Some(true)
     );
-    assert_eq!(provider.day_period_from_char('x', &locale("en-US")), None);
+    assert_eq!(backend.day_period_from_char('x', &locale("en-US")), None);
 }
 
 #[test]
 fn icu4x_max_months_in_year_detects_hebrew_leap() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     // 5784 is year 8 of the 19-year Metonic cycle (year % 19 = 8) — a leap
     // year with 13 months.
     assert_eq!(
-        provider.max_months_in_year(&CalendarSystem::Hebrew, 5784, None),
+        backend.max_months_in_year(&CalendarSystem::Hebrew, 5784, None),
         13
     );
 
     // 5785 is year 9 of the cycle — a common year with 12 months.
     assert_eq!(
-        provider.max_months_in_year(&CalendarSystem::Hebrew, 5785, None),
+        backend.max_months_in_year(&CalendarSystem::Hebrew, 5785, None),
         12
     );
 }
 
 #[test]
 fn icu4x_max_months_in_year_clamps_japanese_end_of_era() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     // Heisei 31 (2019) ended on 30 April; the final year is capped at 4 months.
     assert_eq!(
-        provider.max_months_in_year(&CalendarSystem::Japanese, 31, Some("heisei")),
+        backend.max_months_in_year(&CalendarSystem::Japanese, 31, Some("heisei")),
         4
     );
 }
 
 #[test]
 fn icu4x_days_in_month_respects_japanese_end_of_era() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     // Heisei 31-04 ends on day 30 (final day of the era).
     assert_eq!(
-        provider.days_in_month(&CalendarSystem::Japanese, 31, 4, Some("heisei")),
+        backend.days_in_month(&CalendarSystem::Japanese, 31, 4, Some("heisei")),
         30
     );
 
     // Gregorian February 2024 is 29 days (leap).
     assert_eq!(
-        provider.days_in_month(&CalendarSystem::Gregorian, 2024, 2, None),
+        backend.days_in_month(&CalendarSystem::Gregorian, 2024, 2, None),
         29
     );
 }
 
 #[test]
 fn icu4x_default_era_for_japanese_is_reiwa() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     assert_eq!(
-        provider.default_era(&CalendarSystem::Japanese),
+        backend.default_era(&CalendarSystem::Japanese),
         Some(Era {
             code: "reiwa".to_string(),
             display_name: "Reiwa".to_string(),
@@ -472,7 +461,7 @@ fn icu4x_default_era_for_japanese_is_reiwa() {
 
 #[test]
 fn icu4x_era_boundary_queries_match_spec() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     let heisei_1_1_8 = CalendarDate::new(
         CalendarSystem::Japanese,
@@ -489,9 +478,9 @@ fn icu4x_era_boundary_queries_match_spec() {
     )
     .expect("Heisei 1-1-8 should validate");
 
-    assert_eq!(provider.years_in_era(&heisei_1_1_8), Some(31));
-    assert_eq!(provider.minimum_month_in_year(&heisei_1_1_8), 1);
-    assert_eq!(provider.minimum_day_in_month(&heisei_1_1_8), 8);
+    assert_eq!(backend.years_in_era(&heisei_1_1_8), Some(31));
+    assert_eq!(backend.minimum_month_in_year(&heisei_1_1_8), 1);
+    assert_eq!(backend.minimum_day_in_month(&heisei_1_1_8), 8);
 
     let reiwa_1_5_1 = CalendarDate::new(
         CalendarSystem::Japanese,
@@ -508,17 +497,17 @@ fn icu4x_era_boundary_queries_match_spec() {
     )
     .expect("Reiwa 1-5-1 should validate");
 
-    assert_eq!(provider.minimum_month_in_year(&reiwa_1_5_1), 5);
+    assert_eq!(backend.minimum_month_in_year(&reiwa_1_5_1), 5);
 }
 
 #[test]
 fn icu4x_convert_date_crosses_calendars() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     let gregorian =
         CalendarDate::new_gregorian(2024, 3, 15).expect("Gregorian 2024-03-15 should validate");
 
-    let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+    let japanese = backend.convert_date(&gregorian, CalendarSystem::Japanese);
 
     assert_eq!(japanese.calendar(), CalendarSystem::Japanese);
     assert_eq!(japanese.year(), 6);
@@ -526,20 +515,20 @@ fn icu4x_convert_date_crosses_calendars() {
     assert_eq!(japanese.day(), 15);
     assert!(japanese.era().is_some());
 
-    // Cross-calendar conversion is reversible through the provider.
-    let round_trip = provider.convert_date(&japanese, CalendarSystem::Gregorian);
+    // Cross-calendar conversion is reversible through the backend.
+    let round_trip = backend.convert_date(&japanese, CalendarSystem::Gregorian);
 
     assert_eq!(round_trip, gregorian);
 }
 
 #[test]
 fn icu4x_convert_date_to_hebrew_yields_valid_date() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     let gregorian =
         CalendarDate::new_gregorian(1992, 9, 2).expect("Gregorian 1992-09-02 should validate");
 
-    let hebrew = provider.convert_date(&gregorian, CalendarSystem::Hebrew);
+    let hebrew = backend.convert_date(&gregorian, CalendarSystem::Hebrew);
 
     assert_eq!(hebrew.calendar(), CalendarSystem::Hebrew);
     assert!(hebrew.year() >= 5752 && hebrew.year() <= 5753);
@@ -549,16 +538,16 @@ fn icu4x_convert_date_to_hebrew_yields_valid_date() {
 
 #[test]
 fn icu4x_convert_date_normalizes_early_dates_into_supported_public_eras() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     let gregorian =
         CalendarDate::new_gregorian(1, 3, 15).expect("Gregorian 0001-03-15 should validate");
 
-    let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+    let japanese = backend.convert_date(&gregorian, CalendarSystem::Japanese);
 
-    let islamic = provider.convert_date(&gregorian, CalendarSystem::IslamicUmmAlQura);
+    let islamic = backend.convert_date(&gregorian, CalendarSystem::IslamicUmmAlQura);
 
-    let coptic = provider.convert_date(&gregorian, CalendarSystem::Coptic);
+    let coptic = backend.convert_date(&gregorian, CalendarSystem::Coptic);
 
     assert_eq!(japanese.era().map(|era| era.code.as_str()), Some("ce"));
     assert_eq!(japanese.year(), 1);
@@ -572,7 +561,7 @@ fn icu4x_convert_date_normalizes_early_dates_into_supported_public_eras() {
     assert!((1..=13).contains(&coptic.month()));
     assert!((1..=30).contains(&coptic.day()));
     assert_eq!(
-        provider.convert_date(&coptic, CalendarSystem::Gregorian),
+        backend.convert_date(&coptic, CalendarSystem::Gregorian),
         gregorian
     );
 }
@@ -582,45 +571,45 @@ fn icu4x_convert_date_returns_source_for_out_of_range_year() {
     // The Temporal-backed calendar engine can still project large ISO years
     // into Japanese era years directly. The conversion must remain
     // round-trippable instead of falling back or panicking.
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     let gregorian =
         CalendarDate::new_gregorian(10_000, 1, 1).expect("Gregorian date should validate");
 
-    let converted = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+    let converted = backend.convert_date(&gregorian, CalendarSystem::Japanese);
 
     assert_eq!(converted.calendar(), CalendarSystem::Japanese);
     assert_eq!(
-        provider.convert_date(&converted, CalendarSystem::Gregorian),
+        backend.convert_date(&converted, CalendarSystem::Gregorian),
         gregorian
     );
 }
 
 #[test]
 fn icu4x_convert_date_same_calendar_is_identity() {
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     let gregorian =
         CalendarDate::new_gregorian(2024, 3, 15).expect("Gregorian date should validate");
 
-    let converted = provider.convert_date(&gregorian, CalendarSystem::Gregorian);
+    let converted = backend.convert_date(&gregorian, CalendarSystem::Gregorian);
 
     assert_eq!(converted, gregorian);
 }
 
 #[test]
 fn icu4x_default_provider_under_icu4x_feature() {
-    // With the `icu4x` feature enabled, `default_provider()` selects the
-    // Icu4xProvider branch. The Boxed trait object isn't downcastable
+    // With the `icu4x` feature enabled, `default_backend()` selects the
+    // Icu4xBackend branch. The Boxed trait object isn't downcastable
     // without extra machinery, so we assert observable behavior that the
     // Stub would get wrong.
-    let provider = default_provider();
+    let backend = default_backend();
 
-    let label = provider.weekday_long_label(Weekday::Monday, &locale("ja"));
+    let label = backend.weekday_long_label(Weekday::Monday, &locale("ja"));
 
     assert!(
         label.contains('曜'),
-        "default_provider() under icu4x should return Japanese labels; got {label:?}"
+        "default_backend() under icu4x should return Japanese labels; got {label:?}"
     );
 }
 
@@ -704,13 +693,13 @@ fn icu4x_day_period_label_full_cjk_label_integration_ja_jp() {
     // differ from each other, since CLDR data could evolve; the
     // strict split-around-digits unit tests above pin the semantic
     // contract.
-    let provider = Icu4xProvider;
+    let backend = Icu4xBackend;
 
     let ja = locale("ja-JP");
 
-    let am = provider.day_period_label(false, &ja);
+    let am = backend.day_period_label(false, &ja);
 
-    let pm = provider.day_period_label(true, &ja);
+    let pm = backend.day_period_label(true, &ja);
 
     assert!(
         am.contains('午'),
@@ -728,7 +717,7 @@ fn icu4x_day_period_label_full_cjk_label_integration_ja_jp() {
     let first = am.chars().next().expect("ja-JP AM label is non-empty");
 
     assert_eq!(
-        provider.day_period_from_char(first, &ja),
+        backend.day_period_from_char(first, &ja),
         None,
         "single CJK character must be ambiguous when both labels share their first char"
     );

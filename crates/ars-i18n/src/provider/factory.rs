@@ -1,35 +1,35 @@
-//! [`default_provider`] factory: returns the preferred
-//! [`IcuProvider`](crate::IcuProvider) for the current feature-flag
+//! [`default_backend`] factory: returns the preferred
+//! [`IntlBackend`](crate::IntlBackend) for the current feature-flag
 //! configuration.
 
 use alloc::boxed::Box;
 
-use crate::IcuProvider;
+use crate::IntlBackend;
 
-/// Returns the default [`IcuProvider`] for the current feature flags.
+/// Returns the default [`IntlBackend`] for the current feature flags.
 ///
 /// Precedence matches spec §9.5.3:
 ///
-/// 1. The `icu4x` feature returns an [`Icu4xProvider`](super::Icu4xProvider)
+/// 1. The `icu4x` feature returns an [`Icu4xBackend`](super::Icu4xBackend)
 ///    with full CLDR data.
 /// 2. On `wasm32` targets with the `web-intl` feature (and without `icu4x`),
-///    returns a [`WebIntlProvider`](super::WebIntlProvider) that delegates
+///    returns a [`WebIntlBackend`](super::WebIntlBackend) that delegates
 ///    to the browser.
-/// 3. Otherwise returns the [`StubIcuProvider`](super::StubIcuProvider).
+/// 3. Otherwise returns the [`StubIntlBackend`](super::StubIntlBackend).
 #[must_use]
-pub fn default_provider() -> Box<dyn IcuProvider> {
+pub fn default_backend() -> Box<dyn IntlBackend> {
     #[cfg(feature = "icu4x")]
     {
-        Box::new(super::Icu4xProvider)
+        Box::new(super::Icu4xBackend)
     }
 
     #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
     {
-        Box::new(super::WebIntlProvider)
+        Box::new(super::WebIntlBackend)
     }
 
     #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
     {
-        Box::new(super::StubIcuProvider)
+        Box::new(super::StubIntlBackend)
     }
 }

@@ -77,8 +77,8 @@ pub struct Context {
     pub locale: Locale,
     /// Resolved translatable messages.
     pub messages: Messages,
-    /// ICU data provider for locale-dependent formatting (day period labels, etc.).
-    pub provider: Arc<dyn IcuProvider>,
+    /// Intl backend for locale-dependent formatting (day period labels, etc.).
+    pub intl_backend: Arc<dyn IntlBackend>,
     /// The granularity of the component.
     pub granularity: TimeGranularity,
     /// The hour cycle of the component.
@@ -155,14 +155,14 @@ impl Context {
                 min: 0,
                 max: 1,
                 text: String::new(),
-                placeholder: day_period_label(&*self.provider, false, &self.locale),
+                placeholder: day_period_label(&*self.intl_backend, false, &self.locale),
                 literal: None,
                 is_editable: true,
             };
             if let Some(t) = &value {
                 let is_pm = t.is_pm();
                 period_seg.value = Some(if is_pm { 1 } else { 0 });
-                period_seg.text  = day_period_label(&*self.provider, is_pm, &self.locale);
+                period_seg.text  = day_period_label(&*self.intl_backend, is_pm, &self.locale);
             }
             segs.push(period_seg);
         }
@@ -219,7 +219,7 @@ impl Context {
             let v = raw.clamp(seg.min, seg.max);
             seg.value = Some(v);
             seg.text  = match kind {
-                DateSegmentKind::DayPeriod => day_period_label(&*self.provider, v == 1, &self.locale),
+                DateSegmentKind::DayPeriod => day_period_label(&*self.intl_backend, v == 1, &self.locale),
                 _ if self.force_leading_zeros => format!("{:02}", v),
                 _ => format!("{}", v),
             };
@@ -549,7 +549,7 @@ impl ars_core::Machine for Machine {
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let locale = env.locale.clone();
         let messages = messages.clone();
-        let provider = env.icu_provider.clone();
+        let provider = env.intl_backend.clone();
 
         let resolved_cycle = props
             .hour_cycle

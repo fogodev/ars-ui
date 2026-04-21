@@ -36,14 +36,20 @@ pub fn intern_attr_name(attr: &HtmlAttr) -> &'static str {
     if let Some(name) = attr.static_name() {
         return name;
     }
+
     // Slow path: Data(...) attributes — intern the formatted string.
     let name = attr.to_string(); // e.g., "data-ars-state"
+
     let mut pool = ATTR_NAMES.lock().expect("attr name pool");
+
     if let Some(&existing) = pool.get(name.as_str()) {
         return existing;
     }
+
     let leaked: &'static str = Box::leak(name.into_boxed_str());
+
     pool.insert(leaked);
+
     leaked
 }
 
@@ -54,9 +60,11 @@ pub fn intern_attr_name(attr: &HtmlAttr) -> &'static str {
 pub struct DioxusAttrResult {
     /// Dioxus dynamic attributes ready for spreading via `..attrs`.
     pub attrs: Vec<Attribute>,
+
     /// Styles to apply via CSSOM (`element.style().set_property()`).
     /// Non-empty only when strategy is [`StyleStrategy::Cssom`].
     pub cssom_styles: Vec<(CssProperty, String)>,
+
     /// CSS rule text to inject into a `<style nonce="...">` block.
     /// Non-empty only when strategy is [`StyleStrategy::Nonce`].
     pub nonce_css: String,
@@ -107,6 +115,7 @@ pub fn attr_map_to_dioxus(
                     .map(|(prop, val)| format!("{prop}: {val};"))
                     .collect::<Vec<_>>()
                     .join(" ");
+
                 result.push(Attribute::new(
                     "style",
                     AttributeValue::Text(style_str),
@@ -115,18 +124,22 @@ pub fn attr_map_to_dioxus(
                 ));
             }
         }
+
         StyleStrategy::Cssom => {
             cssom_styles = styles;
         }
+
         StyleStrategy::Nonce(_) => {
             if !styles.is_empty() {
                 let id = element_id.expect("element_id is required for Nonce style strategy");
+
                 result.push(Attribute::new(
                     "data-ars-style-id",
                     AttributeValue::Text(id.to_string()),
                     None,
                     false,
                 ));
+
                 nonce_css = styles_to_nonce_css(id, &styles);
             }
         }
@@ -148,6 +161,7 @@ pub fn attr_map_to_dioxus(
 #[cfg(feature = "web")]
 pub fn apply_styles_cssom(el: &web_sys::HtmlElement, styles: &[(CssProperty, String)]) {
     let style = el.style();
+
     for (prop, val) in styles {
         if let Err(error) = style.set_property(&prop.to_string(), val) {
             #[cfg(debug_assertions)]
@@ -166,6 +180,7 @@ fn styles_to_nonce_css(id: &str, styles: &[(CssProperty, String)]) -> String {
         .iter()
         .map(|(prop, val)| format!("  {prop}: {val};"))
         .collect::<Vec<_>>();
+
     format!("[data-ars-style-id=\"{id}\"] {{\n{}\n}}", decls.join("\n"))
 }
 
@@ -191,6 +206,7 @@ pub struct ArsNonceCssCtx {
 #[component]
 pub fn ArsNonceStyle(nonce: String) -> Element {
     let rules = use_signal(Vec::<String>::new);
+
     use_context_provider(|| ArsNonceCssCtx { rules });
 
     let css_text = use_memo(move || rules.read().join("\n"));
@@ -237,6 +253,7 @@ pub fn use_style_strategy() -> StyleStrategy {
 /// ```rust,ignore
 /// let attrs = api.root_attrs();
 /// let strategy = use_style_strategy();
+///
 /// rsx! {
 ///     div { ..attr_map_to_dioxus(attrs, &strategy, Some("my-el")).attrs, {children} }
 /// }
@@ -275,6 +292,7 @@ mod tests {
     fn intern_attr_name_slow_path_interns_data_attributes() {
         let first = intern_attr_name(&HtmlAttr::Data("ars-state"));
         let second = intern_attr_name(&HtmlAttr::Data("ars-state"));
+
         assert_eq!(first, "data-ars-state");
         assert_eq!(second, "data-ars-state");
         // Same pointer — proves the pool returns the existing leaked reference.
@@ -285,6 +303,7 @@ mod tests {
     fn intern_attr_name_data_distinct_values_differ() {
         let foo = intern_attr_name(&HtmlAttr::Data("foo"));
         let bar = intern_attr_name(&HtmlAttr::Data("bar"));
+
         assert_eq!(foo, "data-foo");
         assert_eq!(bar, "data-bar");
         assert_ne!(foo, bar);
@@ -307,8 +326,10 @@ mod tests {
 
     fn build_test_map() -> AttrMap {
         let mut map = AttrMap::new();
+
         map.set(HtmlAttr::Class, "btn");
         map.set_style(CssProperty::Width, "100px");
+
         map
     }
 
@@ -317,9 +338,11 @@ mod tests {
         let result = attr_map_to_dioxus(build_test_map(), &StyleStrategy::Inline, None);
 
         let class_attr = find_attr(&result.attrs, "class").expect("class attr present");
+
         assert_eq!(text_value(class_attr), Some("btn"));
 
         let style_attr = find_attr(&result.attrs, "style").expect("style attr present");
+
         assert_eq!(text_value(style_attr), Some("width: 100px;"));
 
         assert!(result.cssom_styles.is_empty());
@@ -354,6 +377,7 @@ mod tests {
         // data-ars-style-id injected
         let id_attr =
             find_attr(&result.attrs, "data-ars-style-id").expect("data-ars-style-id present");
+
         assert_eq!(text_value(id_attr), Some("el-1"));
 
         // nonce CSS rule generated
@@ -365,18 +389,22 @@ mod tests {
     #[test]
     fn attr_map_to_dioxus_value_mapping_filters_false_and_none() {
         let mut map = AttrMap::new();
+
         map.set(HtmlAttr::Id, "x");
         map.set_bool(HtmlAttr::Disabled, true);
         map.set_bool(HtmlAttr::Hidden, false);
+
         // AttrValue::None via set then remove pattern: set Inert then override
         // We can test None by checking that Bool(false) is filtered.
 
         let result = attr_map_to_dioxus(map, &StyleStrategy::Inline, None);
 
         let id_attr = find_attr(&result.attrs, "id").expect("id attr present");
+
         assert_eq!(text_value(id_attr), Some("x"));
 
         let disabled_attr = find_attr(&result.attrs, "disabled").expect("disabled attr present");
+
         assert_eq!(text_value(disabled_attr), Some(""));
 
         // Bool(false) attributes are filtered out
@@ -389,7 +417,9 @@ mod tests {
     #[test]
     fn attr_map_to_dioxus_empty_styles_omit_style_attribute() {
         let mut map = AttrMap::new();
+
         map.set(HtmlAttr::Class, "btn");
+
         // No styles
 
         let result = attr_map_to_dioxus(map, &StyleStrategy::Inline, None);
@@ -404,8 +434,11 @@ mod tests {
             (CssProperty::Width, "100px".to_string()),
             (CssProperty::Color, "red".to_string()),
         ];
+
         let css = styles_to_nonce_css("el-1", &styles);
+
         let expected = "[data-ars-style-id=\"el-1\"] {\n  width: 100px;\n  color: red;\n}";
+
         assert_eq!(css, expected);
     }
 
@@ -414,6 +447,7 @@ mod tests {
     #[test]
     fn dioxus_attrs_macro_delegates_to_function() {
         let map = build_test_map();
+
         let result = dioxus_attrs!(map, &StyleStrategy::Inline, None);
 
         // Verify it produces a DioxusAttrResult with expected content
@@ -424,7 +458,9 @@ mod tests {
     #[test]
     fn attr_map_to_dioxus_nonce_strategy_empty_styles_is_noop() {
         let mut map = AttrMap::new();
+
         map.set(HtmlAttr::Class, "btn");
+
         // No styles — Nonce should not inject data-ars-style-id or generate CSS.
 
         let result = attr_map_to_dioxus(map, &StyleStrategy::Nonce("n456".into()), Some("el-2"));
@@ -438,7 +474,9 @@ mod tests {
     #[test]
     fn attr_map_to_dioxus_attr_value_none_is_filtered() {
         let mut map = AttrMap::new();
+
         map.set(HtmlAttr::Id, "x");
+
         // Setting then removing produces AttrValue::None internally via set(_, AttrValue::None).
         map.set(HtmlAttr::Title, AttrValue::None);
 
@@ -460,6 +498,7 @@ mod tests {
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -480,11 +519,11 @@ mod tests {
 
             rsx! {
                 div {}
-
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -493,12 +532,14 @@ mod tests {
         fn app() -> Element {
             // No ArsNonceCssCtx provided — should silently do nothing.
             append_nonce_css("orphan rule".into());
+
             rsx! {
                 div {}
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -508,13 +549,16 @@ mod tests {
     fn use_style_strategy_defaults_without_provider() {
         fn app() -> Element {
             let strategy = use_style_strategy();
+
             assert_eq!(strategy, StyleStrategy::Inline);
+
             rsx! {
                 div {}
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -536,21 +580,25 @@ mod tests {
                 None,
                 None,
                 Arc::new(NullPlatformEffects),
-                Arc::new(ars_i18n::StubIcuProvider),
+                Arc::new(ars_i18n::StubIntlBackend),
                 Arc::new(I18nRegistries::new()),
                 Arc::new(crate::provider::NullPlatform),
                 StyleStrategy::Cssom,
             );
+
             use_context_provider(|| ctx);
 
             let strategy = use_style_strategy();
+
             assert_eq!(strategy, StyleStrategy::Cssom);
+
             rsx! {
                 div {}
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 }
@@ -577,6 +625,7 @@ mod wasm_tests {
             .expect("create_element should succeed")
             .dyn_into::<web_sys::HtmlElement>()
             .expect("element should cast to HtmlElement");
+
         let styles = vec![
             (CssProperty::Width, String::from("120px")),
             (CssProperty::Display, String::from("block")),
@@ -585,6 +634,7 @@ mod wasm_tests {
         apply_styles_cssom(&element, &styles);
 
         let style = element.style();
+
         assert_eq!(
             style
                 .get_property_value("width")

@@ -1,15 +1,18 @@
 use alloc::string::String;
-use core::{cmp::Ordering, fmt};
+use core::{
+    cmp::Ordering,
+    fmt::{self, Display},
+};
 
 use icu::locale::{LanguageIdentifier, Locale as IcuLocale};
 use icu_provider::DataLocale;
 
-use crate::{HourCycle, IcuProvider, ResolvedDirection, Weekday};
+use crate::{HourCycle, IntlBackend, ResolvedDirection, Weekday};
 
 /// A BCP 47 locale identifier.
 ///
 /// Wraps ICU4X's locale type with ars-ui-specific helpers for directionality,
-/// Unicode extension access, and provider interop.
+/// Unicode extension access, and backend interop.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Locale(IcuLocale);
 
@@ -141,16 +144,16 @@ impl Locale {
             })
     }
 
-    /// Returns the locale's first day of the week through the active provider.
+    /// Returns the locale's first day of the week through the active backend.
     #[must_use]
-    pub fn first_day_of_week(&self, provider: &dyn IcuProvider) -> Weekday {
-        provider.first_day_of_week(self)
+    pub fn first_day_of_week(&self, backend: &dyn IntlBackend) -> Weekday {
+        backend.first_day_of_week(self)
     }
 
-    /// Returns the locale's preferred hour cycle through the active provider.
+    /// Returns the locale's preferred hour cycle through the active backend.
     #[must_use]
-    pub fn hour_cycle(&self, provider: &dyn IcuProvider) -> HourCycle {
-        provider.hour_cycle(self)
+    pub fn hour_cycle(&self, backend: &dyn IntlBackend) -> HourCycle {
+        backend.hour_cycle(self)
     }
 
     /// Converts this locale to the ICU4X provider locale type.
@@ -186,11 +189,17 @@ impl Locale {
     fn script_or_default(&self) -> &str {
         self.script().unwrap_or_else(|| match self.language() {
             "ar" | "fa" | "ur" | "ps" | "ug" | "sd" | "ks" => "Arab",
+
             "he" | "yi" => "Hebr",
+
             "dv" => "Thaa",
+
             "nqo" => "Nkoo",
+
             "pa" if self.region() == Some("PK") => "Arab",
+
             "ku" if self.region() == Some("IQ") => "Arab",
+
             _ => "Latn",
         })
     }
@@ -200,7 +209,7 @@ impl Locale {
 #[derive(Debug)]
 pub struct LocaleParseError(pub icu::locale::ParseError);
 
-impl fmt::Display for LocaleParseError {
+impl Display for LocaleParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ars-ui locale parse error: {}", self.0)
     }
@@ -348,20 +357,56 @@ pub mod locales {
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::String;
+    use core::num::NonZero;
+
     use icu::locale::LanguageIdentifier;
 
     use super::{Locale, RTL_SCRIPTS};
-    use crate::{HourCycle, IcuProvider, ResolvedDirection, Weekday};
+    use crate::{HourCycle, IntlBackend, ResolvedDirection, StubIntlBackend, Weekday};
 
     struct TestLocaleProvider;
 
-    impl IcuProvider for TestLocaleProvider {
-        fn first_day_of_week(&self, _locale: &Locale) -> Weekday {
-            Weekday::Thursday
+    impl IntlBackend for TestLocaleProvider {
+        fn weekday_short_label(&self, weekday: Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_short_label(weekday, locale)
+        }
+
+        fn weekday_long_label(&self, weekday: Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_long_label(weekday, locale)
+        }
+
+        fn month_long_name(&self, month: u8, locale: &Locale) -> String {
+            StubIntlBackend.month_long_name(month, locale)
+        }
+
+        fn day_period_label(&self, is_pm: bool, locale: &Locale) -> String {
+            StubIntlBackend.day_period_label(is_pm, locale)
+        }
+
+        fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
+            StubIntlBackend.day_period_from_char(ch, locale)
+        }
+
+        fn format_segment_digits(
+            &self,
+            value: u32,
+            min_digits: NonZero<u8>,
+            locale: &Locale,
+        ) -> String {
+            StubIntlBackend.format_segment_digits(value, min_digits, locale)
         }
 
         fn hour_cycle(&self, _locale: &Locale) -> HourCycle {
             HourCycle::H11
+        }
+
+        fn week_info(&self, locale: &Locale) -> crate::WeekInfo {
+            let mut info = crate::WeekInfo::for_locale(locale);
+
+            info.first_day = Weekday::Thursday;
+
+            info
         }
     }
 
@@ -381,6 +426,7 @@ mod tests {
     fn locale_direction_infers_default_scripts_for_rtl_languages() {
         for tag in ["dv", "nqo", "pa-PK", "ku-IQ", "yi"] {
             let locale = Locale::parse(tag).expect("RTL locale should parse");
+
             assert_eq!(locale.direction(), ResolvedDirection::Rtl);
             assert!(locale.is_rtl());
         }
@@ -411,12 +457,35 @@ mod tests {
     }
 
     #[test]
-    fn locale_provider_backed_helpers_delegate() {
+    fn locale_backend_helpers_delegate() {
         let locale = Locale::parse("en-US").expect("locale should parse");
-        let provider = TestLocaleProvider;
 
-        assert_eq!(locale.first_day_of_week(&provider), Weekday::Thursday);
-        assert_eq!(locale.hour_cycle(&provider), HourCycle::H11);
+        let backend = TestLocaleProvider;
+
+        assert_eq!(locale.first_day_of_week(&backend), Weekday::Thursday);
+        assert_eq!(locale.hour_cycle(&backend), HourCycle::H11);
+    }
+
+    #[test]
+    fn locale_test_provider_required_methods_delegate_to_stub() {
+        let locale = Locale::parse("en-US").expect("locale should parse");
+
+        let backend = TestLocaleProvider;
+
+        assert_eq!(backend.weekday_short_label(Weekday::Monday, &locale), "Mo");
+        assert_eq!(
+            backend.weekday_long_label(Weekday::Monday, &locale),
+            "Monday"
+        );
+        assert_eq!(backend.month_long_name(1, &locale), "January");
+        assert_eq!(backend.day_period_label(false, &locale), "AM");
+        assert_eq!(backend.day_period_label(true, &locale), "PM");
+        assert_eq!(backend.day_period_from_char('a', &locale), Some(false));
+        assert_eq!(backend.day_period_from_char('P', &locale), Some(true));
+        assert_eq!(
+            backend.format_segment_digits(5, NonZero::new(2).expect("2 is non-zero"), &locale),
+            "05"
+        );
     }
 
     #[test]
@@ -442,10 +511,15 @@ mod web_intl_tests {
     #[wasm_bindgen_test]
     fn numeric_ordering_extension_handles_boolean_forms() {
         let enabled = Locale::parse("en-u-kn").expect("locale should parse");
+
+        let explicit_true = Locale::parse("en-u-kn-true").expect("locale should parse");
+
         let disabled = Locale::parse("en-u-kn-false").expect("locale should parse");
+
         let none = Locale::parse("en-US").expect("locale should parse");
 
         assert_eq!(enabled.numeric_ordering_extension(), Some(true));
+        assert_eq!(explicit_true.numeric_ordering_extension(), Some(true));
         assert_eq!(disabled.numeric_ordering_extension(), Some(false));
         assert_eq!(none.numeric_ordering_extension(), None);
     }
