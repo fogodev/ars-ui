@@ -435,23 +435,23 @@ pub trait ConnectApi {
 ///
 /// The adapter reads these values from `ArsProvider` / `ArsContext` and passes
 /// them to framework-agnostic core code. Core component code **never** calls
-/// framework hooks (`use_locale()`, `use_icu_provider()`, `use_context()`) —
+/// framework hooks (`use_locale()`, `use_intl_backend()`, `use_context()`) —
 /// all environment values arrive through this struct.
 ///
-/// Non-date-time components ignore `icu_provider` (it defaults to `StubIcuProvider`).
+/// Non-date-time components ignore `intl_backend` (it defaults to `StubIntlBackend`).
 pub struct Env {
     /// The resolved locale from `ArsProvider`.
     pub locale: Locale,
     /// Calendar/locale data provider for date-time formatting.
-    /// Defaults to `StubIcuProvider` (English-only, zero dependencies).
-    pub icu_provider: Arc<dyn IcuProvider>,
+    /// Defaults to `StubIntlBackend` (English-only, zero dependencies).
+    pub intl_backend: Arc<dyn IntlBackend>,
 }
 
 impl Default for Env {
     fn default() -> Self {
         Self {
             locale: Locale::parse("en-US").expect("en-US is a valid BCP-47 tag"),
-            icu_provider: Arc::new(StubIcuProvider),
+            intl_backend: Arc::new(StubIntlBackend),
         }
     }
 }
@@ -4623,7 +4623,7 @@ configuration, platform capabilities, provider-scoped modality state, i18n resou
 components. It MUST be rendered at (or near) the application root.
 
 `ArsProvider` subsumes the formerly separate `LocaleProvider`, `PlatformEffectsProvider`,
-`IcuProvider`, `I18nProvider`, and `ArsStyleProvider`. Components access configuration
+`IntlBackend`, `I18nProvider`, and `ArsStyleProvider`. Components access configuration
 via `ArsContext` fields and convenience hooks (e.g., `use_locale()`,
 `use_platform_effects()`, `use_modality_context()`, `use_style_strategy()`).
 
@@ -4654,7 +4654,7 @@ pub enum ColorMode {
 | `root_node_id`        | `Option<String>`                            | ID of the root node for focus scope and portal queries. `None` means default.  |
 | `platform`            | `Arc<dyn PlatformEffects>`                  | Platform capabilities for side effects. Defaults to `NullPlatformEffects`.     |
 | `modality`            | `Arc<dyn ModalityContext>`                  | Shared input-modality state for the current provider root.                     |
-| `icu_provider`        | `Arc<dyn IcuProvider>`                      | Calendar/locale data for date-time components. Defaults to `StubIcuProvider`.  |
+| `intl_backend`        | `Arc<dyn IntlBackend>`                      | Calendar/locale data for date-time components. Defaults to `StubIntlBackend`.  |
 | `i18n_registries`     | `Rc<I18nRegistries>`                        | Per-component translation registries. Defaults to empty (English fallbacks).   |
 | `style_strategy`      | `StyleStrategy`                             | CSS style injection strategy. Defaults to `StyleStrategy::Inline`.             |
 
@@ -4664,14 +4664,14 @@ hooks read from `ArsContext` with fallback defaults:
 - `use_locale()` — locale, falls back to `en-US`
 - `use_platform_effects()` — platform capabilities
 - `use_modality_context()` — shared input-modality state
-- `use_icu_provider()` — calendar/locale data
+- `use_intl_backend()` — calendar/locale data
 - `use_style_strategy()` — CSS style strategy, falls back to `Inline`
 - `resolve_messages::<M>()` — translation registries (pure function, not a hook — takes `&I18nRegistries` explicitly)
 
 #### 6.4.3 Environment Resolution Rule
 
 Locale, messages, and ICU provider are **environment context** provided by `ArsProvider`.
-Core component `Props` structs MUST NOT contain `locale`, `messages`, or `icu_provider`
+Core component `Props` structs MUST NOT contain `locale`, `messages`, or `intl_backend`
 fields — these are resolved by the adapter and passed explicitly via the `Env` struct
 and `Messages` parameter.
 

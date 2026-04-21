@@ -60,7 +60,7 @@ ssr = ["dioxus/server", "dep:ars-dom", "ars-dom/ssr"]
 use std::sync::Arc;
 use dioxus::prelude::*;
 use ars_core::{Machine, Service, Env};
-use ars_i18n::{Locale, IcuProvider, ComponentMessages, I18nRegistries};
+use ars_i18n::{Locale, IntlBackend, ComponentMessages, I18nRegistries};
 
 /// Return type from `use_machine`.
 ///
@@ -272,8 +272,8 @@ where
     // Resolve environment values from ArsProvider context.
     // These are adapter-only hooks — core code receives Env and Messages as parameters.
     let locale = resolve_locale(None);
-    let icu_provider = use_icu_provider();
-    let env = Env { locale, icu_provider };
+    let intl_backend = use_intl_backend();
+    let env = Env { locale, intl_backend };
 
     // Resolve messages from adapter-level i18n hooks.
     let messages = use_messages::<M::Messages>(None, Some(&env.locale));
@@ -2139,7 +2139,7 @@ The adapter-level context wraps core `ArsContext` values in reactive signals and
 includes the style strategy and the Dioxus-specific platform capabilities trait object.
 
 ```rust
-use ars_i18n::{Direction, IcuProvider, Locale};
+use ars_i18n::{Direction, IntlBackend, Locale};
 use ars_core::{
     ArsContext as CoreCtx, Arc, ColorMode, I18nRegistries, PlatformEffects, StyleStrategy,
 };
@@ -2156,7 +2156,7 @@ pub struct ArsContext {
     pub portal_container_id: Signal<Option<String>>,
     pub root_node_id: Signal<Option<String>>,
     pub platform: Arc<dyn PlatformEffects>,
-    pub icu_provider: Arc<dyn IcuProvider>,
+    pub intl_backend: Arc<dyn IntlBackend>,
     pub i18n_registries: Arc<I18nRegistries>,
     pub style_strategy: StyleStrategy,
     /// Dioxus adapter-specific: platform services for file pickers, clipboard, drag data.
@@ -2177,7 +2177,7 @@ The Dioxus adapter resolves `platform` via feature flags: `WebPlatformEffects` (
 ### 16.1 use_locale()
 
 All ArsProvider fallback helpers in this section (`use_locale()`,
-`use_icu_provider()`, `t()`, and `use_platform()`) route through
+`use_intl_backend()`, `t()`, and `use_platform()`) route through
 `warn_missing_provider()`. That helper emits `log::warn!` only when the
 `ars-dioxus/debug` feature is enabled.
 
@@ -2254,7 +2254,7 @@ See `04-internationalization.md` §2.3.1 for the three-level resolution chain
 use std::sync::Arc;
 
 use ars_core::Env;
-use ars_i18n::{Locale, IcuProvider, StubIcuProvider, ComponentMessages, I18nRegistries};
+use ars_i18n::{Locale, IntlBackend, StubIntlBackend, ComponentMessages, I18nRegistries};
 
 /// Resolve locale from an optional adapter prop override or ArsProvider context.
 ///
@@ -2281,17 +2281,17 @@ fn resolve_locale(adapter_props_locale: Option<&Locale>) -> Locale {
 
 /// Resolve the ICU provider from ArsProvider context.
 ///
-/// Falls back to `StubIcuProvider` (English-only, zero dependencies) if no
+/// Falls back to `StubIntlBackend` (English-only, zero dependencies) if no
 /// `ArsProvider` is present.
 ///
 /// This is an **adapter-only** utility — NOT available in core crates. Core code
-/// receives the provider via `Env.icu_provider`.
-fn use_icu_provider() -> Arc<dyn IcuProvider> {
+/// receives the provider via `Env.intl_backend`.
+fn use_intl_backend() -> Arc<dyn IntlBackend> {
     try_use_context::<ArsContext>()
-        .map(|ctx| ctx.icu_provider.clone())
+        .map(|ctx| ctx.intl_backend.clone())
         .unwrap_or_else(|| {
-            warn_missing_provider("use_icu_provider");
-            Arc::new(StubIcuProvider)
+            warn_missing_provider("use_intl_backend");
+            Arc::new(StubIntlBackend)
         })
 }
 
@@ -2336,11 +2336,11 @@ use ars_i18n::Translate;
 /// and §7.5 for the `t()` function contract.
 pub fn t<T: Translate>(msg: T) -> String {
     try_use_context::<ArsContext>()
-        .map(|ctx| msg.translate(&ctx.locale.read(), &*ctx.icu_provider))
+        .map(|ctx| msg.translate(&ctx.locale.read(), &*ctx.intl_backend))
         .unwrap_or_else(|| {
             warn_missing_provider("t");
             let fallback = Locale::parse("en-US").expect("en-US is always a valid BCP 47 locale");
-            msg.translate(&fallback, &StubIcuProvider)
+            msg.translate(&fallback, &StubIntlBackend)
         })
 }
 ```

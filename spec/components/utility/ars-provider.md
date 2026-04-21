@@ -13,7 +13,7 @@ references:
 
 `ArsProvider` is the **single root provider** for the ars-ui library. It supplies shared configuration, platform capabilities, provider-scoped modality state, i18n resources, and style strategy to all descendant components. It MUST be rendered at (or near) the application root.
 
-`ArsProvider` subsumes the formerly separate `LocaleProvider`, `PlatformEffectsProvider`, `IcuProvider`, `I18nProvider`, and `ArsStyleProvider`.
+`ArsProvider` subsumes the formerly separate `LocaleProvider`, `PlatformEffectsProvider`, `IntlBackend`, `I18nProvider`, and `ArsStyleProvider`.
 
 ## 1. API
 
@@ -63,9 +63,9 @@ pub struct Props {
     pub modality: Option<Arc<dyn ModalityContext>>,
 
     /// Calendar/locale data provider for date-time components.
-    /// Production uses `Icu4xProvider`; tests use `StubIcuProvider`.
-    /// Defaults to `StubIcuProvider` (English-only).
-    pub icu_provider: Option<Arc<dyn IcuProvider>>,
+    /// Production uses `Icu4xBackend`; tests use `StubIntlBackend`.
+    /// Defaults to `StubIntlBackend` (English-only).
+    pub intl_backend: Option<Arc<dyn IntlBackend>>,
 
     /// Per-component translation message registries.
     /// Defaults to empty (components use built-in English defaults).
@@ -95,7 +95,7 @@ pub struct ArsContext {
     root_node_id: Option<String>,
     platform: Arc<dyn PlatformEffects>,
     modality: Arc<dyn ModalityContext>,
-    icu_provider: Arc<dyn IcuProvider>,
+    intl_backend: Arc<dyn IntlBackend>,
     i18n_registries: Arc<I18nRegistries>,
     style_strategy: StyleStrategy,
 }
@@ -122,7 +122,7 @@ impl ArsContext {
     /// Returns the provider-scoped modality context.
     pub fn modality(&self) -> Arc<dyn ModalityContext> { Arc::clone(&self.modality) }
     /// Returns the ICU calendar/locale data provider.
-    pub fn icu_provider(&self) -> Arc<dyn IcuProvider> { Arc::clone(&self.icu_provider) }
+    pub fn intl_backend(&self) -> Arc<dyn IntlBackend> { Arc::clone(&self.intl_backend) }
     /// Returns the i18n translation registries.
     pub fn i18n_registries(&self) -> &I18nRegistries { &self.i18n_registries }
     /// Returns the active CSS style injection strategy.
@@ -142,7 +142,7 @@ impl Default for ArsContext {
             root_node_id: None,
             platform: Arc::new(NullPlatformEffects),
             modality: Arc::new(DefaultModalityContext::new()),
-            icu_provider: Arc::new(StubIcuProvider),
+            intl_backend: Arc::new(StubIntlBackend),
             i18n_registries: Rc::new(I18nRegistries::new()),
             style_strategy: StyleStrategy::Inline,
         }
@@ -166,7 +166,7 @@ Convenience hooks read from `ArsContext` with fallback defaults:
 - `use_number_formatter()` — locale-aware number formatting derived from the active `ArsProvider` locale
 - `use_platform_effects()` — platform capabilities
 - `use_modality_context()` — provider-scoped input-modality state
-- `use_icu_provider()` — calendar/locale data
+- `use_intl_backend()` — calendar/locale data
 - `use_style_strategy()` — CSS style strategy, falls back to `Inline`
 - `resolve_messages::<M>()` — translation registries
 
@@ -200,8 +200,8 @@ ArsProvider
 | Theme-aware components   | `color_mode` — for conditional rendering based on active color mode                                |
 | All effect closures      | `platform` — via `use_platform_effects()` for focus, timers, scroll-lock, positioning, DOM queries |
 | Focus / Hover / Press    | `modality` — via `use_modality_context()` for shared modality and global press state               |
-| Date-time components     | `icu_provider` — via `use_icu_provider()` for calendar data (weekday names, month names, etc.)     |
-| Numeric components       | `locale` — via `use_number_formatter()` for provider-derived number formatting                      |
+| Date-time components     | `intl_backend` — via `use_intl_backend()` for calendar data (weekday names, month names, etc.)     |
+| Numeric components       | `locale` — via `use_number_formatter()` for provider-derived number formatting                     |
 | All stateful components  | `i18n_registries` — via `resolve_messages::<M>()` for per-component translation lookups            |
 | All rendered components  | `style_strategy` — via `use_style_strategy()` for CSS injection method                             |
 

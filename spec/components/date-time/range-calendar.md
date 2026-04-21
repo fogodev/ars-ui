@@ -101,8 +101,8 @@ pub struct Context {
     pub locale: Locale,
     /// Resolved translatable messages.
     pub messages: Messages,
-    /// ICU data provider for locale-dependent formatting (month/weekday names, etc.).
-    pub provider: Arc<dyn IcuProvider>,
+    /// Intl backend for locale-dependent formatting (month/weekday names, etc.).
+    pub intl_backend: Arc<dyn IntlBackend>,
     /// Override for first day of week (falls back to locale default).
     pub first_day_of_week: Weekday,
     /// Right-to-left layout.
@@ -350,7 +350,7 @@ impl ars_core::Machine for Machine {
             max: props.max.clone(),
             locale,
             messages,
-            provider: env.icu_provider.clone(),
+            intl_backend: env.intl_backend.clone(),
             first_day_of_week: first_day,
             is_rtl: props.is_rtl,
             disabled: props.disabled,
@@ -416,7 +416,7 @@ impl ars_core::Machine for Machine {
                                     if let Some(ref anchor) = ctx.anchor_date {
                                         let platform = use_platform_effects();
                                         let label = (ctx.messages.range_start_label)(
-                                            &format_date_label(anchor, &*ctx.provider, &ctx.locale),
+                                            &format_date_label(anchor, &*ctx.intl_backend, &ctx.locale),
                                             &ctx.locale,
                                         );
                                         platform.announce(&label);
@@ -445,8 +445,8 @@ impl ars_core::Machine for Machine {
                                     if let Some(ref range) = ctx.value.get() {
                                         let platform = use_platform_effects();
                                         let label = (ctx.messages.range_complete_label)(
-                                            &format_date_label(&range.start, &*ctx.provider, &ctx.locale),
-                                            &format_date_label(&range.end, &*ctx.provider, &ctx.locale),
+                                            &format_date_label(&range.start, &*ctx.intl_backend, &ctx.locale),
+                                            &format_date_label(&range.end, &*ctx.intl_backend, &ctx.locale),
                                             &ctx.locale,
                                         );
                                         platform.announce(&label);
@@ -486,11 +486,11 @@ impl ars_core::Machine for Machine {
                 }).with_effect(PendingEffect::new("announce-month", |ctx, _props, _send| {
                     let platform = use_platform_effects();
                     let label = if ctx.visible_months > 1 {
-                        let first = format!("{} {}", month_long_name(&*ctx.provider, ctx.visible_month, &ctx.locale), ctx.visible_year);
+                        let first = format!("{} {}", month_long_name(&*ctx.intl_backend, ctx.visible_month, &ctx.locale), ctx.visible_year);
                         let (lm, ly) = ctx.month_year_at_offset(ctx.visible_months - 1);
-                        format!("{} \u{2013} {} {}", first, month_long_name(&*ctx.provider, lm, &ctx.locale), ly)
+                        format!("{} \u{2013} {} {}", first, month_long_name(&*ctx.intl_backend, lm, &ctx.locale), ly)
                     } else {
-                        format!("{} {}", month_long_name(&*ctx.provider, ctx.visible_month, &ctx.locale), ctx.visible_year)
+                        format!("{} {}", month_long_name(&*ctx.intl_backend, ctx.visible_month, &ctx.locale), ctx.visible_year)
                     };
                     platform.announce(&label);
                     no_cleanup()
@@ -507,11 +507,11 @@ impl ars_core::Machine for Machine {
                 }).with_effect(PendingEffect::new("announce-month", |ctx, _props, _send| {
                     let platform = use_platform_effects();
                     let label = if ctx.visible_months > 1 {
-                        let first = format!("{} {}", month_long_name(&*ctx.provider, ctx.visible_month, &ctx.locale), ctx.visible_year);
+                        let first = format!("{} {}", month_long_name(&*ctx.intl_backend, ctx.visible_month, &ctx.locale), ctx.visible_year);
                         let (lm, ly) = ctx.month_year_at_offset(ctx.visible_months - 1);
-                        format!("{} \u{2013} {} {}", first, month_long_name(&*ctx.provider, lm, &ctx.locale), ly)
+                        format!("{} \u{2013} {} {}", first, month_long_name(&*ctx.intl_backend, lm, &ctx.locale), ly)
                     } else {
-                        format!("{} {}", month_long_name(&*ctx.provider, ctx.visible_month, &ctx.locale), ctx.visible_year)
+                        format!("{} {}", month_long_name(&*ctx.intl_backend, ctx.visible_month, &ctx.locale), ctx.visible_year)
                     };
                     platform.announce(&label);
                     no_cleanup()
@@ -756,16 +756,16 @@ impl<'a> Api<'a> {
     /// Formatted heading text: e.g., "January 2024" or "January -- February 2024".
     pub fn heading_text(&self) -> String {
         if self.ctx.visible_months <= 1 {
-            let month_name = month_long_name(&*self.ctx.provider, self.ctx.visible_month, &self.ctx.locale);
+            let month_name = month_long_name(&*self.ctx.intl_backend, self.ctx.visible_month, &self.ctx.locale);
             return format!("{} {}", month_name, self.ctx.visible_year);
         }
         let first = format!(
             "{} {}",
-            month_long_name(&*self.ctx.provider, self.ctx.visible_month, &self.ctx.locale),
+            month_long_name(&*self.ctx.intl_backend, self.ctx.visible_month, &self.ctx.locale),
             self.ctx.visible_year,
         );
         let (lm, ly) = self.ctx.month_year_at_offset(self.ctx.visible_months - 1);
-        format!("{} \u{2013} {} {}", first, month_long_name(&*self.ctx.provider, lm, &self.ctx.locale), ly)
+        format!("{} \u{2013} {} {}", first, month_long_name(&*self.ctx.intl_backend, lm, &self.ctx.locale), ly)
     }
 
     /// Attributes for the grid group container (role="group").
@@ -817,7 +817,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Scope, "col");
-        attrs.set(HtmlAttr::Abbr, weekday.long_label(&*self.ctx.provider, &self.ctx.locale));
+        attrs.set(HtmlAttr::Abbr, weekday.long_label(&*self.ctx.intl_backend, &self.ctx.locale));
         attrs
     }
 
@@ -906,7 +906,7 @@ impl<'a> Api<'a> {
         }
 
         // aria-label: full date string for screen readers.
-        let base_label = format_date_label(date, &*self.ctx.provider, &self.ctx.locale);
+        let base_label = format_date_label(date, &*self.ctx.intl_backend, &self.ctx.locale);
         let label = if unavailable {
             format!("{} (unavailable)", base_label)
         } else if disabled {
@@ -1003,7 +1003,7 @@ impl<'a> Api<'a> {
     /// Heading text for the month at the given offset.
     pub fn heading_text_for(&self, offset: usize) -> String {
         let (month, year) = self.ctx.month_year_at_offset(offset);
-        format!("{} {}", month_long_name(&*self.ctx.provider, month, &self.ctx.locale), year)
+        format!("{} {}", month_long_name(&*self.ctx.intl_backend, month, &self.ctx.locale), year)
     }
 
     /// Heading text attributes for a per-grid heading.
@@ -1101,13 +1101,13 @@ impl<'a> Api<'a> {
 }
 
 /// Format a date as a human-readable label for screen readers.
-fn format_date_label(date: &CalendarDate, provider: &dyn IcuProvider, locale: &Locale) -> String {
+fn format_date_label(date: &CalendarDate, backend: &dyn IntlBackend, locale: &Locale) -> String {
     format!(
         "{} {} {}, {}",
-        month_long_name(provider, date.month.get(), locale),
+        month_long_name(backend, date.month.get(), locale),
         date.day.get(),
         date.year,
-        date.weekday().long_label(provider, locale),
+        date.weekday().long_label(backend, locale),
     )
 }
 

@@ -1118,7 +1118,7 @@ enum Inventory {
 }
 
 impl Translate for Inventory {
-    fn translate(&self, locale: &Locale, icu: &dyn IcuProvider) -> String {
+    fn translate(&self, locale: &Locale, intl: &dyn IntlBackend) -> String {
         match locale.language().as_str() {
             "es" => match self {
                 Self::Title => "Inventario".into(),
@@ -1152,16 +1152,16 @@ impl Translate for Inventory {
 
 #[test]
 fn translate_title_per_locale() {
-    let icu = StubIcuProvider;
+    let intl = StubIntlProvider;
     assert_eq!(
         Inventory::Title.translate(
-            &Locale::parse("en").expect("en is a valid BCP-47 tag"), &icu,
+            &Locale::parse("en").expect("en is a valid BCP-47 tag"), &intl,
         ),
         "Inventory",
     );
     assert_eq!(
         Inventory::Title.translate(
-            &Locale::parse("es").expect("es is a valid BCP-47 tag"), &icu,
+            &Locale::parse("es").expect("es is a valid BCP-47 tag"), &intl,
         ),
         "Inventario",
     );
@@ -1169,16 +1169,16 @@ fn translate_title_per_locale() {
 
 #[test]
 fn translate_welcome_per_locale() {
-    let icu = StubIcuProvider;
+    let intl = StubIntlProvider;
     assert_eq!(
         Inventory::Welcome.translate(
-            &Locale::parse("en").expect("en is a valid BCP-47 tag"), &icu,
+            &Locale::parse("en").expect("en is a valid BCP-47 tag"), &intl,
         ),
         "Welcome!",
     );
     assert_eq!(
         Inventory::Welcome.translate(
-            &Locale::parse("es").expect("es is a valid BCP-47 tag"), &icu,
+            &Locale::parse("es").expect("es is a valid BCP-47 tag"), &intl,
         ),
         "¡Bienvenido!",
     );
@@ -1193,20 +1193,20 @@ Test data-carrying variants across locales with different CLDR plural rules.
 #[test]
 fn translate_item_count_english_plurals() {
     let locale = Locale::parse("en").expect("en is a valid BCP-47 tag");
-    let icu = StubIcuProvider;
-    assert_eq!(Inventory::ItemCount { count: 0 }.translate(&locale, &icu), "0 items");
-    assert_eq!(Inventory::ItemCount { count: 1 }.translate(&locale, &icu), "1 item");
-    assert_eq!(Inventory::ItemCount { count: 2 }.translate(&locale, &icu), "2 items");
-    assert_eq!(Inventory::ItemCount { count: 42 }.translate(&locale, &icu), "42 items");
+    let intl = StubIntlProvider;
+    assert_eq!(Inventory::ItemCount { count: 0 }.translate(&locale, &intl), "0 items");
+    assert_eq!(Inventory::ItemCount { count: 1 }.translate(&locale, &intl), "1 item");
+    assert_eq!(Inventory::ItemCount { count: 2 }.translate(&locale, &intl), "2 items");
+    assert_eq!(Inventory::ItemCount { count: 42 }.translate(&locale, &intl), "42 items");
 }
 
 #[test]
 fn translate_item_count_spanish_plurals() {
     let locale = Locale::parse("es").expect("es is a valid BCP-47 tag");
-    let icu = StubIcuProvider;
-    assert_eq!(Inventory::ItemCount { count: 0 }.translate(&locale, &icu), "0 elementos");
-    assert_eq!(Inventory::ItemCount { count: 1 }.translate(&locale, &icu), "1 elemento");
-    assert_eq!(Inventory::ItemCount { count: 5 }.translate(&locale, &icu), "5 elementos");
+    let intl = StubIntlProvider;
+    assert_eq!(Inventory::ItemCount { count: 0 }.translate(&locale, &intl), "0 elementos");
+    assert_eq!(Inventory::ItemCount { count: 1 }.translate(&locale, &intl), "1 elemento");
+    assert_eq!(Inventory::ItemCount { count: 5 }.translate(&locale, &intl), "5 elementos");
 }
 ```
 
@@ -1219,7 +1219,7 @@ enum PolishItems {
 }
 
 impl Translate for PolishItems {
-    fn translate(&self, locale: &Locale, _icu: &dyn IcuProvider) -> String {
+    fn translate(&self, locale: &Locale, _intl: &dyn IntlBackend) -> String {
         match locale.language().as_str() {
             "pl" => match self {
                 Self::Count { count } => {
@@ -1251,11 +1251,11 @@ impl Translate for PolishItems {
 #[test]
 fn polish_plural_categories() {
     let locale = Locale::parse("pl").expect("pl is a valid BCP-47 tag");
-    let icu = StubIcuProvider;
-    assert_eq!(PolishItems::Count { count: 1 }.translate(&locale, &icu), "1 element");
-    assert_eq!(PolishItems::Count { count: 2 }.translate(&locale, &icu), "2 elementy");
-    assert_eq!(PolishItems::Count { count: 5 }.translate(&locale, &icu), "5 elementów");
-    assert_eq!(PolishItems::Count { count: 22 }.translate(&locale, &icu), "22 elementy");
+    let intl = StubIntlProvider;
+    assert_eq!(PolishItems::Count { count: 1 }.translate(&locale, &intl), "1 element");
+    assert_eq!(PolishItems::Count { count: 2 }.translate(&locale, &intl), "2 elementy");
+    assert_eq!(PolishItems::Count { count: 5 }.translate(&locale, &intl), "5 elementów");
+    assert_eq!(PolishItems::Count { count: 22 }.translate(&locale, &intl), "22 elementy");
 }
 ```
 
@@ -1288,16 +1288,16 @@ Verify that unknown locales fall through to the English `_` arm.
 #[test]
 fn unknown_locale_falls_back_to_english() {
     let locale = Locale::parse("xx-XX").expect("xx-XX is a valid BCP-47 tag");
-    let icu = StubIcuProvider;
-    assert_eq!(Inventory::Title.translate(&locale, &icu), "Inventory");
-    assert_eq!(Inventory::Welcome.translate(&locale, &icu), "Welcome!");
-    assert_eq!(Inventory::ItemCount { count: 1 }.translate(&locale, &icu), "1 item");
+    let intl = StubIntlProvider;
+    assert_eq!(Inventory::Title.translate(&locale, &intl), "Inventory");
+    assert_eq!(Inventory::Welcome.translate(&locale, &intl), "Welcome!");
+    assert_eq!(Inventory::ItemCount { count: 1 }.translate(&locale, &intl), "1 item");
 }
 ```
 
-### 8.5 ICU Provider Threading
+### 8.5 Intl Backend Threading
 
-Verify that the `icu` parameter is correctly passed through for locale-aware formatting
+Verify that the `intl` parameter is correctly passed through for locale-aware formatting
 within `translate()`. This tests the case where `translate()` uses `NumberFormatter` or
 `DateFormatter` from the ICU provider.
 
@@ -1308,7 +1308,7 @@ enum Price {
 }
 
 impl Translate for Price {
-    fn translate(&self, locale: &Locale, icu: &dyn IcuProvider) -> String {
+    fn translate(&self, locale: &Locale, intl: &dyn IntlBackend) -> String {
         match self {
             Self::Total { amount } => {
                 let formatter = ars_i18n::NumberFormatter::new(
@@ -1330,11 +1330,11 @@ impl Translate for Price {
 #[test]
 fn translate_with_icu_number_formatting() {
     let locale = Locale::parse("en-US").expect("en-US is a valid BCP-47 tag");
-    let icu = StubIcuProvider;
-    let result = Price::Total { amount: 1234.50 }.translate(&locale, &icu);
+    let intl = StubIntlProvider;
+    let result = Price::Total { amount: 1234.50 }.translate(&locale, &intl);
     assert!(result.starts_with("Total: "), "formatted price must start with 'Total: '");
-    // The exact formatted output depends on the ICU provider; StubIcuProvider
-    // may produce simplified formatting. Production tests use Icu4xProvider.
+    // The exact formatted output depends on the active backend; StubIntlProvider
+    // may produce simplified formatting. Production tests use Icu4xBackend.
 }
 ```
 

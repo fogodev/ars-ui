@@ -53,8 +53,8 @@ pub mod __private {
 pub use ars_derive::{ComponentPart, HasId};
 // ── External re-exports ─────────────────────────────────────────────
 pub use ars_i18n::{
-    Direction, IcuProvider, IsolateDirection, Locale, LocaleParseError, Orientation,
-    ResolvedDirection, StubIcuProvider, Weekday, isolate_text_safe,
+    Direction, IntlBackend, IsolateDirection, Locale, LocaleParseError, Orientation,
+    ResolvedDirection, StubIntlBackend, Weekday, isolate_text_safe,
 };
 // ── Platform-conditional smart pointers (extracted modules) ─────────
 pub use callback::{Callback, callback};
@@ -270,6 +270,7 @@ impl<M: Machine> TransitionPlan<M> {
             })),
             None => Some(Box::new(f)),
         };
+
         self
     }
 
@@ -523,24 +524,24 @@ pub trait ConnectApi {
 ///
 /// The adapter reads these values from `ArsProvider` / `ArsContext` and passes
 /// them to framework-agnostic core code. Core component code **never** calls
-/// framework hooks (`use_locale()`, `use_icu_provider()`, `use_context()`) —
+/// framework hooks (`use_locale()`, `use_intl_backend()`, `use_context()`) —
 /// all environment values arrive through this struct.
 ///
-/// Non-date-time components ignore `icu_provider` (it defaults to [`StubIcuProvider`]).
+/// Non-date-time components ignore `intl_backend` (it defaults to [`StubIntlBackend`]).
 pub struct Env {
     /// The resolved locale from `ArsProvider`.
     pub locale: Locale,
 
     /// Calendar/locale data provider for date-time formatting.
-    /// Defaults to [`StubIcuProvider`] (English-only, zero dependencies).
-    pub icu_provider: Arc<dyn IcuProvider>,
+    /// Defaults to [`StubIntlBackend`] (English-only, zero dependencies).
+    pub intl_backend: Arc<dyn IntlBackend>,
 }
 
 impl Debug for Env {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Env")
             .field("locale", &self.locale)
-            .field("icu_provider", &"Arc(..)")
+            .field("intl_backend", &"Arc(..)")
             .finish()
     }
 }
@@ -549,7 +550,7 @@ impl Default for Env {
     fn default() -> Self {
         Self {
             locale: ars_i18n::locales::en_us(),
-            icu_provider: Arc::new(StubIcuProvider),
+            intl_backend: Arc::new(StubIntlBackend),
         }
     }
 }
@@ -639,6 +640,7 @@ fn format_effect_names<M: Machine>(effects: &[PendingEffect<M>]) -> String {
         if index > 0 {
             formatted.push_str(", ");
         }
+
         formatted.push_str(effect.name);
     }
 
@@ -654,17 +656,19 @@ fn format_follow_up_events<Event: Debug>(events: &[Event]) -> String {
 
 #[cfg(feature = "debug")]
 fn format_target_state<State: Debug>(target: Option<&State>) -> String {
-    match target {
-        Some(next) => format!("{next:?}"),
-        None => String::from("(same)"),
+    if let Some(next) = target {
+        format!("{next:?}")
+    } else {
+        String::from("(same)")
     }
 }
 
 #[cfg(feature = "debug")]
 fn format_apply_description(description: Option<&'static str>) -> String {
-    match description {
-        Some(description) => format!("{description:?}"),
-        None => String::from("\"none\""),
+    if let Some(description) = description {
+        format!("{description:?}")
+    } else {
+        String::from("\"none\"")
     }
 }
 
@@ -970,6 +974,7 @@ impl<M: Machine> Service<M> {
 
                 // Collect effects, tagged with the target state.
                 let target = self.state.clone();
+
                 pending_effects.extend(plan.effects.into_iter().map(|mut e| {
                     e.target_state = Some(target.clone());
                     e
@@ -1137,6 +1142,7 @@ mod tests {
     fn init_test_logger() {
         LOGGER_INIT.call_once(|| {
             log::set_logger(&TEST_LOGGER).expect("test logger should install once");
+
             log::set_max_level(log::LevelFilter::Trace);
         });
     }
@@ -1676,6 +1682,7 @@ mod tests {
                             .with_effect(PendingEffect::named("focus"))
                             .with_effect(PendingEffect::named("announce")),
                     ),
+
                     _ => None,
                 }
             }
@@ -2040,6 +2047,7 @@ mod tests {
                     (ToggleState::Off, LoopEvent::Continue) => {
                         Some(TransitionPlan::to(ToggleState::On).then(LoopEvent::Continue))
                     }
+
                     (ToggleState::On, LoopEvent::Continue) => {
                         Some(TransitionPlan::to(ToggleState::Off).then(LoopEvent::Continue))
                     }
@@ -2319,6 +2327,7 @@ mod tests {
 
         let logs = capture_logs(|| {
             let result = service.send(LoopEvent::Continue);
+
             assert!(result.truncated);
             assert!(!result.state_changed);
             assert!(result.context_changed);

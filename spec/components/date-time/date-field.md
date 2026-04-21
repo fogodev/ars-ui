@@ -85,8 +85,8 @@ pub struct Context {
     pub type_buffer: String,
     /// The locale.
     pub locale: Locale,
-    /// ICU data provider for locale-dependent formatting.
-    pub provider: Arc<dyn IcuProvider>,
+    /// Intl backend for locale-dependent formatting.
+    pub intl_backend: Arc<dyn IntlBackend>,
     /// Resolved translatable messages.
     pub messages: Messages,
     /// The calendar system.
@@ -196,7 +196,7 @@ impl Context {
             let v = raw.clamp(seg.min, seg.max);
             seg.value = Some(v);
             seg.text = match kind {
-                DateSegmentKind::DayPeriod => day_period_label(&*self.provider, v == 1, &self.locale),
+                DateSegmentKind::DayPeriod => day_period_label(&*self.intl_backend, v == 1, &self.locale),
                 _ if self.force_leading_zeros => {
                     let width = match kind {
                         DateSegmentKind::Year => 4,
@@ -204,8 +204,8 @@ impl Context {
                     };
                     format!("{:0>width$}", v, width = width)
                 }
-                DateSegmentKind::Year => format_segment_digits(&*self.provider, v, 4, &self.locale),
-                _ => format_segment_digits(&*self.provider, v, 2, &self.locale),
+                DateSegmentKind::Year => format_segment_digits(&*self.intl_backend, v, 4, &self.locale),
+                _ => format_segment_digits(&*self.intl_backend, v, 2, &self.locale),
             };
         }
     }
@@ -469,12 +469,12 @@ impl DateSegment {
     }
 
     /// aria-valuetext: human-readable string (e.g., "March" instead of "3").
-    pub fn aria_value_text(&self, provider: &dyn IcuProvider, locale: &Locale) -> Option<String> {
+    pub fn aria_value_text(&self, backend: &dyn IntlBackend, locale: &Locale) -> Option<String> {
         let v = self.value?;
         match self.kind {
-            DateSegmentKind::Month => Some(month_long_name(provider, v as u8, locale)),
+            DateSegmentKind::Month => Some(month_long_name(backend, v as u8, locale)),
             DateSegmentKind::DayPeriod => {
-                Some(day_period_label(provider, v == 1, locale))
+                Some(day_period_label(backend, v == 1, locale))
             }
             _ => Some(v.to_string()),
         }
@@ -483,7 +483,7 @@ impl DateSegment {
 
 /// Format a numeric value with locale-appropriate numerals and zero-padding.
 ///
-/// Delegates to `IcuProvider::format_segment_digits()`.
+/// Delegates to `IntlBackend::format_segment_digits()`.
 ///
 /// **Locale-aware digit formatting.** Some locales use native digit systems:
 /// - Arabic (ar): Arabic-Indic ٠١٢٣٤٥٦٧٨٩
@@ -492,29 +492,29 @@ impl DateSegment {
 /// - Myanmar (my): ၀၁၂၃၄၅၆၇၈၉
 /// - Most others: Western Arabic 0123456789
 ///
-/// Production (`Icu4xProvider`): uses ICU4X `DecimalFormatter` with the
+/// Production (`Icu4xBackend`): uses ICU4X `DecimalFormatter` with the
 /// locale's default numbering system for automatic native digit substitution.
-/// Tests (`StubIcuProvider`): returns zero-padded Western Arabic digits.
-pub fn format_segment_digits(provider: &dyn IcuProvider, value: u32, min_digits: NonZero<u8>, locale: &Locale) -> String {
-    provider.format_segment_digits(value, min_digits, locale)
+/// Tests (`StubIntlBackend`): returns zero-padded Western Arabic digits.
+pub fn format_segment_digits(backend: &dyn IntlBackend, value: u32, min_digits: NonZero<u8>, locale: &Locale) -> String {
+    backend.format_segment_digits(value, min_digits, locale)
 }
 
 /// Returns the full month name for the given locale.
 ///
-/// Delegates to `IcuProvider::month_long_name()`.
-/// Production (`Icu4xProvider`): uses ICU4X `DateSymbols::month_names(FieldLength::Wide)`
+/// Delegates to `IntlBackend::month_long_name()`.
+/// Production (`Icu4xBackend`): uses ICU4X `DateSymbols::month_names(FieldLength::Wide)`
 /// for comprehensive locale coverage. Examples: en->"January", fr->"janvier",
 /// ar->"يناير", ja->"1月", he->"תשרי" (Hebrew calendar).
-/// Tests (`StubIcuProvider`): returns English month names.
-pub fn month_long_name(provider: &dyn IcuProvider, month: u8, locale: &Locale) -> String {
-    provider.month_long_name(month, locale)
+/// Tests (`StubIntlBackend`): returns English month names.
+pub fn month_long_name(backend: &dyn IntlBackend, month: u8, locale: &Locale) -> String {
+    backend.month_long_name(month, locale)
 }
 
 /// Map typed character(s) to a day period value (0=AM, 1=PM) for the given locale.
 /// Returns `None` if the input doesn't match any day period key.
 ///
-/// Delegates to `IcuProvider::day_period_from_input()`.
-/// Production (`Icu4xProvider`): matches against locale-specific AM/PM strings
+/// Delegates to `IntlBackend::day_period_from_input()`.
+/// Production (`Icu4xBackend`): matches against locale-specific AM/PM strings
 /// from ICU4X `DayPeriodNames`.
 ///
 /// ### CJK Locale Handling
@@ -551,7 +551,7 @@ pub fn month_long_name(provider: &dyn IcuProvider, month: u8, locale: &Locale) -
 ///    is shared by 오전 (AM) and 오후 (PM).
 ///
 /// 3. **Second character resolves** -- When the next character arrives, the full
-///    buffer is passed to `day_period_from_buffer(provider, &buffer, locale)`,
+///    buffer is passed to `day_period_from_buffer(backend, &buffer, locale)`,
 ///    which matches against the locale's AM/PM labels and commits. Example:
 ///    buffer `"午前"` -> AM, buffer `"午後"` -> PM.
 ///
@@ -573,26 +573,26 @@ pub fn month_long_name(provider: &dyn IcuProvider, month: u8, locale: &Locale) -
 /// character-by-character matching. Instead, it waits for the `compositionend`
 /// event, then matches the composed string against the locale's AM/PM labels.
 /// This prevents premature matching on intermediate IME candidates.
-pub fn day_period_from_char(provider: &dyn IcuProvider, ch: char, locale: &Locale) -> Option<i32> {
-    provider.day_period_from_char(ch, locale).map(|is_pm| if is_pm { 1 } else { 0 })
+pub fn day_period_from_char(backend: &dyn IntlBackend, ch: char, locale: &Locale) -> Option<i32> {
+    backend.day_period_from_char(ch, locale).map(|is_pm| if is_pm { 1 } else { 0 })
 }
 
 /// Extended day period matching for multi-character input (CJK locales).
 /// Called when `type_buffer` contains more than one character.
 /// Returns `Some(0)` for AM, `Some(1)` for PM, `None` if no match.
-pub fn day_period_from_buffer(provider: &dyn IcuProvider, buffer: &str, locale: &Locale) -> Option<i32> {
-    provider.day_period_from_buffer(buffer, locale).map(|is_pm| if is_pm { 1 } else { 0 })
+pub fn day_period_from_buffer(backend: &dyn IntlBackend, buffer: &str, locale: &Locale) -> Option<i32> {
+    backend.day_period_from_buffer(buffer, locale).map(|is_pm| if is_pm { 1 } else { 0 })
 }
 
 /// Locale-aware AM/PM label.
 ///
-/// Delegates to `IcuProvider::day_period_label()`.
-/// Production (`Icu4xProvider`): uses ICU4X `DayPeriodNames` with
+/// Delegates to `IntlBackend::day_period_label()`.
+/// Production (`Icu4xBackend`): uses ICU4X `DayPeriodNames` with
 /// `FieldLength::Abbreviated` for comprehensive locale coverage.
 /// Examples: en->"AM"/"PM", ja->"午前"/"午後", ko->"오전"/"오후", ar->"ص"/"م".
-/// Tests (`StubIcuProvider`): returns English "AM"/"PM".
-pub fn day_period_label(provider: &dyn IcuProvider, is_pm: bool, locale: &Locale) -> String {
-    provider.day_period_label(is_pm, locale)
+/// Tests (`StubIntlBackend`): returns English "AM"/"PM".
+pub fn day_period_label(backend: &dyn IntlBackend, is_pm: bool, locale: &Locale) -> String {
+    backend.day_period_label(is_pm, locale)
 }
 ```
 
@@ -1170,7 +1170,7 @@ impl ars_core::Machine for Machine {
             focused_segment: None,
             type_buffer: String::new(),
             locale,
-            provider: env.icu_provider.clone(),
+            intl_backend: env.intl_backend.clone(),
             messages,
             calendar: props.calendar,
             granularity: props.granularity,
@@ -1321,7 +1321,7 @@ impl ars_core::Machine for Machine {
                         // - Japanese: '午' starts both 午前/午後 -- further chars disambiguate
                         // - Korean: '오' starts both 오전/오후
                         // Support Latin + Arabic. CJK handled via ArrowUp/Down only.
-                        let period_value = day_period_from_char(&*ctx.provider, ch, &ctx.locale);
+                        let period_value = day_period_from_char(&*ctx.intl_backend, ch, &ctx.locale);
                         let period_value = match period_value {
                             Some(v) => v,
                             None => return None,

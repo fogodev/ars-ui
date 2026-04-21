@@ -10,7 +10,7 @@ source_foundation: foundation/08-adapter-leptos.md
 
 ## 1. Purpose and Adapter Scope
 
-This spec maps the core [`ArsProvider`](../../components/utility/ars-provider.md) context contract to Leptos 0.8.x. `ArsProvider` is the single root provider — it subsumes the formerly separate `LocaleProvider`, `PlatformEffectsProvider`, `IcuProvider`, `I18nProvider`, and `ArsStyleProvider`.
+This spec maps the core [`ArsProvider`](../../components/utility/ars-provider.md) context contract to Leptos 0.8.x. `ArsProvider` is the single root provider — it subsumes the formerly separate `LocaleProvider`, `PlatformEffectsProvider`, `IntlBackend`, `I18nProvider`, and `ArsStyleProvider`.
 
 ## 2. Public Adapter API
 
@@ -26,7 +26,7 @@ pub fn ArsProvider(
     #[prop(optional)] portal_container_id: Option<String>,
     #[prop(optional)] root_node_id: Option<String>,
     #[prop(optional)] platform: Option<Arc<dyn PlatformEffects>>,
-    #[prop(optional)] icu_provider: Option<Arc<dyn IcuProvider>>,
+    #[prop(optional)] intl_backend: Option<Arc<dyn IntlBackend>>,
     #[prop(optional)] i18n_registries: Option<Arc<I18nRegistries>>,
     #[prop(optional)] style_strategy: Option<StyleStrategy>,
     children: Children,
@@ -66,7 +66,7 @@ ArsProvider is context-driven rather than event-driven.
 | `color_mode`                                         | controlled | signal change           | update ArsContext.color_mode | theme-aware descendants re-render         |                                                   |
 | `disabled` / `read_only`                             | controlled | signal change           | update ArsContext fields     | descendant components enable/disable      |                                                   |
 | `id_prefix` / `portal_container_id` / `root_node_id` | controlled | prop change after mount | update provided context      | descendants resolve new ID prefix/targets | non-reactive; set once at mount                   |
-| `icu_provider`                                       | controlled | prop at mount           | stored in ArsContext         | date-time components use ICU data         | non-reactive; set once at mount                   |
+| `intl_backend`                                       | controlled | prop at mount           | stored in ArsContext         | date-time components use ICU data         | non-reactive; set once at mount                   |
 | `i18n_registries`                                    | controlled | prop at mount           | stored in ArsContext         | components resolve translated messages    | non-reactive; set once at mount                   |
 | `style_strategy`                                     | controlled | prop at mount           | stored in ArsContext         | components use strategy for CSS injection | non-reactive; defaults to `StyleStrategy::Inline` |
 
@@ -189,7 +189,7 @@ pub fn ArsProvider(
     #[prop(optional)] portal_container_id: Option<String>,
     #[prop(optional)] root_node_id: Option<String>,
     #[prop(optional)] platform: Option<Arc<dyn PlatformEffects>>,
-    #[prop(optional)] icu_provider: Option<Arc<dyn IcuProvider>>,
+    #[prop(optional)] intl_backend: Option<Arc<dyn IntlBackend>>,
     #[prop(optional)] i18n_registries: Option<Arc<I18nRegistries>>,
     #[prop(optional)] style_strategy: Option<StyleStrategy>,
     children: Children,
@@ -206,7 +206,7 @@ pub fn ArsProvider(
     let disabled = disabled.unwrap_or_else(|| Signal::stored(false));
     let read_only = read_only.unwrap_or_else(|| Signal::stored(false));
     let platform = platform.unwrap_or_else(|| Rc::new(WebPlatformEffects));
-    let icu_provider = icu_provider.unwrap_or_else(|| Arc::new(StubIcuProvider));
+    let intl_backend = intl_backend.unwrap_or_else(|| Arc::new(StubIntlBackend));
     let i18n_registries = i18n_registries.unwrap_or_else(|| Rc::new(I18nRegistries::new()));
     let style_strategy = style_strategy.unwrap_or(StyleStrategy::Inline);
 
@@ -220,7 +220,7 @@ pub fn ArsProvider(
         portal_container_id: Signal::stored(portal_container_id),
         root_node_id: Signal::stored(root_node_id),
         platform,
-        icu_provider,
+        intl_backend,
         i18n_registries,
         style_strategy,
     });

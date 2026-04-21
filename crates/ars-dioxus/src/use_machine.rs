@@ -6,7 +6,7 @@
 
 use std::{
     collections::HashMap,
-    fmt,
+    fmt::{self, Debug},
     sync::{Arc, Mutex},
 };
 
@@ -15,7 +15,7 @@ use dioxus::prelude::*;
 
 use crate::{
     ephemeral::EphemeralRef,
-    provider::{resolve_locale, use_icu_provider, use_messages},
+    provider::{resolve_locale, use_intl_backend, use_messages},
     use_id,
 };
 
@@ -100,7 +100,7 @@ where
 {
 }
 
-impl<M: Machine + 'static> fmt::Debug for UseMachineReturn<M>
+impl<M: Machine + 'static> Debug for UseMachineReturn<M>
 where
     M::State: Clone + PartialEq + 'static,
     M::Context: Clone + 'static,
@@ -131,10 +131,12 @@ where
     /// cause a re-entrant borrow panic.
     pub fn with_api_snapshot<T>(&self, f: impl Fn(&M::Api<'_>) -> T) -> T {
         let svc = self.service.peek();
+
         let api = svc.connect(&|_e| {
             #[cfg(debug_assertions)]
             panic!("Cannot send events inside with_api_snapshot — use event handlers instead");
         });
+
         f(&api)
     }
 
@@ -154,18 +156,23 @@ where
         f: impl Fn(&M::Api<'_>) -> T + 'static,
     ) -> Memo<T> {
         let state = self.state;
+
         let context_version = self.context_version;
+
         let service = self.service;
         use_memo(move || {
             // Subscribe to both state and context_version so the memo
             // re-computes when either changes.
             let _ = &*state.read();
             let _ = &*context_version.read();
+
             let svc = service.peek();
+
             let api = svc.connect(&|_e| {
                 #[cfg(debug_assertions)]
                 panic!("Cannot send events inside derive() — use event handlers instead");
             });
+
             f(&api)
         })
     }
@@ -179,9 +186,13 @@ where
     /// For reactive derived values, use [`derive()`](Self::derive) instead.
     pub fn with_api_ephemeral<R>(&self, f: impl Fn(EphemeralRef<'_, M::Api<'_>>) -> R) -> R {
         let send = self.send;
+
         let svc = self.service.peek();
+
         let send_fn = move |e| send.call(e);
+
         let api = svc.connect(&send_fn);
+
         f(EphemeralRef::new(api))
     }
 }
@@ -199,6 +210,7 @@ where
 /// pub fn Toggle() -> Element {
 ///     let machine = use_machine::<toggle::Machine>(toggle::Props::default());
 ///     let is_on = machine.derive(|api| api.is_on());
+///
 ///     rsx! {
 ///         button {
 ///             onclick: move |_| machine.send.call(toggle::Event::Toggle),
@@ -216,6 +228,7 @@ where
     M::Messages: Send + Sync + 'static,
 {
     let (result, ..) = use_machine_inner::<M>(props);
+
     result
 }
 
@@ -251,21 +264,28 @@ where
     M::Messages: Send + Sync + 'static,
 {
     let generated_id = use_hook(|| use_id("component"));
+
     let props = {
         let mut props = props;
+
         if props.id().is_empty() {
             props.set_id(generated_id);
         }
+
         props
     };
 
     let locale = resolve_locale(None);
-    let icu_provider = use_icu_provider();
+
+    let intl_backend = use_intl_backend();
+
     let env = Env {
         locale,
-        icu_provider,
+        intl_backend,
     };
+
     let messages = use_messages::<M::Messages>(None, Some(&env.locale));
+
     let props_for_sync = props.clone();
 
     // Create the service once — use_signal runs its closure only on first mount.
@@ -274,6 +294,7 @@ where
     // Create a signal tracking the current state.
     // Use .peek() to avoid subscribing the component to service_signal changes.
     let initial_state = service_signal.peek().state().clone();
+
     let state_signal = use_signal::<M::State>(|| initial_state);
 
     // Context version counter — incremented on every context change so that
@@ -281,7 +302,9 @@ where
     let context_version = use_signal(|| 0u64);
 
     let effect_cleanups = use_signal(HashMap::<&'static str, CleanupFn>::new);
+
     let pending_events = use_hook(|| Arc::new(Mutex::new(Vec::<M::Event>::new())));
+
     let runtime = MachineRuntime {
         service: service_signal,
         state: state_signal,
@@ -309,6 +332,7 @@ where
 
     // Clean up effects when the component unmounts.
     let mut cleanup_runtime = runtime.clone();
+
     use_drop(move || {
         let cleanups = drain_effect_cleanups(cleanup_runtime.effect_cleanups);
         cleanup_runtime.service.write().unmount(cleanups);
@@ -336,29 +360,38 @@ where
     M::Event: Send + 'static,
 {
     let mut prev_props = use_signal(|| None::<M::Props>);
+
     let previous = prev_props.peek().clone();
 
     if previous.as_ref() != Some(&current_props) {
         if previous.is_some() {
             let (send_result, ctx, props) = {
                 let mut service = runtime.service.write();
+
                 let send_result = service.set_props(current_props.clone());
+
                 if send_result.state_changed {
                     runtime.state.set(service.state().clone());
                 }
+
                 if send_result.context_changed {
                     *runtime.context_version.write() += 1;
                 }
+
                 let ctx = service.context().clone();
+
                 let props = service.props().clone();
+
                 (send_result, ctx, props)
             };
 
             #[cfg(feature = "ssr")]
             handle_effects::<M>(&send_result, &ctx, &props, &runtime);
+
             #[cfg(not(feature = "ssr"))]
             handle_effects::<M>(send_result, &ctx, &props, runtime.clone());
         }
+
         prev_props.set(Some(current_props));
     }
 }
@@ -372,6 +405,7 @@ where
 {
     let (result, ctx, props) = {
         let mut service = runtime.service.write();
+
         let result = service.send(event);
 
         if result.state_changed {
@@ -383,12 +417,15 @@ where
         }
 
         let ctx = service.context().clone();
+
         let props = service.props().clone();
+
         (result, ctx, props)
     };
 
     #[cfg(feature = "ssr")]
     handle_effects::<M>(&result, &ctx, &props, &runtime);
+
     #[cfg(not(feature = "ssr"))]
     handle_effects::<M>(result, &ctx, &props, runtime);
 }
@@ -397,9 +434,11 @@ fn drain_effect_cleanups(
     mut effect_cleanups: Signal<HashMap<&'static str, CleanupFn>>,
 ) -> Vec<CleanupFn> {
     let mut pending = Vec::new();
+
     for (_, cleanup) in effect_cleanups.write().drain() {
         pending.push(cleanup);
     }
+
     pending
 }
 
@@ -435,11 +474,13 @@ fn handle_effects<M: Machine + 'static>(
     } else if !send_result.cancel_effects.is_empty() || !send_result.pending_effects.is_empty() {
         {
             let mut active_cleanups = runtime.effect_cleanups.write();
+
             for name in send_result.cancel_effects.iter().copied() {
                 if let Some(cleanup) = active_cleanups.remove(name) {
                     cleanups_to_run.push(cleanup);
                 }
             }
+
             for effect in &send_result.pending_effects {
                 if let Some(cleanup) = active_cleanups.remove(effect.name) {
                     cleanups_to_run.push(cleanup);
@@ -458,6 +499,7 @@ fn handle_effects<M: Machine + 'static>(
 
     let send_handle: Arc<dyn Fn(M::Event) + Send + Sync> = Arc::new({
         let pending_events = Arc::clone(&runtime.pending_events);
+
         move |event| {
             pending_events
                 .lock()
@@ -468,7 +510,9 @@ fn handle_effects<M: Machine + 'static>(
 
     for effect in send_result.pending_effects {
         let name = effect.name;
+
         let cleanup = effect.run(ctx, props, Arc::clone(&send_handle));
+
         runtime.effect_cleanups.write().insert(name, cleanup);
     }
 
@@ -477,6 +521,7 @@ fn handle_effects<M: Machine + 'static>(
             .pending_events
             .lock()
             .expect("pending event queue mutex should not be poisoned");
+
         pending.drain(..).collect::<Vec<_>>()
     };
 
@@ -495,7 +540,7 @@ mod tests {
         AriaAttr, AttrMap, ComponentPart, ConnectApi, HasId, HtmlAttr, I18nRegistries, MessageFn,
         NullPlatformEffects,
     };
-    use ars_i18n::{Direction, IcuProvider, Locale};
+    use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend};
     use dioxus::dioxus_core::{NoOpMutations, ScopeId};
 
     use super::*;
@@ -564,7 +609,9 @@ mod tests {
 
         fn part_attrs(&self, _part: Self::Part) -> AttrMap {
             let mut attrs = AttrMap::new();
+
             attrs.set(HtmlAttr::Aria(AriaAttr::Pressed), self.is_on.to_string());
+
             attrs
         }
     }
@@ -614,15 +661,52 @@ mod tests {
     // --- Tests ---
 
     #[derive(Clone)]
-    struct TestIcuProvider;
+    struct TestIntlBackend;
 
-    impl fmt::Debug for TestIcuProvider {
+    impl Debug for TestIntlBackend {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("TestIcuProvider")
+            f.write_str("TestIntlBackend")
         }
     }
 
-    impl IcuProvider for TestIcuProvider {}
+    impl IntlBackend for TestIntlBackend {
+        fn weekday_short_label(&self, weekday: ars_i18n::Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_short_label(weekday, locale)
+        }
+
+        fn weekday_long_label(&self, weekday: ars_i18n::Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_long_label(weekday, locale)
+        }
+
+        fn month_long_name(&self, month: u8, locale: &Locale) -> String {
+            StubIntlBackend.month_long_name(month, locale)
+        }
+
+        fn day_period_label(&self, is_pm: bool, locale: &Locale) -> String {
+            StubIntlBackend.day_period_label(is_pm, locale)
+        }
+
+        fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
+            StubIntlBackend.day_period_from_char(ch, locale)
+        }
+
+        fn format_segment_digits(
+            &self,
+            value: u32,
+            min_digits: core::num::NonZero<u8>,
+            locale: &Locale,
+        ) -> String {
+            StubIntlBackend.format_segment_digits(value, min_digits, locale)
+        }
+
+        fn hour_cycle(&self, locale: &Locale) -> ars_i18n::HourCycle {
+            StubIntlBackend.hour_cycle(locale)
+        }
+
+        fn week_info(&self, locale: &Locale) -> ars_i18n::WeekInfo {
+            StubIntlBackend.week_info(locale)
+        }
+    }
 
     #[derive(Clone, Debug, PartialEq)]
     struct EnvMessages {
@@ -642,15 +726,15 @@ mod tests {
     #[derive(Clone)]
     struct EnvContext {
         locale: String,
-        icu_provider: Arc<dyn IcuProvider>,
+        intl_backend: Arc<dyn IntlBackend>,
         label: String,
     }
 
-    impl fmt::Debug for EnvContext {
+    impl Debug for EnvContext {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             f.debug_struct("EnvContext")
                 .field("locale", &self.locale)
-                .field("icu_provider", &"Arc(..)")
+                .field("intl_backend", &"Arc(..)")
                 .field("label", &self.label)
                 .finish()
         }
@@ -694,7 +778,7 @@ mod tests {
                 (),
                 EnvContext {
                     locale: env.locale.to_bcp47(),
-                    icu_provider: Arc::clone(&env.icu_provider),
+                    intl_backend: Arc::clone(&env.intl_backend),
                     label: (messages.label)(&env.locale),
                 },
             )
@@ -794,6 +878,7 @@ mod tests {
                 } else {
                     PropState::Off
                 })),
+
                 PropEvent::SyncLabel => Some(ars_core::TransitionPlan::new().apply(
                     |ctx: &mut PropContext| {
                         ctx.sync_count += 1;
@@ -815,12 +900,15 @@ mod tests {
 
         fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
             let mut events = Vec::new();
+
             if old.checked != new.checked {
                 events.push(PropEvent::SetChecked(new.checked));
             }
+
             if old.label != new.label {
                 events.push(PropEvent::SyncLabel);
             }
+
             events
         }
     }
@@ -952,6 +1040,7 @@ mod tests {
                             .with_effect(tracked_effect("timer", "setup:start", "cleanup:start")),
                     )
                 }
+
                 EffectEvent::Replace => {
                     Some(ars_core::TransitionPlan::new().with_effect(tracked_effect(
                         "timer",
@@ -959,8 +1048,11 @@ mod tests {
                         "cleanup:replace",
                     )))
                 }
+
                 EffectEvent::Cancel => Some(ars_core::TransitionPlan::new().cancel_effect("timer")),
+
                 EffectEvent::Stop => Some(ars_core::TransitionPlan::to(EffectState::Idle)),
+
                 EffectEvent::Notify => Some(ars_core::TransitionPlan::new().apply(
                     |ctx: &mut EffectContext| {
                         ctx.notify_count += 1;
@@ -1005,7 +1097,9 @@ mod tests {
                     .lock()
                     .expect("log mutex should not be poisoned")
                     .push(setup_label);
+
                 let log = Arc::clone(&ctx.log);
+
                 Box::new(move || {
                     log.lock()
                         .expect("log mutex should not be poisoned")
@@ -1100,6 +1194,7 @@ mod tests {
                     DerivedState::Off => DerivedState::On,
                     DerivedState::On => DerivedState::Off,
                 })),
+
                 DerivedEvent::BumpContext => Some(ars_core::TransitionPlan::new().apply(
                     |ctx: &mut DerivedContext| {
                         ctx.count += 1;
@@ -1123,7 +1218,7 @@ mod tests {
 
     fn provide_test_context(
         locale: &str,
-        icu_provider: Arc<dyn IcuProvider>,
+        intl_backend: Arc<dyn IntlBackend>,
         registries: Arc<I18nRegistries>,
     ) -> ArsContext {
         ArsContext::new(
@@ -1136,7 +1231,7 @@ mod tests {
             None,
             None,
             Arc::new(NullPlatformEffects),
-            icu_provider,
+            intl_backend,
             registries,
             Arc::new(NullPlatform),
             ars_core::StyleStrategy::Inline,
@@ -1149,6 +1244,7 @@ mod tests {
         // This is a compile-time check — if UseMachineReturn<ToggleMachine> is
         // not Copy, this function won't compile.
         fn assert_copy<T: Copy>() {}
+
         assert_copy::<UseMachineReturn<ToggleMachine>>();
     }
 
@@ -1164,16 +1260,17 @@ mod tests {
                 reason = "This test intentionally exercises the manual Clone impl."
             )]
             let clone = machine.clone();
+
             assert_eq!(*clone.state.peek(), ToggleState::Off);
             assert!(format!("{machine:?}").contains("UseMachineReturn"));
 
             rsx! {
                 div {}
-
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -1196,6 +1293,7 @@ mod tests {
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -1209,9 +1307,11 @@ mod tests {
             assert_eq!(*machine.state.peek(), ToggleState::Off);
 
             machine.send.call(ToggleEvent::Toggle);
+
             assert_eq!(*machine.state.peek(), ToggleState::On);
 
             machine.send.call(ToggleEvent::Toggle);
+
             assert_eq!(*machine.state.peek(), ToggleState::Off);
 
             rsx! {
@@ -1220,6 +1320,7 @@ mod tests {
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -1231,11 +1332,13 @@ mod tests {
             });
 
             let is_on = machine.with_api_snapshot(|api| api.is_on);
+
             assert!(!is_on);
 
             machine.send.call(ToggleEvent::Toggle);
 
             let is_on = machine.with_api_snapshot(|api| api.is_on);
+
             assert!(is_on);
 
             rsx! {
@@ -1244,6 +1347,7 @@ mod tests {
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -1255,11 +1359,13 @@ mod tests {
             });
 
             let is_on = machine.with_api_ephemeral(|api| api.get().is_on);
+
             assert!(!is_on);
 
             machine.send.call(ToggleEvent::Toggle);
 
             let is_on = machine.with_api_ephemeral(|api| api.get().is_on);
+
             assert!(is_on);
 
             rsx! {
@@ -1268,6 +1374,7 @@ mod tests {
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -1281,9 +1388,11 @@ mod tests {
             assert_eq!(*machine.context_version.peek(), 0);
 
             machine.send.call(ToggleEvent::Toggle);
+
             assert_eq!(*machine.context_version.peek(), 0);
 
             machine.send.call(ToggleEvent::Toggle);
+
             assert_eq!(*machine.context_version.peek(), 0);
 
             rsx! {
@@ -1292,6 +1401,7 @@ mod tests {
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -1303,7 +1413,9 @@ mod tests {
             });
 
             assert_eq!(*machine.context_version.peek(), 0);
+
             machine.send.call(DerivedEvent::BumpContext);
+
             assert_eq!(*machine.context_version.peek(), 1);
             assert_eq!(*machine.state.peek(), DerivedState::Off);
 
@@ -1313,6 +1425,7 @@ mod tests {
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -1328,26 +1441,30 @@ mod tests {
             let machine = use_machine::<DerivedMachine>(DerivedProps {
                 id: String::from("derived"),
             });
+
             let derived = machine.derive(|api| (api.is_on, api.count));
+
             let mut phase = use_signal(|| 0u8);
 
             snapshots.borrow_mut().push(derived());
 
             if phase() == 0 {
                 phase.set(1);
+
                 machine.send.call(DerivedEvent::BumpContext);
             } else if phase() == 1 {
                 phase.set(2);
+
                 machine.send.call(DerivedEvent::Toggle);
             }
 
             rsx! {
                 div {}
-
             }
         }
 
         let mut dom = VirtualDom::new_with_props(app, Rc::clone(&snapshots));
+
         dom.rebuild_in_place();
         dom.mark_dirty(ScopeId::APP);
         dom.render_immediate(&mut NoOpMutations);
@@ -1363,8 +1480,10 @@ mod tests {
     #[test]
     fn use_machine_inner_resolves_locale_icu_and_messages_from_context() {
         fn app() -> Element {
-            let expected_provider: Arc<dyn IcuProvider> = Arc::new(TestIcuProvider);
+            let expected_backend: Arc<dyn IntlBackend> = Arc::new(TestIntlBackend);
+
             let mut registries = I18nRegistries::new();
+
             registries.register(
                 ars_core::MessagesRegistry::new(EnvMessages::default()).register(
                     "es",
@@ -1373,30 +1492,31 @@ mod tests {
                     },
                 ),
             );
-            let ctx = provide_test_context(
-                "es-ES",
-                Arc::clone(&expected_provider),
-                Arc::new(registries),
-            );
+
+            let ctx =
+                provide_test_context("es-ES", Arc::clone(&expected_backend), Arc::new(registries));
+
             use_context_provider(|| ctx);
 
             let machine = use_machine::<EnvMachine>(EnvProps { id: String::new() });
+
             let service = machine.service.peek();
+
             assert!(service.props().id().starts_with("component-"));
             assert_eq!(service.context().locale, "es-ES");
             assert!(Arc::ptr_eq(
-                &service.context().icu_provider,
-                &expected_provider
+                &service.context().intl_backend,
+                &expected_backend
             ));
             assert_eq!(service.context().label, "Hola");
 
             rsx! {
                 div {}
-
             }
         }
 
         let mut dom = VirtualDom::new(app);
+
         dom.rebuild_in_place();
     }
 
@@ -1414,10 +1534,13 @@ mod tests {
                 checked: false,
                 label: "a",
             });
+
             let mut phase = use_signal(|| 0u8);
 
             let machine = use_machine::<PropMachine>(props());
+
             let sync_count = machine.service.peek().context().sync_count;
+
             snapshots.borrow_mut().push((
                 *machine.state.peek(),
                 *machine.context_version.peek(),
@@ -1426,6 +1549,7 @@ mod tests {
 
             if phase() == 0 {
                 phase.set(1);
+
                 props.set(PropProps {
                     id: String::from("toggle"),
                     checked: true,
@@ -1433,6 +1557,7 @@ mod tests {
                 });
             } else if phase() == 1 {
                 phase.set(2);
+
                 props.set(PropProps {
                     id: String::from("toggle"),
                     checked: true,
@@ -1446,6 +1571,7 @@ mod tests {
         }
 
         let mut dom = VirtualDom::new_with_props(app, Rc::clone(&snapshots));
+
         dom.rebuild_in_place();
         dom.mark_dirty(ScopeId::APP);
         dom.render_immediate(&mut NoOpMutations);
@@ -1472,6 +1598,7 @@ mod tests {
         )]
         fn app(snapshots: Rc<RefCell<Vec<String>>>) -> Element {
             let mut phase = use_signal(|| 0u8);
+
             let machine = use_machine::<ToggleMachine>(ToggleProps { id: String::new() });
 
             snapshots
@@ -1488,6 +1615,7 @@ mod tests {
         }
 
         let mut dom = VirtualDom::new_with_props(app, Rc::clone(&snapshots));
+
         dom.rebuild_in_place();
         dom.mark_dirty(ScopeId::APP);
         dom.render_immediate(&mut NoOpMutations);
@@ -1495,6 +1623,7 @@ mod tests {
         dom.render_immediate(&mut NoOpMutations);
 
         let snapshots = snapshots.borrow();
+
         assert_eq!(snapshots.len(), 3);
         assert!(snapshots[0].starts_with("component-"));
         assert_eq!(snapshots[0], snapshots[1]);
@@ -1515,10 +1644,13 @@ mod tests {
                 checked: false,
                 label: "a",
             });
+
             let mut phase = use_signal(|| 0u8);
 
             let machine = use_machine_with_reactive_props::<PropMachine>(props);
+
             let sync_count = machine.service.peek().context().sync_count;
+
             snapshots.borrow_mut().push((
                 *machine.state.peek(),
                 *machine.context_version.peek(),
@@ -1527,6 +1659,7 @@ mod tests {
 
             if phase() == 0 {
                 phase.set(1);
+
                 props.set(PropProps {
                     id: String::from("toggle"),
                     checked: true,
@@ -1534,6 +1667,7 @@ mod tests {
                 });
             } else if phase() == 1 {
                 phase.set(2);
+
                 props.set(PropProps {
                     id: String::from("toggle"),
                     checked: true,
@@ -1547,6 +1681,7 @@ mod tests {
         }
 
         let mut dom = VirtualDom::new_with_props(app, Rc::clone(&snapshots));
+
         dom.rebuild_in_place();
         dom.mark_dirty(ScopeId::APP);
         dom.render_immediate(&mut NoOpMutations);
@@ -1578,11 +1713,14 @@ mod tests {
                 action: EffectAction::None,
                 log: Arc::clone(&log),
             });
+
             let mut phase = use_signal(|| 0u8);
 
             let _machine = use_machine_with_reactive_props::<EffectMachine>(props);
+
             if phase() == 0 {
                 phase.set(1);
+
                 props.set(EffectProps {
                     id: String::from("effects"),
                     action: EffectAction::Start,
@@ -1590,6 +1728,7 @@ mod tests {
                 });
             } else if phase() == 1 {
                 phase.set(2);
+
                 props.set(EffectProps {
                     id: String::from("effects"),
                     action: EffectAction::Replace,
@@ -1597,6 +1736,7 @@ mod tests {
                 });
             } else if phase() == 2 {
                 phase.set(3);
+
                 props.set(EffectProps {
                     id: String::from("effects"),
                     action: EffectAction::Cancel,
@@ -1610,6 +1750,7 @@ mod tests {
         }
 
         let mut dom = VirtualDom::new_with_props(app, Arc::clone(&log));
+
         dom.rebuild_in_place();
         dom.mark_dirty(ScopeId::APP);
         dom.render_immediate(&mut NoOpMutations);
@@ -1646,7 +1787,9 @@ mod tests {
             });
 
             let state = *machine.state.peek();
+
             let notify_count = machine.service.peek().context().notify_count;
+
             if state == EffectState::Idle && notify_count == 0 {
                 machine.send.call(EffectEvent::Start);
             } else if state == EffectState::Active && notify_count == 0 {
@@ -1660,9 +1803,11 @@ mod tests {
         }
 
         let mut dom = VirtualDom::new_with_props(app, Arc::clone(&log));
+
         dom.rebuild_in_place();
         dom.mark_dirty(ScopeId::APP);
         dom.render_immediate(&mut NoOpMutations);
+
         drop(dom);
 
         assert_eq!(effect_log(&log), vec!["setup:start", "cleanup:start"]);
@@ -1881,6 +2026,7 @@ mod wasm_tests {
                 } else {
                     PropState::Off
                 })),
+
                 PropEvent::SyncLabel => Some(ars_core::TransitionPlan::new().apply(
                     |ctx: &mut PropContext| {
                         ctx.sync_count += 1;
@@ -1903,12 +2049,15 @@ mod wasm_tests {
 
         fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
             let mut events = Vec::new();
+
             if old.checked != new.checked {
                 events.push(PropEvent::SetChecked(new.checked));
             }
+
             if old.label != new.label {
                 events.push(PropEvent::SyncLabel);
             }
+
             events
         }
     }
@@ -1993,6 +2142,7 @@ mod wasm_tests {
                     DerivedState::Off => DerivedState::On,
                     DerivedState::On => DerivedState::Off,
                 })),
+
                 DerivedEvent::BumpContext => Some(ars_core::TransitionPlan::new().apply(
                     |ctx: &mut DerivedContext| {
                         ctx.count += 1;
@@ -2026,7 +2176,9 @@ mod wasm_tests {
             let machine = use_machine::<ToggleMachine>(ToggleProps {
                 id: String::from("toggle"),
             });
+
             let mut phase = use_signal(|| 0u8);
+
             snapshots
                 .borrow_mut()
                 .push(machine.derive(|api| api.is_on)());
@@ -2042,6 +2194,7 @@ mod wasm_tests {
         }
 
         let mut dom = VirtualDom::new_with_props(app, Rc::clone(&snapshots));
+
         dom.rebuild_in_place();
         dom.mark_dirty(ScopeId::APP);
         dom.render_immediate(&mut NoOpMutations);
@@ -2059,15 +2212,18 @@ mod wasm_tests {
         )]
         fn app(snapshots: Rc<RefCell<Vec<String>>>) -> Element {
             let machine = use_machine::<ToggleMachine>(ToggleProps { id: String::new() });
+
             snapshots
                 .borrow_mut()
                 .push(machine.service.peek().props().id().to_owned());
+
             rsx! {
                 div {}
             }
         }
 
         let mut dom = VirtualDom::new_with_props(app, Rc::clone(&snapshots));
+
         dom.rebuild_in_place();
 
         assert_eq!(snapshots.borrow().len(), 1);
@@ -2088,10 +2244,13 @@ mod wasm_tests {
                 checked: false,
                 label: "a",
             });
+
             let mut phase = use_signal(|| 0u8);
 
             let machine = use_machine_with_reactive_props::<PropMachine>(props);
+
             let derived = machine.derive(PropApi::snapshot);
+
             snapshots.borrow_mut().push((
                 derived(),
                 *machine.state.peek(),
@@ -2100,6 +2259,7 @@ mod wasm_tests {
 
             if phase() == 0 {
                 phase.set(1);
+
                 props.set(PropProps {
                     id: String::from("toggle"),
                     checked: true,
@@ -2107,6 +2267,7 @@ mod wasm_tests {
                 });
             } else if phase() == 1 {
                 phase.set(2);
+
                 props.set(PropProps {
                     id: String::from("toggle"),
                     checked: true,
@@ -2120,6 +2281,7 @@ mod wasm_tests {
         }
 
         let mut dom = VirtualDom::new_with_props(app, Rc::clone(&snapshots));
+
         dom.rebuild_in_place();
         dom.mark_dirty(ScopeId::APP);
         dom.render_immediate(&mut NoOpMutations);
@@ -2148,16 +2310,20 @@ mod wasm_tests {
             let machine = use_machine::<DerivedMachine>(DerivedProps {
                 id: String::from("derived"),
             });
+
             let derived = machine.derive(|api| (api.is_on, api.count));
+
             let mut phase = use_signal(|| 0u8);
 
             snapshots.borrow_mut().push(derived());
 
             if phase() == 0 {
                 phase.set(1);
+
                 machine.send.call(DerivedEvent::BumpContext);
             } else if phase() == 1 {
                 phase.set(2);
+
                 machine.send.call(DerivedEvent::Toggle);
             }
 
@@ -2167,6 +2333,7 @@ mod wasm_tests {
         }
 
         let mut dom = VirtualDom::new_with_props(app, Rc::clone(&snapshots));
+
         dom.rebuild_in_place();
         dom.mark_dirty(ScopeId::APP);
         dom.render_immediate(&mut NoOpMutations);

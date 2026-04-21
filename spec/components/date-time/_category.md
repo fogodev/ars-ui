@@ -82,12 +82,12 @@ impl CalendarDate {
     /// - Chinese/Dangi: 12 or 13 months (intercalary month in some years)
     /// - Islamic: Months alternate 29/30 days
     /// - Persian: First 6 months have 31 days, next 5 have 30, last has 29-30
-    pub fn new(provider: &dyn IcuProvider, calendar: CalendarSystem, year: i32, month: u8, day: u8) -> Option<Self> {
-        let max_month = max_months_in_year(provider, calendar, year);
+    pub fn new(backend: &dyn IntlBackend, calendar: CalendarSystem, year: i32, month: u8, day: u8) -> Option<Self> {
+        let max_month = max_months_in_year(backend, calendar, year);
         if !(1..=max_month).contains(&month) {
             return None;
         }
-        let max_day = days_in_month_for_calendar(provider, calendar, year, month);
+        let max_day = days_in_month_for_calendar(backend, calendar, year, month);
         if !(1..=max_day).contains(&day) {
             return None;
         }
@@ -104,17 +104,17 @@ impl CalendarDate {
     }
 
     /// Returns the number of days in the month of the date.
-    pub fn days_in_month(&self, provider: &dyn IcuProvider) -> u8 {
-        days_in_month_for_calendar(provider, self.calendar, self.year, self.month.get())
+    pub fn days_in_month(&self, backend: &dyn IntlBackend) -> u8 {
+        days_in_month_for_calendar(backend, self.calendar, self.year, self.month.get())
     }
 
     /// Adds a number of months to the date.
-    pub fn add_months(&self, provider: &dyn IcuProvider, n: i32) -> CalendarDate {
+    pub fn add_months(&self, backend: &dyn IntlBackend, n: i32) -> CalendarDate {
         let total_months = (self.year * 12 + (self.month.get() as i32 - 1)) + n;
         let new_year  = total_months.div_euclid(12);
         let new_month = (total_months.rem_euclid(12) + 1) as u8;
-        // Use calendar-aware days-in-month via IcuProvider.
-        let max_day = days_in_month_for_calendar(provider, self.calendar, new_year, new_month);
+        // Use calendar-aware days-in-month via IntlBackend.
+        let max_day = days_in_month_for_calendar(backend, self.calendar, new_year, new_month);
         let clamped_day = self.day.get().min(max_day);
         CalendarDate {
             year: new_year,
@@ -219,26 +219,26 @@ fn gregorian_days_in_month(year: i32, month: Month) -> u8 {
 
 /// Maximum number of months in a year for the given calendar system.
 ///
-/// Delegates to `IcuProvider::max_months_in_year()` for calendar-aware computation.
-/// Production (`Icu4xProvider`): uses ICU4X `AnyCalendar::months_in_year()` for
+/// Delegates to `IntlBackend::max_months_in_year()` for calendar-aware computation.
+/// Production (`Icu4xBackend`): uses ICU4X `AnyCalendar::months_in_year()` for
 /// precise results across all calendar systems (Hebrew 13-month leap years,
 /// Chinese/Dangi intercalary months, Ethiopic/Coptic 13th month).
-/// Tests (`StubIcuProvider`): returns hardcoded values matching the original
+/// Tests (`StubIntlBackend`): returns hardcoded values matching the original
 /// English-only logic (see `04-internationalization.md` §9.5).
-fn max_months_in_year(provider: &dyn IcuProvider, calendar: CalendarSystem, year: i32) -> u8 {
-    provider.max_months_in_year(&calendar, year)
+fn max_months_in_year(backend: &dyn IntlBackend, calendar: CalendarSystem, year: i32) -> u8 {
+    backend.max_months_in_year(&calendar, year)
 }
 
 /// Days in a given month for the given calendar system.
 ///
-/// Delegates to `IcuProvider::days_in_month()` for calendar-aware computation.
-/// Production (`Icu4xProvider`): uses ICU4X `AnyCalendar::days_in_month()`
+/// Delegates to `IntlBackend::days_in_month()` for calendar-aware computation.
+/// Production (`Icu4xBackend`): uses ICU4X `AnyCalendar::days_in_month()`
 /// for precise results including observation-based Islamic calendars, Hebrew
 /// deficient/regular/complete year types, and Chinese/Dangi lunation lengths.
-/// Tests (`StubIcuProvider`): falls back to Gregorian logic for all calendars
+/// Tests (`StubIntlBackend`): falls back to Gregorian logic for all calendars
 /// (see `04-internationalization.md` §9.5).
-fn days_in_month_for_calendar(provider: &dyn IcuProvider, calendar: CalendarSystem, year: i32, month: u8) -> u8 {
-    provider.days_in_month(&calendar, year, month)
+fn days_in_month_for_calendar(backend: &dyn IntlBackend, calendar: CalendarSystem, year: i32, month: u8) -> u8 {
+    backend.days_in_month(&calendar, year, month)
 }
 
 /// Inclusive date range.
@@ -433,22 +433,22 @@ impl Locale {
 
     /// First day of week for this locale.
     ///
-    /// Delegates to `IcuProvider::first_day_of_week()`.
+    /// Delegates to `IntlBackend::first_day_of_week()`.
     /// Production: ICU4X `WeekCalculator::first_weekday()` from CLDR `weekData`,
     /// covering all regions (Sunday-start: US, CA, JP, etc.; Saturday-start:
     /// AF, IR, SA, AE, etc.; Monday-start: most of Europe, ISO 8601 default).
     /// Respects the BCP 47 `fw` extension if present (e.g., `en-US-u-fw-mon`).
-    pub fn first_day_of_week(&self, provider: &dyn IcuProvider) -> Weekday {
-        provider.first_day_of_week(self)
+    pub fn first_day_of_week(&self, backend: &dyn IntlBackend) -> Weekday {
+        backend.first_day_of_week(self)
     }
 
     /// Preferred hour cycle for this locale.
     ///
-    /// Delegates to `IcuProvider::hour_cycle()`.
+    /// Delegates to `IntlBackend::hour_cycle()`.
     /// Production: ICU4X `HourCycle` preference from CLDR `timeData`.
     /// Examples: en-US→H12, de→H23, ja→H23, ko→H12, ar→H12, ar-MA→H23.
-    pub fn hour_cycle(&self, provider: &dyn IcuProvider) -> HourCycle {
-        provider.hour_cycle(self)
+    pub fn hour_cycle(&self, backend: &dyn IntlBackend) -> HourCycle {
+        backend.hour_cycle(self)
     }
 }
 

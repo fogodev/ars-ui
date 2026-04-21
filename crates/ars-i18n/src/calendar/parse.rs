@@ -366,6 +366,21 @@ mod tests {
         assert_eq!(japanese_date_time.time().minute(), 30);
     }
 
+    #[test]
+    fn parsing_helpers_reject_unsupported_calendar_annotations() {
+        let date_error = parse_date("2024-03-15[u-ca=islamic-tbla]")
+            .expect_err("unsupported calendar must fail");
+        let date_time_error = parse_date_time("2024-03-15T09:30:00[u-ca=islamic-tbla]")
+            .expect_err("unsupported calendar must fail");
+
+        assert!(
+            matches!(date_error, CalendarError::Arithmetic(message) if message.contains("parsed calendar is not representable"))
+        );
+        assert!(
+            matches!(date_time_error, CalendarError::Arithmetic(message) if message.contains("parsed calendar is not representable"))
+        );
+    }
+
     #[cfg(feature = "std")]
     #[test]
     fn zoned_and_absolute_parsing_reject_invalid_inputs() {
@@ -378,6 +393,23 @@ mod tests {
         );
         assert!(parse_absolute("2024-03-10T07:45:00", &time_zone).is_err());
         assert!(parse_absolute_to_local("not-a-timestamp").is_err());
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn zoned_and_absolute_parsing_accept_valid_inputs() {
+        let time_zone = TimeZoneId::new("America/New_York").expect("zone should validate");
+
+        let zoned = parse_zoned_date_time("2024-03-10T01:30-05:00[America/New_York]")
+            .expect("zoned date-time should parse");
+        let absolute = parse_absolute("2024-03-10T07:45:00Z", &time_zone)
+            .expect("absolute timestamp should parse");
+
+        assert_eq!(zoned.calendar, CalendarSystem::Iso8601);
+        assert_eq!(zoned.time_zone().as_str(), "America/New_York");
+        assert_eq!(absolute.calendar, CalendarSystem::Iso8601);
+        assert_eq!(absolute.time_zone().as_str(), "America/New_York");
+        assert_eq!(absolute.offset_minutes(), -240);
     }
 
     #[cfg(feature = "std")]

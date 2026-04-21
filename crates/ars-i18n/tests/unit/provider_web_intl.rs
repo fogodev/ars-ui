@@ -1,7 +1,10 @@
-//! WASM `WebIntlProvider` tests (spec §9.5.4).
+//! WASM `WebIntlBackend` tests (spec §9.5.4).
 //!
 //! Run with:
-//! `wasm-pack test --headless --firefox crates/ars-i18n --no-default-features --features std,web-intl`.
+//! `wasm-pack test --headless --chrome crates/ars-i18n --no-default-features --features std,web-intl`.
+//!
+//! If `chromedriver` is not on `PATH`, pass it explicitly:
+//! `wasm-pack test --headless --chrome --chromedriver /opt/homebrew/bin/chromedriver crates/ars-i18n --no-default-features --features std,web-intl`.
 
 use alloc::{format, string::ToString};
 use core::num::NonZero;
@@ -9,8 +12,8 @@ use core::num::NonZero;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
 use crate::{
-    CalendarDate, CalendarDateFields, CalendarSystem, Era, HourCycle, IcuProvider, Locale,
-    WebIntlProvider, Weekday, default_provider,
+    CalendarDate, CalendarDateFields, CalendarSystem, Era, HourCycle, IntlBackend, Locale,
+    WebIntlBackend, Weekday, default_backend,
 };
 
 wasm_bindgen_test_configure!(run_in_browser);
@@ -45,9 +48,9 @@ fn calendar_date(
 
 #[wasm_bindgen_test]
 fn web_intl_weekday_short_label_returns_english() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
-    let label = provider.weekday_short_label(Weekday::Monday, &locale("en-US"));
+    let label = backend.weekday_short_label(Weekday::Monday, &locale("en-US"));
 
     assert!(!label.is_empty());
 
@@ -60,9 +63,9 @@ fn web_intl_weekday_short_label_returns_english() {
 
 #[wasm_bindgen_test]
 fn web_intl_weekday_long_label_localizes_in_japanese() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
-    let label = provider.weekday_long_label(Weekday::Monday, &locale("ja"));
+    let label = backend.weekday_long_label(Weekday::Monday, &locale("ja"));
 
     assert!(
         label.contains('曜'),
@@ -72,9 +75,9 @@ fn web_intl_weekday_long_label_localizes_in_japanese() {
 
 #[wasm_bindgen_test]
 fn web_intl_month_long_name_localizes_in_japanese() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
-    let name = provider.month_long_name(1, &locale("ja"));
+    let name = backend.month_long_name(1, &locale("ja"));
 
     assert!(
         name.contains('月'),
@@ -84,63 +87,57 @@ fn web_intl_month_long_name_localizes_in_japanese() {
 
 #[wasm_bindgen_test]
 fn web_intl_hour_cycle_en_us_is_h12() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
-    assert_eq!(provider.hour_cycle(&locale("en-US")), HourCycle::H12);
+    assert_eq!(backend.hour_cycle(&locale("en-US")), HourCycle::H12);
 }
 
 #[wasm_bindgen_test]
 fn web_intl_hour_cycle_fr_fr_is_h23() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
-    assert_eq!(provider.hour_cycle(&locale("fr-FR")), HourCycle::H23);
+    assert_eq!(backend.hour_cycle(&locale("fr-FR")), HourCycle::H23);
 }
 
 #[wasm_bindgen_test]
 fn web_intl_hour_cycle_uses_formatted_parts_not_resolved_options() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     // Regression (#583): browser `resolvedOptions().hourCycle` is known
     // to misreport some locales. Force Arabic-Indic digits so the
     // provider must normalize the observed hour part and still infer
     // French 24-hour output correctly.
     assert_eq!(
-        provider.hour_cycle(&locale("fr-FR-u-nu-arab")),
+        backend.hour_cycle(&locale("fr-FR-u-nu-arab")),
         HourCycle::H23
     );
 }
 
 #[wasm_bindgen_test]
 fn web_intl_first_day_of_week_en_us_is_sunday() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
-    assert_eq!(
-        provider.first_day_of_week(&locale("en-US")),
-        Weekday::Sunday
-    );
+    assert_eq!(backend.first_day_of_week(&locale("en-US")), Weekday::Sunday);
 }
 
 #[wasm_bindgen_test]
 fn web_intl_first_day_of_week_de_is_monday() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
-    assert_eq!(
-        provider.first_day_of_week(&locale("de-DE")),
-        Weekday::Monday
-    );
+    assert_eq!(backend.first_day_of_week(&locale("de-DE")), Weekday::Monday);
 }
 
 #[wasm_bindgen_test]
 fn web_intl_week_info_reads_first_day_and_weekend_metadata() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
-    let us = provider.week_info(&locale("en-US"));
+    let us = backend.week_info(&locale("en-US"));
 
     assert_eq!(us.first_day, Weekday::Sunday);
     assert_eq!(us.weekend_start, Weekday::Saturday);
     assert_eq!(us.weekend_end, Weekday::Sunday);
 
-    let israel = provider.week_info(&locale("he-IL"));
+    let israel = backend.week_info(&locale("he-IL"));
 
     assert_eq!(israel.first_day, Weekday::Sunday);
     assert_eq!(israel.weekend_start, Weekday::Friday);
@@ -149,13 +146,10 @@ fn web_intl_week_info_reads_first_day_and_weekend_metadata() {
 
 #[wasm_bindgen_test]
 fn web_intl_format_segment_digits_uses_native_digits_in_arabic() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
-    let formatted = provider.format_segment_digits(
-        5,
-        NonZero::new(2).expect("2 is non-zero"),
-        &locale("ar-EG"),
-    );
+    let formatted =
+        backend.format_segment_digits(5, NonZero::new(2).expect("2 is non-zero"), &locale("ar-EG"));
 
     // ar-EG formats 05 as Arabic-Indic ٠٥ via `Intl.NumberFormat`.
     assert_eq!(formatted, "٠٥");
@@ -163,24 +157,21 @@ fn web_intl_format_segment_digits_uses_native_digits_in_arabic() {
 
 #[wasm_bindgen_test]
 fn web_intl_format_segment_digits_preserves_ascii_in_english() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
-    let formatted = provider.format_segment_digits(
-        7,
-        NonZero::new(2).expect("2 is non-zero"),
-        &locale("en-US"),
-    );
+    let formatted =
+        backend.format_segment_digits(7, NonZero::new(2).expect("2 is non-zero"), &locale("en-US"));
 
     assert_eq!(formatted, "07");
 }
 
 #[wasm_bindgen_test]
 fn web_intl_day_period_labels_differ_en_us() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
-    let am = provider.day_period_label(false, &locale("en-US"));
+    let am = backend.day_period_label(false, &locale("en-US"));
 
-    let pm = provider.day_period_label(true, &locale("en-US"));
+    let pm = backend.day_period_label(true, &locale("en-US"));
 
     assert!(!am.is_empty());
     assert!(!pm.is_empty());
@@ -189,34 +180,34 @@ fn web_intl_day_period_labels_differ_en_us() {
 
 #[wasm_bindgen_test]
 fn web_intl_days_in_month_gregorian_leap_february() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     assert_eq!(
-        provider.days_in_month(&CalendarSystem::Gregorian, 2024, 2, None),
+        backend.days_in_month(&CalendarSystem::Gregorian, 2024, 2, None),
         29
     );
     assert_eq!(
-        provider.days_in_month(&CalendarSystem::Gregorian, 2023, 2, None),
+        backend.days_in_month(&CalendarSystem::Gregorian, 2023, 2, None),
         28
     );
 }
 
 #[wasm_bindgen_test]
 fn web_intl_default_provider_under_web_intl() {
-    let provider = default_provider();
+    let backend = default_backend();
 
-    // Japanese localization proves we reached the browser-backed provider.
-    let label = provider.weekday_long_label(Weekday::Monday, &locale("ja"));
+    // Japanese localization proves we reached the browser-backed backend.
+    let label = backend.weekday_long_label(Weekday::Monday, &locale("ja"));
 
     assert!(
         label.contains('曜'),
-        "default_provider() under web-intl should return Japanese labels; got {label:?}"
+        "default_backend() under web-intl should return Japanese labels; got {label:?}"
     );
 }
 
 #[wasm_bindgen_test]
 fn web_intl_weekday_short_label_covers_every_weekday() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     let en = locale("en-US");
 
@@ -229,7 +220,7 @@ fn web_intl_weekday_short_label_covers_every_weekday() {
         Weekday::Saturday,
         Weekday::Sunday,
     ] {
-        let label = provider.weekday_short_label(weekday, &en);
+        let label = backend.weekday_short_label(weekday, &en);
 
         assert!(!label.is_empty(), "empty short label for {weekday:?}");
     }
@@ -237,13 +228,13 @@ fn web_intl_weekday_short_label_covers_every_weekday() {
 
 #[wasm_bindgen_test]
 fn web_intl_day_period_from_char_roundtrips_english() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     let en = locale("en-US");
 
-    assert_eq!(provider.day_period_from_char('a', &en), Some(false));
-    assert_eq!(provider.day_period_from_char('P', &en), Some(true));
-    assert_eq!(provider.day_period_from_char('x', &en), None);
+    assert_eq!(backend.day_period_from_char('a', &en), Some(false));
+    assert_eq!(backend.day_period_from_char('P', &en), Some(true));
+    assert_eq!(backend.day_period_from_char('x', &en), None);
 }
 
 #[wasm_bindgen_test]
@@ -259,13 +250,13 @@ fn web_intl_day_period_from_char_bails_when_labels_share_prefix() {
     // extractor happens to leave a shared prefix (e.g., a future
     // CLDR revision), the ambiguous char must resolve to `None`; if
     // it doesn't, the happy path is verified end-to-end.
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     let ja = locale("ja-JP");
 
-    let am = provider.day_period_label(false, &ja);
+    let am = backend.day_period_label(false, &ja);
 
-    let pm = provider.day_period_label(true, &ja);
+    let pm = backend.day_period_label(true, &ja);
 
     let am_first = am.chars().next().expect("AM label non-empty");
 
@@ -273,99 +264,99 @@ fn web_intl_day_period_from_char_bails_when_labels_share_prefix() {
 
     if am_first == pm_first {
         assert_eq!(
-            provider.day_period_from_char(am_first, &ja),
+            backend.day_period_from_char(am_first, &ja),
             None,
             "shared first char must not collapse to AM"
         );
     } else {
-        assert_eq!(provider.day_period_from_char(am_first, &ja), Some(false));
-        assert_eq!(provider.day_period_from_char(pm_first, &ja), Some(true));
+        assert_eq!(backend.day_period_from_char(am_first, &ja), Some(false));
+        assert_eq!(backend.day_period_from_char(pm_first, &ja), Some(true));
     }
 }
 
 #[wasm_bindgen_test]
 fn web_intl_month_long_name_returns_unknown_for_invalid_month() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
-    assert_eq!(provider.month_long_name(0, &locale("en-US")), "Unknown");
-    assert_eq!(provider.month_long_name(13, &locale("en-US")), "Unknown");
+    assert_eq!(backend.month_long_name(0, &locale("en-US")), "Unknown");
+    assert_eq!(backend.month_long_name(13, &locale("en-US")), "Unknown");
 }
 
 #[wasm_bindgen_test]
 fn web_intl_max_months_in_year_detects_hebrew_leap() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     // Cycle year 8 is a Hebrew leap year (13 months).
     assert_eq!(
-        provider.max_months_in_year(&CalendarSystem::Hebrew, 5784, None),
+        backend.max_months_in_year(&CalendarSystem::Hebrew, 5784, None),
         13
     );
     // Cycle year 9 is a common year (12 months).
     assert_eq!(
-        provider.max_months_in_year(&CalendarSystem::Hebrew, 5785, None),
+        backend.max_months_in_year(&CalendarSystem::Hebrew, 5785, None),
         12
     );
     // Ethiopic/Coptic calendars always have 13 months.
     assert_eq!(
-        provider.max_months_in_year(&CalendarSystem::Ethiopic, 2017, None),
+        backend.max_months_in_year(&CalendarSystem::Ethiopic, 2017, None),
         13
     );
 }
 
 #[wasm_bindgen_test]
 fn web_intl_max_months_in_year_clamps_japanese_end_of_era() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     // End-of-era clamping is served by `bounded_months_in_year`, which the
     // provider calls before the Hebrew/Ethiopic table.
     assert_eq!(
-        provider.max_months_in_year(&CalendarSystem::Japanese, 31, Some("heisei")),
+        backend.max_months_in_year(&CalendarSystem::Japanese, 31, Some("heisei")),
         4
     );
 }
 
 #[wasm_bindgen_test]
 fn web_intl_days_in_month_clamps_japanese_end_of_era() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     // Heisei year 31 month 4 is the era's final month; the shared
     // `bounded_days_in_month` helper must clamp to day 30 before the
     // non-Gregorian fallback kicks in.
     assert_eq!(
-        provider.days_in_month(&CalendarSystem::Japanese, 31, 4, Some("heisei")),
+        backend.days_in_month(&CalendarSystem::Japanese, 31, 4, Some("heisei")),
         30
     );
 }
 
 #[wasm_bindgen_test]
 fn web_intl_max_months_in_year_resolves_persian_via_bridge() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     // Persian is a 12-month solar calendar with no leap-month year
     // variants. The bridge returns 12 for every year, matching the
     // previous fixed fallback without fabricating it.
     assert_eq!(
-        provider.max_months_in_year(&CalendarSystem::Persian, 1403, None),
+        backend.max_months_in_year(&CalendarSystem::Persian, 1403, None),
         12
     );
 }
 
 #[wasm_bindgen_test]
 fn web_intl_hour_cycle_honors_locale_extension() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     // Explicit `-u-hc-*` overrides must short-circuit the probe logic
     // so callers get the exact midnight behavior they requested.
-    assert_eq!(provider.hour_cycle(&locale("ja-u-hc-h11")), HourCycle::H11);
+    assert_eq!(backend.hour_cycle(&locale("ja-u-hc-h11")), HourCycle::H11);
     assert_eq!(
-        provider.hour_cycle(&locale("en-US-u-hc-h12")),
+        backend.hour_cycle(&locale("en-US-u-hc-h12")),
         HourCycle::H12
     );
     assert_eq!(
-        provider.hour_cycle(&locale("de-DE-u-hc-h23")),
+        backend.hour_cycle(&locale("de-DE-u-hc-h23")),
         HourCycle::H23
     );
-    assert_eq!(provider.hour_cycle(&locale("ja-u-hc-h24")), HourCycle::H24);
+    assert_eq!(backend.hour_cycle(&locale("ja-u-hc-h24")), HourCycle::H24);
 }
 
 #[wasm_bindgen_test]
@@ -373,13 +364,13 @@ fn web_intl_convert_date_routes_bce_gregorian_through_bridge() {
     // Regression (Codex PR #563 comment 3103592557, P2): when
     // `u32::try_from(date.year)` rejects a negative Gregorian year,
     // the previous code returned the source date unchanged — a
-    // straight contract violation for `IcuProvider::convert_date`,
+    // straight contract violation for `IntlBackend::convert_date`,
     // which must always return a date in `target`. The fallback now
     // runs `bridge_convert` so BCE Gregorian inputs convert correctly
     // (the ICU4X calendar-arithmetic bridge handles negative year
     // arithmetic natively) or clone the source only when the bridge
     // itself rejects the input.
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     let gregorian = calendar_date(
         CalendarSystem::Gregorian,
@@ -392,7 +383,7 @@ fn web_intl_convert_date_routes_bce_gregorian_through_bridge() {
         15,
     );
 
-    let buddhist = provider.convert_date(&gregorian, CalendarSystem::Buddhist);
+    let buddhist = backend.convert_date(&gregorian, CalendarSystem::Buddhist);
 
     // Buddhist Era year = Gregorian year + 543. -50 CE → Buddhist 493.
     // The browser path must use the canonical ISO year (-50), not the
@@ -424,13 +415,13 @@ fn web_intl_days_in_month_non_gregorian_uses_bridge_not_flat_30() {
     // 31-day months during `CalendarDate::new` validation. We now
     // delegate to the shared ICU4X calendar-arithmetic bridge, which
     // produces the correct per-year month lengths.
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     // Hebrew civil-order month 3 is Kislev, whose length varies
     // between 29 and 30 days by year type (chaser/kesidran/shalem).
     // 28..=30 is the full Hebrew-lunisolar range; assert the bridge
     // returns a real number inside it rather than the fabricated 30.
-    let kislev = provider.days_in_month(&CalendarSystem::Hebrew, 5785, 3, None);
+    let kislev = backend.days_in_month(&CalendarSystem::Hebrew, 5785, 3, None);
 
     assert!(
         (28..=30).contains(&kislev),
@@ -439,7 +430,7 @@ fn web_intl_days_in_month_non_gregorian_uses_bridge_not_flat_30() {
 
     // Chinese month 2 in 2024 is 29 or 30 days — the bridge must
     // pick one, not default to the old flat 30.
-    let chinese_2 = provider.days_in_month(&CalendarSystem::Chinese, 2024, 2, None);
+    let chinese_2 = backend.days_in_month(&CalendarSystem::Chinese, 2024, 2, None);
 
     assert!(
         (29..=30).contains(&chinese_2),
@@ -456,10 +447,10 @@ fn web_intl_max_months_in_year_non_gregorian_uses_bridge_not_flat_12() {
     // validation and normalised civil-ordinal 13 inputs into the
     // following year on `add_months(0)`. The bridge produces the
     // real per-year answer including leap-cycle widenings.
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     // Chinese 2020 is a leap-month year (闰四月, leap 4th) → 13.
-    let months_2020 = provider.max_months_in_year(&CalendarSystem::Chinese, 2020, None);
+    let months_2020 = backend.max_months_in_year(&CalendarSystem::Chinese, 2020, None);
 
     assert_eq!(
         months_2020, 13,
@@ -467,7 +458,7 @@ fn web_intl_max_months_in_year_non_gregorian_uses_bridge_not_flat_12() {
     );
 
     // Chinese 2021 is a non-leap year → 12.
-    let months_2021 = provider.max_months_in_year(&CalendarSystem::Chinese, 2021, None);
+    let months_2021 = backend.max_months_in_year(&CalendarSystem::Chinese, 2021, None);
 
     assert_eq!(
         months_2021, 12,
@@ -477,17 +468,17 @@ fn web_intl_max_months_in_year_non_gregorian_uses_bridge_not_flat_12() {
 
 #[wasm_bindgen_test]
 fn web_intl_era_helpers_match_stub_behavior() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     assert_eq!(
-        provider.default_era(&CalendarSystem::Japanese),
+        backend.default_era(&CalendarSystem::Japanese),
         Some(Era {
             code: "reiwa".to_string(),
             display_name: "Reiwa".to_string(),
         })
     );
     assert_eq!(
-        provider.default_era(&CalendarSystem::Gregorian),
+        backend.default_era(&CalendarSystem::Gregorian),
         Some(Era {
             code: "ad".to_string(),
             display_name: "AD".to_string(),
@@ -505,42 +496,42 @@ fn web_intl_era_helpers_match_stub_behavior() {
         8,
     );
 
-    assert_eq!(provider.years_in_era(&heisei), Some(31));
-    assert_eq!(provider.minimum_month_in_year(&heisei), 1);
-    assert_eq!(provider.minimum_day_in_month(&heisei), 8);
+    assert_eq!(backend.years_in_era(&heisei), Some(31));
+    assert_eq!(backend.minimum_month_in_year(&heisei), 1);
+    assert_eq!(backend.minimum_day_in_month(&heisei), 8);
 }
 
 #[wasm_bindgen_test]
 fn web_intl_first_day_of_week_honors_unicode_extension() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     // `-u-fw-sat` overrides the region default of Sunday for en-US.
     assert_eq!(
-        provider.first_day_of_week(&locale("en-US-u-fw-sat")),
+        backend.first_day_of_week(&locale("en-US-u-fw-sat")),
         Weekday::Saturday
     );
 }
 
 #[wasm_bindgen_test]
 fn web_intl_convert_date_same_calendar_is_identity() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     let gregorian = gregorian_date(2024, 3, 15);
 
-    let converted = provider.convert_date(&gregorian, CalendarSystem::Gregorian);
+    let converted = backend.convert_date(&gregorian, CalendarSystem::Gregorian);
 
     assert_eq!(converted, gregorian);
 }
 
 #[wasm_bindgen_test]
 fn web_intl_convert_date_crosses_calendars_via_browser() {
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     let gregorian = gregorian_date(2024, 3, 15);
 
     // Under `--features web-intl` without `icu4x`, this hits the
     // Intl.DateTimeFormat({ calendar }) → formatToParts reparse path.
-    let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+    let japanese = backend.convert_date(&gregorian, CalendarSystem::Japanese);
 
     assert_eq!(japanese.calendar(), CalendarSystem::Japanese);
     assert_eq!(japanese.year(), 6);
@@ -555,11 +546,11 @@ fn web_intl_convert_date_preserves_historical_japanese_era() {
     // like 1990 came out with era=Reiwa, year=2 instead of era=Heisei,
     // year=2. The fix requests `era: "long"` from `Intl.DateTimeFormat`
     // and maps the localized label back to the CLDR era code.
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     let gregorian = gregorian_date(1990, 6, 15);
 
-    let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+    let japanese = backend.convert_date(&gregorian, CalendarSystem::Japanese);
 
     assert_eq!(japanese.calendar(), CalendarSystem::Japanese);
     assert_eq!(japanese.year(), 2);
@@ -586,12 +577,12 @@ fn web_intl_convert_date_canonicalizes_macronized_japanese_eras() {
     // `taisho`). Downstream era-aware helpers then missed the era and
     // silently returned incorrect bounds. `canonical_era_code` strips
     // the known Latin-macron letters before lowercasing.
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     // Shōwa: 1926-12-25 .. 1989-01-07. Gregorian 1970 is deep inside it.
     let gregorian = gregorian_date(1970, 6, 15);
 
-    let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+    let japanese = backend.convert_date(&gregorian, CalendarSystem::Japanese);
 
     let era = japanese
         .era()
@@ -607,7 +598,7 @@ fn web_intl_convert_date_canonicalizes_macronized_japanese_eras() {
     // Taishō: 1912-07-30 .. 1926-12-25. Gregorian 1920 is inside.
     let gregorian = gregorian_date(1920, 6, 15);
 
-    let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+    let japanese = backend.convert_date(&gregorian, CalendarSystem::Japanese);
 
     let era = japanese
         .era()
@@ -655,11 +646,11 @@ fn web_intl_convert_date_recovers_chinese_leap_month_ordinal() {
     // the `bis` token, some a localised name), we only assert the
     // weaker post-condition: the converted date must differ from the
     // source and must expose a non-zero month ordinal.
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     let gregorian = gregorian_date(2020, 5, 30);
 
-    let chinese = provider.convert_date(&gregorian, CalendarSystem::Chinese);
+    let chinese = backend.convert_date(&gregorian, CalendarSystem::Chinese);
 
     assert_ne!(
         chinese, gregorian,
@@ -679,11 +670,11 @@ fn web_intl_convert_date_preserves_years_below_100() {
     // `0..=99` as `1900..=1999`. `convert_date` now uses `new Date()`
     // + `setUTCFullYear(..)` so a Gregorian year below 100 is passed
     // to `Intl.DateTimeFormat` as itself.
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     let gregorian = gregorian_date(90, 6, 15);
 
-    let buddhist = provider.convert_date(&gregorian, CalendarSystem::Buddhist);
+    let buddhist = backend.convert_date(&gregorian, CalendarSystem::Buddhist);
 
     assert_eq!(buddhist.calendar(), CalendarSystem::Buddhist);
 
@@ -705,12 +696,12 @@ fn web_intl_convert_date_resolves_hebrew_named_month() {
     // label against a probe loop. This test exercises the named-month
     // resolution path even in browsers that return a numeric month —
     // we just verify the result has a valid 1-based month ordinal.
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     // March 25, 2024 is Adar II 15, 5784 (Hebrew leap year).
     let gregorian = gregorian_date(2024, 3, 25);
 
-    let hebrew = provider.convert_date(&gregorian, CalendarSystem::Hebrew);
+    let hebrew = backend.convert_date(&gregorian, CalendarSystem::Hebrew);
 
     assert_eq!(hebrew.calendar(), CalendarSystem::Hebrew);
     assert_eq!(hebrew.year(), 5784);
@@ -732,7 +723,7 @@ fn web_intl_convert_date_bridges_non_gregorian_sources_under_web_intl() {
     // bridge behind `#[cfg(feature = "icu4x")]` and then returned
     // `date.clone()` for every non-Gregorian source under pure
     // `--features web-intl`. That violated the
-    // `IcuProvider::convert_date` contract — downstream callers
+    // `IntlBackend::convert_date` contract — downstream callers
     // (`CalendarDate::add_days_with_provider`, `TypedCalendarDate::
     // to_calendar`) assumed the returned date lives in `target`.
     // Returning the source calendar panicked the Gregorian-only
@@ -745,11 +736,11 @@ fn web_intl_convert_date_bridges_non_gregorian_sources_under_web_intl() {
     // bridge is now unconditionally active for non-Gregorian sources
     // under this feature, so Buddhist 2567 → Gregorian must resolve
     // to the real Gregorian equivalent, not echo the source back.
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     let buddhist = calendar_date(CalendarSystem::Buddhist, None, 2567, 6, 15);
 
-    let gregorian = provider.convert_date(&buddhist, CalendarSystem::Gregorian);
+    let gregorian = backend.convert_date(&buddhist, CalendarSystem::Gregorian);
 
     assert_eq!(gregorian.calendar(), CalendarSystem::Gregorian);
     assert_eq!(
@@ -799,19 +790,18 @@ fn web_intl_resolve_named_month_returns_calendar_ordinal_not_probe_slot() {
     // numeric months), but when a value is returned it must be the
     // canonical civil-order ordinal.
     if let Some(ordinal) =
-        WebIntlProvider::resolve_named_month(CalendarSystem::Hebrew, 5784, "Adar II")
+        WebIntlBackend::resolve_named_month(CalendarSystem::Hebrew, 5784, "Adar II")
     {
         assert_eq!(ordinal, 7, "Adar II must resolve to civil-order 7");
     }
 
     if let Some(ordinal) =
-        WebIntlProvider::resolve_named_month(CalendarSystem::Hebrew, 5784, "Adar I")
+        WebIntlBackend::resolve_named_month(CalendarSystem::Hebrew, 5784, "Adar I")
     {
         assert_eq!(ordinal, 6, "Adar I must resolve to civil-order 6");
     }
 
-    if let Some(ordinal) =
-        WebIntlProvider::resolve_named_month(CalendarSystem::Hebrew, 5785, "Adar")
+    if let Some(ordinal) = WebIntlBackend::resolve_named_month(CalendarSystem::Hebrew, 5785, "Adar")
     {
         assert_eq!(ordinal, 6, "Common-year Adar must resolve to civil-order 6");
     }
@@ -913,7 +903,7 @@ fn web_intl_resolve_named_month_resolves_english_ordinal_labels_without_probe() 
         "Twelfth Monthbis",
         "Seventh Monthbis",
     ] {
-        let ordinal = WebIntlProvider::resolve_named_month(CalendarSystem::Chinese, 2024, label);
+        let ordinal = WebIntlBackend::resolve_named_month(CalendarSystem::Chinese, 2024, label);
 
         assert!(
             matches!(ordinal, Some(o) if (1..=13).contains(&o)),
@@ -944,7 +934,7 @@ fn web_intl_resolve_named_month_reaches_leap_7_8_10_11_years() {
     let mut any_invalid = false;
 
     for label in candidates {
-        let ordinal = WebIntlProvider::resolve_named_month(CalendarSystem::Chinese, 2024, label);
+        let ordinal = WebIntlBackend::resolve_named_month(CalendarSystem::Chinese, 2024, label);
 
         match ordinal {
             Some(o) if (1..=13).contains(&o) => any_resolved = true,
@@ -976,17 +966,14 @@ fn web_intl_first_day_of_week_reads_week_info_property_shape() {
     // engine at test time, so assert that both pt-BR and en-US
     // resolve to Sunday on real runtimes — whichever shape the
     // browser uses, the answer should be the CLDR value.
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     assert_eq!(
-        provider.first_day_of_week(&locale("pt-BR")),
+        backend.first_day_of_week(&locale("pt-BR")),
         Weekday::Sunday,
         "pt-BR must resolve to Sunday via either getWeekInfo() or weekInfo property"
     );
-    assert_eq!(
-        provider.first_day_of_week(&locale("en-US")),
-        Weekday::Sunday
-    );
+    assert_eq!(backend.first_day_of_week(&locale("en-US")), Weekday::Sunday);
 }
 
 #[wasm_bindgen_test]
@@ -1035,7 +1022,7 @@ fn web_intl_resolve_named_month_sweeps_beyond_24_25() {
 
     let resolved = candidates.iter().any(|label| {
         matches!(
-            WebIntlProvider::resolve_named_month(CalendarSystem::Chinese, 2024, label),
+            WebIntlBackend::resolve_named_month(CalendarSystem::Chinese, 2024, label),
             Some(o) if (1..=13).contains(&o)
         )
     });
@@ -1045,7 +1032,7 @@ fn web_intl_resolve_named_month_sweeps_beyond_24_25() {
     // `None` safely rather than panicking.
     if !resolved {
         assert_eq!(
-            WebIntlProvider::resolve_named_month(
+            WebIntlBackend::resolve_named_month(
                 CalendarSystem::Chinese,
                 2024,
                 "Definitely Not A Month"
@@ -1061,7 +1048,7 @@ fn web_intl_resolve_named_month_matches_common_year_adar() {
     // leap year), so common-year labels like "Adar" never matched and
     // `convert_date` silently fell back. The resolver now sweeps both a
     // leap and a common probe year.
-    let ordinal = WebIntlProvider::resolve_named_month(
+    let ordinal = WebIntlBackend::resolve_named_month(
         CalendarSystem::Hebrew,
         5785, // Common year — `rem_euclid(19) == 9`.
         "Adar",
@@ -1075,7 +1062,7 @@ fn web_intl_resolve_named_month_matches_common_year_adar() {
 
 #[wasm_bindgen_test]
 fn web_intl_resolve_named_month_resolves_known_hebrew_labels() {
-    // Direct coverage for `WebIntlProvider::resolve_named_month`: even if
+    // Direct coverage for `WebIntlBackend::resolve_named_month`: even if
     // Chrome emits a numeric month for Hebrew (bypassing the fallback
     // path in `convert_date`), the probe loop must still be able to
     // recognise the long labels the browser returns under `month: "long"`.
@@ -1091,7 +1078,7 @@ fn web_intl_resolve_named_month_resolves_known_hebrew_labels() {
         "Iyar", "Sivan", "Tammuz", "Av", "Elul",
     ] {
         if let Some(ordinal) =
-            WebIntlProvider::resolve_named_month(CalendarSystem::Hebrew, 5784, label)
+            WebIntlBackend::resolve_named_month(CalendarSystem::Hebrew, 5784, label)
         {
             assert!(
                 (1..=13).contains(&ordinal),
@@ -1102,11 +1089,7 @@ fn web_intl_resolve_named_month_resolves_known_hebrew_labels() {
 
     // A nonsense label must not match any month slot.
     assert_eq!(
-        WebIntlProvider::resolve_named_month(
-            CalendarSystem::Hebrew,
-            5784,
-            "Definitely Not A Month"
-        ),
+        WebIntlBackend::resolve_named_month(CalendarSystem::Hebrew, 5784, "Definitely Not A Month"),
         None
     );
 }
@@ -1225,11 +1208,11 @@ fn web_intl_convert_date_preserves_roc_era_round_trip() {
     // conversion must land in the `roc` era (Republic of China year
     // 113) rather than a bogus `minguo` code that would fail the
     // internal-bridge round-trip.
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     let gregorian = gregorian_date(2024, 6, 15);
 
-    let roc = provider.convert_date(&gregorian, CalendarSystem::Roc);
+    let roc = backend.convert_date(&gregorian, CalendarSystem::Roc);
 
     assert_eq!(roc.calendar(), CalendarSystem::Roc);
 
@@ -1266,11 +1249,11 @@ fn web_intl_convert_date_routes_japanese_historical_eras_through_bridge() {
     // Gregorian 1800-06-15 (inside the Kansei era, 1789–1801)
     // resolves to a valid Japanese date with a Kansei / historical
     // CLDR code — never Reiwa.
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     let gregorian = gregorian_date(1800, 6, 15);
 
-    let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+    let japanese = backend.convert_date(&gregorian, CalendarSystem::Japanese);
 
     assert_eq!(japanese.calendar(), CalendarSystem::Japanese);
 
@@ -1301,12 +1284,12 @@ fn web_intl_convert_date_preserves_modern_japanese_allow_list_hits() {
     // behavior for the common Reiwa/Heisei/Showa/Taishō/Meiji case,
     // which still runs through `era_code_for_calendar` rather than
     // the bridge fallback.
-    let provider = WebIntlProvider;
+    let backend = WebIntlBackend;
 
     // Gregorian 2020-06-15 is deep inside Reiwa (2019+).
     let gregorian = gregorian_date(2020, 6, 15);
 
-    let japanese = provider.convert_date(&gregorian, CalendarSystem::Japanese);
+    let japanese = backend.convert_date(&gregorian, CalendarSystem::Japanese);
 
     let era = japanese
         .era()
@@ -1376,7 +1359,7 @@ fn web_intl_resolve_named_month_recovers_when_2_digit_returns_names() {
 
     for (label, expected) in labels_and_expected {
         if let Some(ordinal) =
-            WebIntlProvider::resolve_named_month(CalendarSystem::Hebrew, 5784, label)
+            WebIntlBackend::resolve_named_month(CalendarSystem::Hebrew, 5784, label)
         {
             assert_eq!(
                 ordinal, expected,

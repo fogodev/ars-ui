@@ -1,6 +1,6 @@
-//! [`Icu4xProvider`] — production provider backed by ICU4X CLDR data.
+//! [`Icu4xBackend`] — production provider backed by ICU4X CLDR data.
 //!
-//! Implements the [`IcuProvider`](crate::IcuProvider) contract using ICU4X 2.x
+//! Implements the [`IntlBackend`](crate::IntlBackend) contract using ICU4X 2.x
 //! compiled data. See spec §9.5.2.
 
 use alloc::{
@@ -28,7 +28,7 @@ use icu::{
 };
 
 use crate::{
-    CalendarDate, CalendarSystem, Era, HourCycle, IcuProvider, Locale, WeekInfo, Weekday,
+    CalendarDate, CalendarSystem, Era, HourCycle, IntlBackend, Locale, WeekInfo, Weekday,
     calendar::{bounded_days_in_month, bounded_months_in_year, default_era_for},
 };
 
@@ -42,9 +42,9 @@ use crate::{
 /// The struct is zero-sized: ICU4X's compiled-data path does not require
 /// runtime data to be carried in the formatter instance.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Icu4xProvider;
+pub struct Icu4xBackend;
 
-impl Icu4xProvider {
+impl Icu4xBackend {
     /// Maps [`Weekday`] to a January 2024 day-of-month for format-and-extract.
     ///
     /// January 1, 2024 is a Monday and January 7, 2024 is a Sunday, so a
@@ -63,7 +63,7 @@ impl Icu4xProvider {
     }
 }
 
-impl IcuProvider for Icu4xProvider {
+impl IntlBackend for Icu4xBackend {
     fn weekday_short_label(&self, weekday: Weekday, locale: &Locale) -> String {
         let formatter = DateTimeFormatter::try_new(
             DateTimeFormatterPreferences::from(locale.as_icu()),
@@ -113,6 +113,7 @@ impl IcuProvider for Icu4xProvider {
         // 24-hour (e.g., `de-DE`, `fr-FR`, `ja-JP`). Without this
         // override 24-hour locales collapse to numbers only.
         let mut prefs = DateTimeFormatterPreferences::from(locale.as_icu());
+
         prefs.hour_cycle = Some(IcuHourCycle::H12);
 
         let formatter = NoCalendarFormatter::try_new(prefs, T::hm())
@@ -147,9 +148,10 @@ impl IcuProvider for Icu4xProvider {
         // thousand separators. A year like 2024 must format as
         // `"2024"` (or its native-digit equivalent), not `"2,024"` —
         // otherwise downstream parsers that expect a contiguous digit
-        // run break, and behavior diverges from `WebIntlProvider`,
+        // run break, and behavior diverges from `WebIntlBackend`,
         // which already sets `useGrouping: false`.
         let mut options = DecimalFormatterOptions::default();
+
         options.grouping_strategy = Some(GroupingStrategy::Never);
 
         let formatter =

@@ -405,11 +405,11 @@ impl LocaleProvider for StaticLocaleProvider {
 
 Locale, messages, and ICU provider are **environment context** resolved by the adapter
 layer — not by core component code. Core `Props` structs MUST NOT contain `locale`,
-`messages`, or `icu_provider` fields. The adapter reads these from `ArsProvider`
+`messages`, or `intl_backend` fields. The adapter reads these from `ArsProvider`
 context and passes them to core code via the `Env` struct and `Messages` parameter
 (see `01-architecture.md` §2.1 for the `Env` definition).
 
-**Missing provider warning:** All adapter context hooks (`use_locale()`, `use_icu_provider()`,
+**Missing provider warning:** All adapter context hooks (`use_locale()`, `use_intl_backend()`,
 `use_style_strategy()`) emit a `log::warn!` diagnostic when the adapter crate's
 `debug` feature is enabled and no `ArsProvider` is found. This helps developers
 catch missing provider setup during development while keeping diagnostics routed
@@ -457,8 +457,8 @@ fn use_locale() -> Locale {
 
 // Adapter usage — resolve env before passing to core:
 let locale = resolve_locale(adapter_props.locale.as_ref());
-let icu_provider = use_icu_provider();
-let env = Env { locale, icu_provider };
+let intl_backend = use_intl_backend();
+let env = Env { locale, intl_backend };
 let messages = resolve_messages::<dialog::Messages>(adapter_props.messages.as_ref(), &registries, &env.locale);
 let service = Service::new(core_props, env, messages);
 ```
@@ -469,33 +469,33 @@ or `use_context()` directly. This ensures framework-agnostic crates (`ars-core`,
 
 #### 2.3.2 Canonical ICU Provider Resolution
 
-Date-time components need locale-aware calendar data (weekday names, month names, hour cycles, etc.) via the `IcuProvider` trait (§9.5). The provider is resolved by the adapter and passed to core code via the `Env` struct — **never called from core code directly**:
+Date-time components need locale-aware calendar data (weekday names, month names, hour cycles, etc.) via the `IntlBackend` trait (§9.5). The provider is resolved by the adapter and passed to core code via the `Env` struct — **never called from core code directly**:
 
-1. **ArsProvider inheritance** — The adapter calls `use_icu_provider()` to read the provider from the nearest `ArsProvider` in the component tree.
-2. **Ultimate fallback** — If no provider is found, the fallback is `StubIcuProvider` (English-only, zero dependencies).
+1. **ArsProvider inheritance** — The adapter calls `use_intl_backend()` to read the provider from the nearest `ArsProvider` in the component tree.
+2. **Ultimate fallback** — If no provider is found, the fallback is `StubIntlBackend` (English-only, zero dependencies).
 
 ```rust
-// use_icu_provider() implementation (in adapter layer):
-fn use_icu_provider() -> Arc<dyn IcuProvider> {
+// use_intl_backend() implementation (in adapter layer):
+fn use_intl_backend() -> Arc<dyn IntlBackend> {
     use_context::<ArsContext>()
-        .map(|ctx| ctx.icu_provider())
+        .map(|ctx| ctx.intl_backend())
         .unwrap_or_else(|| {
-            warn_missing_provider("use_icu_provider");
-            Arc::new(StubIcuProvider)
+            warn_missing_provider("use_intl_backend");
+            Arc::new(StubIntlBackend)
         })
 }
 ```
 
-The adapter calls `use_icu_provider()` and passes the result via `Env.icu_provider`.
-Core component code accesses the provider from `Env` during `init()`:
+The adapter calls `use_intl_backend()` and passes the result via `Env.intl_backend`.
+Core component code accesses the backend from `Env` during `init()`:
 
 ```rust
-// In Props: NO provider field — resolved by the adapter.
+// In Props: NO backend prop — resolved by the adapter.
 // In Context:
-pub provider: Arc<dyn IcuProvider>,
+pub intl_backend: Arc<dyn IntlBackend>,
 
 // In init():
-provider: env.icu_provider.clone(),
+intl_backend: env.intl_backend.clone(),
 ```
 
 This mirrors how React Aria resolves calendar data through its `I18nProvider` and how Ark UI uses the browser's `Intl` API — the data source is an application-level concern, not a per-component prop.
@@ -1378,7 +1378,7 @@ This representation establishes three invariants:
 
 - all cross-calendar comparison is performed through canonical ISO slots
 - the projected calendar fields always match the canonical ISO date exactly
-- pure calendar math does not require `IcuProvider`
+- pure calendar math does not require `IntlBackend`
 
 The public constructor and arithmetic surface is therefore method-oriented and pure:
 
@@ -1610,15 +1610,15 @@ impl WeekInfo {
 week data, but the public type is fixed to these four fields.
 
 Pure calendar queries use the new `calendar::queries` helpers, while locale-sensitive week helpers
-still accept `&dyn IcuProvider`:
+still accept `&dyn IntlBackend`:
 
 ```rust
-pub fn start_of_week<T: DateValue>(date: &T, locale: &Locale, provider: &dyn IcuProvider) -> T;
-pub fn end_of_week<T: DateValue>(date: &T, locale: &Locale, provider: &dyn IcuProvider) -> T;
-pub fn get_day_of_week(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvider) -> u8;
-pub fn get_weeks_in_month(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvider) -> u8;
-pub fn is_weekend(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvider) -> bool;
-pub fn is_weekday(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvider) -> bool;
+pub fn start_of_week<T: DateValue>(date: &T, locale: &Locale, backend: &dyn IntlBackend) -> T;
+pub fn end_of_week<T: DateValue>(date: &T, locale: &Locale, backend: &dyn IntlBackend) -> T;
+pub fn get_day_of_week(date: &CalendarDate, locale: &Locale, backend: &dyn IntlBackend) -> u8;
+pub fn get_weeks_in_month(date: &CalendarDate, locale: &Locale, backend: &dyn IntlBackend) -> u8;
+pub fn is_weekend(date: &CalendarDate, locale: &Locale, backend: &dyn IntlBackend) -> bool;
+pub fn is_weekday(date: &CalendarDate, locale: &Locale, backend: &dyn IntlBackend) -> bool;
 ```
 
 The locale-sensitive query contract is:
@@ -2227,7 +2227,7 @@ locale. The three patterns for how locale reaches the call site are:
 
 | Component type                                                       | Locale source                                                                                                                                  | Access pattern                                |
 | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| **Stateful** (has `Machine` + `Context`)                             | Adapter constructs `Env { locale, icu_provider }`, passes to `Machine::init(props, &env, &messages)`. `init()` stores `env.locale` in Context. | `(self.ctx.messages.label)(&self.ctx.locale)` |
+| **Stateful** (has `Machine` + `Context`)                             | Adapter constructs `Env { locale, intl_backend }`, passes to `Machine::init(props, &env, &messages)`. `init()` stores `env.locale` in Context. | `(self.ctx.messages.label)(&self.ctx.locale)` |
 | **Stateless with `Api`** (no state machine, but has an `Api` struct) | Adapter passes `&Env` to `Api::new(props, env, messages)`. Api stores `&env.locale`.                                                           | `(self.messages.label)(self.locale)`          |
 | **Standalone function** (no `Api` struct)                            | Adapter passes `locale: &Locale` directly as a function parameter.                                                                             | `(messages.label)(locale)`                    |
 
@@ -2562,12 +2562,12 @@ fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::Sta
 ```rust
 // In Leptos/Dioxus adapter component:
 let locale = resolve_locale(adapter_props.locale.as_ref());
-let icu_provider = use_icu_provider();
+let intl_backend = use_intl_backend();
 let registries = use_i18n_registries();
 let messages = resolve_messages::<dialog::Messages>(
     adapter_props.messages.as_ref(), &registries, &locale,
 );
-let env = Env { locale, icu_provider };
+let env = Env { locale, intl_backend };
 let service = Service::new(core_props, env, messages);
 ```
 
@@ -2610,15 +2610,15 @@ prelude to render them reactively in views.
 /// Users define an enum with one variant per translatable string.
 /// Data-carrying variants support parameterized text (plurals, interpolation).
 /// The `t()` function (from adapter prelude) wraps enum variants for reactive
-/// rendering in views — locale and ICU provider are resolved from ArsProvider context.
+/// rendering in views — locale and intl backend are resolved from ArsProvider context.
 ///
 /// Named following Rust verb-form trait conventions (`Clone`, `Display`, `Send`).
 pub trait Translate {
     /// Produce the localized text for this variant.
     ///
     /// - `locale`: The active locale (from `ArsProvider` / `use_locale()`)
-    /// - `icu`: The ICU data provider (from `ArsProvider` / `use_icu_provider()`)
-    fn translate(&self, locale: &Locale, icu: &dyn IcuProvider) -> String;
+    /// - `intl`: The active internationalization backend (from `ArsProvider` / `use_intl_backend()`)
+    fn translate(&self, locale: &Locale, intl: &dyn IntlBackend) -> String;
 }
 ```
 
@@ -2630,12 +2630,12 @@ pub trait Translate {
 - **Always include a fallback arm** (`_` → English) as the last locale match arm.
 - Use `ars_i18n::select_plural()` for plural-aware variants.
 - Use `ars_i18n::NumberFormatter` / `DateFormatter` within `translate()` for locale-aware number and date formatting.
-- The `icu` parameter provides access to calendar data, plural rules, and other CLDR data needed inside `translate()`.
+- The `intl` parameter provides access to calendar data, plural rules, and other CLDR data needed inside `translate()`.
 
 #### 7.4.3 Worked Example
 
 ```rust
-use ars_i18n::{Translate, Locale, IcuProvider, PluralCategory, PluralRuleType};
+use ars_i18n::{Translate, Locale, IntlBackend, PluralCategory, PluralRuleType};
 
 /// All translatable text for the inventory page.
 enum Inventory {
@@ -2645,7 +2645,7 @@ enum Inventory {
 }
 
 impl Translate for Inventory {
-    fn translate(&self, locale: &Locale, icu: &dyn IcuProvider) -> String {
+    fn translate(&self, locale: &Locale, intl: &dyn IntlBackend) -> String {
         match locale.language().as_str() {
             "es" => match self {
                 Self::Title => "Inventario".into(),
@@ -2731,7 +2731,7 @@ enum AdminDashboard { Title, UserCount { count: usize } }
 
 There is no registration step — unlike `ComponentMessages` which uses `I18nRegistries`,
 `Translate` enums are resolved directly via `t()` at render time. The `t()` function
-reads locale and ICU provider from `ArsProvider` context and calls `translate()` immediately.
+reads locale and intl backend from `ArsProvider` context and calls `translate()` immediately.
 
 #### 7.4.5 Relationship to ComponentMessages
 
@@ -2746,13 +2746,13 @@ and do not interact — users never register `Translate` enums in `I18nRegistrie
 ### 7.5 The `t()` Function
 
 The `t()` function is the adapter-specific bridge between `Translate` enums and the
-framework's reactive rendering system. It reads locale and ICU provider from `ArsProvider`
+framework's reactive rendering system. It reads locale and intl backend from `ArsProvider`
 context and produces a reactive text node.
 
 ```rust
 /// Resolve a `Translate` value into a reactive text node for rendering.
 ///
-/// Reads the current locale and ICU provider from `ArsProvider` context,
+/// Reads the current locale and intl backend from `ArsProvider` context,
 /// calls `msg.translate()`, and returns a framework-specific reactive view
 /// that updates when the locale changes.
 ///
@@ -2761,8 +2761,8 @@ context and produces a reactive text node.
 /// # Fallback
 ///
 /// If no `ArsProvider` is present in the ancestor tree, falls back to
-/// `en-US` locale and `StubIcuProvider` — matching the default behavior
-/// of `use_locale()` and `use_icu_provider()`.
+/// `en-US` locale and `StubIntlBackend` — matching the default behavior
+/// of `use_locale()` and `use_intl_backend()`.
 ///
 /// # Reactivity
 ///
@@ -3243,22 +3243,24 @@ impl CollationFormat for StringCollator {
 > API available with an English-only fallback. That configuration is supported
 > for backend-free builds and tests, not for full locale-aware production i18n.
 
-### 9.5 Calendar/Locale Provider Trait (`IcuProvider`)
+### 9.5 Calendar/Locale Backend Trait (`IntlBackend`)
 
-`IcuProvider` is no longer the source of truth for calendar arithmetic.
+`IntlBackend` is no longer the source of truth for calendar arithmetic.
 
 The authoritative calendar engine is the pure `CalendarSystem` / `CalendarDate` / `Time` /
-`CalendarDateTime` / `ZonedDateTime` surface backed by `temporal_rs`. `IcuProvider` now serves two
+`CalendarDateTime` / `ZonedDateTime` surface backed by `temporal_rs`. `IntlBackend` now serves two
 roles:
 
 - locale-aware formatting and labels
 - provider-backed labels, formatting, and locale metadata layered over the pure calendar model
 
 The trait therefore remains public, and its calendar methods are adapters over the pure calendar
-model rather than the owner of calendar semantics.
+model rather than the owner of calendar semantics. `IntlBackend` is a backend abstraction:
+concrete implementations may be CLDR-backed (`Icu4xBackend`), browser-backed (`WebIntlBackend`),
+or English/default fallbacks (`StubIntlBackend`).
 
 ```rust
-pub trait IcuProvider: Send + Sync + 'static {
+pub trait IntlBackend: Send + Sync + 'static {
     fn weekday_short_label(&self, weekday: Weekday, locale: &Locale) -> String;
     fn weekday_long_label(&self, weekday: Weekday, locale: &Locale) -> String;
     fn month_long_name(&self, month: u8, locale: &Locale) -> String;
@@ -3282,8 +3284,9 @@ pub trait IcuProvider: Send + Sync + 'static {
 
 Current behavior requirements:
 
-- the pure calendar API must work without `IcuProvider`
-- default trait implementations for calendar methods delegate to the pure calendar API
+- the pure calendar API must work without `IntlBackend`
+- only the pure-calendar adapter methods may use default trait implementations, and those defaults delegate to the pure calendar API
+- locale-facing formatting and metadata methods (`weekday_*`, `month_long_name`, day-period parsing/formatting, digit formatting, `hour_cycle`, and `week_info`) are required provider responsibilities and must be implemented explicitly by each concrete provider
 - backend providers may override those methods for performance or platform normalization, but must preserve the public `CalendarDate` contract
 - locale-week queries such as `start_of_week(...)`, `end_of_week(...)`, and `get_weeks_in_month(...)` still rely on provider week data
 - `week_info(...)` is the provider entry point for locale first-day-of-week and weekend metadata; `first_day_of_week(...)` is a convenience wrapper over it
@@ -3291,13 +3294,13 @@ Current behavior requirements:
 
 #### 9.5.1 Stub implementation
 
-`StubIcuProvider` remains the default no-backend provider. It supplies English fallback labels and delegates calendar compatibility methods to the pure shared calendar API.
+`StubIntlBackend` remains the default no-backend provider. It supplies English fallback labels and delegates calendar compatibility methods to the pure shared calendar API.
 
 #### 9.5.2 ICU4X provider
 
-`Icu4xProvider` is the production locale-data backend for native and compiled-data builds.
+`Icu4xBackend` is the production locale-data backend for native and compiled-data builds.
 It may use ICU4X data for formatting, week info, and locale preferences, but calendar conversion and validation must still resolve to the same public `CalendarDate` semantics as the pure engine.
 
 #### 9.5.3 Web Intl provider
 
-`WebIntlProvider` is the browser-facing formatting backend for `wasm32` builds. It may normalize browser `Intl` output back into ars-i18n's public era and month-code model, but it does not redefine the public calendar contract.
+`WebIntlBackend` is the browser-facing formatting backend for `wasm32` builds. It may normalize browser `Intl` output back into ars-i18n's public era and month-code model, but it does not redefine the public calendar contract.

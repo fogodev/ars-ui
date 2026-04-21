@@ -10,7 +10,7 @@ use super::{
 };
 #[cfg(feature = "std")]
 use super::{Disambiguation, TimeZoneId, to_calendar_date_time, to_zoned, to_zoned_date_time};
-use crate::{Locale, StubIcuProvider};
+use crate::{Locale, StubIntlBackend};
 
 fn gregorian_date(year: i32, month: u8, day: u8) -> CalendarDate {
     CalendarDate::new_gregorian(year, month, day).expect("Gregorian fixture should validate")
@@ -374,7 +374,7 @@ fn time_and_date_time_support_add_set_and_cycle() {
 
 #[test]
 fn query_helpers_operate_on_calendar_dates_and_date_times() {
-    let provider = StubIcuProvider;
+    let backend = StubIntlBackend;
 
     let locale = Locale::parse("en-US").expect("test locale should parse");
 
@@ -401,24 +401,24 @@ fn query_helpers_operate_on_calendar_dates_and_date_times() {
     assert_eq!(year_start.to_iso8601(), "2024-01-01");
     assert_eq!(year_end.to_iso8601(), "2024-12-31");
 
-    let week_start = queries::start_of_week(&date_time, &locale, &provider);
+    let week_start = queries::start_of_week(&date_time, &locale, &backend);
 
-    let week_end = queries::end_of_week(&date_time, &locale, &provider);
+    let week_end = queries::end_of_week(&date_time, &locale, &backend);
 
     assert_eq!(week_start.date().to_iso8601(), "2024-03-10");
     assert_eq!(week_end.date().to_iso8601(), "2024-03-16");
     assert_eq!(week_start.time().hour(), 9);
-    assert_eq!(queries::get_day_of_week(&date, &locale, &provider), 5);
-    assert_eq!(queries::get_weeks_in_month(&date, &locale, &provider), 6);
-    assert!(queries::is_weekday(&date, &locale, &provider));
-    assert!(!queries::is_weekend(&date, &locale, &provider));
+    assert_eq!(queries::get_day_of_week(&date, &locale, &backend), 5);
+    assert_eq!(queries::get_weeks_in_month(&date, &locale, &backend), 6);
+    assert!(queries::is_weekday(&date, &locale, &backend));
+    assert!(!queries::is_weekend(&date, &locale, &backend));
     assert_eq!(queries::min_date(&date, &month_end), date);
     assert_eq!(queries::max_date(&date, &month_end), month_end);
 }
 
 #[test]
 fn query_helpers_follow_react_aria_calendar_and_locale_semantics() {
-    let provider = StubIcuProvider;
+    let backend = StubIntlBackend;
 
     let en_us = Locale::parse("en-US").expect("test locale should parse");
 
@@ -437,27 +437,27 @@ fn query_helpers_follow_react_aria_calendar_and_locale_semantics() {
     assert!(queries::is_same_month(&gregorian, &islamic));
     assert!(!queries::is_equal_month(&gregorian, &islamic));
 
-    assert_eq!(queries::get_day_of_week(&gregorian, &en_us, &provider), 0);
-    assert_eq!(queries::get_day_of_week(&gregorian, &fr_fr, &provider), 6);
+    assert_eq!(queries::get_day_of_week(&gregorian, &en_us, &backend), 0);
+    assert_eq!(queries::get_day_of_week(&gregorian, &fr_fr, &backend), 6);
 
-    assert!(queries::is_weekend(&gregorian, &en_us, &provider));
-    assert!(!queries::is_weekend(&gregorian, &he_il, &provider));
-    assert!(queries::is_weekday(&gregorian, &he_il, &provider));
+    assert!(queries::is_weekend(&gregorian, &en_us, &backend));
+    assert!(!queries::is_weekend(&gregorian, &he_il, &backend));
+    assert!(queries::is_weekday(&gregorian, &he_il, &backend));
     assert_eq!(
-        queries::start_of_week(&gregorian, &en_us_monday, &provider).to_iso8601(),
+        queries::start_of_week(&gregorian, &en_us_monday, &backend).to_iso8601(),
         "2024-03-04"
     );
     assert_eq!(
-        queries::get_day_of_week(&gregorian, &en_us_monday, &provider),
+        queries::get_day_of_week(&gregorian, &en_us_monday, &backend),
         6
     );
 
     let march = gregorian_date(2024, 3, 15);
 
-    assert_eq!(queries::get_weeks_in_month(&march, &en_us, &provider), 6);
-    assert_eq!(queries::get_weeks_in_month(&march, &fr_fr, &provider), 5);
+    assert_eq!(queries::get_weeks_in_month(&march, &en_us, &backend), 6);
+    assert_eq!(queries::get_weeks_in_month(&march, &fr_fr, &backend), 5);
     assert_eq!(
-        queries::get_weeks_in_month(&march, &en_us_monday, &provider),
+        queries::get_weeks_in_month(&march, &en_us_monday, &backend),
         5
     );
 }
@@ -594,6 +594,7 @@ fn native_interop_helpers_convert_to_system_time_without_exposing_temporal_types
 #[test]
 fn zoned_date_time_and_local_zone_override_work() {
     let time_zone = TimeZoneId::new("America/New_York").expect("zone should validate");
+
     let local = CalendarDateTime::new(
         gregorian_date(2024, 3, 10),
         Time::new(1, 30, 0, 0).expect("time should validate"),

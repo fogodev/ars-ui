@@ -516,7 +516,7 @@ impl ars_core::Machine for Machine {
         let date_value = value.get().as_ref().map(|dt| dt.date.clone());
         let time_value = value.get().as_ref().map(|dt| dt.time);
 
-        let resolved_cycle = props.hour_cycle.unwrap_or_else(|| locale.hour_cycle(&*env.icu_provider));
+        let resolved_cycle = props.hour_cycle.unwrap_or_else(|| locale.hour_cycle(&*env.intl_backend));
 
         let date_segments = Machine::build_date_segments(&locale, &date_value);
         let time_segments = Machine::build_time_segments(

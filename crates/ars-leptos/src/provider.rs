@@ -4,14 +4,17 @@
 //! exposes adapter-level helpers for locale, ICU, message resolution, and
 //! reactive application text rendering.
 
-use std::sync::Arc;
+use std::{
+    fmt::{self, Debug},
+    sync::Arc,
+};
 
 use ars_core::{
     ColorMode, I18nRegistries, PlatformEffects, StyleStrategy,
     resolve_messages as core_resolve_messages,
 };
 use ars_i18n::{
-    Direction, IcuProvider, Locale, NumberFormatOptions, NumberFormatter, StubIcuProvider,
+    Direction, IntlBackend, Locale, NumberFormatOptions, NumberFormatter, StubIntlBackend,
     Translate, locales,
 };
 use leptos::{prelude::*, reactive::owner::LocalStorage};
@@ -47,7 +50,7 @@ pub struct ArsContext {
     pub platform: Arc<dyn PlatformEffects>,
 
     /// ICU-backed locale data provider.
-    pub icu_provider: Arc<dyn IcuProvider>,
+    pub intl_backend: Arc<dyn IntlBackend>,
 
     /// Application-owned message registries.
     pub i18n_registries: Arc<I18nRegistries>,
@@ -56,8 +59,8 @@ pub struct ArsContext {
     style_strategy: StyleStrategy,
 }
 
-impl std::fmt::Debug for ArsContext {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Debug for ArsContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ArsContext")
             .field("locale", &self.locale)
             .field("direction", &self.direction)
@@ -68,7 +71,7 @@ impl std::fmt::Debug for ArsContext {
             .field("portal_container_id", &self.portal_container_id)
             .field("root_node_id", &self.root_node_id)
             .field("platform", &"Arc(..)")
-            .field("icu_provider", &"Arc(..)")
+            .field("intl_backend", &"Arc(..)")
             .field("i18n_registries", &"Arc(..)")
             .field("style_strategy", &self.style_strategy)
             .finish()
@@ -92,7 +95,7 @@ impl ArsContext {
         portal_container_id: Option<String>,
         root_node_id: Option<String>,
         platform: Arc<dyn PlatformEffects>,
-        icu_provider: Arc<dyn IcuProvider>,
+        intl_backend: Arc<dyn IntlBackend>,
         i18n_registries: Arc<I18nRegistries>,
         style_strategy: StyleStrategy,
     ) -> Self {
@@ -106,7 +109,7 @@ impl ArsContext {
             portal_container_id: Signal::stored(portal_container_id),
             root_node_id: Signal::stored(root_node_id),
             platform,
-            icu_provider,
+            intl_backend,
             i18n_registries,
             style_strategy,
         }
@@ -155,14 +158,14 @@ pub fn use_locale() -> Signal<Locale> {
 
 /// Resolves the current ICU provider from provider context.
 #[must_use]
-pub fn use_icu_provider() -> Arc<dyn IcuProvider> {
+pub fn use_intl_backend() -> Arc<dyn IntlBackend> {
     current_ars_context().map_or_else(
-        || -> Arc<dyn IcuProvider> {
-            warn_missing_provider("use_icu_provider");
+        || -> Arc<dyn IntlBackend> {
+            warn_missing_provider("use_intl_backend");
 
-            Arc::new(StubIcuProvider)
+            Arc::new(StubIntlBackend)
         },
-        |ctx| -> Arc<dyn IcuProvider> { Arc::clone(&ctx.icu_provider) },
+        |ctx| -> Arc<dyn IntlBackend> { Arc::clone(&ctx.intl_backend) },
     )
 }
 
@@ -191,7 +194,9 @@ where
     F: Fn() -> NumberFormatOptions + 'static,
 {
     let explicit_locale = adapter_props_locale.cloned();
+
     let locale = use_locale();
+
     let cache =
         StoredValue::<Option<(Locale, NumberFormatOptions, NumberFormatter)>, LocalStorage>::new_local(
             None,
@@ -252,9 +257,9 @@ pub fn use_messages<M: ars_core::ComponentMessages + Send + Sync + 'static>(
 fn translated_text<T: Translate + Send + Sync + 'static>(msg: T) -> impl Fn() -> String {
     let locale = use_locale();
 
-    let icu = use_icu_provider();
+    let intl_backend = use_intl_backend();
 
-    move || msg.translate(&locale.get(), &*icu)
+    move || msg.translate(&locale.get(), &*intl_backend)
 }
 
 /// Resolves application-owned translatable text into a reactive text node.
@@ -270,12 +275,12 @@ mod tests {
 
     use ars_core::{ColorMode, I18nRegistries, NullPlatformEffects, StyleStrategy};
     use ars_i18n::{
-        Direction, IcuProvider, Locale, NumberFormatOptions, StubIcuProvider, Translate, locales,
+        Direction, IntlBackend, Locale, NumberFormatOptions, StubIntlBackend, Translate, locales,
     };
     use leptos::prelude::{Get, GetUntracked, Memo, Owner, RwSignal, Set, Signal};
 
     use super::{
-        ArsContext, current_ars_context, resolve_locale, t, translated_text, use_icu_provider,
+        ArsContext, current_ars_context, resolve_locale, t, translated_text, use_intl_backend,
         use_locale, use_messages, use_number_formatter, use_resolved_number_formatter,
     };
 
@@ -300,7 +305,7 @@ mod tests {
     }
 
     impl Translate for AppText {
-        fn translate(&self, locale: &Locale, _icu: &dyn IcuProvider) -> String {
+        fn translate(&self, locale: &Locale, _intl: &dyn IntlBackend) -> String {
             match locale.language() {
                 "es" => String::from("Hola"),
                 _ => String::from("Hello"),
@@ -308,13 +313,50 @@ mod tests {
         }
     }
 
-    struct TestIcuProvider;
+    struct TestIntlBackend;
 
-    impl IcuProvider for TestIcuProvider {}
+    impl IntlBackend for TestIntlBackend {
+        fn weekday_short_label(&self, weekday: ars_i18n::Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_short_label(weekday, locale)
+        }
+
+        fn weekday_long_label(&self, weekday: ars_i18n::Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_long_label(weekday, locale)
+        }
+
+        fn month_long_name(&self, month: u8, locale: &Locale) -> String {
+            StubIntlBackend.month_long_name(month, locale)
+        }
+
+        fn day_period_label(&self, is_pm: bool, locale: &Locale) -> String {
+            StubIntlBackend.day_period_label(is_pm, locale)
+        }
+
+        fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
+            StubIntlBackend.day_period_from_char(ch, locale)
+        }
+
+        fn format_segment_digits(
+            &self,
+            value: u32,
+            min_digits: core::num::NonZero<u8>,
+            locale: &Locale,
+        ) -> String {
+            StubIntlBackend.format_segment_digits(value, min_digits, locale)
+        }
+
+        fn hour_cycle(&self, locale: &Locale) -> ars_i18n::HourCycle {
+            StubIntlBackend.hour_cycle(locale)
+        }
+
+        fn week_info(&self, locale: &Locale) -> ars_i18n::WeekInfo {
+            StubIntlBackend.week_info(locale)
+        }
+    }
 
     fn reactive_test_context(
         locale: Locale,
-        icu_provider: Arc<dyn IcuProvider>,
+        intl_backend: Arc<dyn IntlBackend>,
     ) -> (ArsContext, RwSignal<Locale>) {
         let locale_signal = RwSignal::new(locale);
 
@@ -328,12 +370,69 @@ mod tests {
             portal_container_id: Signal::stored(None),
             root_node_id: Signal::stored(None),
             platform: Arc::new(NullPlatformEffects),
-            icu_provider,
+            intl_backend,
             i18n_registries: Arc::new(I18nRegistries::new()),
             style_strategy: StyleStrategy::Inline,
         };
 
         (context, locale_signal)
+    }
+
+    #[test]
+    fn ars_context_debug_redacts_arc_backed_fields() {
+        let owner = Owner::new();
+
+        owner.with(|| {
+            let (context, _) = reactive_test_context(locales::en_us(), Arc::new(TestIntlBackend));
+
+            let debug = format!("{context:?}");
+
+            assert!(debug.contains("ArsContext"));
+            assert!(debug.contains("platform: \"Arc(..)\""));
+            assert!(debug.contains("intl_backend: \"Arc(..)\""));
+            assert!(debug.contains("i18n_registries: \"Arc(..)\""));
+        });
+    }
+
+    #[test]
+    fn test_intl_backend_delegates_required_methods_to_stub() {
+        let backend = TestIntlBackend;
+
+        let locale = locales::en_us();
+
+        assert_eq!(
+            backend.weekday_short_label(ars_i18n::Weekday::Monday, &locale),
+            StubIntlBackend.weekday_short_label(ars_i18n::Weekday::Monday, &locale)
+        );
+        assert_eq!(
+            backend.weekday_long_label(ars_i18n::Weekday::Monday, &locale),
+            StubIntlBackend.weekday_long_label(ars_i18n::Weekday::Monday, &locale)
+        );
+        assert_eq!(
+            backend.month_long_name(5, &locale),
+            StubIntlBackend.month_long_name(5, &locale)
+        );
+        assert_eq!(
+            backend.day_period_label(false, &locale),
+            StubIntlBackend.day_period_label(false, &locale)
+        );
+        assert_eq!(backend.day_period_from_char('p', &locale), Some(true));
+        assert_eq!(
+            backend.format_segment_digits(
+                7,
+                core::num::NonZero::new(2).expect("minimum digits should be non-zero"),
+                &locale,
+            ),
+            "07"
+        );
+        assert_eq!(
+            backend.hour_cycle(&locale),
+            StubIntlBackend.hour_cycle(&locale)
+        );
+        assert_eq!(
+            backend.week_info(&locale),
+            StubIntlBackend.week_info(&locale)
+        );
     }
 
     fn direction_from_locale(locale: &Locale) -> Direction {
@@ -346,9 +445,9 @@ mod tests {
 
     fn test_context_with_defaults(
         locale: Locale,
-        icu_provider: Arc<dyn IcuProvider>,
+        intl_backend: Arc<dyn IntlBackend>,
     ) -> ArsContext {
-        let (context, _) = reactive_test_context(locale, icu_provider);
+        let (context, _) = reactive_test_context(locale, intl_backend);
 
         context
     }
@@ -369,7 +468,7 @@ mod tests {
         owner.with(|| {
             crate::provide_ars_context(test_context_with_defaults(
                 Locale::parse("fr-FR").expect("locale should parse"),
-                Arc::new(StubIcuProvider),
+                Arc::new(StubIntlBackend),
             ));
 
             let override_locale = Locale::parse("pt-BR").expect("locale should parse");
@@ -388,7 +487,7 @@ mod tests {
 
             crate::provide_ars_context(test_context_with_defaults(
                 Locale::parse("fr-FR").expect("locale should parse"),
-                Arc::new(StubIcuProvider),
+                Arc::new(StubIntlBackend),
             ));
 
             let current = current_ars_context().expect("provider context should exist");
@@ -398,30 +497,30 @@ mod tests {
     }
 
     #[test]
-    fn use_icu_provider_reads_context_value() {
+    fn use_intl_backend_reads_context_value() {
         let owner = Owner::new();
 
         owner.with(|| {
-            let expected: Arc<dyn IcuProvider> = Arc::new(TestIcuProvider);
+            let expected: Arc<dyn IntlBackend> = Arc::new(TestIntlBackend);
 
             crate::provide_ars_context(test_context_with_defaults(
                 locales::en_us(),
                 Arc::clone(&expected),
             ));
 
-            assert!(Arc::ptr_eq(&use_icu_provider(), &expected));
+            assert!(Arc::ptr_eq(&use_intl_backend(), &expected));
         });
     }
 
     #[test]
-    fn use_icu_provider_falls_back_without_provider() {
+    fn use_intl_backend_falls_back_without_provider() {
         let owner = Owner::new();
 
         owner.with(|| {
-            let provider = use_icu_provider();
+            let backend = use_intl_backend();
 
             assert_eq!(
-                AppText::Greeting.translate(&locales::en_us(), &*provider),
+                AppText::Greeting.translate(&locales::en_us(), &*backend),
                 "Hello"
             );
         });
@@ -453,7 +552,7 @@ mod tests {
                 None,
                 None,
                 Arc::new(NullPlatformEffects),
-                Arc::new(StubIcuProvider),
+                Arc::new(StubIntlBackend),
                 Arc::new(registries),
                 StyleStrategy::Inline,
             ));
@@ -485,7 +584,7 @@ mod tests {
 
         owner.with(|| {
             let (context, locale_signal) =
-                reactive_test_context(locales::en_us(), Arc::new(StubIcuProvider));
+                reactive_test_context(locales::en_us(), Arc::new(StubIntlBackend));
 
             crate::provide_ars_context(context);
 
@@ -517,7 +616,7 @@ mod tests {
         owner.with(|| {
             crate::provide_ars_context(test_context_with_defaults(
                 locales::de_de(),
-                Arc::new(StubIcuProvider),
+                Arc::new(StubIntlBackend),
             ));
 
             let formatter = use_number_formatter(NumberFormatOptions::default);
@@ -532,7 +631,7 @@ mod tests {
 
         owner.with(|| {
             let (context, locale_signal) =
-                reactive_test_context(locales::en_us(), Arc::new(StubIcuProvider));
+                reactive_test_context(locales::en_us(), Arc::new(StubIntlBackend));
 
             crate::provide_ars_context(context);
 
@@ -547,13 +646,33 @@ mod tests {
     }
 
     #[test]
+    fn use_number_formatter_reuses_cached_formatter_for_identical_inputs() {
+        let owner = Owner::new();
+
+        owner.with(|| {
+            crate::provide_ars_context(test_context_with_defaults(
+                locales::en_us(),
+                Arc::new(StubIntlBackend),
+            ));
+
+            let formatter = use_number_formatter(NumberFormatOptions::default);
+
+            let first = formatter.get_untracked();
+            let second = formatter.get_untracked();
+
+            assert_eq!(first, second);
+            assert_eq!(second.format(1234.56), "1,234.56");
+        });
+    }
+
+    #[test]
     fn use_resolved_number_formatter_prefers_explicit_locale_override() {
         let owner = Owner::new();
 
         owner.with(|| {
             crate::provide_ars_context(test_context_with_defaults(
                 locales::fr(),
-                Arc::new(StubIcuProvider),
+                Arc::new(StubIntlBackend),
             ));
 
             let explicit = locales::de_de();
@@ -572,7 +691,7 @@ mod tests {
         owner.with(|| {
             crate::provide_ars_context(test_context_with_defaults(
                 locales::en_us(),
-                Arc::new(StubIcuProvider),
+                Arc::new(StubIntlBackend),
             ));
 
             drop(t(AppText::Greeting));
@@ -590,13 +709,13 @@ mod wasm_tests {
 
     use ars_core::{ColorMode, I18nRegistries, NullPlatformEffects, StyleStrategy};
     use ars_i18n::{
-        Direction, IcuProvider, Locale, NumberFormatOptions, StubIcuProvider, Translate, locales,
+        Direction, IntlBackend, Locale, NumberFormatOptions, StubIntlBackend, Translate, locales,
     };
     use leptos::prelude::{Get, GetUntracked, Memo, Owner, RwSignal, Set, Signal};
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
     use super::{
-        ArsContext, current_ars_context, resolve_locale, t, translated_text, use_icu_provider,
+        ArsContext, current_ars_context, resolve_locale, t, translated_text, use_intl_backend,
         use_locale, use_number_formatter,
     };
 
@@ -608,7 +727,7 @@ mod wasm_tests {
     }
 
     impl Translate for AppText {
-        fn translate(&self, locale: &Locale, _icu: &dyn IcuProvider) -> String {
+        fn translate(&self, locale: &Locale, _intl: &dyn IntlBackend) -> String {
             match locale.language() {
                 "es" => String::from("Hola"),
                 _ => String::from("Hello"),
@@ -616,9 +735,46 @@ mod wasm_tests {
         }
     }
 
-    struct TestIcuProvider;
+    struct TestIntlBackend;
 
-    impl IcuProvider for TestIcuProvider {}
+    impl IntlBackend for TestIntlBackend {
+        fn weekday_short_label(&self, weekday: ars_i18n::Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_short_label(weekday, locale)
+        }
+
+        fn weekday_long_label(&self, weekday: ars_i18n::Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_long_label(weekday, locale)
+        }
+
+        fn month_long_name(&self, month: u8, locale: &Locale) -> String {
+            StubIntlBackend.month_long_name(month, locale)
+        }
+
+        fn day_period_label(&self, is_pm: bool, locale: &Locale) -> String {
+            StubIntlBackend.day_period_label(is_pm, locale)
+        }
+
+        fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
+            StubIntlBackend.day_period_from_char(ch, locale)
+        }
+
+        fn format_segment_digits(
+            &self,
+            value: u32,
+            min_digits: core::num::NonZero<u8>,
+            locale: &Locale,
+        ) -> String {
+            StubIntlBackend.format_segment_digits(value, min_digits, locale)
+        }
+
+        fn hour_cycle(&self, locale: &Locale) -> ars_i18n::HourCycle {
+            StubIntlBackend.hour_cycle(locale)
+        }
+
+        fn week_info(&self, locale: &Locale) -> ars_i18n::WeekInfo {
+            StubIntlBackend.week_info(locale)
+        }
+    }
 
     fn direction_from_locale(locale: &Locale) -> Direction {
         if locale.direction().is_rtl() {
@@ -630,7 +786,7 @@ mod wasm_tests {
 
     fn reactive_test_context(
         locale: Locale,
-        icu_provider: Arc<dyn IcuProvider>,
+        intl_backend: Arc<dyn IntlBackend>,
     ) -> (ArsContext, RwSignal<Locale>) {
         let locale_signal = RwSignal::new(locale);
 
@@ -644,7 +800,7 @@ mod wasm_tests {
             portal_container_id: Signal::stored(None),
             root_node_id: Signal::stored(None),
             platform: Arc::new(NullPlatformEffects),
-            icu_provider,
+            intl_backend,
             i18n_registries: Arc::new(I18nRegistries::new()),
             style_strategy: StyleStrategy::Inline,
         };
@@ -658,7 +814,7 @@ mod wasm_tests {
 
         owner.with(|| {
             let (context, locale_signal) =
-                reactive_test_context(locales::en_us(), Arc::new(StubIcuProvider));
+                reactive_test_context(locales::en_us(), Arc::new(StubIntlBackend));
 
             crate::provide_ars_context(context);
 
@@ -681,7 +837,7 @@ mod wasm_tests {
         owner.with(|| {
             assert!(current_ars_context().is_none());
 
-            let (context, _) = reactive_test_context(locales::en_us(), Arc::new(StubIcuProvider));
+            let (context, _) = reactive_test_context(locales::en_us(), Arc::new(StubIntlBackend));
 
             crate::provide_ars_context(context);
 
@@ -692,19 +848,19 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
-    fn locale_and_icu_provider_are_readable_on_wasm() {
+    fn locale_and_intl_backend_are_readable_on_wasm() {
         let owner = Owner::new();
 
         owner.with(|| {
-            let expected_provider: Arc<dyn IcuProvider> = Arc::new(TestIcuProvider);
+            let expected_backend: Arc<dyn IntlBackend> = Arc::new(TestIntlBackend);
 
             let (context, _) =
-                reactive_test_context(locales::en_us(), Arc::clone(&expected_provider));
+                reactive_test_context(locales::en_us(), Arc::clone(&expected_backend));
 
             crate::provide_ars_context(context);
 
             assert_eq!(use_locale().get_untracked().to_bcp47(), "en-US");
-            assert!(Arc::ptr_eq(&use_icu_provider(), &expected_provider));
+            assert!(Arc::ptr_eq(&use_intl_backend(), &expected_backend));
         });
     }
 
@@ -718,14 +874,14 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
-    fn use_icu_provider_falls_back_without_provider_on_wasm() {
+    fn use_intl_backend_falls_back_without_provider_on_wasm() {
         let owner = Owner::new();
 
         owner.with(|| {
-            let provider = use_icu_provider();
+            let backend = use_intl_backend();
 
             assert_eq!(
-                AppText::Greeting.translate(&locales::en_us(), &*provider),
+                AppText::Greeting.translate(&locales::en_us(), &*backend),
                 "Hello"
             );
         });
@@ -736,7 +892,7 @@ mod wasm_tests {
         let owner = Owner::new();
 
         owner.with(|| {
-            let (context, _) = reactive_test_context(locales::en_us(), Arc::new(StubIcuProvider));
+            let (context, _) = reactive_test_context(locales::en_us(), Arc::new(StubIntlBackend));
 
             crate::provide_ars_context(context);
 
@@ -764,7 +920,7 @@ mod wasm_tests {
 
         owner.with(|| {
             let (context, locale_signal) =
-                reactive_test_context(locales::en_us(), Arc::new(StubIcuProvider));
+                reactive_test_context(locales::en_us(), Arc::new(StubIntlBackend));
 
             crate::provide_ars_context(context);
 

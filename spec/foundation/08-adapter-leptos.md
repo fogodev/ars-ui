@@ -67,7 +67,7 @@ The central primitive. Creates a `Service<M>`, wraps it in a reactive signal, an
 use std::rc::Rc;
 use leptos::prelude::*;
 use ars_core::{Machine, Service, Env, Arc};
-use ars_i18n::IcuProvider;
+use ars_i18n::IntlBackend;
 
 /// Return type from `use_machine`.
 #[derive(Clone, Copy)]
@@ -288,11 +288,11 @@ where
 
     // Resolve environment values from ArsProvider context.
     // These are snapshot reads — Leptos components run once, so each component
-    // gets the locale/icu_provider/messages at mount time.
+    // gets the locale/intl_backend/messages at mount time.
     let locale = resolve_locale(None);
-    let icu_provider = use_icu_provider();
+    let intl_backend = use_intl_backend();
     let messages = use_messages::<M::Messages>(None, Some(&locale));
-    let env = Env { locale, icu_provider };
+    let env = Env { locale, intl_backend };
 
     // Create the service once — runs only on component initialization.
     // **Safety**: The `init()` function must not call `api.send()` or otherwise
@@ -1759,7 +1759,7 @@ trait object.
 ```rust
 use std::sync::Arc;
 
-use ars_i18n::{Direction,IcuProvider, Locale};
+use ars_i18n::{Direction,IntlBackend, Locale};
 use ars_core::{ColorMode, PlatformEffects, StyleStrategy};
 
 /// Reactive environment context published by the Leptos ArsProvider adapter.
@@ -1774,7 +1774,7 @@ pub struct ArsContext {
     pub portal_container_id: Signal<Option<String>>,
     pub root_node_id: Signal<Option<String>>,
     pub platform: Arc<dyn PlatformEffects>,
-    pub icu_provider: Arc<dyn IcuProvider>,
+    pub intl_backend: Arc<dyn IntlBackend>,
     pub i18n_registries: Arc<I18nRegistries>,
     /// Non-reactive style strategy — set once at provider mount time.
     style_strategy: StyleStrategy,
@@ -1963,8 +1963,8 @@ use ars_i18n::Translate;
 #[must_use]
 pub fn t<T: Translate + Send + Sync + 'static>(msg: T) -> impl IntoView {
     let locale = use_locale();
-    let icu = use_icu_provider();
-    move || msg.translate(&locale.get(), &*icu)
+    let intl_backend = use_intl_backend();
+    move || msg.translate(&locale.get(), &*intl_backend)
 }
 ```
 

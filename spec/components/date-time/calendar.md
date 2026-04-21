@@ -100,8 +100,8 @@ pub struct Context {
     pub locale: Locale,
     /// Resolved translatable messages.
     pub messages: Messages,
-    /// ICU data provider for locale-dependent formatting (month/weekday names, etc.).
-    pub provider: Arc<dyn IcuProvider>,
+    /// Intl backend for locale-dependent formatting (month/weekday names, etc.).
+    pub intl_backend: Arc<dyn IntlBackend>,
     /// Override for first day of week (falls back to locale default).
     pub first_day_of_week: Weekday,
     /// Right-to-left layout.
@@ -283,7 +283,7 @@ impl Context {
         (0..7)
             .map(|i| {
                 let wd = Weekday::from_u8((start + i) % 7);
-                let label = wd.short_label(&*self.provider, &self.locale);
+                let label = wd.short_label(&*self.intl_backend, &self.locale);
                 (wd, label)
             })
             .collect()
@@ -397,7 +397,7 @@ impl ars_core::Machine for Machine {
             max: props.max.clone(),
             locale,
             messages,
-            provider: env.icu_provider.clone(),
+            intl_backend: env.intl_backend.clone(),
             first_day_of_week: first_day,
             is_rtl: props.is_rtl,
             disabled: props.disabled,
@@ -464,12 +464,12 @@ impl ars_core::Machine for Machine {
                 }).with_effect(PendingEffect::new("announce-month", |ctx, _props, _send| {
                     let platform = use_platform_effects();
                     let label = if ctx.visible_months > 1 {
-                        let first = format!("{} {}", month_long_name(&*ctx.provider, ctx.visible_month, &ctx.locale), ctx.visible_year);
+                        let first = format!("{} {}", month_long_name(&*ctx.intl_backend, ctx.visible_month, &ctx.locale), ctx.visible_year);
                         let (lm, ly) = ctx.month_year_at_offset(ctx.visible_months - 1);
                         let sep = (ctx.messages.month_range_separator)(&ctx.locale);
-                        format!("{}{}{} {}", first, sep, month_long_name(&*ctx.provider, lm, &ctx.locale), ly)
+                        format!("{}{}{} {}", first, sep, month_long_name(&*ctx.intl_backend, lm, &ctx.locale), ly)
                     } else {
-                        format!("{} {}", month_long_name(&*ctx.provider, ctx.visible_month, &ctx.locale), ctx.visible_year)
+                        format!("{} {}", month_long_name(&*ctx.intl_backend, ctx.visible_month, &ctx.locale), ctx.visible_year)
                     };
                     platform.announce(&label);
                     no_cleanup()
@@ -486,12 +486,12 @@ impl ars_core::Machine for Machine {
                 }).with_effect(PendingEffect::new("announce-month", |ctx, _props, _send| {
                     let platform = use_platform_effects();
                     let label = if ctx.visible_months > 1 {
-                        let first = format!("{} {}", month_long_name(&*ctx.provider, ctx.visible_month, &ctx.locale), ctx.visible_year);
+                        let first = format!("{} {}", month_long_name(&*ctx.intl_backend, ctx.visible_month, &ctx.locale), ctx.visible_year);
                         let (lm, ly) = ctx.month_year_at_offset(ctx.visible_months - 1);
                         let sep = (ctx.messages.month_range_separator)(&ctx.locale);
-                        format!("{}{}{} {}", first, sep, month_long_name(&*ctx.provider, lm, &ctx.locale), ly)
+                        format!("{}{}{} {}", first, sep, month_long_name(&*ctx.intl_backend, lm, &ctx.locale), ly)
                     } else {
-                        format!("{} {}", month_long_name(&*ctx.provider, ctx.visible_month, &ctx.locale), ctx.visible_year)
+                        format!("{} {}", month_long_name(&*ctx.intl_backend, ctx.visible_month, &ctx.locale), ctx.visible_year)
                     };
                     platform.announce(&label);
                     no_cleanup()
@@ -750,7 +750,7 @@ impl<'a> Api<'a> {
 
     /// Formatted heading text: e.g. "January 2024".
     pub fn heading_text(&self) -> String {
-        let month_name = month_long_name(&*self.ctx.provider, self.ctx.visible_month, &self.ctx.locale);
+        let month_name = month_long_name(&*self.ctx.intl_backend, self.ctx.visible_month, &self.ctx.locale);
         format!("{} {}", month_name, self.ctx.visible_year)
     }
 
@@ -809,7 +809,7 @@ impl<'a> Api<'a> {
     /// Heading text for the month at the given offset.
     pub fn heading_text_for(&self, offset: usize) -> String {
         let (month, year) = self.ctx.month_year_at_offset(offset);
-        format!("{} {}", month_long_name(&*self.ctx.provider, month, &self.ctx.locale), year)
+        format!("{} {}", month_long_name(&*self.ctx.intl_backend, month, &self.ctx.locale), year)
     }
 
     /// Heading text attributes for a per-grid heading.
@@ -886,7 +886,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Scope, "col");
-        attrs.set(HtmlAttr::Abbr, weekday.long_label(&*self.ctx.provider, &self.ctx.locale));
+        attrs.set(HtmlAttr::Abbr, weekday.long_label(&*self.ctx.intl_backend, &self.ctx.locale));
         attrs
     }
 
@@ -960,10 +960,10 @@ impl<'a> Api<'a> {
         // the restriction without requiring the user to attempt selection.
         let base_label = format!(
             "{} {} {}, {}",
-            month_long_name(&*self.ctx.provider, date.month.get(), &self.ctx.locale),
+            month_long_name(&*self.ctx.intl_backend, date.month.get(), &self.ctx.locale),
             date.day.get(),
             date.year,
-            date.weekday().long_label(&*self.ctx.provider, &self.ctx.locale),
+            date.weekday().long_label(&*self.ctx.intl_backend, &self.ctx.locale),
         );
         let label = if unavailable {
             format!("{} (unavailable)", base_label)
@@ -1269,7 +1269,7 @@ pub struct Messages {
     /// Separator between month names in multi-month range heading (e.g., " – ").
     pub month_range_separator: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
 }
-// Month names, weekday names, and abbreviations are resolved from the IcuProvider
+// Month names, weekday names, and abbreviations are resolved from the IntlBackend
 // (via `month_long_name()`, `wd.short_label()`, etc.) — not stored in Messages.
 
 impl Default for Messages {

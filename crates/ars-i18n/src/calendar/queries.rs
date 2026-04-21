@@ -3,7 +3,7 @@
 use super::{CalendarDate, DateValue};
 #[cfg(feature = "std")]
 use super::{CalendarDateTime, DateDuration, Disambiguation, Time, TimeZoneId};
-use crate::{CalendarSystem, IcuProvider, Locale, Weekday};
+use crate::{CalendarSystem, IntlBackend, Locale, Weekday};
 
 /// Returns `true` when two values represent the same day in the first value's calendar.
 #[must_use]
@@ -159,10 +159,10 @@ pub fn end_of_year<T: DateValue>(date: &T) -> T {
 
 /// Returns the first day of the locale week containing the date.
 #[must_use]
-pub fn start_of_week<T: DateValue>(date: &T, locale: &Locale, provider: &dyn IcuProvider) -> T {
+pub fn start_of_week<T: DateValue>(date: &T, locale: &Locale, backend: &dyn IntlBackend) -> T {
     let current = date.date_value();
 
-    let first_day = provider.first_day_of_week(locale);
+    let first_day = backend.first_day_of_week(locale);
 
     let delta = weekday_index(current.weekday()) - weekday_index(first_day);
 
@@ -175,8 +175,8 @@ pub fn start_of_week<T: DateValue>(date: &T, locale: &Locale, provider: &dyn Icu
 
 /// Returns the last day of the locale week containing the date.
 #[must_use]
-pub fn end_of_week<T: DateValue>(date: &T, locale: &Locale, provider: &dyn IcuProvider) -> T {
-    let start = start_of_week(date, locale, provider).date_value();
+pub fn end_of_week<T: DateValue>(date: &T, locale: &Locale, backend: &dyn IntlBackend) -> T {
+    let start = start_of_week(date, locale, backend).date_value();
 
     let next = start.add_days(6).unwrap_or(start.clone());
 
@@ -185,8 +185,8 @@ pub fn end_of_week<T: DateValue>(date: &T, locale: &Locale, provider: &dyn IcuPr
 
 /// Returns the weekday index relative to the locale's first day of week.
 #[must_use]
-pub fn get_day_of_week(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvider) -> u8 {
-    let first_day = provider.week_info(locale).first_day;
+pub fn get_day_of_week(date: &CalendarDate, locale: &Locale, backend: &dyn IntlBackend) -> u8 {
+    let first_day = backend.week_info(locale).first_day;
 
     let offset = (weekday_index(date.weekday()) - weekday_index(first_day)).rem_euclid(7);
 
@@ -195,14 +195,14 @@ pub fn get_day_of_week(date: &CalendarDate, locale: &Locale, provider: &dyn IcuP
 
 /// Returns the number of calendar weeks that intersect the month.
 #[must_use]
-pub fn get_weeks_in_month(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvider) -> u8 {
+pub fn get_weeks_in_month(date: &CalendarDate, locale: &Locale, backend: &dyn IntlBackend) -> u8 {
     let month_start = start_of_month(date);
 
     let month_end = end_of_month(date);
 
-    let first_week_start = start_of_week(&month_start, locale, provider).date_value();
+    let first_week_start = start_of_week(&month_start, locale, backend).date_value();
 
-    let last_week_end = end_of_week(&month_end, locale, provider).date_value();
+    let last_week_end = end_of_week(&month_end, locale, backend).date_value();
 
     first_week_start
         .days_until(&last_week_end)
@@ -268,8 +268,8 @@ pub fn max_date<T: DateValue>(a: &T, b: &T) -> T {
 
 /// Returns `true` when the given date falls on the locale weekend.
 #[must_use]
-pub fn is_weekend(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvider) -> bool {
-    let week_info = provider.week_info(locale);
+pub fn is_weekend(date: &CalendarDate, locale: &Locale, backend: &dyn IntlBackend) -> bool {
+    let week_info = backend.week_info(locale);
 
     let day = weekday_index(date.weekday());
 
@@ -286,8 +286,8 @@ pub fn is_weekend(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvid
 
 /// Returns `true` when the given date is not on the locale weekend.
 #[must_use]
-pub fn is_weekday(date: &CalendarDate, locale: &Locale, provider: &dyn IcuProvider) -> bool {
-    !is_weekend(date, locale, provider)
+pub fn is_weekday(date: &CalendarDate, locale: &Locale, backend: &dyn IntlBackend) -> bool {
+    !is_weekend(date, locale, backend)
 }
 
 const fn weekday_index(value: Weekday) -> i32 {
@@ -327,11 +327,44 @@ mod tests {
     use super::*;
     #[cfg(feature = "std")]
     use crate::TimeZoneId;
-    use crate::{CalendarDateFields, CalendarDateTime, Era, StubIcuProvider, Time};
+    use crate::{CalendarDateFields, CalendarDateTime, Era, StubIntlBackend, Time};
 
     struct WrapWeekendProvider;
 
-    impl IcuProvider for WrapWeekendProvider {
+    impl IntlBackend for WrapWeekendProvider {
+        fn weekday_short_label(&self, weekday: Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_short_label(weekday, locale)
+        }
+
+        fn weekday_long_label(&self, weekday: Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_long_label(weekday, locale)
+        }
+
+        fn month_long_name(&self, month: u8, locale: &Locale) -> String {
+            StubIntlBackend.month_long_name(month, locale)
+        }
+
+        fn day_period_label(&self, is_pm: bool, locale: &Locale) -> String {
+            StubIntlBackend.day_period_label(is_pm, locale)
+        }
+
+        fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
+            StubIntlBackend.day_period_from_char(ch, locale)
+        }
+
+        fn format_segment_digits(
+            &self,
+            value: u32,
+            min_digits: core::num::NonZero<u8>,
+            locale: &Locale,
+        ) -> String {
+            StubIntlBackend.format_segment_digits(value, min_digits, locale)
+        }
+
+        fn hour_cycle(&self, locale: &Locale) -> crate::HourCycle {
+            StubIntlBackend.hour_cycle(locale)
+        }
+
         fn week_info(&self, _locale: &Locale) -> crate::WeekInfo {
             crate::WeekInfo {
                 first_day: Weekday::Monday,
@@ -420,7 +453,7 @@ mod tests {
 
     #[test]
     fn week_helpers_preserve_time_components_and_cover_weekend_wrap_logic() {
-        let provider = StubIcuProvider;
+        let backend = StubIntlBackend;
 
         let locale = Locale::parse("ar-AE").expect("locale should parse");
 
@@ -429,19 +462,15 @@ mod tests {
             Time::new(9, 30, 0, 0).expect("time should validate"),
         );
 
-        let start = start_of_week(&date_time, &locale, &provider);
-        let end = end_of_week(&date_time, &locale, &provider);
+        let start = start_of_week(&date_time, &locale, &backend);
+        let end = end_of_week(&date_time, &locale, &backend);
 
         assert_eq!(start.time().hour(), 9);
         assert_eq!(start.time().minute(), 30);
         assert_eq!(end.time().hour(), 9);
-        assert!(is_weekend(&gregorian_date(2024, 3, 15), &locale, &provider));
-        assert!(is_weekend(&gregorian_date(2024, 3, 16), &locale, &provider));
-        assert!(!is_weekday(
-            &gregorian_date(2024, 3, 15),
-            &locale,
-            &provider
-        ));
+        assert!(is_weekend(&gregorian_date(2024, 3, 15), &locale, &backend));
+        assert!(is_weekend(&gregorian_date(2024, 3, 16), &locale, &backend));
+        assert!(!is_weekday(&gregorian_date(2024, 3, 15), &locale, &backend));
     }
 
     #[cfg(feature = "std")]
@@ -465,7 +494,7 @@ mod tests {
 
     #[test]
     fn comparison_and_weekend_helpers_cover_remaining_branch_shapes() {
-        let provider = StubIcuProvider;
+        let backend = StubIntlBackend;
 
         let wrap_provider = WrapWeekendProvider;
 
@@ -494,7 +523,7 @@ mod tests {
         assert_eq!(min_date(&same_day, &same_day).to_iso8601(), "2024-03-15");
         assert_eq!(max_date(&same_day, &same_day).to_iso8601(), "2024-03-15");
 
-        assert_eq!(get_day_of_week(&same_day, &locale, &provider), 5);
+        assert_eq!(get_day_of_week(&same_day, &locale, &backend), 5);
         assert!(is_weekend(
             &gregorian_date(2024, 3, 10),
             &locale,
