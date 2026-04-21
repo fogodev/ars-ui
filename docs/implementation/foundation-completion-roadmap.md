@@ -21,7 +21,7 @@ The project needs a fully stable foundation before component work starts. Compon
 | `ars-leptos`       | 1,195  | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, attr_map_to_leptos, use_style_strategy, AdapterCapabilities. Missing: ArsProvider context (#190), reactive props (#190), controlled value helper (#190), emit/emit_map (#191), event mapping (#191), nonce CSS collector (#191), safe event listeners (#191), LiveAnnouncer context bridge (#513)                                                                                                                                                                                         |
 | `ars-dioxus`       | 762    | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, attr_map_to_dioxus, use_style_strategy, AdapterCapabilities. Missing: ArsProvider context (#193), reactive props (#193), controlled value helper (#193), emit/emit_map (#194), event mapping (#194), nonce CSS collector (#194), safe event listeners (#194), LiveAnnouncer context bridge (#512), DioxusPlatform (#195), SSR hydration (#196), error boundary (#197)                                                                                                                     |
 | `ars-collections`  | 6,221  | 90%      | Key, Node, NodeType, Collection trait, StaticCollection, TreeCollection, CollectionBuilder, selection (Mode/Behavior/Set/State/DisabledBehavior), navigation helpers, typeahead, AsyncCollection/AsyncLoader, Virtualizer/LayoutStrategy/VirtualLayout, FilteredCollection, SortedCollection, CollationSupport (i18n). Missing: MutableListData/MutableTreeData, CollectionChangeAnnouncement/CollectionMessages, OnAction, DnD types                                                                                                          |
-| `ars-i18n`         | 1,928  | Partial  | Locale (ICU4X-backed), Direction, Orientation, NumberFormatter, CurrencyCode, BiDi isolation, Weekday, IcuProvider trait (stub), placeholder date/time types                                                                                                                                                                                                                                                                                                                                                                                   |
+| `ars-i18n`         | 1,928  | Partial  | Locale (ICU4X-backed), Direction, Orientation, NumberFormatter, CurrencyCode, BiDi isolation, Weekday, IntlBackend trait (stub), placeholder date/time types                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ### Architecture spec (01-architecture.md) completion — 2026-04-10 audit
 
@@ -908,7 +908,7 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 
 ### Wave 5: Browser Intl Backends
 
-**Goal:** Complete the `web-intl` i18n backend so WASM client builds can rely on browser `Intl` services behind the same public `ars-i18n` API surface established by the ICU4X tasks. Includes full parity for collation, case transformation, and IcuProvider.
+**Goal:** Complete the `web-intl` i18n backend so WASM client builds can rely on browser `Intl` services behind the same public `ars-i18n` API surface established by the ICU4X tasks. Includes full parity for collation, case transformation, and the `IntlBackend` trait.
 
 **Depends on:** `#75` plus the relevant Wave 4 i18n foundation tasks.
 
@@ -1091,8 +1091,8 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 - **Wave 4a (replaces #80):** #128 CalendarDate (5pts), #129 DateFormatter (3pts), #130 RelativeTimeFormatter (3pts)
 - **Wave 4b:** #131 Plural rules (3pts), #132 Layout geometry (2pts), #133 Case transformation (2pts), #134 LocaleStack (2pts)
 - **Wave 4c:** #135 MessagesRegistry (3pts), #136 StringCollator (3pts), #137 Translate trait (2pts)
-- **Wave 5a:** #138 IcuProvider+Icu4xProvider (5pts), #139 accept_language (2pts), #140 t() function (3pts)
-- **Wave 5b (web-intl parity):** #141 web-intl Collation (3pts), #142 web-intl Case (2pts), #143 WebIntlProvider (5pts)
+- **Wave 5a:** #138 IntlBackend+Icu4xBackend (5pts), #139 accept_language (2pts), #140 t() function (3pts)
+- **Wave 5b (web-intl parity):** #141 web-intl Collation (3pts), #142 web-intl Case (2pts), #143 WebIntlBackend (5pts)
 
 See epic #54 for the full wave structure, dependency graph, and ICU4X ↔ web-intl parity matrix.
 
@@ -1450,23 +1450,23 @@ See epic #54 for the full wave structure, dependency graph, and ICU4X ↔ web-in
   - Builds with `--no-default-features --features web-intl --target wasm32-unknown-unknown`.
 - Spec impact: `No` — spec §6.4 already updated with web-intl dispatch.
 
-#### W5-6: Implement WebIntlProvider for IcuProvider trait in ars-i18n
+#### W5-6: Implement WebIntlBackend for IntlBackend trait in ars-i18n
 
 - Points: `5`
 - Layer: `Subsystem`
 - Framework: `None`
 - Test tier: `Unit`
-- Depends on: #138 (IcuProvider full trait definition)
+- Depends on: #138 (IntlBackend full trait definition)
 - Spec refs:
   - `spec/foundation/04-internationalization.md` §9.5.4
-- Goal: implement browser-backed IcuProvider using Intl APIs for WASM client builds, providing full parity with Icu4xProvider.
+- Goal: implement browser-backed `IntlBackend` using Intl APIs for WASM client builds, providing full parity with `Icu4xBackend`.
 - Acceptance criteria:
-  - All 11 `IcuProvider` methods implemented under `web-intl`.
+  - All 11 `IntlBackend` methods implemented under `web-intl`.
   - Clean-mapping methods (weekday/month labels, digits, hourCycle) produce locale-correct output.
   - Fallback methods (max_months, days_in_month, convert_date) have documented strategies per spec §9.5.4.
-  - `default_provider()` returns `WebIntlProvider` under `web-intl`.
+  - `default_backend()` returns `WebIntlBackend` under `web-intl`.
   - Builds with `--no-default-features --features web-intl --target wasm32-unknown-unknown`.
-- Spec impact: `No` — spec §9.5.4 already added with full WebIntlProvider definition.
+- Spec impact: `No` — spec §9.5.4 already added with full `WebIntlBackend` definition.
 
 ---
 
@@ -1697,7 +1697,7 @@ follow-up discovered while implementing `#73` (2026-04-11).
 - Layer: `Adapter`
 - Framework: `Leptos`
 - Test tier: `Unit`
-- Depends on: none (all core dependencies exist: `Service::set_props()` in ars-core, `ArsContext` in ars-core, `Locale`/`IcuProvider`/`Direction` in ars-i18n)
+- Depends on: none (all core dependencies exist: `Service::set_props()` in ars-core, `ArsContext` in ars-core, `Locale`/`IntlBackend`/`Direction` in ars-i18n)
 - Spec refs:
   - `spec/foundation/08-adapter-leptos.md` §13 "ArsProvider Context" (L1721)
   - `spec/foundation/08-adapter-leptos.md` §13.1 `use_locale()` (L1764)

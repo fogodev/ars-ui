@@ -322,7 +322,7 @@ Exit criteria:
 - state machines (stateful components) match their spec §1 exactly
 - ConnectApi implementations produce correct ARIA attributes per spec §2
 - calendar correctly uses locale-aware first-day-of-week via WeekInfo
-- date validation respects per-calendar month/day bounds via IcuProvider
+- date validation respects per-calendar month/day bounds via IntlBackend
 - all public types documented per workspace `missing_docs` lint
 - all tests pass with zero warnings
 - spec and implementation remain aligned; any mismatch resolved in the same task
