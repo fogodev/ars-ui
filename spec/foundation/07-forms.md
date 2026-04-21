@@ -4079,10 +4079,11 @@ impl ars_core::Machine for Machine {
             }
             (_, Event::Reset) => {
                 let behavior = props.validation_behavior;
+                let validation_errors = props.validation_errors.clone();
                 Some(TransitionPlan::to(State::Idle).apply(move |ctx| {
                     ctx.is_submitting = false;
                     ctx.last_submit_succeeded = None;
-                    ctx.server_errors.clear();
+                    ctx.server_errors = validation_errors;
                     ctx.status_message = None;
                     ctx.validation_behavior = behavior;
                 }))
@@ -4223,7 +4224,7 @@ Framework adapters must:
 1. **Prevent default** on the `submit` event when `validation_behavior == Aria`
 2. **Run validation** on all registered fields in the `Context` before calling the user's submit callback
 3. **Inject server errors** into the appropriate `Field` components via `Event::SetServerErrors`
-4. **Reset all fields** on `Event::Reset`, clearing values and errors
+4. **Reset all fields** on `Event::Reset`, clearing transient local errors while reapplying declarative `Props.validation_errors`
 5. **Set `novalidate`** attribute on `<form>` when `validation_behavior == Aria`
 6. **Set `aria-busy="true"`** on the form root while `ctx.is_submitting == true`; disable the submit button and set `aria-disabled="true"`
 7. **Announce results** via the `StatusRegion`: on submit success, post a configurable success message; on submit failure with multiple errors, post "N errors found" before moving focus to the first invalid field

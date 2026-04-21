@@ -844,17 +844,35 @@ fn submit_during_submitting_is_ignored() {
 }
 
 #[test]
-fn reset_clears_server_errors_and_status() {
+fn reset_restores_controlled_server_errors_and_clears_status() {
+    let props = form::component::Props {
+        validation_errors: BTreeMap::from([
+            ("email".into(), vec!["taken".into()]),
+        ]),
+        ..Default::default()
+    };
+    let mut svc = Service::new(props, Env::default(), Default::default());
+    svc.send(form::component::Event::SetStatusMessage(Some("Error occurred".into())));
+
+    svc.send(form::component::Event::Reset);
+    assert_eq!(
+        svc.context().server_errors,
+        BTreeMap::from([("email".into(), vec!["taken".into()])]),
+        "Reset must preserve controlled server errors from props",
+    );
+    assert!(svc.context().status_message.is_none(), "Reset must clear status message");
+}
+
+#[test]
+fn reset_clears_uncontrolled_server_errors() {
     let props = form::component::Props::default();
     let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(form::component::Event::SetServerErrors(BTreeMap::from([
         ("email".into(), vec!["taken".into()]),
     ])));
-    svc.send(form::component::Event::SetStatusMessage(Some("Error occurred".into())));
 
     svc.send(form::component::Event::Reset);
-    assert!(svc.context().server_errors.is_empty(), "Reset must clear server errors");
-    assert!(svc.context().status_message.is_none(), "Reset must clear status message");
+    assert!(svc.context().server_errors.is_empty(), "Reset must clear transient server errors");
 }
 
 #[test]

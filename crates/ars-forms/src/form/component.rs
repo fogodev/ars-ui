@@ -58,6 +58,9 @@ pub enum Event {
     },
 
     /// Triggered when the form is reset.
+    ///
+    /// Reset returns the machine to the idle state and re-synchronizes
+    /// declarative server errors from [`Props::validation_errors`].
     Reset,
 
     /// Replaces server-side validation errors keyed by field name.
@@ -108,6 +111,9 @@ pub struct Props {
     pub validation_behavior: ValidationBehavior,
 
     /// Declarative server-side validation errors keyed by field name.
+    ///
+    /// Reset rehydrates [`Context::server_errors`] from this prop so controlled
+    /// error state remains deterministic across local resets.
     pub validation_errors: BTreeMap<String, Vec<String>>,
 
     /// The URL to submit the form to.
@@ -199,11 +205,12 @@ impl ars_core::Machine for Machine {
 
             (_, Event::Reset) => {
                 let behavior = props.validation_behavior;
+                let validation_errors = props.validation_errors.clone();
                 Some(
                     TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
                         ctx.is_submitting = false;
                         ctx.last_submit_succeeded = None;
-                        ctx.server_errors.clear();
+                        ctx.server_errors = validation_errors;
                         ctx.status_message = None;
                         ctx.validation_behavior = behavior;
                     }),
@@ -432,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn form_reset_clears_state() {
+    fn form_reset_restores_controlled_state() {
         let mut service = Service::<Machine>::new(
             Props {
                 validation_behavior: ValidationBehavior::Native,
@@ -454,13 +461,35 @@ mod tests {
         assert!(result.state_changed);
         assert_eq!(service.state(), &State::Idle);
         assert!(!service.context().is_submitting);
-        assert!(service.context().server_errors.is_empty());
+        assert_eq!(
+            service.context().server_errors,
+            BTreeMap::from([("email".to_string(), vec!["Taken".to_string()])])
+        );
         assert!(service.context().status_message.is_none());
         assert_eq!(service.context().last_submit_succeeded, None);
         assert_eq!(
             service.context().validation_behavior,
             ValidationBehavior::Native
         );
+    }
+
+    #[test]
+    fn form_reset_clears_uncontrolled_server_errors() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetServerErrors(BTreeMap::from([(
+            "email".to_string(),
+            vec!["Taken".to_string()],
+        )]))));
+        drop(service.send(Event::SetStatusMessage(Some("Working".to_string()))));
+
+        let result = service.send(Event::Reset);
+
+        assert!(result.state_changed);
+        assert_eq!(service.state(), &State::Idle);
+        assert!(service.context().server_errors.is_empty());
+        assert!(service.context().status_message.is_none());
+        assert_eq!(service.context().last_submit_succeeded, None);
     }
 
     #[test]
