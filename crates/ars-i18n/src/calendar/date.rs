@@ -2523,4 +2523,47 @@ mod tests {
         assert_eq!(start.to_iso8601(), "2024-03-04");
         assert_eq!(end.to_iso8601(), "2024-03-10");
     }
+
+    /// Wasm smoke tests for `calendar/date.rs` — exercised by
+    /// `wasm-pack test --headless --chrome` against the web-intl backend to
+    /// catch target-specific regressions (panics, allocator drift, float
+    /// printing quirks) that native CI cannot observe.
+    #[cfg(all(target_arch = "wasm32", feature = "web-intl"))]
+    mod wasm_tests {
+        use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+        use super::*;
+
+        wasm_bindgen_test_configure!(run_in_browser);
+
+        #[wasm_bindgen_test]
+        fn wasm_calendar_date_add_days_and_iso_roundtrip_preserve_fields() {
+            let earlier = gregorian_date(2024, 3, 10);
+
+            let later = earlier.add_days(5).expect("day arithmetic should work");
+
+            assert_eq!(later.to_iso8601(), "2024-03-15");
+            assert_eq!(earlier.days_until(&later).expect("date difference"), 5);
+            assert!(earlier.is_before(&later).expect("chronological comparison"));
+        }
+
+        #[wasm_bindgen_test]
+        fn wasm_time_constructor_and_accessors_match_native_behavior() {
+            let time = Time::new(12, 34, 56, 789).expect("time should validate");
+
+            assert_eq!(time.hour(), 12);
+            assert_eq!(time.minute(), 34);
+            assert_eq!(time.second(), 56);
+            assert_eq!(time.millisecond(), 789);
+            assert_eq!(time.microsecond(), 0);
+            assert_eq!(time.nanosecond(), 0);
+        }
+
+        #[wasm_bindgen_test]
+        fn wasm_calendar_date_rejects_invalid_gregorian_day_of_month() {
+            assert!(CalendarDate::new_gregorian(2024, 2, 30).is_err());
+            assert!(CalendarDate::new_gregorian(2023, 2, 29).is_err());
+            assert!(CalendarDate::new_gregorian(2024, 13, 1).is_err());
+        }
+    }
 }
