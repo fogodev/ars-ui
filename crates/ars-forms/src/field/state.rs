@@ -91,6 +91,7 @@ mod tests {
     #[test]
     fn new_initializes_clean() {
         let state = State::new(Value::Text("hello".to_string()));
+
         assert!(!state.dirty);
         assert!(!state.touched);
         assert!(!state.validating);
@@ -111,47 +112,56 @@ mod tests {
             code: ErrorCode::Required,
             message: "required".to_string(),
         }]));
+
         assert!(!state.show_error());
 
         // Touched, invalid → true
         state.touched = true;
+
         assert!(state.show_error());
 
         // Touched, valid → false
         state.validation = Ok(());
+
         assert!(!state.show_error());
     }
 
     #[test]
     fn is_invalid_delegates_to_validation() {
         let mut state = State::new(Value::Bool(false));
+
         assert!(!state.is_invalid());
 
         state.validation = Err(Errors(vec![Error {
             code: ErrorCode::Required,
             message: "required".to_string(),
         }]));
+
         assert!(state.is_invalid());
     }
 
     #[test]
     fn error_message_when_showing() {
         let mut state = State::new(Value::Text(String::new()));
+
         state.touched = true;
         state.validation = Err(Errors(vec![Error {
             code: ErrorCode::Required,
             message: "Value is required".to_string(),
         }]));
+
         assert_eq!(state.error_message(), Some("Value is required"));
     }
 
     #[test]
     fn error_message_none_when_not_touched() {
         let mut state = State::new(Value::Text(String::new()));
+
         state.validation = Err(Errors(vec![Error {
             code: ErrorCode::Required,
             message: "Value is required".to_string(),
         }]));
+
         // Not touched — error_message returns None even though invalid
         assert_eq!(state.error_message(), None);
     }

@@ -53,6 +53,7 @@ impl Validator for ChainValidator {
                     // Return only the very first error, even when a single
                     // validator produces multiple.
                     errors.0.truncate(1);
+
                     return Err(errors);
                 }
 
@@ -299,6 +300,7 @@ mod tests {
             .build_first_fail();
 
         let result = chain.validate(&Value::Text("x".into()), &Context::standalone("f"));
+
         let errors = result.expect_err("should fail");
 
         assert_eq!(
@@ -419,6 +421,7 @@ mod tests {
         let chain = Validators::new().required_msg("custom required").build();
 
         let result = chain.validate(&Value::Text(String::new()), &Context::standalone("x"));
+
         let errors = result.expect_err("empty should fail");
 
         assert!(errors.has_code(&ErrorCode::Required));
@@ -554,6 +557,7 @@ mod tests {
     #[test]
     fn builder_default() {
         let builder = ValidatorsBuilder::default();
+
         let chain = builder.build();
 
         assert!(

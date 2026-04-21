@@ -7,26 +7,24 @@
 //! # Modules
 //!
 //! - **[`field`]** — [`field::State`], [`field::Value`], [`field::Context`],
-//!   [`field::Descriptors`], [`field::InputAria`], [`field::ValueExt`]
-//! - **[`field_component`]** — [`field_component::State`],
-//!   [`field_component::Props`], [`field_component::Part`]
-//! - **[`fieldset`]** — [`fieldset::State`], [`fieldset::Props`],
-//!   [`fieldset::Context`], [`fieldset::Part`]
+//!   [`field::Descriptors`], [`field::InputAria`], [`field::ValueExt`],
+//!   [`field::component::Machine`]
+//! - **[`fieldset`]** — [`fieldset::Context`],
+//!   [`fieldset::component::Machine`], [`fieldset::component::Props`],
+//!   [`fieldset::component::Part`]
 //! - **[`validation`]** — [`validation::Error`], [`validation::Result`],
 //!   [`validation::ResultExt`], [`validation::Validator`],
 //!   [`validation::BoxedValidator`], [`validation::Context`],
 //!   [`validation::AsyncValidator`]
 //! - **[`form`]** — [`form::Context`], [`form::Data`], [`form::Mode`],
-//!   [`form::CrossFieldValidator`], [`form::AnyValidator`]
-//! - **[`form_messages`]** — [`form_messages::FormMessages`]
+//!   [`form::CrossFieldValidator`], [`form::AnyValidator`],
+//!   [`form::Messages`], [`form::component::Machine`]
 //! - **[`hidden_input`]** — [`hidden_input::Config`], [`hidden_input::Value`],
 //!   [`hidden_input::attrs()`], [`hidden_input::multi_attrs()`]
 
 pub mod field;
-pub mod field_component;
 pub mod fieldset;
 pub mod form;
-pub mod form_messages;
 pub mod form_submit;
 pub mod hidden_input;
 pub mod validation;

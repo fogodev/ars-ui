@@ -18,12 +18,16 @@ use super::state::State;
 pub struct Descriptors {
     /// The root element ID (`{form_id}-{field_name}`).
     pub root_id: String,
+
     /// The label element ID (`{form_id}-{field_name}-label`).
     pub label_id: String,
+
     /// The input element ID (`{form_id}-{field_name}-input`).
     pub input_id: String,
+
     /// The description element ID (`{form_id}-{field_name}-desc`).
     pub description_id: String,
+
     /// The error message element ID (`{form_id}-{field_name}-error`).
     pub error_id: String,
 }
@@ -102,16 +106,22 @@ impl Descriptors {
 pub struct InputAria {
     /// The `id` attribute for the input element.
     pub id: String,
+
     /// The `aria-labelledby` attribute pointing to the label element.
     pub aria_labelledby: String,
+
     /// The `aria-describedby` attribute pointing to description and/or error elements.
     pub aria_describedby: Option<String>,
+
     /// The `aria-invalid` attribute (set only when touched and invalid).
     pub aria_invalid: Option<bool>,
+
     /// The `aria-required` attribute.
     pub aria_required: Option<bool>,
+
     /// The `aria-busy` attribute (set when async validation is running).
     pub aria_busy: Option<bool>,
+
     /// WAI-ARIA 1.2 §5.2.7.5: points to the error message element when invalid.
     ///
     /// Set only when `aria_invalid` is `true`. Assistive technologies that
@@ -138,17 +148,20 @@ mod tests {
 
     fn make_touched_invalid_field() -> State {
         let mut field = make_clean_field();
+
         field.touched = true;
         field.validation = Err(Errors(vec![Error {
             code: ErrorCode::Required,
             message: "required".to_string(),
         }]));
+
         field
     }
 
     #[test]
     fn generates_correct_ids() {
         let d = make_descriptors();
+
         assert_eq!(d.root_id, "signup-email");
         assert_eq!(d.label_id, "signup-email-label");
         assert_eq!(d.input_id, "signup-email-input");
@@ -159,8 +172,11 @@ mod tests {
     #[test]
     fn aria_describedby_with_description_and_error() {
         let d = make_descriptors();
+
         let field = make_touched_invalid_field();
+
         let result = d.aria_describedby(&field, true);
+
         assert_eq!(
             result,
             Some("signup-email-desc signup-email-error".to_string())
@@ -170,24 +186,33 @@ mod tests {
     #[test]
     fn aria_describedby_with_description_only() {
         let d = make_descriptors();
+
         let field = make_clean_field();
+
         let result = d.aria_describedby(&field, true);
+
         assert_eq!(result, Some("signup-email-desc".to_string()));
     }
 
     #[test]
     fn aria_describedby_with_error_only() {
         let d = make_descriptors();
+
         let field = make_touched_invalid_field();
+
         let result = d.aria_describedby(&field, false);
+
         assert_eq!(result, Some("signup-email-error".to_string()));
     }
 
     #[test]
     fn aria_describedby_none_when_empty() {
         let d = make_descriptors();
+
         let field = make_clean_field();
+
         let result = d.aria_describedby(&field, false);
+
         assert_eq!(result, None);
     }
 
@@ -197,17 +222,22 @@ mod tests {
 
         // Not touched, invalid → aria_invalid is None
         let mut field = make_clean_field();
+
         field.validation = Err(Errors(vec![Error {
             code: ErrorCode::Required,
             message: "required".to_string(),
         }]));
+
         let aria = d.input_aria(&field, false, false);
+
         assert!(aria.aria_invalid.is_none());
         assert!(aria.aria_errormessage.is_none());
 
         // Touched and invalid → aria_invalid is Some(true)
         let field = make_touched_invalid_field();
+
         let aria = d.input_aria(&field, false, false);
+
         assert_eq!(aria.aria_invalid, Some(true));
         assert_eq!(
             aria.aria_errormessage,
@@ -218,38 +248,50 @@ mod tests {
     #[test]
     fn input_aria_required() {
         let d = make_descriptors();
+
         let field = make_clean_field();
 
         let aria = d.input_aria(&field, true, false);
+
         assert_eq!(aria.aria_required, Some(true));
 
         let aria = d.input_aria(&field, false, false);
+
         assert!(aria.aria_required.is_none());
     }
 
     #[test]
     fn input_aria_busy_when_validating() {
         let d = make_descriptors();
+
         let mut field = make_clean_field();
+
         field.validating = true;
 
         let aria = d.input_aria(&field, false, false);
+
         assert_eq!(aria.aria_busy, Some(true));
     }
 
     #[test]
     fn input_aria_busy_none_when_not_validating() {
         let d = make_descriptors();
+
         let field = make_clean_field();
+
         let aria = d.input_aria(&field, false, false);
+
         assert!(aria.aria_busy.is_none());
     }
 
     #[test]
     fn input_aria_required_and_invalid_simultaneously() {
         let d = make_descriptors();
+
         let field = make_touched_invalid_field();
+
         let aria = d.input_aria(&field, true, true);
+
         assert_eq!(aria.aria_required, Some(true));
         assert_eq!(aria.aria_invalid, Some(true));
         assert_eq!(
@@ -265,7 +307,9 @@ mod tests {
     #[test]
     fn input_aria_errormessage_set_when_showing_error() {
         let d = make_descriptors();
+
         let field = make_touched_invalid_field();
+
         let aria = d.input_aria(&field, false, true);
 
         assert_eq!(

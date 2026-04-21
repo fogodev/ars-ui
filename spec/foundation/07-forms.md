@@ -14,7 +14,7 @@ The `ars-forms` crate provides a complete form management system for ars-ui comp
 >
 > - **`Context.submit()`** — Simple synchronous forms with client-side validation only.
 > - **`form_submit::Machine`** — Standard forms with async validation and server submission.
-> - **`form::Machine` (§14)** — Standard forms rendered as a `<form>` component; simplified 2-state lifecycle with server error integration.
+> - **`form::component::Machine` (§14)** — Standard forms rendered as a `<form>` component; simplified 2-state lifecycle with server error integration.
 
 <!-- Section map: §1 Overview, §2 Core Types, §3 Validator Trait, §4 Async Validation,
      §5 Form Context, §6 Field Association, §7 Hidden Inputs, §8 Form Submit Machine,
@@ -32,12 +32,16 @@ Design goals:
 
 Types use module-based namespacing (project convention: `module::Type` instead of `PrefixType`):
 
-| Module         | Types                                                                                                                                                                         | Crate path                   |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| `field`        | `State`, `Value`, `FileRef`, `Context`, `Descriptors`, `InputAria`, `ValueExt`, `SelectionExt`, `CheckboxExt`                                                                 | `ars_forms::field::*`        |
-| `validation`   | `Error`, `ErrorCode`, `Errors`, `Result`, `ResultExt`, `Validator`, `BoxedValidator`, `Context`, `OwnedContext`, `AsyncValidator`, `BoxedAsyncValidator`, `boxed_validator()` | `ars_forms::validation::*`   |
-| `form`         | `Context`, `Data`, `Mode`, `CrossFieldValidator`, `AnyValidator`                                                                                                              | `ars_forms::form::*`         |
-| `hidden_input` | `Config`, `Value`, `attrs()`, `multi_attrs()`                                                                                                                                 | `ars_forms::hidden_input::*` |
+| Module                | Types                                                                                                                                                                         | Crate path                          |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| `field`               | `State`, `Value`, `FileRef`, `Context`, `Descriptors`, `InputAria`, `ValueExt`, `SelectionExt`, `CheckboxExt`                                                                 | `ars_forms::field::*`               |
+| `field::component`    | `Machine`, `State`, `Event`, `Context`, `Props`, `Api`, `Part`                                                                                                                | `ars_forms::field::component::*`    |
+| `fieldset`            | `Context` (inherited child-field context alias)                                                                                                                               | `ars_forms::fieldset::*`            |
+| `fieldset::component` | `Machine`, `State`, `Event`, `Context`, `Props`, `Api`, `Part`                                                                                                                | `ars_forms::fieldset::component::*` |
+| `validation`          | `Error`, `ErrorCode`, `Errors`, `Result`, `ResultExt`, `Validator`, `BoxedValidator`, `Context`, `OwnedContext`, `AsyncValidator`, `BoxedAsyncValidator`, `boxed_validator()` | `ars_forms::validation::*`          |
+| `form`                | `Context`, `Data`, `Mode`, `CrossFieldValidator`, `AnyValidator`                                                                                                              | `ars_forms::form::*`                |
+| `form::component`     | `ValidationBehavior`, `Machine`, `State`, `Event`, `Context`, `Props`, `Api`, `Part`                                                                                          | `ars_forms::form::component::*`     |
+| `hidden_input`        | `Config`, `Value`, `attrs()`, `multi_attrs()`                                                                                                                                 | `ars_forms::hidden_input::*`        |
 
 Code examples in this spec use the short (unqualified) names since each section defines types within their module context.
 
@@ -74,10 +78,10 @@ pub enum ErrorCode {
     Async(String),    // Error from async validator
 }
 
-// NOTE: Factory methods accept a `FormMessages` parameter for locale-appropriate
+// NOTE: Factory methods accept a `Messages` parameter for locale-appropriate
 // error text. This ensures no hardcoded English strings leak into production.
 // Callers can still override messages per-validator via the `message` field,
-// or globally by providing a localized `FormMessages` struct to the form context.
+// or globally by providing a localized `Messages` struct to the form context.
 ```
 
 #### 2.1.1 Pluralization and ICU MessageFormat
@@ -134,7 +138,7 @@ Adapters MUST provide locale-aware `MessageFn` factories that handle all six CLD
 ```rust
 impl Error {
     /// Creates a "required" validation error with locale-appropriate message.
-    pub fn required(messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
+    pub fn required(messages: &Messages, locale: &ars_i18n::Locale) -> Self {
         Self {
             message: (messages.required_error)(locale),
             code: ErrorCode::Required,
@@ -142,7 +146,7 @@ impl Error {
     }
 
     /// Creates a "min length" validation error.
-    pub fn min_length(min: usize, messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
+    pub fn min_length(min: usize, messages: &Messages, locale: &ars_i18n::Locale) -> Self {
         Self {
             message: (messages.min_length_error)(min, locale),
             code: ErrorCode::MinLength(min),
@@ -150,7 +154,7 @@ impl Error {
     }
 
     /// Creates a "max length" validation error.
-    pub fn max_length(max: usize, messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
+    pub fn max_length(max: usize, messages: &Messages, locale: &ars_i18n::Locale) -> Self {
         Self {
             message: (messages.max_length_error)(max, locale),
             code: ErrorCode::MaxLength(max),
@@ -160,7 +164,7 @@ impl Error {
     /// Creates a "pattern" validation error.
     pub fn pattern(
         pattern: impl Into<String>,
-        messages: &FormMessages,
+        messages: &Messages,
         locale: &ars_i18n::Locale,
     ) -> Self {
         Self {
@@ -170,7 +174,7 @@ impl Error {
     }
 
     /// Creates a "min" validation error.
-    pub fn min(min: f64, messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
+    pub fn min(min: f64, messages: &Messages, locale: &ars_i18n::Locale) -> Self {
         Self {
             message: (messages.min_error)(min, locale),
             code: ErrorCode::Min(min),
@@ -178,7 +182,7 @@ impl Error {
     }
 
     /// Creates a "max" validation error.
-    pub fn max(max: f64, messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
+    pub fn max(max: f64, messages: &Messages, locale: &ars_i18n::Locale) -> Self {
         Self {
             message: (messages.max_error)(max, locale),
             code: ErrorCode::Max(max),
@@ -186,7 +190,7 @@ impl Error {
     }
 
     /// Creates an "email" validation error with locale-appropriate message.
-    pub fn email(messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
+    pub fn email(messages: &Messages, locale: &ars_i18n::Locale) -> Self {
         Self {
             message: (messages.email_error)(locale),
             code: ErrorCode::Email,
@@ -194,7 +198,7 @@ impl Error {
     }
 
     /// Create a step mismatch error.
-    pub fn step(step: f64, messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
+    pub fn step(step: f64, messages: &Messages, locale: &ars_i18n::Locale) -> Self {
         Self {
             message: (messages.step_error)(step, locale),
             code: ErrorCode::Step(step),
@@ -202,7 +206,7 @@ impl Error {
     }
 
     /// Create a URL validation error.
-    pub fn url(messages: &FormMessages, locale: &ars_i18n::Locale) -> Self {
+    pub fn url(messages: &Messages, locale: &ars_i18n::Locale) -> Self {
         Self {
             message: (messages.url_error)(locale),
             code: ErrorCode::Url,
@@ -610,7 +614,7 @@ impl Validator for RequiredValidator {
             Err(Errors(vec![
                 self.message.as_ref()
                     .map(|m| Error { message: m.clone(), code: ErrorCode::Required })
-                    .unwrap_or_else(|| Error::required(&FormMessages::default(), locale))
+                    .unwrap_or_else(|| Error::required(&Messages::default(), locale))
             ]))
         } else {
             Ok(())
@@ -649,7 +653,7 @@ impl Validator for MinLengthValidator {
             Err(Errors(vec![
                 self.message.clone()
                     .map(|m| Error { message: m, code: ErrorCode::MinLength(self.min) })
-                    .unwrap_or_else(|| Error::min_length(self.min, &FormMessages::default(), locale))
+                    .unwrap_or_else(|| Error::min_length(self.min, &Messages::default(), locale))
             ]))
         } else {
             Ok(())
@@ -678,7 +682,7 @@ impl Validator for MaxLengthValidator {
             Err(Errors(vec![
                 self.message.clone()
                     .map(|m| Error { message: m, code: ErrorCode::MaxLength(self.max) })
-                    .unwrap_or_else(|| Error::max_length(self.max, &FormMessages::default(), locale))
+                    .unwrap_or_else(|| Error::max_length(self.max, &Messages::default(), locale))
             ]))
         } else {
             Ok(())
@@ -710,7 +714,7 @@ impl Validator for MinValidator {
             Err(Errors(vec![
                 self.message.clone()
                     .map(|m| Error { message: m, code: ErrorCode::Min(self.min) })
-                    .unwrap_or_else(|| Error::min(self.min, &FormMessages::default(), locale))
+                    .unwrap_or_else(|| Error::min(self.min, &Messages::default(), locale))
             ]))
         } else {
             Ok(())
@@ -742,7 +746,7 @@ impl Validator for MaxValidator {
             Err(Errors(vec![
                 self.message.clone()
                     .map(|m| Error { message: m, code: ErrorCode::Max(self.max) })
-                    .unwrap_or_else(|| Error::max(self.max, &FormMessages::default(), locale))
+                    .unwrap_or_else(|| Error::max(self.max, &Messages::default(), locale))
             ]))
         } else {
             Ok(())
@@ -813,7 +817,7 @@ impl Validator for PatternValidator {
                     // Do not expose raw regex to users — it is incomprehensible
                     // in any language. Callers should provide a custom `message`.
                     .unwrap_or_else(|| {
-                        Error::pattern(self.pattern.clone(), &FormMessages::default(), locale)
+                        Error::pattern(self.pattern.clone(), &Messages::default(), locale)
                     })
             ]))
         } else {
@@ -857,7 +861,7 @@ impl Validator for EmailValidator {
             Err(Errors(vec![
                 self.message.clone()
                     .map(|m| Error { message: m, code: ErrorCode::Email })
-                    .unwrap_or_else(|| Error::email(&FormMessages::default(), locale))
+                    .unwrap_or_else(|| Error::email(&Messages::default(), locale))
             ]))
         } else {
             Ok(())
@@ -915,7 +919,7 @@ impl Validator for StepValidator {
                 return Err(Errors(vec![
                     self.message.clone()
                         .map(|m| Error { message: m, code: ErrorCode::Step(self.step) })
-                        .unwrap_or_else(|| Error::step(self.step, &FormMessages::default(), locale))
+                        .unwrap_or_else(|| Error::step(self.step, &Messages::default(), locale))
                 ]));
             }
 
@@ -927,7 +931,7 @@ impl Validator for StepValidator {
                 return Err(Errors(vec![
                     self.message.clone()
                         .map(|m| Error { message: m, code: ErrorCode::Step(self.step) })
-                        .unwrap_or_else(|| Error::step(self.step, &FormMessages::default(), locale))
+                        .unwrap_or_else(|| Error::step(self.step, &Messages::default(), locale))
                 ]));
             }
         }
@@ -967,7 +971,7 @@ impl Validator for UrlValidator {
                 return Err(Errors(vec![
                     self.message.clone()
                         .map(|m| Error { message: m, code: ErrorCode::Url })
-                        .unwrap_or_else(|| Error::url(&FormMessages::default(), locale))
+                        .unwrap_or_else(|| Error::url(&Messages::default(), locale))
                 ]));
             }
         }
@@ -1375,15 +1379,15 @@ impl Drop for DebouncedAsyncValidator {
 
 ## 5. Form Context
 
-> **Design note:** `Context` is a plain data structure, not a `Machine` implementor. It holds mutable form state (field registry, validation results, dirty/touched tracking). The `form_submit::Machine` in §8 embeds `Context` in its `Context` type and drives the submission lifecycle as a proper state machine. The `form::Machine` in §14 manages its own simplified context; integration with `Context` is done at the adapter layer via context propagation. Direct mutation of `Context` is valid within Machine `apply` closures.
+> **Design note:** `Context` is a plain data structure, not a `Machine` implementor. It holds mutable form state (field registry, validation results, dirty/touched tracking). The `form_submit::Machine` in §8 embeds `Context` in its `Context` type and drives the submission lifecycle as a proper state machine. The `form::component::Machine` in §14 manages its own simplified context; integration with `Context` is done at the adapter layer via context propagation. Direct mutation of `Context` is valid within Machine `apply` closures.
 >
 > **Decision matrix — which approach to use:**
 >
-> | Scenario                                       | Use                         | Why                                                                  |
-> | ---------------------------------------------- | --------------------------- | -------------------------------------------------------------------- |
-> | Full form with validation + async submit       | `form_submit::Machine` (§8) | Full lifecycle: Idle → Validating → Submitting → Success/Failed      |
-> | Simple form without validation states          | `form::Machine` (§14)       | Lightweight: just collects fields and submits                        |
-> | Programmatic submission from outside a Machine | `Context.submit()` (§5.1)   | Direct call from adapter hooks when no state machine drives the form |
+> | Scenario                                       | Use                              | Why                                                                  |
+> | ---------------------------------------------- | -------------------------------- | -------------------------------------------------------------------- |
+> | Full form with validation + async submit       | `form_submit::Machine` (§8)      | Full lifecycle: Idle → Validating → Submitting → Success/Failed      |
+> | Simple form without validation states          | `form::component::Machine` (§14) | Lightweight: just collects fields and submits                        |
+> | Programmatic submission from outside a Machine | `Context.submit()` (§5.1)        | Direct call from adapter hooks when no state machine drives the form |
 
 ### 5.1 `Context`
 
@@ -1871,7 +1875,7 @@ impl Context {
     /// simple forms that don't need a full state machine.
     /// **Note:** `is_submitting` is only meaningful for the duration of the synchronous
     /// `handler` call. For async submission, use `form_submit::Machine` (§8) or
-    /// `form::Machine` (§14), which properly manage the Submitting state across async boundaries.
+    /// `form::component::Machine` (§14), which properly manage the Submitting state across async boundaries.
     /// Note: adapter wrappers may require the submit handler closure to be `Send`
     /// so it can be used uniformly across targets and runtimes.
     /// Submit the form with a synchronous handler.
@@ -2902,7 +2906,7 @@ mod tests {
     fn test_required_validator() {
         let v = RequiredValidator::default();
         let ctx = Context::standalone("test");
-        let messages = FormMessages::default();
+        let messages = Messages::default();
 
         let empty_value = Value::Text(String::new());
         let result = v.validate(&empty_value, &ctx);
@@ -3033,11 +3037,11 @@ pub enum Event {
 }
 ```
 
-#### 12.2.3 Fieldset Component MachineContext
+#### 12.2.3 Fieldset Component Context
 
 ```rust
 #[derive(Clone, Debug, PartialEq)]
-pub struct MachineContext {
+pub struct Context {
     /// Whether the entire fieldset and all contained inputs are disabled.
     pub disabled: bool,
     /// Whether the fieldset is in an invalid state.
@@ -3064,7 +3068,7 @@ pub struct Props {
     /// Adapter-provided base ID for the fieldset root.
     ///
     /// This ID is immutable for the lifetime of a machine instance because
-    /// `MachineContext::ids` caches the derived part IDs during initialization.
+    /// `Context::ids` caches the derived part IDs during initialization.
     pub id: String,
     /// Whether the entire fieldset and all contained inputs are disabled.
     pub disabled: bool,
@@ -3092,18 +3096,21 @@ impl Default for Props {
 #### 12.2.5 Fieldset Component Full Machine Implementation
 
 ```rust
+// inside `fieldset::component`
 pub struct Machine;
 
 impl ars_core::Machine for Machine {
     type State = State;
     type Event = Event;
-    type Context = MachineContext;
+    type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
-    type Messages = Messages;
+    // Localized form strings live in `form::Messages` and are resolved by
+    // adapters/validation helpers, not by the core component machine.
+    type Messages = ();
 
     fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let ctx = MachineContext {
+        let ctx = Context {
             disabled: props.disabled,
             invalid: props.invalid,
             readonly: props.readonly,
@@ -3198,7 +3205,7 @@ impl ars_core::Machine for Machine {
 
 ```rust
 pub struct Api<'a> {
-    ctx: &'a MachineContext,
+    ctx: &'a Context,
 }
 
 #[derive(ComponentPart)]
@@ -3387,7 +3394,7 @@ pub type Context = crate::field::Context;
 - `effective_invalid = field_props.invalid || field_ctx.invalid`
 - `effective_readonly = field_props.readonly || field_ctx.readonly`
 
-The merge happens at the **adapter layer** (not inside the core machine), because the core `field::Machine` has no access to framework context. The adapter passes the merged values as props to `field::Machine`, keeping the core machine framework-agnostic. See §13.4 for the merge code pattern.
+The merge happens at the **adapter layer** (not inside the core machine), because the core `field::component::Machine` has no access to framework context. The adapter passes the merged values as props to `field::component::Machine`, keeping the core machine framework-agnostic. See §13.4 for the merge code pattern.
 
 ### 12.7 I18n Considerations
 
@@ -3483,8 +3490,6 @@ pub struct Context {
 #### 13.2.4 Field Component Props
 
 ```rust
-/// Note: Named `FieldComponentProps` to avoid collision with `State`
-/// in §2.3 which tracks per-field form context state.
 #[derive(Clone, Debug, PartialEq, HasId)]
 pub struct Props {
     pub id: String,
@@ -3517,7 +3522,7 @@ impl Default for Props {
 #### 13.2.5 Field Component Full Machine Implementation
 
 ```rust
-// inside field component module
+// inside `field::component`
 pub struct Machine;
 
 impl ars_core::Machine for Machine {
@@ -3788,7 +3793,7 @@ impl<'a> Api<'a> {
 
 ### 13.4 Integration with Fieldset
 
-When nested inside a `Fieldset`, the `Field` merges its own state with the `Fieldset` context (see §12.6 `Context`). The merge is performed at the **adapter layer**, not inside the core machine — the core `field::Machine` has no access to framework context.
+When nested inside a `Fieldset`, the `Field` merges its own state with the `Fieldset` context (see §12.6 `Context`). The merge is performed at the **adapter layer**, not inside the core machine — the core `field::component::Machine` has no access to framework context.
 
 **Adapter-layer merge pattern:**
 
@@ -3808,7 +3813,7 @@ let effective_readonly = props.readonly
 
 // 3. Build merged props for the core machine.
 // id, required, dir from props; disabled, invalid, readonly merged from Context.
-let merged_props = field::Props {
+let merged_props = field::component::Props {
     disabled: effective_disabled,
     invalid: effective_invalid,
     readonly: effective_readonly,
@@ -3816,7 +3821,7 @@ let merged_props = field::Props {
 };
 
 // 4. Pass merged props to the core machine — it sees the final merged values.
-let machine = use_machine::<field::Machine>(merged_props);
+let machine = use_machine::<field::component::Machine>(merged_props);
 ```
 
 This keeps the core machine framework-agnostic while allowing each adapter to use its native context mechanism (`provide_context` in Leptos, `use_context_provider` in Dioxus).
@@ -3830,7 +3835,7 @@ This keeps the core machine framework-agnostic while allowing each adapter to us
 
 ## 14. Form Component
 
-> **Relationship to form_submit::Machine:** The `form_submit::Machine` (§8) is a lower-level 6-state submission lifecycle machine with explicit validation states, designed for advanced flows (multi-step async validation, complex retry logic). The `form::Machine` (this section) is a standalone high-level component with a simplified 2-state model (Idle, Submitting). They are independent alternatives — **not composed together**. Most consumers should use `form::Machine` via the Form component; use `form_submit::Machine` only when you need fine-grained control over the validation→submission lifecycle. Both machines integrate with `Context` via adapter-provided context propagation.
+> **Relationship to form_submit::Machine:** The `form_submit::Machine` (§8) is a lower-level 6-state submission lifecycle machine with explicit validation states, designed for advanced flows (multi-step async validation, complex retry logic). The `form::component::Machine` (this section) is a standalone high-level component with a simplified 2-state model (Idle, Submitting). They are independent alternatives — **not composed together**. Most consumers should use `form::component::Machine` via the Form component; use `form_submit::Machine` only when you need fine-grained control over the validation→submission lifecycle. Both machines integrate with `Context` via adapter-provided context propagation.
 >
 > Cross-references: Equivalent to React Aria `Form`.
 
@@ -3918,16 +3923,16 @@ pub enum Event {
     SetValidationBehavior(ValidationBehavior),
     /// Set the status message (adapter-driven, for i18n support).
     /// Adapters send this after observing SubmitComplete to provide
-    /// a locale-appropriate message via FormMessages.
+    /// a locale-appropriate message via Messages.
     SetStatusMessage(Option<String>),
 }
 ```
 
 #### 14.3.3 Form Component Context
 
-> **Authoritative source:** `form::Machine::Context` is the authoritative source for `server_errors` and `is_submitting`. `Context` mirrors these values downstream via the adapter effect (§14.6). On divergence, the machine context wins — `Context` is a read-only projection for child components that don't have access to the machine.
+> **Authoritative source:** `form::component::Context` is the authoritative source for `server_errors` and `is_submitting`. `Context` mirrors these values downstream via the adapter effect (§14.6). On divergence, the machine context wins — `Context` is a read-only projection for child components that don't have access to the machine.
 >
-> **Sync timing:** The adapter MUST synchronize `Context` from `form::Machine::Context` synchronously within the same `apply` closure (not in a deferred effect). This ensures child components reading `Context` during the same render cycle see consistent values. The pattern is: `apply` updates `machine.context`, then immediately writes `form_context.is_submitting = machine.context.is_submitting` (and similarly for `server_errors`) before the closure returns.
+> **Sync timing:** The adapter MUST synchronize `Context` from `form::component::Context` synchronously within the same `apply` closure (not in a deferred effect). This ensures child components reading `Context` during the same render cycle see consistent values. The pattern is: `apply` updates `machine.context`, then immediately writes `form_context.is_submitting = machine.context.is_submitting` (and similarly for `server_errors`) before the closure returns.
 
 ```rust
 #[derive(Clone, Debug, PartialEq)]
@@ -3986,17 +3991,17 @@ impl Default for Props {
 
 #### 14.3.5 Form Component Full Machine Implementation
 
-> **Relationship to `form_submit::Machine` (§8):** `form::Machine` is the high-level
+> **Relationship to `form_submit::Machine` (§8):** `form::component::Machine` is the high-level
 > Form component machine with a simplified 2-state model (Idle, Submitting). It is
 > intended for typical form use cases. `form_submit::Machine` (§8) is a lower-level
 > 6-state machine with explicit validation states, designed for advanced flows
 > (multi-step async validation, complex retry logic). They are NOT composed together —
-> choose one based on your use case. Most consumers should use `form::Machine` via the
+> choose one based on your use case. Most consumers should use `form::component::Machine` via the
 > Form component; use `form_submit::Machine` only when you need fine-grained control
 > over the validation→submission lifecycle.
 
 ```rust
-// inside form component module
+// inside `form::component`
 
 pub struct Machine;
 
@@ -4006,7 +4011,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Api<'a> = Api<'a>;
-    type Messages = Messages;
+    type Messages = ();
 
     fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ctx = Context {
@@ -4023,6 +4028,7 @@ impl ars_core::Machine for Machine {
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
         // NOTE: `id` is immutable after init — ComponentIds are computed once
         // in init() and cached in Context. Changing id at runtime is not supported.
+        assert_eq!(old.id, new.id, "form::component::Props.id must remain stable after init");
         let mut events = Vec::new();
         if old.validation_behavior != new.validation_behavior {
             events.push(Event::SetValidationBehavior(new.validation_behavior));
@@ -4067,7 +4073,7 @@ impl ars_core::Machine for Machine {
                     ctx.last_submit_succeeded = Some(success);
                     // status_message is set to None here; the adapter layer is
                     // responsible for setting a locale-appropriate message via
-                    // FormMessages after observing the SubmitComplete transition.
+                    // Messages after observing the SubmitComplete transition.
                     ctx.status_message = None;
                 }))
             }
@@ -4115,9 +4121,9 @@ impl ars_core::Machine for Machine {
         state: &'a Self::State,
         ctx: &'a Self::Context,
         props: &'a Self::Props,
-        send: &'a dyn Fn(Self::Event),
+        _send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
-        Api { state, ctx, props, send }
+        Api { state, ctx, props }
     }
 }
 
@@ -4125,7 +4131,6 @@ pub struct Api<'a> {
     state: &'a State,
     ctx: &'a Context,
     props: &'a Props,
-    send: &'a dyn Fn(Event),
 }
 ```
 
@@ -4165,7 +4170,7 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Aria(AriaAttr::Busy), "true");
         }
         if let Some(ref action) = self.props.action {
-            attrs.set(HtmlAttr::Action, action.as_str());
+            attrs.set(HtmlAttr::Action, sanitize_url(action));
         }
         if let Some(ref role) = self.props.role {
             attrs.set(HtmlAttr::Role, role.as_str());
@@ -4176,8 +4181,7 @@ impl<'a> Api<'a> {
     pub fn status_region_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         attrs.set(HtmlAttr::Role, "status");
-        // Note: role="status" implicitly carries aria-live="polite" per WAI-ARIA.
-        // Explicit aria-atomic="true" retained for older AT that may not map role to atomic.
+        attrs.set(HtmlAttr::Aria(AriaAttr::Live), "polite");
         attrs.set(HtmlAttr::Aria(AriaAttr::Atomic), "true");
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::StatusRegion.data_attrs();
         attrs.set(scope_attr, scope_val);
@@ -4204,13 +4208,13 @@ impl<'a> Api<'a> {
 
 ### 14.5 ARIA Mapping
 
-| Attribute     | Element      | Source                          | Notes                                                       |
-| ------------- | ------------ | ------------------------------- | ----------------------------------------------------------- |
-| `novalidate`  | Root         | `validation_behavior == Aria`   | Suppresses browser validation when using ARIA-based display |
-| `aria-busy`   | Root         | `ctx.is_submitting`             | Set `"true"` while form is submitting                       |
-| `role`        | StatusRegion | `"status"`                      | Implicit `aria-live="polite"`                               |
-| `aria-live`   | StatusRegion | (implicit from `role="status"`) | Announces submission results                                |
-| `aria-atomic` | StatusRegion | `"true"`                        | Entire message announced as a unit                          |
+| Attribute     | Element      | Source                        | Notes                                                       |
+| ------------- | ------------ | ----------------------------- | ----------------------------------------------------------- |
+| `novalidate`  | Root         | `validation_behavior == Aria` | Suppresses browser validation when using ARIA-based display |
+| `aria-busy`   | Root         | `ctx.is_submitting`           | Set `"true"` while form is submitting                       |
+| `role`        | StatusRegion | `"status"`                    | Status live region semantics                                |
+| `aria-live`   | StatusRegion | `"polite"`                    | Announces submission results                                |
+| `aria-atomic` | StatusRegion | `"true"`                      | Entire message announced as a unit                          |
 
 ### 14.6 Adapter Integration
 
@@ -4225,14 +4229,20 @@ Framework adapters must:
 7. **Announce results** via the `StatusRegion`: on submit success, post a configurable success message; on submit failure with multiple errors, post "N errors found" before moving focus to the first invalid field
 8. **Exclude disabled fields** from submission data (see §15)
 
-> **Adapter integration:** The adapter syncs `form::Machine.Context.server_errors` with `Context.server_errors` via a reactive effect that watches the machine's context and calls `Context::set_server_errors()` whenever the machine's server_errors field changes.
+> **Adapter integration:** The adapter syncs `form::component::Context.server_errors` with `Context.server_errors` via a reactive effect that watches the machine's context and calls `Context::set_server_errors()` whenever the machine's server_errors field changes.
 
-### 14.7 I18n — FormMessages
+### 14.7 I18n — Messages
+
+`form::Messages` is a **domain-level** message bundle for validation and
+submission announcements. It is intentionally distinct from
+`form::component::Machine::Messages`: the form component machine keeps
+`type Messages = ()`, and adapters resolve `form::Messages` separately when
+formatting error and status text.
 
 ```rust
 /// Localizable messages for Form component announcements.
 /// Follows the ComponentMessages pattern from `04-internationalization.md` §7.1.
-/// `FormMessages` uses `MessageFn` (`Arc` on all targets) for closure fields
+/// `Messages` uses `MessageFn` (`Arc` on all targets) for closure fields
 /// so the struct can derive `Clone`. `MessageFn<T>` implements `Debug` by printing
 /// `"<closure>"`, so `#[derive(Debug)]` works without a manual impl.
 ///
@@ -4242,7 +4252,7 @@ Framework adapters must:
 /// `04-internationalization.md` §7.1.
 
 #[derive(Clone, Debug)]
-pub struct FormMessages {
+pub struct Messages {
     /// Announced via StatusRegion on successful submission.
     /// Default: "Form submitted successfully."
     pub submit_success: MessageFn<dyn Fn(&ars_i18n::Locale) -> String + Send + Sync>,
@@ -4277,7 +4287,7 @@ pub struct FormMessages {
 }
 
 
-impl Default for FormMessages {
+impl Default for Messages {
     fn default() -> Self {
         Self {
             submit_success: MessageFn::new(|_locale| "Form submitted successfully.".into()),
@@ -4318,17 +4328,17 @@ impl pattern shown above: each closure field receives a sensible English default
 The `#[derive(Debug)]` works because `MessageFn<T>` implements `Debug` by printing `<closure>`,
 satisfying the convention from `01-architecture.md` without requiring a manual `Debug` impl.
 
-#### 14.7.2 FormMessages Provider Context and i18n Integration
+#### 14.7.2 Messages Provider Context and i18n Integration
 
-Adapters MUST provide a **FormMessages provider context** so that all form components in a subtree share a single locale-appropriate `FormMessages` instance. This avoids requiring every field to manually pass a `FormMessages` reference.
+Adapters MUST provide a **Messages provider context** so that all form components in a subtree share a single locale-appropriate `Messages` instance. This avoids requiring every field to manually pass a `Messages` reference.
 
 **Provider pattern** (Leptos example; Dioxus follows the same shape):
 
 ```rust
 // Adapter provides a context provider component:
 #[component]
-pub fn FormMessagesProvider(
-    messages: FormMessages,
+pub fn MessagesProvider(
+    messages: Messages,
     children: Children,
 ) -> impl IntoView {
     provide_context(messages);
@@ -4336,24 +4346,24 @@ pub fn FormMessagesProvider(
 }
 
 // Form components read the context (with English fallback):
-fn use_form_messages() -> FormMessages {
-    use_context::<FormMessages>().unwrap_or_default()
+fn use_form_messages() -> Messages {
+    use_context::<Messages>().unwrap_or_default()
 }
 ```
 
-**i18n framework integration**: Applications using `ars-i18n` or external i18n frameworks (e.g., `leptos-i18n`, `fluent`) construct a `FormMessages` struct from their translation catalog and pass it through the provider:
+**i18n framework integration**: Applications using `ars-i18n` or external i18n frameworks (e.g., `leptos-i18n`, `fluent`) construct a `Messages` struct from their translation catalog and pass it through the provider:
 
 ```rust
 use std::sync::Arc;
 use ars_i18n::{plural_category, PluralCategory};
 
-// Build FormMessages from an i18n catalog for the active locale.
-fn form_messages_for_locale(locale: &Locale) -> FormMessages {
+// Build Messages from an i18n catalog for the active locale.
+fn form_messages_for_locale(locale: &Locale) -> Messages {
     let catalog = Arc::new(load_catalog(locale));
     let c1 = Arc::clone(&catalog);
     let c2 = Arc::clone(&catalog);
     let c3 = Arc::clone(&catalog);
-    FormMessages {
+    Messages {
         submit_success: MessageFn::new({
             let c = Arc::clone(&catalog);
             move |_locale| c.get("form.submit_success").into()

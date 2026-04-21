@@ -1,5 +1,6 @@
-//! Field state, value, context, descriptors, and extension traits.
+//! Field runtime state, inherited context, descriptors, and component machine.
 
+pub mod component;
 mod context;
 pub mod descriptors;
 mod state;

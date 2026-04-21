@@ -581,7 +581,7 @@ This enables `data-ars-state` values and Service debug logging.
 > ```
 >
 > This pattern is used consistently across **all** component specs and foundation machines
-> (e.g., `form_submit::Machine`, `FieldsetMachine`, `FieldComponentMachine`). Adapter code
+> (e.g., `form_submit::Machine`, `fieldset::component::Machine`, `field::component::Machine`). Adapter code
 > that needs to reference the trait generically (e.g., `use_machine<M: ars_core::Machine>`)
 > imports it at the adapter level where no local `Machine` struct exists.
 >
@@ -1167,7 +1167,7 @@ impl Debug for XyzMessages {
 ```
 
 For structs with a mix of plain fields and closures, prefer `debug_struct` with closure fields
-printed as `"<closure>"` (see `FormMessages` in `07-forms.md §14.7` for an example).
+printed as `"<closure>"` (see `Messages` in `07-forms.md §14.7` for an example).
 
 ```rust
 pub struct PendingEffect<M: Machine> {
@@ -3207,6 +3207,95 @@ impl HtmlAttr {
 }
 ```
 
+##### 3.1.1.1 URL Sanitization
+
+All URL-valued attributes (`HtmlAttr::Href`, `HtmlAttr::Action`,
+`HtmlAttr::FormAction`) must be validated before rendering to prevent URL
+injection attacks such as `javascript:`, `data:`, or `vbscript:` schemes.
+
+```rust
+/// Check whether a URL is safe for use in `href`, `action`, or `formaction`
+/// attributes.
+///
+/// Allows `http://`, `https://`, `mailto:`, `tel:`, `/`, `./`, `../`, `#`,
+/// `?`, and relative paths with no scheme separator. Rejects dangerous or
+/// unknown schemes.
+pub fn is_safe_url(url: &str) -> bool {
+    let trimmed = url.trim_start().as_bytes();
+
+    fn starts_with_ignore_case(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack.len() >= needle.len()
+            && haystack[..needle.len()]
+                .iter()
+                .zip(needle)
+                .all(|(a, b)| a.to_ascii_lowercase() == *b)
+    }
+
+    starts_with_ignore_case(trimmed, b"http://")
+        || starts_with_ignore_case(trimmed, b"https://")
+        || starts_with_ignore_case(trimmed, b"mailto:")
+        || starts_with_ignore_case(trimmed, b"tel:")
+        || trimmed.first() == Some(&b'/')
+        || trimmed.first() == Some(&b'#')
+        || trimmed.first() == Some(&b'?')
+        || starts_with_ignore_case(trimmed, b"./")
+        || starts_with_ignore_case(trimmed, b"../")
+        || !trimmed.contains(&b':')
+}
+
+/// Sanitize a URL, returning `"#"` for unsafe URLs.
+pub fn sanitize_url(url: &str) -> &str {
+    if is_safe_url(url) { url } else { "#" }
+}
+
+/// A validated URL newtype.
+///
+/// Components that store URLs in Props or Context should prefer `SafeUrl` over
+/// raw `String` so validation happens once at the boundary.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SafeUrl(String);
+
+impl SafeUrl {
+    /// Create a new `SafeUrl`, returning `Err` when the URL uses a disallowed
+    /// scheme.
+    pub fn new(url: impl Into<String>) -> Result<Self, UnsafeUrlError> {
+        let url = url.into();
+        if is_safe_url(&url) {
+            Ok(Self(url))
+        } else {
+            Err(UnsafeUrlError(url))
+        }
+    }
+
+    /// Access the validated URL string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for SafeUrl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Error returned when `SafeUrl::new()` receives a URL with a disallowed
+/// scheme.
+#[derive(Clone, Debug)]
+pub struct UnsafeUrlError(pub String);
+
+impl fmt::Display for UnsafeUrlError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "unsafe URL scheme: {:?}", self.0)
+    }
+}
+```
+
+Components that set URL-valued attributes must call `sanitize_url()`:
+
+- **Link**: `attrs.set(HtmlAttr::Href, sanitize_url(self.ctx.href.as_str()))`
+- **Form**: `attrs.set(HtmlAttr::Action, sanitize_url(action))`
+
 #### 3.1.2 HtmlEvent
 
 All standard DOM element events per UI Events, Pointer Events, HTML, CSS Animations/Transitions specs.
@@ -4572,7 +4661,7 @@ See `11-dom-utilities.md` for all details:
 - **Portal Root** (§7) — `get_or_create_portal_root()`, `set_background_inert()`
 - **Modality Manager** (§8) — `ModalityManager`
 - **Media Queries** (§9) — `is_forced_colors_active()`, `prefers_reduced_motion()`
-- **URL Sanitization** (§10) — `sanitize_url()`, `SafeUrl`
+- **URL Sanitization** [§3.1.1.1](#3111-url-sanitization) — `sanitize_url()`, `SafeUrl`
 
 ## 6. Adapter Architecture
 

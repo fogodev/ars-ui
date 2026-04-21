@@ -51,10 +51,13 @@ impl ResultExt for Result {
     fn merge(self, other: Result) -> Result {
         match (self, other) {
             (Ok(()), other) => other,
+
             (Err(mut e1), Err(e2)) => {
                 e1.0.extend(e2.0);
+
                 Err(e1)
             }
+
             (err, Ok(())) => err,
         }
     }
@@ -64,21 +67,21 @@ impl ResultExt for Result {
     }
 
     fn without_server_errors(&self) -> Result {
-        match self {
-            Ok(()) => Ok(()),
-            Err(errors) => {
-                let filtered = errors
-                    .0
-                    .iter()
-                    .filter(|e| !matches!(&e.code, ErrorCode::Server(_) | ErrorCode::Async(_)))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                if filtered.is_empty() {
-                    Ok(())
-                } else {
-                    Err(Errors(filtered))
-                }
+        if let Err(errors) = self {
+            let filtered = errors
+                .0
+                .iter()
+                .filter(|e| !matches!(&e.code, ErrorCode::Server(_) | ErrorCode::Async(_)))
+                .cloned()
+                .collect::<Vec<_>>();
+
+            if filtered.is_empty() {
+                Ok(())
+            } else {
+                Err(Errors(filtered))
             }
+        } else {
+            Ok(())
         }
     }
 }
@@ -91,6 +94,7 @@ mod tests {
     #[test]
     fn valid_result_is_ok() {
         let result = Result::Ok(());
+
         assert!(result.is_ok());
     }
 
@@ -100,12 +104,14 @@ mod tests {
             code: ErrorCode::Required,
             message: "This field is required".to_string(),
         }]));
+
         assert!(result.is_err());
     }
 
     #[test]
     fn merge_both_valid() {
         let result = Ok(()).merge(Ok(()));
+
         assert!(result.is_ok());
     }
 
@@ -115,7 +121,9 @@ mod tests {
             code: ErrorCode::Required,
             message: "required".to_string(),
         }]));
+
         let result = invalid.merge(Ok(()));
+
         assert!(result.is_err());
         assert_eq!(result.errors().expect("has errors").len(), 1);
     }
@@ -126,7 +134,9 @@ mod tests {
             code: ErrorCode::Email,
             message: "bad email".to_string(),
         }]));
+
         let result = Ok(()).merge(invalid);
+
         assert!(result.is_err());
         assert_eq!(result.first_error_message(), Some("bad email"));
     }
@@ -137,17 +147,21 @@ mod tests {
             code: ErrorCode::Required,
             message: "required".to_string(),
         }]));
+
         let b = Result::Err(Errors(vec![Error {
             code: ErrorCode::Email,
             message: "bad email".to_string(),
         }]));
+
         let result = a.merge(b);
+
         assert_eq!(result.errors().expect("has errors").len(), 2);
     }
 
     #[test]
     fn first_error_message_valid() {
         let result = Result::Ok(());
+
         assert_eq!(result.first_error_message(), None);
     }
 
@@ -157,6 +171,7 @@ mod tests {
             code: ErrorCode::Required,
             message: "required".to_string(),
         }]));
+
         assert_eq!(result.first_error_message(), Some("required"));
     }
 
@@ -169,9 +184,13 @@ mod tests {
             },
             Error::server("duplicate"),
         ]));
+
         let filtered = result.without_server_errors();
+
         assert!(filtered.is_err());
+
         let errors = filtered.errors().expect("has errors");
+
         assert_eq!(errors.len(), 1);
         assert_eq!(errors.0[0].code, ErrorCode::Required);
     }
@@ -185,13 +204,16 @@ mod tests {
                 message: "async err".to_string(),
             },
         ]));
+
         let filtered = result.without_server_errors();
+
         assert!(filtered.is_ok());
     }
 
     #[test]
     fn without_server_errors_valid_stays_valid() {
         let result = Result::Ok(());
+
         assert!(result.without_server_errors().is_ok());
     }
 }

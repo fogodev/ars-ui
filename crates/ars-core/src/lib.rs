@@ -15,6 +15,7 @@
 //! - [`PendingEffect`] — named side effect with setup closure and cleanup lifecycle
 //! - [`Callback`] — shared callback wrapper built on [`Arc`]
 //! - [`ComponentIds`] — adapter-provided base IDs expanded into stable part IDs
+//! - [`SafeUrl`] — validated URL type for URL-valued HTML attributes
 //! - [`SharedState`] — shared interior-mutable state (`Rc<RefCell>` on wasm, `Arc<Mutex>` on native)
 //! - [`WeakSend`] — weak event sender for safe effect cleanup
 //! - [`SendResult`] — structured result from [`Service::send`]
@@ -39,6 +40,7 @@ pub mod platform;
 pub mod provider;
 mod shared_flag;
 mod shared_state;
+mod url;
 mod weak_send;
 
 /// Hidden re-exports used by proc macros to stay hygienic without forcing
@@ -79,6 +81,7 @@ pub use platform::{
 pub use provider::{ArsContext, ColorMode};
 pub use shared_flag::SharedFlag;
 pub use shared_state::SharedState;
+pub use url::{SafeUrl, UnsafeUrlError, is_safe_url, sanitize_url};
 pub use weak_send::{StrongSend, WeakSend};
 
 // ════════════════════════════════════════════════════════════════════

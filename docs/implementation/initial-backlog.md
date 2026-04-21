@@ -442,7 +442,7 @@ Note: this seed task only covered attribute composition. Follow-on tasks deliver
 - Acceptance: form contracts exist independently of adapters
 - Spec impact: `No spec change required`
 
-Note: this seed task only covered baseline validation types and field state. Follow-on tasks delivered FormContext (#37), form_submit machine (#38), and hidden-input helpers. A full spec audit (2026-04-10) found the original 3-task decomposition covered ~50% of the 4300-line spec. Eight additional tasks (#164–#171, 26 pts) now cover built-in validators, ValidatorsBuilder, FormMessages i18n, debounced async validation, and Fieldset/Field/Form component machines. See [Epic #5](https://github.com/fogodev/ars-ui/issues/5) for the full decomposition.
+Note: this seed task only covered baseline validation types and field state. Follow-on tasks delivered FormContext (#37), form_submit machine (#38), and hidden-input helpers. A full spec audit (2026-04-10) found the original 3-task decomposition covered ~50% of the 4300-line spec. Eight additional tasks (#164–#171, 26 pts) now cover built-in validators, ValidatorsBuilder, Messages i18n, debounced async validation, and Fieldset/Field/Form component machines. See [Epic #5](https://github.com/fogodev/ars-ui/issues/5) for the full decomposition.
 
 ### #18: Add baseline `ars-dom` platform utility shell
 

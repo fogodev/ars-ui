@@ -12,7 +12,7 @@ use super::{
     BoxedValidator, Context, Error, ErrorCode, Errors, Result, Validator, boxed_validator,
     validator::DEFAULT_VALIDATOR_LOCALE,
 };
-use crate::{field::Value, form_messages::FormMessages};
+use crate::{field::Value, form::Messages};
 
 /// Fails when a field's value is considered empty by the forms contract.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -47,7 +47,7 @@ impl Validator for RequiredValidator {
             let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
 
             let error = self.message.as_ref().map_or_else(
-                || Error::required(&FormMessages::default(), locale),
+                || Error::required(&Messages::default(), locale),
                 |message| Error {
                     message: message.clone(),
                     code: ErrorCode::Required,
@@ -94,7 +94,7 @@ impl Validator for MinLengthValidator {
 
         if value.chars().count() < self.min {
             let error = self.message.clone().map_or_else(
-                || Error::min_length(self.min, &FormMessages::default(), locale),
+                || Error::min_length(self.min, &Messages::default(), locale),
                 |message| Error {
                     message,
                     code: ErrorCode::MinLength(self.min),
@@ -141,7 +141,7 @@ impl Validator for MaxLengthValidator {
 
         if value.chars().count() > self.max {
             let error = self.message.clone().map_or_else(
-                || Error::max_length(self.max, &FormMessages::default(), locale),
+                || Error::max_length(self.max, &Messages::default(), locale),
                 |message| Error {
                     message,
                     code: ErrorCode::MaxLength(self.max),
@@ -190,7 +190,7 @@ impl Validator for MinValidator {
 
         if !number.is_finite() || !self.min.is_finite() || number < self.min {
             let error = self.message.clone().map_or_else(
-                || Error::min(self.min, &FormMessages::default(), locale),
+                || Error::min(self.min, &Messages::default(), locale),
                 |message| Error {
                     message,
                     code: ErrorCode::Min(self.min),
@@ -239,7 +239,7 @@ impl Validator for MaxValidator {
 
         if !number.is_finite() || !self.max.is_finite() || number > self.max {
             let error = self.message.clone().map_or_else(
-                || Error::max(self.max, &FormMessages::default(), locale),
+                || Error::max(self.max, &Messages::default(), locale),
                 |message| Error {
                     message,
                     code: ErrorCode::Max(self.max),
@@ -375,7 +375,7 @@ impl Validator for PatternValidator {
             let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
 
             let error = self.message.clone().map_or_else(
-                || Error::pattern(self.pattern.clone(), &FormMessages::default(), locale),
+                || Error::pattern(self.pattern.clone(), &Messages::default(), locale),
                 |message| Error {
                     message,
                     code: ErrorCode::Pattern(self.pattern.clone()),
@@ -421,7 +421,7 @@ impl Validator for EmailValidator {
         let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
 
         let error = self.message.clone().map_or_else(
-            || Error::email(&FormMessages::default(), locale),
+            || Error::email(&Messages::default(), locale),
             |message| Error {
                 message,
                 code: ErrorCode::Email,
@@ -494,7 +494,7 @@ impl Validator for StepValidator {
                 let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
 
                 let error = self.message.clone().map_or_else(
-                    || Error::step(self.step, &FormMessages::default(), locale),
+                    || Error::step(self.step, &Messages::default(), locale),
                     |message| Error {
                         message,
                         code: ErrorCode::Step(self.step),
@@ -512,7 +512,7 @@ impl Validator for StepValidator {
                 let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
 
                 let error = self.message.clone().map_or_else(
-                    || Error::step(self.step, &FormMessages::default(), locale),
+                    || Error::step(self.step, &Messages::default(), locale),
                     |message| Error {
                         message,
                         code: ErrorCode::Step(self.step),
@@ -559,7 +559,7 @@ impl Validator for UrlValidator {
             let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
 
             let error = self.message.clone().map_or_else(
-                || Error::url(&FormMessages::default(), locale),
+                || Error::url(&Messages::default(), locale),
                 |message| Error {
                     message,
                     code: ErrorCode::Url,
@@ -947,6 +947,15 @@ mod tests {
                 actual_bytes: 1025,
             })
         ));
+    }
+
+    #[test]
+    fn pattern_validator_error_source_matches_variant() {
+        let invalid = PatternValidator::new("(").expect_err("invalid regex should fail");
+        let too_long = PatternValidator::new("a".repeat(1025)).expect_err("oversized regex");
+
+        assert!(std::error::Error::source(&invalid).is_some());
+        assert!(std::error::Error::source(&too_long).is_none());
     }
 
     #[test]
@@ -1428,6 +1437,16 @@ mod tests {
         assert_eq!(email_message, "email override");
         assert_eq!(step_message, "step override");
         assert_eq!(url_message, "url override");
+    }
+
+    #[test]
+    fn custom_step_message_overrides_invalid_configuration_error() {
+        let result = StepValidator::new(0.0)
+            .with_message("step config override")
+            .validate(&Value::Number(Some(3.0)), &Context::standalone("x"));
+
+        assert_eq!(error_code(result.clone()), ErrorCode::Step(0.0));
+        assert_eq!(error_message(result), "step config override");
     }
 
     #[test]

@@ -22,6 +22,7 @@ pub trait ValueExt {
 pub trait SelectionExt {
     /// Returns `true` if at least one key is selected.
     fn is_any_selected(&self) -> bool;
+
     /// Returns `true` if all items are selected.
     fn is_all_selected(&self, total_items: usize) -> bool;
 }
@@ -33,6 +34,7 @@ pub trait SelectionExt {
 pub trait CheckboxExt {
     /// Returns `true` if the state is indeterminate.
     fn is_indeterminate(&self) -> bool;
+
     /// Returns `true` if the state is checked or indeterminate.
     fn is_checked_or_indeterminate(&self) -> bool;
 }
@@ -147,18 +149,21 @@ mod tests {
     #[test]
     fn calendar_date_none_empty() {
         let date = None::<ars_i18n::CalendarDate>;
+
         assert!(date.is_empty());
     }
 
     #[test]
     fn option_f64_none_empty() {
         let n = None::<f64>;
+
         assert!(n.is_empty());
     }
 
     #[test]
     fn option_f64_some_not_empty() {
         let n = Some(42.0);
+
         assert!(!n.is_empty());
     }
 
@@ -168,6 +173,7 @@ mod tests {
             selected_keys: SelectionSet::Single(ars_collections::Key::int(1)),
             ..SelectionState::default()
         };
+
         assert!(state.is_any_selected());
     }
 
@@ -177,11 +183,17 @@ mod tests {
     }
 
     #[test]
+    fn selection_state_is_all_selected_false_for_empty_state() {
+        assert!(!SelectionState::default().is_all_selected(0));
+    }
+
+    #[test]
     fn selection_state_is_all_selected_true_for_all_variant() {
         let state = SelectionState {
             selected_keys: SelectionSet::All,
             ..SelectionState::default()
         };
+
         assert!(state.is_all_selected(5));
     }
 

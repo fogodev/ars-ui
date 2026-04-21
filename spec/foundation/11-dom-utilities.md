@@ -2953,90 +2953,11 @@ pub enum ColorScheme { Light, Dark }
 
 ## 11. URL Sanitization
 
-All URL-valued attributes (`HtmlAttr::Href`, `HtmlAttr::Action`, `HtmlAttr::FormAction`) must be validated before rendering to prevent URL injection attacks (e.g., `javascript:`, `data:`, `vbscript:` schemes).
+URL sanitization is a connect-layer safety contract, not a DOM-runtime helper.
+The canonical definitions for `is_safe_url()`, `sanitize_url()`, `SafeUrl`,
+and `UnsafeUrlError` live in `01-architecture.md` §3.1.1.1 because the rule
+applies anywhere a component renders `HtmlAttr::Href`, `HtmlAttr::Action`, or
+`HtmlAttr::FormAction`, including framework-agnostic machines.
 
-```rust
-/// Check whether a URL is safe for use in `href`, `action`, or `formaction` attributes.
-/// Allows: `http:`, `https:`, `mailto:`, `tel:`, and relative URLs.
-/// Rejects: `javascript:`, `data:`, `vbscript:`, and any other potentially dangerous scheme.
-pub fn is_safe_url(url: &str) -> bool {
-    let trimmed = url.trim_start().as_bytes();
-
-    /// Case-insensitive prefix check without allocating.
-    fn starts_with_ignore_case(haystack: &[u8], needle: &[u8]) -> bool {
-        haystack.len() >= needle.len()
-            && haystack[..needle.len()]
-                .iter()
-                .zip(needle)
-                .all(|(a, b)| a.to_ascii_lowercase() == *b)
-    }
-
-    starts_with_ignore_case(trimmed, b"http://")
-        || starts_with_ignore_case(trimmed, b"https://")
-        || starts_with_ignore_case(trimmed, b"mailto:")
-        || starts_with_ignore_case(trimmed, b"tel:")
-        || trimmed.first() == Some(&b'/')
-        || trimmed.first() == Some(&b'#')
-        || trimmed.first() == Some(&b'?')
-        || starts_with_ignore_case(trimmed, b"./")
-        || starts_with_ignore_case(trimmed, b"../")
-        // Catch-all: any URL with an unrecognized scheme (contains ':' but doesn't
-        // match the allowlist above) is rejected. This blocks `javascript:`, `data:`,
-        // `vbscript:`, and all other non-allowlisted schemes.
-        || !trimmed.contains(&b':')  // relative path with no scheme
-}
-
-/// Sanitize a URL, returning "#" for unsafe URLs.
-pub fn sanitize_url(url: &str) -> &str {
-    if is_safe_url(url) { url } else { "#" }
-}
-
-/// A validated URL newtype. Construction validates via `is_safe_url()`,
-/// rejecting dangerous schemes at the type level rather than at render time.
-///
-/// Components that store URLs in Props or Context SHOULD use `SafeUrl`
-/// instead of raw `String` to guarantee that validation happens once at
-/// the boundary and is enforced throughout.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct SafeUrl(String);
-
-impl SafeUrl {
-    /// Create a new `SafeUrl`, returning `Err` if the URL uses a disallowed scheme.
-    pub fn new(url: impl Into<String>) -> Result<Self, UnsafeUrlError> {
-        let url = url.into();
-        if is_safe_url(&url) {
-            Ok(Self(url))
-        } else {
-            Err(UnsafeUrlError(url))
-        }
-    }
-
-    /// Access the validated URL string.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for SafeUrl {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-/// Error returned when `SafeUrl::new()` receives a URL with a disallowed scheme.
-#[derive(Clone, Debug)]
-pub struct UnsafeUrlError(pub String);
-
-impl fmt::Display for UnsafeUrlError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "unsafe URL scheme: {:?}", self.0)
-    }
-}
-```
-
-Components that set URL-valued attributes MUST call `sanitize_url()`:
-
-- **Link**: `attrs.set(HtmlAttr::Href, sanitize_url(&self.ctx.href))`
-- **Form**: `attrs.set(HtmlAttr::Action, sanitize_url(&self.ctx.action))`
-
-When storing URLs in Props or Context, prefer `SafeUrl` over `String` for compile-time safety.
+`ars-dom` does not own this contract. DOM-facing crates consume the shared
+`ars-core` helpers when they need to render URL-valued attributes.

@@ -480,12 +480,24 @@ mod tests {
 
     struct DummyAsyncValidator;
 
+    #[cfg(not(target_arch = "wasm32"))]
     impl AsyncValidator for DummyAsyncValidator {
         fn validate_async<'a>(
             &'a self,
             _value: &'a Value,
             _ctx: &'a ValidationContext<'a>,
         ) -> Pin<Box<dyn Future<Output = ValidationResult> + Send + 'a>> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    impl AsyncValidator for DummyAsyncValidator {
+        fn validate_async<'a>(
+            &'a self,
+            _value: &'a Value,
+            _ctx: &'a ValidationContext<'a>,
+        ) -> Pin<Box<dyn Future<Output = ValidationResult> + 'a>> {
             Box::pin(async { Ok(()) })
         }
     }
@@ -548,6 +560,36 @@ mod tests {
         };
 
         assert_eq!(props_a, props_b);
+    }
+
+    #[test]
+    fn dummy_async_validator_validate_async_returns_ok() {
+        use core::task::{Context as TaskContext, Poll, Waker};
+
+        let validator = DummyAsyncValidator;
+        let value = Value::Text("hello".to_string());
+        let ctx = ValidationContext::standalone("email");
+        let mut future = validator.validate_async(&value, &ctx);
+        let mut task_ctx = TaskContext::from_waker(Waker::noop());
+
+        assert!(matches!(
+            future.as_mut().poll(&mut task_ctx),
+            Poll::Ready(Ok(()))
+        ));
+    }
+
+    #[test]
+    fn required_validator_accepts_non_empty_text() {
+        let validator = RequiredValidator;
+
+        assert!(
+            validator
+                .validate(
+                    &Value::Text("hello".to_string()),
+                    &ValidationContext::standalone("name")
+                )
+                .is_ok()
+        );
     }
 
     #[test]

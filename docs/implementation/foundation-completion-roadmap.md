@@ -15,7 +15,7 @@ The project needs a fully stable foundation before component work starts. Compon
 | `ars-core`         | 4,306  | Solid    | Machine, Service, TransitionPlan, PendingEffect, Bindable, ConnectApi, ComponentPart, AttrMap/AttrValue/UserAttrs, StyleStrategy, Callback, WeakSend, PlatformEffects, Provider (ColorMode), companion CSS                                                                                                                                                                                                                                                                                                                                     |
 | `ars-derive`       | 535    | Complete | HasId, ComponentPart proc macros with error tests                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `ars-a11y`         | 5,800+ | 95%      | AriaRole (88 variants), AriaAttribute (55+ variants), ComponentIds, ARIA state helpers (`set_expanded`/`set_selected`/`set_checked`/`set_disabled`/`set_busy`/`set_invalid`), FocusScopeBehavior, FocusStrategy, FocusRing, FocusZone, DomEvent/KeyboardShortcut/Platform, VisuallyHidden, LabelConfig/DescriptionConfig/FieldContext, LiveAnnouncer, Announcements/Messages (14 fields), Touch/Mobile, AriaValidator, FocusZoneTestHarness. Missing: ARIA assertion test helpers (#554), `set_readonly` (#555), public focus selectors (#556) |
-| `ars-forms`        | 4,128  | Partial  | field::State/Value/Context/Descriptors/InputAria, validation::Error/Validator/AsyncValidator, form::Context/Data/Mode, hidden_input, form_submit machine. Missing: built-in validators, ValidatorsBuilder, FormMessages, DebouncedAsyncValidator, Fieldset/Field/Form machines                                                                                                                                                                                                                                                                 |
+| `ars-forms`        | 4,128  | Partial  | field::State/Value/Context/Descriptors/InputAria, validation::Error/Validator/AsyncValidator, form::Context/Data/Mode, hidden_input, form_submit machine. Missing: built-in validators, ValidatorsBuilder, Messages, DebouncedAsyncValidator, Fieldset/Field/Form machines                                                                                                                                                                                                                                                                     |
 | `ars-interactions` | 3,107  | Partial  | Press, Hover, Focus, FocusWithin, InteractOutside, Dismissable, compose::merge_attrs, LogicalDirection. Missing: LongPress, Move, DnD, Keyboard types                                                                                                                                                                                                                                                                                                                                                                                          |
 | `ars-dom`          | 5,880  | Partial  | FocusScope, focus queries, ScrollLockManager, positioning engine (types + compute_position + overflow + VirtualElement), z-index allocator, scroll_into_view, modality manager. Missing: viewport/visualViewport, containing-block detection, auto_update, portal/inert, overlay stack, media queries, URL sanitization                                                                                                                                                                                                                        |
 | `ars-leptos`       | 1,195  | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, attr_map_to_leptos, use_style_strategy, AdapterCapabilities. Missing: ArsProvider context (#190), reactive props (#190), controlled value helper (#190), emit/emit_map (#191), event mapping (#191), nonce CSS collector (#191), safe event listeners (#191), LiveAnnouncer context bridge (#513)                                                                                                                                                                                         |
@@ -881,7 +881,7 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 | [#549](https://github.com/fogodev/ars-ui/issues/549) | Implement DnD collection traits and types                                | 5      | #53  | #159, #64  |
 | [#550](https://github.com/fogodev/ars-ui/issues/550) | Improve ars-collections edge-case test coverage                          | 2      | #53  | —          |
 | [#85](https://github.com/fogodev/ars-ui/issues/85)   | Implement media query utilities in ars-dom                               | 2      | #6   | —          |
-| [#176](https://github.com/fogodev/ars-ui/issues/176) | Implement URL sanitization utilities in ars-dom                          | 2      | #6   | —          |
+| [#176](https://github.com/fogodev/ars-ui/issues/176) | Implement URL sanitization utilities                                     | 2      | #6   | —          |
 | [#150](https://github.com/fogodev/ars-ui/issues/150) | Implement FocusZone for arrow-key navigation in composite widgets        | 5      | #3   | —          |
 | [#151](https://github.com/fogodev/ars-ui/issues/151) | Implement DomEvent trait, KeyboardShortcut, and Platform detection       | 3      | #3   | —          |
 | [#152](https://github.com/fogodev/ars-ui/issues/152) | Implement VisuallyHidden utilities for screen-reader-only content        | 1      | #3   | —          |
@@ -894,7 +894,7 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 | [#555](https://github.com/fogodev/ars-ui/issues/555) | Add set_readonly helper and DATA_ARS_READONLY constant                   | 1      | #3   | —          |
 | [#556](https://github.com/fogodev/ars-ui/issues/556) | Export TABBABLE_SELECTOR and FOCUSABLE_SELECTOR as public constants      | 1      | #6   | —          |
 | [#164](https://github.com/fogodev/ars-ui/issues/164) | Add MessageFn From impls for usize and f64 arity closures                | 1      | #5   | —          |
-| [#165](https://github.com/fogodev/ars-ui/issues/165) | Implement FormMessages, Error factory methods, DEFAULT_VALIDATOR_LOCALE  | 3      | #5   | #164       |
+| [#165](https://github.com/fogodev/ars-ui/issues/165) | Implement Messages, Error factory methods, DEFAULT_VALIDATOR_LOCALE      | 3      | #5   | #164       |
 | [#166](https://github.com/fogodev/ars-ui/issues/166) | Implement built-in validators and FnValidator                            | 5      | #5   | #165       |
 | [#167](https://github.com/fogodev/ars-ui/issues/167) | Implement ChainValidator, ValidatorsBuilder, and Validators alias        | 3      | #5   | #166       |
 | [#168](https://github.com/fogodev/ars-ui/issues/168) | Implement AsyncFnValidator, DebouncedAsyncValidator, and TimerHandle     | 3      | #5   | —          |
@@ -1292,7 +1292,7 @@ See epic #54 for the full wave structure, dependency graph, and ICU4X ↔ web-in
   - SSR-safe defaults when no window is available.
 - Spec impact: `No spec change required`.
 
-#### W4-11: Implement URL sanitization utilities in ars-dom
+#### W4-11: Implement URL sanitization utilities
 
 - Points: `2`
 - Layer: `Subsystem`
@@ -1300,9 +1300,9 @@ See epic #54 for the full wave structure, dependency graph, and ICU4X ↔ web-in
 - Test tier: `Unit`
 - Depends on: none
 - Spec refs:
-  - `spec/foundation/11-dom-utilities.md` §10 "URL Sanitization" (L2716)
+  - `spec/foundation/01-architecture.md` §3.1.1.1 "URL Sanitization"
 - Goal: implement URL validation and sanitization to prevent URL injection attacks (`javascript:`, `data:`, `vbscript:` schemes).
-- Files to create/modify: `crates/ars-dom/src/url.rs` (new), `crates/ars-dom/src/lib.rs`
+- Files to create/modify: core connect-layer URL helper module and exports
 - Tests to add first:
   - `is_safe_url()` allows `http://`, `https://`, `mailto:`, `tel:`, relative paths; rejects `javascript:`, `data:`, `vbscript:`.
   - Case-insensitive scheme detection.
@@ -1314,8 +1314,8 @@ See epic #54 for the full wave structure, dependency graph, and ICU4X ↔ web-in
   - `sanitize_url(url: &str) -> &str` returns `"#"` for unsafe URLs.
   - `SafeUrl` newtype enforces validation at construction time.
   - `UnsafeUrlError` error type for rejected URLs.
-  - Pure Rust, no `web_sys` deps. Available under both `web` and `ssr` features.
-- Spec impact: `No spec change required`.
+  - Pure Rust, no `web_sys` deps.
+- Spec impact: `Canonical ownership belongs in architecture/connect docs, not DOM utilities`.
 
 ---
 

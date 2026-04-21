@@ -184,7 +184,9 @@ use leptos::prelude::*;
 
 #[component]
 pub fn Fieldset(children: Children) -> impl IntoView {
-    let machine = use_machine::<fieldset::Machine>(fieldset::Props::default());
+    let machine = use_machine::<fieldset::component::Machine>(
+        fieldset::component::Props::default(),
+    );
     let root_attrs = machine.derive(|api| api.root_attrs());
 
     provide_context(Context(machine));
@@ -205,7 +207,7 @@ pub fn Fieldset(children: Children) -> impl IntoView {
 ## 25. Reference Implementation Skeleton
 
 ```rust
-let machine = use_machine::<fieldset::Machine>(props);
+let machine = use_machine::<fieldset::component::Machine>(props);
 let ids = derive_stable_fieldset_ids(machine);
 publish_fieldset_machine_context(machine);
 publish_inherited_field_ctx(machine);

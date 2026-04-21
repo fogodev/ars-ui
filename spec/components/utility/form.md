@@ -97,9 +97,17 @@ Key adapter responsibilities (see `07-forms.md` §14.6 for the complete list):
 
 ## 4. Internationalization
 
-The `FormMessages` struct provides localizable messages for form announcements (submit success, error counts, validation messages). It uses `MessageFn` closures with `Send + Sync` bounds per the ComponentMessages pattern.
+The `form::Messages` struct provides localizable messages for form
+announcements (submit success, error counts, validation messages). It uses
+`MessageFn` closures with `Send + Sync` bounds per the ComponentMessages
+pattern.
 
-See `07-forms.md` §14.7 for the full `FormMessages` definition, default values, provider context pattern, and locale fallback strategy.
+This is separate from `form::component::Machine::Messages`, which remains `()`.
+Adapters resolve `form::Messages` alongside the machine rather than passing it
+through the core machine's associated `Messages` type.
+
+See `07-forms.md` §14.7 for the full `Messages` definition, default values,
+provider context pattern, and locale fallback strategy.
 
 ## 5. Library Parity
 
