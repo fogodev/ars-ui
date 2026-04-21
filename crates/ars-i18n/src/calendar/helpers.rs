@@ -567,4 +567,41 @@ mod tests {
         );
         assert_eq!(epoch_days_to_iso(iso_to_epoch_days(44, 3, 15)), (44, 3, 15));
     }
+
+    /// Wasm smoke tests for `calendar/helpers.rs`. See the module-level note
+    /// in `date.rs`'s `wasm_tests` block for the rationale.
+    #[cfg(all(target_arch = "wasm32", feature = "web-intl"))]
+    mod wasm_tests {
+        use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+        use super::*;
+
+        wasm_bindgen_test_configure!(run_in_browser);
+
+        #[wasm_bindgen_test]
+        fn wasm_gregorian_days_in_month_matches_leap_year_and_fallback_rules() {
+            assert_eq!(gregorian_days_in_month(2024, 2), 29);
+            assert_eq!(gregorian_days_in_month(2023, 2), 28);
+            assert_eq!(gregorian_days_in_month(2024, 4), 30);
+            assert_eq!(gregorian_days_in_month(2024, 13), 30);
+        }
+
+        #[wasm_bindgen_test]
+        fn wasm_japanese_era_and_bounded_helpers_clamp_to_heisei_final_year() {
+            assert_eq!(
+                default_era_for(CalendarSystem::Japanese)
+                    .expect("Japanese default era")
+                    .code,
+                "reiwa"
+            );
+            assert_eq!(
+                bounded_months_in_year(CalendarSystem::Japanese, 31, Some("heisei")),
+                Some(4)
+            );
+            assert_eq!(
+                bounded_days_in_month(CalendarSystem::Japanese, 31, 4, Some("heisei")),
+                Some(30)
+            );
+        }
+    }
 }

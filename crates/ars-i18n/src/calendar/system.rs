@@ -1172,4 +1172,51 @@ mod tests {
             "UTC"
         );
     }
+
+    /// Wasm smoke tests for `calendar/system.rs`. See the module-level note
+    /// in `date.rs`'s `wasm_tests` block for the rationale.
+    #[cfg(all(target_arch = "wasm32", feature = "web-intl"))]
+    mod wasm_tests {
+        use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+        use super::*;
+
+        wasm_bindgen_test_configure!(run_in_browser);
+
+        #[wasm_bindgen_test]
+        fn wasm_calendar_system_bcp47_roundtrips_supported_identifiers() {
+            for (identifier, calendar) in [
+                ("iso8601", CalendarSystem::Iso8601),
+                ("gregory", CalendarSystem::Gregorian),
+                ("japanese", CalendarSystem::Japanese),
+                ("roc", CalendarSystem::Roc),
+            ] {
+                assert_eq!(CalendarSystem::from_bcp47(identifier), Some(calendar));
+                assert_eq!(calendar.to_bcp47_value(), identifier);
+            }
+
+            assert_eq!(CalendarSystem::from_bcp47("bogus"), None);
+        }
+
+        #[wasm_bindgen_test]
+        fn wasm_calendar_system_japanese_minimum_helpers_track_reiwa_era_start() {
+            let japanese = CalendarDate::new(
+                CalendarSystem::Japanese,
+                &crate::calendar::CalendarDateFields {
+                    era: Some(Era {
+                        code: String::from("reiwa"),
+                        display_name: String::from("Reiwa"),
+                    }),
+                    year: Some(1),
+                    month: Some(5),
+                    day: Some(1),
+                    ..crate::calendar::CalendarDateFields::default()
+                },
+            )
+            .expect("Japanese boundary date should validate");
+
+            assert_eq!(CalendarSystem::Japanese.minimum_month_in_year(&japanese), 5);
+            assert_eq!(CalendarSystem::Japanese.minimum_day_in_month(&japanese), 1);
+        }
+    }
 }

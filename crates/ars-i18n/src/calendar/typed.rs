@@ -424,4 +424,46 @@ mod tests {
         assert_eq!(Month::try_from(13).map(Month::get), Ok(13));
         assert_eq!(Month::try_from(14), Err(14));
     }
+
+    /// Wasm smoke tests for `calendar/typed.rs`. See the module-level note
+    /// in `date.rs`'s `wasm_tests` block for the rationale.
+    #[cfg(all(target_arch = "wasm32", feature = "web-intl"))]
+    mod wasm_tests {
+        use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+        use super::*;
+
+        wasm_bindgen_test_configure!(run_in_browser);
+
+        #[wasm_bindgen_test]
+        fn wasm_typed_calendar_date_constructor_and_arithmetic_match_native_api() {
+            let january = TypedCalendarDate::<Gregorian>::new(2024, 1, 31)
+                .expect("Gregorian leap-year fixture should validate");
+
+            let february = january
+                .add_months(1)
+                .expect("month arithmetic should constrain");
+
+            assert_eq!(january.year(), 2024);
+            assert_eq!(january.month(), 1);
+            assert_eq!(january.day(), 31);
+            assert_eq!(february.month(), 2);
+            assert_eq!(february.day(), 29);
+            assert_eq!(
+                TypedCalendarDate::<Gregorian>::calendar_system(),
+                CalendarSystem::Gregorian
+            );
+        }
+
+        #[wasm_bindgen_test]
+        fn wasm_typed_calendar_date_from_raw_rejects_mismatched_marker_systems() {
+            let raw = buddhist_fixture();
+
+            let error = TypedCalendarDate::<Gregorian>::from_raw(raw)
+                .expect_err("Buddhist date must not wrap as Gregorian");
+
+            assert_eq!(error.expected, CalendarSystem::Gregorian);
+            assert_eq!(error.found, CalendarSystem::Buddhist);
+        }
+    }
 }

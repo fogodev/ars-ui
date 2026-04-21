@@ -562,4 +562,49 @@ mod tests {
             Some(30)
         );
     }
+
+    /// Wasm smoke tests for `calendar/internal.rs`. See the module-level note
+    /// in `date.rs`'s `wasm_tests` block for the rationale.
+    #[cfg(all(target_arch = "wasm32", feature = "web-intl"))]
+    mod wasm_tests {
+        use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+        use super::*;
+
+        wasm_bindgen_test_configure!(run_in_browser);
+
+        #[wasm_bindgen_test]
+        fn wasm_internal_year_input_helpers_cover_default_and_explicit_era_paths() {
+            assert!(matches!(
+                default_year_input(CalendarSystem::Gregorian, 2024),
+                YearInput::Extended(2024)
+            ));
+            assert!(matches!(
+                default_year_input(CalendarSystem::Buddhist, 2567),
+                YearInput::EraYear("be", 2567)
+            ));
+            assert_eq!(default_era_code(CalendarSystem::Roc), Some("roc"));
+            assert_eq!(default_era_code(CalendarSystem::Gregorian), None);
+        }
+
+        #[wasm_bindgen_test]
+        fn wasm_internal_calendar_date_from_iso_rejects_invalid_and_supports_arithmetic() {
+            let date = CalendarDate::from_iso(2024, 3, 15).expect("Gregorian fixture");
+
+            let next = date.add_days(1).expect("day arithmetic should succeed");
+
+            assert_eq!(date.weekday(), Weekday::Friday);
+            assert_eq!(date.days_until(&next).expect("difference should fit"), 1);
+            assert!(date.is_before(&next).expect("ordering should succeed"));
+            assert!(
+                date_from_ordinal_fields(
+                    YearInput::Extended(2024),
+                    13,
+                    1,
+                    CalendarSystem::Gregorian,
+                )
+                .is_err()
+            );
+        }
+    }
 }

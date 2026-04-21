@@ -550,4 +550,44 @@ mod tests {
             &wrap_provider
         ));
     }
+
+    /// Wasm smoke tests for `calendar/queries.rs`. See the module-level note
+    /// in `date.rs`'s `wasm_tests` block for the rationale.
+    #[cfg(all(target_arch = "wasm32", feature = "web-intl"))]
+    mod wasm_tests {
+        use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+        use super::*;
+
+        wasm_bindgen_test_configure!(run_in_browser);
+
+        #[wasm_bindgen_test]
+        fn wasm_query_helpers_compute_month_year_boundaries_on_wasm32() {
+            let date = gregorian_date(2024, 3, 15);
+
+            let year_start = start_of_year(&date);
+            let year_end = end_of_year(&date);
+
+            let month_start = start_of_month(&date);
+            let month_end = end_of_month(&date);
+
+            assert_eq!(year_start.to_iso8601(), "2024-01-01");
+            assert_eq!(year_end.to_iso8601(), "2024-12-31");
+            assert_eq!(month_start.to_iso8601(), "2024-03-01");
+            assert_eq!(month_end.to_iso8601(), "2024-03-31");
+        }
+
+        #[wasm_bindgen_test]
+        fn wasm_min_max_equality_helpers_handle_same_and_distinct_dates_on_wasm32() {
+            let earlier = gregorian_date(2024, 3, 10);
+
+            let later = gregorian_date(2024, 3, 15);
+
+            assert_eq!(min_date(&earlier, &later), earlier);
+            assert_eq!(max_date(&earlier, &later), later);
+            assert!(is_equal_day(&earlier, &earlier));
+            assert!(!is_equal_day(&earlier, &later));
+            assert!(has_same_calendar_identity(&earlier, &later));
+        }
+    }
 }

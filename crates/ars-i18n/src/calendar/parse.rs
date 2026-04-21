@@ -428,4 +428,37 @@ mod tests {
         assert_eq!(today.calendar(), CalendarSystem::Iso8601);
         assert_eq!(japanese_today.calendar(), CalendarSystem::Japanese);
     }
+
+    /// Wasm smoke tests for `calendar/parse.rs`. See the module-level note
+    /// in `date.rs`'s `wasm_tests` block for the rationale.
+    #[cfg(all(target_arch = "wasm32", feature = "web-intl"))]
+    mod wasm_tests {
+        use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+        use super::*;
+
+        wasm_bindgen_test_configure!(run_in_browser);
+
+        #[wasm_bindgen_test]
+        fn wasm_parsing_helpers_decode_valid_inputs_on_wasm32() {
+            let date = parse_date("2024-03-15").expect("ISO date should parse");
+
+            let time = parse_time("12:34:56.789").expect("ISO time should parse");
+
+            let duration = parse_duration("P1Y2M3DT4H5M6S").expect("ISO duration should parse");
+
+            assert_eq!(date.to_iso8601(), "2024-03-15");
+            assert_eq!((time.hour(), time.minute(), time.second()), (12, 34, 56));
+            assert_eq!(duration.date.years, 1);
+            assert_eq!(duration.time.hours, 4);
+        }
+
+        #[wasm_bindgen_test]
+        fn wasm_parsing_helpers_reject_malformed_inputs_on_wasm32() {
+            assert!(parse_date("2024-02-30").is_err());
+            assert!(parse_date_time("2024-03-15T25:00").is_err());
+            assert!(parse_time("25:61").is_err());
+            assert!(parse_duration("P-not-a-duration").is_err());
+        }
+    }
 }

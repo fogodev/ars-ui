@@ -602,7 +602,7 @@ fn zoned_date_time_and_local_zone_override_work() {
         Time::new(1, 30, 0, 0).expect("time should validate"),
     );
 
-    let zoned = super::ZonedDateTime::new(&local, time_zone.clone(), Disambiguation::Compatible)
+    let zoned = ZonedDateTime::new(&local, time_zone.clone(), Disambiguation::Compatible)
         .expect("zoned date-time construction should succeed");
 
     assert_eq!(zoned.time_zone(), &time_zone);
