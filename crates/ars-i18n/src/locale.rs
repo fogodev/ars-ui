@@ -505,6 +505,7 @@ mod web_intl_tests {
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
     use super::Locale;
+    use crate::{HourCycle, ResolvedDirection, Weekday};
 
     wasm_bindgen_test_configure!(run_in_browser);
 
@@ -522,5 +523,57 @@ mod web_intl_tests {
         assert_eq!(explicit_true.numeric_ordering_extension(), Some(true));
         assert_eq!(disabled.numeric_ordering_extension(), Some(false));
         assert_eq!(none.numeric_ordering_extension(), None);
+    }
+
+    #[wasm_bindgen_test]
+    fn locale_direction_resolves_rtl_for_canonical_rtl_languages() {
+        for tag in ["ar", "he", "fa"] {
+            let locale = Locale::parse(tag).expect("RTL locale should parse");
+
+            assert_eq!(locale.direction(), ResolvedDirection::Rtl);
+            assert!(locale.is_rtl());
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn locale_is_rtl_is_false_for_representative_ltr_locales() {
+        for tag in ["en-US", "de-DE", "ja-JP"] {
+            let locale = Locale::parse(tag).expect("LTR locale should parse");
+
+            assert_eq!(locale.direction(), ResolvedDirection::Ltr);
+            assert!(!locale.is_rtl());
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn locale_to_bcp47_roundtrips_script_and_region_shapes() {
+        for tag in ["zh-Hant-TW", "pt-BR"] {
+            let locale = Locale::parse(tag).expect("locale should parse");
+
+            assert_eq!(locale.to_bcp47(), tag);
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn locale_calendar_extension_decodes_bcp47_ca_extension() {
+        let locale = Locale::parse("ja-JP-u-ca-japanese").expect("locale should parse");
+
+        assert_eq!(locale.calendar_extension(), Some("japanese"));
+        assert_eq!(
+            Locale::parse("en-US")
+                .expect("locale should parse")
+                .calendar_extension(),
+            None
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn locale_first_day_of_week_and_hour_cycle_extensions_decode_bcp47_u_values() {
+        let fw = Locale::parse("en-GB-u-fw-mon").expect("locale should parse");
+
+        let hc = Locale::parse("en-GB-u-hc-h23").expect("locale should parse");
+
+        assert_eq!(fw.first_day_of_week_extension(), Some(Weekday::Monday));
+        assert_eq!(hc.hour_cycle_extension(), Some(HourCycle::H23));
     }
 }
