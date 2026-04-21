@@ -2563,7 +2563,7 @@ mod tests {
         fn wasm_calendar_date_rejects_invalid_gregorian_day_of_month() {
             assert!(CalendarDate::new_gregorian(2024, 2, 30).is_err());
             assert!(CalendarDate::new_gregorian(2023, 2, 29).is_err());
-            assert!(Time::new(25, 0, 0, 0).is_err());
+            assert!(CalendarDate::new_gregorian(2024, 13, 1).is_err());
         }
     }
 }
