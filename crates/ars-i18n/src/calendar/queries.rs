@@ -450,8 +450,8 @@ mod tests {
         let time_zone = TimeZoneId::new("UTC").expect("UTC should validate");
 
         let far_future = gregorian_date(2099, 1, 1);
-        let today = CalendarDate::today(CalendarSystem::Gregorian)
-            .expect("Gregorian today should resolve for the current instant");
+        let today = crate::calendar::parse::today(Some(&time_zone))
+            .expect("Gregorian today should resolve for the requested time zone");
 
         let earlier = gregorian_date(2024, 3, 10);
 
