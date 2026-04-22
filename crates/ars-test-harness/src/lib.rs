@@ -502,7 +502,7 @@ pub struct MockClipboard {
     state: Rc<RefCell<MockClipboardState>>,
 
     #[cfg(target_arch = "wasm32")]
-    original_clipboard: JsValue,
+    original_clipboard_descriptor: JsValue,
 
     #[cfg(target_arch = "wasm32")]
     _write_text: Closure<dyn FnMut(String) -> js_sys::Promise>,
@@ -567,10 +567,10 @@ impl Drop for MockClipboard {
         {
             let window = web_sys::window().expect("window must exist");
 
-            restore_property(
+            restore_property_descriptor(
                 window.navigator().as_ref(),
                 "clipboard",
-                &self.original_clipboard,
+                &self.original_clipboard_descriptor,
             );
         }
     }
@@ -743,9 +743,8 @@ pub fn mock_clipboard() -> MockClipboard {
 
         let navigator = web_sys::window().expect("window must exist").navigator();
 
-        let original_clipboard =
-            js_sys::Reflect::get(navigator.as_ref(), &JsValue::from_str("clipboard"))
-                .unwrap_or(JsValue::UNDEFINED);
+        let original_clipboard_descriptor =
+            own_property_descriptor(navigator.as_ref(), "clipboard");
 
         let mock = js_sys::Object::new();
 
@@ -783,7 +782,7 @@ pub fn mock_clipboard() -> MockClipboard {
 
         MockClipboard {
             state,
-            original_clipboard,
+            original_clipboard_descriptor,
             _write_text: write_text,
             _read_text: read_text,
         }
@@ -1430,9 +1429,18 @@ impl TestHarness {
     /// Returns focusable descendants in DOM order.
     #[must_use]
     pub fn get_tab_order(&self) -> Vec<ElementHandle> {
-        self.query_selector_all(
-            "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
-        )
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut elements =
+                self.query_selector_all("button, [href], input, select, textarea, [tabindex]");
+            elements.retain(|element| is_tabbable_element(&element.element));
+            elements
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.query_selector_all("button, [href], input, select, textarea, [tabindex]")
+        }
     }
 
     /// Returns `[data-ars-part]` descendants sorted by visual position.
@@ -2202,16 +2210,14 @@ fn normalize_media_text(value: &str) -> String {
 #[cfg(target_arch = "wasm32")]
 fn emulated_media_match(query: &str, overrides: &BTreeMap<String, String>) -> Option<bool> {
     let normalized_query = normalize_media_text(query);
+    let body = normalized_query
+        .strip_prefix('(')?
+        .strip_suffix(')')
+        .filter(|body| !body.contains('(') && !body.contains(')') && !body.contains(','))?;
+    let (feature, actual_value) = body.split_once(':')?;
+    let expected_value = overrides.get(feature.trim())?;
 
-    overrides.iter().find_map(|(feature, expected_value)| {
-        let needle = format!("({feature}:");
-        let start = normalized_query.find(&needle)?;
-        let value_start = start + needle.len();
-        let value_end = normalized_query[value_start..].find(')')? + value_start;
-        let actual_value = normalized_query[value_start..value_end].trim();
-
-        Some(actual_value == expected_value)
-    })
+    Some(actual_value.trim() == expected_value)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -2379,17 +2385,15 @@ fn restore_property_descriptor(target: &JsValue, property: &str, descriptor: &Js
 }
 
 #[cfg(target_arch = "wasm32")]
-fn restore_property(target: &JsValue, property: &str, value: &JsValue) {
-    if value.is_undefined() {
-        let target: &js_sys::Object = target.unchecked_ref();
-
-        let deleted = js_sys::Reflect::delete_property(target, &JsValue::from_str(property))
-            .expect("deleting restored property should not throw");
-
-        assert!(deleted, "deleting restored property should succeed");
-    } else {
-        define_value_property(target, property, value);
+fn is_tabbable_element(element: &web_sys::Element) -> bool {
+    if element.has_attribute("disabled") {
+        return false;
     }
+
+    js_sys::Reflect::get(element.as_ref(), &JsValue::from_str("tabIndex"))
+        .ok()
+        .and_then(|value| value.as_f64())
+        .is_some_and(|value| value >= 0.0)
 }
 
 #[cfg(test)]
@@ -4369,6 +4373,9 @@ mod tests {
             assert!(!match_media_matches(
                 "(prefers-reduced-motion: no-preference)"
             ));
+            assert!(!match_media_matches(
+                "(prefers-reduced-motion: reduce) and (min-width: 100000px)"
+            ));
 
             harness
                 .emulate_media("prefers-reduced-motion", "no-preference")
@@ -4384,6 +4391,88 @@ mod tests {
             &own_property_descriptor(window.as_ref(), "matchMedia"),
             &initial_match_media_descriptor,
             "window.matchMedia",
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
+    async fn get_tab_order_excludes_disabled_and_negative_tabindex_elements() {
+        let harness =
+            render_with_backend(MockComponent, MountedDomBackend::new(Rc::new(Cell::new(0)))).await;
+
+        let document = web_sys::window()
+            .and_then(|window| window.document())
+            .expect("document must exist");
+        let root = harness.query("[data-ars-scope]").element;
+
+        let enabled_input = document
+            .create_element("input")
+            .expect("input element must be creatable");
+        enabled_input
+            .set_attribute("id", "enabled-input")
+            .expect("input id should set");
+
+        let disabled_button = document
+            .create_element("button")
+            .expect("button element must be creatable");
+        disabled_button
+            .set_attribute("id", "disabled-button")
+            .expect("button id should set");
+        disabled_button
+            .set_attribute("disabled", "")
+            .expect("disabled attribute should set");
+
+        let skipped_link = document
+            .create_element("a")
+            .expect("link element must be creatable");
+        skipped_link
+            .set_attribute("id", "skipped-link")
+            .expect("link id should set");
+        skipped_link
+            .set_attribute("href", "#")
+            .expect("link href should set");
+        skipped_link
+            .set_attribute("tabindex", "-1")
+            .expect("link tabindex should set");
+
+        let custom_tab_stop = document
+            .create_element("div")
+            .expect("div element must be creatable");
+        custom_tab_stop
+            .set_attribute("id", "custom-tab-stop")
+            .expect("div id should set");
+        custom_tab_stop
+            .set_attribute("tabindex", "0")
+            .expect("div tabindex should set");
+
+        for element in [
+            enabled_input,
+            disabled_button,
+            skipped_link,
+            custom_tab_stop,
+        ] {
+            root.append_child(&element)
+                .expect("tab-order fixture should append");
+        }
+
+        let tab_order = harness
+            .get_tab_order()
+            .into_iter()
+            .map(|element| {
+                element
+                    .attr("id")
+                    .or_else(|| element.attr("data-ars-part"))
+                    .expect("fixture elements should expose a stable identifier")
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            tab_order,
+            vec![
+                String::from("trigger"),
+                String::from("enabled-input"),
+                String::from("custom-tab-stop"),
+            ]
         );
     }
 
@@ -4553,6 +4642,8 @@ mod tests {
     #[wasm_bindgen_test]
     fn mock_clipboard_patches_navigator_and_restores_original_value() {
         let navigator = web_sys::window().expect("window must exist").navigator();
+        let original_clipboard_descriptor =
+            own_property_descriptor(navigator.as_ref(), "clipboard");
 
         let original_clipboard =
             js_sys::Reflect::get(navigator.as_ref(), &JsValue::from_str("clipboard"))
@@ -4600,6 +4691,11 @@ mod tests {
             js_sys::Reflect::get(navigator.as_ref(), &JsValue::from_str("clipboard"))
                 .unwrap_or(JsValue::UNDEFINED);
 
+        assert_same_descriptor(
+            &own_property_descriptor(navigator.as_ref(), "clipboard"),
+            &original_clipboard_descriptor,
+            "navigator.clipboard",
+        );
         assert!(
             js_sys::Object::is(&restored_clipboard, &original_clipboard),
             "dropping MockClipboard should restore the original navigator.clipboard value"
