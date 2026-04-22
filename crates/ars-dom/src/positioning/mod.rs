@@ -17,7 +17,7 @@ pub use compute::compute_position;
 pub use dom::{client_point_to_local_space, client_rect_to_local_space};
 #[cfg(feature = "web")]
 pub use dom::{
-    find_containing_block_ancestor, offset_parent_rect,
+    find_containing_block_ancestor, measure_and_compute_position, offset_parent_rect,
     warn_if_floating_element_has_containment_issue, warn_if_portal_target_has_containing_block,
 };
 pub use types::{
