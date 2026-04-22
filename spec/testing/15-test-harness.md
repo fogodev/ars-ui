@@ -721,8 +721,8 @@ impl TestHarness {
     /// Set anchor position for popover/tooltip placement tests.
     pub fn set_anchor_position(&self, rect: Rect);
 
-    /// Scroll the container by a delta.
-    pub fn scroll_container_by(&self, dx: i32, dy: i32);
+    /// Scroll the container by a delta and flush reactive updates.
+    pub async fn scroll_container_by(&self, dx: i32, dy: i32);
 
     /// Scroll the window to a position.
     pub fn scroll_to(&self, x: i32, y: i32);
@@ -864,13 +864,13 @@ assert_snapshot!("dialog_open", harness.snapshot_attrs());
 
 ### 8.10 Viewport and Layout
 
-| Method                | Signature             | Used In |
-| --------------------- | --------------------- | ------- |
-| `set_viewport`        | `fn(&self, f64, f64)` | 02      |
-| `set_anchor_position` | `fn(&self, Rect)`     | 02      |
-| `scroll_container_by` | `fn(&self, i32, i32)` | 02      |
-| `scroll_to`           | `fn(&self, i32, i32)` | 02      |
-| `scroll_y`            | `fn(&self) -> i32`    | 02      |
+| Method                | Signature                   | Used In |
+| --------------------- | --------------------------- | ------- |
+| `set_viewport`        | `fn(&self, f64, f64)`       | 02      |
+| `set_anchor_position` | `fn(&self, Rect)`           | 02      |
+| `scroll_container_by` | `async fn(&self, i32, i32)` | 02      |
+| `scroll_to`           | `fn(&self, i32, i32)`       | 02      |
+| `scroll_y`            | `fn(&self) -> i32`          | 02      |
 
 ### 8.11 Convenience Methods
 

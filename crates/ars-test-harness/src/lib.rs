@@ -924,7 +924,7 @@ impl TestHarness {
                 .dispatch_event(&pointer)
                 .expect("pointerenter dispatch must succeed");
 
-            let mouse = web_sys::MouseEvent::new("mouseover").expect("mouseover must construct");
+            let mouse = bubbling_mouse_over_event();
 
             let _ = element
                 .dispatch_event(&mouse)
@@ -1613,31 +1613,35 @@ impl TestHarness {
     }
 
     /// Scrolls the isolated harness container by the provided delta.
-    pub fn scroll_container_by(&self, dx: i32, dy: i32) {
+    pub async fn scroll_container_by(&self, dx: i32, dy: i32) {
         #[cfg(target_arch = "wasm32")]
         {
             let container = container_html(&self.container);
 
-            let mut layout = self.layout.borrow_mut();
+            let (scroll_x, scroll_y) = {
+                let mut layout = self.layout.borrow_mut();
 
-            layout.scroll_x += dx;
-            layout.scroll_y += dy;
+                layout.scroll_x += dx;
+                layout.scroll_y += dy;
+
+                if let Some(anchor) = layout.anchor.as_ref() {
+                    anchor.update_for_scroll(layout.scroll_x, layout.scroll_y);
+                }
+
+                (layout.scroll_x, layout.scroll_y)
+            };
 
             define_value_property(
                 container.as_ref(),
                 "scrollLeft",
-                &JsValue::from_f64(f64::from(layout.scroll_x)),
+                &JsValue::from_f64(f64::from(scroll_x)),
             );
 
             define_value_property(
                 container.as_ref(),
                 "scrollTop",
-                &JsValue::from_f64(f64::from(layout.scroll_y)),
+                &JsValue::from_f64(f64::from(scroll_y)),
             );
-
-            if let Some(anchor) = layout.anchor.as_ref() {
-                anchor.update_for_scroll(layout.scroll_x, layout.scroll_y);
-            }
 
             let container_scroll = web_sys::Event::new("scroll")
                 .expect("scroll event for harness container must construct");
@@ -1654,6 +1658,8 @@ impl TestHarness {
                     .dispatch_event(&window_scroll)
                     .expect("window scroll dispatch must succeed");
             }
+
+            self.flush().await;
         }
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -1878,6 +1884,17 @@ fn bubbling_input_event() -> web_sys::InputEvent {
 
     web_sys::InputEvent::new_with_event_init_dict("input", &init)
         .expect("input event must construct cleanly")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bubbling_mouse_over_event() -> web_sys::MouseEvent {
+    let init = web_sys::MouseEventInit::new();
+
+    init.set_bubbles(true);
+    init.set_cancelable(true);
+
+    web_sys::MouseEvent::new_with_mouse_event_init_dict("mouseover", &init)
+        .expect("mouseover must construct cleanly")
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -3211,7 +3228,10 @@ mod tests {
             },
             "set_anchor_position",
         );
-        assert_panics_with_message(|| harness.scroll_container_by(5, 6), "scroll_container_by");
+        assert_panics_with_message(
+            || run_ready(harness.scroll_container_by(5, 6)),
+            "scroll_container_by",
+        );
 
         assert_panics_with_message(|| run_ready(harness.click()), "query_selector");
         assert_panics_with_message(
@@ -3531,7 +3551,7 @@ mod tests {
             }
         );
 
-        harness.scroll_container_by(0, 50);
+        harness.scroll_container_by(0, 50).await;
 
         let trigger = harness.query("[data-ars-part='trigger']");
 
@@ -3954,6 +3974,54 @@ mod tests {
             .expect("value should be a string");
 
         assert_eq!(current_value, "next");
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
+    async fn hover_dispatches_bubbling_mouseover_events() {
+        let harness =
+            render_with_backend(MockComponent, MountedDomBackend::new(Rc::new(Cell::new(0)))).await;
+
+        let root = harness.query("[data-ars-scope]").element;
+
+        let mouseover = Rc::new(RefCell::new(None));
+
+        let _mouseover_listener = {
+            let mouseover = Rc::clone(&mouseover);
+            let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+                move |event: web_sys::MouseEvent| {
+                    *mouseover.borrow_mut() =
+                        Some((event.bubbles(), event.cancelable(), event.type_()));
+                },
+            ));
+
+            root.add_event_listener_with_callback("mouseover", closure.as_ref().unchecked_ref())
+                .expect("mouseover listener should register");
+
+            closure
+        };
+
+        harness.hover("[data-ars-part='trigger']").await;
+
+        assert_eq!(
+            *mouseover.borrow(),
+            Some((true, true, String::from("mouseover")))
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
+    async fn scroll_container_by_flushes_before_returning() {
+        let flushes = Rc::new(Cell::new(0));
+
+        let harness =
+            render_with_backend(MockComponent, MountedDomBackend::new(Rc::clone(&flushes))).await;
+
+        assert_eq!(flushes.get(), 1, "initial render should flush once");
+
+        harness.scroll_container_by(0, 50).await;
+
+        assert_eq!(flushes.get(), 2, "scroll should flush before returning");
     }
 
     #[cfg(target_arch = "wasm32")]

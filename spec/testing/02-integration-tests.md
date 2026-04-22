@@ -706,14 +706,14 @@ fn rtl_placement_mirror_start_end() {
 
 ```rust
 #[test]
-fn positioning_updates_on_scroll() {
-    let harness = render(Popover::new().placement(Placement::Bottom));
-    harness.open();
+async fn positioning_updates_on_scroll() {
+    let harness = render(Popover::new().placement(Placement::Bottom)).await;
+    harness.open().await;
 
     let initial_top = harness.query_selector("[data-ars-popover]")
         .unwrap().bounding_rect().y;
 
-    harness.scroll_container_by(0, 50);
+    harness.scroll_container_by(0, 50).await;
 
     let updated_top = harness.query_selector("[data-ars-popover]")
         .unwrap().bounding_rect().y;
