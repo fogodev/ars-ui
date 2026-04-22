@@ -1,5 +1,11 @@
 # Advanced Testing
 
+> **Harness entrypoints:** `render(...)` and `mount_with_locale(...)` in the
+> examples below are imported from the active adapter harness crate
+> (`ars_test_harness_leptos` or `ars_test_harness_dioxus`). The core
+> `ars-test-harness` crate exposes only `render_with_backend(...)` and
+> `render_with_locale_and_backend(...)`.
+
 ## 1. Specialized Component Testing
 
 Components with browser API dependencies require specific testing strategies.

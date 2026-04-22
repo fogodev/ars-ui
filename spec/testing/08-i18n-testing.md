@@ -3,6 +3,10 @@
 ## 1. Test Harness Utilities
 
 > **Test harness integration:** The `mount_with_locale` helper is defined in [15-test-harness.md section 2.3](15-test-harness.md#23-locale-aware-mounting). It wraps the component in an `ArsProvider` with the specified locale.
+> Adapter-facing tests import `mount_with_locale(...)` and `render(...)` from the
+> active adapter harness crate (`ars_test_harness_leptos` or
+> `ars_test_harness_dioxus`). The core `ars-test-harness` crate exposes only
+> `render_with_backend(...)` and `render_with_locale_and_backend(...)`.
 
 ```rust
 /// Test harness that wraps a component in a container with the specified

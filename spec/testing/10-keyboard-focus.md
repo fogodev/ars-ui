@@ -3,6 +3,12 @@
 > **Alias:** Throughout this file, `PresenceState` is used as a test alias for `presence::State`.
 > The canonical state names are: `Unmounted`, `Mounting`, `Mounted`, `UnmountPending`.
 > There is NO `Unmounting` variant.
+>
+> **Harness entrypoints:** `render(...)` and `mount_with_locale(...)` in the
+> examples below are imported from the active adapter harness crate
+> (`ars_test_harness_leptos` or `ars_test_harness_dioxus`). The core
+> `ars-test-harness` crate exposes only `render_with_backend(...)` and
+> `render_with_locale_and_backend(...)`.
 
 ## 1. Presence and Animation Lifecycle Testing
 

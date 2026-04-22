@@ -91,6 +91,16 @@ The prelude does **not** include implementation details consumed only by compone
 
 Both adapter preludes must stay symmetric: same items, same structure. When adding a new re-export to one adapter's prelude, add it to the other as well in the same PR.
 
+### Adapter Testing Convention
+
+Adapter-level component tests should default to the framework-specific test harness crate:
+
+- Leptos adapter tests should prefer `ars-test-harness-leptos`.
+- Dioxus adapter tests should prefer `ars-test-harness-dioxus`.
+- Shared `ars-test-harness` helpers should be used where relevant for viewport, layout, clipboard, drag/drop, timing, and other DOM test setup instead of bespoke per-test browser scaffolding.
+
+When a component spec requires interaction, focus, overlay positioning, clipboard, file upload, drag/drop, or similar browser behavior, the task's tests should exercise that behavior through the adapter harness entrypoints and shared core harness helpers unless there is a concrete technical reason not to.
+
 ## Spec Synchronization During Implementation
 
 The specification is the authoritative contract. It took weeks of deliberate design and MUST be followed.

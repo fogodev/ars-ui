@@ -10,6 +10,7 @@ rust-version.workspace = true
 [dependencies]
 ars-leptos       = { path = "../ars-leptos" }
 ars-test-harness = { path = "../ars-test-harness" }
+web-sys          = { version = "0.3", features = ["HtmlElement"] }
 
 [lints]
 workspace = true

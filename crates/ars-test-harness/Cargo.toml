@@ -8,8 +8,53 @@ repository.workspace   = true
 rust-version.workspace = true
 
 [dependencies]
-ars-core = { path = "../ars-core" }
-ars-i18n = { path = "../ars-i18n" }
+ars-core     = { path = "../ars-core" }
+ars-i18n     = { path = "../ars-i18n" }
+js-sys       = "0.3"
+wasm-bindgen = "0.2"
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+    "Attr",
+    "Blob",
+    "Clipboard",
+    "CompositionEvent",
+    "CompositionEventInit",
+    "DataTransfer",
+    "DataTransferItem",
+    "DataTransferItemList",
+    "CssStyleDeclaration",
+    "Document",
+    "DomRect",
+    "Element",
+    "Event",
+    "EventTarget",
+    "File",
+    "FileList",
+    "FilePropertyBag",
+    "FocusEvent",
+    "HtmlElement",
+    "HtmlInputElement",
+    "HtmlTextAreaElement",
+    "InputEvent",
+    "KeyboardEvent",
+    "MouseEvent",
+    "NamedNodeMap",
+    "Navigator",
+    "Node",
+    "NodeList",
+    "PointerEvent",
+    "PointerEventInit",
+    "Touch",
+    "TouchEvent",
+    "TouchEventInit",
+    "TouchInit",
+    "Window"
+]
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
 
 [lints]
 workspace = true
