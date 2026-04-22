@@ -165,6 +165,7 @@ enum ContainerHandle {
 struct WasmLayoutState {
     viewport: Option<ViewportOverride>,
     anchor: Option<ElementRectOverride>,
+    last_root_touch_point: Option<Point>,
     scroll_x: i32,
     scroll_y: i32,
 }
@@ -196,6 +197,19 @@ impl ViewportOverride {
         let document_element = document
             .document_element()
             .expect("document element must exist");
+
+        let original_window_width = window
+            .inner_width()
+            .ok()
+            .and_then(|value| value.as_f64())
+            .unwrap_or(width);
+        let original_window_height = window
+            .inner_height()
+            .ok()
+            .and_then(|value| value.as_f64())
+            .unwrap_or(height);
+        let original_document_width = f64::from(document_element.client_width());
+        let original_document_height = f64::from(document_element.client_height());
 
         let width_state = Rc::new(Cell::new(width));
         let height_state = Rc::new(Cell::new(height));
@@ -245,18 +259,10 @@ impl ViewportOverride {
             _window_height_getter: window_height_getter,
             _document_width_getter: document_width_getter,
             _document_height_getter: document_height_getter,
-            original_window_width: window
-                .inner_width()
-                .ok()
-                .and_then(|value| value.as_f64())
-                .unwrap_or(width),
-            original_window_height: window
-                .inner_height()
-                .ok()
-                .and_then(|value| value.as_f64())
-                .unwrap_or(height),
-            original_document_width: f64::from(document_element.client_width()),
-            original_document_height: f64::from(document_element.client_height()),
+            original_window_width,
+            original_window_height,
+            original_document_width,
+            original_document_height,
         };
 
         viewport.apply_container_styles(container);
@@ -1021,14 +1027,7 @@ impl TestHarness {
                 .focused_element()
                 .expect("press_key requires a focused element");
 
-            let event =
-                web_sys::KeyboardEvent::new("keydown").expect("keydown event must construct");
-
-            drop(js_sys::Reflect::set(
-                event.as_ref(),
-                &JsValue::from_str("key"),
-                &JsValue::from_str(&key.as_key_value()),
-            ));
+            let event = keyboard_event("keydown", key);
 
             let _ = focused
                 .element
@@ -1060,14 +1059,7 @@ impl TestHarness {
                 .expect("key_sequence requires a focused element");
 
             for event_name in ["keydown", "keypress", "keyup"] {
-                let event =
-                    web_sys::KeyboardEvent::new(event_name).expect("keyboard event must construct");
-
-                drop(js_sys::Reflect::set(
-                    event.as_ref(),
-                    &JsValue::from_str("key"),
-                    &JsValue::from_str(&key.as_key_value()),
-                ));
+                let event = keyboard_event(event_name, key);
 
                 let _ = focused
                     .element
@@ -1090,6 +1082,7 @@ impl TestHarness {
     pub async fn touch_start(&self, point: Point) {
         #[cfg(target_arch = "wasm32")]
         {
+            self.layout.borrow_mut().last_root_touch_point = Some(point);
             self.dispatch_touch_event("[data-ars-scope]", "touchstart", point)
                 .await;
         }
@@ -1106,6 +1099,7 @@ impl TestHarness {
     pub async fn touch_move(&self, point: Point) {
         #[cfg(target_arch = "wasm32")]
         {
+            self.layout.borrow_mut().last_root_touch_point = Some(point);
             self.dispatch_touch_event("[data-ars-scope]", "touchmove", point)
                 .await;
         }
@@ -1120,8 +1114,29 @@ impl TestHarness {
 
     /// Dispatches `touchend` on the component root.
     pub async fn touch_end(&self) {
-        self.dispatch_simple_event("[data-ars-scope]", "touchend")
-            .await;
+        #[cfg(target_arch = "wasm32")]
+        {
+            let point = self
+                .layout
+                .borrow()
+                .last_root_touch_point
+                .unwrap_or_else(|| {
+                    let rect = self.query("[data-ars-scope]").bounding_rect();
+
+                    point(rect.x + (rect.width / 2.0), rect.y + (rect.height / 2.0))
+                });
+
+            self.dispatch_touch_event_with_state("[data-ars-scope]", "touchend", point, false)
+                .await;
+
+            self.layout.borrow_mut().last_root_touch_point = None;
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.dispatch_simple_event("[data-ars-scope]", "touchend")
+                .await;
+        }
     }
 
     /// Dispatches `touchstart` on the trigger element.
@@ -1691,19 +1706,35 @@ impl TestHarness {
 
     #[cfg(target_arch = "wasm32")]
     async fn dispatch_touch_event(&self, selector: &str, event_name: &str, point: Point) {
+        self.dispatch_touch_event_with_state(selector, event_name, point, true)
+            .await;
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn dispatch_touch_event_with_state(
+        &self,
+        selector: &str,
+        event_name: &str,
+        point: Point,
+        touch_active: bool,
+    ) {
         let element = self.query(selector).element;
 
         let touch = touch_at_point(&element, point, 0);
 
+        let changed_touches = js_sys::Array::new();
         let touches = js_sys::Array::new();
 
-        touches.push(&touch);
+        changed_touches.push(&touch);
+        if touch_active {
+            touches.push(&touch);
+        }
 
         let init = web_sys::TouchEventInit::new();
 
         init.set_bubbles(true);
         init.set_cancelable(true);
-        init.set_changed_touches(touches.as_ref());
+        init.set_changed_touches(changed_touches.as_ref());
         init.set_target_touches(touches.as_ref());
         init.set_touches(touches.as_ref());
 
@@ -1796,6 +1827,18 @@ fn touch_at_point(element: &web_sys::Element, point: Point, identifier: i32) -> 
     init.set_screen_y(y);
 
     web_sys::Touch::new(&init).expect("touch must construct")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn keyboard_event(event_name: &str, key: KeyboardKey) -> web_sys::KeyboardEvent {
+    let init = web_sys::KeyboardEventInit::new();
+
+    init.set_bubbles(true);
+    init.set_cancelable(true);
+    init.set_key(&key.as_key_value());
+
+    web_sys::KeyboardEvent::new_with_keyboard_event_init_dict(event_name, &init)
+        .expect("keyboard event must construct")
 }
 
 fn create_isolated_container() -> ContainerHandle {
@@ -2262,6 +2305,17 @@ mod tests {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn panic_message(panic: &(dyn Any + Send)) -> String {
+        if let Some(message) = panic.downcast_ref::<String>() {
+            message.clone()
+        } else if let Some(message) = panic.downcast_ref::<&'static str>() {
+            String::from(*message)
+        } else {
+            String::from("<non-string panic>")
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn assert_panics_with_message<F, R>(f: F, expected: &str)
     where
@@ -2279,9 +2333,27 @@ mod tests {
         );
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn assert_panics_with_message<F, R>(f: F, expected: &str)
+    where
+        F: FnOnce() -> R,
+    {
+        let Err(panic) = std::panic::catch_unwind(AssertUnwindSafe(f)) else {
+            panic!("operation should panic on the wasm test runtime");
+        };
+
+        let message = panic_message(panic.as_ref());
+
+        assert!(
+            message.contains(expected),
+            "expected panic message to contain {expected:?}, got {message:?}"
+        );
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     struct NoopWake;
 
+    #[cfg(not(target_arch = "wasm32"))]
     impl Wake for NoopWake {
         fn wake(self: Arc<Self>) {}
     }
@@ -3252,6 +3324,14 @@ mod tests {
     }
 
     #[cfg(target_arch = "wasm32")]
+    fn touch_list_length(event: &web_sys::TouchEvent, property: &str) -> u32 {
+        let touches = js_sys::Reflect::get(event.as_ref(), &JsValue::from_str(property))
+            .unwrap_or_else(|_| panic!("property '{property}' should be readable"));
+
+        js_sys::Array::from(&touches).length()
+    }
+
+    #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen_test]
     async fn set_viewport_overrides_container_geometry_and_window_metrics() {
         let flushes = Rc::new(Cell::new(0));
@@ -3293,6 +3373,59 @@ mod tests {
             Some(480.0)
         );
         assert_eq!(flushes.get(), 1, "initial render should flush once");
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
+    async fn set_viewport_restores_window_metrics_on_drop() {
+        let window = web_sys::window().expect("window must exist");
+        let document = window.document().expect("document must exist");
+        let document_element = document
+            .document_element()
+            .expect("document element must exist");
+
+        let original_window_width = window
+            .inner_width()
+            .ok()
+            .and_then(|value| value.as_f64())
+            .expect("window.innerWidth should be readable");
+        let original_window_height = window
+            .inner_height()
+            .ok()
+            .and_then(|value| value.as_f64())
+            .expect("window.innerHeight should be readable");
+        let original_document_width = document_element.client_width();
+        let original_document_height = document_element.client_height();
+
+        {
+            let harness =
+                render_with_backend(MockComponent, MountedDomBackend::new(Rc::new(Cell::new(0))))
+                    .await;
+
+            harness.set_viewport(320.0, 480.0);
+
+            assert_eq!(
+                window.inner_width().ok().and_then(|value| value.as_f64()),
+                Some(320.0)
+            );
+            assert_eq!(
+                window.inner_height().ok().and_then(|value| value.as_f64()),
+                Some(480.0)
+            );
+            assert_eq!(document_element.client_width(), 320);
+            assert_eq!(document_element.client_height(), 480);
+        }
+
+        assert_eq!(
+            window.inner_width().ok().and_then(|value| value.as_f64()),
+            Some(original_window_width)
+        );
+        assert_eq!(
+            window.inner_height().ok().and_then(|value| value.as_f64()),
+            Some(original_window_height)
+        );
+        assert_eq!(document_element.client_width(), original_document_width);
+        assert_eq!(document_element.client_height(), original_document_height);
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -3375,6 +3508,76 @@ mod tests {
 
     #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen_test]
+    async fn keyboard_helpers_set_dom_key_values() {
+        let harness =
+            render_with_backend(MockComponent, MountedDomBackend::new(Rc::new(Cell::new(0)))).await;
+
+        let trigger = harness.query("[data-ars-part='trigger']");
+        let trigger_element = trigger.element.clone();
+
+        let pressed_key = Rc::new(RefCell::new(None));
+
+        let _keydown_listener = {
+            let pressed_key = Rc::clone(&pressed_key);
+            let closure = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::wrap(Box::new(
+                move |event: web_sys::KeyboardEvent| {
+                    *pressed_key.borrow_mut() = Some(js_string(event.as_ref(), "key"));
+                },
+            ));
+
+            trigger_element
+                .add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref())
+                .expect("keydown listener should register");
+
+            closure
+        };
+
+        let sequence = Rc::new(RefCell::new(Vec::new()));
+        let _sequence_listeners = ["keydown", "keypress", "keyup"]
+            .into_iter()
+            .map(|event_name| {
+                let sequence = Rc::clone(&sequence);
+                let trigger_element = trigger_element.clone();
+                let event_name = String::from(event_name);
+                let listener_event_name = event_name.clone();
+                let closure = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::wrap(Box::new(
+                    move |event: web_sys::KeyboardEvent| {
+                        sequence.borrow_mut().push((
+                            listener_event_name.clone(),
+                            js_string(event.as_ref(), "key"),
+                        ));
+                    },
+                ));
+
+                trigger_element
+                    .add_event_listener_with_callback(&event_name, closure.as_ref().unchecked_ref())
+                    .expect("keyboard listener should register");
+
+                closure
+            })
+            .collect::<Vec<_>>();
+
+        harness.focus("[data-ars-part='trigger']").await;
+        harness.press_key(KeyboardKey::Enter).await;
+
+        assert_eq!(*pressed_key.borrow(), Some(String::from("Enter")));
+
+        sequence.borrow_mut().clear();
+
+        harness.key_sequence(KeyboardKey::Space).await;
+
+        assert_eq!(
+            sequence.borrow().as_slice(),
+            &[
+                (String::from("keydown"), String::from(" ")),
+                (String::from("keypress"), String::from(" ")),
+                (String::from("keyup"), String::from(" ")),
+            ]
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
     async fn pointer_and_root_touch_helpers_preserve_coordinates() {
         let harness =
             render_with_backend(MockComponent, MountedDomBackend::new(Rc::new(Cell::new(0)))).await;
@@ -3388,6 +3591,8 @@ mod tests {
         let touch_start = Rc::new(RefCell::new(None));
 
         let touch_move = Rc::new(RefCell::new(None));
+
+        let touch_end = Rc::new(RefCell::new(None));
 
         let _pointer_down_listener = {
             let pointer_down = Rc::clone(&pointer_down);
@@ -3455,13 +3660,33 @@ mod tests {
             closure
         };
 
+        let _touch_end_listener = {
+            let touch_end = Rc::clone(&touch_end);
+            let closure = Closure::<dyn FnMut(web_sys::TouchEvent)>::wrap(Box::new(
+                move |event: web_sys::TouchEvent| {
+                    *touch_end.borrow_mut() = Some((
+                        first_changed_touch(&event),
+                        touch_list_length(&event, "touches"),
+                        touch_list_length(&event, "targetTouches"),
+                    ));
+                },
+            ));
+
+            root.add_event_listener_with_callback("touchend", closure.as_ref().unchecked_ref())
+                .expect("touchend listener should register");
+
+            closure
+        };
+
         harness.touch_start(point(12.0, 34.0)).await;
         harness.touch_move(point(56.0, 78.0)).await;
+        harness.touch_end().await;
         harness.pointer_down_at(91.0, 123.0).await;
         harness.pointer_move_to(145.0, 167.0).await;
 
         assert_eq!(*touch_start.borrow(), Some((12.0, 34.0)));
         assert_eq!(*touch_move.borrow(), Some((56.0, 78.0)));
+        assert_eq!(*touch_end.borrow(), Some(((56.0, 78.0), 0, 0)));
         assert_eq!(
             *pointer_down.borrow(),
             Some((91.0, 123.0, String::from("mouse"), 1.0))

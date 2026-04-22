@@ -39,6 +39,7 @@ features = [
     "HtmlTextAreaElement",
     "InputEvent",
     "KeyboardEvent",
+    "KeyboardEventInit",
     "MouseEvent",
     "NamedNodeMap",
     "Navigator",
