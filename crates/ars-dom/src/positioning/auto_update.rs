@@ -278,7 +278,7 @@ fn install_mutation_observer(
     )
         as Box<dyn FnMut(js_sys::Array, web_sys::MutationObserver)>);
 
-    let Ok(mutation_observer) =
+    let Ok(parent_mutation_observer) =
         web_sys::MutationObserver::new(mutation_cb.as_ref().unchecked_ref())
     else {
         debug::warn_message(format_args!(
@@ -292,10 +292,10 @@ fn install_mutation_observer(
     parent_opts.set_child_list(true);
     parent_opts.set_subtree(true);
 
-    let anchor_opts = web_sys::MutationObserverInit::new();
+    let geometry_opts = web_sys::MutationObserverInit::new();
 
-    anchor_opts.set_attributes(true);
-    anchor_opts.set_attribute_filter(&js_sys::Array::of2(
+    geometry_opts.set_attributes(true);
+    geometry_opts.set_attribute_filter(&js_sys::Array::of2(
         &JsValue::from_str("class"),
         &JsValue::from_str("style"),
     ));
@@ -303,18 +303,41 @@ fn install_mutation_observer(
     if let Some(parent) = anchor.parent_element() {
         debug::warn_dom_error(
             "observing auto_update mutations",
-            mutation_observer.observe_with_options(&parent, &parent_opts),
+            parent_mutation_observer.observe_with_options(&parent, &parent_opts),
         );
     }
 
-    debug::warn_dom_error(
-        "observing auto_update anchor mutations",
-        mutation_observer.observe_with_options(anchor, &anchor_opts),
-    );
+    let geometry_mutation_observer =
+        web_sys::MutationObserver::new(mutation_cb.as_ref().unchecked_ref()).ok();
 
-    let mutation_observer = mutation_observer.clone();
+    if geometry_mutation_observer.is_none() {
+        debug::warn_message(format_args!(
+            "auto_update() could not create geometry MutationObserver"
+        ));
+    }
+
+    if let Some(geometry_mutation_observer) = geometry_mutation_observer.as_ref() {
+        debug::warn_dom_error(
+            "observing auto_update anchor geometry mutations",
+            geometry_mutation_observer.observe_with_options(anchor, &geometry_opts),
+        );
+
+        if let Some(parent) = anchor.parent_element() {
+            debug::warn_dom_error(
+                "observing auto_update parent geometry mutations",
+                geometry_mutation_observer.observe_with_options(&parent, &geometry_opts),
+            );
+        }
+    }
+
+    let parent_mutation_observer = parent_mutation_observer.clone();
     cleanups.push(move || {
-        mutation_observer.disconnect();
+        parent_mutation_observer.disconnect();
+
+        if let Some(geometry_mutation_observer) = geometry_mutation_observer {
+            geometry_mutation_observer.disconnect();
+        }
+
         drop(mutation_cb);
     });
 }
@@ -1625,6 +1648,50 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test(async)]
+    async fn mutation_observer_tracks_parent_style_and_class_changes() {
+        let _resize_stub = StubbedResizeObserver::install();
+
+        let root = append_div(
+            body().as_ref(),
+            "position:fixed;left:-10000px;top:0;width:240px;height:240px;",
+        );
+        let parent = append_div(root.as_ref(), "width:200px;height:200px;");
+        let anchor = append_div(parent.as_ref(), "width:40px;height:40px;");
+        let floating = append_div(parent.as_ref(), "position:absolute;width:80px;height:20px;");
+
+        let updates = Rc::new(Cell::new(0));
+        let update_counter = Rc::clone(&updates);
+        let cleanup_auto = auto_update(anchor.as_ref(), floating.as_ref(), move || {
+            update_counter.set(update_counter.get() + 1);
+        });
+
+        assert_eq!(updates.get(), 1);
+
+        parent
+            .set_attribute("class", "parent-shift")
+            .expect("parent class update must succeed");
+
+        next_task().await;
+
+        assert!(updates.get() >= 2);
+
+        let after_class_update = updates.get();
+
+        parent
+            .style()
+            .set_property("transform", "translateX(10px)")
+            .expect("parent style update must succeed");
+
+        next_task().await;
+
+        assert!(updates.get() > after_class_update);
+
+        cleanup_auto();
+
+        cleanup(&root);
+    }
+
+    #[wasm_bindgen_test(async)]
     async fn mutation_observer_ignores_floating_style_writes_under_same_parent() {
         let _resize_stub = StubbedResizeObserver::install();
 
@@ -1662,6 +1729,8 @@ mod wasm_tests {
 
     #[wasm_bindgen_test(async)]
     async fn mutation_observer_is_not_installed_for_detached_anchor() {
+        let _resize_stub = StubbedResizeObserver::install();
+
         let root = append_div(
             body().as_ref(),
             "position:fixed;left:-10000px;top:0;width:240px;height:240px;",
@@ -1685,6 +1754,10 @@ mod wasm_tests {
         parent
             .append_child(&anchor)
             .expect("anchor append must succeed");
+
+        next_task().await;
+
+        assert_eq!(updates.get(), 1);
 
         let sibling = append_div(parent.as_ref(), "width:10px;height:10px;");
 

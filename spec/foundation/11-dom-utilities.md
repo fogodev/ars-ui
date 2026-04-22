@@ -1163,13 +1163,13 @@ changes. It mirrors the semantics of [Floating UI's `autoUpdate`](https://floati
 
 **Recalculation triggers:**
 
-| Trigger                | Mechanism                                                                | Rationale                                          |
-| ---------------------- | ------------------------------------------------------------------------ | -------------------------------------------------- |
-| Window resize          | `resize` event on `window`                                               | Viewport dimensions changed                        |
-| Scroll                 | `scroll` event on every scroll-ancestor                                  | Anchor may have moved relative to the viewport     |
-| Anchor/floating resize | `ResizeObserver` on both elements                                        | Element dimensions changed (e.g., content update)  |
-| DOM mutation           | `MutationObserver` on the anchor's parent element plus anchor attributes | Structural content and anchor geometry changes     |
-| Anchor clipping        | `IntersectionObserver` on anchor                                         | Anchor scrolled behind `overflow: hidden` ancestor |
+| Trigger                | Mechanism                                                                   | Rationale                                          |
+| ---------------------- | --------------------------------------------------------------------------- | -------------------------------------------------- |
+| Window resize          | `resize` event on `window`                                                  | Viewport dimensions changed                        |
+| Scroll                 | `scroll` event on every scroll-ancestor                                     | Anchor may have moved relative to the viewport     |
+| Anchor/floating resize | `ResizeObserver` on both elements                                           | Element dimensions changed (e.g., content update)  |
+| DOM mutation           | `MutationObserver` on the anchor's parent element plus local geometry attrs | Structural content and nearby geometry changes     |
+| Anchor clipping        | `IntersectionObserver` on anchor                                            | Anchor scrolled behind `overflow: hidden` ancestor |
 
 **Throttle strategy (adapter-level):** Adapters SHOULD wrap the `update` callback in a
 `requestAnimationFrame` guard so multiple triggers within the same frame coalesce into one
@@ -1177,11 +1177,11 @@ changes. It mirrors the semantics of [Floating UI's `autoUpdate`](https://floati
 calls `update()` directly from each observer; RAF batching is the adapter's responsibility.
 
 **Mutation scope:** The `MutationObserver` MUST watch structural `childList`/`subtree` changes on
-the anchor's parent element, and it MAY observe geometry-affecting attributes on the anchor
-itself such as `style` and `class`. It MUST NOT observe `style` or `class` attribute mutations
-across the parent subtree, because `update()` commonly writes inline positioning styles to the
-floating element and subtree-level attribute observation would make `auto_update()` self-trigger
-for non-portal sibling overlays.
+the anchor's parent element, and it MAY observe geometry-affecting `style`/`class` attributes on
+the anchor itself and on that immediate parent element. It MUST NOT observe `style` or `class`
+attribute mutations across the full parent subtree, because `update()` commonly writes inline
+positioning styles to the floating element and subtree-level attribute observation would make
+`auto_update()` self-trigger for non-portal sibling overlays.
 
 ```rust
 // ars-dom/src/positioning.rs
@@ -1258,17 +1258,23 @@ pub fn auto_update(
     parent_opts.set_child_list(true);
     parent_opts.set_subtree(true);
 
-    let mut anchor_opts = web_sys::MutationObserverInit::new();
-    anchor_opts.set_attributes(true);
-    anchor_opts.set_attribute_filter(
+    let mut geometry_opts = web_sys::MutationObserverInit::new();
+    geometry_opts.set_attributes(true);
+    geometry_opts.set_attribute_filter(
         &js_sys::Array::of2(&JsValue::from_str("class"), &JsValue::from_str("style")),
     );
     if let Some(parent) = anchor.parent_element() {
         mutation_observer.observe_with_options(&parent, &parent_opts)
             .expect("MutationObserver.observe should not throw for valid options");
     }
-    mutation_observer.observe_with_options(anchor, &anchor_opts)
+    let geometry_observer = web_sys::MutationObserver::new(mutation_cb.as_ref().unchecked_ref())
+        .expect("MutationObserver constructor should not throw");
+    geometry_observer.observe_with_options(anchor, &geometry_opts)
         .expect("MutationObserver.observe should not throw for valid options");
+    if let Some(parent) = anchor.parent_element() {
+        geometry_observer.observe_with_options(&parent, &geometry_opts)
+            .expect("MutationObserver.observe should not throw for valid options");
+    }
     let mo = mutation_observer.clone();
     cleanups.push(Box::new(move || { mo.disconnect(); drop(mutation_cb); }));
 
