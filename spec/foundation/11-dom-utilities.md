@@ -562,6 +562,11 @@ an ancestor, `getBoundingClientRect()` returns coordinates relative to the
 viewport but the element is positioned relative to the containing block — so
 the raw viewport-relative values must be adjusted.
 
+When the floating element lives inside Shadow DOM, the ancestor walk MUST
+follow the composed tree. Crossing from a `ShadowRoot` to its `host` is
+required; stopping at `parentElement` is insufficient because shadow hosts can
+also create containing blocks.
+
 > **Containing Block Detection Checklist**
 > The following CSS properties on ancestor elements create a new containing block for
 > `position:fixed` descendants, causing the floating element to be positioned relative to
@@ -598,7 +603,7 @@ fn find_containing_block_ancestor(element: &Element) -> Option<Rect> {
     // See `has_containing_block_ancestor()` in §2.5 for the bool-returning version.
     // This variant returns the ancestor's padding-box rect for coordinate adjustment.
     let window = web_sys::window().expect("window must exist in browser context");
-    let mut current = element.parent_element();
+    let mut current = next_composed_ancestor_element(element.unchecked_ref());
     while let Some(el) = current {
         let style = window.get_computed_style(&el)
             .expect("get_computed_style available in browser")
@@ -631,7 +636,7 @@ fn find_containing_block_ancestor(element: &Element) -> Option<Rect> {
                 height: f64::from(el.client_height()),
             });
         }
-        current = el.parent_element();
+        current = next_composed_ancestor_element(el.unchecked_ref());
     }
     None
 }

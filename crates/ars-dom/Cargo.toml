@@ -47,6 +47,9 @@ features = [
     "ScrollIntoViewOptions",
     "ScrollLogicalPosition",
     "ScrollToOptions",
+    "ShadowRoot",
+    "ShadowRootInit",
+    "ShadowRootMode",
     "TouchEvent",
     "VisualViewport",
     "Window"

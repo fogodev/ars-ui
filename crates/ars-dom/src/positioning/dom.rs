@@ -264,11 +264,11 @@ fn walk_containing_block_ancestors(
 ) -> Option<(Rect, ContainingBlockReason)> {
     let window = web_sys::window()?;
 
-    let mut current = element.parent_element();
+    let mut current = next_composed_ancestor_element(element.unchecked_ref());
 
     while let Some(ancestor) = current {
         let Some(style) = window.get_computed_style(&ancestor).ok().flatten() else {
-            current = ancestor.parent_element();
+            current = next_composed_ancestor_element(ancestor.unchecked_ref());
 
             continue;
         };
@@ -279,7 +279,7 @@ fn walk_containing_block_ancestors(
             return Some((padding_box_rect(&ancestor), reason));
         }
 
-        current = ancestor.parent_element();
+        current = next_composed_ancestor_element(ancestor.unchecked_ref());
     }
 
     None
@@ -289,11 +289,11 @@ fn walk_containing_block_ancestors(
 fn walk_overlay_containment_ancestors(element: &web_sys::Element) -> Option<&'static str> {
     let window = web_sys::window()?;
 
-    let mut current = element.parent_element();
+    let mut current = next_composed_ancestor_element(element.unchecked_ref());
 
     while let Some(ancestor) = current {
         let Some(style) = window.get_computed_style(&ancestor).ok().flatten() else {
-            current = ancestor.parent_element();
+            current = next_composed_ancestor_element(ancestor.unchecked_ref());
 
             continue;
         };
@@ -304,10 +304,23 @@ fn walk_overlay_containment_ancestors(element: &web_sys::Element) -> Option<&'st
             return Some(reason);
         }
 
-        current = ancestor.parent_element();
+        current = next_composed_ancestor_element(ancestor.unchecked_ref());
     }
 
     None
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn next_composed_ancestor_element(node: &web_sys::Node) -> Option<web_sys::Element> {
+    let parent = node.parent_node()?;
+
+    if let Some(element) = parent.dyn_ref::<web_sys::Element>() {
+        return Some(element.clone());
+    }
+
+    parent
+        .dyn_ref::<web_sys::ShadowRoot>()
+        .map(web_sys::ShadowRoot::host)
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -833,6 +846,10 @@ mod wasm_tests {
         }
 
         fn append_child(parent: &web_sys::Element, style: &str) -> web_sys::Element {
+            Self::append_child_to_node(parent.unchecked_ref(), style)
+        }
+
+        fn append_child_to_node(parent: &web_sys::Node, style: &str) -> web_sys::Element {
             let document = parent
                 .owner_document()
                 .expect("fixture parent should have a document");
@@ -908,6 +925,32 @@ mod wasm_tests {
         assert!((rect.y - (dom_rect.y() + 7.0)).abs() < 0.01);
         assert!((rect.width - f64::from(ancestor.client_width())).abs() < 0.01);
         assert!((rect.height - f64::from(ancestor.client_height())).abs() < 0.01);
+    }
+
+    #[wasm_bindgen_test]
+    fn containing_block_lookup_crosses_shadow_root_boundary() {
+        let fixture = DomFixture::new();
+
+        let host = DomFixture::append_child(
+            &fixture.root,
+            "transform: translateX(12px); width: 120px; height: 80px; border-left: 5px solid black; border-top: 7px solid black;",
+        );
+        let shadow_root = host
+            .attach_shadow(&web_sys::ShadowRootInit::new(web_sys::ShadowRootMode::Open))
+            .expect("shadow root should attach");
+        let child = DomFixture::append_child_to_node(
+            shadow_root.unchecked_ref(),
+            "width: 20px; height: 10px;",
+        );
+
+        let rect = find_containing_block_ancestor(&child)
+            .expect("shadow host should create a containing block");
+        let dom_rect = host.get_bounding_client_rect();
+
+        assert!((rect.x - (dom_rect.x() + 5.0)).abs() < 0.01);
+        assert!((rect.y - (dom_rect.y() + 7.0)).abs() < 0.01);
+        assert!((rect.width - f64::from(host.client_width())).abs() < 0.01);
+        assert!((rect.height - f64::from(host.client_height())).abs() < 0.01);
     }
 
     #[wasm_bindgen_test]
