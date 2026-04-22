@@ -4578,6 +4578,49 @@ mod tests {
 
     #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen_test]
+    async fn element_click_fallback_bubbles_on_non_html_targets() {
+        let harness =
+            render_with_backend(MockComponent, MountedDomBackend::new(Rc::new(Cell::new(0)))).await;
+
+        let document = web_sys::window()
+            .and_then(|window| window.document())
+            .expect("document must exist");
+        let root = harness.query("[data-ars-scope]").element;
+        let svg = document
+            .create_element_ns(Some("http://www.w3.org/2000/svg"), "svg")
+            .expect("svg element must be creatable");
+
+        root.append_child(&svg).expect("svg should append to root");
+
+        let bubbled_click = Rc::new(RefCell::new(None));
+
+        let _click_listener = {
+            let bubbled_click = Rc::clone(&bubbled_click);
+            let svg = svg.clone();
+            let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+                move |event: web_sys::MouseEvent| {
+                    let target_matches = event
+                        .target()
+                        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+                        .is_some_and(|target| js_sys::Object::is(target.as_ref(), svg.as_ref()));
+
+                    *bubbled_click.borrow_mut() = Some((event.bubbles(), target_matches));
+                },
+            ));
+
+            root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+                .expect("click listener should register");
+
+            closure
+        };
+
+        ElementHandle::from_element(svg).click().await;
+
+        assert_eq!(*bubbled_click.borrow(), Some((true, true)));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
     async fn scroll_container_by_flushes_before_returning() {
         let flushes = Rc::new(Cell::new(0));
 

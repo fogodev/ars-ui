@@ -187,7 +187,13 @@ impl ElementHandle {
                 return;
             }
 
-            let event = web_sys::MouseEvent::new("click").expect("click event must construct");
+            let init = web_sys::MouseEventInit::new();
+
+            init.set_bubbles(true);
+            init.set_cancelable(true);
+
+            let event = web_sys::MouseEvent::new_with_mouse_event_init_dict("click", &init)
+                .expect("click event must construct");
 
             let dispatched = self
                 .element
