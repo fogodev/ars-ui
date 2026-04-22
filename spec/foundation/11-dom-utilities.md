@@ -1186,8 +1186,8 @@ calls `update()` directly from each observer; RAF batching is the adapter's resp
 /// scroll listeners on all scroll-ancestor elements, and
 /// a `MutationObserver` for DOM structure changes.
 pub fn auto_update(
-    anchor: &web_sys::HtmlElement,
-    floating: &web_sys::HtmlElement,
+    anchor: &web_sys::Element,
+    floating: &web_sys::Element,
     update: impl Fn() + 'static,
 ) -> Box<dyn FnOnce()> {
     let update = Rc::new(update);
@@ -1211,7 +1211,7 @@ pub fn auto_update(
         update_scroll();
     }) as Box<dyn FnMut(web_sys::Event)>);
 
-    let scroll_parents: Vec<web_sys::Element> = scrollable_ancestors(&anchor);
+    let scroll_parents: Vec<web_sys::Element> = scrollable_ancestors(anchor);
     for parent in &scroll_parents {
         let opts = web_sys::AddEventListenerOptions::new();
         opts.set_passive(true);
@@ -1268,11 +1268,16 @@ pub fn auto_update(
     let intersection_cb = Closure::wrap(Box::new(move |entries: js_sys::Array, _: web_sys::IntersectionObserver| {
         if let Some(entry) = entries.get(0).dyn_ref::<web_sys::IntersectionObserverEntry>() {
             if entry.intersection_ratio() == 0.0 {
-                // Anchor is fully clipped — hide the floating element.
-                let _ = floating_el.style().set_property("visibility", "hidden");
+                // Anchor is fully clipped — hide the floating element when it
+                // can be styled as an HtmlElement.
+                if let Some(floating_html) = floating_el.dyn_ref::<web_sys::HtmlElement>() {
+                    let _ = floating_html.style().set_property("visibility", "hidden");
+                }
             } else {
                 // Anchor is (partially) visible — show and reposition.
-                let _ = floating_el.style().remove_property("visibility");
+                if let Some(floating_html) = floating_el.dyn_ref::<web_sys::HtmlElement>() {
+                    let _ = floating_html.style().remove_property("visibility");
+                }
                 update_io();
             }
         }
