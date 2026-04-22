@@ -164,11 +164,20 @@ enum ContainerHandle {
 #[derive(Default)]
 struct WasmLayoutState {
     viewport: Option<ViewportOverride>,
+    media_emulation: Option<MediaEmulation>,
     anchor: Option<ElementRectOverride>,
     last_root_pointer_point: Option<Point>,
     last_root_touch_point: Option<Point>,
+    last_touch_target: Option<TouchTarget>,
     scroll_x: i32,
     scroll_y: i32,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TouchTarget {
+    Root,
+    Trigger,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -380,6 +389,97 @@ impl Drop for ElementRectOverride {
             "getBoundingClientRect",
             &self.original_descriptor,
         );
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct MediaEmulation {
+    overrides: Rc<RefCell<BTreeMap<String, String>>>,
+    original_match_media_descriptor: JsValue,
+    _match_media: Closure<dyn FnMut(JsValue) -> JsValue>,
+    _listener_noop: Closure<dyn FnMut()>,
+    _dispatch_event: Closure<dyn FnMut(JsValue) -> bool>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl MediaEmulation {
+    fn install() -> Self {
+        let window = web_sys::window().expect("window must exist");
+        let overrides = Rc::new(RefCell::new(BTreeMap::new()));
+        let listener_noop = Closure::<dyn FnMut()>::wrap(Box::new(|| {}));
+        let dispatch_event = Closure::<dyn FnMut(JsValue) -> bool>::wrap(Box::new(|_| true));
+        let original_match_media_descriptor =
+            own_property_descriptor(window.as_ref(), "matchMedia");
+        let original_match_media =
+            js_sys::Reflect::get(window.as_ref(), &JsValue::from_str("matchMedia"))
+                .expect("window.matchMedia should be readable")
+                .dyn_into::<js_sys::Function>()
+                .expect("window.matchMedia should be a function");
+
+        let overrides_for_match = Rc::clone(&overrides);
+        let listener_noop_function = listener_noop
+            .as_ref()
+            .unchecked_ref::<js_sys::Function>()
+            .clone();
+        let dispatch_event_function = dispatch_event
+            .as_ref()
+            .unchecked_ref::<js_sys::Function>()
+            .clone();
+        let window_for_match = window.clone();
+
+        let match_media = Closure::<dyn FnMut(JsValue) -> JsValue>::wrap(Box::new(
+            move |query_value: JsValue| {
+                let query = query_value
+                    .as_string()
+                    .expect("matchMedia queries should be strings");
+
+                if let Some(matches) = emulated_media_match(&query, &overrides_for_match.borrow()) {
+                    fake_media_query_list(
+                        &query,
+                        matches,
+                        &listener_noop_function,
+                        &dispatch_event_function,
+                    )
+                } else {
+                    original_match_media
+                        .call1(window_for_match.as_ref(), &JsValue::from_str(&query))
+                        .expect("delegated matchMedia call should succeed")
+                }
+            },
+        ));
+
+        install_function_property(
+            window.as_ref(),
+            "matchMedia",
+            match_media.as_ref().unchecked_ref(),
+        );
+
+        Self {
+            overrides,
+            original_match_media_descriptor,
+            _match_media: match_media,
+            _listener_noop: listener_noop,
+            _dispatch_event: dispatch_event,
+        }
+    }
+
+    fn set(&mut self, feature: &str, value: &str) {
+        self.overrides
+            .borrow_mut()
+            .insert(normalize_media_text(feature), normalize_media_text(value));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for MediaEmulation {
+    fn drop(&mut self) {
+        if let Some(window) = web_sys::window() {
+            restore_property_descriptor(
+                window.as_ref(),
+                "matchMedia",
+                &self.original_match_media_descriptor,
+            );
+        }
     }
 }
 
@@ -1089,7 +1189,11 @@ impl TestHarness {
     pub async fn touch_start(&self, point: Point) {
         #[cfg(target_arch = "wasm32")]
         {
-            self.layout.borrow_mut().last_root_touch_point = Some(point);
+            {
+                let mut layout = self.layout.borrow_mut();
+                layout.last_root_touch_point = Some(point);
+                layout.last_touch_target = Some(TouchTarget::Root);
+            }
             self.dispatch_touch_event("[data-ars-scope]", "touchstart", point)
                 .await;
         }
@@ -1106,7 +1210,11 @@ impl TestHarness {
     pub async fn touch_move(&self, point: Point) {
         #[cfg(target_arch = "wasm32")]
         {
-            self.layout.borrow_mut().last_root_touch_point = Some(point);
+            {
+                let mut layout = self.layout.borrow_mut();
+                layout.last_root_touch_point = Some(point);
+                layout.last_touch_target = Some(TouchTarget::Root);
+            }
             self.dispatch_touch_event("[data-ars-scope]", "touchmove", point)
                 .await;
         }
@@ -1123,20 +1231,28 @@ impl TestHarness {
     pub async fn touch_end(&self) {
         #[cfg(target_arch = "wasm32")]
         {
-            let point = self
-                .layout
-                .borrow()
-                .last_root_touch_point
-                .unwrap_or_else(|| {
-                    let rect = self.query("[data-ars-scope]").bounding_rect();
+            let (selector, point) = {
+                let layout = self.layout.borrow();
+                let selector = match layout.last_touch_target.unwrap_or(TouchTarget::Root) {
+                    TouchTarget::Root => "[data-ars-scope]",
+                    TouchTarget::Trigger => "[data-ars-part='trigger']",
+                };
+
+                let point = layout.last_root_touch_point.unwrap_or_else(|| {
+                    let rect = self.query(selector).bounding_rect();
 
                     point(rect.x + (rect.width / 2.0), rect.y + (rect.height / 2.0))
                 });
 
-            self.dispatch_touch_event_with_state("[data-ars-scope]", "touchend", point, false)
+                (selector, point)
+            };
+
+            self.dispatch_touch_event_with_state(selector, "touchend", point, false)
                 .await;
 
-            self.layout.borrow_mut().last_root_touch_point = None;
+            let mut layout = self.layout.borrow_mut();
+            layout.last_root_touch_point = None;
+            layout.last_touch_target = None;
         }
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -1159,6 +1275,12 @@ impl TestHarness {
                 y: rect.y + (rect.height / 2.0),
             };
 
+            {
+                let mut layout = self.layout.borrow_mut();
+                layout.last_root_touch_point = Some(center);
+                layout.last_touch_target = Some(TouchTarget::Trigger);
+            }
+
             self.dispatch_touch_event("[data-ars-part='trigger']", "touchstart", center)
                 .await;
         }
@@ -1173,6 +1295,11 @@ impl TestHarness {
     pub async fn touch_move_first(&self, point: Point) {
         #[cfg(target_arch = "wasm32")]
         {
+            {
+                let mut layout = self.layout.borrow_mut();
+                layout.last_root_touch_point = Some(point);
+                layout.last_touch_target = Some(TouchTarget::Trigger);
+            }
             self.dispatch_touch_event("[data-ars-part='trigger']", "touchmove", point)
                 .await;
         }
@@ -1499,7 +1626,21 @@ impl TestHarness {
 
     /// Emulates a CSS media feature for the duration of the test.
     pub async fn emulate_media(&self, feature: &str, value: &str) {
-        let _ = (feature, value);
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut layout = self.layout.borrow_mut();
+
+            let media_emulation = layout
+                .media_emulation
+                .get_or_insert_with(MediaEmulation::install);
+            media_emulation.set(feature, value);
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = (feature, value);
+        }
+
         self.flush().await;
     }
 
@@ -2051,6 +2192,61 @@ fn install_rect_override(element: &web_sys::Element, rect: Rect) -> ElementRectO
         base_rect: rect,
         original_descriptor,
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn normalize_media_text(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn emulated_media_match(query: &str, overrides: &BTreeMap<String, String>) -> Option<bool> {
+    let normalized_query = normalize_media_text(query);
+
+    overrides.iter().find_map(|(feature, expected_value)| {
+        let needle = format!("({feature}:");
+        let start = normalized_query.find(&needle)?;
+        let value_start = start + needle.len();
+        let value_end = normalized_query[value_start..].find(')')? + value_start;
+        let actual_value = normalized_query[value_start..value_end].trim();
+
+        Some(actual_value == expected_value)
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn fake_media_query_list(
+    query: &str,
+    matches: bool,
+    listener_noop: &js_sys::Function,
+    dispatch_event: &js_sys::Function,
+) -> JsValue {
+    let media_query_list = js_sys::Object::new();
+
+    define_value_property(
+        media_query_list.as_ref(),
+        "media",
+        &JsValue::from_str(query),
+    );
+    define_value_property(
+        media_query_list.as_ref(),
+        "matches",
+        &JsValue::from_bool(matches),
+    );
+    define_value_property(media_query_list.as_ref(), "onchange", &JsValue::NULL);
+
+    for method in [
+        "addListener",
+        "removeListener",
+        "addEventListener",
+        "removeEventListener",
+    ] {
+        install_function_property(media_query_list.as_ref(), method, listener_noop);
+    }
+
+    install_function_property(media_query_list.as_ref(), "dispatchEvent", dispatch_event);
+
+    media_query_list.into()
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -3503,6 +3699,21 @@ mod tests {
     }
 
     #[cfg(target_arch = "wasm32")]
+    fn match_media_matches(query: &str) -> bool {
+        let window = web_sys::window().expect("window must exist");
+        let match_media = js_sys::Reflect::get(window.as_ref(), &JsValue::from_str("matchMedia"))
+            .expect("window.matchMedia should be readable")
+            .dyn_into::<js_sys::Function>()
+            .expect("window.matchMedia should be a function");
+
+        let media_query_list = match_media
+            .call1(window.as_ref(), &JsValue::from_str(query))
+            .expect("window.matchMedia should succeed");
+
+        js_bool(&media_query_list, "matches")
+    }
+
+    #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen_test]
     async fn set_viewport_overrides_container_geometry_and_window_metrics() {
         let flushes = Rc::new(Cell::new(0));
@@ -4028,6 +4239,8 @@ mod tests {
 
         let trigger_touch_move = Rc::new(RefCell::new(None));
 
+        let trigger_touch_end = Rc::new(RefCell::new(None));
+
         let composition_start = Rc::new(RefCell::new(None));
 
         let composition_update = Rc::new(RefCell::new(None));
@@ -4058,6 +4271,25 @@ mod tests {
             trigger_element
                 .add_event_listener_with_callback("touchmove", closure.as_ref().unchecked_ref())
                 .expect("trigger touchmove listener should register");
+
+            closure
+        };
+
+        let _trigger_touch_end_listener = {
+            let trigger_touch_end = Rc::clone(&trigger_touch_end);
+            let closure = Closure::<dyn FnMut(web_sys::TouchEvent)>::wrap(Box::new(
+                move |event: web_sys::TouchEvent| {
+                    *trigger_touch_end.borrow_mut() = Some((
+                        first_changed_touch(&event),
+                        touch_list_length(&event, "touches"),
+                        touch_list_length(&event, "targetTouches"),
+                    ));
+                },
+            ));
+
+            trigger_element
+                .add_event_listener_with_callback("touchend", closure.as_ref().unchecked_ref())
+                .expect("trigger touchend listener should register");
 
             closure
         };
@@ -4107,13 +4339,52 @@ mod tests {
 
         harness.touch_start_on_trigger().await;
         harness.touch_move_first(point(201.0, 305.0)).await;
+        harness.touch_end().await;
         harness.focus("[data-ars-part='trigger']").await;
         harness.ime_compose("漢字").await;
 
         assert_eq!(*trigger_touch_start.borrow(), Some(expected_center));
         assert_eq!(*trigger_touch_move.borrow(), Some((201.0, 305.0)));
+        assert_eq!(*trigger_touch_end.borrow(), Some(((201.0, 305.0), 0, 0)));
         assert_eq!(*composition_start.borrow(), Some(String::new()));
         assert_eq!(*composition_update.borrow(), Some(String::from("漢字")));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
+    async fn emulate_media_overrides_match_media_queries() {
+        let window = web_sys::window().expect("window must exist");
+        let initial_match_media_descriptor = own_property_descriptor(window.as_ref(), "matchMedia");
+
+        {
+            let harness =
+                render_with_backend(MockComponent, MountedDomBackend::new(Rc::new(Cell::new(0))))
+                    .await;
+
+            harness
+                .emulate_media("prefers-reduced-motion", "reduce")
+                .await;
+
+            assert!(match_media_matches("(prefers-reduced-motion: reduce)"));
+            assert!(!match_media_matches(
+                "(prefers-reduced-motion: no-preference)"
+            ));
+
+            harness
+                .emulate_media("prefers-reduced-motion", "no-preference")
+                .await;
+
+            assert!(!match_media_matches("(prefers-reduced-motion: reduce)"));
+            assert!(match_media_matches(
+                "(prefers-reduced-motion: no-preference)"
+            ));
+        }
+
+        assert_same_descriptor(
+            &own_property_descriptor(window.as_ref(), "matchMedia"),
+            &initial_match_media_descriptor,
+            "window.matchMedia",
+        );
     }
 
     #[cfg(target_arch = "wasm32")]
