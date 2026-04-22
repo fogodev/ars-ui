@@ -287,17 +287,30 @@ fn install_mutation_observer(
         return;
     };
 
-    let opts = web_sys::MutationObserverInit::new();
+    let parent_opts = web_sys::MutationObserverInit::new();
 
-    opts.set_child_list(true);
-    opts.set_subtree(true);
+    parent_opts.set_child_list(true);
+    parent_opts.set_subtree(true);
+
+    let anchor_opts = web_sys::MutationObserverInit::new();
+
+    anchor_opts.set_attributes(true);
+    anchor_opts.set_attribute_filter(&js_sys::Array::of2(
+        &JsValue::from_str("class"),
+        &JsValue::from_str("style"),
+    ));
 
     if let Some(parent) = anchor.parent_element() {
         debug::warn_dom_error(
             "observing auto_update mutations",
-            mutation_observer.observe_with_options(&parent, &opts),
+            mutation_observer.observe_with_options(&parent, &parent_opts),
         );
     }
+
+    debug::warn_dom_error(
+        "observing auto_update anchor mutations",
+        mutation_observer.observe_with_options(anchor, &anchor_opts),
+    );
 
     let mutation_observer = mutation_observer.clone();
     cleanups.push(move || {
@@ -1536,6 +1549,14 @@ mod wasm_tests {
 
         assert!(updates.get() > after_child_insert);
 
+        anchor
+            .set_attribute("class", "moved")
+            .expect("anchor class update must succeed");
+
+        next_task().await;
+
+        assert!(updates.get() > after_child_insert + 1);
+
         cleanup_auto();
 
         let after_cleanup = updates.get();
@@ -1546,7 +1567,59 @@ mod wasm_tests {
 
         assert_eq!(updates.get(), after_cleanup);
 
+        anchor
+            .set_attribute("style", "width:48px;height:48px;")
+            .expect("anchor style update must succeed");
+
+        next_task().await;
+
+        assert_eq!(updates.get(), after_cleanup);
+
         child_after_cleanup.remove();
+
+        cleanup(&root);
+    }
+
+    #[wasm_bindgen_test(async)]
+    async fn mutation_observer_tracks_anchor_style_and_class_changes() {
+        let _resize_stub = StubbedResizeObserver::install();
+
+        let root = append_div(
+            body().as_ref(),
+            "position:fixed;left:-10000px;top:0;width:240px;height:240px;",
+        );
+        let parent = append_div(root.as_ref(), "width:200px;height:200px;");
+        let anchor = append_div(parent.as_ref(), "width:40px;height:40px;");
+        let floating = append_div(parent.as_ref(), "position:absolute;width:80px;height:20px;");
+
+        let updates = Rc::new(Cell::new(0));
+        let update_counter = Rc::clone(&updates);
+        let cleanup_auto = auto_update(anchor.as_ref(), floating.as_ref(), move || {
+            update_counter.set(update_counter.get() + 1);
+        });
+
+        assert_eq!(updates.get(), 1);
+
+        anchor
+            .set_attribute("class", "anchor-shift")
+            .expect("anchor class update must succeed");
+
+        next_task().await;
+
+        assert!(updates.get() >= 2);
+
+        let after_class_update = updates.get();
+
+        anchor
+            .style()
+            .set_property("transform", "translateX(10px)")
+            .expect("anchor style update must succeed");
+
+        next_task().await;
+
+        assert!(updates.get() > after_class_update);
+
+        cleanup_auto();
 
         cleanup(&root);
     }
