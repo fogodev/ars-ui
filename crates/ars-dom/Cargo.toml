@@ -49,6 +49,7 @@ features = [
     "MouseEvent",
     "MutationObserver",
     "MutationObserverInit",
+    "MutationRecord",
     "Navigator",
     "Node",
     "NodeList",

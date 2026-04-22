@@ -111,8 +111,11 @@ fn auto_update_impl(
     let mut cleanups = CleanupStack::default();
 
     install_resize_observer(anchor, floating, Rc::clone(&update), &mut cleanups);
+
     install_scroll_and_resize_listeners(anchor, &window, Rc::clone(&update), &mut cleanups);
-    install_mutation_observer(anchor, Rc::clone(&update), &mut cleanups);
+
+    install_mutation_observer(anchor, floating, &update, &mut cleanups);
+
     install_intersection_observer(anchor, floating, Rc::clone(&update), &mut cleanups);
 
     // The initial recomputation happens after all available observers/listeners
@@ -268,12 +271,14 @@ fn remove_visual_viewport_listeners(
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn install_mutation_observer(
     anchor: &web_sys::Element,
-    update: Rc<impl Fn() + 'static>,
+    floating: &web_sys::Element,
+    update: &Rc<impl Fn() + 'static>,
     cleanups: &mut CleanupStack,
 ) {
+    let parent_update = Rc::clone(update);
     let mutation_cb = Closure::wrap(Box::new(
         move |_entries: js_sys::Array, _observer: web_sys::MutationObserver| {
-            update();
+            parent_update();
         },
     )
         as Box<dyn FnMut(js_sys::Array, web_sys::MutationObserver)>);
@@ -293,10 +298,18 @@ fn install_mutation_observer(
     parent_opts.set_character_data(true);
     parent_opts.set_subtree(true);
 
-    let geometry_opts = web_sys::MutationObserverInit::new();
+    let geometry_anchor_opts = web_sys::MutationObserverInit::new();
+    let geometry_parent_opts = web_sys::MutationObserverInit::new();
 
-    geometry_opts.set_attributes(true);
-    geometry_opts.set_attribute_filter(&js_sys::Array::of2(
+    geometry_anchor_opts.set_attributes(true);
+    geometry_anchor_opts.set_attribute_filter(&js_sys::Array::of2(
+        &JsValue::from_str("class"),
+        &JsValue::from_str("style"),
+    ));
+
+    geometry_parent_opts.set_attributes(true);
+    geometry_parent_opts.set_subtree(true);
+    geometry_parent_opts.set_attribute_filter(&js_sys::Array::of2(
         &JsValue::from_str("class"),
         &JsValue::from_str("style"),
     ));
@@ -308,8 +321,19 @@ fn install_mutation_observer(
         );
     }
 
+    let floating_for_geometry = floating.clone();
+    let geometry_update = Rc::clone(update);
+    let geometry_mutation_cb = Closure::wrap(Box::new(
+        move |entries: js_sys::Array, _observer: web_sys::MutationObserver| {
+            if should_update_for_geometry_mutations(&entries, &floating_for_geometry) {
+                geometry_update();
+            }
+        },
+    )
+        as Box<dyn FnMut(js_sys::Array, web_sys::MutationObserver)>);
+
     let geometry_mutation_observer =
-        web_sys::MutationObserver::new(mutation_cb.as_ref().unchecked_ref()).ok();
+        web_sys::MutationObserver::new(geometry_mutation_cb.as_ref().unchecked_ref()).ok();
 
     if geometry_mutation_observer.is_none() {
         debug::warn_message(format_args!(
@@ -320,13 +344,13 @@ fn install_mutation_observer(
     if let Some(geometry_mutation_observer) = geometry_mutation_observer.as_ref() {
         debug::warn_dom_error(
             "observing auto_update anchor geometry mutations",
-            geometry_mutation_observer.observe_with_options(anchor, &geometry_opts),
+            geometry_mutation_observer.observe_with_options(anchor, &geometry_anchor_opts),
         );
 
         if let Some(parent) = anchor.parent_element() {
             debug::warn_dom_error(
                 "observing auto_update parent geometry mutations",
-                geometry_mutation_observer.observe_with_options(&parent, &geometry_opts),
+                geometry_mutation_observer.observe_with_options(&parent, &geometry_parent_opts),
             );
         }
     }
@@ -339,8 +363,33 @@ fn install_mutation_observer(
             geometry_mutation_observer.disconnect();
         }
 
+        drop(geometry_mutation_cb);
         drop(mutation_cb);
     });
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn should_update_for_geometry_mutations(
+    entries: &js_sys::Array,
+    floating: &web_sys::Element,
+) -> bool {
+    let floating_node: &web_sys::Node = floating.as_ref();
+
+    for index in 0..entries.length() {
+        let Ok(record) = entries.get(index).dyn_into::<web_sys::MutationRecord>() else {
+            return true;
+        };
+
+        let Some(target) = record.target() else {
+            return true;
+        };
+
+        if !floating_node.contains(Some(&target)) {
+            return true;
+        }
+    }
+
+    false
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -1682,6 +1731,51 @@ mod wasm_tests {
             .style()
             .set_property("transform", "translateX(10px)")
             .expect("parent style update must succeed");
+
+        next_task().await;
+
+        assert!(updates.get() > after_class_update);
+
+        cleanup_auto();
+
+        cleanup(&root);
+    }
+
+    #[wasm_bindgen_test(async)]
+    async fn mutation_observer_tracks_sibling_style_and_class_changes() {
+        let _resize_stub = StubbedResizeObserver::install();
+
+        let root = append_div(
+            body().as_ref(),
+            "position:fixed;left:-10000px;top:0;width:240px;height:240px;",
+        );
+        let parent = append_div(root.as_ref(), "width:200px;height:200px;");
+        let sibling = append_div(parent.as_ref(), "width:20px;height:20px;");
+        let anchor = append_div(parent.as_ref(), "width:40px;height:40px;");
+        let floating = append_div(parent.as_ref(), "position:absolute;width:80px;height:20px;");
+
+        let updates = Rc::new(Cell::new(0));
+        let update_counter = Rc::clone(&updates);
+        let cleanup_auto = auto_update(anchor.as_ref(), floating.as_ref(), move || {
+            update_counter.set(update_counter.get() + 1);
+        });
+
+        assert_eq!(updates.get(), 1);
+
+        sibling
+            .set_attribute("class", "sibling-shift")
+            .expect("sibling class update must succeed");
+
+        next_task().await;
+
+        assert!(updates.get() >= 2);
+
+        let after_class_update = updates.get();
+
+        sibling
+            .style()
+            .set_property("height", "32px")
+            .expect("sibling style update must succeed");
 
         next_task().await;
 
