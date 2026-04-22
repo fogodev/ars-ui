@@ -182,10 +182,10 @@ struct ViewportOverride {
     _document_width_getter: Closure<dyn FnMut() -> JsValue>,
     _document_height_getter: Closure<dyn FnMut() -> JsValue>,
 
-    original_window_width: f64,
-    original_window_height: f64,
-    original_document_width: f64,
-    original_document_height: f64,
+    original_window_width_descriptor: JsValue,
+    original_window_height_descriptor: JsValue,
+    original_document_width_descriptor: JsValue,
+    original_document_height_descriptor: JsValue,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -199,18 +199,14 @@ impl ViewportOverride {
             .document_element()
             .expect("document element must exist");
 
-        let original_window_width = window
-            .inner_width()
-            .ok()
-            .and_then(|value| value.as_f64())
-            .unwrap_or(width);
-        let original_window_height = window
-            .inner_height()
-            .ok()
-            .and_then(|value| value.as_f64())
-            .unwrap_or(height);
-        let original_document_width = f64::from(document_element.client_width());
-        let original_document_height = f64::from(document_element.client_height());
+        let original_window_width_descriptor =
+            own_property_descriptor(window.as_ref(), "innerWidth");
+        let original_window_height_descriptor =
+            own_property_descriptor(window.as_ref(), "innerHeight");
+        let original_document_width_descriptor =
+            own_property_descriptor(document_element.as_ref(), "clientWidth");
+        let original_document_height_descriptor =
+            own_property_descriptor(document_element.as_ref(), "clientHeight");
 
         let width_state = Rc::new(Cell::new(width));
         let height_state = Rc::new(Cell::new(height));
@@ -260,10 +256,10 @@ impl ViewportOverride {
             _window_height_getter: window_height_getter,
             _document_width_getter: document_width_getter,
             _document_height_getter: document_height_getter,
-            original_window_width,
-            original_window_height,
-            original_document_width,
-            original_document_height,
+            original_window_width_descriptor,
+            original_window_height_descriptor,
+            original_document_width_descriptor,
+            original_document_height_descriptor,
         };
 
         viewport.apply_container_styles(container);
@@ -317,32 +313,32 @@ impl ViewportOverride {
 impl Drop for ViewportOverride {
     fn drop(&mut self) {
         if let Some(window) = web_sys::window() {
-            define_value_property(
+            restore_property_descriptor(
                 window.as_ref(),
                 "innerWidth",
-                &JsValue::from_f64(self.original_window_width),
+                &self.original_window_width_descriptor,
             );
 
-            define_value_property(
+            restore_property_descriptor(
                 window.as_ref(),
                 "innerHeight",
-                &JsValue::from_f64(self.original_window_height),
+                &self.original_window_height_descriptor,
             );
 
             if let Some(document_element) = window
                 .document()
                 .and_then(|document| document.document_element())
             {
-                define_value_property(
+                restore_property_descriptor(
                     document_element.as_ref(),
                     "clientWidth",
-                    &JsValue::from_f64(self.original_document_width),
+                    &self.original_document_width_descriptor,
                 );
 
-                define_value_property(
+                restore_property_descriptor(
                     document_element.as_ref(),
                     "clientHeight",
-                    &JsValue::from_f64(self.original_document_height),
+                    &self.original_document_height_descriptor,
                 );
             }
         }
@@ -355,6 +351,7 @@ struct ElementRectOverride {
     current_rect: Rc<RefCell<Rect>>,
     _getter: Closure<dyn FnMut() -> JsValue>,
     base_rect: Rect,
+    original_descriptor: JsValue,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -372,6 +369,17 @@ impl ElementRectOverride {
             width: self.base_rect.width,
             height: self.base_rect.height,
         };
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for ElementRectOverride {
+    fn drop(&mut self) {
+        restore_property_descriptor(
+            self.element.as_ref(),
+            "getBoundingClientRect",
+            &self.original_descriptor,
+        );
     }
 }
 
@@ -1596,6 +1604,8 @@ impl TestHarness {
             {
                 anchor.set_base_rect(rect, scroll_x, scroll_y);
             } else {
+                drop(layout.anchor.take());
+
                 let mut anchor = install_rect_override(&target, rect);
 
                 anchor.set_base_rect(rect, scroll_x, scroll_y);
@@ -2020,6 +2030,7 @@ fn native_only(method: &str) -> ! {
 #[cfg(target_arch = "wasm32")]
 fn install_rect_override(element: &web_sys::Element, rect: Rect) -> ElementRectOverride {
     let rect_state = Rc::new(RefCell::new(rect));
+    let original_descriptor = own_property_descriptor(element.as_ref(), "getBoundingClientRect");
 
     let getter_state = Rc::clone(&rect_state);
 
@@ -2038,6 +2049,7 @@ fn install_rect_override(element: &web_sys::Element, rect: Rect) -> ElementRectO
         current_rect: rect_state,
         _getter: getter,
         base_rect: rect,
+        original_descriptor,
     }
 }
 
@@ -2079,6 +2091,13 @@ fn define_numeric_getter(
     install_getter_property(target, property, getter.as_ref().unchecked_ref());
 
     getter
+}
+
+#[cfg(target_arch = "wasm32")]
+fn own_property_descriptor(target: &JsValue, property: &str) -> JsValue {
+    let target: &js_sys::Object = target.unchecked_ref();
+
+    js_sys::Object::get_own_property_descriptor(target, &JsValue::from_str(property))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -2144,6 +2163,23 @@ fn define_value_property(target: &JsValue, property: &str, value: &JsValue) {
     .expect("defining value property configurability must succeed");
 
     js_sys::Object::define_property(target, &JsValue::from_str(property), &descriptor);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn restore_property_descriptor(target: &JsValue, property: &str, descriptor: &JsValue) {
+    if descriptor.is_undefined() {
+        let target: &js_sys::Object = target.unchecked_ref();
+
+        let deleted = js_sys::Reflect::delete_property(target, &JsValue::from_str(property))
+            .expect("deleting restored property should not throw");
+
+        assert!(deleted, "deleting restored property should succeed");
+    } else {
+        let target: &js_sys::Object = target.unchecked_ref();
+        let descriptor: &js_sys::Object = descriptor.unchecked_ref();
+
+        js_sys::Object::define_property(target, &JsValue::from_str(property), descriptor);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -3430,6 +3466,43 @@ mod tests {
     }
 
     #[cfg(target_arch = "wasm32")]
+    fn assert_same_descriptor(actual: &JsValue, expected: &JsValue, label: &str) {
+        assert_eq!(
+            actual.is_undefined(),
+            expected.is_undefined(),
+            "{label} should preserve descriptor presence"
+        );
+
+        if actual.is_undefined() {
+            return;
+        }
+
+        for property in ["configurable", "enumerable", "writable"] {
+            let actual_value = js_sys::Reflect::get(actual, &JsValue::from_str(property))
+                .unwrap_or_else(|_| panic!("{label} {property} should be readable"));
+            let expected_value = js_sys::Reflect::get(expected, &JsValue::from_str(property))
+                .unwrap_or_else(|_| panic!("{label} {property} should be readable"));
+
+            assert!(
+                js_sys::Object::is(&actual_value, &expected_value),
+                "{label} should preserve descriptor field {property}"
+            );
+        }
+
+        for property in ["get", "set", "value"] {
+            let actual_value = js_sys::Reflect::get(actual, &JsValue::from_str(property))
+                .unwrap_or_else(|_| panic!("{label} {property} should be readable"));
+            let expected_value = js_sys::Reflect::get(expected, &JsValue::from_str(property))
+                .unwrap_or_else(|_| panic!("{label} {property} should be readable"));
+
+            assert!(
+                js_sys::Object::is(&actual_value, &expected_value),
+                "{label} should preserve descriptor field {property}"
+            );
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen_test]
     async fn set_viewport_overrides_container_geometry_and_window_metrics() {
         let flushes = Rc::new(Cell::new(0));
@@ -3481,6 +3554,14 @@ mod tests {
         let document_element = document
             .document_element()
             .expect("document element must exist");
+        let initial_window_width_descriptor =
+            own_property_descriptor(window.as_ref(), "innerWidth");
+        let initial_window_height_descriptor =
+            own_property_descriptor(window.as_ref(), "innerHeight");
+        let initial_document_width_descriptor =
+            own_property_descriptor(document_element.as_ref(), "clientWidth");
+        let initial_document_height_descriptor =
+            own_property_descriptor(document_element.as_ref(), "clientHeight");
 
         let original_window_width = window
             .inner_width()
@@ -3512,6 +3593,22 @@ mod tests {
             );
             assert_eq!(document_element.client_width(), 320);
             assert_eq!(document_element.client_height(), 480);
+            assert!(
+                !own_property_descriptor(window.as_ref(), "innerWidth").is_undefined(),
+                "viewport override should install an own descriptor for window.innerWidth"
+            );
+            assert!(
+                !own_property_descriptor(window.as_ref(), "innerHeight").is_undefined(),
+                "viewport override should install an own descriptor for window.innerHeight"
+            );
+            assert!(
+                !own_property_descriptor(document_element.as_ref(), "clientWidth").is_undefined(),
+                "viewport override should install an own descriptor for documentElement.clientWidth"
+            );
+            assert!(
+                !own_property_descriptor(document_element.as_ref(), "clientHeight").is_undefined(),
+                "viewport override should install an own descriptor for documentElement.clientHeight"
+            );
         }
 
         assert_eq!(
@@ -3524,6 +3621,26 @@ mod tests {
         );
         assert_eq!(document_element.client_width(), original_document_width);
         assert_eq!(document_element.client_height(), original_document_height);
+        assert_same_descriptor(
+            &own_property_descriptor(window.as_ref(), "innerWidth"),
+            &initial_window_width_descriptor,
+            "window.innerWidth",
+        );
+        assert_same_descriptor(
+            &own_property_descriptor(window.as_ref(), "innerHeight"),
+            &initial_window_height_descriptor,
+            "window.innerHeight",
+        );
+        assert_same_descriptor(
+            &own_property_descriptor(document_element.as_ref(), "clientWidth"),
+            &initial_document_width_descriptor,
+            "documentElement.clientWidth",
+        );
+        assert_same_descriptor(
+            &own_property_descriptor(document_element.as_ref(), "clientHeight"),
+            &initial_document_height_descriptor,
+            "documentElement.clientHeight",
+        );
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -3557,6 +3674,81 @@ mod tests {
 
         assert_eq!(trigger.bounding_rect().y, 320.0);
         assert_eq!(container_html(&harness.container).scroll_top(), 50);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
+    fn replacing_rect_override_restores_previous_element_descriptor() {
+        let document = web_sys::window()
+            .and_then(|window| window.document())
+            .expect("document must exist");
+
+        let first = document
+            .create_element("div")
+            .expect("first element must be creatable");
+        let second = document
+            .create_element("div")
+            .expect("second element must be creatable");
+
+        assert!(
+            own_property_descriptor(first.as_ref(), "getBoundingClientRect").is_undefined(),
+            "first element should not start with an own rect descriptor"
+        );
+        assert!(
+            own_property_descriptor(second.as_ref(), "getBoundingClientRect").is_undefined(),
+            "second element should not start with an own rect descriptor"
+        );
+
+        let mut layout = WasmLayoutState {
+            anchor: Some(install_rect_override(
+                &first,
+                Rect {
+                    x: 10.0,
+                    y: 20.0,
+                    width: 30.0,
+                    height: 40.0,
+                },
+            )),
+            ..WasmLayoutState::default()
+        };
+
+        assert!(
+            !own_property_descriptor(first.as_ref(), "getBoundingClientRect").is_undefined(),
+            "first element should be overridden while active"
+        );
+
+        drop(layout.anchor.take());
+
+        assert!(
+            own_property_descriptor(first.as_ref(), "getBoundingClientRect").is_undefined(),
+            "dropping an override should remove the temporary descriptor"
+        );
+
+        layout.anchor = Some(install_rect_override(
+            &second,
+            Rect {
+                x: 100.0,
+                y: 200.0,
+                width: 50.0,
+                height: 60.0,
+            },
+        ));
+
+        assert!(
+            own_property_descriptor(first.as_ref(), "getBoundingClientRect").is_undefined(),
+            "replacing the target should leave the previous element restored"
+        );
+        assert!(
+            !own_property_descriptor(second.as_ref(), "getBoundingClientRect").is_undefined(),
+            "new target should receive the override"
+        );
+
+        drop(layout.anchor.take());
+
+        assert!(
+            own_property_descriptor(second.as_ref(), "getBoundingClientRect").is_undefined(),
+            "second element should also restore its original descriptor on drop"
+        );
     }
 
     #[cfg(target_arch = "wasm32")]
