@@ -290,6 +290,7 @@ fn install_mutation_observer(
     let parent_opts = web_sys::MutationObserverInit::new();
 
     parent_opts.set_child_list(true);
+    parent_opts.set_character_data(true);
     parent_opts.set_subtree(true);
 
     let geometry_opts = web_sys::MutationObserverInit::new();
@@ -1685,6 +1686,43 @@ mod wasm_tests {
         next_task().await;
 
         assert!(updates.get() > after_class_update);
+
+        cleanup_auto();
+
+        cleanup(&root);
+    }
+
+    #[wasm_bindgen_test(async)]
+    async fn mutation_observer_tracks_parent_subtree_text_mutations() {
+        let _resize_stub = StubbedResizeObserver::install();
+
+        let root = append_div(
+            body().as_ref(),
+            "position:fixed;left:-10000px;top:0;width:240px;height:240px;",
+        );
+        let parent = append_div(root.as_ref(), "width:200px;height:200px;");
+        let sibling = append_div(parent.as_ref(), "width:10px;height:10px;");
+        let text = document().create_text_node("before");
+        let anchor = append_div(parent.as_ref(), "width:40px;height:40px;");
+        let floating = append_div(parent.as_ref(), "position:absolute;width:80px;height:20px;");
+
+        sibling
+            .append_child(&text)
+            .expect("text append must succeed");
+
+        let updates = Rc::new(Cell::new(0));
+        let update_counter = Rc::clone(&updates);
+        let cleanup_auto = auto_update(anchor.as_ref(), floating.as_ref(), move || {
+            update_counter.set(update_counter.get() + 1);
+        });
+
+        assert_eq!(updates.get(), 1);
+
+        text.set_data("after");
+
+        next_task().await;
+
+        assert!(updates.get() >= 2);
 
         cleanup_auto();
 

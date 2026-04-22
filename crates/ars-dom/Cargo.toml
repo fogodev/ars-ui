@@ -27,6 +27,7 @@ version = "0.3"
 optional = true
 features = [
     "AddEventListenerOptions",
+    "CharacterData",
     "CssStyleDeclaration",
     "DomMatrixReadOnly",
     "DomRect",
@@ -61,6 +62,7 @@ features = [
     "ShadowRootInit",
     "ShadowRootMode",
     "TouchEvent",
+    "Text",
     "VisualViewport",
     "Window"
 ]

@@ -1163,25 +1163,26 @@ changes. It mirrors the semantics of [Floating UI's `autoUpdate`](https://floati
 
 **Recalculation triggers:**
 
-| Trigger                | Mechanism                                                                   | Rationale                                          |
-| ---------------------- | --------------------------------------------------------------------------- | -------------------------------------------------- |
-| Window resize          | `resize` event on `window`                                                  | Viewport dimensions changed                        |
-| Scroll                 | `scroll` event on every scroll-ancestor                                     | Anchor may have moved relative to the viewport     |
-| Anchor/floating resize | `ResizeObserver` on both elements                                           | Element dimensions changed (e.g., content update)  |
-| DOM mutation           | `MutationObserver` on the anchor's parent element plus local geometry attrs | Structural content and nearby geometry changes     |
-| Anchor clipping        | `IntersectionObserver` on anchor                                            | Anchor scrolled behind `overflow: hidden` ancestor |
+| Trigger                | Mechanism                                                                   | Rationale                                                       |
+| ---------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Window resize          | `resize` event on `window`                                                  | Viewport dimensions changed                                     |
+| Scroll                 | `scroll` event on every scroll-ancestor                                     | Anchor may have moved relative to the viewport                  |
+| Anchor/floating resize | `ResizeObserver` on both elements                                           | Element dimensions changed (e.g., content update)               |
+| DOM mutation           | `MutationObserver` on the anchor's parent element plus local geometry attrs | Structural content, text mutations, and nearby geometry changes |
+| Anchor clipping        | `IntersectionObserver` on anchor                                            | Anchor scrolled behind `overflow: hidden` ancestor              |
 
 **Throttle strategy (adapter-level):** Adapters SHOULD wrap the `update` callback in a
 `requestAnimationFrame` guard so multiple triggers within the same frame coalesce into one
 `compute_position()` call, preventing layout thrashing. The core `auto_update()` implementation
 calls `update()` directly from each observer; RAF batching is the adapter's responsibility.
 
-**Mutation scope:** The `MutationObserver` MUST watch structural `childList`/`subtree` changes on
-the anchor's parent element, and it MAY observe geometry-affecting `style`/`class` attributes on
-the anchor itself and on that immediate parent element. It MUST NOT observe `style` or `class`
-attribute mutations across the full parent subtree, because `update()` commonly writes inline
-positioning styles to the floating element and subtree-level attribute observation would make
-`auto_update()` self-trigger for non-portal sibling overlays.
+**Mutation scope:** The `MutationObserver` MUST watch `childList`, `subtree`, and
+`characterData` changes on the anchor's parent element so sibling DOM insertions, removals, and
+text-node updates all trigger repositioning. It MAY observe geometry-affecting `style`/`class`
+attributes on the anchor itself and on that immediate parent element. It MUST NOT observe `style`
+or `class` attribute mutations across the full parent subtree, because `update()` commonly writes
+inline positioning styles to the floating element and subtree-level attribute observation would
+make `auto_update()` self-trigger for non-portal sibling overlays.
 
 ```rust
 // ars-dom/src/positioning.rs
@@ -1256,6 +1257,7 @@ pub fn auto_update(
         .expect("MutationObserver constructor should not throw");
     let mut parent_opts = web_sys::MutationObserverInit::new();
     parent_opts.set_child_list(true);
+    parent_opts.set_character_data(true);
     parent_opts.set_subtree(true);
 
     let mut geometry_opts = web_sys::MutationObserverInit::new();
