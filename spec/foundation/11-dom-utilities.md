@@ -1163,18 +1163,23 @@ changes. It mirrors the semantics of [Floating UI's `autoUpdate`](https://floati
 
 **Recalculation triggers:**
 
-| Trigger                | Mechanism                                         | Rationale                                          |
-| ---------------------- | ------------------------------------------------- | -------------------------------------------------- |
-| Window resize          | `resize` event on `window`                        | Viewport dimensions changed                        |
-| Scroll                 | `scroll` event on every scroll-ancestor           | Anchor may have moved relative to the viewport     |
-| Anchor/floating resize | `ResizeObserver` on both elements                 | Element dimensions changed (e.g., content update)  |
-| DOM mutation           | `MutationObserver` on the anchor's parent element | Content changes that affect size                   |
-| Anchor clipping        | `IntersectionObserver` on anchor                  | Anchor scrolled behind `overflow: hidden` ancestor |
+| Trigger                | Mechanism                                                                   | Rationale                                          |
+| ---------------------- | --------------------------------------------------------------------------- | -------------------------------------------------- |
+| Window resize          | `resize` event on `window`                                                  | Viewport dimensions changed                        |
+| Scroll                 | `scroll` event on every scroll-ancestor                                     | Anchor may have moved relative to the viewport     |
+| Anchor/floating resize | `ResizeObserver` on both elements                                           | Element dimensions changed (e.g., content update)  |
+| DOM mutation           | `MutationObserver` on the anchor's parent element (child-list/subtree only) | Structural content changes that affect layout      |
+| Anchor clipping        | `IntersectionObserver` on anchor                                            | Anchor scrolled behind `overflow: hidden` ancestor |
 
 **Throttle strategy (adapter-level):** Adapters SHOULD wrap the `update` callback in a
 `requestAnimationFrame` guard so multiple triggers within the same frame coalesce into one
 `compute_position()` call, preventing layout thrashing. The core `auto_update()` implementation
 calls `update()` directly from each observer; RAF batching is the adapter's responsibility.
+
+**Mutation scope:** The `MutationObserver` MUST watch structural subtree changes only. It MUST
+NOT observe `style` or `class` attribute mutations, because `update()` commonly writes inline
+positioning styles to the floating element and attribute observation would make `auto_update()`
+self-trigger for non-portal sibling overlays.
 
 ```rust
 // ars-dom/src/positioning.rs
@@ -1250,8 +1255,6 @@ pub fn auto_update(
     let mut opts = web_sys::MutationObserverInit::new();
     opts.set_child_list(true);
     opts.set_subtree(true);
-    opts.set_attributes(true);
-    opts.set_attribute_filter(&js_sys::Array::of2(&"style".into(), &"class".into()));
     if let Some(parent) = anchor.parent_element() {
         mutation_observer.observe_with_options(&parent, &opts)
             .expect("MutationObserver.observe should not throw for valid options");

@@ -291,8 +291,6 @@ fn install_mutation_observer(
 
     opts.set_child_list(true);
     opts.set_subtree(true);
-    opts.set_attributes(true);
-    opts.set_attribute_filter(&js_sys::Array::of2(&"style".into(), &"class".into()).into());
 
     if let Some(parent) = anchor.parent_element() {
         debug::warn_dom_error(
@@ -1493,15 +1491,15 @@ mod wasm_tests {
 
         assert_eq!(updates.get(), 1);
 
-        parent
-            .set_attribute("class", "changed")
-            .expect("class mutation must succeed");
+        let child = append_div(parent.as_ref(), "width:10px;height:10px;");
 
         next_task().await;
 
         assert_eq!(updates.get(), 1);
 
         cleanup_auto();
+
+        child.remove();
 
         cleanup(&root);
     }
@@ -1524,35 +1522,67 @@ mod wasm_tests {
 
         assert_eq!(updates.get(), 1);
 
-        parent
-            .set_attribute("class", "changed")
-            .expect("class mutation must succeed");
+        let child = append_div(parent.as_ref(), "width:10px;height:10px;");
 
         next_task().await;
 
         assert!(updates.get() >= 2);
 
-        let after_class = updates.get();
+        let after_child_insert = updates.get();
 
-        let child = append_div(parent.as_ref(), "width:10px;height:10px;");
+        child.remove();
 
         next_task().await;
 
-        assert!(updates.get() > after_class);
+        assert!(updates.get() > after_child_insert);
 
         cleanup_auto();
 
         let after_cleanup = updates.get();
 
-        parent
-            .set_attribute("style", "width:210px;height:210px;")
-            .expect("style mutation must succeed");
+        let child_after_cleanup = append_div(parent.as_ref(), "width:12px;height:12px;");
 
         next_task().await;
 
         assert_eq!(updates.get(), after_cleanup);
 
-        child.remove();
+        child_after_cleanup.remove();
+
+        cleanup(&root);
+    }
+
+    #[wasm_bindgen_test(async)]
+    async fn mutation_observer_ignores_floating_style_writes_under_same_parent() {
+        let _resize_stub = StubbedResizeObserver::install();
+
+        let root = append_div(
+            body().as_ref(),
+            "position:fixed;left:-10000px;top:0;width:240px;height:240px;",
+        );
+        let parent = append_div(root.as_ref(), "width:200px;height:200px;");
+        let anchor = append_div(parent.as_ref(), "width:40px;height:40px;");
+        let floating = append_div(parent.as_ref(), "position:absolute;width:80px;height:20px;");
+
+        let updates = Rc::new(Cell::new(0));
+        let update_counter = Rc::clone(&updates);
+        let floating_for_update = floating.clone();
+        let cleanup_auto = auto_update(anchor.as_ref(), floating.as_ref(), move || {
+            let next_count = update_counter.get() + 1;
+
+            update_counter.set(next_count);
+            floating_for_update
+                .style()
+                .set_property("left", &format!("{next_count}px"))
+                .expect("floating style write must succeed");
+        });
+
+        assert_eq!(updates.get(), 1);
+
+        next_task().await;
+
+        assert_eq!(updates.get(), 1);
+
+        cleanup_auto();
 
         cleanup(&root);
     }
@@ -1583,15 +1613,15 @@ mod wasm_tests {
             .append_child(&anchor)
             .expect("anchor append must succeed");
 
-        parent
-            .set_attribute("class", "changed")
-            .expect("class mutation must succeed");
+        let sibling = append_div(parent.as_ref(), "width:10px;height:10px;");
 
         next_task().await;
 
         assert_eq!(updates.get(), 1);
 
         cleanup_auto();
+
+        sibling.remove();
 
         cleanup(&root);
     }
