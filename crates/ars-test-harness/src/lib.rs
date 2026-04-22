@@ -167,6 +167,7 @@ struct WasmLayoutState {
     media_emulation: Option<MediaEmulation>,
     anchor: Option<ElementRectOverride>,
     last_root_pointer_point: Option<Point>,
+    primary_pointer_button_down: bool,
     last_root_touch_point: Option<Point>,
     last_touch_target: Option<TouchTarget>,
     scroll_x: i32,
@@ -1315,8 +1316,13 @@ impl TestHarness {
     pub async fn pointer_down_at(&self, x: f64, y: f64) {
         #[cfg(target_arch = "wasm32")]
         {
-            self.layout.borrow_mut().last_root_pointer_point = Some(point(x, y));
-            self.dispatch_pointer_event("[data-ars-scope]", "pointerdown", x, y)
+            {
+                let mut layout = self.layout.borrow_mut();
+                layout.last_root_pointer_point = Some(point(x, y));
+                layout.primary_pointer_button_down = true;
+            }
+
+            self.dispatch_pointer_event("[data-ars-scope]", "pointerdown", x, y, true)
                 .await;
         }
 
@@ -1332,8 +1338,13 @@ impl TestHarness {
     pub async fn pointer_move_to(&self, x: f64, y: f64) {
         #[cfg(target_arch = "wasm32")]
         {
-            self.layout.borrow_mut().last_root_pointer_point = Some(point(x, y));
-            self.dispatch_pointer_event("[data-ars-scope]", "pointermove", x, y)
+            let buttons_down = {
+                let mut layout = self.layout.borrow_mut();
+                layout.last_root_pointer_point = Some(point(x, y));
+                layout.primary_pointer_button_down
+            };
+
+            self.dispatch_pointer_event("[data-ars-scope]", "pointermove", x, y, buttons_down)
                 .await;
         }
 
@@ -1355,10 +1366,12 @@ impl TestHarness {
                 .last_root_pointer_point
                 .unwrap_or_else(|| self.root_center("[data-ars-scope]"));
 
-            self.dispatch_pointer_event("[data-ars-scope]", "pointerup", point.x, point.y)
+            self.dispatch_pointer_event("[data-ars-scope]", "pointerup", point.x, point.y, false)
                 .await;
 
-            self.layout.borrow_mut().last_root_pointer_point = None;
+            let mut layout = self.layout.borrow_mut();
+            layout.last_root_pointer_point = None;
+            layout.primary_pointer_button_down = false;
         }
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -1809,15 +1822,6 @@ impl TestHarness {
                 .dispatch_event(&container_scroll)
                 .expect("container scroll dispatch must succeed");
 
-            if let Some(window) = web_sys::window() {
-                let window_scroll =
-                    web_sys::Event::new("scroll").expect("window scroll event must construct");
-
-                let _ = window
-                    .dispatch_event(&window_scroll)
-                    .expect("window scroll dispatch must succeed");
-            }
-
             self.flush().await;
         }
 
@@ -1866,7 +1870,14 @@ impl TestHarness {
     }
 
     #[cfg(target_arch = "wasm32")]
-    async fn dispatch_pointer_event(&self, selector: &str, event_name: &str, x: f64, y: f64) {
+    async fn dispatch_pointer_event(
+        &self,
+        selector: &str,
+        event_name: &str,
+        x: f64,
+        y: f64,
+        primary_button_down: bool,
+    ) {
         let element = self.query(selector).element;
 
         let init = web_sys::PointerEventInit::new();
@@ -1886,7 +1897,7 @@ impl TestHarness {
             }
 
             "pointermove" => {
-                init.set_buttons(1);
+                init.set_buttons(if primary_button_down { 1 } else { 0 });
             }
 
             "pointerup" => {
@@ -4091,7 +4102,7 @@ mod tests {
 
         let pointer_down = Rc::new(RefCell::new(None));
 
-        let pointer_move = Rc::new(RefCell::new(None));
+        let pointer_moves = Rc::new(RefCell::new(Vec::new()));
 
         let pointer_up = Rc::new(RefCell::new(None));
 
@@ -4121,10 +4132,10 @@ mod tests {
         };
 
         let _pointer_move_listener = {
-            let pointer_move = Rc::clone(&pointer_move);
+            let pointer_moves = Rc::clone(&pointer_moves);
             let closure = Closure::<dyn FnMut(web_sys::PointerEvent)>::wrap(Box::new(
                 move |event: web_sys::PointerEvent| {
-                    *pointer_move.borrow_mut() = Some((
+                    pointer_moves.borrow_mut().push((
                         js_number(event.as_ref(), "clientX"),
                         js_number(event.as_ref(), "clientY"),
                         js_string(event.as_ref(), "pointerType"),
@@ -4208,6 +4219,7 @@ mod tests {
         harness.touch_start(point(12.0, 34.0)).await;
         harness.touch_move(point(56.0, 78.0)).await;
         harness.touch_end().await;
+        harness.pointer_move_to(17.0, 29.0).await;
         harness.pointer_down_at(91.0, 123.0).await;
         harness.pointer_move_to(145.0, 167.0).await;
         harness.pointer_up().await;
@@ -4220,8 +4232,11 @@ mod tests {
             Some((91.0, 123.0, String::from("mouse"), 1.0))
         );
         assert_eq!(
-            *pointer_move.borrow(),
-            Some((145.0, 167.0, String::from("mouse"), 1.0))
+            *pointer_moves.borrow(),
+            vec![
+                (17.0, 29.0, String::from("mouse"), 0.0),
+                (145.0, 167.0, String::from("mouse"), 1.0),
+            ]
         );
         assert_eq!(
             *pointer_up.borrow(),
@@ -4574,6 +4589,49 @@ mod tests {
         harness.scroll_container_by(0, 50).await;
 
         assert_eq!(flushes.get(), 2, "scroll should flush before returning");
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
+    async fn scroll_container_by_only_dispatches_container_scroll_events() {
+        let harness =
+            render_with_backend(MockComponent, MountedDomBackend::new(Rc::new(Cell::new(0)))).await;
+
+        let container = container_html(&harness.container).clone();
+        let window = web_sys::window().expect("window must exist");
+        let container_scrolls = Rc::new(Cell::new(0));
+        let window_scrolls = Rc::new(Cell::new(0));
+
+        let _container_scroll_listener = {
+            let container_scrolls = Rc::clone(&container_scrolls);
+            let closure = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_| {
+                container_scrolls.set(container_scrolls.get() + 1);
+            }));
+
+            container
+                .add_event_listener_with_callback("scroll", closure.as_ref().unchecked_ref())
+                .expect("container scroll listener should register");
+
+            closure
+        };
+
+        let _window_scroll_listener = {
+            let window_scrolls = Rc::clone(&window_scrolls);
+            let closure = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_| {
+                window_scrolls.set(window_scrolls.get() + 1);
+            }));
+
+            window
+                .add_event_listener_with_callback("scroll", closure.as_ref().unchecked_ref())
+                .expect("window scroll listener should register");
+
+            closure
+        };
+
+        harness.scroll_container_by(0, 50).await;
+
+        assert_eq!(container_scrolls.get(), 1);
+        assert_eq!(window_scrolls.get(), 0);
     }
 
     #[cfg(target_arch = "wasm32")]
