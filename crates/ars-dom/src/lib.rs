@@ -52,7 +52,13 @@ pub use portal::{
 };
 pub use positioning::{
     Alignment, Axis, Boundary, Offset, Overflow, Placement, PositioningOptions, PositioningResult,
-    Rect, Side, Strategy, VirtualElement, compute_position,
+    Rect, Side, Strategy, VirtualElement, client_point_to_local_space, client_rect_to_local_space,
+    compute_position,
+};
+#[cfg(feature = "web")]
+pub use positioning::{
+    find_containing_block_ancestor, offset_parent_rect,
+    warn_if_floating_element_has_containment_issue, warn_if_portal_target_has_containing_block,
 };
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub use positioning::{viewport_height, viewport_rect, viewport_width};
