@@ -566,6 +566,8 @@ When the floating element lives inside Shadow DOM, the ancestor walk MUST
 follow the composed tree. Crossing from a `ShadowRoot` to its `host` is
 required; stopping at `parentElement` is insufficient because shadow hosts can
 also create containing blocks.
+For slotted light-DOM nodes, the walk MUST also follow `assignedSlot` into the
+shadow tree before continuing with DOM parents.
 
 > **Containing Block Detection Checklist**
 > The following CSS properties on ancestor elements create a new containing block for
@@ -582,7 +584,8 @@ also create containing blocks.
 
 ```rust
 /// Check whether the floating element has an ancestor that creates a
-/// containing block for absolutely-positioned descendants.
+/// containing block for absolutely-positioned descendants and whose local
+/// coordinate space can be represented by axis-aligned origin subtraction.
 ///
 /// CSS properties that create a containing block:
 /// - `transform` (any value other than `none`)
@@ -628,6 +631,9 @@ fn find_containing_block_ancestor(element: &Element) -> Option<Rect> {
             || (!backdrop_filter.is_empty() && backdrop_filter != "none")
             || content_visibility == "auto"
         {
+            if transform != "none" && !transform.is_empty() && !transform_is_translation_only(&transform) {
+                return None;
+            }
             let rect = el.get_bounding_client_rect();
             return Some(Rect {
                 x: rect.x() + f64::from(el.client_left()),
@@ -645,6 +651,10 @@ fn find_containing_block_ancestor(element: &Element) -> Option<Rect> {
 If a containing-block ancestor is found, its padding-box rect is subtracted from
 all subsequent coordinate calculations (anchor rect, viewport rect) so the
 final `(x, y)` values are relative to the correct coordinate space.
+If the containing block is established by a non-translation `transform`, this
+rect-only helper MUST return `None` instead of fabricating a wrong local
+origin; matrix-aware conversion is required for scaled, rotated, skewed, or
+perspective-transformed coordinate spaces.
 
 #### 2.3.2 Step 1: Measure
 
@@ -1100,7 +1110,7 @@ All positioning calculations use a consistent coordinate system. This section do
 
 - **Positioning strategy.** The positioned floating element uses `position: fixed; top: Y; left: X` with client-space coordinates by default (`Strategy::Fixed`). This avoids scroll-offset calculations since `getBoundingClientRect()` already returns viewport-relative values.
 
-- **CSS transform containing blocks.** If a parent element has CSS transforms (`transform`, `perspective`, `will-change: transform`), it creates a new containing block for `position: fixed` descendants. When this occurs, the floating element's `top`/`left` are interpreted relative to the transformed parent, not the viewport. The positioning engine MUST detect this case (see `has_containing_block_ancestor()` in §2.3 Step 0) and convert coordinates from client-space to the transformed parent's local space by subtracting the containing block's padding-box origin (`getBoundingClientRect()` plus `clientLeft`/`clientTop`). Alternatively, avoid CSS transforms on positioning containers entirely.
+- **CSS transform containing blocks.** If a parent element has CSS transforms (`transform`, `perspective`, `will-change: transform`), it creates a new containing block for `position: fixed` descendants. When this occurs, the floating element's `top`/`left` are interpreted relative to the transformed parent, not the viewport. For translation-only transforms, the positioning engine can convert coordinates from client-space to the transformed parent's local space by subtracting the containing block's padding-box origin (`getBoundingClientRect()` plus `clientLeft`/`clientTop`). Scaled, rotated, skewed, or perspective-transformed containing blocks require matrix-aware conversion; rect-only helpers MUST return `None` rather than invent incorrect coordinates. Alternatively, avoid non-translation CSS transforms on positioning containers entirely.
 
 - **`position: absolute` positioning (non-portal).** When the floating element uses `Strategy::Absolute` (e.g., it is not portaled and lives inside a positioned ancestor), convert client-space coordinates into the offset parent's **scroll-adjusted padding-box** coordinate space. CSS resolves absolute `top`/`left` against the offset parent's padding box, and the positioned contents move with the offset parent's scroll position, so the local origin must include `clientLeft`/`clientTop` and subtract `scrollLeft`/`scrollTop` instead of using the raw border-box origin:
 
