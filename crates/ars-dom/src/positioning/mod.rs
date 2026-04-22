@@ -4,12 +4,15 @@
 //! to compute where floating elements (popovers, tooltips, menus) should be
 //! placed relative to their anchor elements.
 
+mod auto_update;
 mod compute;
 mod dom;
 mod overflow;
 mod types;
 mod viewport;
 
+#[cfg(feature = "web")]
+pub use auto_update::auto_update;
 pub use compute::compute_position;
 pub use dom::{client_point_to_local_space, client_rect_to_local_space};
 #[cfg(feature = "web")]

@@ -57,7 +57,7 @@ pub use positioning::{
 };
 #[cfg(feature = "web")]
 pub use positioning::{
-    find_containing_block_ancestor, offset_parent_rect,
+    auto_update, find_containing_block_ancestor, offset_parent_rect,
     warn_if_floating_element_has_containment_issue, warn_if_portal_target_has_containing_block,
 };
 #[cfg(all(feature = "web", target_arch = "wasm32"))]

@@ -1163,18 +1163,27 @@ changes. It mirrors the semantics of [Floating UI's `autoUpdate`](https://floati
 
 **Recalculation triggers:**
 
-| Trigger                | Mechanism                                         | Rationale                                          |
-| ---------------------- | ------------------------------------------------- | -------------------------------------------------- |
-| Window resize          | `resize` event on `window`                        | Viewport dimensions changed                        |
-| Scroll                 | `scroll` event on every scroll-ancestor           | Anchor may have moved relative to the viewport     |
-| Anchor/floating resize | `ResizeObserver` on both elements                 | Element dimensions changed (e.g., content update)  |
-| DOM mutation           | `MutationObserver` on the anchor's parent element | Content changes that affect size                   |
-| Anchor clipping        | `IntersectionObserver` on anchor                  | Anchor scrolled behind `overflow: hidden` ancestor |
+| Trigger                | Mechanism                                                                              | Rationale                                                       |
+| ---------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Window resize          | `resize` event on `window`                                                             | Viewport dimensions changed                                     |
+| Scroll                 | `scroll` event on every scroll-ancestor                                                | Anchor may have moved relative to the viewport                  |
+| Anchor/floating resize | `ResizeObserver` on both elements                                                      | Element dimensions changed (e.g., content update)               |
+| DOM mutation           | `MutationObserver` on the anchor's parent element plus filtered subtree geometry attrs | Structural content, text mutations, and nearby geometry changes |
+| Anchor clipping        | `IntersectionObserver` on anchor                                                       | Anchor scrolled behind `overflow: hidden` ancestor              |
 
 **Throttle strategy (adapter-level):** Adapters SHOULD wrap the `update` callback in a
 `requestAnimationFrame` guard so multiple triggers within the same frame coalesce into one
 `compute_position()` call, preventing layout thrashing. The core `auto_update()` implementation
 calls `update()` directly from each observer; RAF batching is the adapter's responsibility.
+
+**Mutation scope:** The `MutationObserver` MUST watch `childList`, `subtree`, and
+`characterData` changes on the anchor's parent element so sibling DOM insertions, removals, and
+text-node updates all trigger repositioning. It MUST also watch geometry-affecting `style`/`class`
+attribute changes across that parent subtree so sibling layout changes can trigger repositioning
+without waiting for a later scroll or resize. Implementations MUST ignore attribute mutation
+records whose target is the floating element or one of its descendants, because `update()`
+commonly writes inline positioning styles to the floating subtree and those writes must not
+self-trigger another reposition cycle.
 
 ```rust
 // ars-dom/src/positioning.rs
@@ -1186,8 +1195,8 @@ calls `update()` directly from each observer; RAF batching is the adapter's resp
 /// scroll listeners on all scroll-ancestor elements, and
 /// a `MutationObserver` for DOM structure changes.
 pub fn auto_update(
-    anchor: &web_sys::HtmlElement,
-    floating: &web_sys::HtmlElement,
+    anchor: &web_sys::Element,
+    floating: &web_sys::Element,
     update: impl Fn() + 'static,
 ) -> Box<dyn FnOnce()> {
     let update = Rc::new(update);
@@ -1211,7 +1220,7 @@ pub fn auto_update(
         update_scroll();
     }) as Box<dyn FnMut(web_sys::Event)>);
 
-    let scroll_parents: Vec<web_sys::Element> = scrollable_ancestors(&anchor);
+    let scroll_parents: Vec<web_sys::Element> = scrollable_ancestors(anchor);
     for parent in &scroll_parents {
         let opts = web_sys::AddEventListenerOptions::new();
         opts.set_passive(true);
@@ -1247,13 +1256,39 @@ pub fn auto_update(
     }) as Box<dyn FnMut(js_sys::Array, web_sys::MutationObserver)>);
     let mutation_observer = web_sys::MutationObserver::new(mutation_cb.as_ref().unchecked_ref())
         .expect("MutationObserver constructor should not throw");
-    let mut opts = web_sys::MutationObserverInit::new();
-    opts.set_child_list(true);
-    opts.set_subtree(true);
-    opts.set_attributes(true);
-    opts.set_attribute_filter(&js_sys::Array::of2(&"style".into(), &"class".into()));
+    let mut parent_opts = web_sys::MutationObserverInit::new();
+    parent_opts.set_child_list(true);
+    parent_opts.set_character_data(true);
+    parent_opts.set_subtree(true);
+
+    let mut geometry_anchor_opts = web_sys::MutationObserverInit::new();
+    geometry_anchor_opts.set_attributes(true);
+    geometry_anchor_opts.set_attribute_filter(
+        &js_sys::Array::of2(&JsValue::from_str("class"), &JsValue::from_str("style")),
+    );
+    let mut geometry_parent_opts = web_sys::MutationObserverInit::new();
+    geometry_parent_opts.set_attributes(true);
+    geometry_parent_opts.set_subtree(true);
+    geometry_parent_opts.set_attribute_filter(
+        &js_sys::Array::of2(&JsValue::from_str("class"), &JsValue::from_str("style")),
+    );
     if let Some(parent) = anchor.parent_element() {
-        mutation_observer.observe_with_options(&parent, &opts)
+        mutation_observer.observe_with_options(&parent, &parent_opts)
+            .expect("MutationObserver.observe should not throw for valid options");
+    }
+    let floating_for_geometry = floating.clone();
+    let update_geometry = update.clone();
+    let geometry_cb = Closure::wrap(Box::new(move |entries: js_sys::Array, _: web_sys::MutationObserver| {
+        if should_update_for_geometry_mutations(&entries, &floating_for_geometry) {
+            update_geometry();
+        }
+    }) as Box<dyn FnMut(js_sys::Array, web_sys::MutationObserver)>);
+    let geometry_observer = web_sys::MutationObserver::new(geometry_cb.as_ref().unchecked_ref())
+        .expect("MutationObserver constructor should not throw");
+    geometry_observer.observe_with_options(anchor, &geometry_anchor_opts)
+        .expect("MutationObserver.observe should not throw for valid options");
+    if let Some(parent) = anchor.parent_element() {
+        geometry_observer.observe_with_options(&parent, &geometry_parent_opts)
             .expect("MutationObserver.observe should not throw for valid options");
     }
     let mo = mutation_observer.clone();
@@ -1266,15 +1301,24 @@ pub fn auto_update(
     let update_io = update.clone();
     let floating_el = floating.clone();
     let intersection_cb = Closure::wrap(Box::new(move |entries: js_sys::Array, _: web_sys::IntersectionObserver| {
-        if let Some(entry) = entries.get(0).dyn_ref::<web_sys::IntersectionObserverEntry>() {
-            if entry.intersection_ratio() == 0.0 {
-                // Anchor is fully clipped — hide the floating element.
-                let _ = floating_el.style().set_property("visibility", "hidden");
-            } else {
-                // Anchor is (partially) visible — show and reposition.
-                let _ = floating_el.style().remove_property("visibility");
-                update_io();
+        let Some(entry) = (0..entries.length()).rev().find_map(|index| {
+            entries.get(index).dyn_into::<web_sys::IntersectionObserverEntry>().ok()
+        }) else {
+            return;
+        };
+
+        if entry.intersection_ratio() == 0.0 {
+            // Anchor is fully clipped — hide the floating element when it
+            // can be styled as an HtmlElement.
+            if let Some(floating_html) = floating_el.dyn_ref::<web_sys::HtmlElement>() {
+                let _ = floating_html.style().set_property("visibility", "hidden");
             }
+        } else {
+            // Anchor is (partially) visible — show and reposition.
+            if let Some(floating_html) = floating_el.dyn_ref::<web_sys::HtmlElement>() {
+                let _ = floating_html.style().remove_property("visibility");
+            }
+            update_io();
         }
     }) as Box<dyn FnMut(js_sys::Array, web_sys::IntersectionObserver)>);
     let mut io_opts = web_sys::IntersectionObserverInit::new();
