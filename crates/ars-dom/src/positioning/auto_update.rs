@@ -3,7 +3,7 @@
 //! This module wires browser observers and event listeners used by overlays to
 //! keep their computed position in sync with viewport, scroll, and DOM changes.
 
-#[cfg(test)]
+#[cfg(any(test, all(feature = "web", target_arch = "wasm32")))]
 use std::cell::RefCell;
 #[cfg(all(test, not(all(feature = "web", target_arch = "wasm32"))))]
 use std::rc::Rc;
@@ -17,6 +17,25 @@ use {
 
 #[cfg(any(test, all(feature = "web", target_arch = "wasm32")))]
 type CleanupFn = Box<dyn FnOnce()>;
+
+#[cfg(any(test, all(feature = "web", target_arch = "wasm32")))]
+#[derive(Debug, Default, Eq, PartialEq)]
+struct VisibilityOverrideState {
+    restore_visibility: Option<Option<String>>,
+}
+
+#[cfg(any(test, all(feature = "web", target_arch = "wasm32")))]
+impl VisibilityOverrideState {
+    fn record_override(&mut self, visibility: Option<&str>) {
+        if self.restore_visibility.is_none() {
+            self.restore_visibility = Some(visibility.map(str::to_owned));
+        }
+    }
+
+    fn take_restore_visibility(&mut self) -> Option<Option<String>> {
+        self.restore_visibility.take()
+    }
+}
 
 /// Sets up automatic repositioning when the anchor or viewport changes.
 ///
@@ -298,6 +317,12 @@ fn install_intersection_observer(
 ) {
     let floating = floating.clone();
 
+    let cleanup_floating = floating.clone();
+
+    let visibility_state = Rc::new(RefCell::new(VisibilityOverrideState::default()));
+
+    let cleanup_visibility_state = Rc::clone(&visibility_state);
+
     let intersection_cb = Closure::wrap(Box::new(
         move |entries: js_sys::Array, _observer: web_sys::IntersectionObserver| {
             let Some(entry) = entries
@@ -309,9 +334,10 @@ fn install_intersection_observer(
             };
 
             if entry.intersection_ratio() == 0.0 {
-                set_floating_visibility(&floating, true);
+                hide_floating_visibility(&floating, visibility_state.as_ref());
             } else {
-                set_floating_visibility(&floating, false);
+                restore_floating_visibility(&floating, visibility_state.as_ref());
+
                 update();
             }
         },
@@ -336,28 +362,65 @@ fn install_intersection_observer(
 
     let intersection_observer = intersection_observer.clone();
     cleanups.push(move || {
+        restore_floating_visibility(&cleanup_floating, cleanup_visibility_state.as_ref());
+
         intersection_observer.disconnect();
+
         drop(intersection_cb);
     });
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn set_floating_visibility(floating: &web_sys::Element, hidden: bool) {
+fn hide_floating_visibility(
+    floating: &web_sys::Element,
+    visibility_state: &RefCell<VisibilityOverrideState>,
+) {
     let Some(floating) = floating.dyn_ref::<web_sys::HtmlElement>() else {
         return;
     };
 
-    if hidden {
+    let current_visibility = floating
+        .style()
+        .get_property_value("visibility")
+        .ok()
+        .filter(|value| !value.is_empty());
+
+    visibility_state
+        .borrow_mut()
+        .record_override(current_visibility.as_deref());
+
+    debug::warn_dom_error(
+        "setting auto_update floating visibility",
+        floating.style().set_property("visibility", "hidden"),
+    );
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn restore_floating_visibility(
+    floating: &web_sys::Element,
+    visibility_state: &RefCell<VisibilityOverrideState>,
+) {
+    let Some(floating) = floating.dyn_ref::<web_sys::HtmlElement>() else {
+        return;
+    };
+
+    let Some(restore_visibility) = visibility_state.borrow_mut().take_restore_visibility() else {
+        return;
+    };
+
+    if let Some(visibility) = restore_visibility {
         debug::warn_dom_error(
-            "setting auto_update floating visibility",
-            floating.style().set_property("visibility", "hidden"),
+            "restoring auto_update floating visibility",
+            floating.style().set_property("visibility", &visibility),
         );
-    } else {
-        debug::warn_dom_error(
-            "clearing auto_update floating visibility",
-            floating.style().remove_property("visibility").map(|_| ()),
-        );
+
+        return;
     }
+
+    debug::warn_dom_error(
+        "clearing auto_update floating visibility",
+        floating.style().remove_property("visibility").map(|_| ()),
+    );
 }
 
 #[cfg(all(feature = "web", not(target_arch = "wasm32")))]
@@ -436,6 +499,30 @@ mod tests {
             &*events.borrow(),
             &["remove-b", "drop-b", "remove-a", "drop-a"]
         );
+    }
+
+    #[test]
+    fn visibility_override_state_restores_absent_property() {
+        let mut state = VisibilityOverrideState::default();
+
+        state.record_override(None);
+
+        assert_eq!(state.take_restore_visibility(), Some(None));
+        assert_eq!(state.take_restore_visibility(), None);
+    }
+
+    #[test]
+    fn visibility_override_state_preserves_original_property() {
+        let mut state = VisibilityOverrideState::default();
+
+        state.record_override(Some("collapse"));
+        state.record_override(Some("visible"));
+
+        assert_eq!(
+            state.take_restore_visibility(),
+            Some(Some(String::from("collapse")))
+        );
+        assert_eq!(state.take_restore_visibility(), None);
     }
 }
 
@@ -1109,6 +1196,51 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn intersection_observer_cleanup_restores_previous_visibility() {
+        let _resize_stub = StubbedResizeObserver::install();
+
+        let _entry_stub = StubbedIntersectionObserverEntry::install();
+
+        let intersection_stub = StubbedIntersectionObserver::install();
+
+        let root = append_div(
+            body().as_ref(),
+            "position:fixed;left:-10000px;top:0;width:240px;height:240px;",
+        );
+        let anchor = append_div(root.as_ref(), "width:40px;height:40px;");
+        let floating = append_div(
+            root.as_ref(),
+            "position:absolute;width:80px;height:20px;visibility:collapse;",
+        );
+
+        let cleanup_auto = auto_update(anchor.as_ref(), floating.as_ref(), || {});
+
+        let hidden_entry = StubbedIntersectionObserverEntry::create(0.0);
+
+        intersection_stub.invoke_callback(&hidden_entry);
+
+        assert_eq!(
+            floating
+                .style()
+                .get_property_value("visibility")
+                .expect("visibility lookup must succeed"),
+            "hidden"
+        );
+
+        cleanup_auto();
+
+        assert_eq!(
+            floating
+                .style()
+                .get_property_value("visibility")
+                .expect("visibility lookup must succeed"),
+            "collapse"
+        );
+
+        cleanup(&root);
+    }
+
+    #[wasm_bindgen_test]
     fn intersection_observer_ignores_invalid_entries() {
         let _resize_stub = StubbedResizeObserver::install();
 
@@ -1338,6 +1470,8 @@ mod wasm_tests {
 
     #[wasm_bindgen_test(async)]
     async fn mutation_observer_constructor_failure_is_ignored() {
+        let _resize_stub = StubbedResizeObserver::install();
+
         let _failure = ThrowingConstructorGuard::install(
             "MutationObserver",
             "__arsTestMutationObserverFailureRegistry",
