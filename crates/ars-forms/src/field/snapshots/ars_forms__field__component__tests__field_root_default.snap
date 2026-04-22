@@ -1,0 +1,31 @@
+---
+source: crates/ars-forms/src/field/component.rs
+expression: "snapshot_attrs(service.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "field",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "email",
+            ),
+        ),
+    ],
+    styles: [],
+}

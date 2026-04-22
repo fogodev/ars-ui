@@ -358,6 +358,7 @@ impl<'a> Api<'a> {
 #[cfg(test)]
 mod tests {
     use ars_core::{ConnectApi, Machine as _, Service};
+    use insta::assert_snapshot;
 
     use super::*;
 
@@ -366,6 +367,10 @@ mod tests {
             id: "checkout".to_string(),
             ..Props::default()
         }
+    }
+
+    fn snapshot_attrs(attrs: &AttrMap) -> String {
+        format!("{attrs:#?}")
     }
 
     #[test]
@@ -694,6 +699,73 @@ mod tests {
         drop(service.send(Event::Submit));
 
         assert!(service.connect(&|_| {}).is_submitting());
+    }
+
+    #[test]
+    fn form_root_idle_aria_snapshot() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        assert_snapshot!(
+            "form_root_idle_aria",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn form_root_idle_native_snapshot() {
+        let service = Service::<Machine>::new(
+            Props {
+                validation_behavior: ValidationBehavior::Native,
+                ..test_props()
+            },
+            &Env::default(),
+            &(),
+        );
+
+        assert_snapshot!(
+            "form_root_idle_native",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn form_root_submitting_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::Submit));
+
+        assert_snapshot!(
+            "form_root_submitting",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn form_root_action_and_role_snapshot() {
+        let service = Service::<Machine>::new(
+            Props {
+                action: Some("javascript:alert(1)".to_string()),
+                role: Some("search".to_string()),
+                ..test_props()
+            },
+            &Env::default(),
+            &(),
+        );
+
+        assert_snapshot!(
+            "form_root_action_and_role",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn form_status_region_default_snapshot() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        assert_snapshot!(
+            "form_status_region_default",
+            snapshot_attrs(&service.connect(&|_| {}).status_region_attrs())
+        );
     }
 
     #[test]

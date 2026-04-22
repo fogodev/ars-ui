@@ -1,0 +1,63 @@
+---
+source: crates/ars-forms/src/field/component.rs
+expression: "snapshot_attrs(service.connect(&|_| {}).input_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "field",
+            ),
+        ),
+        (
+            Aria(
+                Disabled,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "email-label",
+            ),
+        ),
+        (
+            Aria(
+                ReadOnly,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Busy,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "email-input",
+            ),
+        ),
+    ],
+    styles: [],
+}

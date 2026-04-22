@@ -26,5 +26,8 @@ version  = "0.9.1"
 optional = true
 features = ["normalization", "comments", "white-spaces", "literals"]
 
+[dev-dependencies]
+insta = { version = "1", features = ["yaml"] }
+
 [lints]
 workspace = true

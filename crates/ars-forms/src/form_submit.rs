@@ -468,6 +468,7 @@ mod tests {
 
     // Import Machine trait for on_props_changed.
     use ars_core::{Machine as _, Service, StrongSend, callback};
+    use insta::assert_snapshot;
 
     use super::*;
     use crate::{
@@ -531,6 +532,10 @@ mod tests {
             ),
             schedule_microtask: callback(|_: Box<dyn FnOnce()>| {}),
         }
+    }
+
+    fn snapshot_attrs(attrs: &AttrMap) -> String {
+        format!("{attrs:#?}")
     }
 
     // --- State transition tests ---
@@ -968,6 +973,105 @@ mod tests {
 
         assert!(attrs.get(&HtmlAttr::Aria(AriaAttr::Busy)).is_none());
         assert!(attrs.get(&HtmlAttr::Disabled).is_none());
+    }
+
+    #[test]
+    fn form_submit_root_idle_snapshot() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        assert_snapshot!(
+            "form_submit_root_idle",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn form_submit_root_validating_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::Submit));
+
+        assert_snapshot!(
+            "form_submit_root_validating",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn form_submit_root_validation_failed_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::Submit));
+        drop(service.send(Event::ValidationFailed));
+
+        assert_snapshot!(
+            "form_submit_root_validation_failed",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn form_submit_root_submitting_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::Submit));
+        drop(service.send(Event::ValidationPassed));
+
+        assert_snapshot!(
+            "form_submit_root_submitting",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn form_submit_root_succeeded_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::Submit));
+        drop(service.send(Event::ValidationPassed));
+        drop(service.send(Event::SubmitComplete));
+
+        assert_snapshot!(
+            "form_submit_root_succeeded",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn form_submit_root_failed_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::Submit));
+        drop(service.send(Event::ValidationPassed));
+        drop(service.send(Event::SubmitError("server down".into())));
+
+        assert_snapshot!(
+            "form_submit_root_failed",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn form_submit_button_idle_snapshot() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        assert_snapshot!(
+            "form_submit_button_idle",
+            snapshot_attrs(&service.connect(&|_| {}).submit_button_attrs())
+        );
+    }
+
+    #[test]
+    fn form_submit_button_submitting_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::Submit));
+        drop(service.send(Event::ValidationPassed));
+
+        assert_snapshot!(
+            "form_submit_button_submitting",
+            snapshot_attrs(&service.connect(&|_| {}).submit_button_attrs())
+        );
     }
 
     #[test]

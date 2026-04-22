@@ -433,6 +433,7 @@ impl<'a> Api<'a> {
 #[cfg(test)]
 mod tests {
     use ars_core::{ConnectApi, Service};
+    use insta::assert_snapshot;
 
     use super::*;
 
@@ -452,6 +453,10 @@ mod tests {
 
     fn custom_error() -> Error {
         Error::custom("required", "Field is invalid")
+    }
+
+    fn snapshot_attrs(attrs: &AttrMap) -> String {
+        format!("{attrs:#?}")
     }
 
     #[test]
@@ -748,6 +753,132 @@ mod tests {
         let attrs = api.root_attrs();
 
         assert_eq!(attrs.get(&HtmlAttr::Dir), Some("rtl"));
+    }
+
+    #[test]
+    fn field_root_default_snapshot() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        assert_snapshot!(
+            "field_root_default",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn field_root_rtl_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetDir(Some(Direction::Rtl))));
+
+        assert_snapshot!(
+            "field_root_rtl",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn field_label_default_snapshot() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        assert_snapshot!(
+            "field_label_default",
+            snapshot_attrs(&service.connect(&|_| {}).label_attrs())
+        );
+    }
+
+    #[test]
+    fn field_input_default_snapshot() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        assert_snapshot!(
+            "field_input_default",
+            snapshot_attrs(&service.connect(&|_| {}).input_attrs())
+        );
+    }
+
+    #[test]
+    fn field_input_required_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetRequired(true)));
+
+        assert_snapshot!(
+            "field_input_required",
+            snapshot_attrs(&service.connect(&|_| {}).input_attrs())
+        );
+    }
+
+    #[test]
+    fn field_input_invalid_no_errors_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetInvalid(true)));
+
+        assert_snapshot!(
+            "field_input_invalid_no_errors",
+            snapshot_attrs(&service.connect(&|_| {}).input_attrs())
+        );
+    }
+
+    #[test]
+    fn field_input_invalid_with_description_and_error_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetHasDescription(true)));
+        drop(service.send(Event::SetInvalid(true)));
+        drop(service.send(Event::SetErrors(vec![custom_error()])));
+
+        assert_snapshot!(
+            "field_input_invalid_with_description_and_error",
+            snapshot_attrs(&service.connect(&|_| {}).input_attrs())
+        );
+    }
+
+    #[test]
+    fn field_input_disabled_readonly_validating_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetDisabled(true)));
+        drop(service.send(Event::SetReadonly(true)));
+        drop(service.send(Event::SetValidating(true)));
+
+        assert_snapshot!(
+            "field_input_disabled_readonly_validating",
+            snapshot_attrs(&service.connect(&|_| {}).input_attrs())
+        );
+    }
+
+    #[test]
+    fn field_description_default_snapshot() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        assert_snapshot!(
+            "field_description_default",
+            snapshot_attrs(&service.connect(&|_| {}).description_attrs())
+        );
+    }
+
+    #[test]
+    fn field_error_message_hidden_snapshot() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        assert_snapshot!(
+            "field_error_message_hidden",
+            snapshot_attrs(&service.connect(&|_| {}).error_message_attrs())
+        );
+    }
+
+    #[test]
+    fn field_error_message_visible_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetErrors(vec![custom_error()])));
+
+        assert_snapshot!(
+            "field_error_message_visible",
+            snapshot_attrs(&service.connect(&|_| {}).error_message_attrs())
+        );
     }
 
     #[test]

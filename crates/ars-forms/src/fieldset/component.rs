@@ -393,6 +393,7 @@ impl<'a> Api<'a> {
 #[cfg(test)]
 mod tests {
     use ars_core::{ConnectApi, Service};
+    use insta::assert_snapshot;
 
     use super::*;
 
@@ -412,6 +413,10 @@ mod tests {
 
     fn custom_error() -> Error {
         Error::custom("group", "Group is invalid")
+    }
+
+    fn snapshot_attrs(attrs: &AttrMap) -> String {
+        format!("{attrs:#?}")
     }
 
     #[test]
@@ -710,6 +715,117 @@ mod tests {
         let attrs = api.error_message_attrs();
 
         assert_eq!(attrs.get(&HtmlAttr::Role), Some("alert"));
+    }
+
+    #[test]
+    fn fieldset_root_default_snapshot() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        assert_snapshot!(
+            "fieldset_root_default",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn fieldset_root_disabled_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetDisabled(true)));
+
+        assert_snapshot!(
+            "fieldset_root_disabled",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn fieldset_root_rtl_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetDir(Some(Direction::Rtl))));
+
+        assert_snapshot!(
+            "fieldset_root_rtl",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn fieldset_root_description_only_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetHasDescription(true)));
+
+        assert_snapshot!(
+            "fieldset_root_description_only",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn fieldset_root_description_and_error_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetHasDescription(true)));
+        drop(service.send(Event::SetErrors(vec![custom_error()])));
+
+        assert_snapshot!(
+            "fieldset_root_description_and_error",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn fieldset_legend_default_snapshot() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        assert_snapshot!(
+            "fieldset_legend_default",
+            snapshot_attrs(&service.connect(&|_| {}).legend_attrs())
+        );
+    }
+
+    #[test]
+    fn fieldset_description_default_snapshot() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        assert_snapshot!(
+            "fieldset_description_default",
+            snapshot_attrs(&service.connect(&|_| {}).description_attrs())
+        );
+    }
+
+    #[test]
+    fn fieldset_error_message_hidden_snapshot() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        assert_snapshot!(
+            "fieldset_error_message_hidden",
+            snapshot_attrs(&service.connect(&|_| {}).error_message_attrs())
+        );
+    }
+
+    #[test]
+    fn fieldset_error_message_visible_snapshot() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        drop(service.send(Event::SetErrors(vec![custom_error()])));
+
+        assert_snapshot!(
+            "fieldset_error_message_visible",
+            snapshot_attrs(&service.connect(&|_| {}).error_message_attrs())
+        );
+    }
+
+    #[test]
+    fn fieldset_content_default_snapshot() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &());
+
+        assert_snapshot!(
+            "fieldset_content_default",
+            snapshot_attrs(&service.connect(&|_| {}).content_attrs())
+        );
     }
 
     #[test]
