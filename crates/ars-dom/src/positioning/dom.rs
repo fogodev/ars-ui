@@ -47,7 +47,10 @@ pub fn find_containing_block_ancestor(element: &web_sys::Element) -> Option<Rect
 }
 
 /// Returns the scroll-adjusted padding-box rect of the element's offset parent
-/// when available.
+/// when its local coordinate space remains axis-aligned.
+///
+/// If the offset parent has a non-translation `transform`, this returns
+/// `None` rather than exposing an incorrect local origin.
 #[cfg(feature = "web")]
 #[must_use]
 pub fn offset_parent_rect(element: &web_sys::Element) -> Option<Rect> {
@@ -230,8 +233,16 @@ fn find_containing_block_ancestor_impl(_element: &web_sys::Element) -> Option<Re
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn offset_parent_rect_impl(element: &web_sys::Element) -> Option<Rect> {
+    let window = web_sys::window()?;
     let element = element.dyn_ref::<web_sys::HtmlElement>()?;
     let offset_parent = element.offset_parent()?;
+    let style = window.get_computed_style(&offset_parent).ok().flatten()?;
+    let snapshot = style_snapshot(&style);
+
+    if !transform_is_translation_only(&snapshot.transform) {
+        return None;
+    }
+
     let mut rect = padding_box_rect(&offset_parent);
     rect.x -= f64::from(offset_parent.scroll_left());
     rect.y -= f64::from(offset_parent.scroll_top());
@@ -373,6 +384,7 @@ fn transform_is_translation_only(transform: &str) -> bool {
         && is_identity_or_translation_component(matrix.m32(), 0.0)
         && is_identity_or_translation_component(matrix.m33(), 1.0)
         && is_identity_or_translation_component(matrix.m34(), 0.0)
+        && is_identity_or_translation_component(matrix.m43(), 0.0)
         && is_identity_or_translation_component(matrix.m44(), 1.0)
 }
 
@@ -1093,6 +1105,19 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn translatez_transform_containing_block_returns_none() {
+        let fixture = DomFixture::new();
+
+        let ancestor = DomFixture::append_child(
+            &fixture.root,
+            "transform: translateZ(8px); width: 120px; height: 80px;",
+        );
+        let child = DomFixture::append_child(&ancestor, "width: 20px; height: 10px;");
+
+        assert_eq!(find_containing_block_ancestor(&child), None);
+    }
+
+    #[wasm_bindgen_test]
     fn containment_ancestor_is_detected() {
         let fixture = DomFixture::new();
 
@@ -1259,6 +1284,47 @@ mod wasm_tests {
         assert!((rect.y - (dom_rect.y() + 7.0 - 13.0)).abs() < 0.01);
         assert!((rect.width - f64::from(offset_parent.client_width())).abs() < 0.01);
         assert!((rect.height - f64::from(offset_parent.client_height())).abs() < 0.01);
+    }
+
+    #[wasm_bindgen_test]
+    fn offset_parent_rect_accepts_translation_only_matrix3d_transform() {
+        let fixture = DomFixture::new();
+
+        let offset_parent = DomFixture::append_child(
+            &fixture.root,
+            "position: relative; transform: translate3d(12px, 18px, 0); width: 120px; height: 80px; border-left: 5px solid black; border-top: 7px solid black;",
+        );
+
+        let child = DomFixture::append_child(
+            &offset_parent,
+            "position: absolute; left: 14px; top: 9px; width: 20px; height: 10px;",
+        );
+
+        let rect = offset_parent_rect(&child)
+            .expect("translation-only matrix3d offset parent should stay axis-aligned");
+        let dom_rect = offset_parent.get_bounding_client_rect();
+
+        assert!((rect.x - (dom_rect.x() + 5.0)).abs() < 0.01);
+        assert!((rect.y - (dom_rect.y() + 7.0)).abs() < 0.01);
+        assert!((rect.width - f64::from(offset_parent.client_width())).abs() < 0.01);
+        assert!((rect.height - f64::from(offset_parent.client_height())).abs() < 0.01);
+    }
+
+    #[wasm_bindgen_test]
+    fn offset_parent_rect_returns_none_for_scaled_transform() {
+        let fixture = DomFixture::new();
+
+        let offset_parent = DomFixture::append_child(
+            &fixture.root,
+            "position: relative; transform: scale(2); transform-origin: 0 0; width: 120px; height: 80px;",
+        );
+
+        let child = DomFixture::append_child(
+            &offset_parent,
+            "position: absolute; left: 14px; top: 9px; width: 20px; height: 10px;",
+        );
+
+        assert_eq!(offset_parent_rect(&child), None);
     }
 
     #[wasm_bindgen_test]
