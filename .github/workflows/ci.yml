@@ -63,6 +63,42 @@ jobs:
       - uses: ./.github/actions/install-dioxus-desktop-deps
       - name: Unit Tests
         run: cargo xtest unit
+      - name: Install cargo-insta
+        run: cargo install cargo-insta --locked
+      - name: Snapshot Tests
+        run: cargo insta test --unreferenced=reject
+        env:
+          INSTA_UPDATE: no
+
+  snapshot-change-check:
+    name: Snapshot Change Check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for snapshot changes
+        id: snap-changes
+        run: |
+          SNAP_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.snap$' || true)
+          if [ -n "$SNAP_FILES" ]; then
+            echo "has_snaps=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Snapshot review check
+        if: steps.snap-changes.outputs.has_snaps == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q 'CHANGELOG'; then
+            if ! gh pr view ${{ github.event.pull_request.number }} --json labels -q '.labels[].name' | grep -q 'snapshot-reviewed'; then
+              echo "::error::PRs modifying .snap files must include a CHANGELOG entry or have the 'snapshot-reviewed' label"
+              exit 1
+            fi
+          fi
 
   i18n-browser:
     name: I18n Browser Tests

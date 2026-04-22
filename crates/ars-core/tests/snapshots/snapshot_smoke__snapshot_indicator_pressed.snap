@@ -1,0 +1,47 @@
+---
+source: crates/ars-core/tests/snapshot_smoke.rs
+expression: "snapshot_attrs(SnapshotState::Pressed, true, SnapshotPart::Indicator)"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "indicator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "snapshot-toggle",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "pressed",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "example-toggle-indicator",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,31 @@
+---
+source: crates/ars-forms/src/fieldset/component.rs
+expression: "snapshot_attrs(service.connect(&|_| {}).legend_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "legend",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "fieldset",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "billing-legend",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,67 @@
+---
+source: crates/ars-core/tests/snapshot_smoke.rs
+expression: "snapshot_attrs(SnapshotState::Idle, false, SnapshotPart::Root)"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "snapshot-toggle",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "idle",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Example toggle",
+            ),
+        ),
+        (
+            Aria(
+                Pressed,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "example-toggle",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "button",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,39 @@
+---
+source: crates/ars-forms/src/fieldset/component.rs
+expression: "snapshot_attrs(service.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "fieldset",
+            ),
+        ),
+        (
+            Aria(
+                DescribedBy,
+            ),
+            String(
+                "billing-description billing-error-message",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "billing",
+            ),
+        ),
+    ],
+    styles: [],
+}
