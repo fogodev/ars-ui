@@ -1097,12 +1097,12 @@ All positioning calculations use a consistent coordinate system. This section do
 
 - **CSS transform containing blocks.** If a parent element has CSS transforms (`transform`, `perspective`, `will-change: transform`), it creates a new containing block for `position: fixed` descendants. When this occurs, the floating element's `top`/`left` are interpreted relative to the transformed parent, not the viewport. The positioning engine MUST detect this case (see `has_containing_block_ancestor()` in §2.3 Step 0) and convert coordinates from client-space to the transformed parent's local space by subtracting the parent's `getBoundingClientRect()` origin. Alternatively, avoid CSS transforms on positioning containers entirely.
 
-- **`position: absolute` positioning (non-portal).** When the floating element uses `Strategy::Absolute` (e.g., it is not portaled and lives inside a positioned ancestor), subtract the offset parent's `getBoundingClientRect()` from the client-space coordinates to produce values relative to the offset parent:
+- **`position: absolute` positioning (non-portal).** When the floating element uses `Strategy::Absolute` (e.g., it is not portaled and lives inside a positioned ancestor), convert client-space coordinates into the offset parent's **padding-box** coordinate space. CSS resolves absolute `top`/`left` against the offset parent's padding box, so the local origin must include `clientLeft`/`clientTop` instead of using the raw border-box origin:
 
     ```rust
     let offset_parent_rect = offset_parent.get_bounding_client_rect();
-    let local_x = client_x - offset_parent_rect.x();
-    let local_y = client_y - offset_parent_rect.y();
+    let local_x = client_x - (offset_parent_rect.x() + f64::from(offset_parent.client_left()));
+    let local_y = client_y - (offset_parent_rect.y() + f64::from(offset_parent.client_top()));
     // Apply: element.style.left = local_x; element.style.top = local_y;
     ```
 

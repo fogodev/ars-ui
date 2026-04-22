@@ -36,7 +36,7 @@ pub fn find_containing_block_ancestor(element: &web_sys::Element) -> Option<Rect
     find_containing_block_ancestor_impl(element)
 }
 
-/// Returns the bounding rect of the element's offset parent when available.
+/// Returns the padding-box rect of the element's offset parent when available.
 #[cfg(feature = "web")]
 #[must_use]
 pub fn offset_parent_rect(element: &web_sys::Element) -> Option<Rect> {
@@ -219,7 +219,14 @@ fn find_containing_block_ancestor_impl(_element: &web_sys::Element) -> Option<Re
 fn offset_parent_rect_impl(element: &web_sys::Element) -> Option<Rect> {
     let element = element.dyn_ref::<web_sys::HtmlElement>()?;
     let offset_parent = element.offset_parent()?;
-    Some(dom_rect_to_rect(&offset_parent.get_bounding_client_rect()))
+    let rect = offset_parent.get_bounding_client_rect();
+
+    Some(Rect {
+        x: rect.x() + f64::from(offset_parent.client_left()),
+        y: rect.y() + f64::from(offset_parent.client_top()),
+        width: f64::from(offset_parent.client_width()),
+        height: f64::from(offset_parent.client_height()),
+    })
 }
 
 #[cfg(all(feature = "web", not(target_arch = "wasm32")))]
@@ -681,6 +688,37 @@ mod tests {
             (78.5, 64.25)
         );
     }
+
+    #[test]
+    fn absolute_strategy_offset_parent_adjustment_uses_padding_box_origin() {
+        let offset_parent_padding_box = Rect {
+            x: 44.0,
+            y: 38.0,
+            width: 240.0,
+            height: 200.0,
+        };
+
+        let client_rect = Rect {
+            x: 118.5,
+            y: 96.25,
+            width: 32.0,
+            height: 18.0,
+        };
+
+        assert_eq!(
+            client_rect_to_local_space(&client_rect, &offset_parent_padding_box),
+            Rect {
+                x: 74.5,
+                y: 58.25,
+                width: 32.0,
+                height: 18.0,
+            }
+        );
+        assert_eq!(
+            client_point_to_local_space(client_rect.x, client_rect.y, &offset_parent_padding_box),
+            (74.5, 58.25)
+        );
+    }
 }
 
 #[cfg(all(test, feature = "web", not(target_arch = "wasm32")))]
@@ -937,6 +975,30 @@ mod wasm_tests {
             .expect("positioned ancestor should be returned as the offset parent");
 
         assert_rect_matches_dom(rect, &offset_parent);
+    }
+
+    #[wasm_bindgen_test]
+    fn offset_parent_rect_uses_padding_box_origin() {
+        let fixture = DomFixture::new();
+
+        let offset_parent = DomFixture::append_child(
+            &fixture.root,
+            "position: relative; left: 30px; top: 22px; width: 120px; height: 80px; border-left: 5px solid black; border-top: 7px solid black;",
+        );
+
+        let child = DomFixture::append_child(
+            &offset_parent,
+            "position: absolute; left: 14px; top: 9px; width: 20px; height: 10px;",
+        );
+
+        let rect = offset_parent_rect(&child)
+            .expect("positioned ancestor should be returned as the offset parent");
+        let dom_rect = offset_parent.get_bounding_client_rect();
+
+        assert!((rect.x - (dom_rect.x() + 5.0)).abs() < 0.01);
+        assert!((rect.y - (dom_rect.y() + 7.0)).abs() < 0.01);
+        assert!((rect.width - 120.0).abs() < 0.01);
+        assert!((rect.height - 80.0).abs() < 0.01);
     }
 
     #[wasm_bindgen_test]
