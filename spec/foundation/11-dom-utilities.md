@@ -596,7 +596,7 @@ the raw viewport-relative values must be adjusted.
 ///
 fn find_containing_block_ancestor(element: &Element) -> Option<Rect> {
     // See `has_containing_block_ancestor()` in §2.5 for the bool-returning version.
-    // This variant returns the ancestor's bounding rect for coordinate adjustment.
+    // This variant returns the ancestor's padding-box rect for coordinate adjustment.
     let window = web_sys::window().expect("window must exist in browser context");
     let mut current = element.parent_element();
     while let Some(el) = current {
@@ -625,10 +625,10 @@ fn find_containing_block_ancestor(element: &Element) -> Option<Rect> {
         {
             let rect = el.get_bounding_client_rect();
             return Some(Rect {
-                x: rect.x(),
-                y: rect.y(),
-                width: rect.width(),
-                height: rect.height(),
+                x: rect.x() + f64::from(el.client_left()),
+                y: rect.y() + f64::from(el.client_top()),
+                width: f64::from(el.client_width()),
+                height: f64::from(el.client_height()),
             });
         }
         current = el.parent_element();
@@ -637,7 +637,7 @@ fn find_containing_block_ancestor(element: &Element) -> Option<Rect> {
 }
 ```
 
-If a containing-block ancestor is found, its bounding rect is subtracted from
+If a containing-block ancestor is found, its padding-box rect is subtracted from
 all subsequent coordinate calculations (anchor rect, viewport rect) so the
 final `(x, y)` values are relative to the correct coordinate space.
 
@@ -1095,14 +1095,18 @@ All positioning calculations use a consistent coordinate system. This section do
 
 - **Positioning strategy.** The positioned floating element uses `position: fixed; top: Y; left: X` with client-space coordinates by default (`Strategy::Fixed`). This avoids scroll-offset calculations since `getBoundingClientRect()` already returns viewport-relative values.
 
-- **CSS transform containing blocks.** If a parent element has CSS transforms (`transform`, `perspective`, `will-change: transform`), it creates a new containing block for `position: fixed` descendants. When this occurs, the floating element's `top`/`left` are interpreted relative to the transformed parent, not the viewport. The positioning engine MUST detect this case (see `has_containing_block_ancestor()` in §2.3 Step 0) and convert coordinates from client-space to the transformed parent's local space by subtracting the parent's `getBoundingClientRect()` origin. Alternatively, avoid CSS transforms on positioning containers entirely.
+- **CSS transform containing blocks.** If a parent element has CSS transforms (`transform`, `perspective`, `will-change: transform`), it creates a new containing block for `position: fixed` descendants. When this occurs, the floating element's `top`/`left` are interpreted relative to the transformed parent, not the viewport. The positioning engine MUST detect this case (see `has_containing_block_ancestor()` in §2.3 Step 0) and convert coordinates from client-space to the transformed parent's local space by subtracting the containing block's padding-box origin (`getBoundingClientRect()` plus `clientLeft`/`clientTop`). Alternatively, avoid CSS transforms on positioning containers entirely.
 
-- **`position: absolute` positioning (non-portal).** When the floating element uses `Strategy::Absolute` (e.g., it is not portaled and lives inside a positioned ancestor), convert client-space coordinates into the offset parent's **padding-box** coordinate space. CSS resolves absolute `top`/`left` against the offset parent's padding box, so the local origin must include `clientLeft`/`clientTop` instead of using the raw border-box origin:
+- **`position: absolute` positioning (non-portal).** When the floating element uses `Strategy::Absolute` (e.g., it is not portaled and lives inside a positioned ancestor), convert client-space coordinates into the offset parent's **scroll-adjusted padding-box** coordinate space. CSS resolves absolute `top`/`left` against the offset parent's padding box, and the positioned contents move with the offset parent's scroll position, so the local origin must include `clientLeft`/`clientTop` and subtract `scrollLeft`/`scrollTop` instead of using the raw border-box origin:
 
     ```rust
     let offset_parent_rect = offset_parent.get_bounding_client_rect();
-    let local_x = client_x - (offset_parent_rect.x() + f64::from(offset_parent.client_left()));
-    let local_y = client_y - (offset_parent_rect.y() + f64::from(offset_parent.client_top()));
+    let local_x = client_x
+        - (offset_parent_rect.x() + f64::from(offset_parent.client_left())
+            - f64::from(offset_parent.scroll_left()));
+    let local_y = client_y
+        - (offset_parent_rect.y() + f64::from(offset_parent.client_top())
+            - f64::from(offset_parent.scroll_top()));
     // Apply: element.style.left = local_x; element.style.top = local_y;
     ```
 

@@ -29,14 +29,16 @@ pub fn client_rect_to_local_space(rect: &Rect, local_origin: &Rect) -> Rect {
     }
 }
 
-/// Returns the first ancestor whose computed styles create a containing block.
+/// Returns the padding-box rect of the first ancestor whose computed styles
+/// create a containing block.
 #[cfg(feature = "web")]
 #[must_use]
 pub fn find_containing_block_ancestor(element: &web_sys::Element) -> Option<Rect> {
     find_containing_block_ancestor_impl(element)
 }
 
-/// Returns the padding-box rect of the element's offset parent when available.
+/// Returns the scroll-adjusted padding-box rect of the element's offset parent
+/// when available.
 #[cfg(feature = "web")]
 #[must_use]
 pub fn offset_parent_rect(element: &web_sys::Element) -> Option<Rect> {
@@ -219,14 +221,11 @@ fn find_containing_block_ancestor_impl(_element: &web_sys::Element) -> Option<Re
 fn offset_parent_rect_impl(element: &web_sys::Element) -> Option<Rect> {
     let element = element.dyn_ref::<web_sys::HtmlElement>()?;
     let offset_parent = element.offset_parent()?;
-    let rect = offset_parent.get_bounding_client_rect();
+    let mut rect = padding_box_rect(&offset_parent);
+    rect.x -= f64::from(offset_parent.scroll_left());
+    rect.y -= f64::from(offset_parent.scroll_top());
 
-    Some(Rect {
-        x: rect.x() + f64::from(offset_parent.client_left()),
-        y: rect.y() + f64::from(offset_parent.client_top()),
-        width: f64::from(offset_parent.client_width()),
-        height: f64::from(offset_parent.client_height()),
-    })
+    Some(rect)
 }
 
 #[cfg(all(feature = "web", not(target_arch = "wasm32")))]
@@ -277,10 +276,7 @@ fn walk_containing_block_ancestors(
         let snapshot = style_snapshot(&style);
 
         if let Some(reason) = containing_block_reason(&snapshot) {
-            return Some((
-                dom_rect_to_rect(&ancestor.get_bounding_client_rect()),
-                reason,
-            ));
+            return Some((padding_box_rect(&ancestor), reason));
         }
 
         current = ancestor.parent_element();
@@ -335,12 +331,14 @@ fn style_snapshot(style: &web_sys::CssStyleDeclaration) -> StyleSnapshot {
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn dom_rect_to_rect(rect: &web_sys::DomRect) -> Rect {
+fn padding_box_rect(element: &web_sys::Element) -> Rect {
+    let rect = element.get_bounding_client_rect();
+
     Rect {
-        x: rect.x(),
-        y: rect.y(),
-        width: rect.width(),
-        height: rect.height(),
+        x: rect.x() + f64::from(element.client_left()),
+        y: rect.y() + f64::from(element.client_top()),
+        width: f64::from(element.client_width()),
+        height: f64::from(element.client_height()),
     }
 }
 
@@ -719,6 +717,37 @@ mod tests {
             (74.5, 58.25)
         );
     }
+
+    #[test]
+    fn absolute_strategy_offset_parent_adjustment_accounts_for_scroll() {
+        let offset_parent_local_origin = Rect {
+            x: 32.0,
+            y: 26.0,
+            width: 240.0,
+            height: 200.0,
+        };
+
+        let client_rect = Rect {
+            x: 118.5,
+            y: 96.25,
+            width: 32.0,
+            height: 18.0,
+        };
+
+        assert_eq!(
+            client_rect_to_local_space(&client_rect, &offset_parent_local_origin),
+            Rect {
+                x: 86.5,
+                y: 70.25,
+                width: 32.0,
+                height: 18.0,
+            }
+        );
+        assert_eq!(
+            client_point_to_local_space(client_rect.x, client_rect.y, &offset_parent_local_origin),
+            (86.5, 70.25)
+        );
+    }
 }
 
 #[cfg(all(test, feature = "web", not(target_arch = "wasm32")))]
@@ -861,6 +890,27 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn containing_block_lookup_uses_padding_box_origin() {
+        let fixture = DomFixture::new();
+
+        let ancestor = DomFixture::append_child(
+            &fixture.root,
+            "transform: translateX(12px); width: 120px; height: 80px; border-left: 5px solid black; border-top: 7px solid black;",
+        );
+
+        let child = DomFixture::append_child(&ancestor, "width: 20px; height: 10px;");
+
+        let rect = find_containing_block_ancestor(&child)
+            .expect("transform ancestor should create a containing block");
+        let dom_rect = ancestor.get_bounding_client_rect();
+
+        assert!((rect.x - (dom_rect.x() + 5.0)).abs() < 0.01);
+        assert!((rect.y - (dom_rect.y() + 7.0)).abs() < 0.01);
+        assert!((rect.width - f64::from(ancestor.client_width())).abs() < 0.01);
+        assert!((rect.height - f64::from(ancestor.client_height())).abs() < 0.01);
+    }
+
+    #[wasm_bindgen_test]
     fn containment_ancestor_is_detected() {
         let fixture = DomFixture::new();
 
@@ -997,8 +1047,36 @@ mod wasm_tests {
 
         assert!((rect.x - (dom_rect.x() + 5.0)).abs() < 0.01);
         assert!((rect.y - (dom_rect.y() + 7.0)).abs() < 0.01);
-        assert!((rect.width - 120.0).abs() < 0.01);
-        assert!((rect.height - 80.0).abs() < 0.01);
+        assert!((rect.width - f64::from(offset_parent.client_width())).abs() < 0.01);
+        assert!((rect.height - f64::from(offset_parent.client_height())).abs() < 0.01);
+    }
+
+    #[wasm_bindgen_test]
+    fn offset_parent_rect_accounts_for_scroll_position() {
+        let fixture = DomFixture::new();
+
+        let offset_parent = DomFixture::append_child(
+            &fixture.root,
+            "position: relative; left: 30px; top: 22px; width: 120px; height: 80px; overflow: auto; border-left: 5px solid black; border-top: 7px solid black;",
+        );
+        let _spacer = DomFixture::append_child(&offset_parent, "width: 400px; height: 400px;");
+
+        offset_parent.set_scroll_left(11);
+        offset_parent.set_scroll_top(13);
+
+        let child = DomFixture::append_child(
+            &offset_parent,
+            "position: absolute; left: 14px; top: 9px; width: 20px; height: 10px;",
+        );
+
+        let rect = offset_parent_rect(&child)
+            .expect("positioned ancestor should be returned as the offset parent");
+        let dom_rect = offset_parent.get_bounding_client_rect();
+
+        assert!((rect.x - (dom_rect.x() + 5.0 - 11.0)).abs() < 0.01);
+        assert!((rect.y - (dom_rect.y() + 7.0 - 13.0)).abs() < 0.01);
+        assert!((rect.width - f64::from(offset_parent.client_width())).abs() < 0.01);
+        assert!((rect.height - f64::from(offset_parent.client_height())).abs() < 0.01);
     }
 
     #[wasm_bindgen_test]
