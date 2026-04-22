@@ -1,5 +1,11 @@
 # Accessibility Testing
 
+> **Harness entrypoints:** `render(...)` and `mount_with_locale(...)` in the
+> examples below are imported from the active adapter harness crate
+> (`ars_test_harness_leptos` or `ars_test_harness_dioxus`). The core
+> `ars-test-harness` crate exposes only `render_with_backend(...)` and
+> `render_with_locale_and_backend(...)`.
+
 ## 1. Automated: axe-core in CI
 
 Run `axe-core` against every component's rendered output in the adapter test harness.

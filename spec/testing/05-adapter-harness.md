@@ -10,6 +10,11 @@
 > (`harness.open()`, `harness.press_key(...)`) for readable component-level assertions.
 > Both approaches coexist — parity tests stay close to the metal, behavior tests use
 > the harness.
+>
+> When those behavior specs use `render(...)` or `mount_with_locale(...)`, the
+> helpers come from the active adapter harness crate. The core
+> `ars-test-harness` crate only provides `render_with_backend(...)` and
+> `render_with_locale_and_backend(...)`.
 
 ## 1. Leptos
 
@@ -588,7 +593,7 @@ fn z_index_stacking_parity_test() {
 ```rust
 #[wasm_bindgen_test]
 async fn placement_start_resolves_to_left_in_ltr() {
-    let harness = TestHarness::mount_with_locale(
+    let harness = mount_with_locale(
         popover::Machine::new(popover::Props { placement: Placement::Start, ..Default::default() }),
         locale!("en"),
     ).await;
@@ -600,7 +605,7 @@ async fn placement_start_resolves_to_left_in_ltr() {
 
 #[wasm_bindgen_test]
 async fn placement_start_resolves_to_right_in_rtl() {
-    let harness = TestHarness::mount_with_locale(
+    let harness = mount_with_locale(
         popover::Machine::new(popover::Props { placement: Placement::Start, ..Default::default() }),
         locale!("ar"),
     ).await;

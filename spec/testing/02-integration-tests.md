@@ -3,6 +3,12 @@
 ## 1. Service-Level Integration Tests
 
 > **Note:** Test examples assume component `Props` types implement `Default`. This is not a `Machine` trait bound — each component must provide its own `Default` impl for tests to compile.
+>
+> **Harness entrypoints:** Any example below that mounts DOM with `render(...)` or
+> `mount_with_locale(...)` imports those helpers from the active adapter harness
+> crate (`ars_test_harness_leptos` or `ars_test_harness_dioxus`). The core
+> `ars-test-harness` crate exposes only `render_with_backend(...)` and
+> `render_with_locale_and_backend(...)`.
 
 Service tests verify the full `Service::send()` → `transition()` → effect → event cycle, including the `drain_queue` loop and `PendingEffect` execution.
 
@@ -700,14 +706,14 @@ fn rtl_placement_mirror_start_end() {
 
 ```rust
 #[test]
-fn positioning_updates_on_scroll() {
-    let harness = render(Popover::new().placement(Placement::Bottom));
-    harness.open();
+async fn positioning_updates_on_scroll() {
+    let harness = render(Popover::new().placement(Placement::Bottom)).await;
+    harness.open().await;
 
     let initial_top = harness.query_selector("[data-ars-popover]")
         .unwrap().bounding_rect().y;
 
-    harness.scroll_container_by(0, 50);
+    harness.scroll_container_by(0, 50).await;
 
     let updated_top = harness.query_selector("[data-ars-popover]")
         .unwrap().bounding_rect().y;

@@ -17,17 +17,20 @@ The `TestHarness` is the unified testing API for ars-ui adapter tests. It wraps 
 
 ```filetree
 ars-test-harness/          # Framework-agnostic harness API
-  src/lib.rs               # TestHarness, render(), core methods
+  src/lib.rs               # TestHarness, render_with_backend(), core methods
   src/backend.rs           # HarnessBackend trait
   src/element.rs           # ElementHandle wrapper
-  src/ext.rs               # Re-exports for component extension traits
-  src/mock.rs              # File, clipboard, viewport mocks
-  src/snapshot.rs          # Snapshot integration
+  src/item.rs              # ItemHandle wrapper
+  src/types.rs             # KeyboardKey, Point, Rect
 
-ars-test-harness-leptos/   # LeptosBackend impl
-ars-test-harness-dioxus/   # DioxusBackend impl
+ars-test-harness-leptos/   # Leptos backend + adapter-owned render() wrappers
+ars-test-harness-dioxus/   # Dioxus backend + adapter-owned render() wrappers
 ars-test-ext-{component}/  # Per-component extension crates (optional)
 ```
+
+`ars-test-harness` stays backend-agnostic. Each adapter crate owns the
+zero-argument `render(...)` and `mount_with_locale(...)` wrappers that delegate
+to the core constructors with that adapter's concrete backend instance.
 
 ---
 
@@ -58,6 +61,8 @@ pub trait AnyService {
     fn part_attrs(&self, part: &str) -> AttrMap;
     /// Send an event by name (for generic test patterns).
     fn send_named(&mut self, event_name: &str);
+    /// Send a concrete boxed event through the erased service boundary.
+    fn send_boxed(&mut self, event: Box<dyn Any>);
 }
 
 // NOTE: M::Event: FromStr is required for AnyService::send_named().
@@ -104,15 +109,28 @@ where
             .unwrap_or_else(|_| panic!(
                 "Unknown event name for {}: {}", std::any::type_name::<M>(), event_name
             ));
-        self.send(event);
+        let _ = self.send(event);
+    }
+    fn send_boxed(&mut self, event: Box<dyn Any>) {
+        let event = event.downcast::<M::Event>()
+            .unwrap_or_else(|_| panic!(
+                "boxed event type mismatch for {}; expected {}",
+                std::any::type_name::<M>(),
+                std::any::type_name::<M::Event>(),
+            ));
+        let _ = self.send(*event);
     }
 }
 
-impl<M: Machine> Service<M> {
+pub trait ServiceHarnessExt<M: Machine> {
     /// Returns attrs for a specific Part variant with real data.
     /// Use this instead of `part_attrs(&str)` when testing data-carrying Part
     /// variants that need actual IDs for correct ARIA attributes.
-    pub fn part_attrs_typed(&self, part: <M::Api<'_> as ConnectApi>::Part) -> AttrMap {
+    fn part_attrs_typed<'a>(&'a self, part: <M::Api<'a> as ConnectApi>::Part) -> AttrMap;
+}
+
+impl<M: Machine> ServiceHarnessExt<M> for Service<M> {
+    fn part_attrs_typed<'a>(&'a self, part: <M::Api<'a> as ConnectApi>::Part) -> AttrMap {
         let api = M::connect(self.state(), self.context(), self.props(), &|_| {});
         api.part_attrs(part)
     }
@@ -120,11 +138,12 @@ impl<M: Machine> Service<M> {
 
 /// The primary test API. Wraps a rendered component in an isolated DOM container.
 ///
-/// Created via [`render()`]. Each harness gets its own `<div>` appended to
+/// Created via adapter-owned `render()` wrappers backed by `render_with_backend()`.
+/// Each harness gets its own `<div>` appended to
 /// `<body>`, removed on `Drop`. Tests never share DOM state.
 pub struct TestHarness {
     container: web_sys::HtmlElement,
-    service: Box<dyn AnyService>,
+    service: RefCell<Box<dyn AnyService>>,
     backend: Box<dyn HarnessBackend>,
 }
 
@@ -135,17 +154,19 @@ impl Drop for TestHarness {
 }
 ```
 
-### 2.2 The render() Entry Point
+### 2.2 Core Render Entry Point
 
 ```rust
-/// Mount a component into an isolated DOM container and return a TestHarness.
+/// Mount a component into an isolated DOM container using an explicit backend.
 ///
-/// Each call creates a fresh `<div>` inside `<body>`. The backend is selected
-/// at compile time via feature flags (`leptos` or `dioxus`).
-pub async fn render<C: Component>(component: C) -> TestHarness {
+/// Adapter crates expose zero-argument `render(...)` wrappers that delegate to
+/// this function with their concrete backend implementation.
+pub async fn render_with_backend<C: Component, B: HarnessBackend>(
+    component: C,
+    backend: B,
+) -> TestHarness {
     let container = create_isolated_container();
     // create_isolated_container() appends a <div data-ars-test-container> to <body>
-    let backend = create_backend();
     let service = backend.mount(&container, Box::new(component)).await;
     backend.flush().await;
     TestHarness { container, service, backend }
@@ -155,17 +176,17 @@ pub async fn render<C: Component>(component: C) -> TestHarness {
 ### 2.3 Locale-Aware Mounting
 
 ```rust
-/// Mount a component with a specific locale context.
+/// Mount a component with a specific locale context and explicit backend.
 /// Delegates locale-wrapping to the `HarnessBackend` implementation,
 /// which uses framework-specific environment provider components.
 /// Used by i18n tests ([08-i18n-testing.md](08-i18n-testing.md)) to verify
 /// RTL layout, locale-dependent formatting, and IME behavior.
-pub async fn mount_with_locale<C: Component>(
+pub async fn render_with_locale_and_backend<C: Component, B: HarnessBackend>(
     component: C,
     locale: ars_i18n::Locale,
+    backend: B,
 ) -> TestHarness {
     let container = create_isolated_container();
-    let backend = create_backend();
     let service = backend.mount_with_locale(&container, Box::new(component), locale).await;
     backend.flush().await;
     TestHarness { container, service, backend }
@@ -376,10 +397,10 @@ impl TestHarness {
     /// True if the component root (`[data-ars-scope]`) is present in the DOM.
     pub fn is_mounted(&self) -> bool;
 
-    /// Send a machine event directly to the underlying Service.
-    pub async fn send<E: Into<Box<dyn Any>>>(&self, event: E);
+    /// Send a machine event directly to the underlying Service through erased dispatch.
+    pub async fn send<E: Any>(&self, event: E);
 
-    /// Current machine state as a string (via `Display`).
+    /// Current machine state as a debug string.
     pub fn state(&self) -> String;
 }
 ```
@@ -584,6 +605,7 @@ wasm_bindgen_test_configure!(run_in_browser);
 
 #[wasm_bindgen_test]
 async fn checkbox_toggles() {
+    // `render(...)` is imported from the active adapter harness crate.
     let harness = render(Checkbox::new(false)).await;
     assert_eq!(harness.control_attr("aria-checked"), Some("false".into()));
     harness.click().await;
@@ -602,6 +624,7 @@ Every interaction method calls `backend.flush()` after dispatching DOM events. T
 ```rust
 #[wasm_bindgen_test]
 async fn toast_auto_dismiss() {
+    // `render(...)` is imported from the active adapter harness crate.
     let harness = render(Toast::new().auto_dismiss(Duration::from_secs(5))).await;
     harness.send(toast::Event::Show).await;
     assert!(harness.is_mounted());
@@ -698,8 +721,8 @@ impl TestHarness {
     /// Set anchor position for popover/tooltip placement tests.
     pub fn set_anchor_position(&self, rect: Rect);
 
-    /// Scroll the container by a delta.
-    pub fn scroll_container_by(&self, dx: i32, dy: i32);
+    /// Scroll the container by a delta and flush reactive updates.
+    pub async fn scroll_container_by(&self, dx: i32, dy: i32);
 
     /// Scroll the window to a position.
     pub fn scroll_to(&self, x: i32, y: i32);
@@ -738,6 +761,7 @@ impl TestHarness {
 Usage:
 
 ```rust
+// `render(...)` is imported from the active adapter harness crate.
 let harness = render(Dialog::new().open(true)).await;
 assert_snapshot!("dialog_open", harness.snapshot_attrs());
 ```
@@ -840,13 +864,13 @@ assert_snapshot!("dialog_open", harness.snapshot_attrs());
 
 ### 8.10 Viewport and Layout
 
-| Method                | Signature             | Used In |
-| --------------------- | --------------------- | ------- |
-| `set_viewport`        | `fn(&self, f64, f64)` | 02      |
-| `set_anchor_position` | `fn(&self, Rect)`     | 02      |
-| `scroll_container_by` | `fn(&self, i32, i32)` | 02      |
-| `scroll_to`           | `fn(&self, i32, i32)` | 02      |
-| `scroll_y`            | `fn(&self) -> i32`    | 02      |
+| Method                | Signature                   | Used In |
+| --------------------- | --------------------------- | ------- |
+| `set_viewport`        | `fn(&self, f64, f64)`       | 02      |
+| `set_anchor_position` | `fn(&self, Rect)`           | 02      |
+| `scroll_container_by` | `async fn(&self, i32, i32)` | 02      |
+| `scroll_to`           | `fn(&self, i32, i32)`       | 02      |
+| `scroll_y`            | `fn(&self) -> i32`          | 02      |
 
 ### 8.11 Convenience Methods
 
