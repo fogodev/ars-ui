@@ -1301,20 +1301,24 @@ pub fn auto_update(
     let update_io = update.clone();
     let floating_el = floating.clone();
     let intersection_cb = Closure::wrap(Box::new(move |entries: js_sys::Array, _: web_sys::IntersectionObserver| {
-        if let Some(entry) = entries.get(0).dyn_ref::<web_sys::IntersectionObserverEntry>() {
-            if entry.intersection_ratio() == 0.0 {
-                // Anchor is fully clipped — hide the floating element when it
-                // can be styled as an HtmlElement.
-                if let Some(floating_html) = floating_el.dyn_ref::<web_sys::HtmlElement>() {
-                    let _ = floating_html.style().set_property("visibility", "hidden");
-                }
-            } else {
-                // Anchor is (partially) visible — show and reposition.
-                if let Some(floating_html) = floating_el.dyn_ref::<web_sys::HtmlElement>() {
-                    let _ = floating_html.style().remove_property("visibility");
-                }
-                update_io();
+        let Some(entry) = (0..entries.length()).rev().find_map(|index| {
+            entries.get(index).dyn_into::<web_sys::IntersectionObserverEntry>().ok()
+        }) else {
+            return;
+        };
+
+        if entry.intersection_ratio() == 0.0 {
+            // Anchor is fully clipped — hide the floating element when it
+            // can be styled as an HtmlElement.
+            if let Some(floating_html) = floating_el.dyn_ref::<web_sys::HtmlElement>() {
+                let _ = floating_html.style().set_property("visibility", "hidden");
             }
+        } else {
+            // Anchor is (partially) visible — show and reposition.
+            if let Some(floating_html) = floating_el.dyn_ref::<web_sys::HtmlElement>() {
+                let _ = floating_html.style().remove_property("visibility");
+            }
+            update_io();
         }
     }) as Box<dyn FnMut(js_sys::Array, web_sys::IntersectionObserver)>);
     let mut io_opts = web_sys::IntersectionObserverInit::new();

@@ -393,6 +393,18 @@ fn should_update_for_geometry_mutations(
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn latest_intersection_entry(
+    entries: &js_sys::Array,
+) -> Option<web_sys::IntersectionObserverEntry> {
+    (0..entries.length()).rev().find_map(|index| {
+        entries
+            .get(index)
+            .dyn_into::<web_sys::IntersectionObserverEntry>()
+            .ok()
+    })
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn install_intersection_observer(
     anchor: &web_sys::Element,
     floating: &web_sys::Element,
@@ -409,11 +421,7 @@ fn install_intersection_observer(
 
     let intersection_cb = Closure::wrap(Box::new(
         move |entries: js_sys::Array, _observer: web_sys::IntersectionObserver| {
-            let Some(entry) = entries
-                .get(0)
-                .dyn_into::<web_sys::IntersectionObserverEntry>()
-                .ok()
-            else {
+            let Some(entry) = latest_intersection_entry(&entries) else {
                 return;
             };
 
@@ -1275,6 +1283,51 @@ mod wasm_tests {
         cleanup_auto();
 
         assert_eq!(intersection_stub.disconnect_count(), 1);
+
+        cleanup(&root);
+    }
+
+    #[wasm_bindgen_test]
+    fn intersection_observer_uses_latest_entry_when_multiple_are_queued() {
+        let _resize_stub = StubbedResizeObserver::install();
+
+        let _entry_stub = StubbedIntersectionObserverEntry::install();
+
+        let intersection_stub = StubbedIntersectionObserver::install();
+
+        let root = append_div(
+            body().as_ref(),
+            "position:fixed;left:-10000px;top:0;width:240px;height:240px;",
+        );
+        let anchor = append_div(root.as_ref(), "width:40px;height:40px;");
+        let floating = append_div(root.as_ref(), "position:absolute;width:80px;height:20px;");
+
+        let updates = Rc::new(Cell::new(0));
+        let update_counter = Rc::clone(&updates);
+        let cleanup_auto = auto_update(anchor.as_ref(), floating.as_ref(), move || {
+            update_counter.set(update_counter.get() + 1);
+        });
+
+        assert_eq!(updates.get(), 1);
+
+        let hidden_entry = StubbedIntersectionObserverEntry::create(0.0);
+        let visible_entry = StubbedIntersectionObserverEntry::create(1.0);
+        let entries = Array::new();
+
+        entries.push(&hidden_entry);
+        entries.push(&visible_entry);
+        intersection_stub.invoke_entries(&entries);
+
+        assert_eq!(
+            floating
+                .style()
+                .get_property_value("visibility")
+                .expect("visibility lookup must succeed"),
+            ""
+        );
+        assert_eq!(updates.get(), 2);
+
+        cleanup_auto();
 
         cleanup(&root);
     }
