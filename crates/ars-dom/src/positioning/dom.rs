@@ -361,11 +361,24 @@ fn transform_is_translation_only(transform: &str) -> bool {
         return false;
     };
 
-    matrix.is_2d()
-        && (matrix.a() - 1.0).abs() < f64::EPSILON
-        && matrix.b().abs() < f64::EPSILON
-        && matrix.c().abs() < f64::EPSILON
-        && (matrix.d() - 1.0).abs() < f64::EPSILON
+    is_identity_or_translation_component(matrix.m11(), 1.0)
+        && is_identity_or_translation_component(matrix.m12(), 0.0)
+        && is_identity_or_translation_component(matrix.m13(), 0.0)
+        && is_identity_or_translation_component(matrix.m14(), 0.0)
+        && is_identity_or_translation_component(matrix.m21(), 0.0)
+        && is_identity_or_translation_component(matrix.m22(), 1.0)
+        && is_identity_or_translation_component(matrix.m23(), 0.0)
+        && is_identity_or_translation_component(matrix.m24(), 0.0)
+        && is_identity_or_translation_component(matrix.m31(), 0.0)
+        && is_identity_or_translation_component(matrix.m32(), 0.0)
+        && is_identity_or_translation_component(matrix.m33(), 1.0)
+        && is_identity_or_translation_component(matrix.m34(), 0.0)
+        && is_identity_or_translation_component(matrix.m44(), 1.0)
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn is_identity_or_translation_component(actual: f64, expected: f64) -> bool {
+    (actual - expected).abs() < 1e-9
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -1061,6 +1074,22 @@ mod wasm_tests {
         let child = DomFixture::append_child(&ancestor, "width: 20px; height: 10px;");
 
         assert_eq!(find_containing_block_ancestor(&child), None);
+    }
+
+    #[wasm_bindgen_test]
+    fn translate3d_transform_containing_block_is_detected() {
+        let fixture = DomFixture::new();
+
+        let ancestor = DomFixture::append_child(
+            &fixture.root,
+            "transform: translate3d(12px, 18px, 0); width: 120px; height: 80px;",
+        );
+        let child = DomFixture::append_child(&ancestor, "width: 20px; height: 10px;");
+
+        let rect = find_containing_block_ancestor(&child)
+            .expect("translation-only matrix3d transform should stay axis-aligned");
+
+        assert_rect_matches_dom(rect, &ancestor);
     }
 
     #[wasm_bindgen_test]
