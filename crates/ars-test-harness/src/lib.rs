@@ -165,6 +165,7 @@ enum ContainerHandle {
 struct WasmLayoutState {
     viewport: Option<ViewportOverride>,
     anchor: Option<ElementRectOverride>,
+    last_root_pointer_point: Option<Point>,
     last_root_touch_point: Option<Point>,
     scroll_x: i32,
     scroll_y: i32,
@@ -892,8 +893,7 @@ impl TestHarness {
                 ));
             }
 
-            let event =
-                web_sys::InputEvent::new("input").expect("input event must construct cleanly");
+            let event = bubbling_input_event();
 
             let _ = focused
                 .element
@@ -1000,8 +1000,7 @@ impl TestHarness {
             )
             .expect("setting element value should succeed");
 
-            let event =
-                web_sys::InputEvent::new("input").expect("input event must construct cleanly");
+            let event = bubbling_input_event();
 
             let _ = focused
                 .element
@@ -1182,6 +1181,7 @@ impl TestHarness {
     pub async fn pointer_down_at(&self, x: f64, y: f64) {
         #[cfg(target_arch = "wasm32")]
         {
+            self.layout.borrow_mut().last_root_pointer_point = Some(point(x, y));
             self.dispatch_pointer_event("[data-ars-scope]", "pointerdown", x, y)
                 .await;
         }
@@ -1198,6 +1198,7 @@ impl TestHarness {
     pub async fn pointer_move_to(&self, x: f64, y: f64) {
         #[cfg(target_arch = "wasm32")]
         {
+            self.layout.borrow_mut().last_root_pointer_point = Some(point(x, y));
             self.dispatch_pointer_event("[data-ars-scope]", "pointermove", x, y)
                 .await;
         }
@@ -1212,8 +1213,24 @@ impl TestHarness {
 
     /// Dispatches `pointerup` on the component root.
     pub async fn pointer_up(&self) {
-        self.dispatch_simple_event("[data-ars-scope]", "pointerup")
-            .await;
+        #[cfg(target_arch = "wasm32")]
+        {
+            let point = self
+                .layout
+                .borrow()
+                .last_root_pointer_point
+                .unwrap_or_else(|| self.root_center("[data-ars-scope]"));
+
+            self.dispatch_pointer_event("[data-ars-scope]", "pointerup", point.x, point.y)
+                .await;
+
+            self.layout.borrow_mut().last_root_pointer_point = None;
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            native_only("pointer_up")
+        }
     }
 
     /// Dispatches composition start and update events.
@@ -1254,8 +1271,7 @@ impl TestHarness {
                 .dispatch_event(&end)
                 .expect("compositionend dispatch must succeed");
 
-            let input =
-                web_sys::InputEvent::new("input").expect("input event must construct cleanly");
+            let input = bubbling_input_event();
 
             let _ = focused
                 .element
@@ -1317,8 +1333,16 @@ impl TestHarness {
 
     /// Dispatches `animationend` on the root element.
     pub async fn fire_animation_end(&self) {
-        self.dispatch_simple_event("[data-ars-scope]", "animationend")
-            .await;
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.dispatch_animation_event("[data-ars-scope]", "animationend")
+                .await;
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            native_only("fire_animation_end")
+        }
     }
 
     /// Returns whether the root element is still mounted.
@@ -1640,6 +1664,13 @@ impl TestHarness {
         }
     }
 
+    #[cfg_attr(
+        target_arch = "wasm32",
+        expect(
+            dead_code,
+            reason = "generic event fallback is only used on non-wasm paths"
+        )
+    )]
     async fn dispatch_simple_event(&self, selector: &str, event_name: &str) {
         #[cfg(target_arch = "wasm32")]
         {
@@ -1660,6 +1691,13 @@ impl TestHarness {
 
             native_only("dispatch_simple_event")
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn root_center(&self, selector: &str) -> Point {
+        let rect = self.query(selector).bounding_rect();
+
+        point(rect.x + (rect.width / 2.0), rect.y + (rect.height / 2.0))
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -1700,6 +1738,27 @@ impl TestHarness {
         let _ = element
             .dispatch_event(&event)
             .expect("pointer event dispatch must succeed");
+
+        self.flush().await;
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn dispatch_animation_event(&self, selector: &str, event_name: &str) {
+        let element = self.query(selector).element;
+
+        let init = web_sys::AnimationEventInit::new();
+
+        init.set_bubbles(true);
+        init.set_animation_name("");
+        init.set_elapsed_time(0.0);
+        init.set_pseudo_element("");
+
+        let event = web_sys::AnimationEvent::new_with_event_init_dict(event_name, &init)
+            .expect("animation event must construct");
+
+        let _ = element
+            .dispatch_event(&event)
+            .expect("animation event dispatch must succeed");
 
         self.flush().await;
     }
@@ -1808,6 +1867,17 @@ fn dom_event_coordinate(value: f64) -> i32 {
     value
         .round()
         .clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bubbling_input_event() -> web_sys::InputEvent {
+    let init = web_sys::InputEventInit::new();
+
+    init.set_bubbles(true);
+    init.set_composed(true);
+
+    web_sys::InputEvent::new_with_event_init_dict("input", &init)
+        .expect("input event must construct cleanly")
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -3188,12 +3258,12 @@ mod tests {
             || run_ready(harness.pointer_move_to(9.0, 10.0)),
             "pointer_move_to",
         );
-        assert_panics_with_message(|| run_ready(harness.pointer_up()), "dispatch_simple_event");
+        assert_panics_with_message(|| run_ready(harness.pointer_up()), "pointer_up");
         assert_panics_with_message(|| run_ready(harness.ime_compose("text")), "ime_compose");
         assert_panics_with_message(|| run_ready(harness.ime_commit()), "ime_commit");
         assert_panics_with_message(
             || run_ready(harness.fire_animation_end()),
-            "dispatch_simple_event",
+            "fire_animation_end",
         );
     }
 
@@ -3303,6 +3373,14 @@ mod tests {
             .unwrap_or_else(|_| panic!("property '{property}' should be readable"))
             .as_string()
             .unwrap_or_else(|| panic!("property '{property}' should be a string"))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn js_bool(value: &JsValue, property: &str) -> bool {
+        js_sys::Reflect::get(value, &JsValue::from_str(property))
+            .unwrap_or_else(|_| panic!("property '{property}' should be readable"))
+            .as_bool()
+            .unwrap_or_else(|| panic!("property '{property}' should be a bool"))
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -3588,6 +3666,8 @@ mod tests {
 
         let pointer_move = Rc::new(RefCell::new(None));
 
+        let pointer_up = Rc::new(RefCell::new(None));
+
         let touch_start = Rc::new(RefCell::new(None));
 
         let touch_move = Rc::new(RefCell::new(None));
@@ -3628,6 +3708,26 @@ mod tests {
 
             root.add_event_listener_with_callback("pointermove", closure.as_ref().unchecked_ref())
                 .expect("pointermove listener should register");
+
+            closure
+        };
+
+        let _pointer_up_listener = {
+            let pointer_up = Rc::clone(&pointer_up);
+            let closure = Closure::<dyn FnMut(web_sys::PointerEvent)>::wrap(Box::new(
+                move |event: web_sys::PointerEvent| {
+                    *pointer_up.borrow_mut() = Some((
+                        js_number(event.as_ref(), "clientX"),
+                        js_number(event.as_ref(), "clientY"),
+                        js_string(event.as_ref(), "pointerType"),
+                        js_number(event.as_ref(), "pointerId"),
+                        js_number(event.as_ref(), "buttons"),
+                    ));
+                },
+            ));
+
+            root.add_event_listener_with_callback("pointerup", closure.as_ref().unchecked_ref())
+                .expect("pointerup listener should register");
 
             closure
         };
@@ -3683,6 +3783,7 @@ mod tests {
         harness.touch_end().await;
         harness.pointer_down_at(91.0, 123.0).await;
         harness.pointer_move_to(145.0, 167.0).await;
+        harness.pointer_up().await;
 
         assert_eq!(*touch_start.borrow(), Some((12.0, 34.0)));
         assert_eq!(*touch_move.borrow(), Some((56.0, 78.0)));
@@ -3694,6 +3795,10 @@ mod tests {
         assert_eq!(
             *pointer_move.borrow(),
             Some((145.0, 167.0, String::from("mouse"), 1.0))
+        );
+        assert_eq!(
+            *pointer_up.borrow(),
+            Some((145.0, 167.0, String::from("mouse"), 1.0, 0.0))
         );
     }
 
@@ -3797,6 +3902,94 @@ mod tests {
         assert_eq!(*trigger_touch_move.borrow(), Some((201.0, 305.0)));
         assert_eq!(*composition_start.borrow(), Some(String::new()));
         assert_eq!(*composition_update.borrow(), Some(String::from("漢字")));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
+    async fn input_helpers_dispatch_bubbling_input_events() {
+        let harness =
+            render_with_backend(MockComponent, MountedDomBackend::new(Rc::new(Cell::new(0)))).await;
+
+        let root = harness.query("[data-ars-scope]").element;
+        let trigger = harness.query("[data-ars-part='trigger']").element;
+
+        let input_events = Rc::new(RefCell::new(Vec::new()));
+
+        let _input_listener = {
+            let input_events = Rc::clone(&input_events);
+            let closure = Closure::<dyn FnMut(web_sys::InputEvent)>::wrap(Box::new(
+                move |event: web_sys::InputEvent| {
+                    input_events.borrow_mut().push((
+                        event.input_type(),
+                        js_bool(event.as_ref(), "bubbles"),
+                        js_bool(event.as_ref(), "composed"),
+                        event.is_composing(),
+                    ));
+                },
+            ));
+
+            root.add_event_listener_with_callback("input", closure.as_ref().unchecked_ref())
+                .expect("input listener should register");
+
+            closure
+        };
+
+        harness.focus("[data-ars-part='trigger']").await;
+        harness.type_text("hello").await;
+        harness.set_value("next").await;
+        harness.ime_commit().await;
+
+        assert_eq!(
+            *input_events.borrow(),
+            vec![
+                (String::new(), true, true, false),
+                (String::new(), true, true, false),
+                (String::new(), true, true, false),
+            ]
+        );
+
+        let current_value = js_sys::Reflect::get(trigger.as_ref(), &JsValue::from_str("value"))
+            .expect("value should be readable")
+            .as_string()
+            .expect("value should be a string");
+
+        assert_eq!(current_value, "next");
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
+    async fn animation_helper_dispatches_typed_bubbling_animation_event() {
+        let harness =
+            render_with_backend(MockComponent, MountedDomBackend::new(Rc::new(Cell::new(0)))).await;
+
+        let root = harness.query("[data-ars-scope]").element;
+        let animation_end = Rc::new(RefCell::new(None));
+
+        let _animation_listener = {
+            let animation_end = Rc::clone(&animation_end);
+            let closure = Closure::<dyn FnMut(web_sys::AnimationEvent)>::wrap(Box::new(
+                move |event: web_sys::AnimationEvent| {
+                    *animation_end.borrow_mut() = Some((
+                        event.animation_name(),
+                        event.elapsed_time(),
+                        event.pseudo_element(),
+                        event.bubbles(),
+                    ));
+                },
+            ));
+
+            root.add_event_listener_with_callback("animationend", closure.as_ref().unchecked_ref())
+                .expect("animationend listener should register");
+
+            closure
+        };
+
+        harness.fire_animation_end().await;
+
+        assert_eq!(
+            *animation_end.borrow(),
+            Some((String::new(), 0.0, String::new(), true))
+        );
     }
 
     #[cfg(target_arch = "wasm32")]
