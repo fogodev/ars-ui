@@ -27,6 +27,7 @@ version = "0.3"
 optional = true
 features = [
     "CssStyleDeclaration",
+    "DomMatrixReadOnly",
     "DomRect",
     "Document",
     "Element",
@@ -35,6 +36,7 @@ features = [
     "FocusOptions",
     "HtmlCollection",
     "HtmlElement",
+    "HtmlSlotElement",
     "KeyboardEvent",
     "KeyboardEventInit",
     "MediaQueryList",
@@ -47,6 +49,9 @@ features = [
     "ScrollIntoViewOptions",
     "ScrollLogicalPosition",
     "ScrollToOptions",
+    "ShadowRoot",
+    "ShadowRootInit",
+    "ShadowRootMode",
     "TouchEvent",
     "VisualViewport",
     "Window"
