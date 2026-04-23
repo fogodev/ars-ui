@@ -2538,8 +2538,11 @@ pub struct Announcement {
 ///
 /// The adapter mounts a `LiveAnnouncerProvider` that wraps the application tree
 /// and provides `Rc<RefCell<LiveAnnouncer>>` via the framework's context system.
-/// Components access it indirectly through `ars_dom::announce()` and
-/// `ars_dom::announce_assertive()` — they never hold a direct reference.
+/// Components access it indirectly through the `PlatformEffects::announce()` and
+/// `PlatformEffects::announce_assertive()` trait methods defined in
+/// `01-architecture.md` §2.2.7 — they never hold a direct reference. The web
+/// implementation (`WebPlatformEffects` in `ars-dom`) bridges those trait calls
+/// onto this `LiveAnnouncer` instance.
 ///
 /// This ensures announcements are coordinated, deduplicated, and testable
 /// (tests can provide a mock announcer or skip the provider for no-op behavior).
