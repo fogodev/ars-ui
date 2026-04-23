@@ -720,6 +720,26 @@ mod tests {
     }
 
     #[test]
+    fn use_modality_context_falls_back_without_provider() {
+        fn app() -> Element {
+            let first = use_modality_context();
+            let second = use_modality_context();
+
+            assert_eq!(first.snapshot(), ars_core::ModalitySnapshot::default());
+            assert_eq!(second.snapshot(), ars_core::ModalitySnapshot::default());
+            assert!(!Arc::ptr_eq(&first, &second));
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new(app);
+
+        dom.rebuild_in_place();
+    }
+
+    #[test]
     fn use_messages_reads_provider_registry_bundle() {
         fn app() -> Element {
             let mut registries = I18nRegistries::new();

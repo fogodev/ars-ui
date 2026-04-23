@@ -556,6 +556,20 @@ mod tests {
     }
 
     #[test]
+    fn use_modality_context_falls_back_without_provider() {
+        let owner = Owner::new();
+
+        owner.with(|| {
+            let first = use_modality_context();
+            let second = use_modality_context();
+
+            assert_eq!(first.snapshot(), ars_core::ModalitySnapshot::default());
+            assert_eq!(second.snapshot(), ars_core::ModalitySnapshot::default());
+            assert!(!Arc::ptr_eq(&first, &second));
+        });
+    }
+
+    #[test]
     fn use_intl_backend_falls_back_without_provider() {
         let owner = Owner::new();
 
@@ -844,7 +858,7 @@ mod wasm_tests {
             portal_container_id: Signal::stored(None),
             root_node_id: Signal::stored(None),
             platform: Arc::new(NullPlatformEffects),
-            modality: Arc::new(DefaultModalityContext::new()),
+            modality: Arc::new(ars_core::DefaultModalityContext::new()),
             intl_backend,
             i18n_registries: Arc::new(I18nRegistries::new()),
             style_strategy: StyleStrategy::Inline,
