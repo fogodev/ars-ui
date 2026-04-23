@@ -1035,4 +1035,187 @@ mod wasm_tests {
 
         cleanup(&root);
     }
+
+    fn active_id() -> Option<String> {
+        document()
+            .active_element()
+            .and_then(|element| element.dyn_into::<HtmlElement>().ok())
+            .map(|element| element.id())
+            .filter(|id| !id.is_empty())
+    }
+
+    #[wasm_bindgen_test]
+    fn focus_scope_activate_auto_focuses_first_and_deactivate_restores_previous() {
+        let root = append_div(
+            body().as_ref(),
+            "scope-activate-root",
+            "position:fixed;left:-10000px;top:0;width:240px;height:120px;",
+        );
+
+        let outside = append_button(root.as_ref(), "scope-activate-outside", None, false);
+
+        let container = append_div(root.as_ref(), "scope-activate-container", "");
+
+        let inner_first = append_button(container.as_ref(), "scope-activate-first", None, false);
+        let _inner_second = append_button(container.as_ref(), "scope-activate-second", None, false);
+
+        focus_element(&outside, false);
+
+        assert_eq!(active_id(), Some(outside.id()));
+
+        let mut scope = FocusScope::new(
+            "scope-activate-container",
+            FocusScopeOptions {
+                contain: true,
+                restore_focus: true,
+                auto_focus: true,
+            },
+        );
+
+        scope.activate(FocusTarget::First);
+
+        assert!(scope.is_active());
+        assert_eq!(active_id(), Some(inner_first.id()));
+
+        scope.deactivate();
+
+        assert!(!scope.is_active());
+        assert_eq!(active_id(), Some(outside.id()));
+
+        // Double-deactivate is a no-op.
+        scope.deactivate();
+
+        assert!(!scope.is_active());
+
+        cleanup(&root);
+    }
+
+    #[wasm_bindgen_test]
+    fn focus_scope_handle_tab_key_contained_wraps_at_boundaries() {
+        let root = append_div(
+            body().as_ref(),
+            "scope-tab-wrap-root",
+            "position:fixed;left:-10000px;top:0;width:240px;height:120px;",
+        );
+
+        let container = append_div(root.as_ref(), "scope-tab-wrap-container", "");
+
+        let first = append_button(container.as_ref(), "scope-tab-wrap-first", None, false);
+        let _middle = append_button(container.as_ref(), "scope-tab-wrap-middle", None, false);
+        let last = append_button(container.as_ref(), "scope-tab-wrap-last", None, false);
+
+        let mut scope = FocusScope::new(
+            "scope-tab-wrap-container",
+            FocusScopeOptions {
+                contain: true,
+                restore_focus: false,
+                auto_focus: true,
+            },
+        );
+        scope.activate(FocusTarget::First);
+
+        assert_eq!(active_id(), Some(first.id()));
+
+        // Shift+Tab at the first tabbable wraps to the last.
+        focus_element(&first, false);
+
+        assert!(scope.handle_tab_key(true));
+        assert_eq!(active_id(), Some(last.id()));
+
+        // Tab at the last tabbable wraps to the first.
+        focus_element(&last, false);
+
+        assert!(scope.handle_tab_key(false));
+        assert_eq!(active_id(), Some(first.id()));
+
+        scope.deactivate();
+
+        cleanup(&root);
+    }
+
+    #[wasm_bindgen_test]
+    fn focus_scope_handle_tab_key_uncontained_allows_browser_default() {
+        let root = append_div(
+            body().as_ref(),
+            "scope-tab-free-root",
+            "position:fixed;left:-10000px;top:0;width:240px;height:120px;",
+        );
+
+        let container = append_div(root.as_ref(), "scope-tab-free-container", "");
+
+        let first = append_button(container.as_ref(), "scope-tab-free-first", None, false);
+        let last = append_button(container.as_ref(), "scope-tab-free-last", None, false);
+
+        let scope = FocusScope::new(
+            "scope-tab-free-container",
+            FocusScopeOptions {
+                contain: false,
+                restore_focus: false,
+                auto_focus: false,
+            },
+        );
+
+        // Uncontained scope never prevents tab navigation regardless of position.
+        focus_element(&first, false);
+
+        assert!(!scope.handle_tab_key(false));
+
+        focus_element(&last, false);
+
+        assert!(!scope.handle_tab_key(true));
+
+        cleanup(&root);
+    }
+
+    #[wasm_bindgen_test]
+    fn focus_scope_focus_first_honors_autofocus_and_previously_active_targets() {
+        let root = append_div(
+            body().as_ref(),
+            "scope-targets-root",
+            "position:fixed;left:-10000px;top:0;width:240px;height:120px;",
+        );
+
+        let container = append_div(root.as_ref(), "scope-targets-container", "");
+
+        let plain = append_button(container.as_ref(), "scope-targets-plain", None, false);
+
+        let autofocus = append_button(container.as_ref(), "scope-targets-autofocus", None, false);
+
+        autofocus
+            .set_attribute("data-ars-autofocus", "")
+            .expect("autofocus marker must set");
+
+        let scope = FocusScope::new(
+            "scope-targets-container",
+            FocusScopeOptions {
+                contain: false,
+                restore_focus: false,
+                auto_focus: false,
+            },
+        );
+
+        // AutofocusMarked prefers the marked candidate over the first tabbable.
+        scope.focus_first(FocusTarget::AutofocusMarked);
+
+        assert_eq!(active_id(), Some(autofocus.id()));
+
+        // focus_last explicitly jumps to the last tabbable.
+        scope.focus_last();
+
+        assert_eq!(active_id(), Some(autofocus.id()));
+
+        // PreviouslyActive restores a stored candidate inside the scope.
+        store_previously_active_element("scope-targets-container", FocusedElement(plain.id()));
+
+        scope.focus_first(FocusTarget::PreviouslyActive);
+
+        assert_eq!(active_id(), Some(plain.id()));
+
+        // Unknown target falls back to the first tabbable.
+        scope.focus_first(FocusTarget::First);
+
+        assert_eq!(active_id(), Some(plain.id()));
+
+        cleanup(&root);
+    }
 }

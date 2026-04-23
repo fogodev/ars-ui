@@ -1453,41 +1453,6 @@ pub fn focus_element_by_id(id: &str) {
     }
 }
 
-/// Announce a message to screen readers with polite priority.
-///
-/// Resolves the `LiveAnnouncer` from the adapter's framework context internally.
-/// No-op during SSR or when no `LiveAnnouncerProvider` is in the component tree.
-///
-/// This is the primary announcement API used by component effects (e.g., announcing
-/// a new month after calendar navigation, announcing sort state changes in tables).
-/// Components call `ars_dom::announce(&msg)` — they never manage the `LiveAnnouncer`
-/// instance directly.
-pub fn announce(message: &str) {
-    if let Some(announcer) = use_announcer() {
-        announcer.borrow_mut().announce(message);
-    }
-}
-
-/// Announce a message with assertive priority (interrupts current screen reader speech).
-/// Use sparingly — unexpected interruptions degrade UX significantly.
-pub fn announce_assertive(message: &str) {
-    if let Some(announcer) = use_announcer() {
-        announcer.borrow_mut().announce_assertive(message);
-    }
-}
-
-/// Adapter-provided context resolution for the LiveAnnouncer.
-/// Each framework adapter implements this via its own context system:
-///   - Leptos: `use_context::<Rc<RefCell<LiveAnnouncer>>>()`
-///   - Dioxus: `try_consume_context::<Rc<RefCell<LiveAnnouncer>>>()`
-/// Returns `None` if no `LiveAnnouncerProvider` is mounted (SSR, tests without provider).
-fn use_announcer() -> Option<Rc<RefCell<LiveAnnouncer>>> {
-    // Adapter-specific implementation.
-    // The adapter's root component (or ArsProvider) mounts a
-    // LiveAnnouncerProvider that provides Rc<RefCell<LiveAnnouncer>> via context.
-    use_context::<Rc<RefCell<LiveAnnouncer>>>()
-}
-
 /// Focus the first tabbable element inside a container identified by ID.
 /// Used by modal dialogs to move focus into the dialog content on open.
 /// No-op if the container is not found or contains no tabbable elements.
@@ -1553,6 +1518,8 @@ pub fn remove_inert_from_siblings(portal_id: &str) {
     }
 }
 ```
+
+> **Screen-reader announcements:** `ars-dom` does not expose free functions `announce()` / `announce_assertive()`. The canonical call site is the `PlatformEffects` trait in `ars-core` (see `01-architecture.md` §2.2.7) — components invoke `platform_effects.announce(&msg)` / `.announce_assertive(&msg)` resolved from the adapter's `ArsProvider` context. On web targets, `WebPlatformEffects` implements the trait by delegating to the shared `LiveAnnouncer` defined in `03-accessibility.md` §5.1. The only announcer surface owned by `ars-dom` is the live-region DOM bootstrap `ensure_dom()` in `ars-dom/src/announcer.rs`, which creates the two hidden `aria-live` containers (`#ars-live-polite`, `#ars-live-assertive`) the `LiveAnnouncer` writes into.
 
 ### 3.3 FocusScope Implementation
 
