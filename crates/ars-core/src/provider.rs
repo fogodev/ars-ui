@@ -7,10 +7,11 @@
 use alloc::{string::String, sync::Arc};
 use core::fmt::{self, Debug};
 
-use ars_i18n::{Direction, Locale, locales};
+use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend, locales};
 
 use crate::{
-    DefaultModalityContext, ModalityContext, NullPlatformEffects, PlatformEffects, StyleStrategy,
+    DefaultModalityContext, I18nRegistries, ModalityContext, NullPlatformEffects, PlatformEffects,
+    StyleStrategy,
 };
 
 /// Active color mode for theme-aware rendering.
@@ -31,6 +32,11 @@ pub enum ColorMode {
 }
 
 /// Framework-agnostic provider context shared with descendant components.
+///
+/// This is the canonical provider contract shared across adapters. Framework
+/// crates wrap these values in reactive signals, but the field set itself stays
+/// consistent so runtime-facing hooks and environment resolution follow the same
+/// semantics everywhere.
 #[derive(Clone)]
 pub struct ArsContext {
     locale: Locale,
@@ -43,6 +49,8 @@ pub struct ArsContext {
     root_node_id: Option<String>,
     platform: Arc<dyn PlatformEffects>,
     modality: Arc<dyn ModalityContext>,
+    intl_backend: Arc<dyn IntlBackend>,
+    i18n_registries: Arc<I18nRegistries>,
     style_strategy: StyleStrategy,
 }
 
@@ -64,6 +72,8 @@ impl ArsContext {
         root_node_id: Option<String>,
         platform: Arc<dyn PlatformEffects>,
         modality: Arc<dyn ModalityContext>,
+        intl_backend: Arc<dyn IntlBackend>,
+        i18n_registries: Arc<I18nRegistries>,
         style_strategy: StyleStrategy,
     ) -> Self {
         Self {
@@ -77,6 +87,8 @@ impl ArsContext {
             root_node_id,
             platform,
             modality,
+            intl_backend,
+            i18n_registries,
             style_strategy,
         }
     }
@@ -141,6 +153,18 @@ impl ArsContext {
         Arc::clone(&self.modality)
     }
 
+    /// Returns the shared ICU provider for this provider root.
+    #[must_use]
+    pub fn intl_backend(&self) -> Arc<dyn IntlBackend> {
+        Arc::clone(&self.intl_backend)
+    }
+
+    /// Returns the shared per-component message registries.
+    #[must_use]
+    pub fn i18n_registries(&self) -> Arc<I18nRegistries> {
+        Arc::clone(&self.i18n_registries)
+    }
+
     /// Returns the active style strategy.
     #[must_use]
     pub const fn style_strategy(&self) -> &StyleStrategy {
@@ -161,6 +185,8 @@ impl Default for ArsContext {
             root_node_id: None,
             platform: Arc::new(NullPlatformEffects),
             modality: Arc::new(DefaultModalityContext::new()),
+            intl_backend: Arc::new(StubIntlBackend),
+            i18n_registries: Arc::new(I18nRegistries::new()),
             style_strategy: StyleStrategy::Inline,
         }
     }
@@ -179,6 +205,8 @@ impl Debug for ArsContext {
             .field("root_node_id", &self.root_node_id)
             .field("platform", &"<dyn PlatformEffects>")
             .field("modality", &"<dyn ModalityContext>")
+            .field("intl_backend", &"<dyn IntlBackend>")
+            .field("i18n_registries", &self.i18n_registries)
             .field("style_strategy", &self.style_strategy)
             .finish()
     }
@@ -224,6 +252,14 @@ mod tests {
 
     #[test]
     fn ars_context_constructor_preserves_values() {
+        let platform: Arc<dyn PlatformEffects> = Arc::new(NullPlatformEffects);
+
+        let modality: Arc<dyn ModalityContext> = Arc::new(NullModalityContext);
+
+        let intl_backend: Arc<dyn IntlBackend> = Arc::new(StubIntlBackend);
+
+        let i18n_registries = Arc::new(I18nRegistries::new());
+
         let context = ArsContext::new(
             locales::br(),
             Direction::Ltr,
@@ -233,8 +269,10 @@ mod tests {
             Some(String::from("prefix")),
             Some(String::from("portal-root")),
             Some(String::from("app-root")),
-            Arc::new(NullPlatformEffects),
-            Arc::new(NullModalityContext),
+            Arc::clone(&platform),
+            Arc::clone(&modality),
+            Arc::clone(&intl_backend),
+            Arc::clone(&i18n_registries),
             StyleStrategy::Cssom,
         );
 
@@ -244,6 +282,10 @@ mod tests {
         assert_eq!(context.id_prefix(), Some("prefix"));
         assert_eq!(context.portal_container_id(), Some("portal-root"));
         assert_eq!(context.root_node_id(), Some("app-root"));
+        assert!(Arc::ptr_eq(&context.platform(), &platform));
+        assert!(Arc::ptr_eq(&context.modality(), &modality));
+        assert!(Arc::ptr_eq(&context.intl_backend(), &intl_backend));
+        assert!(Arc::ptr_eq(&context.i18n_registries(), &i18n_registries));
         assert_eq!(context.style_strategy(), &StyleStrategy::Cssom);
     }
 
@@ -257,6 +299,8 @@ mod tests {
         assert_eq!(context.style_strategy(), &StyleStrategy::Inline);
         assert_eq!(context.platform().now_ms(), 0);
         assert_eq!(context.modality().snapshot(), ModalitySnapshot::default());
+        let registries = context.i18n_registries();
+        assert_eq!(Arc::strong_count(&registries), 2);
     }
 
     #[test]

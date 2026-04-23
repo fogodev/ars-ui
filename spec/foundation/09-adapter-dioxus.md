@@ -2141,7 +2141,8 @@ includes the style strategy and the Dioxus-specific platform capabilities trait 
 ```rust
 use ars_i18n::{Direction, IntlBackend, Locale};
 use ars_core::{
-    ArsContext as CoreCtx, Arc, ColorMode, I18nRegistries, PlatformEffects, StyleStrategy,
+    ArsContext as CoreCtx, Arc, ColorMode, I18nRegistries, ModalityContext, PlatformEffects,
+    StyleStrategy,
 };
 
 /// Reactive environment context published by the Dioxus ArsProvider adapter.
@@ -2156,6 +2157,7 @@ pub struct ArsContext {
     pub portal_container_id: Signal<Option<String>>,
     pub root_node_id: Signal<Option<String>>,
     pub platform: Arc<dyn PlatformEffects>,
+    pub modality: Arc<dyn ModalityContext>,
     pub intl_backend: Arc<dyn IntlBackend>,
     pub i18n_registries: Arc<I18nRegistries>,
     pub style_strategy: StyleStrategy,
@@ -2171,13 +2173,15 @@ Although Dioxus context values only require `Clone + 'static`, ars-ui keeps the
 Dioxus-local `dioxus_platform` handle in `Arc<dyn DioxusPlatform>` so the adapter
 matches the shared `Send + Sync` ownership model used across the rest of the crate
 family.
+The shared fields above mirror the canonical `ars_core::ArsContext`; only
+`dioxus_platform` is adapter-specific.
 The Dioxus adapter resolves `platform` via feature flags: `WebPlatformEffects` (web),
 `DesktopPlatformEffects` (desktop), `NullPlatformEffects` (SSR/tests/mobile fallback).
 
 ### 16.1 use_locale()
 
 All ArsProvider fallback helpers in this section (`use_locale()`,
-`use_intl_backend()`, `t()`, and `use_platform()`) route through
+`use_intl_backend()`, `use_modality_context()`, `t()`, and `use_platform()`) route through
 `warn_missing_provider()`. That helper emits `log::warn!` only when the
 `ars-dioxus/debug` feature is enabled.
 

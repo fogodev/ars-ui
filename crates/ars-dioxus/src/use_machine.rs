@@ -1231,6 +1231,7 @@ mod tests {
             None,
             None,
             Arc::new(NullPlatformEffects),
+            Arc::new(ars_core::DefaultModalityContext::new()),
             intl_backend,
             registries,
             Arc::new(NullPlatform),

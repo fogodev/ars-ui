@@ -1760,7 +1760,7 @@ trait object.
 use std::sync::Arc;
 
 use ars_i18n::{Direction,IntlBackend, Locale};
-use ars_core::{ColorMode, PlatformEffects, StyleStrategy};
+use ars_core::{ColorMode, ModalityContext, PlatformEffects, StyleStrategy};
 
 /// Reactive environment context published by the Leptos ArsProvider adapter.
 #[derive(Clone)]
@@ -1774,6 +1774,7 @@ pub struct ArsContext {
     pub portal_container_id: Signal<Option<String>>,
     pub root_node_id: Signal<Option<String>>,
     pub platform: Arc<dyn PlatformEffects>,
+    pub modality: Arc<dyn ModalityContext>,
     pub intl_backend: Arc<dyn IntlBackend>,
     pub i18n_registries: Arc<I18nRegistries>,
     /// Non-reactive style strategy — set once at provider mount time.
@@ -1803,6 +1804,13 @@ The `ArsProvider` component, its props, and rendering are specified in
 The context value itself satisfies Leptos's `provide_context(T: Send + Sync + 'static)`
 contract because ars-ui standardizes on `Arc` ownership and `Send + Sync` trait
 bounds across native and wasm builds.
+This reactive wrapper mirrors the canonical `ars_core::ArsContext` provider
+surface and adds no adapter-only fields.
+
+Leptos also exposes `use_modality_context()` for provider-scoped ambient input
+modality. It clones `ctx.modality` when `ArsProvider` is present and falls back
+to `Arc::new(DefaultModalityContext::new())` with `warn_missing_provider(...)`
+diagnostics when it is not.
 
 ### 13.1 use_locale()
 

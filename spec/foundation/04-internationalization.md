@@ -478,7 +478,7 @@ Date-time components need locale-aware calendar data (weekday names, month names
 // use_intl_backend() implementation (in adapter layer):
 fn use_intl_backend() -> Arc<dyn IntlBackend> {
     use_context::<ArsContext>()
-        .map(|ctx| ctx.intl_backend())
+        .map(|ctx| Arc::clone(&ctx.intl_backend))
         .unwrap_or_else(|| {
             warn_missing_provider("use_intl_backend");
             Arc::new(StubIntlBackend)
@@ -2592,7 +2592,7 @@ registries.register(MessagesRegistry::new(select::Messages::default())
     }));
 
 // Pass registries to ArsProvider — all descendants inherit these translations
-// ArsProvider { i18n_registries: Some(Rc::new(registries)), .. }
+// ArsProvider { i18n_registries: Some(Arc::new(registries)), .. }
 ```
 
 ### 7.4 User-Defined Translatable Text

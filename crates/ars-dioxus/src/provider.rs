@@ -8,8 +8,8 @@ use std::{
 };
 
 use ars_core::{
-    ColorMode, I18nRegistries, PlatformEffects, Rect, StyleStrategy,
-    resolve_messages as core_resolve_messages,
+    ColorMode, DefaultModalityContext, I18nRegistries, ModalityContext, PlatformEffects, Rect,
+    StyleStrategy, resolve_messages as core_resolve_messages,
 };
 use ars_forms::field::FileRef;
 use ars_i18n::{
@@ -230,6 +230,9 @@ pub struct ArsContext {
     /// Platform side-effect capabilities.
     pub platform: Arc<dyn PlatformEffects>,
 
+    /// Shared input-modality state for this provider root.
+    pub modality: Arc<dyn ModalityContext>,
+
     /// ICU-backed locale data provider.
     pub intl_backend: Arc<dyn IntlBackend>,
 
@@ -255,6 +258,7 @@ impl Debug for ArsContext {
             .field("portal_container_id", &self.portal_container_id)
             .field("root_node_id", &self.root_node_id)
             .field("platform", &"Arc(..)")
+            .field("modality", &"Arc(..)")
             .field("intl_backend", &"Arc(..)")
             .field("i18n_registries", &"Arc(..)")
             .field("dioxus_platform", &"Arc(..)")
@@ -280,6 +284,7 @@ impl ArsContext {
         portal_container_id: Option<String>,
         root_node_id: Option<String>,
         platform: Arc<dyn PlatformEffects>,
+        modality: Arc<dyn ModalityContext>,
         intl_backend: Arc<dyn IntlBackend>,
         i18n_registries: Arc<I18nRegistries>,
         dioxus_platform: Arc<dyn DioxusPlatform>,
@@ -295,6 +300,7 @@ impl ArsContext {
             portal_container_id: Signal::new(portal_container_id),
             root_node_id: Signal::new(root_node_id),
             platform,
+            modality,
             intl_backend,
             i18n_registries,
             dioxus_platform,
@@ -390,6 +396,19 @@ pub fn use_intl_backend() -> Arc<dyn IntlBackend> {
     )
 }
 
+/// Resolves the shared input-modality context from provider context.
+#[must_use]
+pub fn use_modality_context() -> Arc<dyn ModalityContext> {
+    try_use_context::<ArsContext>().map_or_else(
+        || -> Arc<dyn ModalityContext> {
+            warn_missing_provider("use_modality_context");
+
+            Arc::new(DefaultModalityContext::new())
+        },
+        |ctx| -> Arc<dyn ModalityContext> { Arc::clone(&ctx.modality) },
+    )
+}
+
 /// Resolves per-component messages from override, provider registry, or defaults.
 #[must_use]
 pub fn use_messages<M: ars_core::ComponentMessages + Send + Sync + 'static>(
@@ -448,7 +467,10 @@ mod tests {
         task::{Context, Poll, Waker},
     };
 
-    use ars_core::{ColorMode, I18nRegistries, NullPlatformEffects, StyleStrategy};
+    use ars_core::{
+        ColorMode, DefaultModalityContext, I18nRegistries, ModalityContext, NullPlatformEffects,
+        StyleStrategy,
+    };
     use ars_i18n::{
         Direction, IntlBackend, Locale, NumberFormatOptions, StubIntlBackend, Translate, locales,
     };
@@ -573,6 +595,7 @@ mod tests {
             None,
             None,
             Arc::new(NullPlatformEffects),
+            Arc::new(DefaultModalityContext::new()),
             intl_backend,
             Arc::new(I18nRegistries::new()),
             Arc::new(NullPlatform),
@@ -639,6 +662,7 @@ mod tests {
                 None,
                 None,
                 Arc::new(NullPlatformEffects),
+                Arc::new(DefaultModalityContext::new()),
                 Arc::clone(&expected),
                 Arc::new(I18nRegistries::new()),
                 Arc::new(NullPlatform),
@@ -648,6 +672,42 @@ mod tests {
             use_context_provider(|| ctx);
 
             assert!(Arc::ptr_eq(&use_intl_backend(), &expected));
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new(app);
+
+        dom.rebuild_in_place();
+    }
+
+    #[test]
+    fn use_modality_context_reads_context_value() {
+        fn app() -> Element {
+            let expected: Arc<dyn ModalityContext> = Arc::new(DefaultModalityContext::new());
+
+            let ctx = ArsContext::new(
+                locales::en_us(),
+                Direction::Ltr,
+                ColorMode::System,
+                false,
+                false,
+                None,
+                None,
+                None,
+                Arc::new(NullPlatformEffects),
+                Arc::clone(&expected),
+                Arc::new(StubIntlBackend),
+                Arc::new(I18nRegistries::new()),
+                Arc::new(NullPlatform),
+                StyleStrategy::Inline,
+            );
+
+            use_context_provider(|| ctx);
+
+            assert!(Arc::ptr_eq(&use_modality_context(), &expected));
 
             rsx! {
                 div {}
@@ -683,6 +743,7 @@ mod tests {
                 None,
                 None,
                 Arc::new(NullPlatformEffects),
+                Arc::new(DefaultModalityContext::new()),
                 Arc::new(StubIntlBackend),
                 Arc::new(registries),
                 Arc::new(NullPlatform),
@@ -947,6 +1008,7 @@ mod tests {
                     None,
                     None,
                     Arc::new(NullPlatformEffects),
+                    Arc::new(DefaultModalityContext::new()),
                     Arc::new(StubIntlBackend),
                     Arc::new(I18nRegistries::new()),
                     Arc::new(NullPlatform),
@@ -1059,6 +1121,7 @@ mod tests {
                 None,
                 None,
                 Arc::new(NullPlatformEffects),
+                Arc::new(DefaultModalityContext::new()),
                 Arc::new(StubIntlBackend),
                 Arc::new(I18nRegistries::new()),
                 Arc::clone(&expected),
@@ -1231,6 +1294,7 @@ mod wasm_tests {
             None,
             None,
             Arc::new(NullPlatformEffects),
+            Arc::new(DefaultModalityContext::new()),
             intl_backend,
             Arc::new(I18nRegistries::new()),
             Arc::new(NullPlatform),

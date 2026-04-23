@@ -537,7 +537,7 @@ pub trait Machine: Sized + 'static {
 >
 > **Violation**: Storing `Api<'a>` beyond its scope is undefined behavior and will cause use-after-free. If persistent access to machine operations is needed, store the `send: Arc<dyn Fn(Event) + Send + Sync>` closure directly instead.
 >
-> **Ergonomic persistent access**: For cases where persistent access to machine operations is needed, store `send: Arc<dyn Fn(Event) + Send + Sync>` directly (extractable from the `Service` via `Service::send_fn()`). Do not create ad-hoc wrapper types — the adapter's `use_machine` hook already provides the ergonomic access layer.
+> **Ergonomic persistent access**: For cases where persistent access to machine operations is needed, store `send: Arc<dyn Fn(Event) + Send + Sync>` directly. Do not create ad-hoc wrapper types — the adapter's `use_machine` hook already provides the ergonomic access layer.
 
 Components SHOULD implement `fmt::Display` for their State and Event enums
 for debugging, logging, and `data-ars-state` attribute values. The architecture
@@ -4755,11 +4755,15 @@ pub enum ColorMode {
 | `platform`            | `Arc<dyn PlatformEffects>`                  | Platform capabilities for side effects. Defaults to `NullPlatformEffects`.     |
 | `modality`            | `Arc<dyn ModalityContext>`                  | Shared input-modality state for the current provider root.                     |
 | `intl_backend`        | `Arc<dyn IntlBackend>`                      | Calendar/locale data for date-time components. Defaults to `StubIntlBackend`.  |
-| `i18n_registries`     | `Rc<I18nRegistries>`                        | Per-component translation registries. Defaults to empty (English fallbacks).   |
+| `i18n_registries`     | `Arc<I18nRegistries>`                       | Per-component translation registries. Defaults to empty (English fallbacks).   |
 | `style_strategy`      | `StyleStrategy`                             | CSS style injection strategy. Defaults to `StyleStrategy::Inline`.             |
 
 Components access configuration via `ctx.locale`, `ctx.direction`, etc. Convenience
 hooks read from `ArsContext` with fallback defaults:
+
+Adapter crates publish reactive `ArsContext` wrappers that mirror this canonical
+field set and may add framework-specific extras (for example Dioxus-only
+platform services).
 
 - `use_locale()` — locale, falls back to `en-US`
 - `use_platform_effects()` — platform capabilities
