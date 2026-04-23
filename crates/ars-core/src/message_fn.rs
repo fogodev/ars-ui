@@ -162,6 +162,7 @@ mod tests {
     fn message_fn_clone_shares_pointer_identity() {
         let mf = MessageFn::static_str("Hello");
         let cloned = mf.clone();
+
         assert_eq!(mf, cloned);
     }
 
@@ -169,45 +170,55 @@ mod tests {
     fn message_fn_different_allocations_are_not_equal() {
         let mf1 = MessageFn::static_str("Hello");
         let mf2 = MessageFn::static_str("Hello");
+
         assert_ne!(mf1, mf2);
     }
 
     #[test]
     fn message_fn_debug_output() {
         let mf = MessageFn::static_str("Dismiss");
+
         assert_eq!(format!("{mf:?}"), "<closure>");
     }
 
     #[test]
     fn message_fn_deref_invokes_closure() {
         let mf = MessageFn::static_str("Dismiss");
+
         let locale = locales::en_us();
+
         assert_eq!(mf(&locale), "Dismiss");
     }
 
     #[test]
     fn message_fn_as_ref_delegates_to_inner() {
         let mf = MessageFn::static_str("Test");
+
         let f: &(dyn Fn(&Locale) -> String + Send + Sync) = mf.as_ref();
+
         assert_eq!(f(&locales::en()), "Test");
     }
 
     #[test]
     fn message_fn_from_closure() {
         let mf = MessageFn::from(|locale: &Locale| format!("Close ({})", locale.to_bcp47()));
+
         let locale = locales::de_de();
+
         assert_eq!(mf(&locale), "Close (de-DE)");
     }
 
     #[test]
     fn message_fn_new_delegates_to_from() {
         let mf = MessageFn::new(|locale: &Locale| format!("Hello {}", locale.to_bcp47()));
+
         assert_eq!(mf(&locales::fr()), "Hello fr-FR");
     }
 
     #[test]
     fn message_fn_static_str_ignores_locale() {
         let mf = MessageFn::static_str("Dismiss");
+
         assert_eq!(mf(&locales::ja_jp()), "Dismiss");
         assert_eq!(mf(&locales::ar_eg()), "Dismiss");
     }
@@ -218,7 +229,9 @@ mod tests {
             Arc::new(|count: u8, enabled: bool, locale: &Locale| {
                 format!("{count}:{enabled}:{}", locale.to_bcp47())
             });
+
         let mf: MessageFn<CustomLocaleMessageFn> = MessageFn::new(Arc::clone(&inner));
+
         let cloned = mf.clone();
 
         assert_eq!(mf, cloned);
@@ -266,6 +279,7 @@ mod tests {
             MessageFn::new(|count: usize, locale: &Locale| {
                 format!("{count} {}", locale.to_bcp47())
             });
+
         let cloned = mf.clone();
 
         assert_eq!(mf, cloned);
@@ -276,6 +290,7 @@ mod tests {
     fn message_fn_f64_arity_clone_and_deref() {
         let mf: MessageFn<FloatLocaleMessageFn> =
             MessageFn::new(|value: f64, locale: &Locale| format!("{value} {}", locale.to_bcp47()));
+
         let cloned = mf.clone();
 
         assert_eq!(mf, cloned);
@@ -286,6 +301,7 @@ mod tests {
     fn message_fn_str_arity_clone_and_deref() {
         let mf: MessageFn<LabelLocaleMessageFn> =
             MessageFn::new(|label: &str, locale: &Locale| format!("{label} {}", locale.to_bcp47()));
+
         let cloned = mf.clone();
 
         assert_eq!(mf, cloned);
@@ -298,6 +314,7 @@ mod tests {
             MessageFn::new(|count: usize, target: &str, locale: &Locale| {
                 format!("{count} {target} {}", locale.to_bcp47())
             });
+
         let cloned = mf.clone();
 
         assert_eq!(mf, cloned);

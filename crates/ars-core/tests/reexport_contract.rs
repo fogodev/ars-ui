@@ -3,5 +3,6 @@
 #[test]
 fn orientation_reexport_pass_tests() {
     let cases = trybuild::TestCases::new();
+
     cases.pass("tests/pass/orientation_reexport.rs");
 }

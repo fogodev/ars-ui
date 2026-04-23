@@ -96,12 +96,15 @@ fn has_id_derive_exposes_spec_contract() {
         id: String::from("heading-1"),
         label: String::from("Title"),
     };
+
     assert_eq!(props.id(), "heading-1");
 
     props.set_id(String::from("heading-3"));
+
     assert_eq!(props.id(), "heading-3");
 
     let renamed = props.with_id(String::from("heading-2"));
+
     assert_eq!(renamed.id(), "heading-2");
     assert_eq!(renamed.label, "Title");
 }
@@ -112,9 +115,11 @@ fn has_id_derive_preserves_generics_and_where_clauses() {
         id: String::from("generic-1"),
         value: vec![1_u8, 2, 3],
     };
+
     assert_eq!(props.id(), "generic-1");
 
     let renamed = props.with_id(String::from("generic-2"));
+
     assert_eq!(renamed.id(), "generic-2");
     assert_eq!(renamed.value, vec![1_u8, 2, 3]);
 }
@@ -122,13 +127,16 @@ fn has_id_derive_preserves_generics_and_where_clauses() {
 #[test]
 fn has_id_derive_supports_lifetimes() {
     let value = String::from("payload");
+
     let props = LifetimeProps {
         id: String::from("lifetime-1"),
         value: &value,
     };
+
     assert_eq!(props.id(), "lifetime-1");
 
     let renamed = props.with_id(String::from("lifetime-2"));
+
     assert_eq!(renamed.id(), "lifetime-2");
     assert_eq!(renamed.value, "payload");
 }
@@ -186,14 +194,19 @@ fn component_part_derive_supports_mixed_variants_and_trait_impls() {
         panel_id: String::from("panel-1"),
         tab_id: String::from("tab-1"),
     };
+
     let clone = part.clone();
+
     assert_eq!(part, clone);
     assert!(format!("{clone:?}").contains("Panel"));
 
     let mut left = DefaultHasher::new();
     let mut right = DefaultHasher::new();
+
     part.hash(&mut left);
+
     clone.hash(&mut right);
+
     assert_eq!(left.finish(), right.finish());
 }
 
@@ -276,5 +289,6 @@ fn component_part_derive_preserves_declaration_order_in_all() {
 #[test]
 fn derive_contract_ui_tests() {
     let cases = trybuild::TestCases::new();
+
     cases.compile_fail("tests/ui/*.rs");
 }

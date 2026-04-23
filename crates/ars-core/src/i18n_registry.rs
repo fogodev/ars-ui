@@ -11,7 +11,7 @@ use alloc::{
 };
 use core::{
     any::{Any, TypeId},
-    fmt,
+    fmt::{self, Debug},
 };
 
 use ars_i18n::Locale;
@@ -48,12 +48,14 @@ impl<M: ComponentMessages> MessagesRegistry<M> {
     #[must_use]
     pub fn get(&self, locale: &Locale) -> &M {
         let exact_tag = locale.to_data_locale().to_string();
+
         if let Some(messages) = self.messages.get(&exact_tag) {
             return messages;
         }
 
         if let Some(script) = locale.script() {
             let lang_script = alloc::format!("{}-{script}", locale.language());
+
             if let Some(messages) = self.messages.get(&lang_script) {
                 return messages;
             }
@@ -105,7 +107,7 @@ impl I18nRegistries {
     }
 }
 
-impl fmt::Debug for I18nRegistries {
+impl Debug for I18nRegistries {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("I18nRegistries")
             .field("registries", &self.map.len())
@@ -180,6 +182,7 @@ mod tests {
         );
 
         let locale = Locale::parse("zh-Hant-TW").expect("locale should parse");
+
         assert_eq!((registry.get(&locale).close_label)(&locale), "關閉");
     }
 
@@ -193,6 +196,7 @@ mod tests {
         );
 
         let locale = Locale::parse("ja-JP").expect("locale should parse");
+
         assert_eq!((registry.get(&locale).close_label)(&locale), "Close");
     }
 
@@ -213,18 +217,21 @@ mod tests {
             );
 
         let locale = Locale::parse("en-US-u-hc-h12").expect("locale should parse");
+
         assert_eq!((registry.get(&locale).close_label)(&locale), "Exact");
     }
 
     #[test]
     fn i18n_registries_store_multiple_message_types() {
         let mut registries = I18nRegistries::new();
+
         registries.register(MessagesRegistry::new(DialogMessages::default()).register(
             "es",
             DialogMessages {
                 close_label: MessageFn::static_str("Cerrar"),
             },
         ));
+
         registries.register(MessagesRegistry::new(SelectMessages::default()).register(
             "es",
             SelectMessages {
@@ -233,9 +240,11 @@ mod tests {
         ));
 
         let locale = Locale::parse("es-ES").expect("locale should parse");
+
         let dialog = registries
             .get::<DialogMessages>()
             .expect("dialog registry should exist");
+
         let select = registries
             .get::<SelectMessages>()
             .expect("select registry should exist");
@@ -247,6 +256,7 @@ mod tests {
     #[test]
     fn resolve_messages_prefers_prop_override() {
         let mut registries = I18nRegistries::new();
+
         registries.register(MessagesRegistry::new(DialogMessages::default()).register(
             "es",
             DialogMessages {
@@ -255,17 +265,20 @@ mod tests {
         ));
 
         let locale = Locale::parse("es-ES").expect("locale should parse");
+
         let override_messages = DialogMessages {
             close_label: MessageFn::static_str("Override"),
         };
 
         let resolved = resolve_messages(Some(&override_messages), &registries, &locale);
+
         assert_eq!((resolved.close_label)(&locale), "Override");
     }
 
     #[test]
     fn resolve_messages_uses_registry_when_present() {
         let mut registries = I18nRegistries::new();
+
         registries.register(MessagesRegistry::new(DialogMessages::default()).register(
             "es",
             DialogMessages {
@@ -274,6 +287,7 @@ mod tests {
         ));
 
         let locale = Locale::parse("es-MX").expect("locale should parse");
+
         let resolved = resolve_messages::<DialogMessages>(None, &registries, &locale);
 
         assert_eq!((resolved.close_label)(&locale), "Cerrar");
@@ -282,9 +296,11 @@ mod tests {
     #[test]
     fn resolve_messages_falls_back_to_default() {
         let registries = I18nRegistries::new();
+
         let locale = Locale::parse("de-DE").expect("locale should parse");
 
         let resolved = resolve_messages::<DialogMessages>(None, &registries, &locale);
+
         assert_eq!((resolved.close_label)(&locale), "Close");
     }
 }

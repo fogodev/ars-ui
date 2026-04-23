@@ -40,6 +40,7 @@ impl<T> SharedState<T> {
         {
             Self(alloc::rc::Rc::new(core::cell::RefCell::new(value)))
         }
+
         #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
         {
             Self(alloc::sync::Arc::new(std::sync::Mutex::new(value)))
@@ -61,6 +62,7 @@ impl<T> SharedState<T> {
         {
             *self.0.borrow_mut() = value;
         }
+
         #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
         {
             *self.0.lock().expect("SharedState mutex poisoned") = value;
@@ -76,6 +78,7 @@ impl<T> SharedState<T> {
         {
             f(&self.0.borrow())
         }
+
         #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
         {
             let guard = self.0.lock().expect("SharedState mutex poisoned");
@@ -110,6 +113,7 @@ impl<T> PartialEq for SharedState<T> {
         {
             alloc::rc::Rc::ptr_eq(&self.0, &other.0)
         }
+
         #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
         {
             alloc::sync::Arc::ptr_eq(&self.0, &other.0)
@@ -130,13 +134,16 @@ mod tests {
     #[test]
     fn shared_state_new_and_get() {
         let state = SharedState::new(42u32);
+
         assert_eq!(state.get(), 42);
     }
 
     #[test]
     fn shared_state_set_updates_value() {
         let state = SharedState::new(1u32);
+
         state.set(99);
+
         assert_eq!(state.get(), 99);
     }
 
@@ -146,7 +153,9 @@ mod tests {
         use alloc::string::String;
 
         let state = SharedState::new(String::from("hello"));
+
         let len = state.with(String::len);
+
         assert_eq!(len, 5);
     }
 
@@ -154,20 +163,25 @@ mod tests {
     fn shared_state_clone_shares_state() {
         let state1 = SharedState::new(10u32);
         let state2 = state1.clone();
+
         state2.set(20);
+
         assert_eq!(state1.get(), 20);
     }
 
     #[test]
     fn shared_state_debug_shows_inner_value() {
         let state = SharedState::new(42u32);
+
         let debug = alloc::format!("{state:?}");
+
         assert_eq!(debug, "SharedState(42)");
     }
 
     #[test]
     fn shared_state_default() {
         let state = SharedState::<u32>::default();
+
         assert_eq!(state.get(), 0);
     }
 

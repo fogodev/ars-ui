@@ -1985,6 +1985,7 @@ impl AttrMap {
                     self.attrs[index].1 = value;
                 }
             }
+
             Err(index) => {
                 if !matches!(value, AttrValue::None) {
                     self.attrs.insert(index, (attr, value));
@@ -2001,6 +2002,7 @@ impl AttrMap {
 
         match self.styles.binary_search_by(|(key, _)| key.cmp(&prop)) {
             Ok(index) => self.styles[index].1 = value,
+
             Err(index) => self.styles.insert(index, (prop, value)),
         }
 
@@ -2063,6 +2065,7 @@ impl AttrMap {
         for (attr, value) in other.attrs {
             self.set(attr, value);
         }
+
         for (prop, value) in other.styles {
             self.set_style(prop, value);
         }
@@ -2936,6 +2939,7 @@ mod tests {
         attrs.set(HtmlAttr::Role, "button");
 
         let mut user = UserAttrs::new();
+
         user.set(HtmlAttr::Title, "from-user");
         user.set_bool(HtmlAttr::Hidden, true);
         user.set_style(CssProperty::Height, "24px");
@@ -2984,9 +2988,10 @@ mod tests {
     #[test]
     fn user_attrs_allow_non_blocked_bool_and_string_backed_inputs() {
         let mut user = UserAttrs::new();
+
         let title = String::from("tooltip");
 
-        user.set(HtmlAttr::Title, &title);
+        user.set(HtmlAttr::Title, title);
         user.set_bool(HtmlAttr::Draggable, true);
         user.set(HtmlAttr::Aria(AriaAttr::Current), AttrValue::from(false));
 

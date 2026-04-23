@@ -58,10 +58,13 @@ thread_local! {
 pub struct FocusScope {
     /// Options controlling containment, restore, and auto-focus behavior.
     options: FocusScopeOptions,
+
     /// The previously focused element saved during activation.
     previously_focused: Option<FocusedElement>,
+
     /// Whether the scope is currently active.
     active: bool,
+
     /// The ID of the container element that bounds the scope.
     container_id: String,
 }
@@ -102,6 +105,7 @@ impl FocusScope {
         }
 
         self.previously_focused = get_currently_focused();
+
         self.active = true;
 
         if self.options.auto_focus {
@@ -128,6 +132,7 @@ impl FocusScope {
                 .previously_focused
                 .as_ref()
                 .is_some_and(is_element_in_dom);
+
             match resolve_restore_target(
                 previous_is_valid,
                 container_parent_exists(&self.container_id),
@@ -137,7 +142,9 @@ impl FocusScope {
                         focus_focused_element(previous);
                     }
                 }
+
                 RestoreTarget::ContainerParent => focus_container_parent(&self.container_id),
+
                 RestoreTarget::Body => focus_body(),
             }
         }
@@ -151,6 +158,7 @@ impl FocusScope {
     #[must_use]
     pub fn handle_tab_key(&self, shift: bool) -> bool {
         let current_index = current_tabbable_index(&self.container_id);
+
         let tabbable_count = tabbable_count(&self.container_id);
 
         match resolve_tab_navigation(
@@ -161,16 +169,22 @@ impl FocusScope {
             shift,
         ) {
             TabNavigationAction::AllowBrowserDefault => false,
+
             TabNavigationAction::FocusContainer => {
                 focus_container(&self.container_id);
+
                 true
             }
+
             TabNavigationAction::FocusFirst => {
                 focus_first_tabbable(&self.container_id);
+
                 true
             }
+
             TabNavigationAction::FocusLast => {
                 focus_last_tabbable(&self.container_id);
+
                 true
             }
         }
@@ -181,21 +195,26 @@ impl FocusScope {
         match target {
             FocusTarget::Last => {
                 self.focus_last();
+
                 return;
             }
+
             FocusTarget::AutofocusMarked => {
                 if focus_autofocus_marked(&self.container_id) {
                     return;
                 }
             }
+
             FocusTarget::PreviouslyActive => {
                 if let Some(previous) = get_previously_active_element(&self.container_id)
                     && self.contains_element(&previous.0)
                 {
                     focus_focused_element(&previous);
+
                     return;
                 }
             }
+
             FocusTarget::First => {}
         }
 
@@ -242,6 +261,7 @@ fn is_element_in_dom(element: &FocusedElement) -> bool {
     if element.0.is_empty() {
         return false;
     }
+
     document_contains_id_impl(&element.0)
 }
 
@@ -263,6 +283,47 @@ fn focus_last_tabbable(container_id: &str) {
 /// Focuses `document.body` as a last-resort fallback.
 pub fn focus_body() {
     focus_body_impl();
+}
+
+/// Focuses the last tabbable element inside the container with `container_id`.
+#[cfg(feature = "web")]
+pub(crate) fn focus_last_tabbable_for_platform(container_id: &str) {
+    focus_last_tabbable(container_id);
+}
+
+/// Returns the ID of the active element for platform-effects consumers.
+#[must_use]
+#[cfg(feature = "web")]
+pub(crate) fn active_element_id_for_platform() -> Option<String> {
+    active_element_id_impl()
+}
+
+/// Returns whether the document contains a connected element with `id`.
+#[must_use]
+#[cfg(feature = "web")]
+pub(crate) fn document_contains_id_for_platform(id: &str) -> bool {
+    document_contains_id_impl(id)
+}
+
+/// Returns all non-empty tabbable element IDs inside `container_id`.
+#[must_use]
+#[cfg(feature = "web")]
+pub(crate) fn tabbable_element_ids_for_platform(container_id: &str) -> Vec<String> {
+    tabbable_element_ids_impl(container_id)
+}
+
+/// Returns whether focus can be safely restored to the element with `id`.
+#[must_use]
+#[cfg(feature = "web")]
+pub(crate) fn can_restore_focus_for_platform(id: &str) -> bool {
+    can_restore_focus_impl(id)
+}
+
+/// Returns the nearest restorable focusable ancestor ID of the element with `id`.
+#[must_use]
+#[cfg(feature = "web")]
+pub(crate) fn nearest_focusable_ancestor_id_for_platform(id: &str) -> Option<String> {
+    nearest_focusable_ancestor_id_impl(id)
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -336,6 +397,7 @@ fn focus_container_parent(container_id: &str) {
         && let Ok(parent) = parent.dyn_into::<HtmlElement>()
     {
         focus_element(&parent, false);
+
         return;
     }
 
@@ -360,7 +422,9 @@ fn focus_container(_container_id: &str) {}
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn current_tabbable_index(container_id: &str) -> Option<usize> {
     let container = get_element_by_id(container_id)?;
+
     let tabbables = get_tabbable_elements(&container);
+
     let active = active_html_element()?;
 
     tabbables.iter().position(|candidate| candidate == &active)
@@ -386,6 +450,7 @@ fn focus_autofocus_marked(container_id: &str) -> bool {
     let Some(container) = get_element_by_id(container_id) else {
         return false;
     };
+
     let Some(marked) = container
         .query_selector("[data-ars-autofocus]")
         .ok()
@@ -397,6 +462,7 @@ fn focus_autofocus_marked(container_id: &str) -> bool {
 
     if is_focusable_element(&marked) {
         focus_element(&marked, false);
+
         return true;
     }
 
@@ -428,11 +494,13 @@ fn focus_first_tabbable_impl(container_id: &str) -> bool {
     let Some(container) = get_element_by_id(container_id) else {
         return false;
     };
+
     let Some(first) = get_tabbable_elements(&container).into_iter().next() else {
         return false;
     };
 
     focus_element(&first, false);
+
     true
 }
 
@@ -446,11 +514,13 @@ fn focus_last_tabbable_impl(container_id: &str) -> bool {
     let Some(container) = get_element_by_id(container_id) else {
         return false;
     };
+
     let Some(last) = get_tabbable_elements(&container).into_iter().last() else {
         return false;
     };
 
     focus_element(&last, false);
+
     true
 }
 
@@ -474,6 +544,7 @@ fn contains_element_by_id(container_id: &str, element_id: &str) -> bool {
     let Some(container) = get_element_by_id(container_id) else {
         return false;
     };
+
     let Some(element) = get_element_by_id(element_id) else {
         return false;
     };
@@ -487,12 +558,35 @@ fn contains_element_by_id(_container_id: &str, _element_id: &str) -> bool {
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn tabbable_element_ids_impl(container_id: &str) -> Vec<String> {
+    let Some(container) = get_element_by_id(container_id) else {
+        return Vec::new();
+    };
+
+    get_tabbable_elements(&container)
+        .into_iter()
+        .filter_map(|element| {
+            let id = element.id();
+
+            (!id.is_empty()).then_some(id)
+        })
+        .collect()
+}
+
+#[cfg(feature = "web")]
+#[cfg(any(not(feature = "web"), not(target_arch = "wasm32")))]
+fn tabbable_element_ids_impl(_container_id: &str) -> Vec<String> {
+    Vec::new()
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn collect_candidates(container: &Element, selector: &str) -> Vec<HtmlElement> {
     let Ok(nodes) = container.query_selector_all(selector) else {
         return Vec::new();
     };
 
     let mut elements = Vec::new();
+
     for index in 0..nodes.length() {
         if let Some(node) = nodes.item(index)
             && let Ok(element) = node.dyn_into::<HtmlElement>()
@@ -525,7 +619,9 @@ fn is_focusable_element(element: &HtmlElement) -> bool {
 
     match element.tag_name().as_str() {
         "BUTTON" | "INPUT" | "SELECT" | "TEXTAREA" => true,
+
         "A" | "AREA" => element.has_attribute("href"),
+
         _ => element
             .get_attribute("contenteditable")
             .is_some_and(|value| value != "false"),
@@ -547,6 +643,7 @@ fn is_hidden(element: &HtmlElement) -> bool {
     let Some(window) = window() else {
         return true;
     };
+
     let Ok(Some(style)) = window.get_computed_style(element) else {
         return true;
     };
@@ -560,18 +657,22 @@ fn is_hidden(element: &HtmlElement) -> bool {
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn has_inert_ancestor(element: &HtmlElement) -> bool {
     let mut current = Some(element.clone().unchecked_into::<Element>());
+
     while let Some(node) = current {
         if node.has_attribute("inert") {
             return true;
         }
+
         current = node.parent_element();
     }
+
     false
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn has_aria_hidden_ancestor(element: &HtmlElement) -> bool {
     let mut current = Some(element.clone().unchecked_into::<Element>());
+
     while let Some(node) = current {
         if node
             .get_attribute("aria-hidden")
@@ -579,21 +680,90 @@ fn has_aria_hidden_ancestor(element: &HtmlElement) -> bool {
         {
             return true;
         }
+
         current = node.parent_element();
     }
+
     false
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn is_inside_closed_details(element: &HtmlElement) -> bool {
     let mut current = element.parent_element();
+
     while let Some(node) = current {
         if node.tag_name() == "DETAILS" && !node.has_attribute("open") {
             return true;
         }
+
         current = node.parent_element();
     }
+
     false
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn has_layout_for_restore(element: &HtmlElement) -> bool {
+    if element.offset_parent().is_some() {
+        return true;
+    }
+
+    let rect = element.get_bounding_client_rect();
+
+    if rect.width() <= 0.0 || rect.height() <= 0.0 {
+        return false;
+    }
+
+    let Some(window) = window() else {
+        return false;
+    };
+
+    let Ok(Some(style)) = window.get_computed_style(element) else {
+        return false;
+    };
+
+    style.get_property_value("position").unwrap_or_default() == "fixed"
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn can_restore_html_element(element: &HtmlElement) -> bool {
+    is_focusable_element(element) && has_layout_for_restore(element)
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn can_restore_focus_impl(id: &str) -> bool {
+    get_html_element_by_id(id).is_some_and(|element| can_restore_html_element(&element))
+}
+
+#[cfg(any(not(feature = "web"), not(target_arch = "wasm32")))]
+fn can_restore_focus_impl(_id: &str) -> bool {
+    false
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn nearest_focusable_ancestor_id_impl(id: &str) -> Option<String> {
+    let mut current = get_element_by_id(id)?.parent_element();
+
+    while let Some(node) = current {
+        if let Ok(element) = node.clone().dyn_into::<HtmlElement>()
+            && can_restore_html_element(&element)
+        {
+            let node_id = element.id();
+
+            if !node_id.is_empty() {
+                return Some(node_id);
+            }
+        }
+
+        current = node.parent_element();
+    }
+
+    None
+}
+
+#[cfg(any(not(feature = "web"), not(target_arch = "wasm32")))]
+fn nearest_focusable_ancestor_id_impl(_id: &str) -> Option<String> {
+    None
 }
 
 /// Looks up a DOM element by ID.
@@ -620,7 +790,10 @@ pub fn get_focusable_elements(container: &Element) -> Vec<HtmlElement> {
         .collect()
 }
 
-/// Queries tabbable elements within `container`, ordered by tabindex and DOM position.
+/// Queries tabbable elements within `container`, ordered by sequential tab order.
+///
+/// Elements with positive `tabindex` sort before the natural tab sequence, and
+/// ties fall back to DOM position.
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 #[must_use]
 pub(crate) fn get_tabbable_elements(container: &Element) -> Vec<HtmlElement> {
@@ -716,8 +889,11 @@ fn resolve_tab_navigation(
 
     match current_index {
         Some(0) | None if shift => TabNavigationAction::FocusLast,
+
         Some(index) if !shift && index + 1 == tabbable_count => TabNavigationAction::FocusFirst,
+
         None => TabNavigationAction::FocusFirst,
+
         Some(_) => TabNavigationAction::AllowBrowserDefault,
     }
 }
@@ -753,11 +929,13 @@ mod tests {
         let mut scope = FocusScope::new("dialog-root", FocusScopeOptions::default());
 
         scope.activate(FocusTarget::First);
+
         assert!(scope.active);
         assert_eq!(scope.previously_focused, None);
         assert!(scope.is_active());
 
         scope.deactivate();
+
         assert!(!scope.active);
         assert_eq!(scope.previously_focused, None);
         assert!(!scope.is_active());
@@ -940,13 +1118,17 @@ mod wasm_tests {
             .expect("div creation must succeed")
             .dyn_into::<HtmlElement>()
             .expect("div must be HtmlElement");
+
         element.set_id(id);
+
         element
             .set_attribute("style", style)
             .expect("style assignment must succeed");
+
         parent
             .append_child(&element)
             .expect("append_child must succeed");
+
         element
     }
 
@@ -961,20 +1143,25 @@ mod wasm_tests {
             .expect("button creation must succeed")
             .dyn_into::<HtmlElement>()
             .expect("button must be HtmlElement");
+
         button.set_id(id);
+
         if let Some(tabindex) = tabindex {
             button
                 .set_attribute("tabindex", tabindex)
                 .expect("tabindex assignment must succeed");
         }
+
         if disabled {
             button
                 .set_attribute("disabled", "")
                 .expect("disabled assignment must succeed");
         }
+
         parent
             .append_child(&button)
             .expect("append_child must succeed");
+
         button
     }
 
@@ -984,12 +1171,16 @@ mod wasm_tests {
             .expect("div creation must succeed")
             .dyn_into::<HtmlElement>()
             .expect("div must be HtmlElement");
+
         div.set_id(id);
+
         div.set_attribute("tabindex", tabindex)
             .expect("tabindex assignment must succeed");
+
         parent
             .append_child(&div)
             .expect("append_child must succeed");
+
         div
     }
 
@@ -1013,6 +1204,7 @@ mod wasm_tests {
             .into_iter()
             .map(|element| element.id())
             .collect::<Vec<_>>();
+
         let tabbable_ids = get_tabbable_elements(root.as_ref())
             .into_iter()
             .map(|element| element.id())
@@ -1053,9 +1245,7 @@ mod wasm_tests {
         );
 
         let outside = append_button(root.as_ref(), "scope-activate-outside", None, false);
-
         let container = append_div(root.as_ref(), "scope-activate-container", "");
-
         let inner_first = append_button(container.as_ref(), "scope-activate-first", None, false);
         let _inner_second = append_button(container.as_ref(), "scope-activate-second", None, false);
 
@@ -1099,7 +1289,6 @@ mod wasm_tests {
         );
 
         let container = append_div(root.as_ref(), "scope-tab-wrap-container", "");
-
         let first = append_button(container.as_ref(), "scope-tab-wrap-first", None, false);
         let _middle = append_button(container.as_ref(), "scope-tab-wrap-middle", None, false);
         let last = append_button(container.as_ref(), "scope-tab-wrap-last", None, false);
@@ -1142,7 +1331,6 @@ mod wasm_tests {
         );
 
         let container = append_div(root.as_ref(), "scope-tab-free-container", "");
-
         let first = append_button(container.as_ref(), "scope-tab-free-first", None, false);
         let last = append_button(container.as_ref(), "scope-tab-free-last", None, false);
 
@@ -1159,8 +1347,11 @@ mod wasm_tests {
         // so the remaining assertions exercise the
         // `active && !contain` arm of `resolve_tab_navigation`.
         focus_element(&first, false);
+
         assert!(!scope.handle_tab_key(false));
+
         scope.activate(FocusTarget::First);
+
         assert!(scope.is_active());
 
         // Active but uncontained scope still allows browser default navigation.
@@ -1223,6 +1414,60 @@ mod wasm_tests {
         scope.focus_first(FocusTarget::First);
 
         assert_eq!(active_id(), Some(plain.id()));
+
+        cleanup(&root);
+    }
+
+    #[wasm_bindgen_test]
+    fn can_restore_focus_rejects_elements_inside_closed_details() {
+        let root = append_div(
+            body().as_ref(),
+            "closed-details-root",
+            "position:fixed;left:-10000px;top:0;width:240px;height:120px;",
+        );
+
+        let details = document()
+            .create_element("details")
+            .expect("details creation must succeed")
+            .dyn_into::<HtmlElement>()
+            .expect("details must be HtmlElement");
+
+        details.set_id("closed-details");
+
+        root.append_child(&details)
+            .expect("append_child must succeed");
+
+        let inner = append_button(details.as_ref(), "closed-details-button", None, false);
+
+        assert!(is_inside_closed_details(&inner));
+        assert!(!can_restore_focus_impl("closed-details-button"));
+        assert_eq!(
+            nearest_focusable_ancestor_id_impl("closed-details-button"),
+            None
+        );
+
+        cleanup(&root);
+    }
+
+    #[wasm_bindgen_test]
+    fn can_restore_focus_accepts_fixed_position_elements_with_layout() {
+        let root = append_div(
+            body().as_ref(),
+            "fixed-layout-root",
+            "position:fixed;left:-10000px;top:0;width:240px;height:120px;",
+        );
+
+        let fixed = append_button(root.as_ref(), "fixed-layout-button", None, false);
+
+        fixed
+            .set_attribute(
+                "style",
+                "position:fixed;left:12px;top:16px;width:32px;height:20px;",
+            )
+            .expect("style assignment must succeed");
+
+        assert!(has_layout_for_restore(&fixed));
+        assert!(can_restore_focus_impl("fixed-layout-button"));
 
         cleanup(&root);
     }

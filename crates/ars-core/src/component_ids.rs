@@ -24,6 +24,7 @@ impl ComponentIds {
     #[must_use]
     pub fn from_id(base_id: &str) -> Self {
         debug_assert!(!base_id.is_empty(), "Component base ID must not be empty");
+
         Self {
             base: String::from(base_id),
         }
@@ -92,12 +93,14 @@ mod tests {
     #[test]
     fn component_ids_from_id_stores_base() {
         let ids = ExportedComponentIds::from_id("dialog-3");
+
         assert_eq!(ids.id(), "dialog-3");
     }
 
     #[test]
     fn component_ids_part_derives_structural_id() {
         let ids = ExportedComponentIds::from_id("dialog-3");
+
         assert_eq!(ids.part("title"), "dialog-3-title");
         assert_eq!(ids.part("content"), "dialog-3-content");
         assert_eq!(ids.part("description"), "dialog-3-description");
@@ -106,6 +109,7 @@ mod tests {
     #[test]
     fn component_ids_item_derives_keyed_id() {
         let ids = ExportedComponentIds::from_id("listbox-2");
+
         assert_eq!(ids.item("item", &"option-a"), "listbox-2-item-option-a");
         assert_eq!(ids.item("item", &42), "listbox-2-item-42");
     }
@@ -113,6 +117,7 @@ mod tests {
     #[test]
     fn component_ids_item_part_derives_sub_element_id() {
         let ids = ExportedComponentIds::from_id("listbox-2");
+
         assert_eq!(
             ids.item_part("item", &"opt-a", "text"),
             "listbox-2-item-opt-a-text"
@@ -122,6 +127,7 @@ mod tests {
     #[test]
     fn component_ids_is_re_exported_from_crate_root() {
         let ids = crate::ComponentIds::from_id("menu-1");
+
         assert_eq!(ids.part("trigger"), "menu-1-trigger");
     }
 }
