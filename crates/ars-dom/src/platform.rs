@@ -487,8 +487,16 @@ fn attach_focus_trap_impl(container_id: &str, on_escape: Box<dyn Fn()>) -> Box<d
             return;
         };
 
+        if key_event.default_prevented() {
+            return;
+        }
+
         match key_event.key().as_str() {
             "Escape" => {
+                key_event.prevent_default();
+
+                event.stop_propagation();
+
                 on_escape();
             }
 
@@ -1355,6 +1363,8 @@ fn run_style_detection(state: &Rc<RefCell<AnimationEndState>>, element: &Element
 
         let listener_deadline_ms = performance_now_ms() + f64::from(timeout_ms.saturating_sub(10));
 
+        let required_elapsed_ms = f64::from(timeout_ms.saturating_sub(10));
+
         if state.borrow().transition_listener.is_none() {
             let transition_state = Rc::clone(state);
             let transition_element = element.clone();
@@ -1376,8 +1386,22 @@ fn run_style_detection(state: &Rc<RefCell<AnimationEndState>>, element: &Element
                     if property_name.as_deref() != Some(property_filter) {
                         return;
                     }
-                } else if performance_now_ms() + 1.0 < listener_deadline_ms {
-                    return;
+                } else {
+                    let elapsed_ms = Reflect::get(
+                        event.as_ref(),
+                        &wasm_bindgen::JsValue::from_str("elapsedTime"),
+                    )
+                    .ok()
+                    .and_then(|value| value.as_f64())
+                    .map(|seconds| seconds * 1000.0);
+
+                    if let Some(elapsed_ms) = elapsed_ms {
+                        if elapsed_ms + 1.0 < required_elapsed_ms {
+                            return;
+                        }
+                    } else if performance_now_ms() + 1.0 < listener_deadline_ms {
+                        return;
+                    }
                 }
 
                 event.stop_propagation();
@@ -1760,15 +1784,37 @@ mod wasm_tests {
     }
 
     fn dispatch_transitionend(target: &HtmlElement, property_name: &str) {
+        dispatch_transitionend_with_elapsed(target, property_name, 0.0);
+    }
+
+    fn dispatch_transitionend_with_elapsed(
+        target: &HtmlElement,
+        property_name: &str,
+        elapsed_seconds: f64,
+    ) {
         let event = Event::new("transitionend").expect("transition event creation must succeed");
 
-        let set_result = Reflect::set(
+        let property_set_result = Reflect::set(
             event.as_ref(),
             &JsValue::from_str("propertyName"),
             &JsValue::from_str(property_name),
         );
 
-        assert_reflect_set_succeeds(&set_result, "setting transition propertyName must succeed");
+        assert_reflect_set_succeeds(
+            &property_set_result,
+            "setting transition propertyName must succeed",
+        );
+
+        let elapsed_set_result = Reflect::set(
+            event.as_ref(),
+            &JsValue::from_str("elapsedTime"),
+            &JsValue::from_f64(elapsed_seconds),
+        );
+
+        assert_reflect_set_succeeds(
+            &elapsed_set_result,
+            "setting transition elapsedTime must succeed",
+        );
 
         target
             .dispatch_event(&event)
@@ -3050,13 +3096,13 @@ mod wasm_tests {
 
         TimeoutFuture::new(50).await;
 
-        dispatch_transitionend(&transition_all, "opacity");
+        dispatch_transitionend_with_elapsed(&transition_all, "opacity", 0.0);
 
         assert_eq!(transition_all_count.get(), 0);
 
         TimeoutFuture::new(560).await;
 
-        dispatch_transitionend(&transition_all, "opacity");
+        dispatch_transitionend_with_elapsed(&transition_all, "opacity", 0.6);
 
         assert_eq!(transition_all_count.get(), 1);
 
@@ -3138,5 +3184,76 @@ mod wasm_tests {
         cleanup();
 
         remove_node(&root);
+    }
+
+    #[wasm_bindgen_test]
+    fn focus_trap_escape_stops_at_innermost_trap() {
+        let outer = append_div(
+            body().as_ref(),
+            "trap-outer-root",
+            "position:fixed;left:-10000px;top:0;width:260px;height:140px;",
+        );
+
+        outer
+            .set_attribute("tabindex", "-1")
+            .expect("outer tabindex assignment must succeed");
+
+        let inner = append_div(
+            outer.as_ref(),
+            "trap-inner-root",
+            "position:absolute;left:0;top:0;width:180px;height:80px;",
+        );
+
+        inner
+            .set_attribute("tabindex", "-1")
+            .expect("inner tabindex assignment must succeed");
+
+        let _outer_button = append_button(outer.as_ref(), "trap-outer-button", None);
+        let inner_button = append_button(inner.as_ref(), "trap-inner-button", None);
+
+        let outer_escapes = Rc::new(Cell::new(0));
+        let inner_escapes = Rc::new(Cell::new(0));
+
+        let platform = WebPlatformEffects;
+
+        let outer_cleanup = platform.attach_focus_trap(
+            "trap-outer-root",
+            Box::new({
+                let outer_escapes = Rc::clone(&outer_escapes);
+                move || outer_escapes.set(outer_escapes.get() + 1)
+            }),
+        );
+
+        let inner_cleanup = platform.attach_focus_trap(
+            "trap-inner-root",
+            Box::new({
+                let inner_escapes = Rc::clone(&inner_escapes);
+                move || inner_escapes.set(inner_escapes.get() + 1)
+            }),
+        );
+
+        focus::focus_element(&inner_button, false);
+
+        let init = KeyboardEventInit::new();
+
+        init.set_key("Escape");
+        init.set_bubbles(true);
+        init.set_cancelable(true);
+
+        let event = KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init)
+            .expect("nested escape event creation must succeed");
+
+        inner_button
+            .dispatch_event(&event)
+            .expect("dispatching nested escape event must succeed");
+
+        assert_eq!(inner_escapes.get(), 1);
+        assert_eq!(outer_escapes.get(), 0);
+        assert!(event.default_prevented());
+
+        inner_cleanup();
+        outer_cleanup();
+
+        remove_node(&outer);
     }
 }
