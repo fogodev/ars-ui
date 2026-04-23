@@ -167,10 +167,13 @@ pub trait PlatformEffects: Send + Sync {
 pub struct Rect {
     /// The x coordinate of the rectangle's origin.
     pub x: f64,
+
     /// The y coordinate of the rectangle's origin.
     pub y: f64,
+
     /// The width of the rectangle.
     pub width: f64,
+
     /// The height of the rectangle.
     pub height: f64,
 }
@@ -224,6 +227,7 @@ impl PlatformEffects for NullPlatformEffects {
     #[inline]
     fn set_timeout(&self, _delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
         callback();
+
         TimerHandle::new(0)
     }
 
@@ -325,6 +329,7 @@ impl PlatformEffects for NullPlatformEffects {
     #[inline]
     fn on_animation_end(&self, _id: &str, callback: Box<dyn FnOnce()>) -> Box<dyn FnOnce()> {
         callback();
+
         Box::new(|| {})
     }
 }
@@ -372,6 +377,7 @@ impl PlatformEffects for MissingProviderEffects {
     #[inline]
     fn tabbable_element_ids(&self, _container_id: &str) -> Vec<String> {
         Self::warn("tabbable_element_ids");
+
         Vec::new()
     }
 
@@ -383,7 +389,9 @@ impl PlatformEffects for MissingProviderEffects {
     #[inline]
     fn set_timeout(&self, _delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
         Self::warn("set_timeout");
+
         callback();
+
         TimerHandle::new(0)
     }
 
@@ -410,12 +418,14 @@ impl PlatformEffects for MissingProviderEffects {
     #[inline]
     fn resolved_direction(&self, _id: &str) -> ResolvedDirection {
         Self::warn("resolved_direction");
+
         ResolvedDirection::Ltr
     }
 
     #[inline]
     fn set_background_inert(&self, _portal_root_id: &str) -> Box<dyn FnOnce()> {
         Self::warn("set_background_inert");
+
         Box::new(|| {})
     }
 
@@ -437,6 +447,7 @@ impl PlatformEffects for MissingProviderEffects {
     #[inline]
     fn document_contains_id(&self, _id: &str) -> bool {
         Self::warn("document_contains_id");
+
         false
     }
 
@@ -447,12 +458,14 @@ impl PlatformEffects for MissingProviderEffects {
         _on_up: Box<dyn FnOnce()>,
     ) -> Box<dyn FnOnce()> {
         Self::warn("track_pointer_drag");
+
         Box::new(|| {})
     }
 
     #[inline]
     fn active_element_id(&self) -> Option<String> {
         Self::warn("active_element_id");
+
         None
     }
 
@@ -463,18 +476,21 @@ impl PlatformEffects for MissingProviderEffects {
         _on_escape: Box<dyn Fn()>,
     ) -> Box<dyn FnOnce()> {
         Self::warn("attach_focus_trap");
+
         Box::new(|| {})
     }
 
     #[inline]
     fn can_restore_focus(&self, _id: &str) -> bool {
         Self::warn("can_restore_focus");
+
         false
     }
 
     #[inline]
     fn nearest_focusable_ancestor_id(&self, _id: &str) -> Option<String> {
         Self::warn("nearest_focusable_ancestor_id");
+
         None
     }
 
@@ -491,31 +507,37 @@ impl PlatformEffects for MissingProviderEffects {
     #[inline]
     fn on_reduced_motion_change(&self, _callback: Box<dyn Fn(bool)>) -> Box<dyn FnOnce()> {
         Self::warn("on_reduced_motion_change");
+
         Box::new(|| {})
     }
 
     #[inline]
     fn is_mac_platform(&self) -> bool {
         Self::warn("is_mac_platform");
+
         false
     }
 
     #[inline]
     fn now_ms(&self) -> u64 {
         Self::warn("now_ms");
+
         0
     }
 
     #[inline]
     fn get_bounding_rect(&self, _id: &str) -> Option<Rect> {
         Self::warn("get_bounding_rect");
+
         None
     }
 
     #[inline]
     fn on_animation_end(&self, _id: &str, callback: Box<dyn FnOnce()>) -> Box<dyn FnOnce()> {
         Self::warn("on_animation_end");
+
         callback();
+
         Box::new(|| {})
     }
 }
@@ -532,6 +554,7 @@ mod tests {
     #[test]
     fn timer_handle_round_trip() {
         let handle = TimerHandle::new(42);
+
         assert_eq!(handle.id(), 42);
     }
 
@@ -540,6 +563,7 @@ mod tests {
     #[test]
     fn rect_default_is_zero() {
         let r = Rect::default();
+
         assert_eq!(r.x, 0.0);
         assert_eq!(r.y, 0.0);
         assert_eq!(r.width, 0.0);
@@ -551,18 +575,24 @@ mod tests {
     #[test]
     fn null_set_timeout_fires_immediately() {
         let fired = Rc::new(Cell::new(false));
+
         let fired_clone = Rc::clone(&fired);
+
         let _handle =
             NullPlatformEffects.set_timeout(1000, Box::new(move || fired_clone.set(true)));
+
         assert!(fired.get());
     }
 
     #[test]
     fn null_on_animation_end_fires_immediately() {
         let fired = Rc::new(Cell::new(false));
+
         let fired_clone = Rc::clone(&fired);
+
         let _cleanup =
             NullPlatformEffects.on_animation_end("el", Box::new(move || fired_clone.set(true)));
+
         assert!(fired.get());
     }
 
@@ -623,19 +653,90 @@ mod tests {
     #[test]
     fn missing_provider_set_timeout_fires_immediately() {
         let fired = Rc::new(Cell::new(false));
+
         let fired_clone = Rc::clone(&fired);
+
         let _handle =
             MissingProviderEffects.set_timeout(500, Box::new(move || fired_clone.set(true)));
+
         assert!(fired.get());
     }
 
     #[test]
     fn missing_provider_on_animation_end_fires_immediately() {
         let fired = Rc::new(Cell::new(false));
+
         let fired_clone = Rc::clone(&fired);
+
         let _cleanup =
             MissingProviderEffects.on_animation_end("el", Box::new(move || fired_clone.set(true)));
+
         assert!(fired.get());
+    }
+
+    #[test]
+    fn missing_provider_effects_cover_remaining_noop_paths() {
+        MissingProviderEffects.focus_element_by_id("id");
+        MissingProviderEffects.focus_first_tabbable("container");
+        MissingProviderEffects.focus_last_tabbable("container");
+
+        assert!(
+            MissingProviderEffects
+                .tabbable_element_ids("container")
+                .is_empty()
+        );
+
+        MissingProviderEffects.focus_body();
+        MissingProviderEffects.clear_timeout(TimerHandle::new(1));
+        MissingProviderEffects.announce("message");
+        MissingProviderEffects.announce_assertive("message");
+        MissingProviderEffects.position_element_at("id", 1.0, 2.0);
+
+        assert_eq!(
+            MissingProviderEffects.resolved_direction("id"),
+            ResolvedDirection::Ltr
+        );
+
+        let cleanup = MissingProviderEffects.set_background_inert("portal-root");
+
+        cleanup();
+
+        MissingProviderEffects.remove_inert_from_siblings("portal-root");
+        MissingProviderEffects.scroll_lock_acquire();
+        MissingProviderEffects.scroll_lock_release();
+
+        assert!(!MissingProviderEffects.document_contains_id("id"));
+
+        let drag_cleanup =
+            MissingProviderEffects.track_pointer_drag(Box::new(|_, _| {}), Box::new(|| {}));
+
+        drag_cleanup();
+
+        assert!(MissingProviderEffects.active_element_id().is_none());
+
+        let focus_cleanup = MissingProviderEffects.attach_focus_trap("container", Box::new(|| {}));
+
+        focus_cleanup();
+
+        assert!(!MissingProviderEffects.can_restore_focus("id"));
+        assert!(
+            MissingProviderEffects
+                .nearest_focusable_ancestor_id("id")
+                .is_none()
+        );
+
+        MissingProviderEffects.set_scroll_top("container", 24.0);
+        MissingProviderEffects.resize_to_content("textarea", None);
+        MissingProviderEffects.resize_to_content("textarea", Some("200px"));
+
+        let reduced_motion_cleanup =
+            MissingProviderEffects.on_reduced_motion_change(Box::new(|_| {}));
+
+        reduced_motion_cleanup();
+
+        assert!(!MissingProviderEffects.is_mac_platform());
+        assert_eq!(MissingProviderEffects.now_ms(), 0);
+        assert!(MissingProviderEffects.get_bounding_rect("id").is_none());
     }
 
     // -- Compile coverage: trait object usage ---------------------------------
@@ -649,46 +750,64 @@ mod tests {
         platform.focus_element_by_id("id");
         platform.focus_first_tabbable("id");
         platform.focus_last_tabbable("id");
+
         drop(platform.tabbable_element_ids("id"));
+
         platform.focus_body();
 
         let _handle = platform.set_timeout(0, Box::new(|| {}));
+
         platform.clear_timeout(TimerHandle::new(0));
 
         platform.announce("msg");
         platform.announce_assertive("msg");
 
         platform.position_element_at("id", 0.0, 0.0);
+
         let _ = platform.resolved_direction("id");
 
         let cleanup = platform.set_background_inert("id");
+
         cleanup();
+
         platform.remove_inert_from_siblings("id");
+
         platform.scroll_lock_acquire();
         platform.scroll_lock_release();
 
         let _ = platform.document_contains_id("id");
 
         let cleanup = platform.track_pointer_drag(Box::new(|_x, _y| {}), Box::new(|| {}));
+
         cleanup();
 
         drop(platform.active_element_id());
+
         let cleanup = platform.attach_focus_trap("id", Box::new(|| {}));
+
         cleanup();
+
         let _ = platform.can_restore_focus("id");
+
         drop(platform.nearest_focusable_ancestor_id("id"));
 
         platform.set_scroll_top("id", 0.0);
+
         platform.resize_to_content("id", None);
         platform.resize_to_content("id", Some("200px"));
 
         let cleanup = platform.on_reduced_motion_change(Box::new(|_reduced| {}));
+
         cleanup();
+
         let _ = platform.is_mac_platform();
+
         let _ = platform.now_ms();
+
         let _ = platform.get_bounding_rect("id");
 
         let cleanup = platform.on_animation_end("id", Box::new(|| {}));
+
         cleanup();
     }
 
@@ -696,8 +815,11 @@ mod tests {
     #[test]
     fn missing_provider_is_object_safe() {
         let platform: &dyn PlatformEffects = &MissingProviderEffects;
+
         platform.focus_element_by_id("test");
+
         let _ = platform.resolved_direction("test");
+
         assert!(!platform.document_contains_id("test"));
     }
 
@@ -706,6 +828,7 @@ mod tests {
     #[test]
     fn implementations_work_as_arc_trait_objects() {
         let null = Arc::new(NullPlatformEffects);
+
         let missing = Arc::new(MissingProviderEffects);
 
         null.focus_element_by_id("a");
@@ -721,17 +844,22 @@ mod tests {
         use alloc::collections::BTreeMap;
 
         let a = TimerHandle::new(1);
+
         let b = a; // Copy
+
         assert_eq!(a, b); // Eq
 
         // Prove Debug formatting:
         let debug = alloc::format!("{a:?}");
+
         assert!(debug.contains("TimerHandle"));
         assert!(debug.contains('1'));
 
         // Hash is proven by the derive; verify Eq works in a collection context:
         let mut map = BTreeMap::<u64, TimerHandle>::new();
+
         map.insert(a.id(), a);
+
         assert_eq!(map[&1], a);
     }
 
@@ -744,7 +872,9 @@ mod tests {
             width: 100.0,
             height: 50.0,
         };
+
         let r2 = r; // Copy
+
         assert_eq!(r, r2);
         assert_eq!(r.x, 10.0);
         assert_eq!(r.y, 20.0);

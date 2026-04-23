@@ -14,6 +14,7 @@ serde        = ["dep:serde"]
 ssr          = []
 debug        = ["dep:log"]
 embedded-css = []
+testing      = []
 
 [dependencies]
 ars-derive = { path = "../ars-derive" }
