@@ -1146,7 +1146,7 @@ mod wasm_tests {
         let first = append_button(container.as_ref(), "scope-tab-free-first", None, false);
         let last = append_button(container.as_ref(), "scope-tab-free-last", None, false);
 
-        let scope = FocusScope::new(
+        let mut scope = FocusScope::new(
             "scope-tab-free-container",
             FocusScopeOptions {
                 contain: false,
@@ -1155,7 +1155,15 @@ mod wasm_tests {
             },
         );
 
-        // Uncontained scope never prevents tab navigation regardless of position.
+        // Inactive scope short-circuits; verify first, then flip `active`
+        // so the remaining assertions exercise the
+        // `active && !contain` arm of `resolve_tab_navigation`.
+        focus_element(&first, false);
+        assert!(!scope.handle_tab_key(false));
+        scope.activate(FocusTarget::First);
+        assert!(scope.is_active());
+
+        // Active but uncontained scope still allows browser default navigation.
         focus_element(&first, false);
 
         assert!(!scope.handle_tab_key(false));
