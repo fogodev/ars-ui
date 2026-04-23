@@ -1465,6 +1465,29 @@ pub fn focus_first_tabbable(container_id: &str) {
     }
 }
 
+/// Lower-level browser helper used by `WebPlatformEffects::announce()`.
+///
+/// This function is responsible only for live-region DOM mutation and node
+/// bootstrap. Adapter-managed queueing and `LiveAnnouncer` context resolution
+/// live above this layer.
+pub(crate) fn announce_polite(message: &str) {
+    ensure_dom();
+    write_live_region("ars-live-polite", message);
+}
+
+/// Lower-level browser helper used by `WebPlatformEffects::announce_assertive()`.
+pub(crate) fn announce_assertive(message: &str) {
+    ensure_dom();
+    write_live_region("ars-live-assertive", message);
+}
+
+fn write_live_region(region_id: &str, message: &str) {
+    // 1. Clear child nodes immediately.
+    // 2. After ~150ms, insert a new <span> with the message text.
+    // 3. Later clear the inserted node to avoid stale announcements.
+    let _ = (region_id, message);
+}
+
 /// Focus `document.body` as a last-resort fallback (e.g., when a dialog's
 /// trigger element was removed from the DOM while the dialog was open).
 pub fn focus_body() {

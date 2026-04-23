@@ -159,11 +159,11 @@ When the page becomes hidden (user switches tabs, minimizes window), animations 
 
 - Listen to `document.addEventListener('visibilitychange', ...)` in the `"listen-animation-end"` effect.
 - When `document.visibilityState === "hidden"`:
-    - Pause the 5000ms fallback timeout by recording elapsed time via `performance.now()`.
-    - Browsers may throttle or pause `requestAnimationFrame` callbacks in background tabs — do not rely on rAF for timing while hidden.
+  - Pause the 5000ms fallback timeout by recording elapsed time via `performance.now()`.
+  - Browsers may throttle or pause `requestAnimationFrame` callbacks in background tabs — do not rely on rAF for timing while hidden.
 - When `document.visibilityState === "visible"`:
-    - Resume the fallback timeout with the remaining duration.
-    - Trigger a fresh `getComputedStyle()` read to check if the animation completed while hidden.
+  - Resume the fallback timeout with the remaining duration.
+  - Trigger a fresh `getComputedStyle()` read to check if the animation completed while hidden.
 
 **Batch Announcements:**
 
@@ -191,9 +191,9 @@ When a component is being removed from the DOM while an animation is still in pr
 
 2. **Cancel pending animations immediately**: When the component is being removed from the DOM, do NOT wait for `animationend` or `transitionend` events. Use `animation.cancel()` (Web Animations API) or remove the animation class synchronously to halt running animations.
 
-3. **Prevent callbacks on detached nodes**: If `animationend` or `transitionend` fires after the element has been removed from the DOM (detectable via `!document.contains(node)`), the callback MUST be a no-op. The `completed` guard (`SharedFlag`) in the `"listen-animation-end"` effect serves this purpose — set it to `true` during cleanup.
+3. **Prevent late callbacks after teardown**: If `animationend` or `transitionend` fires after teardown has started, the callback MUST be a no-op. The `completed` guard (`SharedFlag`) in the `"listen-animation-end"` effect serves this purpose — set it to `true` during cleanup. Adapter-managed node mutation cleanup may also guard detached-node DOM writes where needed.
 
-4. **State access guard**: Animation callbacks that access component state (context, props, signals) MUST verify the component is still alive before reading or writing state. In Rust frameworks, this means checking that `Rc`/`Arc` references have not been dropped (e.g., `Weak::upgrade()` returns `Some`).
+4. **State access guard**: Animation callbacks that access component state (context, props, signals) MUST verify the component is still alive before reading or writing state. The exact ownership pattern is adapter-specific; the invariant is that teardown must prevent callbacks from observing dropped state.
 
 5. **Cleanup ordering**: The effect cleanup function MUST:
     - Set the `completed` flag to `true` (prevents any pending listener from firing)
@@ -739,7 +739,9 @@ When both CSS animation and transition are active, wait for **BOTH** to complete
 
 **Animation listener (`animationend`):**
 
-- Use `{ once: true }` to prevent duplicate fires
+- Use one-shot completion semantics. Native `{ once: true }` is acceptable only
+  when bubbled child events cannot consume the listener before the target check;
+  otherwise keep the listener installed and ignore non-target events manually.
 - Use `event.target().is_same_node(Some(&element))` for FFI-safe comparison (not Rust `==`)
 - Call `event.stop_propagation()` to prevent parent animation bubbling
 - Only the FIRST completion event counts
@@ -748,21 +750,25 @@ When both CSS animation and transition are active, wait for **BOTH** to complete
 
 - Use the "longest-duration" approach: compute `max(duration[i] + delay[i])` across all transition properties
 - Filter `transitionend` events by `event.propertyName` matching the longest-duration property — other property completions are ignored
+- If the computed transition property resolves to `all`, the implementation may
+  treat target-owned `transitionend` events as candidates and only accept one
+  once the elapsed monotonic time has reached the computed longest-track
+  deadline; the `max_total_ms + 10ms` timeout remains the authoritative backstop
 - Install a safety-net timeout at `max_total_ms + 10ms`
 - Cancel the timeout if the `transitionend` event fires first
 
 ### 11.3 Race Condition Safeguards
 
-1. **DOM detachment:** Verify node is still in DOM (`document.contains(node)`) before DOM operations in cleanup. Component unmount during animation may leave a detached element.
+1. **Teardown safety:** Cleanup must tolerate the element already being detached. Any adapter-managed DOM writes after teardown begins must guard detached-node operations where needed.
 2. **Event filtering:** Track which CSS properties animated via `event.propertyName` and only count the FIRST completion for each type.
 3. **Bubbling prevention:** Use `event.stopPropagation()` on all animation/transition listeners to prevent parent CSS animations triggering on child elements.
 4. **Style caching:** Cache `getComputedStyle()` result immediately to avoid re-reading during DOM modification.
 5. **Single completion:** Only the FIRST `animationend` or `transitionend` event completes the transition. All listeners and timers MUST be cancelled immediately on the first completion event.
-6. **Weak references:** Use `Weak` references for send callbacks in long-lived animation listeners to avoid preventing service cleanup.
+6. **Ownership safety:** Long-lived animation listeners must not keep component state alive past teardown. The exact ownership strategy is adapter-specific.
 
 ### 11.4 Fallback Timeout
 
-A 5000ms ultimate fallback timeout guards against stuck animations where neither `animationend` nor `transitionend` fires (e.g., element removed from DOM mid-transition, browser bug). If the service has been dropped by the time the timeout fires, silently ignore (`Weak::upgrade` returns `None`).
+A 5000ms ultimate fallback timeout guards against stuck animations where neither `animationend` nor `transitionend` fires (e.g., element removed from DOM mid-transition, browser bug). If teardown has already completed by the time the timeout fires, it must be a no-op.
 
 ### 11.5 Cleanup
 
@@ -772,7 +778,7 @@ The cleanup function returned by `on_animation_end` MUST:
 2. Remove the `transitionend` listener (if installed)
 3. Cancel the safety-net transition timeout
 4. Cancel the 5000ms fallback timeout
-5. Guard all DOM cleanup operations with `document.contains(node)` — skip if the element was removed
+5. Mark the completion guard so late events and timeouts become no-ops
 
 ## 12. Library Parity
 

@@ -5,7 +5,10 @@
 //! modality as instance-scoped state so each provider root, window, or scene
 //! can track its own last input modality independently.
 
-use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use core::{
+    fmt::{self, Debug},
+    sync::atomic::{AtomicBool, AtomicU8, Ordering},
+};
 
 /// The input modality that initiated an interaction.
 ///
@@ -15,12 +18,16 @@ use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 pub enum PointerType {
     /// Physical mouse or trackpad.
     Mouse,
+
     /// Finger on a touchscreen.
     Touch,
+
     /// Stylus or digital pen.
     Pen,
+
     /// Keyboard-driven interaction.
     Keyboard,
+
     /// Programmatic or virtual-cursor activation.
     Virtual,
 }
@@ -30,10 +37,13 @@ pub enum PointerType {
 pub struct KeyModifiers {
     /// Whether the Shift key was held.
     pub shift: bool,
+
     /// Whether the physical Ctrl key was held.
     pub ctrl: bool,
+
     /// Whether the Alt/Option key was held.
     pub alt: bool,
+
     /// Whether the Meta/Cmd/Windows key was held.
     pub meta: bool,
 }
@@ -933,6 +943,7 @@ impl KeyboardKey {
 pub struct ModalitySnapshot {
     /// The most recent input modality observed for this context.
     pub last_pointer_type: Option<PointerType>,
+
     /// Whether any press interaction is currently active for this context.
     pub global_press_active: bool,
 }
@@ -997,6 +1008,8 @@ pub struct DefaultModalityContext {
     /// Encoded `Option<PointerType>`: 0=None, 1=Mouse, 2=Touch, 3=Pen,
     /// 4=Keyboard, 5=Virtual.
     last_pointer_type: AtomicU8,
+
+    /// Whether any press interaction is currently active for this context.
     global_press_active: AtomicBool,
 }
 
@@ -1017,8 +1030,8 @@ impl Default for DefaultModalityContext {
     }
 }
 
-impl core::fmt::Debug for DefaultModalityContext {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl Debug for DefaultModalityContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DefaultModalityContext")
             .field("snapshot", &self.snapshot())
             .finish()
@@ -1437,6 +1450,7 @@ mod tests {
     #[test]
     fn keyboard_input_sets_keyboard_modality() {
         let context = DefaultModalityContext::new();
+
         context.on_key_down(KeyboardKey::Tab, KeyModifiers::default());
 
         assert_eq!(context.last_pointer_type(), Some(PointerType::Keyboard));
@@ -1448,14 +1462,17 @@ mod tests {
         let context = DefaultModalityContext::new();
 
         context.on_pointer_down(PointerType::Mouse);
+
         assert_eq!(context.last_pointer_type(), Some(PointerType::Mouse));
         assert!(context.had_pointer_interaction());
 
         context.on_pointer_down(PointerType::Touch);
+
         assert_eq!(context.last_pointer_type(), Some(PointerType::Touch));
         assert!(context.had_pointer_interaction());
 
         context.on_pointer_down(PointerType::Pen);
+
         assert_eq!(context.last_pointer_type(), Some(PointerType::Pen));
         assert!(context.had_pointer_interaction());
     }
@@ -1463,6 +1480,7 @@ mod tests {
     #[test]
     fn virtual_input_is_not_pointer_interaction() {
         let context = DefaultModalityContext::new();
+
         context.on_virtual_input();
 
         assert_eq!(context.last_pointer_type(), Some(PointerType::Virtual));
@@ -1474,9 +1492,11 @@ mod tests {
         let context = DefaultModalityContext::new();
 
         context.set_global_press_active(true);
+
         assert!(context.is_global_press_active());
 
         context.set_global_press_active(false);
+
         assert!(!context.is_global_press_active());
     }
 
@@ -1494,6 +1514,7 @@ mod tests {
     #[test]
     fn clear_resets_context_state() {
         let context = DefaultModalityContext::new();
+
         context.on_pointer_down(PointerType::Touch);
         context.set_global_press_active(true);
 
@@ -1505,6 +1526,7 @@ mod tests {
     #[test]
     fn null_modality_context_is_a_no_op() {
         let context = NullModalityContext;
+
         context.on_key_down(KeyboardKey::Tab, KeyModifiers::default());
         context.on_pointer_down(PointerType::Mouse);
         context.on_virtual_input();
@@ -1517,6 +1539,7 @@ mod tests {
     #[test]
     fn default_modality_context_default_trait() {
         let context = DefaultModalityContext::default();
+
         assert_eq!(context.snapshot(), ModalitySnapshot::default());
     }
 
@@ -1527,6 +1550,7 @@ mod tests {
 
         let context = DefaultModalityContext::new();
         let debug = format!("{context:?}");
+
         assert!(debug.contains("DefaultModalityContext"));
         assert!(debug.contains("snapshot"));
     }
@@ -1535,6 +1559,7 @@ mod tests {
     fn pointer_type_encoding_covers_none() {
         // Exercises the None → 0 path in pointer_type_to_u8 via clear()
         let context = DefaultModalityContext::new();
+
         context.on_pointer_down(PointerType::Mouse);
         context.clear();
         assert_eq!(context.last_pointer_type(), None);

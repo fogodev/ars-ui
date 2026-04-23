@@ -37,6 +37,8 @@ pub mod focus;
 pub mod media;
 pub mod modality;
 pub mod overlay_stack;
+#[cfg(feature = "web")]
+pub mod platform;
 pub mod portal;
 pub mod positioning;
 mod scroll;
@@ -62,6 +64,8 @@ pub use overlay_stack::{
     OverlayEntry, contains_overlay, is_above, is_topmost, overlay_count, overlays_above,
     push_overlay, remove_overlay, reset_overlay_stack, topmost_overlay,
 };
+#[cfg(feature = "web")]
+pub use platform::WebPlatformEffects;
 #[cfg(feature = "web")]
 pub use portal::{
     ensure_portal_mount_root, get_or_create_portal_root, remove_inert_from_siblings,

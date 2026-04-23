@@ -65,27 +65,33 @@ mod tests {
     #[test]
     fn shared_flag_new_stores_initial_value() {
         let flag_false = SharedFlag::new(false);
+
         assert!(!flag_false.get());
 
         let flag_true = SharedFlag::new(true);
+
         assert!(flag_true.get());
     }
 
     #[test]
     fn shared_flag_default_is_false() {
         let flag = SharedFlag::default();
+
         assert!(!flag.get());
     }
 
     #[test]
     fn shared_flag_set_updates_value() {
         let flag = SharedFlag::new(false);
+
         assert!(!flag.get());
 
         flag.set(true);
+
         assert!(flag.get());
 
         flag.set(false);
+
         assert!(!flag.get());
     }
 
@@ -100,13 +106,16 @@ mod tests {
 
         // Setting on one affects the other
         flag1.set(true);
+
         assert!(flag2.get());
     }
 
     #[test]
     fn shared_flag_debug_shows_value() {
         let flag = SharedFlag::new(true);
+
         let debug = alloc::format!("{flag:?}");
+
         assert!(debug.contains("SharedFlag"));
         assert!(debug.contains("true"));
     }

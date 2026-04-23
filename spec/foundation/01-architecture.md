@@ -1370,7 +1370,10 @@ pub trait PlatformEffects {
     fn focus_first_tabbable(&self, container_id: &str);
     /// Focus the last tabbable element inside a container. No-op if not found.
     fn focus_last_tabbable(&self, container_id: &str);
-    /// Return IDs of all tabbable elements inside a container, in DOM order.
+    /// Return IDs of all tabbable elements inside a container in sequential tab order.
+    ///
+    /// Positive `tabindex` values sort before the natural tab sequence, with DOM
+    /// order breaking ties.
     fn tabbable_element_ids(&self, container_id: &str) -> Vec<String>;
     /// Focus the document body (last-resort fallback).
     fn focus_body(&self);
@@ -1629,11 +1632,19 @@ impl PlatformEffects for WebPlatformEffects {
         TimerHandle::new(id as u64)
     }
     fn announce(&self, message: &str) {
-        crate::live_announcer::announce(message);
+        crate::announcer::announce_polite(message);
     }
     // ... remaining methods delegate to existing ars_dom implementations
 }
 ```
+
+`PlatformEffects::announce()` and `announce_assertive()` define the minimum
+cross-platform announcement surface: deliver a best-effort polite or assertive
+live-region update. On web, `WebPlatformEffects` may implement this either by
+delegating directly to `ars-dom` live-region DOM helpers or by routing through
+an adapter-managed `LiveAnnouncer` service. Queueing, repeated-message
+deduplication, and assertive preemption remain adapter-level concerns when the
+full `LiveAnnouncer` integration is in use.
 
 #### 2.2.8 Context Snapshot Semantics
 

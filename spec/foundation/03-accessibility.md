@@ -2538,11 +2538,12 @@ pub struct Announcement {
 ///
 /// The adapter mounts a `LiveAnnouncerProvider` that wraps the application tree
 /// and provides `Rc<RefCell<LiveAnnouncer>>` via the framework's context system.
-/// Components access it indirectly through the `PlatformEffects::announce()` and
-/// `PlatformEffects::announce_assertive()` trait methods defined in
-/// `01-architecture.md` §2.2.7 — they never hold a direct reference. The web
-/// implementation (`WebPlatformEffects` in `ars-dom`) bridges those trait calls
-/// onto this `LiveAnnouncer` instance.
+/// Components that need coordinated queueing access it indirectly through
+/// adapter-managed announcement helpers built on top of the `ars-dom`
+/// live-region primitives — they never hold a direct reference.
+/// Simpler machine effects may use `PlatformEffects::announce()` /
+/// `announce_assertive()` for best-effort one-shot delivery when full queue
+/// coordination is unnecessary.
 ///
 /// This ensures announcements are coordinated, deduplicated, and testable
 /// (tests can provide a mock announcer or skip the provider for no-op behavior).
@@ -2691,13 +2692,15 @@ impl LiveAnnouncer {
         //    of the live region. Node insertion triggers more reliable screen
         //    reader detection than textContent replacement (especially NVDA).
         // 3. After clear_delay_ms, remove the <span> to clean up.
-        // 4. The ars-dom adapter calls notify_announced() after the live region update completes.
+        // 4. Adapter-managed queue helpers call notify_announced() after the
+        //    coordinated live region update completes. Best-effort one-shot
+        //    PlatformEffects announcements may skip queue coordination.
         let _ = (content, next.priority);
     }
 
-    /// Called by the ars-dom adapter after the live region content has been set
-    /// and the clear delay has elapsed. Resets `announcing` and processes the
-    /// next queued announcement.
+    /// Called by the adapter-managed queue bridge after the live region content
+    /// has been set and the clear delay has elapsed. Resets `announcing` and
+    /// processes the next queued announcement.
     pub fn notify_announced(&mut self) {
         self.announcing = false;
         self.active_priority = None;

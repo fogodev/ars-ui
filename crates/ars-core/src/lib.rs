@@ -273,6 +273,7 @@ impl<M: Machine> TransitionPlan<M> {
                 prev(ctx);
                 f(ctx);
             })),
+
             None => Some(Box::new(f)),
         };
 
@@ -1348,10 +1349,12 @@ mod tests {
 
         let first = {
             let cleanup_order = Rc::clone(&cleanup_order);
+
             Box::new(move || cleanup_order.borrow_mut().push("first")) as CleanupFn
         };
         let second = {
             let cleanup_order = Rc::clone(&cleanup_order);
+
             Box::new(move || cleanup_order.borrow_mut().push("second")) as CleanupFn
         };
 
@@ -1919,6 +1922,7 @@ mod tests {
                     .contains("[ars:toggle#btn-1]   apply: \"set pressed = true\"")
             })
             .expect("expected detail log");
+
         assert!(
             detail.message.contains("then_send: [Notify]"),
             "missing follow-up events: {detail:?}"
@@ -2512,7 +2516,6 @@ mod tests {
 
         let effect = PendingEffect::<ToggleMachine>::new("notify", {
             let cleanup_calls = Arc::clone(&cleanup_calls);
-
             move |_ctx, _props, send| {
                 send.call_if_alive(ToggleEvent::Toggle);
 
@@ -2531,9 +2534,11 @@ mod tests {
                 observed.store(true, Ordering::SeqCst);
             })
         };
+
         let props = ToggleProps {
             id: String::from("toggle"),
         };
+
         let (_state, context) = ToggleMachine::init(&props, &Env::default(), &());
 
         let cleanup = effect.run(&context, &props, send);

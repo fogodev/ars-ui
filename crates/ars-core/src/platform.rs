@@ -41,7 +41,10 @@ pub trait PlatformEffects: Send + Sync {
     /// Focus the last tabbable element inside a container. No-op if not found.
     fn focus_last_tabbable(&self, container_id: &str);
 
-    /// Return IDs of all tabbable elements inside a container, in DOM order.
+    /// Return IDs of all tabbable elements inside a container in sequential tab order.
+    ///
+    /// Positive `tabindex` values sort before the natural tab sequence, with DOM
+    /// order breaking ties.
     fn tabbable_element_ids(&self, container_id: &str) -> Vec<String>;
 
     /// Focus the document body (last-resort fallback).
