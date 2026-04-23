@@ -580,6 +580,7 @@ mod tests {
                 None,
                 None,
                 Arc::new(NullPlatformEffects),
+                Arc::new(ars_core::DefaultModalityContext::new()),
                 Arc::new(ars_i18n::StubIntlBackend),
                 Arc::new(I18nRegistries::new()),
                 Arc::new(crate::provider::NullPlatform),

@@ -10,8 +10,8 @@ use std::{
 };
 
 use ars_core::{
-    ColorMode, I18nRegistries, PlatformEffects, StyleStrategy,
-    resolve_messages as core_resolve_messages,
+    ColorMode, DefaultModalityContext, I18nRegistries, ModalityContext, PlatformEffects,
+    StyleStrategy, resolve_messages as core_resolve_messages,
 };
 use ars_i18n::{
     Direction, IntlBackend, Locale, NumberFormatOptions, NumberFormatter, StubIntlBackend,
@@ -49,6 +49,9 @@ pub struct ArsContext {
     /// Platform side-effect capabilities.
     pub platform: Arc<dyn PlatformEffects>,
 
+    /// Shared input-modality state for this provider root.
+    pub modality: Arc<dyn ModalityContext>,
+
     /// ICU-backed locale data provider.
     pub intl_backend: Arc<dyn IntlBackend>,
 
@@ -71,6 +74,7 @@ impl Debug for ArsContext {
             .field("portal_container_id", &self.portal_container_id)
             .field("root_node_id", &self.root_node_id)
             .field("platform", &"Arc(..)")
+            .field("modality", &"Arc(..)")
             .field("intl_backend", &"Arc(..)")
             .field("i18n_registries", &"Arc(..)")
             .field("style_strategy", &self.style_strategy)
@@ -95,6 +99,7 @@ impl ArsContext {
         portal_container_id: Option<String>,
         root_node_id: Option<String>,
         platform: Arc<dyn PlatformEffects>,
+        modality: Arc<dyn ModalityContext>,
         intl_backend: Arc<dyn IntlBackend>,
         i18n_registries: Arc<I18nRegistries>,
         style_strategy: StyleStrategy,
@@ -109,6 +114,7 @@ impl ArsContext {
             portal_container_id: Signal::stored(portal_container_id),
             root_node_id: Signal::stored(root_node_id),
             platform,
+            modality,
             intl_backend,
             i18n_registries,
             style_strategy,
@@ -166,6 +172,19 @@ pub fn use_intl_backend() -> Arc<dyn IntlBackend> {
             Arc::new(StubIntlBackend)
         },
         |ctx| -> Arc<dyn IntlBackend> { Arc::clone(&ctx.intl_backend) },
+    )
+}
+
+/// Resolves the shared input-modality context from provider context.
+#[must_use]
+pub fn use_modality_context() -> Arc<dyn ModalityContext> {
+    current_ars_context().map_or_else(
+        || -> Arc<dyn ModalityContext> {
+            warn_missing_provider("use_modality_context");
+
+            Arc::new(DefaultModalityContext::new())
+        },
+        |ctx| -> Arc<dyn ModalityContext> { Arc::clone(&ctx.modality) },
     )
 }
 
@@ -273,7 +292,10 @@ pub fn t<T: Translate + Send + Sync + 'static>(msg: T) -> impl IntoView {
 mod tests {
     use std::sync::Arc;
 
-    use ars_core::{ColorMode, I18nRegistries, NullPlatformEffects, StyleStrategy};
+    use ars_core::{
+        ColorMode, DefaultModalityContext, I18nRegistries, ModalityContext, NullPlatformEffects,
+        StyleStrategy,
+    };
     use ars_i18n::{
         Direction, IntlBackend, Locale, NumberFormatOptions, StubIntlBackend, Translate, locales,
     };
@@ -281,7 +303,8 @@ mod tests {
 
     use super::{
         ArsContext, current_ars_context, resolve_locale, t, translated_text, use_intl_backend,
-        use_locale, use_messages, use_number_formatter, use_resolved_number_formatter,
+        use_locale, use_messages, use_modality_context, use_number_formatter,
+        use_resolved_number_formatter,
     };
 
     #[derive(Clone, Debug, PartialEq)]
@@ -370,6 +393,7 @@ mod tests {
             portal_container_id: Signal::stored(None),
             root_node_id: Signal::stored(None),
             platform: Arc::new(NullPlatformEffects),
+            modality: Arc::new(DefaultModalityContext::new()),
             intl_backend,
             i18n_registries: Arc::new(I18nRegistries::new()),
             style_strategy: StyleStrategy::Inline,
@@ -389,6 +413,7 @@ mod tests {
 
             assert!(debug.contains("ArsContext"));
             assert!(debug.contains("platform: \"Arc(..)\""));
+            assert!(debug.contains("modality: \"Arc(..)\""));
             assert!(debug.contains("intl_backend: \"Arc(..)\""));
             assert!(debug.contains("i18n_registries: \"Arc(..)\""));
         });
@@ -513,6 +538,38 @@ mod tests {
     }
 
     #[test]
+    fn use_modality_context_reads_context_value() {
+        let owner = Owner::new();
+
+        owner.with(|| {
+            let expected: Arc<dyn ModalityContext> = Arc::new(DefaultModalityContext::new());
+
+            let (mut context, _) =
+                reactive_test_context(locales::en_us(), Arc::new(TestIntlBackend));
+
+            context.modality = Arc::clone(&expected);
+
+            crate::provide_ars_context(context);
+
+            assert!(Arc::ptr_eq(&use_modality_context(), &expected));
+        });
+    }
+
+    #[test]
+    fn use_modality_context_falls_back_without_provider() {
+        let owner = Owner::new();
+
+        owner.with(|| {
+            let first = use_modality_context();
+            let second = use_modality_context();
+
+            assert_eq!(first.snapshot(), ars_core::ModalitySnapshot::default());
+            assert_eq!(second.snapshot(), ars_core::ModalitySnapshot::default());
+            assert!(!Arc::ptr_eq(&first, &second));
+        });
+    }
+
+    #[test]
     fn use_intl_backend_falls_back_without_provider() {
         let owner = Owner::new();
 
@@ -552,6 +609,7 @@ mod tests {
                 None,
                 None,
                 Arc::new(NullPlatformEffects),
+                Arc::new(DefaultModalityContext::new()),
                 Arc::new(StubIntlBackend),
                 Arc::new(registries),
                 StyleStrategy::Inline,
@@ -800,6 +858,7 @@ mod wasm_tests {
             portal_container_id: Signal::stored(None),
             root_node_id: Signal::stored(None),
             platform: Arc::new(NullPlatformEffects),
+            modality: Arc::new(ars_core::DefaultModalityContext::new()),
             intl_backend,
             i18n_registries: Arc::new(I18nRegistries::new()),
             style_strategy: StyleStrategy::Inline,

@@ -1024,14 +1024,15 @@ impl<M: Machine> Service<M> {
     /// Updates props atomically and processes any resulting events.
     ///
     /// Calls [`Machine::on_props_changed`] with the old and new props,
-    /// enqueues any returned events, and drains the queue.
+    /// prepends any returned events ahead of already-queued user input, and
+    /// drains the queue.
     pub fn set_props(&mut self, props: M::Props) -> SendResult<M> {
         let old_props = core::mem::replace(&mut self.props, props);
 
         let events = M::on_props_changed(&old_props, &self.props);
 
-        for event in events {
-            self.event_queue.push_back(event);
+        for event in events.into_iter().rev() {
+            self.event_queue.push_front(event);
         }
 
         self.drain_queue()
@@ -1387,6 +1388,70 @@ mod tests {
     }
 
     #[test]
+    fn rejected_transition_returns_inert_send_result() {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum RejectEvent {
+            Ignore,
+        }
+
+        struct RejectMachine;
+
+        impl Machine for RejectMachine {
+            type State = ToggleState;
+            type Event = RejectEvent;
+            type Context = ToggleContext;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::Off, ToggleContext)
+            }
+
+            fn transition(
+                _state: &Self::State,
+                _event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                None
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+        }
+
+        let mut service = Service::<RejectMachine>::new(
+            ToggleProps {
+                id: String::from("toggle"),
+            },
+            &Env::default(),
+            &(),
+        );
+
+        let result = service.send(RejectEvent::Ignore);
+
+        assert!(!result.state_changed);
+        assert!(!result.context_changed);
+        assert!(result.pending_effects.is_empty());
+        assert!(result.cancel_effects.is_empty());
+        assert!(!result.truncated);
+        assert_eq!(result.context_change_count, 0);
+        assert_eq!(service.state(), &ToggleState::Off);
+        assert_eq!(service.context(), &ToggleContext);
+    }
+
+    #[test]
     fn context_only_plan_does_not_change_state() {
         // Verify context_only plan reports context_changed but not state_changed.
         #[derive(Clone, Debug, PartialEq)]
@@ -1667,6 +1732,104 @@ mod tests {
 
         assert!(result.context_changed);
         assert_eq!(service.context().mode, 1);
+    }
+
+    #[test]
+    fn set_props_prepends_prop_sync_events_ahead_of_queued_user_input() {
+        struct QueueOrderMachine;
+
+        #[derive(Clone, Debug, Default, PartialEq, Eq)]
+        struct QueueOrderContext {
+            events: Vec<&'static str>,
+        }
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum QueueOrderEvent {
+            PropSync,
+            UserInput,
+        }
+
+        impl Machine for QueueOrderMachine {
+            type State = ToggleState;
+            type Event = QueueOrderEvent;
+            type Context = QueueOrderContext;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::Off, QueueOrderContext::default())
+            }
+
+            fn transition(
+                _state: &Self::State,
+                event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                let label = match event {
+                    QueueOrderEvent::PropSync => "prop-sync",
+                    QueueOrderEvent::UserInput => "user-input",
+                };
+
+                Some(TransitionPlan::context_only(
+                    move |ctx: &mut QueueOrderContext| ctx.events.push(label),
+                ))
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+
+            fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+                if old.id == new.id {
+                    Vec::new()
+                } else {
+                    vec![QueueOrderEvent::PropSync]
+                }
+            }
+        }
+
+        let mut service = Service::<QueueOrderMachine>::new(
+            ToggleProps {
+                id: String::from("a"),
+            },
+            &Env::default(),
+            &(),
+        );
+        service.event_queue.push_back(QueueOrderEvent::UserInput);
+
+        let result = service.set_props(ToggleProps {
+            id: String::from("b"),
+        });
+
+        assert!(result.context_changed);
+        assert_eq!(
+            service.context().events,
+            vec!["prop-sync", "user-input"],
+            "prop sync events must be prepended so same-frame user input wins",
+        );
+
+        let unchanged = service.set_props(ToggleProps {
+            id: String::from("b"),
+        });
+
+        assert!(!unchanged.state_changed);
+        assert!(!unchanged.context_changed);
+        assert_eq!(
+            service.context().events,
+            vec!["prop-sync", "user-input"],
+            "unchanged props must not synthesize extra prop-sync work",
+        );
     }
 
     #[test]
