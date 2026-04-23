@@ -9,18 +9,20 @@
 use wasm_bindgen::JsCast;
 
 use super::Rect;
-// `PositioningOptions` and `PositioningResult` appear only in the pipeline
-// helper (`measure_and_compute_position`) and its pure worker, both of which
-// require either the `web` feature or a test build. `compute_position` and
-// `Strategy` are referenced even more narrowly (wasm32 + web, or tests). The
-// cfg gates match each import's call sites so the `ssr`-only lib build does
-// not warn about unused imports.
-#[cfg(any(test, all(feature = "web", target_arch = "wasm32")))]
-use super::compute::compute_position;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use super::types::Strategy;
 #[cfg(any(test, feature = "web"))]
 use super::types::{PositioningOptions, PositioningResult};
+// `PositioningOptions` and `PositioningResult` appear only in the pipeline
+// helper (`measure_and_compute_position`) and its pure worker, both of which
+// require either the `web` feature or a test build. `compute_position`,
+// `resolve_boundary_rect`, and `Boundary` are referenced even more narrowly
+// (wasm32 + web, or tests) by the pure worker's boundary-normalization path.
+// `Strategy` is only used by the wasm32 measurement glue. The cfg gates match
+// each import's call sites so the `ssr`-only lib build does not warn about
+// unused imports.
+#[cfg(any(test, all(feature = "web", target_arch = "wasm32")))]
+use super::{compute::compute_position, overflow::resolve_boundary_rect, types::Boundary};
 
 /// Convert a client-space point into an axis-aligned local coordinate space.
 ///
@@ -187,11 +189,26 @@ fn measure_and_compute_position_impl(
 
 /// Pure coordinate-space adjustment around [`compute_position`].
 ///
-/// When `local_origin` is `Some(rect)`, both the anchor rect and the viewport
-/// rect are converted from client space into the rect's local space by
-/// axis-aligned origin subtraction. When `local_origin` is `None`, both rects
-/// are forwarded unchanged, which matches the client-space behaviour of
-/// [`Strategy::Fixed`] with no containing-block ancestor.
+/// Resolves the caller's [`Boundary`] choice in client space first (picking up
+/// the `getBoundingClientRect()` reading for [`Boundary::Element`] on wasm, or
+/// the viewport fallback on host), then converts the anchor rect and that
+/// boundary rect into the `local_origin`'s local space via axis-aligned origin
+/// subtraction. When `local_origin` is `None`, both rects are forwarded
+/// unchanged, which matches the client-space behaviour of [`Strategy::Fixed`]
+/// with no containing-block ancestor.
+///
+/// The boundary is pre-resolved here — not left for [`compute_position`] to
+/// resolve — because `compute_position` calls `getBoundingClientRect()` itself,
+/// which always reports client-space coordinates. Leaving the boundary
+/// unconverted while anchor/viewport moved into local space would make
+/// flip/shift/max-size compare anchor-in-local-space against
+/// boundary-in-client-space, causing placement errors whenever `local_origin`
+/// is non-zero.
+///
+/// Because [`compute_position`]'s `viewport` argument is read only to resolve
+/// [`Boundary::Viewport`], this helper forwards the pre-resolved boundary as
+/// that argument and swaps `options.boundary` to [`Boundary::Viewport`] in a
+/// cloned copy so the engine's own resolution path is a no-op pass-through.
 ///
 /// Only compiled for the wasm32 web impl and the host tests; the non-wasm32
 /// lib build relies on the [`measure_and_compute_position`] stub returning
@@ -204,16 +221,21 @@ fn compute_in_local_space(
     local_origin: Option<&Rect>,
     options: &PositioningOptions,
 ) -> PositioningResult {
-    let (anchor, viewport) = if let Some(origin) = local_origin {
+    let boundary_client = resolve_boundary_rect(&options.boundary, viewport_client);
+
+    let (anchor, boundary) = if let Some(origin) = local_origin {
         (
             client_rect_to_local_space(anchor_client, origin),
-            client_rect_to_local_space(viewport_client, origin),
+            client_rect_to_local_space(&boundary_client, origin),
         )
     } else {
-        (*anchor_client, *viewport_client)
+        (*anchor_client, boundary_client)
     };
 
-    compute_position(&anchor, floating_dims, &viewport, options)
+    let mut normalized_options = options.clone();
+    normalized_options.boundary = Boundary::Viewport;
+
+    compute_position(&anchor, floating_dims, &boundary, &normalized_options)
 }
 
 #[cfg(any(test, all(feature = "web", target_arch = "wasm32")))]
@@ -1006,7 +1028,7 @@ mod tests {
 
     use crate::positioning::{
         compute::compute_position,
-        types::{Placement, PositioningOptions},
+        types::{Boundary, Placement, PositioningOptions},
     };
 
     fn pipeline_options(placement: Placement) -> PositioningOptions {
@@ -1176,6 +1198,207 @@ mod tests {
         // Sanity-check anchor_local matches §2.8 example arithmetic.
         assert_eq!(anchor_local.x, 86.5);
         assert_eq!(anchor_local.y, 70.25);
+    }
+
+    // -----------------------------------------------------------------
+    // Regression coverage for the Boundary coordinate-space fix.
+    //
+    // `compute_position` resolves `Boundary::Element` via
+    // `getBoundingClientRect()` on wasm, which reports client-space
+    // coordinates. When `compute_in_local_space` has already moved anchor
+    // and viewport into the containing-block's local space, the engine
+    // would otherwise compare local-space positions against a client-space
+    // boundary — mispredicting flip/shift/max-size whenever `local_origin`
+    // is non-zero. The fix pre-resolves the boundary in client space, runs
+    // the same origin subtraction on it, and passes `Boundary::Viewport`
+    // to the engine so the already-resolved rect is used as-is.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn pipeline_boundary_element_fallback_is_converted_to_local_space_when_origin_is_non_zero() {
+        // `Boundary::Element` cannot actually resolve a DOM element on host
+        // targets, so `resolve_boundary_rect` falls back to the passed
+        // viewport. The fix must still run that fallback rect through the
+        // same origin subtraction as the anchor — otherwise flip would
+        // compare the local-space anchor against the client-space viewport.
+        //
+        // Setup: an anchor whose right edge, when measured in local space,
+        // overflows the (converted) viewport by enough to trigger flip.
+        // The exact deltas here are chosen so the two code paths would
+        // disagree if the fix regressed — a large local origin makes the
+        // client-vs-local mismatch unmistakable.
+        let origin = Rect {
+            x: 400.0,
+            y: 300.0,
+            width: 0.0,
+            height: 0.0,
+        };
+
+        let anchor_client = Rect {
+            x: 950.0,
+            y: 360.0,
+            width: 40.0,
+            height: 20.0,
+        };
+
+        let floating = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 80.0,
+            height: 20.0,
+        };
+
+        let viewport_client = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 1024.0,
+            height: 768.0,
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let element_ref: std::sync::Arc<dyn std::any::Any + Send + Sync> = std::sync::Arc::new(());
+        #[cfg(target_arch = "wasm32")]
+        let element_ref: std::rc::Rc<dyn std::any::Any> = std::rc::Rc::new(());
+
+        let options = PositioningOptions {
+            placement: Placement::Right,
+            boundary: Boundary::Element(element_ref),
+            flip: true,
+            ..PositioningOptions::default()
+        };
+
+        let pipeline = compute_in_local_space(
+            &anchor_client,
+            &floating,
+            &viewport_client,
+            Some(&origin),
+            &options,
+        );
+
+        // Expected: boundary fallback is `viewport_client` (since the
+        // element cannot resolve on host), converted to local space, and
+        // passed in via `Boundary::Viewport`.
+        let anchor_local = client_rect_to_local_space(&anchor_client, &origin);
+        let boundary_local = client_rect_to_local_space(&viewport_client, &origin);
+
+        let mut expected_options = options.clone();
+        expected_options.boundary = Boundary::Viewport;
+
+        let expected =
+            compute_position(&anchor_local, &floating, &boundary_local, &expected_options);
+
+        assert_eq!(pipeline, expected);
+    }
+
+    #[test]
+    fn pipeline_boundary_viewport_with_local_origin_still_matches_hand_computed_local_space() {
+        // Regression guard for the common path. Even after the fix rewrote
+        // the internals to pre-resolve the boundary and swap to
+        // `Boundary::Viewport`, `Boundary::Viewport` + `local_origin =
+        // Some(..)` must still produce the same result as hand-applying
+        // origin subtraction to anchor and viewport and calling
+        // `compute_position` directly. This covers the overwhelmingly
+        // common overlay case (no explicit boundary element).
+        let origin = Rect {
+            x: 150.0,
+            y: 90.0,
+            width: 600.0,
+            height: 500.0,
+        };
+
+        let anchor_client = Rect {
+            x: 300.0,
+            y: 210.0,
+            width: 100.0,
+            height: 40.0,
+        };
+
+        let floating = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 60.0,
+            height: 24.0,
+        };
+
+        let viewport_client = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 1280.0,
+            height: 800.0,
+        };
+
+        let options = PositioningOptions {
+            placement: Placement::Bottom,
+            flip: true,
+            shift: true,
+            ..PositioningOptions::default()
+        };
+
+        let pipeline = compute_in_local_space(
+            &anchor_client,
+            &floating,
+            &viewport_client,
+            Some(&origin),
+            &options,
+        );
+
+        // Pre-fix semantics: manual origin subtraction, then
+        // `Boundary::Viewport` resolves to that converted viewport.
+        let anchor_local = client_rect_to_local_space(&anchor_client, &origin);
+        let viewport_local = client_rect_to_local_space(&viewport_client, &origin);
+        let expected = compute_position(&anchor_local, &floating, &viewport_local, &options);
+
+        assert_eq!(pipeline, expected);
+    }
+
+    #[test]
+    fn pipeline_without_local_origin_passes_boundary_element_through_as_resolved_rect() {
+        // When `local_origin` is `None`, the fix must not quietly alter
+        // output either: `Boundary::Element` still falls back to viewport
+        // on host, so the pipeline's result must match calling
+        // `compute_position` directly with client-space anchor/viewport
+        // and `Boundary::Viewport`.
+        let anchor = Rect {
+            x: 200.0,
+            y: 160.0,
+            width: 120.0,
+            height: 32.0,
+        };
+
+        let floating = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 80.0,
+            height: 24.0,
+        };
+
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 1024.0,
+            height: 768.0,
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let element_ref: std::sync::Arc<dyn std::any::Any + Send + Sync> = std::sync::Arc::new(());
+        #[cfg(target_arch = "wasm32")]
+        let element_ref: std::rc::Rc<dyn std::any::Any> = std::rc::Rc::new(());
+
+        let options = PositioningOptions {
+            placement: Placement::Bottom,
+            boundary: Boundary::Element(element_ref),
+            flip: true,
+            ..PositioningOptions::default()
+        };
+
+        let pipeline = compute_in_local_space(&anchor, &floating, &viewport, None, &options);
+
+        let mut expected_options = options.clone();
+        expected_options.boundary = Boundary::Viewport;
+
+        let expected = compute_position(&anchor, &floating, &viewport, &expected_options);
+
+        assert_eq!(pipeline, expected);
     }
 }
 
@@ -1734,7 +1957,10 @@ mod wasm_tests {
     // conversion (spec §2.3.1–§2.8.1, issue #595).
     // -----------------------------------------------------------------
 
-    use crate::positioning::types::{Placement, PositioningOptions, Strategy};
+    use crate::positioning::{
+        compute::compute_position,
+        types::{Boundary, Placement, PositioningOptions, Strategy},
+    };
 
     fn pipeline_options(placement: Placement, strategy: Strategy) -> PositioningOptions {
         PositioningOptions {
@@ -2027,5 +2253,112 @@ mod wasm_tests {
             result.y
         );
         assert_eq!(result.actual_placement, Placement::Bottom);
+    }
+
+    #[wasm_bindgen_test]
+    fn measure_and_compute_position_converts_boundary_element_rect_to_local_space() {
+        // Regression test for the `Boundary::Element` coordinate-space fix:
+        // when the floating element's containing block has a non-zero local
+        // origin (here, a translateX ancestor) and the caller uses an
+        // explicit `Boundary::Element`, the pipeline MUST convert the
+        // boundary's `getBoundingClientRect()` reading into local space
+        // before handing it to the engine. Otherwise flip/shift/max-size
+        // compare local-space anchor against a client-space boundary and
+        // mispredict placement.
+        //
+        // Host tests can only exercise the fallback path because
+        // `Boundary::Element` doesn't resolve to a real rect on non-wasm;
+        // this browser test is the one that exercises the actual
+        // DOM-resolved element boundary path.
+        let fixture = DomFixture::new();
+
+        // Transformed containing block — creates a non-zero local origin
+        // for `position: fixed` descendants (spec §2.3.1 "Step 0").
+        let ancestor = DomFixture::append_child(
+            &fixture.root,
+            "transform: translateX(30px); position: relative; left: 20px; top: 15px; width: 400px; height: 300px;",
+        );
+
+        // Scroll container used as the explicit overflow boundary.
+        // `getBoundingClientRect()` on this element returns client-space
+        // coordinates; the fix must run those through origin subtraction
+        // so they match the anchor/viewport conversion the pipeline does.
+        let scroller = DomFixture::append_child(
+            &ancestor,
+            "position: absolute; left: 40px; top: 50px; width: 200px; height: 150px;",
+        );
+
+        let anchor = DomFixture::append_child(
+            &scroller,
+            "position: absolute; left: 40px; top: 30px; width: 60px; height: 20px;",
+        );
+
+        let floating = DomFixture::append_child(
+            &ancestor,
+            "position: fixed; left: 0; top: 0; width: 80px; height: 20px;",
+        );
+
+        let scroller_handle: std::rc::Rc<dyn std::any::Any> = std::rc::Rc::new(scroller.clone());
+
+        let options = PositioningOptions {
+            placement: Placement::Bottom,
+            strategy: Strategy::Fixed,
+            boundary: Boundary::Element(scroller_handle),
+            flip: true,
+            shift: true,
+            ..PositioningOptions::default()
+        };
+
+        let actual = measure_and_compute_position(&anchor, &floating, &options).expect(
+            "pipeline should succeed with an element boundary under a transformed ancestor",
+        );
+
+        // Manually run the same pipeline to build the expected result:
+        // 1. Resolve every input in client space via `get_bounding_client_rect()`.
+        // 2. Subtract the containing block's local origin (padding-box, which
+        //    equals client-box here because the ancestor has no border) from
+        //    every rect.
+        // 3. Call `compute_position` with `Boundary::Viewport` so the engine
+        //    uses the already-resolved boundary rect as-is.
+        let ancestor_client = ancestor.get_bounding_client_rect();
+        let anchor_client = anchor.get_bounding_client_rect();
+        let scroller_client = scroller.get_bounding_client_rect();
+        let floating_client = floating.get_bounding_client_rect();
+
+        let anchor_local = Rect {
+            x: anchor_client.x() - ancestor_client.x(),
+            y: anchor_client.y() - ancestor_client.y(),
+            width: anchor_client.width(),
+            height: anchor_client.height(),
+        };
+
+        let floating_dims = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: floating_client.width(),
+            height: floating_client.height(),
+        };
+
+        let boundary_local = Rect {
+            x: scroller_client.x() - ancestor_client.x(),
+            y: scroller_client.y() - ancestor_client.y(),
+            width: scroller_client.width(),
+            height: scroller_client.height(),
+        };
+
+        let mut expected_options = options.clone();
+        expected_options.boundary = Boundary::Viewport;
+
+        let expected = compute_position(
+            &anchor_local,
+            &floating_dims,
+            &boundary_local,
+            &expected_options,
+        );
+
+        assert_eq!(
+            actual, expected,
+            "pipeline must convert Boundary::Element to local space before running the engine",
+        );
     }
 }
