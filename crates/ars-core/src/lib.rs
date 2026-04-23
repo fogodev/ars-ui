@@ -40,6 +40,8 @@ pub mod platform;
 pub mod provider;
 mod shared_flag;
 mod shared_state;
+#[cfg(any(test, feature = "testing"))]
+pub mod test_helpers;
 mod url;
 mod weak_send;
 
@@ -1085,7 +1087,7 @@ impl<M: Machine> Service<M> {
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec;
+    use alloc::{format, vec};
     #[cfg(feature = "debug")]
     use std::sync::{Mutex, Once};
 
@@ -1300,6 +1302,67 @@ mod tests {
     }
 
     #[test]
+    fn default_machine_on_props_changed_returns_no_events() {
+        let old = ToggleProps {
+            id: String::from("toggle-old"),
+        };
+        let new = ToggleProps {
+            id: String::from("toggle-new"),
+        };
+
+        assert!(<ToggleMachine as Machine>::on_props_changed(&old, &new).is_empty());
+    }
+
+    #[test]
+    fn service_accessors_debug_connect_and_unmount_behave_as_expected() {
+        use alloc::{format, rc::Rc};
+        use core::cell::RefCell;
+
+        let mut service = Service::<ToggleMachine>::new(
+            ToggleProps {
+                id: String::from("toggle"),
+            },
+            &Env::default(),
+            &(),
+        );
+
+        assert_eq!(service.props().id, "toggle");
+
+        service.props_mut().id = String::from("toggle-updated");
+        *service.context_mut() = ToggleContext;
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.part_attrs(TogglePart), AttrMap::new());
+        assert_eq!(service.props().id, "toggle-updated");
+
+        let debug = format!("{service:?}");
+
+        assert!(debug.contains("Service"));
+        assert!(debug.contains("props_id"));
+        assert!(!service.is_unmounted());
+
+        service.event_queue.push_back(ToggleEvent::Toggle);
+
+        let cleanup_order = Rc::new(RefCell::new(Vec::new()));
+
+        let first = {
+            let cleanup_order = Rc::clone(&cleanup_order);
+            Box::new(move || cleanup_order.borrow_mut().push("first")) as CleanupFn
+        };
+        let second = {
+            let cleanup_order = Rc::clone(&cleanup_order);
+            Box::new(move || cleanup_order.borrow_mut().push("second")) as CleanupFn
+        };
+
+        service.unmount(vec![first, second]);
+
+        assert!(service.event_queue.is_empty());
+        assert!(service.is_unmounted());
+        assert_eq!(cleanup_order.borrow().as_slice(), ["second", "first"]);
+    }
+
+    #[test]
     fn send_result_reports_no_change_when_ignored() {
         let mut service = Service::<ToggleMachine>::new(
             ToggleProps {
@@ -1373,6 +1436,11 @@ mod tests {
             &(),
         );
 
+        assert_eq!(
+            service.connect(&|_| {}).part_attrs(TogglePart),
+            AttrMap::new()
+        );
+
         let result = service.send(ToggleEvent::Toggle);
 
         assert!(!result.state_changed);
@@ -1431,6 +1499,11 @@ mod tests {
             &(),
         );
 
+        assert_eq!(
+            service.connect(&|_| {}).part_attrs(TogglePart),
+            AttrMap::new()
+        );
+
         let result = service.send(ToggleEvent::Toggle);
 
         assert_eq!(result.cancel_effects, vec!["timer", "polling"]);
@@ -1481,6 +1554,11 @@ mod tests {
             },
             &Env::default(),
             &(),
+        );
+
+        assert_eq!(
+            service.connect(&|_| {}).part_attrs(TogglePart),
+            AttrMap::new()
         );
 
         let result = service.send(ToggleEvent::Toggle);
@@ -1565,6 +1643,19 @@ mod tests {
             &Env::default(),
             &(),
         );
+
+        assert_eq!(
+            service.connect(&|_| {}).part_attrs(TogglePart),
+            AttrMap::new()
+        );
+        assert_eq!(service.context().mode, 0);
+
+        let unchanged = service.set_props(ToggleProps {
+            id: String::from("a"),
+        });
+
+        assert!(!unchanged.state_changed);
+        assert!(!unchanged.context_changed);
         assert_eq!(service.context().mode, 0);
 
         let result = service.set_props(ToggleProps {
@@ -2499,6 +2590,87 @@ mod tests {
     }
 
     #[test]
+    fn transition_plan_apply_chains_mutations_in_order() {
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        struct ChainContext {
+            values: Vec<u8>,
+        }
+
+        struct ApplyMachine;
+
+        impl Machine for ApplyMachine {
+            type State = ToggleState;
+            type Event = ToggleEvent;
+            type Context = ChainContext;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::Off, ChainContext { values: Vec::new() })
+            }
+
+            fn transition(
+                _state: &Self::State,
+                _event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                Some(
+                    TransitionPlan::new()
+                        .apply(|ctx: &mut ChainContext| ctx.values.push(1))
+                        .apply(|ctx: &mut ChainContext| ctx.values.push(2)),
+                )
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+        }
+
+        let mut service = Service::<ApplyMachine>::new(
+            ToggleProps {
+                id: String::from("apply"),
+            },
+            &Env::default(),
+            &(),
+        );
+
+        assert_eq!(
+            service.connect(&|_| {}).part_attrs(TogglePart),
+            AttrMap::new()
+        );
+
+        let result = service.send(ToggleEvent::Toggle);
+
+        assert!(!result.state_changed);
+        assert!(result.context_changed);
+        assert_eq!(service.context().values, vec![1, 2]);
+    }
+
+    #[test]
+    fn transition_plan_default_matches_new_and_formats_apply_closures() {
+        use alloc::format;
+
+        let default_plan = TransitionPlan::<ToggleMachine>::default();
+        let new_plan = TransitionPlan::<ToggleMachine>::new();
+        let apply_plan = TransitionPlan::<ToggleMachine>::context_only(|_ctx| {});
+
+        assert_eq!(default_plan.debug_summary(), "none");
+        assert_eq!(format!("{default_plan:?}"), format!("{new_plan:?}"));
+        assert!(format!("{apply_plan:?}").contains("apply: \"<closure>\""));
+    }
+
+    #[test]
     fn transition_plan_debug_summary_distinguishes_plan_kinds() {
         assert_eq!(
             TransitionPlan::<ToggleMachine>::new().debug_summary(),
@@ -2524,6 +2696,67 @@ mod tests {
         );
         assert!(css.contains(".ars-sr-input"));
         assert!(css.contains(".ars-touch-none"));
+    }
+
+    #[test]
+    fn toggle_props_has_id_helpers_replace_and_mutate_ids() {
+        let props = ToggleProps {
+            id: String::from("before"),
+        };
+
+        let replaced = props.clone().with_id(String::from("after"));
+
+        assert_eq!(props.id(), "before");
+        assert_eq!(replaced.id(), "after");
+
+        let mut mutated = props;
+
+        mutated.set_id(String::from("mutated"));
+
+        assert_eq!(mutated.id(), "mutated");
+    }
+
+    #[test]
+    fn component_part_data_attrs_include_scope_and_name() {
+        assert_eq!(
+            TogglePart::ROOT.data_attrs(),
+            [
+                (HtmlAttr::Data("ars-scope"), "toggle"),
+                (HtmlAttr::Data("ars-part"), "root"),
+            ]
+        );
+        assert_eq!(TogglePart::all(), vec![TogglePart]);
+    }
+
+    #[test]
+    fn env_debug_includes_locale_and_backend_placeholder() {
+        let debug = format!("{:?}", Env::default());
+
+        assert!(debug.contains("Env"));
+        assert!(debug.contains("en-US"));
+        assert!(debug.contains("Arc(..)"));
+    }
+
+    #[test]
+    fn send_result_debug_lists_effect_names() {
+        let result = SendResult::<ToggleMachine> {
+            state_changed: true,
+            context_changed: false,
+            pending_effects: vec![
+                PendingEffect::named("focus"),
+                PendingEffect::named("announce"),
+            ],
+            cancel_effects: vec!["timer"],
+            truncated: false,
+            context_change_count: 0,
+        };
+
+        let debug = format!("{result:?}");
+
+        assert!(debug.contains("SendResult"));
+        assert!(debug.contains("focus"));
+        assert!(debug.contains("announce"));
+        assert!(debug.contains("timer"));
     }
 
     #[cfg(feature = "embedded-css")]

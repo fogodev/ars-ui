@@ -2237,7 +2237,10 @@ impl serde::Serialize for CssProperty {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{string::ToString, vec};
+    use alloc::{
+        string::{String, ToString},
+        vec,
+    };
 
     use super::*;
 
@@ -2245,6 +2248,66 @@ mod tests {
     fn aria_attr_display_matches_attribute_name() {
         assert_eq!(AriaAttr::Label.to_string(), "aria-label");
         assert_eq!(AriaAttr::DescribedBy.as_str(), "aria-describedby");
+    }
+
+    #[test]
+    fn aria_attr_as_str_covers_full_variant_table() {
+        let cases = [
+            (AriaAttr::ActiveDescendant, "aria-activedescendant"),
+            (AriaAttr::AutoComplete, "aria-autocomplete"),
+            (AriaAttr::Checked, "aria-checked"),
+            (AriaAttr::Disabled, "aria-disabled"),
+            (AriaAttr::ErrorMessage, "aria-errormessage"),
+            (AriaAttr::Expanded, "aria-expanded"),
+            (AriaAttr::HasPopup, "aria-haspopup"),
+            (AriaAttr::Hidden, "aria-hidden"),
+            (AriaAttr::Invalid, "aria-invalid"),
+            (AriaAttr::KeyShortcuts, "aria-keyshortcuts"),
+            (AriaAttr::Label, "aria-label"),
+            (AriaAttr::LabelledBy, "aria-labelledby"),
+            (AriaAttr::Level, "aria-level"),
+            (AriaAttr::Modal, "aria-modal"),
+            (AriaAttr::MultiLine, "aria-multiline"),
+            (AriaAttr::MultiSelectable, "aria-multiselectable"),
+            (AriaAttr::Orientation, "aria-orientation"),
+            (AriaAttr::Placeholder, "aria-placeholder"),
+            (AriaAttr::Pressed, "aria-pressed"),
+            (AriaAttr::ReadOnly, "aria-readonly"),
+            (AriaAttr::Required, "aria-required"),
+            (AriaAttr::RoleDescription, "aria-roledescription"),
+            (AriaAttr::Selected, "aria-selected"),
+            (AriaAttr::Sort, "aria-sort"),
+            (AriaAttr::ValueMax, "aria-valuemax"),
+            (AriaAttr::ValueMin, "aria-valuemin"),
+            (AriaAttr::ValueNow, "aria-valuenow"),
+            (AriaAttr::ValueText, "aria-valuetext"),
+            (AriaAttr::Atomic, "aria-atomic"),
+            (AriaAttr::Busy, "aria-busy"),
+            (AriaAttr::Live, "aria-live"),
+            (AriaAttr::Relevant, "aria-relevant"),
+            (AriaAttr::DropEffect, "aria-dropeffect"),
+            (AriaAttr::Grabbed, "aria-grabbed"),
+            (AriaAttr::ColCount, "aria-colcount"),
+            (AriaAttr::ColIndex, "aria-colindex"),
+            (AriaAttr::ColSpan, "aria-colspan"),
+            (AriaAttr::Controls, "aria-controls"),
+            (AriaAttr::Current, "aria-current"),
+            (AriaAttr::DescribedBy, "aria-describedby"),
+            (AriaAttr::Description, "aria-description"),
+            (AriaAttr::Details, "aria-details"),
+            (AriaAttr::FlowTo, "aria-flowto"),
+            (AriaAttr::Owns, "aria-owns"),
+            (AriaAttr::PosInSet, "aria-posinset"),
+            (AriaAttr::RowCount, "aria-rowcount"),
+            (AriaAttr::RowIndex, "aria-rowindex"),
+            (AriaAttr::RowSpan, "aria-rowspan"),
+            (AriaAttr::SetSize, "aria-setsize"),
+        ];
+
+        for (attr, expected) in cases {
+            assert_eq!(attr.as_str(), expected);
+            assert_eq!(attr.to_string(), expected);
+        }
     }
 
     #[test]
@@ -2268,19 +2331,441 @@ mod tests {
     }
 
     #[test]
+    fn html_attr_static_name_covers_full_variant_table() {
+        let cases = [
+            (HtmlAttr::AccessKey, "accesskey"),
+            (HtmlAttr::AutoCapitalize, "autocapitalize"),
+            (HtmlAttr::AutoCorrect, "autocorrect"),
+            (HtmlAttr::AutoFocus, "autofocus"),
+            (HtmlAttr::Class, "class"),
+            (HtmlAttr::ContentEditable, "contenteditable"),
+            (HtmlAttr::Dir, "dir"),
+            (HtmlAttr::Draggable, "draggable"),
+            (HtmlAttr::EnterKeyHint, "enterkeyhint"),
+            (HtmlAttr::Hidden, "hidden"),
+            (HtmlAttr::Id, "id"),
+            (HtmlAttr::Inert, "inert"),
+            (HtmlAttr::InputMode, "inputmode"),
+            (HtmlAttr::Is, "is"),
+            (HtmlAttr::ItemId, "itemid"),
+            (HtmlAttr::ItemProp, "itemprop"),
+            (HtmlAttr::ItemRef, "itemref"),
+            (HtmlAttr::ItemScope, "itemscope"),
+            (HtmlAttr::ItemType, "itemtype"),
+            (HtmlAttr::Lang, "lang"),
+            (HtmlAttr::Nonce, "nonce"),
+            (HtmlAttr::Popover, "popover"),
+            (HtmlAttr::Role, "role"),
+            (HtmlAttr::Slot, "slot"),
+            (HtmlAttr::SpellCheck, "spellcheck"),
+            (HtmlAttr::TabIndex, "tabindex"),
+            (HtmlAttr::Title, "title"),
+            (HtmlAttr::Translate, "translate"),
+            (HtmlAttr::WritingSuggestions, "writingsuggestions"),
+            (HtmlAttr::Accept, "accept"),
+            (HtmlAttr::AcceptCharset, "accept-charset"),
+            (HtmlAttr::Action, "action"),
+            (HtmlAttr::Alpha, "alpha"),
+            (HtmlAttr::AutoComplete, "autocomplete"),
+            (HtmlAttr::Capture, "capture"),
+            (HtmlAttr::Checked, "checked"),
+            (HtmlAttr::Cols, "cols"),
+            (HtmlAttr::ColorSpace, "colorspace"),
+            (HtmlAttr::Command, "command"),
+            (HtmlAttr::CommandFor, "commandfor"),
+            (HtmlAttr::Disabled, "disabled"),
+            (HtmlAttr::DirName, "dirname"),
+            (HtmlAttr::EncType, "enctype"),
+            (HtmlAttr::For, "for"),
+            (HtmlAttr::Form, "form"),
+            (HtmlAttr::FormAction, "formaction"),
+            (HtmlAttr::FormEncType, "formenctype"),
+            (HtmlAttr::FormMethod, "formmethod"),
+            (HtmlAttr::FormNoValidate, "formnovalidate"),
+            (HtmlAttr::FormTarget, "formtarget"),
+            (HtmlAttr::High, "high"),
+            (HtmlAttr::List, "list"),
+            (HtmlAttr::Low, "low"),
+            (HtmlAttr::Max, "max"),
+            (HtmlAttr::MaxLength, "maxlength"),
+            (HtmlAttr::Method, "method"),
+            (HtmlAttr::Min, "min"),
+            (HtmlAttr::MinLength, "minlength"),
+            (HtmlAttr::Multiple, "multiple"),
+            (HtmlAttr::Name, "name"),
+            (HtmlAttr::NoValidate, "novalidate"),
+            (HtmlAttr::Optimum, "optimum"),
+            (HtmlAttr::Pattern, "pattern"),
+            (HtmlAttr::Placeholder, "placeholder"),
+            (HtmlAttr::ReadOnly, "readonly"),
+            (HtmlAttr::Required, "required"),
+            (HtmlAttr::Rows, "rows"),
+            (HtmlAttr::Selected, "selected"),
+            (HtmlAttr::Size, "size"),
+            (HtmlAttr::Step, "step"),
+            (HtmlAttr::Type, "type"),
+            (HtmlAttr::Value, "value"),
+            (HtmlAttr::Wrap, "wrap"),
+            (HtmlAttr::As, "as"),
+            (HtmlAttr::Async, "async"),
+            (HtmlAttr::Blocking, "blocking"),
+            (HtmlAttr::Charset, "charset"),
+            (HtmlAttr::Color, "color"),
+            (HtmlAttr::Defer, "defer"),
+            (HtmlAttr::HttpEquiv, "http-equiv"),
+            (HtmlAttr::ImageSizes, "imagesizes"),
+            (HtmlAttr::ImageSrcSet, "imagesrcset"),
+            (HtmlAttr::Allow, "allow"),
+            (HtmlAttr::Alt, "alt"),
+            (HtmlAttr::AutoPlay, "autoplay"),
+            (HtmlAttr::Controls, "controls"),
+            (HtmlAttr::CrossOrigin, "crossorigin"),
+            (HtmlAttr::Decoding, "decoding"),
+            (HtmlAttr::Default, "default"),
+            (HtmlAttr::Download, "download"),
+            (HtmlAttr::FetchPriority, "fetchpriority"),
+            (HtmlAttr::Height, "height"),
+            (HtmlAttr::Href, "href"),
+            (HtmlAttr::HrefLang, "hreflang"),
+            (HtmlAttr::Integrity, "integrity"),
+            (HtmlAttr::IsMap, "ismap"),
+            (HtmlAttr::Kind, "kind"),
+            (HtmlAttr::Label, "label"),
+            (HtmlAttr::Loading, "loading"),
+            (HtmlAttr::Loop, "loop"),
+            (HtmlAttr::Media, "media"),
+            (HtmlAttr::Muted, "muted"),
+            (HtmlAttr::ObjectData, "data"),
+            (HtmlAttr::Ping, "ping"),
+            (HtmlAttr::PlaysInline, "playsinline"),
+            (HtmlAttr::Poster, "poster"),
+            (HtmlAttr::Preload, "preload"),
+            (HtmlAttr::ReferrerPolicy, "referrerpolicy"),
+            (HtmlAttr::Rel, "rel"),
+            (HtmlAttr::Sandbox, "sandbox"),
+            (HtmlAttr::Shape, "shape"),
+            (HtmlAttr::Sizes, "sizes"),
+            (HtmlAttr::Src, "src"),
+            (HtmlAttr::SrcDoc, "srcdoc"),
+            (HtmlAttr::SrcLang, "srclang"),
+            (HtmlAttr::SrcSet, "srcset"),
+            (HtmlAttr::Target, "target"),
+            (HtmlAttr::UseMap, "usemap"),
+            (HtmlAttr::Width, "width"),
+            (HtmlAttr::Abbr, "abbr"),
+            (HtmlAttr::ColSpan, "colspan"),
+            (HtmlAttr::Headers, "headers"),
+            (HtmlAttr::RowSpan, "rowspan"),
+            (HtmlAttr::Scope, "scope"),
+            (HtmlAttr::Span, "span"),
+            (HtmlAttr::ShadowRootClonable, "shadowrootclonable"),
+            (
+                HtmlAttr::ShadowRootCustomElementRegistry,
+                "shadowrootcustomelementregistry",
+            ),
+            (
+                HtmlAttr::ShadowRootDelegatesFocus,
+                "shadowrootdelegatesfocus",
+            ),
+            (HtmlAttr::ShadowRootMode, "shadowrootmode"),
+            (HtmlAttr::ShadowRootSerializable, "shadowrootserializable"),
+            (HtmlAttr::Cite, "cite"),
+            (HtmlAttr::ClosedBy, "closedby"),
+            (HtmlAttr::Content, "content"),
+            (HtmlAttr::Coords, "coords"),
+            (HtmlAttr::DateTime, "datetime"),
+            (HtmlAttr::Open, "open"),
+            (HtmlAttr::Reversed, "reversed"),
+            (HtmlAttr::Start, "start"),
+            (HtmlAttr::Summary, "summary"),
+            (HtmlAttr::WebkitDirectory, "webkitdirectory"),
+        ];
+
+        for (attr, expected) in cases {
+            assert_eq!(attr.static_name(), Some(expected));
+            assert_eq!(attr.to_string(), expected);
+        }
+    }
+
+    #[test]
     fn html_event_display_matches_dom_event_names() {
-        assert_eq!(HtmlEvent::PointerDown.to_string(), "pointerdown");
-        assert_eq!(HtmlEvent::BeforeInput.to_string(), "beforeinput");
-        assert_eq!(HtmlEvent::TransitionEnd.to_string(), "transitionend");
+        let cases = [
+            (HtmlEvent::AuxClick, "auxclick"),
+            (HtmlEvent::Click, "click"),
+            (HtmlEvent::ContextMenu, "contextmenu"),
+            (HtmlEvent::DblClick, "dblclick"),
+            (HtmlEvent::MouseDown, "mousedown"),
+            (HtmlEvent::MouseEnter, "mouseenter"),
+            (HtmlEvent::MouseLeave, "mouseleave"),
+            (HtmlEvent::MouseMove, "mousemove"),
+            (HtmlEvent::MouseOut, "mouseout"),
+            (HtmlEvent::MouseOver, "mouseover"),
+            (HtmlEvent::MouseUp, "mouseup"),
+            (HtmlEvent::GotPointerCapture, "gotpointercapture"),
+            (HtmlEvent::LostPointerCapture, "lostpointercapture"),
+            (HtmlEvent::PointerCancel, "pointercancel"),
+            (HtmlEvent::PointerDown, "pointerdown"),
+            (HtmlEvent::PointerEnter, "pointerenter"),
+            (HtmlEvent::PointerLeave, "pointerleave"),
+            (HtmlEvent::PointerMove, "pointermove"),
+            (HtmlEvent::PointerOut, "pointerout"),
+            (HtmlEvent::PointerOver, "pointerover"),
+            (HtmlEvent::PointerUp, "pointerup"),
+            (HtmlEvent::KeyDown, "keydown"),
+            (HtmlEvent::KeyUp, "keyup"),
+            (HtmlEvent::Blur, "blur"),
+            (HtmlEvent::Focus, "focus"),
+            (HtmlEvent::FocusIn, "focusin"),
+            (HtmlEvent::FocusOut, "focusout"),
+            (HtmlEvent::Change, "change"),
+            (HtmlEvent::Input, "input"),
+            (HtmlEvent::BeforeInput, "beforeinput"),
+            (HtmlEvent::Invalid, "invalid"),
+            (HtmlEvent::Reset, "reset"),
+            (HtmlEvent::Select, "select"),
+            (HtmlEvent::Submit, "submit"),
+            (HtmlEvent::Drag, "drag"),
+            (HtmlEvent::DragEnd, "dragend"),
+            (HtmlEvent::DragEnter, "dragenter"),
+            (HtmlEvent::DragLeave, "dragleave"),
+            (HtmlEvent::DragOver, "dragover"),
+            (HtmlEvent::DragStart, "dragstart"),
+            (HtmlEvent::Drop, "drop"),
+            (HtmlEvent::TouchCancel, "touchcancel"),
+            (HtmlEvent::TouchEnd, "touchend"),
+            (HtmlEvent::TouchMove, "touchmove"),
+            (HtmlEvent::TouchStart, "touchstart"),
+            (HtmlEvent::Scroll, "scroll"),
+            (HtmlEvent::ScrollEnd, "scrollend"),
+            (HtmlEvent::Wheel, "wheel"),
+            (HtmlEvent::Copy, "copy"),
+            (HtmlEvent::Cut, "cut"),
+            (HtmlEvent::Paste, "paste"),
+            (HtmlEvent::CompositionEnd, "compositionend"),
+            (HtmlEvent::CompositionStart, "compositionstart"),
+            (HtmlEvent::CompositionUpdate, "compositionupdate"),
+            (HtmlEvent::AnimationCancel, "animationcancel"),
+            (HtmlEvent::AnimationEnd, "animationend"),
+            (HtmlEvent::AnimationIteration, "animationiteration"),
+            (HtmlEvent::AnimationStart, "animationstart"),
+            (HtmlEvent::TransitionCancel, "transitioncancel"),
+            (HtmlEvent::TransitionEnd, "transitionend"),
+            (HtmlEvent::TransitionRun, "transitionrun"),
+            (HtmlEvent::TransitionStart, "transitionstart"),
+            (HtmlEvent::Abort, "abort"),
+            (HtmlEvent::Error, "error"),
+            (HtmlEvent::Load, "load"),
+            (HtmlEvent::Resize, "resize"),
+            (HtmlEvent::CanPlay, "canplay"),
+            (HtmlEvent::CanPlayThrough, "canplaythrough"),
+            (HtmlEvent::DurationChange, "durationchange"),
+            (HtmlEvent::Emptied, "emptied"),
+            (HtmlEvent::Ended, "ended"),
+            (HtmlEvent::LoadedData, "loadeddata"),
+            (HtmlEvent::LoadedMetaData, "loadedmetadata"),
+            (HtmlEvent::LoadStart, "loadstart"),
+            (HtmlEvent::Pause, "pause"),
+            (HtmlEvent::Play, "play"),
+            (HtmlEvent::Playing, "playing"),
+            (HtmlEvent::Progress, "progress"),
+            (HtmlEvent::RateChange, "ratechange"),
+            (HtmlEvent::Seeked, "seeked"),
+            (HtmlEvent::Seeking, "seeking"),
+            (HtmlEvent::Stalled, "stalled"),
+            (HtmlEvent::Suspend, "suspend"),
+            (HtmlEvent::TimeUpdate, "timeupdate"),
+            (HtmlEvent::VolumeChange, "volumechange"),
+            (HtmlEvent::Waiting, "waiting"),
+            (HtmlEvent::Cancel, "cancel"),
+            (HtmlEvent::Close, "close"),
+            (HtmlEvent::FullscreenChange, "fullscreenchange"),
+            (HtmlEvent::FullscreenError, "fullscreenerror"),
+            (HtmlEvent::SelectionChange, "selectionchange"),
+            (HtmlEvent::SlotChange, "slotchange"),
+            (HtmlEvent::Toggle, "toggle"),
+        ];
+
+        for (event, expected) in cases {
+            assert_eq!(event.to_string(), expected);
+        }
     }
 
     #[test]
     fn css_property_display_matches_css_spelling() {
-        assert_eq!(CssProperty::ZIndex.to_string(), "z-index");
-        assert_eq!(
-            CssProperty::ScrollSnapAlign.to_string(),
-            "scroll-snap-align"
-        );
+        let cases = [
+            (CssProperty::BoxSizing, "box-sizing"),
+            (CssProperty::Width, "width"),
+            (CssProperty::MinWidth, "min-width"),
+            (CssProperty::MaxWidth, "max-width"),
+            (CssProperty::Height, "height"),
+            (CssProperty::MinHeight, "min-height"),
+            (CssProperty::MaxHeight, "max-height"),
+            (CssProperty::Margin, "margin"),
+            (CssProperty::MarginTop, "margin-top"),
+            (CssProperty::MarginRight, "margin-right"),
+            (CssProperty::MarginBottom, "margin-bottom"),
+            (CssProperty::MarginLeft, "margin-left"),
+            (CssProperty::Padding, "padding"),
+            (CssProperty::PaddingTop, "padding-top"),
+            (CssProperty::PaddingRight, "padding-right"),
+            (CssProperty::PaddingBottom, "padding-bottom"),
+            (CssProperty::PaddingLeft, "padding-left"),
+            (CssProperty::Border, "border"),
+            (CssProperty::BorderWidth, "border-width"),
+            (CssProperty::BorderStyle, "border-style"),
+            (CssProperty::BorderColor, "border-color"),
+            (CssProperty::BorderRadius, "border-radius"),
+            (CssProperty::BorderCollapse, "border-collapse"),
+            (CssProperty::BorderSpacing, "border-spacing"),
+            (CssProperty::InlineSize, "inline-size"),
+            (CssProperty::BlockSize, "block-size"),
+            (CssProperty::MinInlineSize, "min-inline-size"),
+            (CssProperty::MaxInlineSize, "max-inline-size"),
+            (CssProperty::MinBlockSize, "min-block-size"),
+            (CssProperty::MaxBlockSize, "max-block-size"),
+            (CssProperty::MarginInline, "margin-inline"),
+            (CssProperty::MarginInlineStart, "margin-inline-start"),
+            (CssProperty::MarginInlineEnd, "margin-inline-end"),
+            (CssProperty::MarginBlock, "margin-block"),
+            (CssProperty::MarginBlockStart, "margin-block-start"),
+            (CssProperty::MarginBlockEnd, "margin-block-end"),
+            (CssProperty::PaddingInline, "padding-inline"),
+            (CssProperty::PaddingInlineStart, "padding-inline-start"),
+            (CssProperty::PaddingInlineEnd, "padding-inline-end"),
+            (CssProperty::PaddingBlock, "padding-block"),
+            (CssProperty::PaddingBlockStart, "padding-block-start"),
+            (CssProperty::PaddingBlockEnd, "padding-block-end"),
+            (CssProperty::InsetInlineStart, "inset-inline-start"),
+            (CssProperty::InsetInlineEnd, "inset-inline-end"),
+            (CssProperty::InsetBlockStart, "inset-block-start"),
+            (CssProperty::InsetBlockEnd, "inset-block-end"),
+            (CssProperty::Position, "position"),
+            (CssProperty::Top, "top"),
+            (CssProperty::Right, "right"),
+            (CssProperty::Bottom, "bottom"),
+            (CssProperty::Left, "left"),
+            (CssProperty::ZIndex, "z-index"),
+            (CssProperty::Float, "float"),
+            (CssProperty::Clear, "clear"),
+            (CssProperty::Display, "display"),
+            (CssProperty::FlexDirection, "flex-direction"),
+            (CssProperty::FlexWrap, "flex-wrap"),
+            (CssProperty::FlexFlow, "flex-flow"),
+            (CssProperty::FlexGrow, "flex-grow"),
+            (CssProperty::FlexShrink, "flex-shrink"),
+            (CssProperty::FlexBasis, "flex-basis"),
+            (CssProperty::Order, "order"),
+            (CssProperty::AlignItems, "align-items"),
+            (CssProperty::AlignSelf, "align-self"),
+            (CssProperty::AlignContent, "align-content"),
+            (CssProperty::JustifyContent, "justify-content"),
+            (CssProperty::JustifyItems, "justify-items"),
+            (CssProperty::JustifySelf, "justify-self"),
+            (CssProperty::PlaceItems, "place-items"),
+            (CssProperty::PlaceContent, "place-content"),
+            (CssProperty::Gap, "gap"),
+            (CssProperty::RowGap, "row-gap"),
+            (CssProperty::ColumnGap, "column-gap"),
+            (CssProperty::GridTemplateColumns, "grid-template-columns"),
+            (CssProperty::GridTemplateRows, "grid-template-rows"),
+            (CssProperty::GridColumn, "grid-column"),
+            (CssProperty::GridRow, "grid-row"),
+            (CssProperty::GridArea, "grid-area"),
+            (CssProperty::GridAutoFlow, "grid-auto-flow"),
+            (CssProperty::GridAutoColumns, "grid-auto-columns"),
+            (CssProperty::GridAutoRows, "grid-auto-rows"),
+            (CssProperty::Color, "color"),
+            (CssProperty::FontFamily, "font-family"),
+            (CssProperty::FontSize, "font-size"),
+            (CssProperty::FontWeight, "font-weight"),
+            (CssProperty::FontStyle, "font-style"),
+            (CssProperty::LineHeight, "line-height"),
+            (CssProperty::TextAlign, "text-align"),
+            (CssProperty::TextDecoration, "text-decoration"),
+            (CssProperty::TextTransform, "text-transform"),
+            (CssProperty::TextOverflow, "text-overflow"),
+            (CssProperty::TextIndent, "text-indent"),
+            (CssProperty::TextShadow, "text-shadow"),
+            (CssProperty::WhiteSpace, "white-space"),
+            (CssProperty::WordBreak, "word-break"),
+            (CssProperty::WordWrap, "word-wrap"),
+            (CssProperty::OverflowWrap, "overflow-wrap"),
+            (CssProperty::LetterSpacing, "letter-spacing"),
+            (CssProperty::WordSpacing, "word-spacing"),
+            (CssProperty::Background, "background"),
+            (CssProperty::BackgroundColor, "background-color"),
+            (CssProperty::BackgroundImage, "background-image"),
+            (CssProperty::BackgroundPosition, "background-position"),
+            (CssProperty::BackgroundSize, "background-size"),
+            (CssProperty::BackgroundRepeat, "background-repeat"),
+            (CssProperty::Opacity, "opacity"),
+            (CssProperty::Visibility, "visibility"),
+            (CssProperty::BoxShadow, "box-shadow"),
+            (CssProperty::Outline, "outline"),
+            (CssProperty::OutlineWidth, "outline-width"),
+            (CssProperty::OutlineStyle, "outline-style"),
+            (CssProperty::OutlineColor, "outline-color"),
+            (CssProperty::OutlineOffset, "outline-offset"),
+            (CssProperty::Cursor, "cursor"),
+            (CssProperty::PointerEvents, "pointer-events"),
+            (CssProperty::UserSelect, "user-select"),
+            (CssProperty::Overflow, "overflow"),
+            (CssProperty::OverflowX, "overflow-x"),
+            (CssProperty::OverflowY, "overflow-y"),
+            (CssProperty::Clip, "clip"),
+            (CssProperty::ClipPath, "clip-path"),
+            (CssProperty::ScrollBehavior, "scroll-behavior"),
+            (CssProperty::ScrollSnapType, "scroll-snap-type"),
+            (CssProperty::ScrollSnapAlign, "scroll-snap-align"),
+            (CssProperty::OverscrollBehavior, "overscroll-behavior"),
+            (CssProperty::Transform, "transform"),
+            (CssProperty::TransformOrigin, "transform-origin"),
+            (CssProperty::Transition, "transition"),
+            (CssProperty::TransitionProperty, "transition-property"),
+            (CssProperty::TransitionDuration, "transition-duration"),
+            (
+                CssProperty::TransitionTimingFunction,
+                "transition-timing-function",
+            ),
+            (CssProperty::TransitionDelay, "transition-delay"),
+            (CssProperty::Animation, "animation"),
+            (CssProperty::AnimationName, "animation-name"),
+            (CssProperty::AnimationDuration, "animation-duration"),
+            (
+                CssProperty::AnimationTimingFunction,
+                "animation-timing-function",
+            ),
+            (CssProperty::AnimationDelay, "animation-delay"),
+            (
+                CssProperty::AnimationIterationCount,
+                "animation-iteration-count",
+            ),
+            (CssProperty::AnimationDirection, "animation-direction"),
+            (CssProperty::AnimationFillMode, "animation-fill-mode"),
+            (CssProperty::AnimationPlayState, "animation-play-state"),
+            (CssProperty::AspectRatio, "aspect-ratio"),
+            (CssProperty::ObjectFit, "object-fit"),
+            (CssProperty::ObjectPosition, "object-position"),
+            (CssProperty::Contain, "contain"),
+            (CssProperty::ContentVisibility, "content-visibility"),
+            (CssProperty::WillChange, "will-change"),
+            (CssProperty::Appearance, "appearance"),
+            (CssProperty::Resize, "resize"),
+            (CssProperty::TouchAction, "touch-action"),
+            (CssProperty::Filter, "filter"),
+            (CssProperty::BackdropFilter, "backdrop-filter"),
+            (CssProperty::Content, "content"),
+            (CssProperty::ListStyle, "list-style"),
+            (CssProperty::ListStyleType, "list-style-type"),
+            (CssProperty::ListStylePosition, "list-style-position"),
+            (CssProperty::TableLayout, "table-layout"),
+            (CssProperty::VerticalAlign, "vertical-align"),
+        ];
+
+        for (property, expected) in cases {
+            assert_eq!(property.to_string(), expected);
+        }
+
         assert_eq!(
             CssProperty::Custom("ars-timer-progress").to_string(),
             "--ars-timer-progress"
@@ -2317,6 +2802,33 @@ mod tests {
     }
 
     #[test]
+    fn attr_map_accessors_expose_sorted_attrs_and_styles() {
+        let mut attrs = AttrMap::new();
+
+        attrs.set(HtmlAttr::Title, "tooltip");
+        attrs.set(HtmlAttr::Id, "root");
+        attrs.set_style(CssProperty::Height, "20px");
+        attrs.set_style(CssProperty::Width, "10px");
+
+        assert_eq!(
+            attrs.attrs(),
+            &[
+                (HtmlAttr::Id, AttrValue::String(String::from("root"))),
+                (HtmlAttr::Title, AttrValue::String(String::from("tooltip"))),
+            ]
+        );
+        assert_eq!(
+            attrs.styles(),
+            &[
+                (CssProperty::Width, String::from("10px")),
+                (CssProperty::Height, String::from("20px")),
+            ]
+        );
+        assert_eq!(attrs.iter_attrs().count(), 2);
+        assert_eq!(attrs.iter_styles().count(), 2);
+    }
+
+    #[test]
     fn attr_map_set_none_removes_existing_value() {
         let mut attrs = AttrMap::new();
 
@@ -2325,6 +2837,16 @@ mod tests {
 
         assert!(!attrs.contains(&HtmlAttr::Title));
         assert_eq!(attrs.get(&HtmlAttr::Title), None);
+    }
+
+    #[test]
+    fn attr_map_none_insert_on_missing_key_is_noop() {
+        let mut attrs = AttrMap::new();
+
+        attrs.set(HtmlAttr::Title, AttrValue::None);
+
+        assert_eq!(attrs.attrs(), &[]);
+        assert_eq!(attrs.styles(), &[]);
     }
 
     #[test]
@@ -2350,6 +2872,23 @@ mod tests {
         assert_eq!(
             attrs.get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
             Some("hint error")
+        );
+    }
+
+    #[test]
+    fn attr_map_space_separated_attrs_replace_non_string_values() {
+        let mut attrs = AttrMap::new();
+
+        attrs.set_bool(HtmlAttr::Class, true);
+        attrs.set(HtmlAttr::Class, "merged");
+
+        assert_eq!(attrs.get(&HtmlAttr::Class), Some("merged"));
+
+        attrs.set(HtmlAttr::Class, AttrValue::Bool(false));
+
+        assert_eq!(
+            attrs.get_value(&HtmlAttr::Class),
+            Some(&AttrValue::Bool(false))
         );
     }
 
@@ -2392,6 +2931,27 @@ mod tests {
     }
 
     #[test]
+    fn attr_map_merge_user_applies_allowed_user_attributes() {
+        let mut attrs = AttrMap::new();
+        attrs.set(HtmlAttr::Role, "button");
+
+        let mut user = UserAttrs::new();
+        user.set(HtmlAttr::Title, "from-user");
+        user.set_bool(HtmlAttr::Hidden, true);
+        user.set_style(CssProperty::Height, "24px");
+
+        attrs.merge_user(user);
+
+        assert_eq!(attrs.get(&HtmlAttr::Role), Some("button"));
+        assert_eq!(attrs.get(&HtmlAttr::Title), Some("from-user"));
+        assert_eq!(attrs.get(&HtmlAttr::Hidden), Some("true"));
+        assert_eq!(
+            attrs.styles(),
+            &[(CssProperty::Height, String::from("24px"))]
+        );
+    }
+
+    #[test]
     fn user_attrs_reject_blocked_keys() {
         let mut user = UserAttrs::new();
 
@@ -2418,6 +2978,27 @@ mod tests {
         assert_eq!(
             merged.styles(),
             &[(CssProperty::Width, String::from("12px"))]
+        );
+    }
+
+    #[test]
+    fn user_attrs_allow_non_blocked_bool_and_string_backed_inputs() {
+        let mut user = UserAttrs::new();
+        let title = String::from("tooltip");
+
+        user.set(HtmlAttr::Title, &title);
+        user.set_bool(HtmlAttr::Draggable, true);
+        user.set(HtmlAttr::Aria(AriaAttr::Current), AttrValue::from(false));
+
+        let mut merged = AttrMap::new();
+
+        merged.merge_user(user);
+
+        assert_eq!(merged.get(&HtmlAttr::Title), Some("tooltip"));
+        assert_eq!(merged.get(&HtmlAttr::Draggable), Some("true"));
+        assert_eq!(
+            merged.get(&HtmlAttr::Aria(AriaAttr::Current)),
+            Some("false")
         );
     }
 
@@ -2486,6 +3067,14 @@ mod tests {
         assert_eq!(AttrValue::from(true).as_str(), Some("true"));
         assert_eq!(AttrValue::from(false).as_str(), Some("false"));
         assert_eq!(AttrValue::None.as_str(), None);
+    }
+
+    #[test]
+    fn attr_value_from_owned_string_preserves_inner_string() {
+        let value = AttrValue::from(String::from("owned"));
+
+        assert_eq!(value, AttrValue::String(String::from("owned")));
+        assert_eq!(value.as_str(), Some("owned"));
     }
 
     #[cfg(feature = "serde")]

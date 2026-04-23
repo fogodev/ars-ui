@@ -5,7 +5,7 @@
 //! the shared instance-scoped modality context.
 
 use alloc::{string::String, sync::Arc};
-use core::fmt;
+use core::fmt::{self, Debug};
 
 use ars_i18n::{Direction, Locale, locales};
 
@@ -21,8 +21,10 @@ use crate::{
 pub enum ColorMode {
     /// Light color scheme.
     Light,
+
     /// Dark color scheme.
     Dark,
+
     /// Inherit from the operating system preference.
     #[default]
     System,
@@ -164,7 +166,7 @@ impl Default for ArsContext {
     }
 }
 
-impl fmt::Debug for ArsContext {
+impl Debug for ArsContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ArsContext")
             .field("locale", &self.locale)
@@ -184,6 +186,8 @@ impl fmt::Debug for ArsContext {
 
 #[cfg(test)]
 mod tests {
+    use alloc::format;
+
     use super::*;
     use crate::{ModalitySnapshot, NullModalityContext};
 
@@ -202,7 +206,9 @@ mod tests {
     #[test]
     fn color_mode_is_copy() {
         let a = ColorMode::Dark;
+
         let b = a;
+
         assert_eq!(a, b);
     }
 
@@ -239,5 +245,32 @@ mod tests {
         assert_eq!(context.portal_container_id(), Some("portal-root"));
         assert_eq!(context.root_node_id(), Some("app-root"));
         assert_eq!(context.style_strategy(), &StyleStrategy::Cssom);
+    }
+
+    #[test]
+    fn ars_context_default_exposes_default_optional_and_platform_values() {
+        let context = ArsContext::default();
+
+        assert_eq!(context.id_prefix(), None);
+        assert_eq!(context.portal_container_id(), None);
+        assert_eq!(context.root_node_id(), None);
+        assert_eq!(context.style_strategy(), &StyleStrategy::Inline);
+        assert_eq!(context.platform().now_ms(), 0);
+        assert_eq!(context.modality().snapshot(), ModalitySnapshot::default());
+    }
+
+    #[test]
+    fn ars_context_debug_lists_public_fields() {
+        let context = ArsContext::default();
+
+        let debug = format!("{context:?}");
+
+        assert!(debug.contains("ArsContext"));
+        assert!(debug.contains("locale"));
+        assert!(debug.contains("direction"));
+        assert!(debug.contains("color_mode"));
+        assert!(debug.contains("platform"));
+        assert!(debug.contains("modality"));
+        assert!(debug.contains("style_strategy"));
     }
 }
