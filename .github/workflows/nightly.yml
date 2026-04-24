@@ -1,0 +1,84 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC daily
+  workflow_dispatch: {}
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  extended-proptest:
+    name: Extended Property Tests
+    runs-on: ubuntu-latest
+    env:
+      PROPTEST_CASES: "10000"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-nightly-proptest-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - run: cargo test -p ars-core -- --ignored proptest
+
+  a11y-audit:
+    name: Accessibility Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/wasm-pack
+            target
+          key: ${{ runner.os }}-cargo-nightly-a11y-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked --version 0.14.0
+      - name: Accessibility Audit
+        run: |
+          wasm-pack test --headless --chrome crates/ars-leptos --test axe
+          wasm-pack test --headless --chrome crates/ars-dioxus --test axe
+
+  cross-compile:
+    name: Cross-Compile (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: wasm32 + web-intl
+            target: wasm32-unknown-unknown
+            features: "-p ars-leptos -p ars-i18n --features ars-leptos/csr,ars-i18n/web-intl"
+          - name: native + icu4x
+            target: x86_64-unknown-linux-gnu
+            features: "-p ars-i18n --no-default-features --features std,icu4x"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-nightly-cross-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - run: cargo check --target ${{ matrix.target }} ${{ matrix.features }}

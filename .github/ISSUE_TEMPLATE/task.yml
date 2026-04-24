@@ -83,7 +83,7 @@ body:
     id: tests_first
     attributes:
       label: Tests to add first
-      description: Name the exact tests or suites this task must add or extend before implementation.
+      description: Name the exact tests or suites this task must add or extend before implementation. Adapter component tasks must include an axe-core audit against rendered component output using the component root data-ars-scope selector.
     validations:
       required: true
   - type: textarea
