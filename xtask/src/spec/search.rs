@@ -11,16 +11,22 @@ use crate::manifest::{self, Error, SpecRoot};
 pub enum SectionFilter {
     /// `## 1. State Machine` or `## 1. API`.
     States,
+
     /// `### 1.2 Events`.
     Events,
+
     /// `### 1.4 Props` or `### 1.1 Props`.
     Props,
+
     /// `## 3. Accessibility` or similar.
     Accessibility,
+
     /// `## 2. Anatomy`.
     Anatomy,
+
     /// `## N. Internationalization`.
     Internationalization,
+
     /// `## N. Form Integration`.
     FormIntegration,
 }
@@ -58,10 +64,13 @@ impl SectionFilter {
 struct SearchHit {
     /// Relative spec file path.
     file: String,
+
     /// 1-based line number.
     line_num: usize,
+
     /// The matching line text.
     line: String,
+
     /// Current section heading at the point of the match.
     section: String,
 }
@@ -84,8 +93,11 @@ pub fn execute(
 ) -> Result<String, Error> {
     let re =
         Regex::new(query).map_err(|e| Error::FrontmatterError(format!("invalid regex: {e}")))?;
+
     let section_filter = section.and_then(SectionFilter::parse);
+
     let m = &root.manifest;
+
     let mut hits = Vec::new();
 
     let files = m
@@ -97,6 +109,7 @@ pub fn execute(
 
     for (_name, rel_path) in &files {
         let file_path = root.path.join(rel_path);
+
         let Ok(content) = fs::read_to_string(&file_path) else {
             continue;
         };
@@ -109,6 +122,7 @@ pub fn execute(
                         .strip_prefix("tier:")
                         .is_some_and(|v| v.trim() == wanted_tier)
                 });
+
                 if !has_tier {
                     continue;
                 }
@@ -118,16 +132,21 @@ pub fn execute(
         }
 
         let mut current_section = String::new();
+
         let mut in_matching_section = section_filter.is_none();
+
         let mut section_level = 0;
 
         for (line_idx, line) in content.lines().enumerate() {
             if let Some((level, text)) = manifest::parse_heading(line) {
                 current_section = text.to_string();
+
                 if let Some(ref filter) = section_filter {
                     let patterns = filter.heading_patterns();
+
                     if level == 2 {
                         in_matching_section = patterns.iter().any(|p| text.contains(p));
+
                         if in_matching_section {
                             section_level = level;
                         }
@@ -136,6 +155,7 @@ pub fn execute(
                     }
                 }
             }
+
             if in_matching_section && re.is_match(line) {
                 hits.push(SearchHit {
                     file: (*rel_path).to_string(),
@@ -148,23 +168,30 @@ pub fn execute(
     }
 
     let mut out = String::new();
+
     writeln!(out, "# Search results for /{query}/").expect("write to String cannot fail");
+
     if let Some(cat) = category {
         writeln!(out, "Category filter: {cat}").expect("write to String cannot fail");
     }
+
     if let Some(sec) = section {
         writeln!(out, "Section filter: {sec}").expect("write to String cannot fail");
     }
+
     if let Some(t) = tier {
         writeln!(out, "Tier filter: {t}").expect("write to String cannot fail");
     }
+
     writeln!(out, "Matches: {}", hits.len()).expect("write to String cannot fail");
     writeln!(out).expect("write to String cannot fail");
+
     for hit in &hits {
         writeln!(out, "{}:L{} [{}]", hit.file, hit.line_num, hit.section)
             .expect("write to String cannot fail");
         writeln!(out, "  {}", hit.line.trim()).expect("write to String cannot fail");
     }
+
     Ok(out)
 }
 

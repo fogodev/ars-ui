@@ -1,6 +1,10 @@
 //! Ephemeral reference wrapper that prevents borrowed data from escaping into signals.
 
-use std::{fmt, marker::PhantomData, rc::Rc};
+use std::{
+    fmt::{self, Debug},
+    marker::PhantomData,
+    rc::Rc,
+};
 
 /// A non-cloneable, non-copyable wrapper that prevents storing borrowed data in signals.
 ///
@@ -18,24 +22,32 @@ use std::{fmt, marker::PhantomData, rc::Rc};
 ///
 /// ```rust,compile_fail
 /// # use ars_leptos::EphemeralRef;
+///
 /// // Cannot send across threads:
 /// fn assert_send<T: Send>(_: T) {}
+///
 /// let e = EphemeralRef::new(42);
+///
 /// assert_send(e); // ERROR: Rc<()> is not Send
 /// ```
 ///
 /// ```rust,compile_fail
 /// # use ars_leptos::EphemeralRef;
+///
 /// // Cannot share across threads:
 /// fn assert_sync<T: Sync>(_: T) {}
+///
 /// let e = EphemeralRef::new(42);
+///
 /// assert_sync(e); // ERROR: Rc<()> is not Sync
 /// ```
 ///
 /// ```rust,compile_fail
 /// # use ars_leptos::EphemeralRef;
+///
 /// // Cannot clone:
 /// let e = EphemeralRef::new(42);
+///
 /// let _ = e.clone(); // ERROR: no Clone impl
 /// ```
 pub struct EphemeralRef<'a, T> {
@@ -61,7 +73,7 @@ impl<'a, T> EphemeralRef<'a, T> {
     }
 }
 
-impl<T: fmt::Debug> fmt::Debug for EphemeralRef<'_, T> {
+impl<T: Debug> Debug for EphemeralRef<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("EphemeralRef").field(&self.value).finish()
     }
@@ -74,13 +86,39 @@ mod tests {
     #[test]
     fn ephemeral_ref_provides_access_to_inner_value() {
         let e = EphemeralRef::new(42);
+
         assert_eq!(*e.get(), 42);
     }
 
     #[test]
     fn ephemeral_ref_debug_shows_inner_value() {
         let e = EphemeralRef::new("hello");
+
         let debug = format!("{e:?}");
+
         assert!(debug.contains("hello"));
+    }
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod wasm_tests {
+    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+    use super::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test]
+    fn ephemeral_ref_provides_access_to_inner_value_on_wasm() {
+        let ephemeral = EphemeralRef::new(42);
+
+        assert_eq!(*ephemeral.get(), 42);
+    }
+
+    #[wasm_bindgen_test]
+    fn ephemeral_ref_debug_shows_inner_value_on_wasm() {
+        let ephemeral = EphemeralRef::new("hello");
+
+        assert!(format!("{ephemeral:?}").contains("hello"));
     }
 }

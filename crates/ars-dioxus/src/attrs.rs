@@ -94,12 +94,14 @@ pub fn attr_map_to_dioxus(
                 None,
                 false,
             )),
+
             AttrValue::Bool(true) => Some(Attribute::new(
                 intern_attr_name(&key),
                 AttributeValue::Text(String::new()),
                 None,
                 false,
             )),
+
             AttrValue::Bool(false) | AttrValue::None => None,
         })
         .collect::<Vec<_>>();
@@ -166,6 +168,7 @@ pub fn apply_styles_cssom(el: &web_sys::HtmlElement, styles: &[(CssProperty, Str
         if let Err(error) = style.set_property(&prop.to_string(), val) {
             #[cfg(debug_assertions)]
             web_sys::console::warn_1(&error);
+
             #[cfg(not(debug_assertions))]
             drop(error);
         }
@@ -252,6 +255,7 @@ pub fn use_style_strategy() -> StyleStrategy {
 ///
 /// ```rust,ignore
 /// let attrs = api.root_attrs();
+///
 /// let strategy = use_style_strategy();
 ///
 /// rsx! {
@@ -302,6 +306,7 @@ mod tests {
     #[test]
     fn intern_attr_name_data_distinct_values_differ() {
         let foo = intern_attr_name(&HtmlAttr::Data("foo"));
+
         let bar = intern_attr_name(&HtmlAttr::Data("bar"));
 
         assert_eq!(foo, "data-foo");
@@ -327,8 +332,8 @@ mod tests {
     fn build_test_map() -> AttrMap {
         let mut map = AttrMap::new();
 
-        map.set(HtmlAttr::Class, "btn");
-        map.set_style(CssProperty::Width, "100px");
+        map.set(HtmlAttr::Class, "btn")
+            .set_style(CssProperty::Width, "100px");
 
         map
     }
@@ -390,9 +395,9 @@ mod tests {
     fn attr_map_to_dioxus_value_mapping_filters_false_and_none() {
         let mut map = AttrMap::new();
 
-        map.set(HtmlAttr::Id, "x");
-        map.set_bool(HtmlAttr::Disabled, true);
-        map.set_bool(HtmlAttr::Hidden, false);
+        map.set(HtmlAttr::Id, "x")
+            .set_bool(HtmlAttr::Disabled, true)
+            .set_bool(HtmlAttr::Hidden, false);
 
         // AttrValue::None via set then remove pattern: set Inert then override
         // We can test None by checking that Bool(false) is filtered.
@@ -507,6 +512,7 @@ mod tests {
         fn app() -> Element {
             // Provide the context directly (same as ArsNonceStyle does internally).
             let rules = use_signal(Vec::<String>::new);
+
             use_context_provider(|| ArsNonceCssCtx { rules });
 
             append_nonce_css(".rule-1 { color: red; }".into());
@@ -606,6 +612,13 @@ mod tests {
 
 #[cfg(all(test, feature = "web", target_arch = "wasm32"))]
 mod wasm_tests {
+    use std::sync::Arc;
+
+    use ars_core::{
+        AriaAttr, ColorMode, CssProperty, HtmlAttr, I18nRegistries, NullPlatformEffects,
+    };
+    use ars_i18n::{Direction, locales};
+    use dioxus::prelude::*;
     use wasm_bindgen::JsCast;
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
@@ -617,6 +630,126 @@ mod wasm_tests {
         web_sys::window()
             .and_then(|window| window.document())
             .expect("browser document should exist")
+    }
+
+    fn find_attr<'a>(attrs: &'a [Attribute], name: &str) -> Option<&'a Attribute> {
+        attrs.iter().find(|attr| attr.name == name)
+    }
+
+    const fn text_value(attr: &Attribute) -> Option<&str> {
+        match &attr.value {
+            AttributeValue::Text(text) => Some(text.as_str()),
+            _ => None,
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn intern_attr_name_and_attr_map_to_dioxus_cover_core_conversion_paths_on_wasm() {
+        assert_eq!(intern_attr_name(&HtmlAttr::Class), "class");
+        assert_eq!(
+            intern_attr_name(&HtmlAttr::Data("ars-state")),
+            "data-ars-state"
+        );
+        assert_eq!(
+            intern_attr_name(&HtmlAttr::Aria(AriaAttr::Label)),
+            "aria-label"
+        );
+
+        let mut map = AttrMap::new();
+        map.set(HtmlAttr::Class, "btn")
+            .set(HtmlAttr::Title, AttrValue::None)
+            .set_bool(HtmlAttr::Disabled, true)
+            .set_bool(HtmlAttr::Hidden, false)
+            .set_style(CssProperty::Width, "100px");
+
+        let inline = attr_map_to_dioxus(map.clone(), &StyleStrategy::Inline, None);
+
+        let cssom = attr_map_to_dioxus(map.clone(), &StyleStrategy::Cssom, None);
+
+        let nonce = attr_map_to_dioxus(
+            map,
+            &StyleStrategy::Nonce(String::from("n123")),
+            Some("el-1"),
+        );
+
+        assert_eq!(
+            text_value(find_attr(&inline.attrs, "class").expect("class attr present")),
+            Some("btn")
+        );
+        assert_eq!(
+            text_value(find_attr(&inline.attrs, "style").expect("style attr present")),
+            Some("width: 100px;")
+        );
+        assert_eq!(
+            text_value(find_attr(&inline.attrs, "disabled").expect("disabled attr present")),
+            Some("")
+        );
+        assert!(find_attr(&inline.attrs, "hidden").is_none());
+        assert!(find_attr(&inline.attrs, "title").is_none());
+
+        assert!(find_attr(&cssom.attrs, "style").is_none());
+        assert_eq!(
+            cssom.cssom_styles,
+            vec![(CssProperty::Width, String::from("100px"))]
+        );
+        assert_eq!(
+            text_value(
+                find_attr(&nonce.attrs, "data-ars-style-id")
+                    .expect("nonce style id attr should exist"),
+            ),
+            Some("el-1")
+        );
+        assert_eq!(
+            nonce.nonce_css,
+            "[data-ars-style-id=\"el-1\"] {\n  width: 100px;\n}"
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn nonce_css_helpers_and_style_strategy_context_work_on_wasm() {
+        fn app() -> Element {
+            let rules = use_signal(Vec::<String>::new);
+
+            use_context_provider(|| ArsNonceCssCtx { rules });
+
+            append_nonce_css(".rule-1 { color: red; }".into());
+            append_nonce_css(".rule-2 { color: blue; }".into());
+
+            let collected = rules.peek().clone();
+
+            assert_eq!(collected.len(), 2);
+            assert_eq!(collected[0], ".rule-1 { color: red; }");
+            assert_eq!(collected[1], ".rule-2 { color: blue; }");
+
+            let ctx = ArsContext::new(
+                locales::en_us(),
+                Direction::Ltr,
+                ColorMode::System,
+                false,
+                false,
+                None,
+                None,
+                None,
+                Arc::new(NullPlatformEffects),
+                Arc::new(ars_core::DefaultModalityContext::new()),
+                Arc::new(ars_i18n::StubIntlBackend),
+                Arc::new(I18nRegistries::new()),
+                Arc::new(crate::provider::NullPlatform),
+                StyleStrategy::Cssom,
+            );
+
+            use_context_provider(|| ctx);
+
+            assert_eq!(use_style_strategy(), StyleStrategy::Cssom);
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new(app);
+
+        dom.rebuild_in_place();
     }
 
     #[wasm_bindgen_test]

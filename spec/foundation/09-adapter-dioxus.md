@@ -864,7 +864,7 @@ pub fn append_nonce_css(css: String) {
 
 ## 4. Standard Component Pattern
 
-Library adapter code MUST use explicit `#[derive(Props, Clone, PartialEq)]` structs for every component and sub-part that accepts one or more props. Zero-prop parts (e.g., `fn Backdrop() -> Element`) MAY use a bare function signature. The `#[component]` attribute is still applied to the function itself, but the parameter list is always a single `props: XxxProps` argument.
+Library adapter code MUST use explicit `Props` structs for every component and sub-part that accepts one or more props. Those props structs MUST implement `Clone` and `PartialEq`; deriving both is preferred, but a manual `PartialEq` implementation is allowed when trait-object fields or other non-derivable members require custom equality semantics. Zero-prop parts (e.g., `fn Backdrop() -> Element`) MAY use a bare function signature. The `#[component]` attribute is still applied to the function itself, but the parameter list is always a single `props: XxxProps` argument.
 
 Rationale: explicit Props structs enable generic type parameters, custom `PartialEq` implementations for re-render control, full control over doc-comment rendering, and `#[props(extends = GlobalAttributes)]` for attribute spreading. This aligns with the Dioxus team recommendation for library code and matches the pattern used in the official `DioxusLabs/components` crate.
 
@@ -873,7 +873,7 @@ Rationale: explicit Props structs enable generic type parameters, custom `Partia
 ```rust
 use dioxus::prelude::*;
 
-/// Dioxus requires Props to be Clone + PartialEq.
+/// Dioxus props must implement Clone + PartialEq.
 #[derive(Props, Clone, PartialEq)]
 pub struct CheckboxProps {
     /// Controlled checked state.
@@ -2409,7 +2409,9 @@ Dioxus supports two complementary testing styles:
    `TestHarness` from [15-test-harness.md](../testing/15-test-harness.md). In
    that setup, the Dioxus backend owns `ArsProvider` wrapping for
    `mount_with_locale(...)`, and reactivity is synchronized through
-   `dom.wait_for_work().await` behind the harness `flush()` / `tick()` helpers.
+   a backend-owned browser task boundary behind the harness `flush()` /
+   `tick()` helpers. Public `dioxus-web` launch APIs consume the `VirtualDom`,
+   so shared-harness tests must not assume access to `wait_for_work()`.
 
 Shared-harness Dioxus tests should not rely on ad hoc zero-delay timer shims to
 observe locale or DOM updates. Interaction helpers already flush the Dioxus

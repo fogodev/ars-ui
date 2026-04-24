@@ -7,7 +7,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::OsString,
-    fmt::{self, Write},
+    fmt::{self, Display, Write},
     fs, io,
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -21,8 +21,10 @@ use serde::Deserialize;
 pub struct CrateThreshold {
     /// Crate name as it appears in the workspace (e.g., `ars-core`).
     pub package: String,
+
     /// Minimum line coverage percentage (0.0–100.0).
     pub min_line: f64,
+
     /// Minimum branch coverage percentage (0.0–100.0).
     pub min_branch: f64,
 }
@@ -41,11 +43,11 @@ pub struct CrateThreshold {
 /// | ars-forms                | 95.8 / 76.5           | 90 / 75                |
 /// | ars-i18n                 | 96.4 / 69.1           | 96 / 65                |
 /// | ars-interactions         | 99.9 / 95.0           | 98 / 90                |
-/// | ars-leptos               | 95.4 / 60.0           | 90 / 55                |
-/// | ars-dioxus               | 87.9 / 75.0           | 85 / 70                |
+/// | ars-leptos               | 78.8 / 88.9           | 78 / 55                |
+/// | ars-dioxus               | 79.8 / 91.5           | 79 / 70                |
 /// | ars-test-harness         | 100.0 / n/a           | 100 / 0                |
-/// | ars-test-harness-leptos  | 100.0 / n/a           | 100 / 0                |
-/// | ars-test-harness-dioxus  | 100.0 / n/a           | 100 / 0                |
+/// | ars-test-harness-leptos  | 62.4 / 50.0           | 60 / 0                 |
+/// | ars-test-harness-dioxus  | 64.1 / 75.0           | 60 / 0                 |
 /// | ars-derive               | 97.9 / 83.3           | 95 / 80                |
 /// | xtask                    | 30.4 / 37.7           | 30 / 35                |
 pub fn default_thresholds() -> Vec<CrateThreshold> {
@@ -87,12 +89,12 @@ pub fn default_thresholds() -> Vec<CrateThreshold> {
         },
         CrateThreshold {
             package: "ars-leptos".into(),
-            min_line: 90.0,
+            min_line: 78.0,
             min_branch: 55.0,
         },
         CrateThreshold {
             package: "ars-dioxus".into(),
-            min_line: 85.0,
+            min_line: 79.0,
             min_branch: 70.0,
         },
         CrateThreshold {
@@ -102,12 +104,12 @@ pub fn default_thresholds() -> Vec<CrateThreshold> {
         },
         CrateThreshold {
             package: "ars-test-harness-leptos".into(),
-            min_line: 100.0,
+            min_line: 60.0,
             min_branch: 0.0,
         },
         CrateThreshold {
             package: "ars-test-harness-dioxus".into(),
-            min_line: 100.0,
+            min_line: 60.0,
             min_branch: 0.0,
         },
         CrateThreshold {
@@ -128,35 +130,43 @@ pub fn default_thresholds() -> Vec<CrateThreshold> {
 pub enum Error {
     /// IO error reading the lcov file.
     Io(io::Error),
+
     /// A required external tool is not available.
     MissingTool {
         /// Human-readable tool name.
         tool: String,
+
         /// Suggested install command or hint.
         install_hint: String,
     },
+
     /// A subprocess exited unsuccessfully.
     CommandFailed {
         /// Display form of the command that failed.
         command: String,
+
         /// Exit code, if available.
         code: Option<i32>,
     },
+
     /// No source files matched the requested package.
     NoSourceFiles {
         /// The package that was looked up.
         package: String,
     },
+
     /// The wasm coverage pipeline found no relevant compiler artifacts.
     NoArtifacts {
         /// Package name requested by the user.
         package: String,
     },
+
     /// The wasm coverage pipeline generated no `.profraw` files.
     NoProfiles {
         /// Directory searched for profiling outputs.
         directory: PathBuf,
     },
+
     /// One or more crates fell below their coverage thresholds.
     BelowThreshold {
         /// Human-readable summary including the full results table.
@@ -164,23 +174,28 @@ pub enum Error {
     },
 }
 
-impl fmt::Display for Error {
+impl Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(e) => write!(f, "IO error reading lcov file: {e}"),
+
             Self::MissingTool { tool, install_hint } => {
                 write!(
                     f,
                     "missing required tool: {tool}\n  install: {install_hint}"
                 )
             }
+
             Self::CommandFailed { command, code } => {
                 write!(f, "command failed")?;
+
                 if let Some(code) = code {
                     write!(f, " (exit code {code})")?;
                 }
+
                 write!(f, ": {command}")
             }
+
             Self::NoSourceFiles { package } => {
                 write!(
                     f,
@@ -189,15 +204,18 @@ impl fmt::Display for Error {
                      {package}/src/)"
                 )
             }
+
             Self::NoArtifacts { package } => {
                 write!(
                     f,
                     "no wasm coverage artifacts found for package '{package}'"
                 )
             }
+
             Self::NoProfiles { directory } => {
                 write!(f, "no .profraw files generated in {}", directory.display())
             }
+
             Self::BelowThreshold { summary } => write!(f, "{summary}"),
         }
     }
@@ -248,6 +266,7 @@ impl CrateStats {
         if self.lines_found == 0 {
             return 0.0;
         }
+
         (self.lines_hit as f64 / self.lines_found as f64) * 100.0
     }
 
@@ -255,6 +274,7 @@ impl CrateStats {
         if self.branches_found == 0 {
             return 0.0;
         }
+
         (self.branches_hit as f64 / self.branches_found as f64) * 100.0
     }
 }
@@ -277,12 +297,16 @@ struct CargoTarget {
 pub struct WasmCoverageOptions {
     /// Crate package name (e.g. `ars-dom`).
     pub package: String,
+
     /// Output lcov path to write.
     pub output: PathBuf,
+
     /// Feature flags passed to cargo.
     pub features: Vec<String>,
+
     /// Whether to disable the package's default features.
     pub no_default_features: bool,
+
     /// Extra arguments appended after `cargo test --`.
     pub extra_test_args: Vec<String>,
 }
@@ -292,8 +316,10 @@ pub struct WasmCoverageOptions {
 pub struct WasmCoverageTarget {
     /// Crate package name (e.g. `ars-dom`).
     pub package: &'static str,
+
     /// Cargo features required for the browser test build.
     pub features: &'static [&'static str],
+
     /// Whether CI coverage must disable the crate's default features.
     pub no_default_features: bool,
 }
@@ -311,12 +337,33 @@ pub const fn default_wasm_coverage_targets() -> &'static [WasmCoverageTarget] {
             features: &["web-intl"],
             no_default_features: true,
         },
+        WasmCoverageTarget {
+            package: "ars-leptos",
+            features: &["csr"],
+            no_default_features: false,
+        },
+        WasmCoverageTarget {
+            package: "ars-dioxus",
+            features: &["web"],
+            no_default_features: false,
+        },
+        WasmCoverageTarget {
+            package: "ars-test-harness-leptos",
+            features: &[],
+            no_default_features: false,
+        },
+        WasmCoverageTarget {
+            package: "ars-test-harness-dioxus",
+            features: &[],
+            no_default_features: false,
+        },
     ]
 }
 
 /// Parse lcov content into per-file line/branch hit maps.
 fn parse_lcov_records(content: &str) -> BTreeMap<String, FileCoverage> {
     let mut files = BTreeMap::<String, FileCoverage>::new();
+
     let mut current_file: Option<String> = None;
 
     for raw_line in content.lines() {
@@ -324,54 +371,69 @@ fn parse_lcov_records(content: &str) -> BTreeMap<String, FileCoverage> {
 
         if let Some(path) = line.strip_prefix("SF:") {
             current_file = Some(path.to_owned());
+
             files.entry(path.to_owned()).or_default();
+
             continue;
         }
 
         if line == "end_of_record" {
             current_file = None;
+
             continue;
         }
 
         let Some(path) = current_file.as_ref() else {
             continue;
         };
+
         let Some(file) = files.get_mut(path) else {
             continue;
         };
 
         if let Some(rest) = line.strip_prefix("DA:") {
             let mut parts = rest.split(',');
+
             let Some(line_no) = parts.next().and_then(|value| value.parse::<u32>().ok()) else {
                 continue;
             };
+
             let Some(hit_count) = parts.next().and_then(|value| value.parse::<u64>().ok()) else {
                 continue;
             };
+
             file.record_line(line_no, hit_count > 0);
+
             continue;
         }
 
         if let Some(rest) = line.strip_prefix("BRDA:") {
             let mut parts = rest.split(',');
+
             let Some(line_no) = parts.next().and_then(|value| value.parse::<u32>().ok()) else {
                 continue;
             };
+
             let Some(block) = parts.next().and_then(|value| value.parse::<u32>().ok()) else {
                 continue;
             };
+
             let Some(branch) = parts.next().and_then(|value| value.parse::<u32>().ok()) else {
                 continue;
             };
+
             let Some(taken) = parts.next() else {
                 continue;
             };
+
             if taken == "-" {
                 // Some wasm lcov exporters emit branch records without taken counts.
                 // Treat those as "no branch data" instead of uncovered branches.
                 continue;
             }
+
             let hit = taken.parse::<u64>().ok().is_some_and(|count| count > 0);
+
             file.record_branch(
                 BranchKey {
                     line: line_no,
@@ -393,6 +455,7 @@ fn parse_wasm_bindgen_version_from_lock(lock_content: &str) -> Result<String, Er
             format!("Cargo.lock: {error}"),
         ))
     })?;
+
     let packages = doc
         .get("package")
         .and_then(toml::Value::as_array)
@@ -407,15 +470,19 @@ fn parse_wasm_bindgen_version_from_lock(lock_content: &str) -> Result<String, Er
         let Some(table) = package.as_table() else {
             continue;
         };
+
         let Some(name) = table.get("name").and_then(toml::Value::as_str) else {
             continue;
         };
+
         if name != "wasm-bindgen" {
             continue;
         }
+
         let Some(version) = table.get("version").and_then(toml::Value::as_str) else {
             continue;
         };
+
         return Ok(version.to_owned());
     }
 
@@ -433,19 +500,26 @@ fn write_lcov_records(records: &BTreeMap<String, FileCoverage>) -> String {
         writeln!(out, "SF:{path}").expect("write to String");
 
         let mut line_hits = 0_u64;
+
         for (line, hit) in &file.lines {
             let count = if *hit { 1 } else { 0 };
+
             line_hits += u64::from(*hit);
+
             writeln!(out, "DA:{line},{count}").expect("write to String");
         }
+
         writeln!(out, "LF:{}", file.lines.len()).expect("write to String");
         writeln!(out, "LH:{line_hits}").expect("write to String");
 
         if !file.branches.is_empty() {
             let mut branch_hits = 0_u64;
+
             for (branch, hit) in &file.branches {
                 let taken = if *hit { "1" } else { "0" };
+
                 branch_hits += u64::from(*hit);
+
                 writeln!(
                     out,
                     "BRDA:{},{},{},{}",
@@ -453,6 +527,7 @@ fn write_lcov_records(records: &BTreeMap<String, FileCoverage>) -> String {
                 )
                 .expect("write to String");
             }
+
             writeln!(out, "BRF:{}", file.branches.len()).expect("write to String");
             writeln!(out, "BRH:{branch_hits}").expect("write to String");
         }
@@ -474,7 +549,9 @@ fn package_source_needles(package: &str) -> [String; 2] {
 /// packages such as `xtask`.
 fn parse_package_stats(lcov_content: &str, package: &str) -> CrateStats {
     let needles = package_source_needles(package);
+
     let records = parse_lcov_records(lcov_content);
+
     let mut stats = CrateStats::default();
 
     for (path, file) in records {
@@ -505,11 +582,14 @@ pub fn merge_files(files: &[PathBuf], output: &Path) -> Result<String, Error> {
 
     for file in files {
         let content = fs::read_to_string(file).map_err(Error::Io)?;
+
         for (path, incoming) in parse_lcov_records(&content) {
             let entry = merged.entry(path).or_default();
+
             for (line, hit) in incoming.lines {
                 entry.record_line(line, hit);
             }
+
             for (branch, hit) in incoming.branches {
                 entry.record_branch(branch, hit);
             }
@@ -517,7 +597,9 @@ pub fn merge_files(files: &[PathBuf], output: &Path) -> Result<String, Error> {
     }
 
     let rendered = write_lcov_records(&merged);
+
     fs::write(output, &rendered).map_err(Error::Io)?;
+
     Ok(format!(
         "Merged {} lcov files into {}",
         files.len(),
@@ -543,29 +625,42 @@ pub fn generate_wasm_lcov(options: &WasmCoverageOptions) -> Result<String, Error
     preflight_nightly()?;
     preflight_nightly_wasm32()?;
     preflight_wasm_runner()?;
+
     let tools = NightlyLlvmTools::discover()?;
+
     let wasm_clang = discover_wasm_clang()?;
+
     let chromedriver = discover_chromedriver()?;
 
     let work_dir = Path::new("target")
         .join("wasm-coverage")
         .join(&options.package);
+
     let cargo_target_dir = work_dir.join("cargo-target");
+
     let profraw_dir = work_dir.join("profraw");
+
     let objects_dir = work_dir.join("objects");
+
     let profdata_path = work_dir.join("coverage.profdata");
 
     if work_dir.exists() {
         fs::remove_dir_all(&work_dir).map_err(Error::Io)?;
     }
+
     fs::create_dir_all(&profraw_dir).map_err(Error::Io)?;
     fs::create_dir_all(&objects_dir).map_err(Error::Io)?;
 
-    let rustflags = coverage_rustflags();
+    let profiler_runtime_shim = build_profiler_runtime_shim(&work_dir, &wasm_clang)?;
+
+    let rustflags = coverage_rustflags(Some(&profiler_runtime_shim));
+
     let runner = OsString::from("wasm-bindgen-test-runner");
+
     let package_snake = options.package.replace('-', "_");
 
     let test_args = wasm_test_args(options);
+
     run_command(
         nightly_cargo_command(
             &rustflags,
@@ -579,6 +674,7 @@ pub fn generate_wasm_lcov(options: &WasmCoverageOptions) -> Result<String, Error
     )?;
 
     let no_run_args = wasm_no_run_args(options);
+
     let artifact_output = capture_output(
         nightly_cargo_command(
             &rustflags,
@@ -590,6 +686,7 @@ pub fn generate_wasm_lcov(options: &WasmCoverageOptions) -> Result<String, Error
         )
         .args(&no_run_args),
     )?;
+
     let artifacts = parse_wasm_artifacts(&artifact_output.stdout, &package_snake)?;
 
     if artifacts.is_empty() {
@@ -599,9 +696,12 @@ pub fn generate_wasm_lcov(options: &WasmCoverageOptions) -> Result<String, Error
     }
 
     let mut linked_wasm_paths = BTreeSet::new();
+
     for artifact in artifacts {
         let ir_path = artifact_to_ir_path(&artifact);
+
         let object_path = objects_dir.join(object_name_for_ir(&ir_path));
+
         run_command(
             process::Command::new(&wasm_clang)
                 .arg("--target=wasm32-unknown-unknown")
@@ -611,7 +711,9 @@ pub fn generate_wasm_lcov(options: &WasmCoverageOptions) -> Result<String, Error
                 .arg("-o")
                 .arg(&object_path),
         )?;
+
         let linked_wasm_path = objects_dir.join(linked_wasm_name_for_ir(&ir_path));
+
         run_command(
             process::Command::new(&tools.rust_lld)
                 .arg("-flavor")
@@ -623,10 +725,12 @@ pub fn generate_wasm_lcov(options: &WasmCoverageOptions) -> Result<String, Error
                 .arg("-o")
                 .arg(&linked_wasm_path),
         )?;
+
         linked_wasm_paths.insert(linked_wasm_path);
     }
 
     let profraw_files = collect_profraw_files(&profraw_dir)?;
+
     if profraw_files.is_empty() {
         return Err(Error::NoProfiles {
             directory: profraw_dir,
@@ -634,21 +738,29 @@ pub fn generate_wasm_lcov(options: &WasmCoverageOptions) -> Result<String, Error
     }
 
     let mut profdata_command = process::Command::new(&tools.llvm_profdata);
+
     profdata_command.arg("merge").arg("-sparse");
+
     for file in &profraw_files {
         profdata_command.arg(file);
     }
+
     profdata_command.arg("-o").arg(&profdata_path);
+
     run_command(&mut profdata_command)?;
 
     let crate_sources = Path::new("crates").join(&options.package).join("src");
+
     let mut linked_wasm_paths = linked_wasm_paths.into_iter();
+
     let Some(primary_binary) = linked_wasm_paths.next() else {
         return Err(Error::NoArtifacts {
             package: options.package.clone(),
         });
     };
+
     let mut export_command = process::Command::new(&tools.llvm_cov);
+
     export_command
         .arg("export")
         .arg("--format=lcov")
@@ -656,16 +768,20 @@ pub fn generate_wasm_lcov(options: &WasmCoverageOptions) -> Result<String, Error
         .arg(&profdata_path)
         .arg(&primary_binary)
         .arg(&crate_sources);
+
     for binary in linked_wasm_paths {
         export_command.arg("--object").arg(binary);
     }
+
     let output = capture_output(&mut export_command)?;
 
     let parent = options
         .output
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+
     fs::create_dir_all(parent).map_err(Error::Io)?;
+
     fs::write(&options.output, output.stdout).map_err(Error::Io)?;
 
     Ok(format!(
@@ -689,6 +805,7 @@ pub fn generate_wasm_lcov(options: &WasmCoverageOptions) -> Result<String, Error
 /// - [`CoverageError::BelowThreshold`] if coverage is below the minimum.
 pub fn check(file: &Path, package: &str, min_line: f64, min_branch: f64) -> Result<String, Error> {
     let content = fs::read_to_string(file).map_err(Error::Io)?;
+
     check_from_content(&content, package, min_line, min_branch)
 }
 
@@ -709,14 +826,19 @@ fn check_from_content(
     }
 
     let line_pct = stats.line_pct();
+
     let branch_pct = stats.branch_pct();
+
     let no_branch_data = stats.branches_found == 0;
 
     let line_ok = line_pct >= min_line;
+
     let branch_ok = no_branch_data || branch_pct >= min_branch;
 
     let mut out = String::new();
+
     writeln!(out, "{package}:").expect("write to String");
+
     writeln!(
         out,
         "  lines:    {:.1}% ({}/{}) — min {min_line:.0}% {}",
@@ -763,13 +885,16 @@ fn check_from_content(
 /// - [`CoverageError::BelowThreshold`] if any crate fails its threshold.
 pub fn check_all(file: &Path, thresholds: &[CrateThreshold]) -> Result<String, Error> {
     let content = fs::read_to_string(file).map_err(Error::Io)?;
+
     check_all_from_content(&content, thresholds)
 }
 
 /// Inner implementation that operates on lcov content directly.
 fn check_all_from_content(content: &str, thresholds: &[CrateThreshold]) -> Result<String, Error> {
     let mut out = String::new();
+
     let mut any_failed = false;
+
     let crate_width = thresholds
         .iter()
         .map(|threshold| threshold.package.len())
@@ -783,6 +908,7 @@ fn check_all_from_content(content: &str, thresholds: &[CrateThreshold]) -> Resul
         "Crate", "Lines", "Min", "Branch", "Min"
     )
     .expect("write to String");
+
     writeln!(
         out,
         "{:-<crate_width$} {:->8} {:->8} {:->8} {:->8}   {:-<6}",
@@ -800,15 +926,20 @@ fn check_all_from_content(content: &str, thresholds: &[CrateThreshold]) -> Resul
                 threshold.package, "—", threshold.min_line, "—", threshold.min_branch,
             )
             .expect("write to String");
+
             continue;
         }
 
         let line_pct = stats.line_pct();
+
         let branch_pct = stats.branch_pct();
+
         let no_branch_data = stats.branches_found == 0;
 
         let line_ok = line_pct >= threshold.min_line;
+
         let branch_ok = no_branch_data || branch_pct >= threshold.min_branch;
+
         let passed = line_ok && branch_ok;
 
         if !passed {
@@ -838,15 +969,19 @@ fn check_all_from_content(content: &str, thresholds: &[CrateThreshold]) -> Resul
 
     if any_failed {
         writeln!(out).expect("write to String");
+
         writeln!(
             out,
             "Coverage check FAILED — one or more crates below threshold."
         )
         .expect("write to String");
+
         Err(Error::BelowThreshold { summary: out })
     } else {
         writeln!(out).expect("write to String");
+
         writeln!(out, "All crates meet coverage thresholds.").expect("write to String");
+
         Ok(out)
     }
 }
@@ -923,9 +1058,11 @@ end_of_record
     #[test]
     fn parse_stats_aggregates_across_files() {
         let stats = parse_package_stats(SAMPLE_LCOV, "ars-core");
+
         // lib.rs: 5 lines with 4 hits + connect.rs: 2 lines with 1 hit
         assert_eq!(stats.lines_found, 7);
         assert_eq!(stats.lines_hit, 5);
+
         // lib.rs: 4 branches with 3 hits + connect.rs: 2 branches with 1 hit
         assert_eq!(stats.branches_found, 6);
         assert_eq!(stats.branches_hit, 4);
@@ -934,6 +1071,7 @@ end_of_record
     #[test]
     fn parse_stats_filters_by_package() {
         let stats = parse_package_stats(SAMPLE_LCOV, "ars-forms");
+
         assert_eq!(stats.lines_found, 3);
         assert_eq!(stats.lines_hit, 3);
         assert_eq!(stats.branches_found, 0);
@@ -943,12 +1081,14 @@ end_of_record
     #[test]
     fn parse_stats_nonexistent_package() {
         let stats = parse_package_stats(SAMPLE_LCOV, "ars-nonexistent");
+
         assert_eq!(stats.lines_found, 0);
     }
 
     #[test]
     fn parse_stats_unions_duplicate_file_records() {
         let stats = parse_package_stats(DUPLICATE_LCOV, "ars-core");
+
         assert_eq!(stats.lines_found, 2);
         assert_eq!(stats.lines_hit, 2);
         assert_eq!(stats.branches_found, 2);
@@ -958,6 +1098,7 @@ end_of_record
     #[test]
     fn parse_stats_matches_workspace_root_package() {
         let stats = parse_package_stats(ROOT_PACKAGE_LCOV, "xtask");
+
         assert_eq!(stats.lines_found, 2);
         assert_eq!(stats.lines_hit, 1);
         assert_eq!(stats.branches_found, 2);
@@ -967,6 +1108,7 @@ end_of_record
     #[test]
     fn parse_stats_ignores_branch_records_without_taken_counts() {
         let stats = parse_package_stats(NO_BRANCH_DATA_LCOV, "ars-i18n");
+
         assert_eq!(stats.lines_found, 2);
         assert_eq!(stats.lines_hit, 2);
         assert_eq!(stats.branches_found, 0);
@@ -977,16 +1119,22 @@ end_of_record
     fn check_passes_when_above_threshold() {
         // ars-core: 5/7 = 71.4% lines, 4/6 = 66.7% branches
         let result = check_from_content(SAMPLE_LCOV, "ars-core", 70.0, 60.0);
+
         assert!(result.is_ok());
+
         let output = result.expect("should pass");
+
         assert!(output.contains("PASS"));
     }
 
     #[test]
     fn check_fails_when_below_line_threshold() {
         let result = check_from_content(SAMPLE_LCOV, "ars-core", 90.0, 60.0);
+
         assert!(result.is_err());
+
         let err = result.unwrap_err();
+
         assert!(matches!(err, Error::BelowThreshold { .. }));
         assert!(err.to_string().contains("FAIL"));
     }
@@ -994,6 +1142,7 @@ end_of_record
     #[test]
     fn check_fails_when_below_branch_threshold() {
         let result = check_from_content(SAMPLE_LCOV, "ars-core", 70.0, 90.0);
+
         assert!(result.is_err());
     }
 
@@ -1001,14 +1150,18 @@ end_of_record
     fn check_skips_branch_when_no_data() {
         // ars-forms has BRF=0, BRH=0 — branch check should pass regardless
         let result = check_from_content(SAMPLE_LCOV, "ars-forms", 90.0, 90.0);
+
         assert!(result.is_ok());
+
         let output = result.expect("should pass with no branch data");
+
         assert!(output.contains("SKIP"));
     }
 
     #[test]
     fn check_errors_on_missing_package() {
         let result = check_from_content(SAMPLE_LCOV, "ars-nonexistent", 50.0, 50.0);
+
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::NoSourceFiles { .. }));
     }
@@ -1027,9 +1180,13 @@ end_of_record
                 min_branch: 90.0,
             },
         ];
+
         let result = check_all_from_content(SAMPLE_LCOV, &thresholds);
+
         assert!(result.is_ok());
+
         let output = result.expect("all should pass");
+
         assert!(output.contains("ars-core"));
         assert!(output.contains("ars-forms"));
         assert!(output.contains("All crates meet coverage thresholds."));
@@ -1042,9 +1199,13 @@ end_of_record
             min_line: 50.0,
             min_branch: 50.0,
         }];
+
         let result = check_all_from_content(SAMPLE_LCOV, &thresholds);
+
         assert!(result.is_ok());
+
         let output = result.expect("long-name table should render");
+
         assert!(output.contains("ars-test-harness-leptos"));
         assert!(!output.contains("ars-test-harness-leptos—"));
     }
@@ -1063,9 +1224,13 @@ end_of_record
                 min_branch: 90.0,
             },
         ];
+
         let result = check_all_from_content(SAMPLE_LCOV, &thresholds);
+
         assert!(result.is_err());
+
         let err = result.unwrap_err();
+
         assert!(err.to_string().contains("FAIL"));
         assert!(err.to_string().contains("Coverage check FAILED"));
     }
@@ -1077,15 +1242,20 @@ end_of_record
             min_line: 50.0,
             min_branch: 50.0,
         }];
+
         let result = check_all_from_content(SAMPLE_LCOV, &thresholds);
+
         assert!(result.is_ok());
+
         let output = result.expect("should skip missing");
+
         assert!(output.contains("SKIP"));
     }
 
     #[test]
     fn line_pct_zero_found() {
         let stats = CrateStats::default();
+
         assert_eq!(stats.line_pct(), 0.0);
         assert_eq!(stats.branch_pct(), 0.0);
     }
@@ -1093,18 +1263,25 @@ end_of_record
     #[test]
     fn merge_files_unions_hits_without_double_counting() {
         let tempdir = std::env::temp_dir().join(format!("ars-ui-coverage-merge-{}", process::id()));
+
         drop(fs::remove_dir_all(&tempdir));
+
         fs::create_dir_all(&tempdir).expect("temp dir");
 
         let first = tempdir.join("first.info");
         let second = tempdir.join("second.info");
+
         let output = tempdir.join("merged.info");
+
         fs::write(&first, DUPLICATE_LCOV).expect("write first");
         fs::write(&second, SAMPLE_LCOV).expect("write second");
 
         merge_files(&[first, second], &output).expect("merge succeeds");
+
         let merged = fs::read_to_string(output).expect("read merged");
+
         let stats = parse_package_stats(&merged, "ars-core");
+
         assert_eq!(stats.lines_found, 7);
         assert_eq!(stats.lines_hit, 5);
 
@@ -1142,13 +1319,16 @@ version = "0.2.118"
 
         let version =
             parse_wasm_bindgen_version_from_lock(lock).expect("should parse wasm-bindgen version");
+
         assert_eq!(version, "0.2.118");
     }
 
     #[test]
     fn llvm_profile_file_uses_runner_placeholders_in_profraw_dir() {
         let profraw_dir = std::env::temp_dir().join("ars-ui-profraw");
+
         let profile = llvm_profile_file(profraw_dir);
+
         assert_eq!(
             profile,
             std::env::temp_dir().join("ars-ui-profraw/wasm-coverage-%m-%p.profraw")
@@ -1157,7 +1337,8 @@ version = "0.2.118"
 
     #[test]
     fn coverage_rustflags_enables_branch_instrumentation() {
-        let flags = coverage_rustflags();
+        let flags = coverage_rustflags(None);
+
         assert!(flags.contains("-Cinstrument-coverage"));
         assert!(flags.contains("-Zcoverage-options=branch"));
     }
@@ -1174,6 +1355,33 @@ version = "0.2.118"
                 && target.features == ["web-intl"]
                 && target.no_default_features
         }));
+        assert!(targets.iter().any(|target| {
+            target.package == "ars-leptos"
+                && target.features == ["csr"]
+                && !target.no_default_features
+        }));
+        assert!(targets.iter().any(|target| {
+            target.package == "ars-dioxus"
+                && target.features == ["web"]
+                && !target.no_default_features
+        }));
+        assert!(targets.iter().any(|target| {
+            target.package == "ars-test-harness-leptos"
+                && target.features.is_empty()
+                && !target.no_default_features
+        }));
+        assert!(targets.iter().any(|target| {
+            target.package == "ars-test-harness-dioxus"
+                && target.features.is_empty()
+                && !target.no_default_features
+        }));
+    }
+
+    #[test]
+    fn coverage_rustflags_can_link_profiler_runtime_shim() {
+        let flags = coverage_rustflags(Some(Path::new("/tmp/llvm_profile_runtime.o")));
+
+        assert!(flags.contains("-Clink-arg=/tmp/llvm_profile_runtime.o"));
     }
 
     #[test]
@@ -1185,6 +1393,7 @@ version = "0.2.118"
             no_default_features: true,
             extra_test_args: Vec::new(),
         });
+
         let args = args
             .into_iter()
             .map(|arg| arg.to_string_lossy().into_owned())
@@ -1199,16 +1408,53 @@ version = "0.2.118"
     }
 }
 
-fn coverage_rustflags() -> String {
+fn coverage_rustflags(profiler_runtime_shim: Option<&Path>) -> String {
     let mut flags = std::env::var("RUSTFLAGS").unwrap_or_default();
+
     if !flags.is_empty() {
         flags.push(' ');
     }
+
     flags.push_str(
         "-Cinstrument-coverage -Zcoverage-options=branch -Zno-profiler-runtime --emit=llvm-ir \
          --cfg=wasm_bindgen_unstable_test_coverage",
     );
+
+    if let Some(shim) = profiler_runtime_shim {
+        flags.push(' ');
+        flags.push_str("-Clink-arg=");
+        flags.push_str(&shim.display().to_string());
+    }
+
     flags
+}
+
+fn build_profiler_runtime_shim(work_dir: &Path, wasm_clang: &Path) -> Result<PathBuf, Error> {
+    let shim_dir = work_dir.join("profiler-runtime-shim");
+
+    fs::create_dir_all(&shim_dir).map_err(Error::Io)?;
+
+    let source = shim_dir.join("llvm_profile_runtime.c");
+    let object = shim_dir.join("llvm_profile_runtime.o");
+
+    fs::write(
+        &source,
+        "__attribute__((weak)) unsigned char __llvm_profile_runtime = 0;\n",
+    )
+    .map_err(Error::Io)?;
+
+    run_command(
+        process::Command::new(wasm_clang)
+            .arg("--target=wasm32-unknown-unknown")
+            .arg("-fno-profile-instr-generate")
+            .arg("-fno-coverage-mapping")
+            .arg("-c")
+            .arg(&source)
+            .arg("-o")
+            .arg(&object),
+    )?;
+
+    fs::canonicalize(&object).map_err(Error::Io)
 }
 
 fn base_wasm_cargo_args(options: &WasmCoverageOptions) -> Vec<OsString> {
@@ -1225,31 +1471,38 @@ fn base_wasm_cargo_args(options: &WasmCoverageOptions) -> Vec<OsString> {
     if options.no_default_features {
         args.push(OsString::from("--no-default-features"));
     }
+
     if !options.features.is_empty() {
         args.push(OsString::from("--features"));
         args.push(OsString::from(options.features.join(",")));
     }
+
     args
 }
 
 fn wasm_test_args(options: &WasmCoverageOptions) -> Vec<OsString> {
     let mut args = base_wasm_cargo_args(options);
+
     if !options.extra_test_args.is_empty() {
         args.push(OsString::from("--"));
         args.extend(options.extra_test_args.iter().map(OsString::from));
     }
+
     args
 }
 
 fn wasm_no_run_args(options: &WasmCoverageOptions) -> Vec<OsString> {
     let mut args = base_wasm_cargo_args(options);
+
     args.push(OsString::from("--no-run"));
     args.push(OsString::from("--message-format=json"));
+
     args
 }
 
 fn llvm_profile_file(profraw_dir: impl AsRef<Path>) -> PathBuf {
     let profraw_dir = profraw_dir.as_ref();
+
     let absolute = if profraw_dir.is_absolute() {
         profraw_dir.to_path_buf()
     } else {
@@ -1257,6 +1510,7 @@ fn llvm_profile_file(profraw_dir: impl AsRef<Path>) -> PathBuf {
             .expect("current working directory")
             .join(profraw_dir)
     };
+
     absolute.join("wasm-coverage-%m-%p.profraw")
 }
 
@@ -1269,12 +1523,16 @@ fn nightly_cargo_command(
     runner: &OsString,
 ) -> process::Command {
     let mut command = process::Command::new("cargo");
+
     let path = std::env::var_os("PATH").unwrap_or_default();
+
     let path_dir = wasm_clang.parent().unwrap_or_else(|| Path::new("."));
+
     let joined_path = std::env::join_paths(
         std::iter::once(path_dir.to_path_buf()).chain(std::env::split_paths(&path)),
     )
     .expect("valid PATH");
+
     command
         .env("RUSTFLAGS", rustflags)
         .env("CARGO_TARGET_DIR", cargo_target_dir)
@@ -1286,12 +1544,15 @@ fn nightly_cargo_command(
         .env("TARGET_CC", wasm_clang)
         .env("PATH", &joined_path)
         .env("CHROMEDRIVER", chromedriver);
+
     command
 }
 
 fn run_command(command: &mut process::Command) -> Result<(), Error> {
     let display = format!("{command:?}");
+
     let status = command.status().map_err(Error::Io)?;
+
     if status.success() {
         Ok(())
     } else {
@@ -1304,7 +1565,9 @@ fn run_command(command: &mut process::Command) -> Result<(), Error> {
 
 fn capture_output(command: &mut process::Command) -> Result<Output, Error> {
     let display = format!("{command:?}");
+
     let output = command.output().map_err(Error::Io)?;
+
     if output.status.success() {
         Ok(output)
     } else {
@@ -1338,6 +1601,7 @@ fn preflight_nightly_wasm32() -> Result<(), Error> {
         .args(["target", "list", "--toolchain", "nightly", "--installed"])
         .output()
         .map_err(Error::Io)?;
+
     if !output.status.success() {
         return Err(Error::CommandFailed {
             command: "rustup target list --toolchain nightly --installed".into(),
@@ -1346,6 +1610,7 @@ fn preflight_nightly_wasm32() -> Result<(), Error> {
     }
 
     let installed = String::from_utf8_lossy(&output.stdout);
+
     if installed
         .lines()
         .any(|line| line.trim() == "wasm32-unknown-unknown")
@@ -1363,6 +1628,7 @@ fn preflight_wasm_runner() -> Result<(), Error> {
     let expected_version = parse_wasm_bindgen_version_from_lock(
         &fs::read_to_string("Cargo.lock").map_err(Error::Io)?,
     )?;
+
     let output = process::Command::new("wasm-bindgen-test-runner")
         .arg("--version")
         .output()
@@ -1382,6 +1648,7 @@ fn preflight_wasm_runner() -> Result<(), Error> {
         .last()
         .map(str::to_owned)
         .unwrap_or_default();
+
     if actual_version == expected_version {
         Ok(())
     } else {
@@ -1397,16 +1664,21 @@ fn preflight_wasm_runner() -> Result<(), Error> {
 fn discover_chromedriver() -> Result<PathBuf, Error> {
     if let Ok(path) = std::env::var("CHROMEDRIVER") {
         let path = PathBuf::from(path);
+
         if path.is_file() {
             return Ok(path);
         }
     }
+
     if let Ok(path) = std::env::var("CHROMEWEBDRIVER") {
         let path = PathBuf::from(path);
+
         if path.is_file() {
             return Ok(path);
         }
+
         let nested = path.join("chromedriver");
+
         if nested.is_file() {
             return Ok(nested);
         }
@@ -1417,6 +1689,7 @@ fn discover_chromedriver() -> Result<PathBuf, Error> {
         PathBuf::from("/usr/local/share/chromedriver-linux64/chromedriver"),
         PathBuf::from("/usr/local/bin/chromedriver"),
     ];
+
     for candidate in candidates {
         if candidate.is_file() {
             return Ok(candidate);
@@ -1428,12 +1701,15 @@ fn discover_chromedriver() -> Result<PathBuf, Error> {
         .stdout(process::Stdio::null())
         .stderr(process::Stdio::null())
         .status();
+
     match status {
         Ok(status) if status.success() => Ok(PathBuf::from("chromedriver")),
+
         Ok(status) => Err(Error::CommandFailed {
             command: "chromedriver --version".into(),
             code: status.code(),
         }),
+
         Err(_) => Err(Error::MissingTool {
             tool: "chromedriver".into(),
             install_hint:
@@ -1448,6 +1724,7 @@ fn discover_wasm_clang() -> Result<PathBuf, Error> {
     for env_name in ["WASM_COVERAGE_CLANG", "CC_wasm32_unknown_unknown", "CC"] {
         if let Ok(path) = std::env::var(env_name) {
             let trimmed = path.trim();
+
             if !trimmed.is_empty() {
                 candidates.push(PathBuf::from(trimmed));
             }
@@ -1455,18 +1732,23 @@ fn discover_wasm_clang() -> Result<PathBuf, Error> {
     }
 
     let nightly_llvm_major = NightlyLlvmTools::discover()?.llvm_major;
+
     candidates.push(PathBuf::from(format!("clang-{nightly_llvm_major}")));
     candidates.push(PathBuf::from("/opt/homebrew/opt/llvm/bin/clang"));
     candidates.push(PathBuf::from("/usr/local/opt/llvm/bin/clang"));
     candidates.push(PathBuf::from("clang"));
 
     let mut saw_candidate = false;
+
     let probe_dir = Path::new("target")
         .join("wasm-coverage")
         .join("clang-probe");
+
     fs::create_dir_all(&probe_dir).map_err(Error::Io)?;
+
     let source = probe_dir.join("probe.c");
     let object = probe_dir.join("probe.o");
+
     fs::write(
         &source,
         "int ars_ui_wasm_coverage_probe(void) { return 0; }\n",
@@ -1479,10 +1761,14 @@ fn discover_wasm_clang() -> Result<PathBuf, Error> {
             .stdout(process::Stdio::null())
             .stderr(process::Stdio::null())
             .status();
+
         match version {
             Ok(status) if status.success() => saw_candidate = true,
+
             Ok(_) => continue,
+
             Err(err) if err.kind() == ErrorKind::NotFound => continue,
+
             Err(err) => return Err(Error::Io(err)),
         }
 
@@ -1495,10 +1781,14 @@ fn discover_wasm_clang() -> Result<PathBuf, Error> {
             .stdout(process::Stdio::null())
             .stderr(process::Stdio::null())
             .status();
+
         match compile {
             Ok(status) if status.success() => return Ok(candidate),
+
             Ok(_) => {}
+
             Err(err) if err.kind() == ErrorKind::NotFound => {}
+
             Err(err) => return Err(Error::Io(err)),
         }
     }
@@ -1525,11 +1815,15 @@ impl NightlyLlvmTools {
         let sysroot = capture_output(
             process::Command::new("rustup").args(["run", "nightly", "rustc", "--print", "sysroot"]),
         )?;
+
         let host_output = capture_output(
             process::Command::new("rustup").args(["run", "nightly", "rustc", "-vV"]),
         )?;
+
         let sysroot = PathBuf::from(String::from_utf8_lossy(&sysroot.stdout).trim().to_owned());
+
         let host_text = String::from_utf8_lossy(&host_output.stdout);
+
         let host = host_text
             .lines()
             .find_map(|line| line.strip_prefix("host: "))
@@ -1538,6 +1832,7 @@ impl NightlyLlvmTools {
                 command: "rustup run nightly rustc -vV".into(),
                 code: None,
             })?;
+
         let llvm_major = host_text
             .lines()
             .find_map(|line| line.strip_prefix("LLVM version: "))
@@ -1549,8 +1844,11 @@ impl NightlyLlvmTools {
             })?;
 
         let bin_dir = sysroot.join("lib").join("rustlib").join(host).join("bin");
+
         let rust_lld = bin_dir.join("rust-lld");
+
         let llvm_profdata = bin_dir.join("llvm-profdata");
+
         let llvm_cov = bin_dir.join("llvm-cov");
 
         if !rust_lld.is_file() || !llvm_profdata.is_file() || !llvm_cov.is_file() {
@@ -1571,27 +1869,35 @@ impl NightlyLlvmTools {
 
 fn parse_wasm_artifacts(stdout: &[u8], package_snake: &str) -> Result<Vec<PathBuf>, Error> {
     let stdout = String::from_utf8_lossy(stdout);
+
     let mut artifacts = BTreeSet::new();
 
     for line in stdout.lines() {
         let Ok(message) = serde_json::from_str::<CargoArtifactMessage>(line) else {
             continue;
         };
+
         if message.reason != "compiler-artifact" {
             continue;
         }
+
         let Some(target) = message.target else {
             continue;
         };
+
         let is_test = target.kind == ["test"];
+
         let is_crate_artifact = target.name == package_snake;
+
         if !is_test && !is_crate_artifact {
             continue;
         }
 
         for filename in message.filenames.unwrap_or_default() {
             let path = PathBuf::from(filename);
+
             let extension = path.extension().and_then(|value| value.to_str());
+
             if matches!(extension, Some("rlib" | "wasm")) {
                 artifacts.insert(path);
             }
@@ -1603,12 +1909,15 @@ fn parse_wasm_artifacts(stdout: &[u8], package_snake: &str) -> Result<Vec<PathBu
 
 fn artifact_to_ir_path(artifact: &Path) -> PathBuf {
     let parent = artifact.parent().unwrap_or_else(|| Path::new("."));
+
     let stem = artifact
         .file_stem()
         .and_then(|value| value.to_str())
         .unwrap_or_default();
+
     if artifact.extension().and_then(|value| value.to_str()) == Some("rlib") {
         let stem = stem.strip_prefix("lib").unwrap_or(stem);
+
         parent.join(format!("{stem}.ll"))
     } else {
         parent.join(format!("{stem}.ll"))
@@ -1620,6 +1929,7 @@ fn object_name_for_ir(path: &Path) -> String {
         .file_stem()
         .and_then(|value| value.to_str())
         .unwrap_or("coverage");
+
     format!("{stem}.o")
 }
 
@@ -1628,17 +1938,22 @@ fn linked_wasm_name_for_ir(path: &Path) -> String {
         .file_stem()
         .and_then(|value| value.to_str())
         .unwrap_or("coverage");
+
     format!("{stem}.wasm")
 }
 
 fn collect_profraw_files(directory: &Path) -> Result<Vec<PathBuf>, Error> {
     let mut files = Vec::new();
+
     for entry in fs::read_dir(directory).map_err(Error::Io)? {
         let path = entry.map_err(Error::Io)?.path();
+
         if path.extension().and_then(|value| value.to_str()) == Some("profraw") {
             files.push(path);
         }
     }
+
     files.sort();
+
     Ok(files)
 }

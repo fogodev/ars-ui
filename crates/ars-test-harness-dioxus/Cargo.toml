@@ -8,9 +8,21 @@ repository.workspace   = true
 rust-version.workspace = true
 
 [dependencies]
-ars-dioxus       = { path = "../ars-dioxus" }
-ars-test-harness = { path = "../ars-test-harness" }
-web-sys          = { version = "0.3", features = ["HtmlElement"] }
+ars-core             = { path = "../ars-core" }
+ars-dioxus           = { path = "../ars-dioxus", features = ["web"] }
+ars-i18n             = { path = "../ars-i18n" }
+ars-test-harness     = { path = "../ars-test-harness" }
+dioxus-web           = "0.7.6"
+js-sys               = "0.3"
+wasm-bindgen         = "0.2"
+wasm-bindgen-futures = "0.4"
+wasm-bindgen-test    = "0.3"
+web-sys              = { version = "0.3", features = ["Document", "Element", "HtmlElement", "Node", "Window"] }
+
+[dependencies.dioxus]
+version          = "0.7.6"
+default-features = false
+features         = ["macro", "signals", "hooks", "html"]
 
 [lints]
 workspace = true

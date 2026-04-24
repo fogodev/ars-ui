@@ -79,6 +79,7 @@ impl ServerHandler for McpServer {
                 None,
             ))
         };
+
         future::ready(result)
     }
 }

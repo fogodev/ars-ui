@@ -18,6 +18,7 @@ pub fn execute(root: &SpecRoot, name: &str) -> Result<String, Error> {
                 name: name.to_string(),
                 available: vec![],
             })?;
+
     let profile = profiles
         .get(name)
         .or_else(|| profiles.get(&name.replace('-', "_")))
@@ -26,12 +27,16 @@ pub fn execute(root: &SpecRoot, name: &str) -> Result<String, Error> {
             name: name.to_string(),
             available: profiles.keys().cloned().collect(),
         })?;
+
     let mut out = String::new();
+
     writeln!(out, "# Review profile: {name}").expect("write to String");
     writeln!(out).expect("write to String");
     writeln!(out, "## Files always loaded").expect("write to String");
+
     for file in &profile.files_always {
         writeln!(out, "{file}").expect("write to String");
     }
+
     Ok(out)
 }

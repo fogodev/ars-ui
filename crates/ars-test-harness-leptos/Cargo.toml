@@ -8,9 +8,14 @@ repository.workspace   = true
 rust-version.workspace = true
 
 [dependencies]
-ars-leptos       = { path = "../ars-leptos" }
-ars-test-harness = { path = "../ars-test-harness" }
-web-sys          = { version = "0.3", features = ["HtmlElement"] }
+ars-core          = { path = "../ars-core" }
+ars-i18n          = { path = "../ars-i18n" }
+ars-leptos        = { path = "../ars-leptos", features = ["csr"] }
+ars-test-harness  = { path = "../ars-test-harness" }
+leptos            = { version = "0.8.19", features = ["csr"] }
+wasm-bindgen      = "0.2"
+wasm-bindgen-test = "0.3"
+web-sys           = { version = "0.3", features = ["Document", "Element", "HtmlElement", "Window"] }
 
 [lints]
 workspace = true

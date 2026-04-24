@@ -562,7 +562,9 @@ fn parse_nextest_summary(output: &str) -> Summary {
         .last()
         .and_then(|captures| {
             let total_run = captures.name("run")?.as_str().parse::<u64>().ok()?;
+
             let total_passed = captures.name("passed")?.as_str().parse::<u64>().ok()?;
+
             Some(Summary {
                 total_run,
                 total_passed,

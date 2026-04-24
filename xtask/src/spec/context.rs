@@ -19,7 +19,9 @@ pub fn execute(
     include_testing: bool,
 ) -> Result<String, Error> {
     let (key, comp) = manifest::find_component(&root.manifest, component)?;
+
     let m = &root.manifest;
+
     let mut out = String::new();
 
     writeln!(out, "# Implementation context for {component}").expect("write to String");
@@ -49,6 +51,7 @@ pub fn execute(
             "dioxus" => &m.dioxus_adapters,
             _ => return Err(Error::UnknownFramework(fw.to_string())),
         };
+
         if let Some(path) = adapters.get(key) {
             append_file(&root.path, path, &mut out);
         }
@@ -57,7 +60,9 @@ pub fn execute(
     // 5. Testing spec (if requested)
     if include_testing {
         let testing_overview = "testing/00-overview.md";
+
         let full = root.path.join(testing_overview);
+
         if full.exists() {
             append_file(&root.path, testing_overview, &mut out);
         }
@@ -69,12 +74,14 @@ pub fn execute(
 /// Append a file's content with a boundary marker.
 fn append_file(spec_root: &Path, rel_path: &str, out: &mut String) {
     let full_path = spec_root.join(rel_path);
+
     match fs::read_to_string(&full_path) {
         Ok(content) => {
             writeln!(out, "--- FILE: {rel_path} ---").expect("write to String");
             writeln!(out, "{content}").expect("write to String");
             writeln!(out).expect("write to String");
         }
+
         Err(e) => {
             writeln!(out, "--- FILE: {rel_path} (ERROR: {e}) ---").expect("write to String");
             writeln!(out).expect("write to String");
