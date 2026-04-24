@@ -111,8 +111,13 @@ impl HarnessBackend for DioxusHarnessBackend {
 
             Box::pin(async move {
                 let component = downcast_component(component);
+
+                let timer_guard = ars_test_harness::install_fake_timers();
+
                 let mounted = component.0.mount(container);
-                *mount_state.borrow_mut() = Some(mounted.mount_state);
+
+                *mount_state.borrow_mut() = Some(Box::new((mounted.mount_state, timer_guard)));
+
                 mounted.service
             })
         }
@@ -139,8 +144,13 @@ impl HarnessBackend for DioxusHarnessBackend {
 
             Box::pin(async move {
                 let component = downcast_component(component);
+
+                let timer_guard = ars_test_harness::install_fake_timers();
+
                 let mounted = component.0.mount_with_locale(container, locale);
-                *mount_state.borrow_mut() = Some(mounted.mount_state);
+
+                *mount_state.borrow_mut() = Some(Box::new((mounted.mount_state, timer_guard)));
+
                 mounted.service
             })
         }
@@ -167,8 +177,10 @@ impl HarnessBackend for DioxusHarnessBackend {
         }
     }
 
-    fn advance_time(&self, _duration: Duration) -> Pin<Box<dyn Future<Output = ()>>> {
-        Box::pin(async {})
+    fn advance_time(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()>>> {
+        Box::pin(async move {
+            ars_test_harness::advance_fake_time(duration);
+        })
     }
 }
 
@@ -207,9 +219,9 @@ async fn best_effort_flush() {
     // handle we can await directly. Waiting for a browser task boundary plus a
     // trailing microtask reliably lets the spawned Dioxus work loop settle DOM
     // edits after external `schedule_update()` invalidations.
-    timeout_turn().await;
+    animation_frame_turn().await;
     microtask_turn().await;
-    timeout_turn().await;
+    animation_frame_turn().await;
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -223,7 +235,7 @@ async fn microtask_turn() {
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn timeout_turn() {
+async fn animation_frame_turn() {
     let promise = js_sys::Promise::new(&mut |resolve, _reject| {
         let resolve = resolve.clone();
         let callback = wasm_bindgen::closure::Closure::once_into_js(move || {
@@ -232,8 +244,8 @@ async fn timeout_turn() {
 
         web_sys::window()
             .expect("window should exist")
-            .set_timeout_with_callback_and_timeout_and_arguments_0(callback.unchecked_ref(), 0)
-            .expect("setTimeout should succeed");
+            .request_animation_frame(callback.unchecked_ref())
+            .expect("requestAnimationFrame should succeed");
     });
 
     drop(wasm_bindgen_futures::JsFuture::from(promise).await);
@@ -514,7 +526,7 @@ impl Machine for HarnessBridgeMachine {
 mod tests {
     #[cfg(target_arch = "wasm32")]
     mod wasm {
-        use std::{cell::RefCell, rc::Rc, sync::Arc};
+        use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
 
         use ars_core::{
             AttrMap, ComponentPart, ConnectApi, Env, HasId, HtmlAttr, Machine, Service,
@@ -799,7 +811,94 @@ mod tests {
             }
         }
 
+        struct TimerFixtureComponent;
+
+        impl TimerFixtureComponent {
+            fn mount_fixture(
+                container: web_sys::HtmlElement,
+                locale: Option<Locale>,
+            ) -> MountedDioxusHarness<MockMachine> {
+                let env = Env {
+                    locale: locale.clone().unwrap_or_else(locales::en_us),
+                    intl_backend: Arc::new(StubIntlBackend) as Arc<dyn IntlBackend>,
+                };
+
+                let service = Rc::new(RefCell::new(Service::new(MockProps::default(), &env, &())));
+
+                let rerender_handle: RerenderHandle = Rc::new(RefCell::new(None));
+
+                let rerender = {
+                    let rerender_handle = Rc::clone(&rerender_handle);
+                    move || {
+                        rerender_handle
+                            .borrow()
+                            .as_ref()
+                            .expect("rerender handle should be installed after mount")(
+                        );
+                    }
+                };
+
+                let props = FixtureRootProps {
+                    service: Rc::clone(&service),
+                    locale,
+                    rerender_handle: Rc::clone(&rerender_handle),
+                };
+
+                let dom = VirtualDom::new_with_props(FixtureRoot, props);
+
+                dioxus_web::launch::launch_virtual_dom(
+                    dom,
+                    dioxus_web::Config::new().rootelement(container.into()),
+                );
+
+                let timeout_service = Rc::clone(&service);
+                let timeout_rerender_handle = Rc::clone(&rerender_handle);
+                let timeout =
+                    wasm_bindgen::closure::Closure::<dyn FnMut()>::wrap(Box::new(move || {
+                        let result = timeout_service.borrow_mut().send(MockEvent::Open);
+
+                        if result.state_changed || result.context_changed {
+                            timeout_rerender_handle
+                                .borrow()
+                                .as_ref()
+                                .expect("rerender handle should be installed before timers fire")(
+                            );
+                        }
+                    }));
+
+                web_sys::window()
+                    .expect("window should exist")
+                    .set_timeout_with_callback_and_timeout_and_arguments_0(
+                        timeout.as_ref().unchecked_ref(),
+                        25,
+                    )
+                    .expect("timeout should schedule");
+
+                MountedDioxusHarness::new(service, rerender, ((), timeout))
+            }
+        }
+
         impl DioxusHarnessComponent for FixtureComponent {
+            type Machine = MockMachine;
+
+            fn mount(self, container: web_sys::HtmlElement) -> MountedDioxusHarness<Self::Machine> {
+                let _ = self;
+
+                Self::mount_fixture(container, None)
+            }
+
+            fn mount_with_locale(
+                self,
+                container: web_sys::HtmlElement,
+                locale: Locale,
+            ) -> MountedDioxusHarness<Self::Machine> {
+                let _ = self;
+
+                Self::mount_fixture(container, Some(locale))
+            }
+        }
+
+        impl DioxusHarnessComponent for TimerFixtureComponent {
             type Machine = MockMachine;
 
             fn mount(self, container: web_sys::HtmlElement) -> MountedDioxusHarness<Self::Machine> {
@@ -967,6 +1066,32 @@ mod tests {
             assert_eq!(
                 harness.query("[data-testid='state']").text_content(),
                 "Open"
+            );
+        }
+
+        #[wasm_bindgen_test]
+        async fn harness_advance_time_fires_scheduled_timeouts() {
+            let harness = render(TimerFixtureComponent).await;
+
+            assert_eq!(
+                harness.query("[data-testid='state']").text_content(),
+                "Idle"
+            );
+
+            harness.advance_time(Duration::from_millis(24)).await;
+
+            assert_eq!(
+                harness.query("[data-testid='state']").text_content(),
+                "Idle",
+                "timeout should not fire before the requested delay"
+            );
+
+            harness.advance_time(Duration::from_millis(1)).await;
+
+            assert_eq!(
+                harness.query("[data-testid='state']").text_content(),
+                "Open",
+                "advance_time should drive intercepted browser timers"
             );
         }
 

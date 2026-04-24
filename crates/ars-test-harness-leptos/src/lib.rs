@@ -115,8 +115,13 @@ impl HarnessBackend for LeptosHarnessBackend {
 
             Box::pin(async move {
                 let component = downcast_component(component);
+
+                let timer_guard = ars_test_harness::install_fake_timers();
+
                 let mounted = component.0.mount(container);
-                *mount_state.borrow_mut() = Some(mounted.mount_state);
+
+                *mount_state.borrow_mut() = Some(Box::new((mounted.mount_state, timer_guard)));
+
                 mounted.service
             })
         }
@@ -142,8 +147,13 @@ impl HarnessBackend for LeptosHarnessBackend {
 
             Box::pin(async move {
                 let component = downcast_component(component);
+
+                let timer_guard = ars_test_harness::install_fake_timers();
+
                 let mounted = component.0.mount_with_locale(container, locale);
-                *mount_state.borrow_mut() = Some(mounted.mount_state);
+
+                *mount_state.borrow_mut() = Some(Box::new((mounted.mount_state, timer_guard)));
+
                 mounted.service
             })
         }
@@ -170,8 +180,10 @@ impl HarnessBackend for LeptosHarnessBackend {
         }
     }
 
-    fn advance_time(&self, _duration: Duration) -> Pin<Box<dyn Future<Output = ()>>> {
-        Box::pin(async {})
+    fn advance_time(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()>>> {
+        Box::pin(async move {
+            ars_test_harness::advance_fake_time(duration);
+        })
     }
 }
 
@@ -493,7 +505,10 @@ impl Machine for HarnessBridgeMachine {
 mod tests {
     #[cfg(target_arch = "wasm32")]
     mod wasm {
-        use std::sync::{Arc, Mutex};
+        use std::{
+            sync::{Arc, Mutex},
+            time::Duration,
+        };
 
         use ars_core::{
             AttrMap, ComponentPart, ConnectApi, Env, HasId, HtmlAttr, Machine, Service,
@@ -757,11 +772,111 @@ mod tests {
             }
         }
 
+        struct TimerFixtureComponent;
+
+        impl TimerFixtureComponent {
+            fn schedule_open_timeout(
+                service: Arc<Mutex<Service<MockMachine>>>,
+                version: RwSignal<u64>,
+            ) -> wasm_bindgen::closure::Closure<dyn FnMut()> {
+                let timeout =
+                    wasm_bindgen::closure::Closure::<dyn FnMut()>::wrap(Box::new(move || {
+                        let result = service
+                            .lock()
+                            .expect("service lock should not be poisoned")
+                            .send(MockEvent::Open);
+
+                        if result.state_changed || result.context_changed {
+                            version.update(|value| *value += 1);
+                        }
+                    }));
+
+                web_sys::window()
+                    .expect("window should exist")
+                    .set_timeout_with_callback_and_timeout_and_arguments_0(
+                        timeout.as_ref().unchecked_ref(),
+                        25,
+                    )
+                    .expect("timeout should schedule");
+
+                timeout
+            }
+
+            fn mount_fixture(
+                container: web_sys::HtmlElement,
+                locale: Option<Locale>,
+            ) -> MountedLeptosHarness<MockMachine> {
+                let env = Env {
+                    locale: locale.clone().unwrap_or_else(locales::en_us),
+                    intl_backend: Arc::new(StubIntlBackend) as Arc<dyn IntlBackend>,
+                };
+
+                let service = Arc::new(Mutex::new(Service::new(MockProps::default(), &env, &())));
+
+                let version = RwSignal::new(0);
+
+                let mounted_service = Arc::clone(&service);
+                let view_service = Arc::clone(&service);
+
+                if let Some(locale) = locale {
+                    let locale = Signal::stored(locale);
+
+                    let mount_handle = mount_to(container, move || {
+                        view! {
+                            <ars_leptos::ArsProvider locale>
+                                <FixtureView service=Arc::clone(&view_service) version />
+                            </ars_leptos::ArsProvider>
+                        }
+                    });
+
+                    let timeout = Self::schedule_open_timeout(Arc::clone(&service), version);
+
+                    MountedLeptosHarness::new(
+                        mounted_service,
+                        move || version.update(|value| *value += 1),
+                        (mount_handle, timeout),
+                    )
+                } else {
+                    let mount_handle = mount_to(container, move || {
+                        view! { <FixtureView service=Arc::clone(&view_service) version /> }
+                    });
+
+                    let timeout = Self::schedule_open_timeout(Arc::clone(&service), version);
+
+                    MountedLeptosHarness::new(
+                        mounted_service,
+                        move || version.update(|value| *value += 1),
+                        (mount_handle, timeout),
+                    )
+                }
+            }
+        }
+
         impl LeptosHarnessComponent for FixtureComponent {
             type Machine = MockMachine;
 
             fn mount(self, container: web_sys::HtmlElement) -> MountedLeptosHarness<Self::Machine> {
                 let _ = self;
+                Self::mount_fixture(container, None)
+            }
+
+            fn mount_with_locale(
+                self,
+                container: web_sys::HtmlElement,
+                locale: Locale,
+            ) -> MountedLeptosHarness<Self::Machine> {
+                let _ = self;
+
+                Self::mount_fixture(container, Some(locale))
+            }
+        }
+
+        impl LeptosHarnessComponent for TimerFixtureComponent {
+            type Machine = MockMachine;
+
+            fn mount(self, container: web_sys::HtmlElement) -> MountedLeptosHarness<Self::Machine> {
+                let _ = self;
+
                 Self::mount_fixture(container, None)
             }
 
@@ -918,6 +1033,32 @@ mod tests {
             assert_eq!(
                 harness.query("[data-testid='state']").text_content(),
                 "Open"
+            );
+        }
+
+        #[wasm_bindgen_test]
+        async fn harness_advance_time_fires_scheduled_timeouts() {
+            let harness = render(TimerFixtureComponent).await;
+
+            assert_eq!(
+                harness.query("[data-testid='state']").text_content(),
+                "Idle"
+            );
+
+            harness.advance_time(Duration::from_millis(24)).await;
+
+            assert_eq!(
+                harness.query("[data-testid='state']").text_content(),
+                "Idle",
+                "timeout should not fire before the requested delay"
+            );
+
+            harness.advance_time(Duration::from_millis(1)).await;
+
+            assert_eq!(
+                harness.query("[data-testid='state']").text_content(),
+                "Open",
+                "advance_time should drive intercepted browser timers"
             );
         }
 

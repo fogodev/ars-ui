@@ -20,7 +20,11 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 #[cfg(target_arch = "wasm32")]
 use {
-    std::{cell::Cell, rc::Rc},
+    std::{
+        cell::{Cell, RefCell as WasmRefCell},
+        collections::BTreeSet,
+        rc::Rc,
+    },
     wasm_bindgen::{JsCast, closure::Closure},
 };
 
@@ -35,6 +39,385 @@ pub use element::ElementHandle;
 use element::NativeElementStub;
 pub use item::ItemHandle;
 pub use types::{KeyboardKey, Point, Rect, point};
+
+/// Guard that keeps the shared wasm fake-timer hooks installed for the lifetime
+/// of an adapter harness mount.
+#[derive(Debug)]
+pub struct FakeTimerGuard {
+    _private: (),
+}
+
+impl FakeTimerGuard {
+    const fn new() -> Self {
+        Self { _private: () }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for FakeTimerGuard {
+    fn drop(&mut self) {
+        FAKE_TIMERS.with(|timers| {
+            let mut timers = timers.borrow_mut();
+
+            let Some(installed) = timers.as_mut() else {
+                return;
+            };
+
+            installed.ref_count = installed
+                .ref_count
+                .checked_sub(1)
+                .expect("fake timer refcount should not underflow");
+
+            if installed.ref_count == 0 {
+                installed.restore();
+                *timers = None;
+            }
+        });
+    }
+}
+
+/// Installs the shared browser fake-timer hooks and returns a guard that keeps
+/// them active until the mounted harness is dropped.
+#[must_use]
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    expect(
+        clippy::missing_const_for_fn,
+        reason = "the native fallback only returns a guard, but the wasm path installs shared timer hooks"
+    )
+)]
+pub fn install_fake_timers() -> FakeTimerGuard {
+    #[cfg(target_arch = "wasm32")]
+    {
+        FAKE_TIMERS.with(|timers| {
+            let mut timers = timers.borrow_mut();
+
+            if let Some(installed) = timers.as_mut() {
+                installed.ref_count += 1;
+            } else {
+                *timers = Some(InstalledFakeTimers::install());
+            }
+        });
+    }
+
+    FakeTimerGuard::new()
+}
+
+/// Advances the shared fake browser clock, firing any pending timer callbacks
+/// whose delay has elapsed.
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    expect(
+        clippy::missing_const_for_fn,
+        reason = "the native fallback is a no-op, but the wasm path mutates shared timer state through JS hooks"
+    )
+)]
+pub fn advance_fake_time(duration: Duration) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let state = FAKE_TIMERS.with(|timers| {
+            timers
+                .borrow()
+                .as_ref()
+                .map(|installed| Rc::clone(&installed.state))
+        });
+
+        if let Some(state) = state {
+            advance_fake_timer_state(&state, duration);
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = duration;
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static FAKE_TIMERS: WasmRefCell<Option<InstalledFakeTimers>> = const { WasmRefCell::new(None) };
+}
+
+#[cfg(target_arch = "wasm32")]
+struct InstalledFakeTimers {
+    ref_count: usize,
+    state: Rc<WasmRefCell<FakeTimerState>>,
+    hooks: FakeTimerHooks,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl InstalledFakeTimers {
+    fn install() -> Self {
+        let state = Rc::new(WasmRefCell::new(FakeTimerState::default()));
+
+        let hooks = FakeTimerHooks::install(&state);
+
+        Self {
+            ref_count: 1,
+            state,
+            hooks,
+        }
+    }
+
+    fn restore(&mut self) {
+        self.state.borrow_mut().clear();
+        self.hooks.restore();
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn advance_fake_timer_state(state: &Rc<WasmRefCell<FakeTimerState>>, duration: Duration) {
+    let target_ms = {
+        let state = state.borrow();
+        state.target_ms_after(duration)
+    };
+
+    loop {
+        let next_timer = { state.borrow_mut().take_next_due_timer(target_ms) };
+        let Some((timer_id, entry)) = next_timer else {
+            break;
+        };
+
+        entry
+            .callback
+            .call0(&JsValue::UNDEFINED)
+            .expect("fake timer callback should not throw");
+
+        state.borrow_mut().finish_timer(timer_id, entry);
+    }
+
+    state.borrow_mut().current_ms = target_ms;
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Default)]
+struct FakeTimerState {
+    current_ms: u64,
+    next_id: u32,
+    timers: BTreeMap<u32, FakeTimerEntry>,
+    canceled_during_fire: BTreeSet<u32>,
+    firing: Option<u32>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl FakeTimerState {
+    fn schedule(&mut self, callback: JsValue, delay: &JsValue, interval: Option<u64>) -> u32 {
+        let callback = callback
+            .dyn_into::<js_sys::Function>()
+            .expect("fake timers only support function callbacks");
+
+        let delay_ms = normalize_timer_delay(delay);
+
+        self.next_id = self.next_id.wrapping_add(1).max(1);
+
+        let id = self.next_id;
+
+        self.timers.insert(
+            id,
+            FakeTimerEntry {
+                due_ms: self.current_ms.saturating_add(delay_ms),
+                interval_ms: interval,
+                callback,
+            },
+        );
+
+        id
+    }
+
+    fn clear_timer(&mut self, timer_id: &JsValue) {
+        let Some(timer_id) = timer_id.as_f64().map(|id| id as u32) else {
+            return;
+        };
+
+        self.timers.remove(&timer_id);
+
+        if self.firing == Some(timer_id) {
+            self.canceled_during_fire.insert(timer_id);
+        }
+    }
+
+    fn target_ms_after(&self, duration: Duration) -> u64 {
+        self.current_ms
+            .saturating_add(duration.as_millis().try_into().unwrap_or(u64::MAX))
+    }
+
+    fn take_next_due_timer(&mut self, target_ms: u64) -> Option<(u32, FakeTimerEntry)> {
+        let (timer_id, due_ms) = self.next_due_timer(target_ms)?;
+
+        self.current_ms = due_ms;
+        self.firing = Some(timer_id);
+
+        Some((
+            timer_id,
+            self.timers
+                .remove(&timer_id)
+                .expect("ready timer should still be registered"),
+        ))
+    }
+
+    fn finish_timer(&mut self, timer_id: u32, entry: FakeTimerEntry) {
+        self.firing = None;
+
+        if let Some(interval_ms) = entry.interval_ms
+            && !self.canceled_during_fire.remove(&timer_id)
+        {
+            self.timers.insert(
+                timer_id,
+                FakeTimerEntry {
+                    due_ms: self.current_ms.saturating_add(interval_ms.max(1)),
+                    interval_ms: Some(interval_ms),
+                    callback: entry.callback,
+                },
+            );
+        }
+    }
+
+    fn clear(&mut self) {
+        self.current_ms = 0;
+        self.next_id = 0;
+        self.timers.clear();
+        self.canceled_during_fire.clear();
+        self.firing = None;
+    }
+
+    fn next_due_timer(&self, target_ms: u64) -> Option<(u32, u64)> {
+        self.timers
+            .iter()
+            .filter(|(_, entry)| entry.due_ms <= target_ms)
+            .map(|(timer_id, entry)| (*timer_id, entry.due_ms))
+            .min_by_key(|(timer_id, due_ms)| (*due_ms, *timer_id))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct FakeTimerEntry {
+    due_ms: u64,
+    interval_ms: Option<u64>,
+    callback: js_sys::Function,
+}
+
+#[cfg(target_arch = "wasm32")]
+struct FakeTimerHooks {
+    original_set_timeout: JsValue,
+    original_set_interval: JsValue,
+    original_clear_timeout: JsValue,
+    original_clear_interval: JsValue,
+    _set_timeout: Closure<dyn FnMut(JsValue, JsValue) -> JsValue>,
+    _set_interval: Closure<dyn FnMut(JsValue, JsValue) -> JsValue>,
+    _clear_timeout: Closure<dyn FnMut(JsValue)>,
+    _clear_interval: Closure<dyn FnMut(JsValue)>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl FakeTimerHooks {
+    fn install(state: &Rc<WasmRefCell<FakeTimerState>>) -> Self {
+        let window = web_sys::window().expect("window must exist");
+
+        let original_set_timeout = own_property_descriptor(window.as_ref(), "setTimeout");
+        let original_set_interval = own_property_descriptor(window.as_ref(), "setInterval");
+        let original_clear_timeout = own_property_descriptor(window.as_ref(), "clearTimeout");
+        let original_clear_interval = own_property_descriptor(window.as_ref(), "clearInterval");
+
+        let set_timeout_state = Rc::clone(state);
+        let set_timeout = Closure::<dyn FnMut(JsValue, JsValue) -> JsValue>::wrap(Box::new(
+            move |callback: JsValue, delay: JsValue| {
+                JsValue::from_f64(f64::from(
+                    set_timeout_state
+                        .borrow_mut()
+                        .schedule(callback, &delay, None),
+                ))
+            },
+        ));
+
+        let set_interval_state = Rc::clone(state);
+        let set_interval = Closure::<dyn FnMut(JsValue, JsValue) -> JsValue>::wrap(Box::new(
+            move |callback: JsValue, delay: JsValue| {
+                let delay_ms = normalize_timer_delay(&delay);
+                JsValue::from_f64(f64::from(set_interval_state.borrow_mut().schedule(
+                    callback,
+                    &delay,
+                    Some(delay_ms),
+                )))
+            },
+        ));
+
+        let clear_timeout_state = Rc::clone(state);
+        let clear_timeout =
+            Closure::<dyn FnMut(JsValue)>::wrap(Box::new(move |timer_id: JsValue| {
+                clear_timeout_state.borrow_mut().clear_timer(&timer_id);
+            }));
+
+        let clear_interval_state = Rc::clone(state);
+        let clear_interval =
+            Closure::<dyn FnMut(JsValue)>::wrap(Box::new(move |timer_id: JsValue| {
+                clear_interval_state.borrow_mut().clear_timer(&timer_id);
+            }));
+
+        install_function_property(
+            window.as_ref(),
+            "setTimeout",
+            set_timeout.as_ref().unchecked_ref(),
+        );
+
+        install_function_property(
+            window.as_ref(),
+            "setInterval",
+            set_interval.as_ref().unchecked_ref(),
+        );
+
+        install_function_property(
+            window.as_ref(),
+            "clearTimeout",
+            clear_timeout.as_ref().unchecked_ref(),
+        );
+
+        install_function_property(
+            window.as_ref(),
+            "clearInterval",
+            clear_interval.as_ref().unchecked_ref(),
+        );
+
+        Self {
+            original_set_timeout,
+            original_set_interval,
+            original_clear_timeout,
+            original_clear_interval,
+            _set_timeout: set_timeout,
+            _set_interval: set_interval,
+            _clear_timeout: clear_timeout,
+            _clear_interval: clear_interval,
+        }
+    }
+
+    fn restore(&self) {
+        let window = web_sys::window().expect("window must exist");
+
+        restore_property_descriptor(window.as_ref(), "setTimeout", &self.original_set_timeout);
+        restore_property_descriptor(window.as_ref(), "setInterval", &self.original_set_interval);
+
+        restore_property_descriptor(
+            window.as_ref(),
+            "clearTimeout",
+            &self.original_clear_timeout,
+        );
+
+        restore_property_descriptor(
+            window.as_ref(),
+            "clearInterval",
+            &self.original_clear_interval,
+        );
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn normalize_timer_delay(delay: &JsValue) -> u64 {
+    delay
+        .as_f64()
+        .unwrap_or(0.0)
+        .max(0.0)
+        .round()
+        .min(u64::MAX as f64) as u64
+}
 
 /// Marker trait for adapter component types mountable by the test harness.
 pub trait Component: 'static {
@@ -2423,7 +2806,11 @@ mod tests {
     use wasm_bindgen::JsCast;
     #[cfg(target_arch = "wasm32")]
     use {
-        std::{cell::Cell, rc::Rc},
+        std::{
+            cell::{Cell, RefCell},
+            rc::Rc,
+        },
+        wasm_bindgen::closure::Closure,
         wasm_bindgen_test::*,
     };
 
@@ -3395,6 +3782,16 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
+    fn fake_timer_public_surface_is_callable_on_native() {
+        let guard = install_fake_timers();
+
+        assert!(format!("{guard:?}").contains("FakeTimerGuard"));
+
+        advance_fake_time(Duration::from_millis(5));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
     fn native_only_public_surface_panics_on_native_runtime() {
         let harness = TestHarness::new_for_test(Box::new(mock_service()), Box::new(NoopBackend));
         let clipboard = MockClipboard {};
@@ -3711,6 +4108,191 @@ mod tests {
                 "{label} should preserve descriptor field {property}"
             );
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
+    fn fake_timers_fire_timeouts_and_restore_descriptors() {
+        let window = web_sys::window().expect("window must exist");
+        let initial_set_timeout = own_property_descriptor(window.as_ref(), "setTimeout");
+        let initial_set_interval = own_property_descriptor(window.as_ref(), "setInterval");
+        let initial_clear_timeout = own_property_descriptor(window.as_ref(), "clearTimeout");
+        let initial_clear_interval = own_property_descriptor(window.as_ref(), "clearInterval");
+
+        let first_guard = install_fake_timers();
+        let second_guard = install_fake_timers();
+
+        let fired = Rc::new(Cell::new(0));
+
+        let timeout_counter = Rc::clone(&fired);
+        let timeout = Closure::<dyn FnMut()>::wrap(Box::new(move || {
+            timeout_counter.set(timeout_counter.get() + 1);
+        }));
+
+        let timeout_id = window
+            .set_timeout_with_callback_and_timeout_and_arguments_0(
+                timeout.as_ref().unchecked_ref(),
+                5,
+            )
+            .expect("fake timeout should schedule");
+
+        advance_fake_time(Duration::from_millis(4));
+
+        assert_eq!(fired.get(), 0, "timeout should not fire before its delay");
+
+        advance_fake_time(Duration::from_millis(1));
+
+        assert_eq!(fired.get(), 1, "timeout should fire once when due");
+
+        drop(first_guard);
+
+        let canceled_counter = Rc::clone(&fired);
+        let canceled = Closure::<dyn FnMut()>::wrap(Box::new(move || {
+            canceled_counter.set(canceled_counter.get() + 10);
+        }));
+
+        let canceled_id = window
+            .set_timeout_with_callback_and_timeout_and_arguments_0(
+                canceled.as_ref().unchecked_ref(),
+                5,
+            )
+            .expect("second timeout should schedule");
+
+        assert_ne!(
+            timeout_id, canceled_id,
+            "fake timers should allocate unique ids"
+        );
+
+        window.clear_timeout_with_handle(canceled_id);
+
+        advance_fake_time(Duration::from_millis(5));
+
+        assert_eq!(fired.get(), 1, "cleared timeouts should not fire");
+
+        drop(second_guard);
+
+        assert_same_descriptor(
+            &own_property_descriptor(window.as_ref(), "setTimeout"),
+            &initial_set_timeout,
+            "window.setTimeout",
+        );
+        assert_same_descriptor(
+            &own_property_descriptor(window.as_ref(), "setInterval"),
+            &initial_set_interval,
+            "window.setInterval",
+        );
+        assert_same_descriptor(
+            &own_property_descriptor(window.as_ref(), "clearTimeout"),
+            &initial_clear_timeout,
+            "window.clearTimeout",
+        );
+        assert_same_descriptor(
+            &own_property_descriptor(window.as_ref(), "clearInterval"),
+            &initial_clear_interval,
+            "window.clearInterval",
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
+    fn fake_timers_support_intervals_and_nested_timeouts() {
+        let window = web_sys::window().expect("window must exist");
+        let _guard = install_fake_timers();
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let nested_timeout = Rc::new(RefCell::new(None));
+        let interval_ticks = Rc::new(Cell::new(0));
+        let interval_id = Rc::new(Cell::new(0_i32));
+
+        let clear_interval =
+            js_sys::Reflect::get(window.as_ref(), &JsValue::from_str("clearInterval"))
+                .expect("window.clearInterval should be readable")
+                .dyn_into::<js_sys::Function>()
+                .expect("window.clearInterval should be callable");
+        let set_interval = js_sys::Reflect::get(window.as_ref(), &JsValue::from_str("setInterval"))
+            .expect("window.setInterval should be readable")
+            .dyn_into::<js_sys::Function>()
+            .expect("window.setInterval should be callable");
+
+        let interval_events = Rc::clone(&events);
+        let interval_ticks_for_cb = Rc::clone(&interval_ticks);
+        let interval_id_for_cb = Rc::clone(&interval_id);
+        let nested_timeout_for_cb = Rc::clone(&nested_timeout);
+        let window_for_cb = window.clone();
+        let clear_interval_for_cb = clear_interval.clone();
+        let interval = Closure::<dyn FnMut()>::wrap(Box::new(move || {
+            interval_events.borrow_mut().push(String::from("interval"));
+
+            let next_tick = interval_ticks_for_cb.get() + 1;
+            interval_ticks_for_cb.set(next_tick);
+
+            if next_tick == 1 {
+                let nested_events = Rc::clone(&interval_events);
+                let nested = Closure::<dyn FnMut()>::wrap(Box::new(move || {
+                    nested_events
+                        .borrow_mut()
+                        .push(String::from("nested-timeout"));
+                }));
+
+                window_for_cb
+                    .set_timeout_with_callback_and_timeout_and_arguments_0(
+                        nested.as_ref().unchecked_ref(),
+                        0,
+                    )
+                    .expect("nested timeout should schedule");
+
+                *nested_timeout_for_cb.borrow_mut() = Some(nested);
+            } else {
+                clear_interval_for_cb
+                    .call1(
+                        window_for_cb.as_ref(),
+                        &JsValue::from_f64(f64::from(interval_id_for_cb.get())),
+                    )
+                    .expect("interval should clear");
+            }
+        }));
+
+        let scheduled_interval_id = set_interval
+            .call2(
+                window.as_ref(),
+                interval.as_ref().unchecked_ref(),
+                &JsValue::from_f64(10.0),
+            )
+            .expect("interval should schedule")
+            .as_f64()
+            .expect("interval handle should be numeric") as i32;
+        interval_id.set(scheduled_interval_id);
+
+        advance_fake_time(Duration::from_millis(10));
+
+        assert_eq!(
+            events.borrow().as_slice(),
+            &[String::from("interval"), String::from("nested-timeout")],
+            "nested zero-delay timeouts should fire during the same clock advance"
+        );
+
+        advance_fake_time(Duration::from_millis(10));
+
+        assert_eq!(
+            events.borrow().as_slice(),
+            &[
+                String::from("interval"),
+                String::from("nested-timeout"),
+                String::from("interval"),
+            ],
+            "intervals should reschedule until cleared by their callback"
+        );
+
+        advance_fake_time(Duration::from_millis(10));
+
+        assert_eq!(
+            events.borrow().as_slice(),
+            &[
+                String::from("interval"),
+                String::from("nested-timeout"),
+                String::from("interval"),
+            ],
+            "cleared intervals should stop firing on later advances"
+        );
     }
 
     #[cfg(target_arch = "wasm32")]
