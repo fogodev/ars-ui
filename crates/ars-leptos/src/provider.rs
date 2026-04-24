@@ -826,9 +826,11 @@ mod wasm_tests {
     use leptos::{mount::mount_to, wasm_bindgen::JsCast};
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
+    #[cfg(feature = "csr")]
+    use super::ArsProvider;
     use super::{
-        ArsContext, ArsProvider, current_ars_context, resolve_locale, t, translated_text,
-        use_intl_backend, use_locale, use_messages, use_modality_context, use_number_formatter,
+        ArsContext, current_ars_context, resolve_locale, t, translated_text, use_intl_backend,
+        use_locale, use_messages, use_modality_context, use_number_formatter,
         use_resolved_number_formatter,
     };
 
