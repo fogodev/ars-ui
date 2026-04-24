@@ -179,6 +179,28 @@ jobs:
       - name: Adapter Tests
         run: cargo xtest adapter
 
+  adapter-parity:
+    name: Adapter Parity
+    needs: [unit, adapter]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Adapter Parity
+        run: cargo xtask ci adapter-parity
+
+  error-variant-coverage:
+    name: Error Variant Coverage
+    needs: [unit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Error Variant Coverage
+        run: cargo xtask ci error-variant-coverage
+
   coverage:
     name: Coverage
     needs: [unit]
@@ -207,6 +229,8 @@ jobs:
       - uses: ./.github/actions/install-dioxus-desktop-deps
       - name: Coverage
         run: cargo xtask ci coverage
+      - name: Snapshot Count
+        run: cargo xtask ci snapshot-count
       - name: Upload to Codecov
         if: always()
         uses: codecov/codecov-action@v4

@@ -2798,8 +2798,7 @@ mod tests {
     use std::{
         cell::Cell,
         rc::Rc,
-        sync::Arc,
-        task::{Context, Poll, Wake, Waker},
+        task::{Context, Poll, Waker},
     };
 
     use ars_core::{AttrValue, Env, HasId, HtmlAttr};
@@ -3073,20 +3072,12 @@ mod tests {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    struct NoopWake;
-
-    #[cfg(not(target_arch = "wasm32"))]
-    impl Wake for NoopWake {
-        fn wake(self: Arc<Self>) {}
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
     fn run_ready<F: Future>(future: F) -> F::Output {
-        let waker = Waker::from(Arc::new(NoopWake));
+        let waker = Waker::noop();
 
         let mut future = std::pin::pin!(future);
 
-        let mut context = Context::from_waker(&waker);
+        let mut context = Context::from_waker(waker);
 
         match future.as_mut().poll(&mut context) {
             Poll::Ready(output) => output,
@@ -3416,10 +3407,9 @@ mod tests {
 
         assert!(pending_message.contains("Poll::Pending"));
 
-        let waker = Waker::from(Arc::new(NoopWake));
+        let waker = Waker::noop();
 
         waker.wake_by_ref();
-        waker.wake();
 
         assert!(format!("{:?}", MockClipboard {}).contains("MockClipboard"));
     }

@@ -735,7 +735,7 @@ fn can_restore_focus_impl(id: &str) -> bool {
     get_html_element_by_id(id).is_some_and(|element| can_restore_html_element(&element))
 }
 
-#[cfg(any(not(feature = "web"), not(target_arch = "wasm32")))]
+#[cfg(all(feature = "web", not(target_arch = "wasm32")))]
 fn can_restore_focus_impl(_id: &str) -> bool {
     false
 }
@@ -761,7 +761,7 @@ fn nearest_focusable_ancestor_id_impl(id: &str) -> Option<String> {
     None
 }
 
-#[cfg(any(not(feature = "web"), not(target_arch = "wasm32")))]
+#[cfg(all(feature = "web", not(target_arch = "wasm32")))]
 fn nearest_focusable_ancestor_id_impl(_id: &str) -> Option<String> {
     None
 }

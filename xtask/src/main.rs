@@ -3,7 +3,7 @@
 use std::{env, path::PathBuf, process, sync};
 
 use clap::{Parser, Subcommand};
-use xtask::{ci, coverage, manifest, mcp, spec, test};
+use xtask::{ci, coverage, lint, manifest, mcp, spec, test};
 
 /// ars-ui workspace task runner.
 #[derive(Parser)]
@@ -54,6 +54,12 @@ enum Command {
     Coverage {
         #[command(subcommand)]
         cmd: CoverageCommand,
+    },
+
+    /// Repository testing policy lints.
+    Lint {
+        #[command(subcommand)]
+        cmd: LintCommand,
     },
 
     /// Run workspace tests through cargo-nextest.
@@ -123,6 +129,54 @@ enum CoverageCommand {
         /// Path to lcov.info file.
         #[arg(long)]
         file: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum LintCommand {
+    /// Compare per-component adapter test counts.
+    AdapterParity {
+        /// Directory containing Leptos adapter tests.
+        #[arg(long, default_value = "crates/ars-leptos/tests")]
+        leptos_test_dir: PathBuf,
+
+        /// Directory containing Dioxus adapter tests.
+        #[arg(long, default_value = "crates/ars-dioxus/tests")]
+        dioxus_test_dir: PathBuf,
+
+        /// Maximum allowed per-component count delta.
+        #[arg(long, default_value_t = 2)]
+        tolerance: usize,
+    },
+
+    /// Enforce per-component snapshot count budgets.
+    SnapshotCount {
+        /// Directory tree containing `.snap` files.
+        #[arg(long, default_value = "crates")]
+        snapshots_dir: PathBuf,
+
+        /// Minimum snapshot count per detected state variant.
+        #[arg(long, default_value_t = 3)]
+        min_per_variant: usize,
+
+        /// Maximum snapshots per component before failure.
+        #[arg(long, default_value_t = 20)]
+        max_per_component: usize,
+    },
+
+    /// Verify each error enum variant appears in a test function.
+    ErrorVariantCoverage {
+        /// Glob selecting Rust source files containing the enum.
+        #[arg(long, default_value = "crates/ars-core/src/**/*.rs")]
+        source_glob: String,
+
+        /// Glob selecting Rust test files to inspect.
+        #[arg(long, default_value = "crates/ars-core/tests/**/*.rs")]
+        test_glob: String,
+
+        /// Enum name whose variants must be exercised.
+        #[arg(long, default_value = "ComponentError")]
+        enum_name: String,
     },
 }
 
@@ -331,6 +385,50 @@ fn main() {
                     coverage::check_all(&file, &coverage::default_thresholds())
                 }
             };
+
+            match result {
+                Ok(output) => print!("{output}"),
+                Err(e) => {
+                    eprintln!("{e}");
+                    process::exit(1);
+                }
+            }
+        }
+
+        // ── Lint ──────────────────────────────────────────────────────
+        Command::Lint { cmd } => {
+            let result = match cmd {
+                LintCommand::AdapterParity {
+                    leptos_test_dir,
+                    dioxus_test_dir,
+                    tolerance,
+                } => lint::check_adapter_parity(&lint::AdapterParityOptions {
+                    leptos_test_dir,
+                    dioxus_test_dir,
+                    tolerance,
+                }),
+
+                LintCommand::SnapshotCount {
+                    snapshots_dir,
+                    min_per_variant,
+                    max_per_component,
+                } => lint::check_snapshot_count(&lint::SnapshotCountOptions {
+                    snapshots_dir,
+                    min_per_variant,
+                    max_per_component,
+                }),
+
+                LintCommand::ErrorVariantCoverage {
+                    source_glob,
+                    test_glob,
+                    enum_name,
+                } => lint::check_error_variant_coverage(&lint::ErrorVariantCoverageOptions {
+                    source_glob,
+                    test_glob,
+                    enum_name,
+                }),
+            };
+
             match result {
                 Ok(output) => print!("{output}"),
                 Err(e) => {
