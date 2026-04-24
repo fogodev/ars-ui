@@ -32,9 +32,9 @@ pub use provider::DesktopPlatform;
 #[cfg(feature = "web")]
 pub use provider::WebPlatform;
 pub use provider::{
-    ArsContext, DioxusPlatform, DragData, FilePickerOptions, NullPlatform, t, use_intl_backend,
-    use_locale, use_messages, use_modality_context, use_number_formatter, use_platform,
-    warn_missing_provider,
+    ArsContext, ArsProvider, ArsProviderProps, DioxusPlatform, DragData, FilePickerOptions,
+    NullPlatform, t, use_intl_backend, use_locale, use_messages, use_modality_context,
+    use_number_formatter, use_platform, warn_missing_provider,
 };
 pub use use_machine::{UseMachineReturn, use_machine, use_machine_with_reactive_props};
 

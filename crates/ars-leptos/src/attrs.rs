@@ -133,9 +133,9 @@ mod tests {
     fn inline_strategy_emits_style_attribute() {
         let mut map = AttrMap::new();
 
-        map.set(HtmlAttr::Id, "button-id");
-        map.set_style(CssProperty::Display, "inline-flex");
-        map.set_style(CssProperty::Width, "10px");
+        map.set(HtmlAttr::Id, "button-id")
+            .set_style(CssProperty::Display, "inline-flex")
+            .set_style(CssProperty::Width, "10px");
 
         let result = attr_map_to_leptos(map, &StyleStrategy::Inline, None);
 
@@ -173,9 +173,9 @@ mod tests {
     fn cssom_strategy_returns_cssom_styles() {
         let mut map = AttrMap::new();
 
-        map.set(HtmlAttr::Title, "tooltip");
-        map.set_style(CssProperty::Display, "grid");
-        map.set_style(CssProperty::Width, "20px");
+        map.set(HtmlAttr::Title, "tooltip")
+            .set_style(CssProperty::Display, "grid")
+            .set_style(CssProperty::Width, "20px");
 
         let result = attr_map_to_leptos(map, &StyleStrategy::Cssom, None);
 
@@ -197,8 +197,8 @@ mod tests {
     fn nonce_strategy_emits_selector_and_css_text() {
         let mut map = AttrMap::new();
 
-        map.set(HtmlAttr::Class, "root");
-        map.set_style(CssProperty::Display, "flex");
+        map.set(HtmlAttr::Class, "root")
+            .set_style(CssProperty::Display, "flex");
 
         let result = attr_map_to_leptos(
             map,
@@ -247,9 +247,9 @@ mod tests {
     fn bool_false_and_none_are_filtered_while_bool_true_is_empty_string() {
         let mut map = AttrMap::new();
 
-        map.set_bool(HtmlAttr::Disabled, true);
-        map.set_bool(HtmlAttr::Required, false);
-        map.set(HtmlAttr::Title, AttrValue::None);
+        map.set_bool(HtmlAttr::Disabled, true)
+            .set_bool(HtmlAttr::Required, false)
+            .set(HtmlAttr::Title, AttrValue::None);
 
         let result = attr_map_to_leptos(map, &StyleStrategy::Inline, None);
 
@@ -262,7 +262,6 @@ mod tests {
     #[test]
     fn use_style_strategy_falls_back_to_inline_without_context() {
         let owner = Owner::new();
-
         owner.with(|| {
             assert_eq!(use_style_strategy(), StyleStrategy::Inline);
         });
@@ -271,7 +270,6 @@ mod tests {
     #[test]
     fn use_style_strategy_reads_configured_context_value() {
         let owner = Owner::new();
-
         owner.with(|| {
             crate::provide_ars_context(crate::ArsContext::new(
                 ars_i18n::locales::en_us(),
@@ -313,6 +311,12 @@ mod tests {
 
 #[cfg(all(test, not(feature = "ssr"), target_arch = "wasm32"))]
 mod wasm_tests {
+    use std::sync::Arc;
+
+    use ars_core::{
+        AttrMap, AttrValue, CssProperty, HtmlAttr, I18nRegistries, NullPlatformEffects,
+    };
+    use leptos::prelude::Owner;
     use wasm_bindgen::JsCast;
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
@@ -324,6 +328,90 @@ mod wasm_tests {
         leptos::web_sys::window()
             .and_then(|window| window.document())
             .expect("browser document should exist")
+    }
+
+    #[wasm_bindgen_test]
+    fn attr_map_to_leptos_covers_inline_cssom_and_nonce_strategies_on_wasm() {
+        let mut map = AttrMap::new();
+
+        map.set(HtmlAttr::Class, "btn")
+            .set_style(CssProperty::Width, "100px");
+
+        let inline = attr_map_to_leptos(map.clone(), &StyleStrategy::Inline, None);
+
+        let cssom = attr_map_to_leptos(map.clone(), &StyleStrategy::Cssom, None);
+
+        let nonce = attr_map_to_leptos(
+            map,
+            &StyleStrategy::Nonce(String::from("nonce-123")),
+            Some("el-1"),
+        );
+
+        assert_eq!(
+            inline.attrs,
+            vec![
+                (String::from("class"), String::from("btn")),
+                (String::from("style"), String::from("width: 100px;"))
+            ]
+        );
+        assert_eq!(
+            cssom.cssom_styles,
+            vec![(CssProperty::Width, String::from("100px"))]
+        );
+        assert_eq!(
+            nonce.attrs,
+            vec![
+                (String::from("class"), String::from("btn")),
+                (String::from("data-ars-style-id"), String::from("el-1"))
+            ]
+        );
+        assert_eq!(
+            nonce.nonce_css,
+            "[data-ars-style-id=\"el-1\"] {\n  width: 100px;\n}"
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn attr_map_to_leptos_filters_false_and_none_values_on_wasm() {
+        let mut map = AttrMap::new();
+
+        map.set_bool(HtmlAttr::Disabled, true)
+            .set_bool(HtmlAttr::Required, false)
+            .set(HtmlAttr::Title, AttrValue::None);
+
+        let result = attr_map_to_leptos(map, &StyleStrategy::Inline, None);
+
+        assert_eq!(
+            result.attrs,
+            vec![(String::from("disabled"), String::new())]
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn use_style_strategy_reads_configured_context_on_wasm() {
+        let owner = Owner::new();
+        owner.with(|| {
+            crate::provide_ars_context(crate::ArsContext::new(
+                ars_i18n::locales::en_us(),
+                ars_i18n::Direction::Ltr,
+                ars_core::ColorMode::System,
+                false,
+                false,
+                None,
+                None,
+                None,
+                Arc::new(NullPlatformEffects),
+                Arc::new(ars_core::DefaultModalityContext::new()),
+                Arc::new(ars_i18n::StubIntlBackend),
+                Arc::new(I18nRegistries::new()),
+                StyleStrategy::Nonce(String::from("nonce-456")),
+            ));
+
+            assert_eq!(
+                use_style_strategy(),
+                StyleStrategy::Nonce(String::from("nonce-456"))
+            );
+        });
     }
 
     #[wasm_bindgen_test]

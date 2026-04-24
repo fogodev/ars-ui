@@ -11,13 +11,17 @@ use super::Error;
 pub(crate) enum Group {
     /// `ars-core` feature combinations (15 combos).
     Core,
+
     /// `ars-i18n` feature combinations (6 combos + wasm32 cross-check).
     I18n,
+
     /// `ars-a11y`, `ars-interactions`, `ars-collections`, `ars-forms`, `ars-dom`
     /// combos (14 combos + wasm32 cross-check).
     Subsystems,
+
     /// `ars-leptos` render-mode combos (3 combos).
     Leptos,
+
     /// `ars-dioxus` platform combos (4 combos + wasm32 cross-check).
     Dioxus,
 }
@@ -32,6 +36,7 @@ pub(crate) struct Combo {
 pub(crate) struct CrossCheck {
     /// Arguments passed to `cargo check`.
     pub(crate) args: &'static [&'static str],
+
     /// Target triple (e.g., `wasm32-unknown-unknown`).
     pub(crate) target: &'static str,
 }
@@ -260,18 +265,22 @@ pub(crate) fn group_def(group: Group) -> GroupDef {
             combos: CORE_COMBOS,
             cross_checks: &[],
         },
+
         Group::I18n => GroupDef {
             combos: I18N_COMBOS,
             cross_checks: I18N_CROSS_CHECKS,
         },
+
         Group::Subsystems => GroupDef {
             combos: SUBSYSTEMS_COMBOS,
             cross_checks: SUBSYSTEMS_CROSS_CHECKS,
         },
+
         Group::Leptos => GroupDef {
             combos: LEPTOS_COMBOS,
             cross_checks: &[],
         },
+
         Group::Dioxus => GroupDef {
             combos: DIOXUS_COMBOS,
             cross_checks: DIOXUS_CROSS_CHECKS,
@@ -287,6 +296,7 @@ pub(crate) fn group_def(group: Group) -> GroupDef {
 /// combo, then any cross-compilation checks.
 pub(crate) fn run_group(group: Group) -> Result<(), Error> {
     let def = group_def(group);
+
     let step = group_step(group);
 
     if !def.cross_checks.is_empty() {
@@ -295,14 +305,18 @@ pub(crate) fn run_group(group: Group) -> Result<(), Error> {
 
     for combo in def.combos {
         let mut args = vec!["check"];
+
         args.extend_from_slice(combo.args);
+
         super::cargo(step, &args)?;
     }
 
     for cross in def.cross_checks {
         let mut args = vec!["check"];
+
         args.extend_from_slice(cross.args);
         args.extend_from_slice(&["--target", cross.target]);
+
         super::cargo(step, &args)?;
     }
 
@@ -330,6 +344,7 @@ fn preflight_wasm32() -> Result<(), Error> {
         .map_err(Error::Io)?;
 
     let installed = String::from_utf8_lossy(&output.stdout);
+
     if installed
         .lines()
         .any(|line| line.trim() == "wasm32-unknown-unknown")
@@ -390,8 +405,10 @@ mod tests {
             (Group::Leptos, 3, 0),
             (Group::Dioxus, 4, 1),
         ];
+
         for &(group, expected_combos, expected_cross) in cases {
             let def = group_def(group);
+
             assert_eq!(
                 def.combos.len(),
                 expected_combos,
@@ -415,8 +432,10 @@ mod tests {
             Group::Leptos,
             Group::Dioxus,
         ];
+
         for group in groups {
             let def = group_def(group);
+
             for cross in def.cross_checks {
                 assert_eq!(
                     cross.target, "wasm32-unknown-unknown",
@@ -437,8 +456,10 @@ mod tests {
             Group::Leptos,
             Group::Dioxus,
         ];
+
         for group in groups {
             let def = group_def(group);
+
             for (i, combo) in def.combos.iter().enumerate() {
                 assert!(!combo.args.is_empty(), "{group:?} combo {i} has empty args");
                 assert_eq!(

@@ -1,5 +1,7 @@
 //! Tool trait and registry for auto-exposure via MCP.
 
+use std::fmt::{self, Debug, Display};
+
 use serde_json::Value;
 
 /// Error returned by tool execution.
@@ -9,8 +11,8 @@ pub struct ToolError {
     pub message: String,
 }
 
-impl std::fmt::Display for ToolError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for ToolError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.message)
     }
 }
@@ -53,8 +55,8 @@ pub struct ToolRegistry {
     tools: Vec<Box<dyn Tool>>,
 }
 
-impl std::fmt::Debug for ToolRegistry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Debug for ToolRegistry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ToolRegistry")
             .field("tool_count", &self.tools.len())
             .finish()
@@ -110,7 +112,9 @@ mod tests {
     #[test]
     fn registry_find() {
         let mut reg = ToolRegistry::new();
+
         reg.register(Box::new(DummyTool));
+
         assert!(reg.find("dummy").is_some());
         assert!(reg.find("nonexistent").is_none());
     }
@@ -118,7 +122,9 @@ mod tests {
     #[test]
     fn registry_list() {
         let mut reg = ToolRegistry::new();
+
         reg.register(Box::new(DummyTool));
+
         assert_eq!(reg.tools().len(), 1);
         assert_eq!(reg.tools()[0].name(), "dummy");
     }

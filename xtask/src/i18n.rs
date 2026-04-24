@@ -15,7 +15,9 @@ const I18N_BACKENDS: [&str; 2] = ["icu4x", "web-intl"];
 /// separate feature strings.
 pub(crate) fn i18n_feature_lists() -> io::Result<[String; 2]> {
     let path = Path::new("crates/ars-i18n/Cargo.toml");
+
     let content = fs::read_to_string(path)?;
+
     parse_i18n_feature_lists(&content, path)
 }
 
@@ -42,7 +44,9 @@ fn parse_i18n_feature_lists(content: &str, path: &Path) -> io::Result<[String; 2
 
     Ok(I18N_BACKENDS.map(|backend| {
         let mut all = common.clone();
+
         all.push(backend);
+
         all.join(",")
     }))
 }
@@ -73,6 +77,7 @@ web-intl = []
     fn parse_i18n_feature_lists_requires_features_table() {
         let error = parse_i18n_feature_lists("", Path::new("crates/ars-i18n/Cargo.toml"))
             .expect_err("missing features table should fail");
+
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert!(error.to_string().contains("missing [features] table"));
     }

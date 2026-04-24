@@ -615,7 +615,7 @@ async fn checkbox_toggles() {
 
 ### 4.2 Reactivity Flush
 
-Every interaction method calls `backend.flush()` after dispatching DOM events. This ensures the framework's reactivity system has processed the event before the test reads DOM state. Equivalent to Leptos `tick().await` or Dioxus `dom.wait_for_work().await`. Test authors never call flush manually.
+Every interaction method calls `backend.flush()` after dispatching DOM events. This ensures the framework's reactivity system has processed the event before the test reads DOM state. Equivalent to Leptos `tick().await` or the Dioxus backend's owned post-update browser task boundary. Test authors never call flush manually.
 
 ### 4.3 Timer Simulation
 
@@ -675,10 +675,13 @@ component in `<ArsProvider locale>` using Leptos `view!`. `flush()` calls
 
 ### 5.3 Dioxus Backend
 
-Uses `VirtualDom` with web renderer. `mount_with_locale()` wraps the component
-in `ArsProvider { locale, ... }` via `rsx!`. `flush()` calls
-`dom.wait_for_work().await` (Dioxus 0.7.3), and shared-harness DOM tests rely on
-that flush behavior rather than ad hoc timer shims.
+Uses the public `dioxus-web` launch path with a web renderer rooted at the
+isolated harness container. `mount_with_locale()` wraps the component in
+`ArsProvider { locale, ... }` via `rsx!`. Because the public launch API consumes
+the `VirtualDom`, `flush()` cannot await `wait_for_work()` directly; instead it
+waits for a backend-owned browser task boundary plus trailing microtask turn.
+Shared-harness DOM tests rely on that backend-owned flush behavior rather than
+ad hoc timer shims in test code.
 
 ---
 

@@ -15,7 +15,7 @@ This spec maps the core [`ArsProvider`](../../components/utility/ars-provider.md
 ## 2. Public Adapter API
 
 ```rust
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone)]
 pub struct ArsProviderProps {
     #[props(optional, into)]
     pub locale: Option<Signal<Locale>>,
@@ -46,6 +46,10 @@ pub struct ArsProviderProps {
     pub children: Element,
 }
 
+impl PartialEq for ArsProviderProps {
+    fn eq(&self, other: &Self) -> bool;
+}
+
 #[component]
 pub fn ArsProvider(props: ArsProviderProps) -> Element
 ```
@@ -55,6 +59,7 @@ pub fn ArsProvider(props: ArsProviderProps) -> Element
 - Props parity: full parity with the core context props. Reactive props (`locale`, `direction`, `color_mode`, `disabled`, `read_only`) accept `Signal` for live updates. Non-reactive props (`id_prefix`, `portal_container_id`, `root_node_id`) are plain values set at mount time.
 - `style_strategy` maps directly to the core `StyleStrategy` prop (defaults to `StyleStrategy::Inline`).
 - `dioxus_platform` is an adapter-only extra prop (no core equivalent) — it provides Dioxus-specific platform services (file pickers, clipboard, drag data).
+- `ArsProviderProps` must implement `Clone + PartialEq`, but `PartialEq` may be implemented manually so trait-object fields can use adapter-defined semantic equality.
 - Context parity: publishes full `ArsContext` to descendants via `use_context_provider`.
 
 ## 4. Part Mapping
@@ -201,7 +206,7 @@ Dioxus targets web, desktop, and mobile. `ArsContext` bundles platform-agnostic 
 ## 24. Canonical Implementation Sketch
 
 ```rust
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone)]
 pub struct ArsProviderSketchProps {
     #[props(optional, into)]
     pub locale: Option<Signal<Locale>>,
@@ -230,6 +235,10 @@ pub struct ArsProviderSketchProps {
     #[props(optional)]
     pub dioxus_platform: Option<Arc<dyn DioxusPlatform>>,
     pub children: Element,
+}
+
+impl PartialEq for ArsProviderSketchProps {
+    fn eq(&self, other: &Self) -> bool;
 }
 
 #[component]

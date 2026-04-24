@@ -10,8 +10,8 @@ use std::{
 };
 
 use ars_core::{
-    ColorMode, DefaultModalityContext, I18nRegistries, ModalityContext, PlatformEffects,
-    StyleStrategy, resolve_messages as core_resolve_messages,
+    ColorMode, DefaultModalityContext, I18nRegistries, ModalityContext, NullPlatformEffects,
+    PlatformEffects, StyleStrategy, resolve_messages as core_resolve_messages,
 };
 use ars_i18n::{
     Direction, IntlBackend, Locale, NumberFormatOptions, NumberFormatter, StubIntlBackend,
@@ -135,6 +135,73 @@ pub(crate) fn current_ars_context() -> Option<ArsContext> {
 /// Publishes [`ArsContext`] into Leptos context.
 pub fn provide_ars_context(context: ArsContext) {
     provide_context(context);
+}
+
+fn direction_from_locale(locale: &Locale) -> Direction {
+    if locale.direction().is_rtl() {
+        Direction::Rtl
+    } else {
+        Direction::Ltr
+    }
+}
+
+/// Publishes adapter environment context to a Leptos subtree.
+#[component]
+#[expect(
+    unreachable_pub,
+    reason = "ArsProvider is re-exported at the adapter crate root."
+)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "ArsProvider intentionally mirrors the documented provider surface."
+)]
+pub fn ArsProvider(
+    #[prop(optional, into)] locale: Option<Signal<Locale>>,
+    #[prop(optional, into)] direction: Option<Signal<Direction>>,
+    #[prop(optional, into)] color_mode: Option<Signal<ColorMode>>,
+    #[prop(optional, into)] disabled: Option<Signal<bool>>,
+    #[prop(optional, into)] read_only: Option<Signal<bool>>,
+    #[prop(optional)] id_prefix: Option<String>,
+    #[prop(optional)] portal_container_id: Option<String>,
+    #[prop(optional)] root_node_id: Option<String>,
+    #[prop(optional)] platform: Option<Arc<dyn PlatformEffects>>,
+    #[prop(optional)] intl_backend: Option<Arc<dyn IntlBackend>>,
+    #[prop(optional)] i18n_registries: Option<Arc<I18nRegistries>>,
+    #[prop(optional)] style_strategy: Option<StyleStrategy>,
+    children: Children,
+) -> impl IntoView {
+    let locale = locale.unwrap_or_else(|| Signal::stored(locales::en_us()));
+
+    let direction =
+        direction.unwrap_or_else(|| Signal::derive(move || direction_from_locale(&locale.get())));
+
+    let color_mode = color_mode.unwrap_or_else(|| Signal::stored(ColorMode::System));
+
+    let disabled = disabled.unwrap_or_else(|| Signal::stored(false));
+
+    let read_only = read_only.unwrap_or_else(|| Signal::stored(false));
+
+    let dir_attr = move || direction.get().as_html_attr();
+
+    provide_ars_context(ArsContext {
+        locale,
+        direction: Memo::new(move |_| direction.get()),
+        color_mode,
+        disabled,
+        read_only,
+        id_prefix: Signal::stored(id_prefix),
+        portal_container_id: Signal::stored(portal_container_id),
+        root_node_id: Signal::stored(root_node_id),
+        platform: platform.unwrap_or_else(|| Arc::new(NullPlatformEffects)),
+        modality: Arc::new(DefaultModalityContext::new()),
+        intl_backend: intl_backend.unwrap_or_else(|| Arc::new(StubIntlBackend)),
+        i18n_registries: i18n_registries.unwrap_or_else(|| Arc::new(I18nRegistries::new())),
+        style_strategy: style_strategy.unwrap_or(StyleStrategy::Inline),
+    });
+
+    view! {
+        <div dir=dir_attr>{children()}</div>
+    }
 }
 
 /// Emits a debug warning when a provider-dependent helper is used without context.
@@ -405,7 +472,6 @@ mod tests {
     #[test]
     fn ars_context_debug_redacts_arc_backed_fields() {
         let owner = Owner::new();
-
         owner.with(|| {
             let (context, _) = reactive_test_context(locales::en_us(), Arc::new(TestIntlBackend));
 
@@ -480,7 +546,6 @@ mod tests {
     #[test]
     fn use_locale_falls_back_to_en_us_without_provider() {
         let owner = Owner::new();
-
         owner.with(|| {
             assert_eq!(use_locale().get_untracked().to_bcp47(), "en-US");
         });
@@ -489,7 +554,6 @@ mod tests {
     #[test]
     fn resolve_locale_prefers_explicit_override() {
         let owner = Owner::new();
-
         owner.with(|| {
             crate::provide_ars_context(test_context_with_defaults(
                 Locale::parse("fr-FR").expect("locale should parse"),
@@ -506,7 +570,6 @@ mod tests {
     #[test]
     fn current_ars_context_round_trips_through_leptos_context() {
         let owner = Owner::new();
-
         owner.with(|| {
             assert!(current_ars_context().is_none());
 
@@ -524,7 +587,6 @@ mod tests {
     #[test]
     fn use_intl_backend_reads_context_value() {
         let owner = Owner::new();
-
         owner.with(|| {
             let expected: Arc<dyn IntlBackend> = Arc::new(TestIntlBackend);
 
@@ -540,7 +602,6 @@ mod tests {
     #[test]
     fn use_modality_context_reads_context_value() {
         let owner = Owner::new();
-
         owner.with(|| {
             let expected: Arc<dyn ModalityContext> = Arc::new(DefaultModalityContext::new());
 
@@ -558,7 +619,6 @@ mod tests {
     #[test]
     fn use_modality_context_falls_back_without_provider() {
         let owner = Owner::new();
-
         owner.with(|| {
             let first = use_modality_context();
             let second = use_modality_context();
@@ -572,7 +632,6 @@ mod tests {
     #[test]
     fn use_intl_backend_falls_back_without_provider() {
         let owner = Owner::new();
-
         owner.with(|| {
             let backend = use_intl_backend();
 
@@ -586,7 +645,6 @@ mod tests {
     #[test]
     fn use_messages_uses_provider_registry_bundle() {
         let owner = Owner::new();
-
         owner.with(|| {
             let mut registries = I18nRegistries::new();
 
@@ -626,7 +684,6 @@ mod tests {
     #[test]
     fn use_messages_falls_back_without_provider() {
         let owner = Owner::new();
-
         owner.with(|| {
             let locale = Locale::parse("pt-BR").expect("locale should parse");
 
@@ -639,7 +696,6 @@ mod tests {
     #[test]
     fn translated_text_reacts_to_locale_changes() {
         let owner = Owner::new();
-
         owner.with(|| {
             let (context, locale_signal) =
                 reactive_test_context(locales::en_us(), Arc::new(StubIntlBackend));
@@ -659,7 +715,6 @@ mod tests {
     #[test]
     fn use_number_formatter_falls_back_without_provider() {
         let owner = Owner::new();
-
         owner.with(|| {
             let formatter = use_number_formatter(NumberFormatOptions::default);
 
@@ -670,7 +725,6 @@ mod tests {
     #[test]
     fn use_number_formatter_reads_context_locale() {
         let owner = Owner::new();
-
         owner.with(|| {
             crate::provide_ars_context(test_context_with_defaults(
                 locales::de_de(),
@@ -686,7 +740,6 @@ mod tests {
     #[test]
     fn use_number_formatter_recomputes_when_locale_changes() {
         let owner = Owner::new();
-
         owner.with(|| {
             let (context, locale_signal) =
                 reactive_test_context(locales::en_us(), Arc::new(StubIntlBackend));
@@ -706,7 +759,6 @@ mod tests {
     #[test]
     fn use_number_formatter_reuses_cached_formatter_for_identical_inputs() {
         let owner = Owner::new();
-
         owner.with(|| {
             crate::provide_ars_context(test_context_with_defaults(
                 locales::en_us(),
@@ -726,7 +778,6 @@ mod tests {
     #[test]
     fn use_resolved_number_formatter_prefers_explicit_locale_override() {
         let owner = Owner::new();
-
         owner.with(|| {
             crate::provide_ars_context(test_context_with_defaults(
                 locales::fr(),
@@ -745,7 +796,6 @@ mod tests {
     #[test]
     fn prelude_t_reexport_compiles() {
         let owner = Owner::new();
-
         owner.with(|| {
             crate::provide_ars_context(test_context_with_defaults(
                 locales::en_us(),
@@ -765,16 +815,21 @@ mod tests {
 mod wasm_tests {
     use std::sync::Arc;
 
-    use ars_core::{ColorMode, I18nRegistries, NullPlatformEffects, StyleStrategy};
+    use ars_core::{
+        ColorMode, I18nRegistries, ModalityContext, NullPlatformEffects, StyleStrategy,
+    };
     use ars_i18n::{
         Direction, IntlBackend, Locale, NumberFormatOptions, StubIntlBackend, Translate, locales,
     };
-    use leptos::prelude::{Get, GetUntracked, Memo, Owner, RwSignal, Set, Signal};
+    use leptos::prelude::*;
+    #[cfg(feature = "csr")]
+    use leptos::{mount::mount_to, wasm_bindgen::JsCast};
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
     use super::{
-        ArsContext, current_ars_context, resolve_locale, t, translated_text, use_intl_backend,
-        use_locale, use_number_formatter,
+        ArsContext, ArsProvider, current_ars_context, resolve_locale, t, translated_text,
+        use_intl_backend, use_locale, use_messages, use_modality_context, use_number_formatter,
+        use_resolved_number_formatter,
     };
 
     wasm_bindgen_test_configure!(run_in_browser);
@@ -792,6 +847,21 @@ mod wasm_tests {
             }
         }
     }
+
+    #[derive(Clone, Debug, PartialEq)]
+    struct TestMessages {
+        label: ars_core::MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    }
+
+    impl Default for TestMessages {
+        fn default() -> Self {
+            Self {
+                label: ars_core::MessageFn::static_str("Default"),
+            }
+        }
+    }
+
+    impl ars_core::ComponentMessages for TestMessages {}
 
     struct TestIntlBackend;
 
@@ -868,9 +938,53 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn ars_context_new_and_debug_cover_constructor_fields_on_wasm() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let context = ArsContext::new(
+                Locale::parse("ar-SA").expect("locale should parse"),
+                Direction::Rtl,
+                ColorMode::Dark,
+                true,
+                true,
+                Some(String::from("app")),
+                Some(String::from("portal-root")),
+                Some(String::from("focus-root")),
+                Arc::new(NullPlatformEffects),
+                Arc::new(ars_core::DefaultModalityContext::new()),
+                Arc::new(StubIntlBackend),
+                Arc::new(I18nRegistries::new()),
+                StyleStrategy::Cssom,
+            );
+
+            assert_eq!(context.locale.get_untracked().to_bcp47(), "ar-SA");
+            assert_eq!(context.direction.get_untracked(), Direction::Rtl);
+            assert_eq!(context.color_mode.get_untracked(), ColorMode::Dark);
+            assert!(context.disabled.get_untracked());
+            assert!(context.read_only.get_untracked());
+            assert_eq!(context.id_prefix.get_untracked().as_deref(), Some("app"));
+            assert_eq!(
+                context.portal_container_id.get_untracked().as_deref(),
+                Some("portal-root")
+            );
+            assert_eq!(
+                context.root_node_id.get_untracked().as_deref(),
+                Some("focus-root")
+            );
+            assert_eq!(context.style_strategy(), &StyleStrategy::Cssom);
+
+            let debug_output = format!("{context:?}");
+
+            assert!(debug_output.contains("ArsContext"));
+            assert!(debug_output.contains("portal_container_id"));
+            assert!(debug_output.contains("style_strategy: Cssom"));
+            assert!(debug_output.contains("platform: \"Arc(..)\""));
+        });
+    }
+
+    #[wasm_bindgen_test]
     fn translated_text_reacts_to_locale_changes_on_wasm() {
         let owner = Owner::new();
-
         owner.with(|| {
             let (context, locale_signal) =
                 reactive_test_context(locales::en_us(), Arc::new(StubIntlBackend));
@@ -892,7 +1006,6 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn current_ars_context_round_trips_on_wasm() {
         let owner = Owner::new();
-
         owner.with(|| {
             assert!(current_ars_context().is_none());
 
@@ -909,7 +1022,6 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn locale_and_intl_backend_are_readable_on_wasm() {
         let owner = Owner::new();
-
         owner.with(|| {
             let expected_backend: Arc<dyn IntlBackend> = Arc::new(TestIntlBackend);
 
@@ -924,9 +1036,26 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn use_modality_context_reads_context_value_on_wasm() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let expected: Arc<dyn ModalityContext> =
+                Arc::new(ars_core::DefaultModalityContext::new());
+
+            let (mut context, _) =
+                reactive_test_context(locales::en_us(), Arc::new(TestIntlBackend));
+
+            context.modality = Arc::clone(&expected);
+
+            crate::provide_ars_context(context);
+
+            assert!(Arc::ptr_eq(&use_modality_context(), &expected));
+        });
+    }
+
+    #[wasm_bindgen_test]
     fn use_locale_falls_back_without_provider_on_wasm() {
         let owner = Owner::new();
-
         owner.with(|| {
             assert_eq!(use_locale().get_untracked().to_bcp47(), "en-US");
         });
@@ -935,7 +1064,6 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn use_intl_backend_falls_back_without_provider_on_wasm() {
         let owner = Owner::new();
-
         owner.with(|| {
             let backend = use_intl_backend();
 
@@ -947,9 +1075,63 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn provider_fallbacks_cover_modality_messages_and_text_on_wasm() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let locale = Locale::parse("pt-BR").expect("locale should parse");
+
+            let modality = use_modality_context();
+
+            let resolved = use_messages::<TestMessages>(None, Some(&locale));
+
+            assert_eq!(modality.snapshot(), ars_core::ModalitySnapshot::default());
+            assert_eq!((resolved.label)(&locale), "Default");
+            assert_eq!(translated_text(AppText::Greeting)(), "Hello");
+
+            drop(t(AppText::Greeting));
+        });
+    }
+
+    #[wasm_bindgen_test]
+    fn provider_context_helpers_read_registered_messages_and_modality_on_wasm() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let expected: Arc<dyn ModalityContext> =
+                Arc::new(ars_core::DefaultModalityContext::new());
+
+            let mut registries = I18nRegistries::new();
+
+            registries.register(
+                ars_core::MessagesRegistry::new(TestMessages::default()).register(
+                    "es",
+                    TestMessages {
+                        label: ars_core::MessageFn::static_str("Etiqueta"),
+                    },
+                ),
+            );
+
+            let (mut context, _) = reactive_test_context(
+                Locale::parse("es-MX").expect("locale should parse"),
+                Arc::new(StubIntlBackend),
+            );
+
+            context.modality = Arc::clone(&expected);
+            context.i18n_registries = Arc::new(registries);
+
+            crate::provide_ars_context(context);
+
+            let locale = Locale::parse("es-MX").expect("locale should parse");
+
+            let resolved = use_messages::<TestMessages>(None, None);
+
+            assert!(Arc::ptr_eq(&use_modality_context(), &expected));
+            assert_eq!((resolved.label)(&locale), "Etiqueta");
+        });
+    }
+
+    #[wasm_bindgen_test]
     fn resolve_locale_prefers_override_on_wasm() {
         let owner = Owner::new();
-
         owner.with(|| {
             let (context, _) = reactive_test_context(locales::en_us(), Arc::new(StubIntlBackend));
 
@@ -965,7 +1147,6 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn use_number_formatter_falls_back_without_provider_on_wasm() {
         let owner = Owner::new();
-
         owner.with(|| {
             let formatter = use_number_formatter(NumberFormatOptions::default);
 
@@ -974,9 +1155,22 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn use_number_formatter_reads_context_locale_on_wasm() {
+        let owner = Owner::new();
+        owner.with(|| {
+            crate::provide_ars_context(
+                reactive_test_context(locales::de_de(), Arc::new(StubIntlBackend)).0,
+            );
+
+            let formatter = use_number_formatter(NumberFormatOptions::default);
+
+            assert_eq!(formatter.get().format(1234.56), "1.234,56");
+        });
+    }
+
+    #[wasm_bindgen_test]
     fn use_number_formatter_reacts_to_locale_changes_on_wasm() {
         let owner = Owner::new();
-
         owner.with(|| {
             let (context, locale_signal) =
                 reactive_test_context(locales::en_us(), Arc::new(StubIntlBackend));
@@ -991,5 +1185,350 @@ mod wasm_tests {
 
             assert_eq!(formatter.get().format(1234.56), "1.234,56");
         });
+    }
+
+    #[wasm_bindgen_test]
+    fn use_number_formatter_reuses_cached_formatter_for_identical_inputs_on_wasm() {
+        let owner = Owner::new();
+        owner.with(|| {
+            crate::provide_ars_context(
+                reactive_test_context(locales::en_us(), Arc::new(StubIntlBackend)).0,
+            );
+
+            let formatter = use_number_formatter(NumberFormatOptions::default);
+
+            let first = formatter.get_untracked();
+            let second = formatter.get_untracked();
+
+            assert_eq!(first, second);
+            assert_eq!(second.format(1234.56), "1,234.56");
+        });
+    }
+
+    #[wasm_bindgen_test]
+    fn use_number_formatter_recomputes_when_non_reactive_options_change_on_wasm() {
+        let owner = Owner::new();
+        owner.with(|| {
+            crate::provide_ars_context(
+                reactive_test_context(locales::en_us(), Arc::new(StubIntlBackend)).0,
+            );
+
+            let (use_percent, set_use_percent) = signal(false);
+
+            let formatter = use_number_formatter(move || {
+                if use_percent.get() {
+                    NumberFormatOptions {
+                        style: ars_i18n::NumberStyle::Percent,
+                        ..NumberFormatOptions::default()
+                    }
+                } else {
+                    NumberFormatOptions::default()
+                }
+            });
+
+            assert_eq!(formatter.get().format(0.47), "0.47");
+
+            set_use_percent.set(true);
+
+            assert_eq!(formatter.get().format(0.47), "47%");
+        });
+    }
+
+    #[wasm_bindgen_test]
+    fn use_resolved_number_formatter_prefers_explicit_locale_override_on_wasm() {
+        let owner = Owner::new();
+        owner.with(|| {
+            crate::provide_ars_context(
+                reactive_test_context(locales::fr(), Arc::new(StubIntlBackend)).0,
+            );
+
+            let explicit = locales::de_de();
+            let formatter =
+                use_resolved_number_formatter(Some(&explicit), NumberFormatOptions::default);
+
+            assert_eq!(formatter.get().format(1234.56), "1.234,56");
+        });
+    }
+
+    #[cfg(feature = "csr")]
+    fn document() -> leptos::web_sys::Document {
+        leptos::web_sys::window()
+            .expect("window should exist")
+            .document()
+            .expect("document should exist")
+    }
+
+    #[cfg(feature = "csr")]
+    fn append_container() -> leptos::web_sys::HtmlElement {
+        let container = document()
+            .create_element("div")
+            .expect("container creation should succeed")
+            .dyn_into::<leptos::web_sys::HtmlElement>()
+            .expect("container should be an HtmlElement");
+
+        document()
+            .body()
+            .expect("body should exist")
+            .append_child(&container)
+            .expect("container append should succeed");
+
+        container
+    }
+
+    #[cfg(feature = "csr")]
+    #[leptos::component]
+    fn ProviderProbe() -> impl IntoView {
+        let context = current_ars_context().expect("ArsProvider should publish context");
+
+        let locale = use_locale();
+
+        leptos::view! {
+            <div data-testid="probe">
+                <span data-testid="locale">{move || locale.get().to_bcp47()}</span>
+                <span data-testid="direction">
+                    {move || context.direction.get().as_html_attr()}
+                </span>
+            </div>
+        }
+    }
+
+    #[cfg(feature = "csr")]
+    #[leptos::component]
+    fn ConfiguredProviderProbe() -> impl IntoView {
+        let context = current_ars_context().expect("ArsProvider should publish context");
+
+        let locale = use_locale();
+
+        leptos::view! {
+            <div data-testid="configured-probe">
+                <span data-testid="locale">{move || locale.get().to_bcp47()}</span>
+                <span data-testid="direction">
+                    {move || context.direction.get().as_html_attr()}
+                </span>
+                <span data-testid="color-mode">
+                    {move || format!("{:?}", context.color_mode.get())}
+                </span>
+                <span data-testid="disabled">{move || context.disabled.get().to_string()}</span>
+                <span data-testid="read-only">{move || context.read_only.get().to_string()}</span>
+                <span data-testid="id-prefix">
+                    {move || context.id_prefix.get().unwrap_or_default()}
+                </span>
+                <span data-testid="portal-container-id">
+                    {move || context.portal_container_id.get().unwrap_or_default()}
+                </span>
+                <span data-testid="root-node-id">
+                    {move || context.root_node_id.get().unwrap_or_default()}
+                </span>
+                <span data-testid="style-strategy">
+                    {move || format!("{:?}", context.style_strategy())}
+                </span>
+            </div>
+        }
+    }
+
+    #[cfg(feature = "csr")]
+    #[wasm_bindgen_test]
+    async fn ars_provider_renders_default_locale_and_dir_wrapper_on_wasm() {
+        let container = append_container();
+
+        let mount_handle = mount_to(container.clone(), move || {
+            leptos::view! {
+                <ArsProvider>
+                    <ProviderProbe />
+                </ArsProvider>
+            }
+        });
+
+        leptos::task::tick().await;
+
+        let wrapper = container
+            .query_selector("[dir='ltr']")
+            .expect("selector should be valid")
+            .expect("provider wrapper should exist");
+
+        let locale = container
+            .query_selector("[data-testid='locale']")
+            .expect("selector should be valid")
+            .expect("locale node should exist");
+
+        assert_eq!(wrapper.get_attribute("dir").as_deref(), Some("ltr"));
+        assert_eq!(locale.text_content().as_deref(), Some("en-US"));
+
+        drop(mount_handle);
+
+        container.remove();
+    }
+
+    #[cfg(feature = "csr")]
+    #[wasm_bindgen_test]
+    async fn ars_provider_reacts_to_locale_changes_on_wasm() {
+        let container = append_container();
+
+        let locale = RwSignal::new(locales::en_us());
+
+        let mount_handle = mount_to(container.clone(), move || {
+            leptos::view! {
+                <ArsProvider locale=locale>
+                    <ProviderProbe />
+                </ArsProvider>
+            }
+        });
+
+        leptos::task::tick().await;
+
+        locale.set(Locale::parse("ar-SA").expect("locale should parse"));
+
+        leptos::task::tick().await;
+
+        let wrapper = container
+            .query_selector("[dir='rtl']")
+            .expect("selector should be valid")
+            .expect("provider wrapper should exist");
+
+        let locale_node = container
+            .query_selector("[data-testid='locale']")
+            .expect("selector should be valid")
+            .expect("locale node should exist");
+
+        let direction_node = container
+            .query_selector("[data-testid='direction']")
+            .expect("selector should be valid")
+            .expect("direction node should exist");
+
+        assert_eq!(wrapper.get_attribute("dir").as_deref(), Some("rtl"));
+        assert_eq!(locale_node.text_content().as_deref(), Some("ar-SA"));
+        assert_eq!(direction_node.text_content().as_deref(), Some("rtl"));
+
+        drop(mount_handle);
+
+        container.remove();
+    }
+
+    #[cfg(feature = "csr")]
+    #[wasm_bindgen_test]
+    async fn ars_provider_respects_explicit_direction_and_optional_context_values_on_wasm() {
+        let container = append_container();
+
+        let locale = Signal::stored(Locale::parse("ar-SA").expect("locale should parse"));
+
+        let direction = Signal::stored(Direction::Ltr);
+
+        let color_mode = Signal::stored(ColorMode::Dark);
+
+        let disabled = Signal::stored(true);
+
+        let read_only = Signal::stored(true);
+
+        let mount_handle = mount_to(container.clone(), move || {
+            leptos::view! {
+                <ArsProvider
+                    locale
+                    direction
+                    color_mode
+                    disabled
+                    read_only
+                    id_prefix=String::from("app")
+                    portal_container_id=String::from("portal-root")
+                    root_node_id=String::from("focus-root")
+                    style_strategy=StyleStrategy::Cssom
+                >
+                    <ConfiguredProviderProbe />
+                </ArsProvider>
+            }
+        });
+
+        leptos::task::tick().await;
+
+        let wrapper = container
+            .query_selector("[dir='ltr']")
+            .expect("selector should be valid")
+            .expect("provider wrapper should exist");
+
+        assert_eq!(wrapper.get_attribute("dir").as_deref(), Some("ltr"));
+        assert_eq!(
+            container
+                .query_selector("[data-testid='locale']")
+                .expect("selector should be valid")
+                .expect("locale node should exist")
+                .text_content()
+                .as_deref(),
+            Some("ar-SA")
+        );
+        assert_eq!(
+            container
+                .query_selector("[data-testid='direction']")
+                .expect("selector should be valid")
+                .expect("direction node should exist")
+                .text_content()
+                .as_deref(),
+            Some("ltr")
+        );
+        assert_eq!(
+            container
+                .query_selector("[data-testid='color-mode']")
+                .expect("selector should be valid")
+                .expect("color mode node should exist")
+                .text_content()
+                .as_deref(),
+            Some("Dark")
+        );
+        assert_eq!(
+            container
+                .query_selector("[data-testid='disabled']")
+                .expect("selector should be valid")
+                .expect("disabled node should exist")
+                .text_content()
+                .as_deref(),
+            Some("true")
+        );
+        assert_eq!(
+            container
+                .query_selector("[data-testid='read-only']")
+                .expect("selector should be valid")
+                .expect("read-only node should exist")
+                .text_content()
+                .as_deref(),
+            Some("true")
+        );
+        assert_eq!(
+            container
+                .query_selector("[data-testid='id-prefix']")
+                .expect("selector should be valid")
+                .expect("id-prefix node should exist")
+                .text_content()
+                .as_deref(),
+            Some("app")
+        );
+        assert_eq!(
+            container
+                .query_selector("[data-testid='portal-container-id']")
+                .expect("selector should be valid")
+                .expect("portal-container-id node should exist")
+                .text_content()
+                .as_deref(),
+            Some("portal-root")
+        );
+        assert_eq!(
+            container
+                .query_selector("[data-testid='root-node-id']")
+                .expect("selector should be valid")
+                .expect("root-node-id node should exist")
+                .text_content()
+                .as_deref(),
+            Some("focus-root")
+        );
+        assert_eq!(
+            container
+                .query_selector("[data-testid='style-strategy']")
+                .expect("selector should be valid")
+                .expect("style-strategy node should exist")
+                .text_content()
+                .as_deref(),
+            Some("Cssom")
+        );
+
+        drop(mount_handle);
+
+        container.remove();
     }
 }

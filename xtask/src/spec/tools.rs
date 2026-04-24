@@ -357,9 +357,13 @@ impl Tool for SearchTool {
 
     fn execute(&self, input: Value) -> Result<String, ToolError> {
         let query = get_string(&input, "query")?;
+
         let category = input.get("category").and_then(Value::as_str);
+
         let section = input.get("section").and_then(Value::as_str);
+
         let tier = input.get("tier").and_then(Value::as_str);
+
         Ok(super::search::execute(
             &self.0, &query, category, section, tier,
         )?)
@@ -434,11 +438,14 @@ impl Tool for ContextTool {
 
     fn execute(&self, input: Value) -> Result<String, ToolError> {
         let component = get_string(&input, "component")?;
+
         let framework = input.get("framework").and_then(Value::as_str);
+
         let include_testing = input
             .get("include_testing")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+
         Ok(super::context::execute(
             &self.0,
             &component,

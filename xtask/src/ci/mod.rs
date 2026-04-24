@@ -140,9 +140,11 @@ impl Display for Error {
                 code,
             } => {
                 write!(f, "{} failed", step_name(*step))?;
+
                 if let Some(code) = code {
                     write!(f, " (exit code {code})")?;
                 }
+
                 write!(f, ": {command}")
             }
 
