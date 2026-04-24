@@ -131,13 +131,8 @@ pub fn check_adapter_parity(options: &AdapterParityOptions) -> Result<String, Er
     let leptos_counts = adapter_test_counts(&options.leptos_test_dir, &components)?;
     let dioxus_counts = adapter_test_counts(&options.dioxus_test_dir, &components)?;
 
-    let mut all_components = BTreeSet::new();
-
-    all_components.extend(leptos_counts.keys().cloned());
-    all_components.extend(dioxus_counts.keys().cloned());
-
     let (mut output, failures) = adapter_parity_report(
-        &all_components,
+        &components,
         &leptos_counts,
         &dioxus_counts,
         options.tolerance,
@@ -175,7 +170,9 @@ fn adapter_parity_report(
 
         let delta = leptos.abs_diff(dioxus);
 
-        let status = if leptos == 0 || dioxus == 0 {
+        let status = if leptos == 0 && dioxus == 0 {
+            "SKIP"
+        } else if leptos == 0 || dioxus == 0 {
             failures.push(format!(
                 "{component}: both adapters must have tests, leptos={leptos}, dioxus={dioxus}"
             ));
@@ -881,6 +878,17 @@ mod tests {
 
         assert_eq!(failures.len(), 1);
         assert!(failures[0].contains("both adapters must have tests"));
+    }
+
+    #[test]
+    fn adapter_parity_reports_manifest_components_with_no_tests_as_skipped() {
+        let components = BTreeSet::from(["button".to_owned()]);
+
+        let (output, failures) =
+            adapter_parity_report(&components, &BTreeMap::new(), &BTreeMap::new(), 2);
+
+        assert!(failures.is_empty());
+        assert!(output.contains("button | 0 | 0 | 0 | SKIP"));
     }
 
     #[test]

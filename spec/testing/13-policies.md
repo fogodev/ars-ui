@@ -323,7 +323,10 @@ For each component (e.g., Checkbox, Select, Dialog):
 
 > See [14-ci.md](./14-ci.md) §6.1 for the lint specification — it must match this per-component granularity.
 
-Any component with zero integration tests in either adapter is a policy violation.
+Any component with integration tests in one adapter and zero integration tests
+in the other adapter is a policy violation. Components with zero integration
+tests in both adapters are reported as not-yet-implemented by the CI lint until
+adapter-level component coverage starts for that component.
 
 > CI enforcement: see [14-ci.md](14-ci.md#16-adapter-parity-enforcement).
 
