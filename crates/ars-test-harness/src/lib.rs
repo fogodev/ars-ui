@@ -31,6 +31,7 @@ use {
 mod backend;
 mod element;
 mod item;
+pub mod parity;
 mod types;
 
 pub use backend::HarnessBackend;

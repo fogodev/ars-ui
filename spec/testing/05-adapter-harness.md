@@ -209,19 +209,19 @@ pub fn select_scenarios() -> Vec<InteractionTestCase> {
     vec![
         InteractionTestCase {
             name: "open_with_click",
-            component: "select",
+            component: ComponentType::Select,
             steps: vec![TestStep::Click("[data-ars-part='trigger']"), TestStep::AssertOpen],
-            expected_attrs: vec![],
+            expected_attrs: HashMap::from([("aria-expanded", "true")]),
         },
         InteractionTestCase {
             name: "close_with_escape",
-            component: "select",
+            component: ComponentType::Select,
             steps: vec![
                 TestStep::Click("[data-ars-part='trigger']"),
                 TestStep::Press(KeyboardKey::Escape),
                 TestStep::AssertClosed,
             ],
-            expected_attrs: vec![],
+            expected_attrs: HashMap::from([("aria-expanded", "false")]),
         },
         // ...
     ]
