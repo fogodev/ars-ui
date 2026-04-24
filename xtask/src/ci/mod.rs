@@ -13,7 +13,7 @@ use std::{
     process,
 };
 
-use crate::{coverage, i18n, test};
+use crate::{coverage, i18n, lint, test};
 
 const MUTUAL_EXCLUSION_GUARD: &str = "features `icu4x` and `web-intl` are mutually exclusive";
 
@@ -52,8 +52,17 @@ pub enum Step {
     /// Adapter harness tests (Leptos + Dioxus).
     Adapter,
 
+    /// Compare per-component test counts between adapters.
+    AdapterParity,
+
     /// Generate coverage and check per-crate thresholds.
     Coverage,
+
+    /// Enforce per-component snapshot-count policy.
+    SnapshotCount,
+
+    /// Verify every `ComponentError` variant appears in tests.
+    ErrorVariantCoverage,
 
     /// Meta-step: run all five feature-matrix groups.
     FeatureMatrix,
@@ -91,7 +100,10 @@ const PIPELINE_ORDER: &[Step] = &[
     Step::Release,
     Step::Integration,
     Step::Adapter,
+    Step::AdapterParity,
     Step::Coverage,
+    Step::SnapshotCount,
+    Step::ErrorVariantCoverage,
     Step::FeatureMatrixCore,
     Step::FeatureMatrixI18n,
     Step::FeatureMatrixSubsystems,
@@ -129,6 +141,9 @@ pub enum Error {
 
     /// Coverage threshold check failed.
     Coverage(coverage::Error),
+
+    /// Repository lint check failed.
+    Lint(lint::Error),
 }
 
 impl Display for Error {
@@ -158,6 +173,8 @@ impl Display for Error {
             Self::Io(e) => write!(f, "IO error: {e}"),
 
             Self::Coverage(e) => write!(f, "{e}"),
+
+            Self::Lint(e) => write!(f, "{e}"),
         }
     }
 }
@@ -249,7 +266,13 @@ fn run_step(step: Step, message_format: Option<&str>) -> Result<(), Error> {
 
         Step::Adapter => run_adapter(),
 
+        Step::AdapterParity => run_adapter_parity(),
+
         Step::Coverage => run_coverage(),
+
+        Step::SnapshotCount => run_snapshot_count(),
+
+        Step::ErrorVariantCoverage => run_error_variant_coverage(),
 
         Step::FeatureMatrix => {
             unreachable!("FeatureMatrix is expanded by resolve_steps")
@@ -425,6 +448,51 @@ fn run_integration() -> Result<(), Error> {
 
 fn run_adapter() -> Result<(), Error> {
     run_test_stage(Step::Adapter, test::Stage::Adapter)
+}
+
+fn run_adapter_parity() -> Result<(), Error> {
+    match lint::check_adapter_parity(&lint::AdapterParityOptions {
+        leptos_test_dir: PathBuf::from("crates/ars-leptos/tests"),
+        dioxus_test_dir: PathBuf::from("crates/ars-dioxus/tests"),
+        tolerance: 2,
+    }) {
+        Ok(output) => {
+            eprint!("{output}");
+            Ok(())
+        }
+
+        Err(error) => Err(Error::Lint(error)),
+    }
+}
+
+fn run_snapshot_count() -> Result<(), Error> {
+    match lint::check_snapshot_count(&lint::SnapshotCountOptions {
+        snapshots_dir: PathBuf::from("crates"),
+        min_per_variant: 3,
+        max_per_component: 20,
+    }) {
+        Ok(output) => {
+            eprint!("{output}");
+            Ok(())
+        }
+
+        Err(error) => Err(Error::Lint(error)),
+    }
+}
+
+fn run_error_variant_coverage() -> Result<(), Error> {
+    match lint::check_error_variant_coverage(&lint::ErrorVariantCoverageOptions {
+        source_glob: "crates/ars-core/src/**/*.rs".to_owned(),
+        test_glob: "crates/ars-core/tests/**/*.rs".to_owned(),
+        enum_name: "ComponentError".to_owned(),
+    }) {
+        Ok(output) => {
+            eprint!("{output}");
+            Ok(())
+        }
+
+        Err(error) => Err(Error::Lint(error)),
+    }
 }
 
 fn run_mutual_exclusion() -> Result<(), Error> {
@@ -696,7 +764,10 @@ const fn step_name(step: Step) -> &'static str {
         Step::Release => "release",
         Step::Integration => "integration",
         Step::Adapter => "adapter",
+        Step::AdapterParity => "adapter-parity",
         Step::Coverage => "coverage",
+        Step::SnapshotCount => "snapshot-count",
+        Step::ErrorVariantCoverage => "error-variant-coverage",
         Step::FeatureMatrix => "feature-matrix",
         Step::FeatureMatrixCore => "feature-matrix-core",
         Step::FeatureMatrixI18n => "feature-matrix-i18n",
@@ -822,7 +893,10 @@ mod tests {
             Step::Release,
             Step::Integration,
             Step::Adapter,
+            Step::AdapterParity,
             Step::Coverage,
+            Step::SnapshotCount,
+            Step::ErrorVariantCoverage,
             Step::FeatureMatrix,
             Step::FeatureMatrixCore,
             Step::FeatureMatrixI18n,

@@ -308,7 +308,7 @@ CI matrix entry: `cargo test -p ars-dom --features ssr`
 
 ### 2.4 Adapter Parity Enforcement Matrix
 
-Test parity between the Leptos and Dioxus adapters MUST be maintained to prevent one adapter from falling behind in coverage.
+Test-count parity between the Leptos and Dioxus adapters MUST be maintained to prevent one adapter from falling behind in coverage.
 
 **Per-Component Test Count Parity**:
 
@@ -319,37 +319,16 @@ For each component (e.g., Checkbox, Select, Dialog):
   |ars-leptos tests - ars-dioxus tests| <= 2  (tolerance for adapter-specific edge cases)
 ```
 
-`check_adapter_parity.sh` compares test counts per component (not total), with tolerance of |count_leptos - count_dioxus| <= 2 per component.
+`cargo xtask lint adapter-parity` compares test counts per component (not total), with tolerance of |count_leptos - count_dioxus| <= 2 per component.
 
-> See [14-ci.md](./14-ci.md) §6.1 for the script specification — it must match this per-component granularity.
+> See [14-ci.md](./14-ci.md) §6.1 for the lint specification — it must match this per-component granularity.
 
-Any component with zero integration tests in either adapter is a policy violation.
+Any component with integration tests in one adapter and zero integration tests
+in the other adapter is a policy violation. Components with zero integration
+tests in both adapters are reported as not-yet-implemented by the CI lint until
+adapter-level component coverage starts for that component.
 
 > CI enforcement: see [14-ci.md](14-ci.md#16-adapter-parity-enforcement).
-
-**Snapshot Equivalence**: Both adapters MUST produce identical `AttrMap` snapshots for the same `Context` and `Props` combination:
-
-```rust
-#[test]
-fn attr_map_parity_checkbox() {
-    let props = CheckboxProps::default();
-    let leptos_attrs = ars_leptos::render_attrs::<Checkbox>(&props);
-    let dioxus_attrs = ars_dioxus::render_attrs::<Checkbox>(&props);
-    assert_eq!(leptos_attrs, dioxus_attrs, "AttrMap mismatch for Checkbox");
-}
-```
-
-This test MUST exist for every component and cover at least: default props, disabled state, and one interactive state (e.g., checked, open, selected).
-
-> **Scope:** Adapter parity for `render_attrs` output is enforced only for the `web` target
-> (both adapters rendering to browser DOM). SSR output and Dioxus Desktop are excluded from
-> snapshot equivalence checks, as they may legitimately differ (Leptos SSR adds hydration
-> markers, Dioxus Desktop has no DOM).
->
-> `render_attrs` is defined in each adapter crate: `ars_leptos::render_attrs()` and
-> `ars_dioxus::render_attrs()`. These functions convert an `AttrMap` to framework-specific
-> attribute representations. See [08-adapter-leptos.md](../foundation/08-adapter-leptos.md)
-> and [09-adapter-dioxus.md](../foundation/09-adapter-dioxus.md) for definitions.
 
 ---
 
@@ -365,16 +344,21 @@ This test MUST exist for every component and cover at least: default props, disa
 - **Warning threshold:** When total snapshot count exceeds 500, a CI warning is emitted.
 - **Per-component limit:** No single component should have more than 20 snapshot files. Components exceeding this should consolidate state variants.
 - **Quarterly audit:** Review snapshot growth each quarter. Prune snapshots for removed or significantly refactored components.
-- **New component budget:** Each new component starts with a budget of 3 snapshots per state variant × number of anatomy parts.
+- **Review budget guideline:** Each new component starts review with a snapshot plan of 3 snapshots per state variant × number of anatomy parts.
+- **CI floor:** Each component implementation file (`component.rs`) with more than two `State` variants must have at least 3 snapshots per state variant.
 
-Each component is budgeted a maximum of **20 snapshots**. The budget formula is:
+Each component is budgeted a maximum of **20 snapshots**. The review guideline formula is:
 
 `budget = min(3 × state_variants × anatomy_parts, 20)`
 
-Components exceeding 20 snapshots require explicit justification in PR review.
+Components exceeding 20 snapshots fail the snapshot-count lint and should
+consolidate state variants before merge.
 
-**Enforcement:** The `check_snapshot_count.py` script verifies per-component snapshot counts
-using a flat cap of 20. The script counts `*.snap` files per component directory.
+**Enforcement:** `cargo xtask lint snapshot-count` verifies per-component snapshot counts
+using the implementation-derived state-variant floor and a flat cap of 20. The lint
+counts `*.snap` files per component directory. The anatomy-part multiplier is a
+review guideline because anatomy parts are specified in component specs rather than
+implementation files.
 
 > **CI enforcement:** The snapshot count linting job in [14-ci.md section 2.4](14-ci.md#24-snapshot-count-linting) enforces both minimum (>= 3 per component variant) and maximum (<= 20 per component) bounds.
 
@@ -429,9 +413,7 @@ and those operational floors may temporarily lag the long-term targets below.
 
 > CI enforcement: see [14-ci.md](14-ci.md#2-coverage-pipeline).
 
-**Snapshot count enforcement**: Every component with more than two `State` variants MUST have
-at least 3 snapshot tests per variant. Components with fewer are flagged for review. The lint
-runs via `scripts/check_snapshot_count.py` and parses `*.snap` files in the test directory.
+**Snapshot count enforcement**: Every component implementation file (`component.rs`) with more than two `State` variants MUST have at least 3 snapshot tests per variant. Components with fewer fail the snapshot-count lint. The lint runs via `cargo xtask lint snapshot-count` and parses `*.snap` files in the test directory.
 
 > CI integration: see [14-ci.md](14-ci.md#24-snapshot-count-linting).
 

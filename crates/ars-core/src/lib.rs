@@ -15,6 +15,7 @@
 //! - [`PendingEffect`] — named side effect with setup closure and cleanup lifecycle
 //! - [`Callback`] — shared callback wrapper built on [`Arc`]
 //! - [`ComponentIds`] — adapter-provided base IDs expanded into stable part IDs
+//! - [`ComponentError`] — standardized recoverable component misuse errors
 //! - [`SafeUrl`] — validated URL type for URL-valued HTML attributes
 //! - [`SharedState`] — shared interior-mutable state (`Rc<RefCell>` on wasm, `Arc<Mutex>` on native)
 //! - [`WeakSend`] — weak event sender for safe effect cleanup
@@ -33,6 +34,7 @@ mod callback;
 pub mod companion_css;
 mod component_ids;
 mod connect;
+mod error;
 mod i18n_registry;
 mod message_fn;
 pub mod modality;
@@ -68,6 +70,7 @@ pub use connect::{
     AriaAttr, AttrMap, AttrMapParts, AttrValue, CssProperty, EventOptions, HtmlAttr, HtmlEvent,
     StyleStrategy, UserAttrs, data,
 };
+pub use error::ComponentError;
 pub use i18n_registry::{I18nRegistries, MessagesRegistry, resolve_messages};
 pub use message_fn::{ComponentMessages, MessageFn};
 // ── Modality ────────────────────────────────────────────────────────
