@@ -318,6 +318,7 @@ impl PartialEq for ArsProviderProps {
                 self.dioxus_platform.as_ref(),
                 other.dioxus_platform.as_ref(),
             )
+            && self.children == other.children
     }
 }
 
@@ -1452,7 +1453,9 @@ mod tests {
                 },
             };
 
-            let same_semantics = ArsProviderProps {
+            let same_semantics = baseline.clone();
+
+            let different_children = ArsProviderProps {
                 children: rsx! {
                     span {}
                 },
@@ -1464,6 +1467,7 @@ mod tests {
             };
 
             assert_eq!(baseline, same_semantics);
+            assert_ne!(baseline, different_children);
             assert_ne!(baseline, different_platform);
 
             let debug_output = format!("{baseline:?}");
@@ -1734,7 +1738,9 @@ mod wasm_tests {
                 },
             };
 
-            let same_semantics = ArsProviderProps {
+            let same_semantics = baseline.clone();
+
+            let different_children = ArsProviderProps {
                 children: rsx! {
                     span {}
                 },
@@ -1746,6 +1752,7 @@ mod wasm_tests {
             };
 
             assert_eq!(baseline, same_semantics);
+            assert_ne!(baseline, different_children);
             assert_ne!(baseline, different_platform);
 
             let debug_output = format!("{baseline:?}");
