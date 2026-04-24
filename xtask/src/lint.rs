@@ -213,15 +213,17 @@ pub fn check_snapshot_count(options: &SnapshotCountOptions) -> Result<String, Er
 
     let total_snapshots = snapshots.len();
 
+    let state_variants = detect_state_variants(&workspace_root_for(&options.snapshots_dir))?;
     let mut counts = BTreeMap::<String, usize>::new();
 
     for snapshot in snapshots {
-        if let Some(component) = infer_snapshot_component(&snapshot) {
+        if let Some(component) = infer_snapshot_component(&snapshot)
+            && state_variants.contains_key(&component)
+        {
             *counts.entry(component).or_insert(0) += 1;
         }
     }
 
-    let state_variants = detect_state_variants(&workspace_root_for(&options.snapshots_dir))?;
     let mut output = String::from("Component | Snapshots | State variants | Required | Status\n");
 
     output.push_str("----------|-----------|----------------|----------|-------\n");
@@ -970,6 +972,11 @@ mod tests {
             );
         }
 
+        write(
+            &root.join("crates/demo/src/button/component.rs"),
+            "pub enum State {\n    Idle,\n}\n",
+        );
+
         let options = SnapshotCountOptions {
             snapshots_dir: root.join("crates/demo/src/button/snapshots"),
             min_per_variant: 3,
@@ -979,6 +986,32 @@ mod tests {
         let result = check_snapshot_count(&options);
 
         assert!(matches!(result, Err(Error::Failed { .. })));
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn snapshot_count_ignores_non_component_snapshot_suites() {
+        let root = temp_dir("snapshot-non-component");
+
+        for idx in 0..3 {
+            write(
+                &root.join(format!(
+                    "crates/ars-core/tests/snapshots/snapshot_smoke__{idx}.snap"
+                )),
+                "snapshot",
+            );
+        }
+
+        let options = SnapshotCountOptions {
+            snapshots_dir: root.join("crates"),
+            min_per_variant: 3,
+            max_per_component: 2,
+        };
+
+        let output = check_snapshot_count(&options).expect("non-component snapshots are ignored");
+
+        assert!(!output.contains("snapshot_smoke"));
 
         drop(fs::remove_dir_all(root));
     }
