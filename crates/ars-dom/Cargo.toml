@@ -16,7 +16,7 @@ web     = ["dep:js-sys", "dep:wasm-bindgen", "dep:web-sys"]
 [dependencies]
 ars-a11y         = { path = "../ars-a11y" }
 ars-core         = { path = "../ars-core" }
-ars-i18n         = { path = "../ars-i18n" }
+ars-i18n         = { path = "../ars-i18n", default-features = false }
 ars-interactions = { path = "../ars-interactions" }
 js-sys           = { version = "0.3", optional = true }
 log              = { version = "0.4", default-features = false, optional = true }

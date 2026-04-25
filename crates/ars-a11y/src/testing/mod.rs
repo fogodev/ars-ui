@@ -1,6 +1,7 @@
 //! Testing helpers for validating ARIA output from connect surfaces.
 
 mod asserts;
+mod ids;
 mod keyboard;
 mod validator;
 
@@ -16,6 +17,7 @@ pub use asserts::{
     assert_aria_setsize, assert_aria_sort, assert_aria_valuemax, assert_aria_valuemin,
     assert_aria_valuenow, assert_aria_valuetext, assert_data_state, assert_role, assert_tabindex,
 };
+pub use ids::extract_all_ids;
 pub use keyboard::{FocusZoneTestHarness, NavigationEvent, NavigationRecorder, SimulatedKeyEvent};
 pub use validator::{
     AriaValidationContext, AriaValidationError, AriaValidationWarning, AriaValidator,

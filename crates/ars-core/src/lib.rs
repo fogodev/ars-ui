@@ -42,8 +42,6 @@ pub mod platform;
 pub mod provider;
 mod shared_flag;
 mod shared_state;
-#[cfg(any(test, feature = "testing"))]
-pub mod test_helpers;
 mod url;
 mod weak_send;
 
@@ -730,6 +728,42 @@ impl<M: Machine> Debug for SendResult<M> {
     }
 }
 
+/// Serializable snapshot of a machine's runtime state, used to round-trip
+/// state across the SSR → client-hydration boundary.
+///
+/// The server builds the snapshot after rendering — typically
+/// `HydrationSnapshot { state: svc.state().clone(), id: svc.props().id().into() }`
+/// — writes it to the page (for example as a JSON payload alongside the SSR
+/// HTML), and the client deserializes it before calling
+/// [`Service::new_hydrated`] to restore the component without re-running
+/// [`Machine::init`].
+///
+/// Only state and the component ID travel across the boundary. Context is
+/// always recomputed from props by [`Service::new_hydrated`] so that
+/// adapter-computed values (resolved locale, platform effects, derived
+/// IDs) stay consistent with the client's environment.
+///
+/// The spec contract lives in `spec/testing/07-ssr-hydration.md` §2.
+///
+/// This type is gated behind the `ssr` and `serde` features because both
+/// are required for its intended use: SSR builds provide the rendering
+/// path, and serde provides the wire format.
+#[cfg(all(feature = "ssr", feature = "serde"))]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(bound(
+    serialize = "M::State: serde::Serialize",
+    deserialize = "M::State: serde::Deserialize<'de>"
+))]
+pub struct HydrationSnapshot<M: Machine> {
+    /// The machine state captured on the server, to be restored on the client.
+    pub state: M::State,
+
+    /// The component ID that produced the snapshot. Equal to
+    /// `svc.props().id()` on the server; used on the client to match the
+    /// snapshot to the mounted component instance.
+    pub id: String,
+}
+
 /// A running instance of a [`Machine`] that manages state, context, and props.
 ///
 /// `Service` is the runtime counterpart to a `Machine` definition. It holds the
@@ -1099,6 +1133,7 @@ mod tests {
     use super::*;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     enum ToggleState {
         Off,
         On,
@@ -1304,6 +1339,50 @@ mod tests {
         assert!(result.state_changed);
         assert!(result.pending_effects.is_empty());
         assert_eq!(service.state(), &ToggleState::On);
+    }
+
+    /// [`HydrationSnapshot`] serialises the state captured on the server and
+    /// reconstructs the same logical [`Service`] on the client via
+    /// [`Service::new_hydrated`] — without re-running [`Machine::init`]'s
+    /// state derivation. This covers the `spec/testing/07-ssr-hydration.md`
+    /// §2 round-trip contract.
+    #[cfg(all(feature = "ssr", feature = "serde"))]
+    #[test]
+    fn hydration_snapshot_round_trips_through_serde_json() {
+        let props = ToggleProps {
+            id: String::from("toggle-1"),
+        };
+
+        // Server side: build a Service, advance to the "On" state, capture a snapshot.
+        let mut server = Service::<ToggleMachine>::new(props.clone(), &Env::default(), &());
+
+        drop(server.send(ToggleEvent::Toggle));
+
+        assert_eq!(server.state(), &ToggleState::On);
+
+        let snapshot: HydrationSnapshot<ToggleMachine> = HydrationSnapshot {
+            state: *server.state(),
+            id: server.props().id().into(),
+        };
+
+        let json = serde_json::to_string(&snapshot).expect("serialize snapshot");
+
+        let restored: HydrationSnapshot<ToggleMachine> =
+            serde_json::from_str(&json).expect("deserialize snapshot");
+
+        assert_eq!(restored.state, ToggleState::On);
+        assert_eq!(restored.id, "toggle-1");
+
+        // Client side: hydrate the Service from the restored state. Context is
+        // recomputed from props, state is injected from the snapshot.
+        let client =
+            Service::<ToggleMachine>::new_hydrated(props, restored.state, &Env::default(), &());
+
+        assert_eq!(
+            client.state(),
+            &ToggleState::On,
+            "hydrated client must skip init's initial state and adopt the snapshot",
+        );
     }
 
     #[test]

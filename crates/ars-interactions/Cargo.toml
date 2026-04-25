@@ -17,7 +17,7 @@ test-support          = []
 [dependencies]
 ars-a11y = { path = "../ars-a11y", default-features = false }
 ars-core = { path = "../ars-core" }
-ars-i18n = { path = "../ars-i18n" }
+ars-i18n = { path = "../ars-i18n", default-features = false }
 log      = { version = "0.4", default-features = false, optional = true }
 
 [lints]

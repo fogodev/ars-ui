@@ -9,7 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 ars-core          = { path = "../ars-core" }
-ars-i18n          = { path = "../ars-i18n" }
+ars-i18n          = { path = "../ars-i18n", default-features = false }
 ars-leptos        = { path = "../ars-leptos", features = ["csr"] }
 ars-test-harness  = { path = "../ars-test-harness" }
 leptos            = { version = "0.8.19", features = ["csr"] }

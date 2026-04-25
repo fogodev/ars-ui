@@ -10,7 +10,7 @@ rust-version.workspace = true
 [dependencies]
 ars-core             = { path = "../ars-core" }
 ars-dioxus           = { path = "../ars-dioxus", features = ["web"] }
-ars-i18n             = { path = "../ars-i18n" }
+ars-i18n             = { path = "../ars-i18n", default-features = false }
 ars-test-harness     = { path = "../ars-test-harness" }
 dioxus-web           = "0.7.6"
 js-sys               = "0.3"

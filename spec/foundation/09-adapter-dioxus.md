@@ -2677,36 +2677,31 @@ fn setup_focus_scope_hydration_safe(
 
 ### 20.2 HydrationSnapshot
 
-For stateful components that need to preserve state across SSR → client hydration:
+For stateful components that need to preserve state across SSR → client
+hydration, use the canonical `HydrationSnapshot<M>` defined in `ars_core`
+(gated behind the `ssr` + `serde` features). The Dioxus adapter re-uses
+this shared type rather than redefining its own — the server and client
+halves of a round-trip must agree on the wire format, so a single source
+of truth lives in the foundation crate.
 
-````rust
-/// Serialize component state for hydration.
-/// Used for components that need to hydrate with correct initial state
-/// (e.g., Dialog that was opened during SSR, or DatePicker with pre-selected date).
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct HydrationSnapshot<M>
+```rust
+use ars_core::{HydrationSnapshot, Machine, Service};
+
+/// In SSR mode: embed a snapshot as a JSON script tag.
+/// In hydration mode: read the snapshot and initialize the machine via
+/// `Service::new_hydrated(props, snapshot.state, &env, &messages)`.
+#[cfg(feature = "ssr")]
+fn serialize_snapshot<M: Machine>(svc: &Service<M>) -> String
 where
-    M: Machine,
-    M::State: serde::Serialize + serde::de::DeserializeOwned,
+    M::State: serde::Serialize,
 {
-    pub state: M::State,
-    pub id: String,
+    serde_json::to_string(&HydrationSnapshot::<M> {
+        state: svc.state().clone(),
+        id: svc.props().id().to_string(),
+    })
+    .expect("HydrationSnapshot must be serializable for SSR — ensure State implements Serialize")
 }
-
-/// In SSR mode: embed snapshot as a JSON script tag.
-/// In hydration mode: read snapshot and initialize machine from it.
-///
-/// ```rust
-/// #[cfg(feature = "ssr")]
-/// fn serialize_snapshot<M: Machine>(svc: &Service<M>) -> String
-/// where M::State: serde::Serialize {
-///     serde_json::to_string(&HydrationSnapshot::<M> {
-///         state: svc.state().clone(),
-///         id: svc.props().id().to_string(),
-///     }).expect("HydrationSnapshot must be serializable for SSR — ensure State implements Serialize")
-/// }
-/// ```
-````
+```
 
 ---
 
