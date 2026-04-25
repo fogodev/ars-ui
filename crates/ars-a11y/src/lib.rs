@@ -58,7 +58,7 @@ pub use testing::{
     assert_aria_roledescription, assert_aria_rowcount, assert_aria_rowindex, assert_aria_selected,
     assert_aria_setsize, assert_aria_sort, assert_aria_valuemax, assert_aria_valuemin,
     assert_aria_valuenow, assert_aria_valuetext, assert_data_state, assert_role, assert_tabindex,
-    required_attributes_for_role, validate_attr_map,
+    extract_all_ids, required_attributes_for_role, validate_attr_map,
 };
 pub use touch::{
     InputMode, MIN_DRAG_TARGET_SIZE, MIN_TOUCH_TARGET_SIZE, should_use_roving_tabindex_for_mobile,

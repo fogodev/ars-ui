@@ -1369,22 +1369,32 @@ mod tooltip {
 
 ### 7.3 Hydration Considerations
 
+The canonical `HydrationSnapshot<M>` wire type lives in `ars_core` (gated
+behind the `ssr` + `serde` features). The Leptos adapter re-uses it rather
+than redefining; keeping a single type across both adapters prevents the
+server and client halves of a hydration round-trip from disagreeing on
+field layout.
+
 ```rust
-/// Serialize component state for hydration.
-/// Used for components that need to hydrate with correct initial state.
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct HydrationSnapshot<M>
+use ars_core::{HydrationSnapshot, Machine, Service};
+
+// In SSR mode: embed a snapshot in HTML via a script tag.
+#[cfg(feature = "ssr")]
+fn serialize_snapshot<M>(svc: &Service<M>) -> String
 where
     M: Machine,
-    M::State: serde::Serialize + serde::de::DeserializeOwned,
+    M::State: serde::Serialize,
 {
-    pub state: M::State,
-    pub id: String,
+    serde_json::to_string(&HydrationSnapshot::<M> {
+        state: svc.state().clone(),
+        id: svc.props().id().to_string(),
+    })
+    .expect("HydrationSnapshot must be serializable for SSR — ensure State implements Serialize")
 }
 
-// In SSR mode: embed snapshot in HTML via script tag
-// In hydration mode: read snapshot and initialize machine from it
-// This ensures the machine starts in the same state as the server rendered
+// In hydration mode: read the snapshot and initialize the machine from it
+// via `Service::new_hydrated(props, snapshot.state, &env, &messages)`.
+// This ensures the machine starts in the same state the server rendered.
 ```
 
 ### 7.4 SSR Effect Behavior

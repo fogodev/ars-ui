@@ -48,16 +48,10 @@ mod ssr_tests {
 Verify state survives SSR → serialization → client hydration:
 
 ```rust
-/// Matches the canonical HydrationSnapshot from foundation adapter specs
-/// (08-adapter-leptos.md, 09-adapter-dioxus.md).
-#[derive(Debug, Serialize, Deserialize)]
-struct HydrationSnapshot<M: Machine>
-where
-    M::State: Serialize + DeserializeOwned,
-{
-    state: M::State,
-    id: String,
-}
+// The canonical `HydrationSnapshot<M>` type lives in `ars_core`, gated
+// behind the `ssr` + `serde` features. Tests import it rather than
+// redefining it so server and client agree on the wire format.
+use ars_core::HydrationSnapshot;
 
 #[test]
 fn hydration_snapshot_round_trip() {
@@ -81,7 +75,9 @@ fn hydration_snapshot_round_trip() {
 fn hydration_snapshot_initializes_service() {
     // Server side: create service and serialize
     let props = dialog::Props { id: "dlg1".into(), ..Default::default() };
-    let mut svc = Service::new(props.clone(), Env::default(), Default::default());
+    let env = Env::default();
+    let messages = Default::default();
+    let mut svc = Service::new(props.clone(), &env, &messages);
     svc.send(dialog::Event::Open);
     let snapshot = HydrationSnapshot {
         state: svc.state().clone(),
@@ -94,18 +90,21 @@ fn hydration_snapshot_initializes_service() {
     // use the SSR-only constructor that accepts a pre-existing state:
     let restored: HydrationSnapshot<dialog::Machine> =
         serde_json::from_str(&json).expect("deserialization must succeed");
-    let client_svc = Service::new_hydrated(props, restored.state);
+    let client_svc = Service::new_hydrated(props, restored.state, &env, &messages);
 
     // Service should be in the Open state without re-running init()
     assert_eq!(*client_svc.state(), dialog::State::Open);
 }
 ```
 
-> **Note:** `Service::new_hydrated(props, state)` is a `#[cfg(feature = "ssr")]` constructor
-> on `Service` that bypasses `Machine::init()` and directly sets the provided state.
-> It is used exclusively for hydration: the server serializes the state via
-> `HydrationSnapshot`, and the client reconstructs the service without re-running
-> initialization logic. See `01-architecture.md` §2.3 for the `Service` API surface.
+> **Note:** `Service::new_hydrated(props, state, env, messages)` is a
+> `#[cfg(feature = "ssr")]` constructor on `Service` that bypasses
+> [`Machine::init`]'s *state* derivation but still calls `init` to derive
+> the context from props. Only state is restored from the snapshot;
+> context (resolved locale, platform effects, derived IDs, etc.) is always
+> recomputed so the client picks up its own environment. See
+> `01-architecture.md` §2.3 for the `Service` API surface and
+> `HydrationSnapshot` in `ars_core` for the shared wire type.
 
 ---
 
