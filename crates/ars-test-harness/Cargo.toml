@@ -9,7 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 ars-core     = { path = "../ars-core" }
-ars-i18n     = { path = "../ars-i18n" }
+ars-i18n     = { path = "../ars-i18n", default-features = false }
 js-sys       = "0.3"
 wasm-bindgen = "0.2"
 

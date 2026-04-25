@@ -16,7 +16,7 @@ serde            = []
 [dependencies]
 ars-collections = { path = "../ars-collections" }
 ars-core        = { path = "../ars-core" }
-ars-i18n        = { path = "../ars-i18n" }
+ars-i18n        = { path = "../ars-i18n", default-features = false }
 indexmap        = "2.14"
 regex           = "1.12"
 url             = { version = "2.5", optional = true }

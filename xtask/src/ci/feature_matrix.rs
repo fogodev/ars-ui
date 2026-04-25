@@ -235,6 +235,23 @@ static LEPTOS_COMBOS: &[Combo] = &[
     },
 ];
 
+/// Cross-compile the Leptos adapter against `wasm32-unknown-unknown` while the
+/// `web-intl` i18n backend is the only one enabled. Adapter crates declare
+/// `ars-i18n = { default-features = false }` and default to `icu4x`, so
+/// `--no-default-features` is required so the explicit `ars-i18n/web-intl`
+/// is the *only* backend in the unified feature set. Catches the regression
+/// class that previously only surfaced in the nightly cross-compile job.
+static LEPTOS_CROSS_CHECKS: &[CrossCheck] = &[CrossCheck {
+    args: &[
+        "-p",
+        "ars-leptos",
+        "--no-default-features",
+        "--features",
+        "ars-leptos/csr,ars-i18n/web-intl",
+    ],
+    target: "wasm32-unknown-unknown",
+}];
+
 static DIOXUS_COMBOS: &[Combo] = &[
     Combo {
         args: &["-p", "ars-dioxus", "--features", "desktop"],
@@ -250,10 +267,26 @@ static DIOXUS_COMBOS: &[Combo] = &[
     },
 ];
 
-static DIOXUS_CROSS_CHECKS: &[CrossCheck] = &[CrossCheck {
-    args: &["-p", "ars-dioxus", "--features", "web"],
-    target: "wasm32-unknown-unknown",
-}];
+static DIOXUS_CROSS_CHECKS: &[CrossCheck] = &[
+    CrossCheck {
+        args: &["-p", "ars-dioxus", "--features", "web"],
+        target: "wasm32-unknown-unknown",
+    },
+    // Symmetric `web-intl` cross-compile — see the Leptos counterpart above
+    // for rationale. Both adapters ship as wasm and must build with
+    // `web-intl` as the sole i18n backend; `--no-default-features` strips
+    // the adapter's `icu4x` default so the two backends don't unify.
+    CrossCheck {
+        args: &[
+            "-p",
+            "ars-dioxus",
+            "--no-default-features",
+            "--features",
+            "ars-dioxus/web,ars-i18n/web-intl",
+        ],
+        target: "wasm32-unknown-unknown",
+    },
+];
 
 // ---------------------------------------------------------------------------
 // Lookup
@@ -278,7 +311,7 @@ pub(crate) fn group_def(group: Group) -> GroupDef {
 
         Group::Leptos => GroupDef {
             combos: LEPTOS_COMBOS,
-            cross_checks: &[],
+            cross_checks: LEPTOS_CROSS_CHECKS,
         },
 
         Group::Dioxus => GroupDef {
@@ -384,14 +417,15 @@ mod tests {
     }
 
     #[test]
-    fn leptos_has_3_combos() {
+    fn leptos_has_3_combos_and_1_cross() {
         assert_eq!(LEPTOS_COMBOS.len(), 3);
+        assert_eq!(LEPTOS_CROSS_CHECKS.len(), 1);
     }
 
     #[test]
-    fn dioxus_has_4_combos_and_1_cross() {
+    fn dioxus_has_4_combos_and_2_cross() {
         assert_eq!(DIOXUS_COMBOS.len(), 4);
-        assert_eq!(DIOXUS_CROSS_CHECKS.len(), 1);
+        assert_eq!(DIOXUS_CROSS_CHECKS.len(), 2);
     }
 
     /// Verify `group_def()` returns the expected data for every group and that
@@ -402,8 +436,8 @@ mod tests {
             (Group::Core, 15, 0),
             (Group::I18n, 6, 1),
             (Group::Subsystems, 14, 1),
-            (Group::Leptos, 3, 0),
-            (Group::Dioxus, 4, 1),
+            (Group::Leptos, 3, 1),
+            (Group::Dioxus, 4, 2),
         ];
 
         for &(group, expected_combos, expected_cross) in cases {

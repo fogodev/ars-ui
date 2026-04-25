@@ -61,9 +61,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: wasm32 + web-intl
+          # Verify a Leptos CSR app can use the browser-native `web-intl`
+          # backend without dragging icu4x in. Adapter crates declare
+          # `ars-i18n = { default-features = false }` and default to
+          # `icu4x`, so `--no-default-features` strips the adapter default
+          # and `ars-i18n/web-intl` is the only enabled backend.
+          - name: wasm32 + web-intl (leptos)
             target: wasm32-unknown-unknown
-            features: "-p ars-leptos -p ars-i18n --features ars-leptos/csr,ars-i18n/web-intl"
+            features: "-p ars-leptos --no-default-features --features ars-leptos/csr,ars-i18n/web-intl"
+          # Same combo on the Dioxus side. Catches asymmetric breakage
+          # between the two adapters' i18n consumption.
+          - name: wasm32 + web-intl (dioxus)
+            target: wasm32-unknown-unknown
+            features: "-p ars-dioxus --no-default-features --features ars-dioxus/web,ars-i18n/web-intl"
           - name: native + icu4x
             target: x86_64-unknown-linux-gnu
             features: "-p ars-i18n --no-default-features --features std,icu4x"

@@ -8,11 +8,15 @@ repository.workspace   = true
 rust-version.workspace = true
 
 [features]
-default = []
+default = ["icu4x"]
 debug   = ["dep:log", "ars-core/debug", "ars-dom/debug", "ars-interactions/debug"]
 ssr     = ["leptos/ssr", "ars-dom/ssr"]
 hydrate = ["leptos/hydrate"]
 csr     = ["leptos/csr"]
+# Pre-compiled CLDR data via ICU4X. Default backend on native targets and the
+# server-side rendering path. Use `--no-default-features --features csr,ars-i18n/web-intl`
+# to swap icu4x for the browser-native Intl API on wasm32 builds.
+icu4x   = ["ars-i18n/std", "ars-i18n/icu4x"]
 
 [dependencies]
 ars-a11y         = { path = "../ars-a11y" }
@@ -20,7 +24,7 @@ ars-collections  = { path = "../ars-collections" }
 ars-core         = { path = "../ars-core" }
 ars-dom          = { path = "../ars-dom" }
 ars-forms        = { path = "../ars-forms" }
-ars-i18n         = { path = "../ars-i18n" }
+ars-i18n         = { path = "../ars-i18n", default-features = false }
 ars-interactions = { path = "../ars-interactions" }
 leptos           = { version = "0.8", default-features = false }
 log              = { version = "0.4", default-features = false, optional = true }
