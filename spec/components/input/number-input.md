@@ -75,7 +75,7 @@ pub enum Event {
 
 ```rust
 /// Fine-grained formatting options for NumberInput display value.
-pub struct NumberFormatOptions {
+pub struct FormatOptions {
     /// Minimum fraction digits to display. Default: 0.
     pub minimum_fraction_digits: Option<u8>,
     /// Maximum fraction digits to display. Default: locale-dependent.
@@ -177,9 +177,9 @@ pub struct Props {
     /// with accelerating speed (press-and-hold to spin). Default: `true`.
     pub spin_on_press: bool,
     /// Fine-grained number formatting options for parsing.
-    pub format_options: Option<NumberFormatOptions>,
+    pub format_options: Option<FormatOptions>,
     /// Display formatting options applied when the input is not focused.
-    pub display_format: Option<NumberFormatOptions>,
+    pub display_format: Option<FormatOptions>,
 }
 
 impl Default for Props {
@@ -672,7 +672,7 @@ When the user pastes content into the NumberInput, the adapter intercepts the `p
 
 1. **Extract clipboard text**: Read plain-text content from the clipboard.
 2. **Strip whitespace**: Trim leading/trailing whitespace.
-3. **Locale-aware parse**: Pass the trimmed text through `NumberFormatter::parse()` using the resolved locale. This handles locale-specific decimal separators, grouping separators, currency symbols, and percentage signs.
+3. **Locale-aware parse**: Pass the trimmed text through `number::Formatter::parse()` using the resolved locale. This handles locale-specific decimal separators, grouping separators, currency symbols, and percentage signs.
 4. **Validation**: If `parse()` returns `Ok(value)`: clamp to `[min, max]`, round to `precision`, send `Event::SetValue(parsed_value)`, call `event.preventDefault()`.
 5. **Rejection**: If `parse()` returns `Err`: call `event.preventDefault()` to reject the paste entirely. Optionally announce "Invalid paste content" via a live region.
 
@@ -692,7 +692,7 @@ announcements.
 - **Decimal separator**: Uses locale-appropriate separator (`,` vs `.`).
 - **Thousands separator**: Applied when formatting the displayed value.
 - **`aria-valuetext`**: Adapters derive a memoized formatter from `ArsProvider`
-  via `use_number_formatter(|| NumberFormatOptions::default())` and use it for
+  via `use_number_formatter(|| number::FormatOptions::default())` and use it for
   locale-aware value text.
 - **RTL**: Increment/decrement button positions swap visually (CSS `direction` handles this).
 - **Input parsing**: Must accept both locale-specific input (e.g., `1.234,56` in `de-DE`) and
@@ -715,7 +715,7 @@ announcements.
 4. Fallback: `en-US`
 
 **Non-Uniform Digit Grouping**: Number formatting and parsing delegate to ICU4X
-`NumberFormatter`, which handles locale-specific grouping (including non-uniform patterns
+`number::Formatter`, which handles locale-specific grouping (including non-uniform patterns
 like Indian numbering: `12,34,567`). The component must not hardcode grouping assumptions.
 When locale is inherited from `ArsProvider`, adapters should resolve this
 through `use_number_formatter(...)` rather than constructing ad hoc ambient
@@ -739,25 +739,25 @@ ICU4X — leading minus, trailing minus, or accounting parentheses. Adapters mus
 
 ### 6.1 Props
 
-| Feature                    | ars-ui                                        | Ark UI             | React Aria                                | Notes                                  |
-| -------------------------- | --------------------------------------------- | ------------------ | ----------------------------------------- | -------------------------------------- |
-| Controlled value           | `value: Option<f64>`                          | `value: string`    | `value: number`                           | Full parity (ars-ui uses numeric type) |
-| Default value              | `default_value: Option<f64>`                  | `defaultValue`     | `defaultValue`                            | Full parity                            |
-| Min/Max                    | `min`/`max`                                   | `min`/`max`        | `minValue`/`maxValue`                     | Full parity                            |
-| Step                       | `step: f64`                                   | `step`             | `step`                                    | Full parity                            |
-| Large step                 | `large_step: f64`                             | --                 | --                                        | ars-ui enhancement for PageUp/PageDown |
-| Disabled                   | `disabled: bool`                              | `disabled`         | `isDisabled`                              | Full parity                            |
-| Read-only                  | `readonly: bool`                              | `readOnly`         | `isReadOnly`                              | Full parity                            |
-| Required                   | `required: bool`                              | `required`         | `isRequired`                              | Full parity                            |
-| Invalid                    | `invalid: bool`                               | `invalid`          | `isInvalid`                               | Full parity                            |
-| Form name                  | `name: Option<String>`                        | `name`             | `name`                                    | Full parity                            |
-| Form ID                    | `form: Option<String>`                        | `form`             | `form`                                    | Full parity                            |
-| Mouse wheel                | `allow_mouse_wheel: bool`                     | `allowMouseWheel`  | `isWheelDisabled` (inverted)              | Full parity (inverted boolean)         |
-| Clamp on blur              | `clamp_value_on_blur: bool`                   | `clampValueOnBlur` | --                                        | Ark parity                             |
-| Spin on press              | `spin_on_press: bool`                         | `spinOnPress`      | --                                        | Ark parity                             |
-| Format options             | `format_options: Option<NumberFormatOptions>` | `formatOptions`    | `formatOptions`                           | Full parity                            |
-| Locale                     | via `Env.locale` (adapter-resolved)           | `locale`           | --                                        | Ark parity (adapter prop, not core)    |
-| Increment/decrement labels | via `Messages`                                | `translations`     | `incrementAriaLabel`/`decrementAriaLabel` | Full parity                            |
+| Feature                    | ars-ui                                  | Ark UI             | React Aria                                | Notes                                  |
+| -------------------------- | --------------------------------------- | ------------------ | ----------------------------------------- | -------------------------------------- |
+| Controlled value           | `value: Option<f64>`                    | `value: string`    | `value: number`                           | Full parity (ars-ui uses numeric type) |
+| Default value              | `default_value: Option<f64>`            | `defaultValue`     | `defaultValue`                            | Full parity                            |
+| Min/Max                    | `min`/`max`                             | `min`/`max`        | `minValue`/`maxValue`                     | Full parity                            |
+| Step                       | `step: f64`                             | `step`             | `step`                                    | Full parity                            |
+| Large step                 | `large_step: f64`                       | --                 | --                                        | ars-ui enhancement for PageUp/PageDown |
+| Disabled                   | `disabled: bool`                        | `disabled`         | `isDisabled`                              | Full parity                            |
+| Read-only                  | `readonly: bool`                        | `readOnly`         | `isReadOnly`                              | Full parity                            |
+| Required                   | `required: bool`                        | `required`         | `isRequired`                              | Full parity                            |
+| Invalid                    | `invalid: bool`                         | `invalid`          | `isInvalid`                               | Full parity                            |
+| Form name                  | `name: Option<String>`                  | `name`             | `name`                                    | Full parity                            |
+| Form ID                    | `form: Option<String>`                  | `form`             | `form`                                    | Full parity                            |
+| Mouse wheel                | `allow_mouse_wheel: bool`               | `allowMouseWheel`  | `isWheelDisabled` (inverted)              | Full parity (inverted boolean)         |
+| Clamp on blur              | `clamp_value_on_blur: bool`             | `clampValueOnBlur` | --                                        | Ark parity                             |
+| Spin on press              | `spin_on_press: bool`                   | `spinOnPress`      | --                                        | Ark parity                             |
+| Format options             | `format_options: Option<FormatOptions>` | `formatOptions`    | `formatOptions`                           | Full parity                            |
+| Locale                     | via `Env.locale` (adapter-resolved)     | `locale`           | --                                        | Ark parity (adapter prop, not core)    |
+| Increment/decrement labels | via `Messages`                          | `translations`     | `incrementAriaLabel`/`decrementAriaLabel` | Full parity                            |
 
 **Gaps:** None.
 

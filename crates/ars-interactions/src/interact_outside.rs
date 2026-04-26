@@ -5,7 +5,7 @@
 //! free of DOM or framework types so the detection policy can be tested with
 //! pure unit tests.
 
-use std::{string::String, vec::Vec};
+use alloc::{string::String, vec::Vec};
 
 use ars_core::{Callback, PointerType};
 
@@ -61,8 +61,10 @@ pub enum InteractOutsideEvent {
     PointerOutside {
         /// Client-space X coordinate of the pointer event.
         client_x: f64,
+
         /// Client-space Y coordinate of the pointer event.
         client_y: f64,
+
         /// The type of pointer that triggered the event.
         pointer_type: PointerType,
     },
@@ -103,10 +105,8 @@ fn portal_owner_id_is_inside(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
+    use alloc::{format, sync::Arc, vec};
+    use core::sync::atomic::{AtomicUsize, Ordering};
 
     use ars_core::PointerType;
 
@@ -125,6 +125,7 @@ mod tests {
     #[test]
     fn interact_outside_config_defaults() {
         let config = InteractOutsideConfig::default();
+
         assert!(!config.disabled);
         assert!(!config.detect_focus);
     }
@@ -166,6 +167,7 @@ mod tests {
     #[test]
     fn standalone_clone_preserves_fields_and_callback_identity() {
         let calls = Arc::new(AtomicUsize::new(0));
+
         let standalone = InteractOutsideStandalone {
             on_interact_outside: Some({
                 let calls = Arc::clone(&calls);
@@ -183,13 +185,16 @@ mod tests {
         assert_eq!(standalone.enabled, cloned.enabled);
         assert_eq!(standalone.pointer_gracing, cloned.pointer_gracing);
         assert_eq!(standalone.on_interact_outside, cloned.on_interact_outside);
+
         cloned.on_interact_outside.as_ref().expect("callback")(InteractOutsideEvent::EscapeKey);
+
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
     fn standalone_debug_redacts_callback_body() {
         let calls = Arc::new(AtomicUsize::new(0));
+
         let standalone = InteractOutsideStandalone {
             on_interact_outside: Some({
                 let calls = Arc::clone(&calls);
@@ -201,33 +206,41 @@ mod tests {
         };
 
         let debug = format!("{standalone:?}");
+
         assert!(debug.contains("target_id: \"popover-1\""));
         assert!(debug.contains("on_interact_outside: Some(Callback(..))"));
         assert!(debug.contains("pointer_gracing: Some(250)"));
+
         standalone.on_interact_outside.as_ref().expect("callback")(
             InteractOutsideEvent::FocusOutside,
         );
+
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
     fn standalone_partial_eq_uses_callback_pointer_identity() {
         let shared_calls = Arc::new(AtomicUsize::new(0));
+
         let callback = {
             let shared_calls = Arc::clone(&shared_calls);
             Callback::new(move |_: InteractOutsideEvent| {
                 shared_calls.fetch_add(1, Ordering::SeqCst);
             })
         };
+
         let left = InteractOutsideStandalone {
             on_interact_outside: Some(callback.clone()),
             ..sample_standalone()
         };
+
         let right = InteractOutsideStandalone {
             on_interact_outside: Some(callback),
             ..sample_standalone()
         };
+
         let different_calls = Arc::new(AtomicUsize::new(0));
+
         let different = InteractOutsideStandalone {
             on_interact_outside: Some({
                 let different_calls = Arc::clone(&different_calls);
@@ -240,7 +253,9 @@ mod tests {
 
         assert_eq!(left, right);
         assert_ne!(left, different);
+
         right.on_interact_outside.as_ref().expect("callback")(InteractOutsideEvent::EscapeKey);
+
         different.on_interact_outside.as_ref().expect("callback")(
             InteractOutsideEvent::PointerOutside {
                 client_x: 1.0,
@@ -248,6 +263,7 @@ mod tests {
                 pointer_type: PointerType::Pen,
             },
         );
+
         assert_eq!(shared_calls.load(Ordering::SeqCst), 1);
         assert_eq!(different_calls.load(Ordering::SeqCst), 1);
     }
@@ -265,6 +281,7 @@ mod tests {
     #[test]
     fn detection_is_inactive_when_standalone_is_disabled() {
         let config = InteractOutsideConfig::default();
+
         let standalone = InteractOutsideStandalone {
             enabled: false,
             ..sample_standalone()
@@ -284,18 +301,21 @@ mod tests {
     #[test]
     fn target_id_is_not_treated_as_a_portal_owner_id() {
         let standalone = sample_standalone();
+
         assert!(!portal_owner_id_is_inside(&standalone, Some("popover-1")));
     }
 
     #[test]
     fn portal_owner_ids_count_as_inside() {
         let standalone = sample_standalone();
+
         assert!(portal_owner_id_is_inside(&standalone, Some("portal-2")));
     }
 
     #[test]
     fn unrelated_owner_id_is_outside() {
         let standalone = sample_standalone();
+
         assert!(!portal_owner_id_is_inside(
             &standalone,
             Some("other-overlay")
@@ -305,6 +325,7 @@ mod tests {
     #[test]
     fn missing_owner_id_is_outside() {
         let standalone = sample_standalone();
+
         assert!(!portal_owner_id_is_inside(&standalone, None));
     }
 

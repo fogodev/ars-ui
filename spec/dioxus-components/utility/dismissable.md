@@ -34,9 +34,9 @@ The public surface matches the full core `Props`, including `on_interact_outside
 
 | Core part / structure      | Required? | Adapter rendering target                           | Ownership                                          | Attr source                                   | Notes                                        |
 | -------------------------- | --------- | -------------------------------------------------- | -------------------------------------------------- | --------------------------------------------- | -------------------------------------------- |
-| `DismissButton` (start)    | repeated  | native `<button>` before dismissable content       | adapter-owned                                      | `dismiss_button_attrs(props)`                 | First visually hidden dismiss control.       |
+| `DismissButton` (start)    | repeated  | native `<button>` before dismissable content       | adapter-owned                                      | `dismiss_button_attrs(label)`                 | First visually hidden dismiss control.       |
 | dismissable content region | required  | consumer children inside the dismissable container | consumer-owned content inside adapter-owned region | root attrs plus adapter listener registration | Structural node, not a separate core `Part`. |
-| `DismissButton` (end)      | repeated  | native `<button>` after dismissable content        | adapter-owned                                      | `dismiss_button_attrs(props)`                 | Second visually hidden dismiss control.      |
+| `DismissButton` (end)      | repeated  | native `<button>` after dismissable content        | adapter-owned                                      | `dismiss_button_attrs(label)`                 | Second visually hidden dismiss control.      |
 
 ## 5. Attr Merge and Ownership Rules
 
@@ -200,7 +200,8 @@ pub struct DismissableRegionProps {
 #[component]
 pub fn DismissableRegion(props: DismissableRegionProps) -> Element {
     let root_id = use_hook(|| "dismissable-root".to_string());
-    let dismiss_attrs = dismissable::dismiss_button_attrs(&props.props);
+    let dismiss_label = "Dismiss";
+    let dismiss_attrs = dismissable::dismiss_button_attrs(dismiss_label);
 
     let _handle = use_dismissable(root_id.clone(), props.props.clone(), Vec::new());
 

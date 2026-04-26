@@ -238,7 +238,7 @@ pub struct FieldSketchProps {
 #[component]
 pub fn Field(props: FieldSketchProps) -> Element {
     let machine =
-        use_machine::<field::component::Machine>(field::component::Props::default());
+        use_machine::<field::Machine>(field::Props::default());
     let root_attrs = machine.derive(|api| api.root_attrs());
     use_context_provider(|| Context(machine));
 
@@ -266,7 +266,7 @@ pub fn Label(props: LabelSketchProps) -> Element {
 ## 25. Reference Implementation Skeleton
 
 ```rust
-let machine = use_machine::<field::component::Machine>(props);
+let machine = use_machine::<field::Machine>(props);
 let ids = derive_stable_field_ids(machine);
 let machine_ctx = publish_field_machine_context(machine);
 let inherited_ctx = publish_field_context(machine, parent_ctx);

@@ -195,7 +195,7 @@ use leptos::prelude::*;
 
 #[component]
 pub fn Form(children: Children) -> impl IntoView {
-    let machine = use_machine::<form::component::Machine>(form::component::Props::default());
+    let machine = use_machine::<form::Machine>(form::Props::default());
     let root_attrs = machine.derive(|api| api.root_attrs());
     let status_attrs = machine.derive(|api| api.status_region_attrs());
     let status_message = machine.derive(|api| api.status_message().to_string());
@@ -211,9 +211,9 @@ pub fn Form(children: Children) -> impl IntoView {
             {..root_attrs.get()}
             on:submit=move |ev| {
                 ev.prevent_default();
-                machine.send.run(form::component::Event::Submit);
+                machine.send.run(form::Event::Submit);
             }
-            on:reset=move |_| machine.send.run(form::component::Event::Reset)
+            on:reset=move |_| machine.send.run(form::Event::Reset)
         >
             {children()}
             <div {..status_attrs.get()}>
@@ -227,7 +227,7 @@ pub fn Form(children: Children) -> impl IntoView {
 ## 25. Reference Implementation Skeleton
 
 ```rust
-let machine = use_machine::<form::component::Machine>(props);
+let machine = use_machine::<form::Machine>(props);
 let form_ref = create_form_ref();
 let status_ref = create_status_region_ref();
 let registry = create_field_registration_helper();

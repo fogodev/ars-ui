@@ -4,6 +4,11 @@
 //! hold — text, numbers, booleans, dates, times, files, and multi-select lists.
 //! [`FileRef`] is an opaque reference to an uploaded file.
 
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
+
 /// A reference to an uploaded file.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FileRef {
@@ -110,6 +115,8 @@ impl Value {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{string::ToString, vec};
+
     use super::*;
 
     #[test]

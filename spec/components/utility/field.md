@@ -1,160 +1,147 @@
 ---
 component: Field
 category: utility
-tier: stateless
+tier: stateful
 foundation_deps: [architecture, accessibility, forms]
 shared_deps: []
-related: [fieldset]
+related: [fieldset, form]
 references:
-  ark-ui: Field
-  radix-ui: Label
-  react-aria: Label
+    ark-ui: Field
+    radix-ui: Label
+    react-aria: Label
 ---
 
 # Field
 
-Field provides the structural glue that connects a form control to its label, description, and error message. It manages the ID associations required for accessible form experiences.
+Field is the canonical specification for the framework-agnostic `ars_components::utility::field`
+machine. It provides the structural glue between a control, its label, description, and error
+message, while leaving actual input rendering to the consuming component or adapter.
 
-> **Canonical specification:** The full state machine, validation lifecycle, and form context integration are defined in `spec/foundation/07-forms.md` §13. This file provides an inline summary for quick reference.
+Shared validation types, field descriptors, and form context primitives live in
+`spec/foundation/07-forms.md`. This file owns the Field machine, connect API, anatomy, and adapter
+merge contract.
 
-## 1. API
+## 1. State Machine
 
-### 1.1 Props
+### 1.1 State
 
-> This is an adapter-level convenience summary. The canonical Props definition is in `07-forms.md` §13.2.4. The core machine Props are: `id`, `required`, `disabled`, `readonly`, `invalid`, `dir`.
+`Field` has a single `Idle` state. All meaningful changes are context-only:
+`required`, `disabled`, `readonly`, `invalid`, `validating`, `dir`, `errors`, and
+`has_description`.
 
-```rust
-#[derive(Clone, Debug, PartialEq, HasId)]
-pub struct Props {
-    pub id: String,
-    /// Whether the field is required.
-    pub required: bool,
-    /// Whether the field is disabled.
-    pub disabled: bool,
-    /// Whether the field is read-only.
-    pub readonly: bool,
-    /// Whether the field is invalid.
-    pub invalid: bool,
-    /// Layout direction.
-    pub dir: Option<Direction>,
-}
-```
+### 1.2 Props
 
-### 1.2 Connect / API
+The core machine props are:
 
-The `Api` provides attribute maps for each anatomy part, ensuring correct ID linkage:
+- `id: String`
+- `required: bool`
+- `disabled: bool`
+- `readonly: bool`
+- `invalid: bool`
+- `dir: Option<Direction>`
 
-| Method                       | Purpose                                                                  |
-| ---------------------------- | ------------------------------------------------------------------------ |
-| `root_attrs()`               | Container element attributes (`data-ars-scope="field"`)                  |
-| `label_attrs()`              | Label element — sets `for` attribute pointing to input ID                |
-| `input_attrs()`              | Input element — sets `aria-describedby`, `aria-invalid`, `aria-required` |
-| `description_attrs()`        | Help text element — sets ID referenced by input's `aria-describedby`     |
-| `error_message_attrs()`      | Error message element — sets ID, `role="alert"`                          |
-| `required_indicator_attrs()` | Required marker element — sets `aria-hidden="true"` (decorative)         |
+The `id` is immutable after initialization because `ComponentIds::from_id(&props.id)` is cached in
+context.
+
+### 1.3 Events
+
+The machine accepts context-synchronization events:
+
+- `SetErrors(Vec<Error>)`
+- `ClearErrors`
+- `SetHasDescription(bool)`
+- `SetDisabled(bool)`
+- `SetInvalid(bool)`
+- `SetReadonly(bool)`
+- `SetRequired(bool)`
+- `SetDir(Option<Direction>)`
+- `SetValidating(bool)`
+
+`invalid` is derived as `props.invalid || !errors.is_empty()`.
+
+### 1.4 Connect API
+
+`field::Api` exposes:
+
+- `root_attrs()`
+- `label_attrs()`
+- `input_attrs()`
+- `description_attrs()`
+- `error_message_attrs()`
+
+The structural parts are:
+
+- `Root`
+- `Label`
+- `Input`
+- `Description`
+- `ErrorMessage`
 
 ## 2. Anatomy
 
-```html
-<div data-ars-scope="field" data-ars-part="root">
-  <label data-ars-part="label" for="{input-id}">
-    Email
-    <span data-ars-part="required-indicator" aria-hidden="true">*</span>
-  </label>
-  <input
-    data-ars-part="input"
-    id="{input-id}"
-    aria-describedby="{description-id} {error-id}"
-    aria-invalid="true|false"
-    aria-required="true|false"
-  />
-  <span data-ars-part="description" id="{description-id}">
-    Enter your email address
-  </span>
-  <span data-ars-part="error-message" id="{error-id}" role="alert">
-    Email is required
-  </span>
-</div>
+```text
+Field
+├── Root          <div>    data-ars-scope="field" data-ars-part="root"
+├── Label         <label>  data-ars-part="label" for="{input-id}"
+├── Input         <any>    data-ars-part="input" id="{input-id}"
+├── Description   <span>   data-ars-part="description" id="{description-id}" (optional)
+└── ErrorMessage  <span>   data-ars-part="error-message" id="{error-id}" role="alert"
 ```
 
-### 2.1 RequiredIndicator
-
-The `required-indicator` part renders a visual required marker (typically `*`) when the field's `required` prop is true. It is marked `aria-hidden="true"` because the `aria-required` attribute on the input already communicates the requirement to assistive technology.
-
-Adapters MAY allow custom content for the indicator (e.g., a custom icon or localized text like "(required)").
+The core Field contract does **not** define a `RequiredIndicator` part. Any visual required marker
+is adapter- or consumer-owned presentation layered on top of the machine’s `required` state.
 
 ## 3. Accessibility
 
-### 3.1 ARIA Roles, States, and Properties
+### 3.1 ARIA Wiring
 
-| Property           | Element           | Value                                      |
-| ------------------ | ----------------- | ------------------------------------------ |
-| `for`/`id`         | Label / Input     | Label associated with input via pairing    |
-| `aria-describedby` | Input             | Space-separated IDs of description + error |
-| `aria-invalid`     | Input             | `"true"` when validation fails             |
-| `aria-required`    | Input             | `"true"` when field is required            |
-| `role="alert"`     | ErrorMessage      | Dynamic error announcements                |
-| `aria-hidden`      | RequiredIndicator | `"true"` (decorative)                      |
+`input_attrs()` is responsible for:
 
-- Error messages use `role="alert"` for dynamic announcements (`role="alert"` implicitly sets `aria-live="assertive"` — do NOT additionally set `aria-live` to avoid double-announcement on NVDA+Firefox)
-- Disabled fields set `aria-disabled="true"` and the native `disabled` attribute
+- `id`
+- `aria-labelledby` -> label ID
+- `aria-describedby` -> description ID and/or error message ID when present
+- `aria-required="true"` when required
+- `aria-invalid="true"` when invalid
+- `aria-errormessage` when invalid and errors are present
+- `aria-disabled="true"` when disabled
+- `aria-readonly="true"` when readonly
+- `aria-busy="true"` when validating
 
-## 4. Async Validation
+`error_message_attrs()` sets `role="alert"` and hides the node when there are no errors.
 
-During async validation, the Context field `validating: bool` is set to `true`, and `input_attrs()` emits `aria-busy="true"`. See `07-forms.md` §4 for the full async validation lifecycle.
+### 3.2 Disabled Contract
 
-## 5. Adapter Notes
+Field emits `aria-disabled`, not a native `disabled` attribute. This is intentional: Field is a
+structural wrapper, not the concrete input element. The consuming input component or adapter decides
+whether the underlying control should also receive native `disabled`.
 
-### 5.1 Textarea Auto-Resize
+## 4. Integration
 
-Textarea height auto-adjustment is an adapter-level concern. Adapters MAY implement auto-resize using `ResizeObserver` to track content height or by measuring `scrollHeight` on input events and setting the element's height accordingly. This is not part of the core Field machine.
+### 4.1 Fieldset Merge
 
-## 6. Library Parity
+When nested inside `Fieldset`, the adapter reads parent field context and merges it before
+constructing `field::Props`:
 
-> Compared against: Ark UI (`Field`), Radix UI (`Label`), React Aria (`Label`).
+- `effective_disabled = field_props.disabled || fieldset_ctx.disabled`
+- `effective_invalid = field_props.invalid || fieldset_ctx.invalid`
+- `effective_readonly = field_props.readonly || fieldset_ctx.readonly`
 
-### 6.1 Props
+The merge happens at the adapter layer so the core machine stays framework-agnostic.
 
-| Feature   | ars-ui              | Ark UI     | Radix UI  | React Aria | Notes                                       |
-| --------- | ------------------- | ---------- | --------- | ---------- | ------------------------------------------- |
-| Disabled  | `disabled`          | `disabled` | --        | --         | Ark has disabled; Radix/RA Label is simpler |
-| Invalid   | `invalid`           | `invalid`  | --        | --         | Ark has invalid                             |
-| Read-only | `readonly`          | `readOnly` | --        | --         | Ark has readOnly                            |
-| Required  | `required`          | `required` | --        | --         | Ark has required                            |
-| Dir       | `dir`               | --         | --        | --         | ars-ui addition                             |
-| htmlFor   | via `label_attrs()` | --         | `htmlFor` | --         | Radix Label has htmlFor                     |
+### 4.2 Shared Form Contracts
 
-**Gaps:** None.
+Use `07-forms.md` for:
 
-### 6.2 Anatomy
+- `validation::Error`
+- field descriptors and ID association helpers
+- form context registration and validation flow
+- hidden-input participation for composite widgets
 
-| Part              | ars-ui              | Ark UI              | Radix UI | React Aria | Notes                           |
-| ----------------- | ------------------- | ------------------- | -------- | ---------- | ------------------------------- |
-| Root              | `Root`              | `Root`              | --       | --         | Ark has Root container          |
-| Label             | `Label`             | `Label`             | `Root`   | `Label`    | All libraries                   |
-| Input             | `Input`             | `Input`             | --       | --         | Ark has Input                   |
-| Description       | `Description`       | `HelperText`        | --       | --         | Different naming                |
-| ErrorMessage      | `ErrorMessage`      | `ErrorText`         | --       | --         | Different naming                |
-| RequiredIndicator | `RequiredIndicator` | `RequiredIndicator` | --       | --         | Ark has RequiredIndicator       |
-| Textarea          | --                  | `Textarea`          | --       | --         | Ark has dedicated Textarea part |
-| Select            | --                  | `Select`            | --       | --         | Ark has dedicated Select part   |
+## 5. Library Parity
 
-**Gaps:** None. Ark UI's `Textarea` and `Select` parts are handled by their own components in ars-ui.
+Compared against Ark UI `Field`, Radix UI `Label`, and React Aria `Label`:
 
-### 6.3 Features
-
-| Feature                    | ars-ui | Ark UI | Radix UI | React Aria |
-| -------------------------- | ------ | ------ | -------- | ---------- |
-| Label-input association    | Yes    | Yes    | Yes      | Yes        |
-| aria-describedby wiring    | Yes    | Yes    | --       | --         |
-| Error message (role=alert) | Yes    | Yes    | --       | --         |
-| Required indicator         | Yes    | Yes    | --       | --         |
-| Async validation           | Yes    | --     | --       | --         |
-
-**Gaps:** None.
-
-### 6.4 Summary
-
-- **Overall:** Full parity with Ark UI. Radix/React Aria only provide a Label component without Field wrapping.
-- **Divergences:** Ark UI has `Textarea` and `Select` as Field sub-parts; ars-ui delegates to dedicated component specs. Ark's `HelperText`/`ErrorText` map to ars-ui's `Description`/`ErrorMessage`.
-- **Recommended additions:** None.
+- ars-ui matches Ark UI’s label/description/error wiring model.
+- ars-ui intentionally does **not** model Ark’s presentational `RequiredIndicator` as a shared core
+  part.
+- Radix UI and React Aria provide the label primitive but not the full structural field wrapper.

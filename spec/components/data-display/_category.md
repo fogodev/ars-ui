@@ -3,7 +3,7 @@
 Cross-references: `00-overview.md` for naming conventions and data attributes,
 `01-architecture.md` for the `Machine` trait, `AttrMap`, `Bindable`, and crate structure,
 `03-accessibility.md` for ARIA patterns, focus management, and keyboard navigation,
-`04-internationalization.md` for `NumberFormatter`, `PluralCategory`, and RTL layout,
+`04-internationalization.md` for `number::Formatter`, `PluralCategory`, and RTL layout,
 `05-interactions.md` for pointer and keyboard event handling.
 
 ---
@@ -91,14 +91,14 @@ All stateful components in this file follow these invariants:
    calls the cleanup when the component unmounts or the effect re-runs.
 
 4. **Data attribute conventions**:
-   - `data-ars-state="<state-name>"` on the root or primary element.
-   - `data-ars-disabled` (presence-based) when disabled — set to `""`, omit when not disabled.
-   - `data-ars-selected` (presence-based) when selected.
-   - `data-ars-expanded` (presence-based) on expandable parts.
-   - `data-ars-sorted` (presence-based) on the active sort column header.
-   - `data-ars-sort="ascending|descending|none"` encodes sort direction.
-   - `data-ars-highlighted` (presence-based) on hovered/previewed items (RatingGroup).
-   - `data-ars-loading` (presence-based) when loading (Stat, Progress).
+    - `data-ars-state="<state-name>"` on the root or primary element.
+    - `data-ars-disabled` (presence-based) when disabled — set to `""`, omit when not disabled.
+    - `data-ars-selected` (presence-based) when selected.
+    - `data-ars-expanded` (presence-based) on expandable parts.
+    - `data-ars-sorted` (presence-based) on the active sort column header.
+    - `data-ars-sort="ascending|descending|none"` encodes sort direction.
+    - `data-ars-highlighted` (presence-based) on hovered/previewed items (RatingGroup).
+    - `data-ars-loading` (presence-based) when loading (Stat, Progress).
 
 5. **Anatomy scoping**: Every rendered element has both `data-ars-scope` (component name)
    and `data-ars-part` (part name). This allows global CSS selectors like:

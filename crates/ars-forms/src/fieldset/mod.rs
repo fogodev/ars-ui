@@ -1,10 +1,7 @@
-//! Fieldset component machine and inherited field context alias.
-
-pub mod component;
+//! Fieldset inherited field context alias.
 
 /// Framework-context payload propagated from a fieldset to descendant fields.
 ///
 /// This aliases the shared [`crate::field::Context`] type so framework context
-/// lookup stays consistent across `Fieldset`, `CheckboxGroup`, `RadioGroup`,
-/// and descendant `Field` components.
+/// lookup stays consistent across field-like component trees.
 pub type Context = crate::field::Context;

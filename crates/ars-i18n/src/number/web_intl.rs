@@ -1,4 +1,4 @@
-//! Browser-backed `NumberFormatter` helpers for `web-intl` builds on `wasm32`.
+//! Browser-backed `number::Formatter` helpers for `web-intl` builds on `wasm32`.
 
 use alloc::{string::String, vec::Vec};
 #[cfg(test)]
@@ -15,16 +15,13 @@ use js_sys::{
 };
 use wasm_bindgen::{JsCast, JsValue};
 
-use super::{
-    NumberFormatOptions, NumberStyle, RoundingMode, SignDisplay, UnitDisplay,
-    resolve_measure_unit_id,
-};
+use super::{RoundingMode, SignDisplay, UnitDisplay, resolve_measure_unit_id};
 use crate::Locale;
 
 #[cfg(test)]
 static NEGATIVE_SIGN_DISPLAY_SUPPORT_OVERRIDE: AtomicI8 = AtomicI8::new(-1);
 
-/// Browser-backed formatter for the public `NumberFormatter` API.
+/// Browser-backed formatter for the public `number::Formatter` API.
 #[derive(Clone, Debug)]
 pub(super) struct WebIntlNumberFormatter {
     inner: NumberFormat,
@@ -32,7 +29,7 @@ pub(super) struct WebIntlNumberFormatter {
 
 impl WebIntlNumberFormatter {
     /// Construct a browser-backed formatter using `Intl.NumberFormat`.
-    pub(super) fn new(locale: &Locale, options: &NumberFormatOptions) -> Self {
+    pub(super) fn new(locale: &Locale, options: &super::FormatOptions) -> Self {
         let locales = Array::of1(&JsValue::from_str(&locale.to_bcp47()));
 
         let js_options = build_options(options);
@@ -65,7 +62,7 @@ impl WebIntlNumberFormatter {
 /// Extract decimal and grouping separators from `Intl.NumberFormat::formatToParts`.
 #[must_use]
 pub(super) fn decimal_and_group_separators(locale: &Locale) -> (char, char) {
-    let formatter = WebIntlNumberFormatter::new(locale, &NumberFormatOptions::default());
+    let formatter = WebIntlNumberFormatter::new(locale, &super::FormatOptions::default());
 
     let mut decimal_separator = '.';
 
@@ -98,7 +95,7 @@ pub(super) fn decimal_and_group_separators(locale: &Locale) -> (char, char) {
     )
 }
 
-fn build_options(options: &NumberFormatOptions) -> JsNumberFormatOptions {
+fn build_options(options: &super::FormatOptions) -> JsNumberFormatOptions {
     let js_options = JsNumberFormatOptions::new();
 
     let min_integer_digits = clamped_minimum_integer_digits(options);
@@ -141,15 +138,15 @@ fn build_options(options: &NumberFormatOptions) -> JsNumberFormatOptions {
     }
 
     match &options.style {
-        NumberStyle::Decimal => {
+        super::Style::Decimal => {
             js_options.set_style(NumberFormatStyle::Decimal);
         }
 
-        NumberStyle::Percent => {
+        super::Style::Percent => {
             js_options.set_style(NumberFormatStyle::Percent);
         }
 
-        NumberStyle::Currency(code) => {
+        super::Style::Currency(code) => {
             js_options.set_style(NumberFormatStyle::Currency);
 
             js_options.set_currency(code.as_str());
@@ -159,7 +156,7 @@ fn build_options(options: &NumberFormatOptions) -> JsNumberFormatOptions {
             js_options.set_currency_sign(CurrencySign::Standard);
         }
 
-        NumberStyle::Unit(unit) => {
+        super::Style::Unit(unit) => {
             let unit_id = resolve_measure_unit_id(unit)
                 .expect("unit formatter requires a resolvable CLDR unit id");
 
@@ -178,18 +175,18 @@ fn build_options(options: &NumberFormatOptions) -> JsNumberFormatOptions {
     js_options
 }
 
-fn normalized_fraction_digit_bounds(options: &NumberFormatOptions) -> (u8, u8) {
+fn normalized_fraction_digit_bounds(options: &super::FormatOptions) -> (u8, u8) {
     (
         options.min_fraction_digits,
         options.max_fraction_digits.max(options.min_fraction_digits),
     )
 }
 
-fn clamped_minimum_integer_digits(options: &NumberFormatOptions) -> u8 {
+fn clamped_minimum_integer_digits(options: &super::FormatOptions) -> u8 {
     options.min_integer_digits.get().clamp(1, 21)
 }
 
-fn clamped_fraction_digit_bounds(options: &NumberFormatOptions) -> (u8, u8) {
+fn clamped_fraction_digit_bounds(options: &super::FormatOptions) -> (u8, u8) {
     let (min_fraction_digits, max_fraction_digits) = normalized_fraction_digit_bounds(options);
 
     (min_fraction_digits.min(100), max_fraction_digits.min(100))

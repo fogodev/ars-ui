@@ -1170,7 +1170,7 @@ Currency and numeric values in data display components must use BiDi isolation w
 
 Components displaying ordinal numbers (e.g., pagination "Page 1st", table ranking columns) must use ICU4X `PluralRules` with ordinal type for locale-correct formatting (English: 1st/2nd/3rd, French: 1er/2e, Japanese: 第1). An `format_ordinal(n: u64, locale: &Locale) -> String` utility is provided by `ars-i18n`. Components must not hardcode ordinal suffixes.
 
-- Cell values containing numbers use `NumberFormatter` from `ars-i18n` for locale-aware
+- Cell values containing numbers use `number::Formatter` from `ars-i18n` for locale-aware
   formatting. The Table machine does not format; adapters apply formatting at render time.
 - "Select all rows" and "Select row" labels are passed through `Messages`:
 

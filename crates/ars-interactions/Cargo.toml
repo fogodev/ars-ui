@@ -8,7 +8,8 @@ repository.workspace   = true
 rust-version.workspace = true
 
 [features]
-default               = ["aria-drag-drop-compat"]
+default               = ["std", "aria-drag-drop-compat"]
+std                   = ["ars-core/std", "ars-i18n/std"]
 aria-drag-drop-compat = []
 debug                 = ["dep:log", "ars-core/debug"]
 embedded-css          = []
@@ -16,7 +17,7 @@ test-support          = []
 
 [dependencies]
 ars-a11y = { path = "../ars-a11y", default-features = false }
-ars-core = { path = "../ars-core" }
+ars-core = { path = "../ars-core", default-features = false }
 ars-i18n = { path = "../ars-i18n", default-features = false }
 log      = { version = "0.4", default-features = false, optional = true }
 

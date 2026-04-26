@@ -8,6 +8,8 @@
 //! The [`ResultExt`] extension trait adds domain-specific helpers like
 //! [`merge`](ResultExt::merge) and [`without_server_errors`](ResultExt::without_server_errors).
 
+use alloc::vec::Vec;
+
 use super::error::{ErrorCode, Errors};
 
 /// The result of validating a field value.
@@ -88,6 +90,7 @@ impl ResultExt for Result {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{string::ToString, vec};
 
     use super::{super::Error, *};
 

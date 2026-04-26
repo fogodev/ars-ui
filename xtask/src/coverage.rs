@@ -39,6 +39,7 @@ pub struct CrateThreshold {
 /// | ars-core                 | 77.1 / 75.0           | 75 / 70                |
 /// | ars-a11y                 | 81.8 / 70.6           | 80 / 70                |
 /// | ars-collections          | 99.5 / 92.0           | 95 / 90                |
+/// | ars-components           | 90.5 / 92.3           | 90 / 90                |
 /// | ars-dom                  | 85.2 / 52.6           | 85 / 50                |
 /// | ars-forms                | 95.8 / 76.5           | 90 / 75                |
 /// | ars-i18n                 | 96.4 / 69.1           | 96 / 65                |
@@ -65,6 +66,11 @@ pub fn default_thresholds() -> Vec<CrateThreshold> {
         CrateThreshold {
             package: "ars-collections".into(),
             min_line: 95.0,
+            min_branch: 90.0,
+        },
+        CrateThreshold {
+            package: "ars-components".into(),
+            min_line: 90.0,
             min_branch: 90.0,
         },
         CrateThreshold {

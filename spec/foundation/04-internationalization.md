@@ -28,11 +28,11 @@ The `icu4x` vs `web-intl` split applies to formatter backends and compiled CLDR
 data, not to the core `Locale` wrapper itself.
 
 Number formatting does **not** expose a public backend alias. The public type is
-always `NumberFormatter`; `icu4x` and `web-intl` only change the internal
-backend selected by `NumberFormatter::new()`. Components are backend-agnostic.
+always `number::Formatter`; `icu4x` and `web-intl` only change the internal
+backend selected by `number::Formatter::new()`. Components are backend-agnostic.
 Ambient formatter reuse is adapter-scoped: adapters derive memoized formatters
 from `ArsProvider` context through `use_number_formatter(...)`, while
-`NumberFormatter::new()` remains the explicit low-level constructor for
+`number::Formatter::new()` remains the explicit low-level constructor for
 host-application and non-adapter code.
 
 #### 1.1.1 Number Formatter Context Propagation
@@ -44,16 +44,16 @@ Numeric components (NumberInput, Slider, RangeSlider, Progress, Meter) MUST reso
 3. **ArsProvider**: Inherit from the nearest ancestor `ArsProvider` context via `use_locale()` hook
 4. **Fallback**: `Locale::parse("en-US").expect("en-US is a valid BCP-47 tag")` — always available
 
-All numeric components MUST accept a `number_formatter: Option<NumberFormatter>` prop. If not provided, a default `NumberFormatter` is constructed from the resolved locale.
+All numeric components MUST accept a `number_formatter: Option<Formatter>` prop. If not provided, a default `Formatter` is constructed from the resolved locale.
 
 ```rust
-pub struct NumberFormatter {
+pub struct Formatter {
     /* private fields */
 }
 
-impl NumberFormatter {
+impl Formatter {
     /// Create a locale-aware formatter with the requested options.
-    pub fn new(locale: &Locale, options: NumberFormatOptions) -> Self;
+    pub fn new(locale: &Locale, options: FormatOptions) -> Self;
     /// Format a numeric value for display.
     pub fn format(&self, value: f64) -> String;
     /// Parse a locale-formatted string back to a number.
@@ -831,7 +831,7 @@ Overlay components use `Placement` from `11-dom-utilities.md` §2.2, which inclu
 
 ## 4. Number Formatting and Parsing
 
-### 4.1 NumberFormatter
+### 4.1 number::Formatter
 
 ````rust
 use core::num::NonZeroU8;
@@ -844,8 +844,8 @@ pub use icu_experimental::measure::measureunit::MeasureUnit;
 
 /// Options for formatting numbers.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NumberFormatOptions {
-    pub style: NumberStyle,
+pub struct FormatOptions {
+    pub style: Style,
     pub unit_display: UnitDisplay,
     pub min_integer_digits: NonZeroU8,
     pub min_fraction_digits: u8,
@@ -861,7 +861,7 @@ pub struct NumberFormatOptions {
 //
 // The `max_fraction_digits` for currency formatting MUST default to the
 // ISO 4217 standard fraction digits for the given currency code. The
-// `NumberFormatter` resolves this via ars-i18n's ISO 4217 helper table.
+// `number::Formatter` resolves this via ars-i18n's ISO 4217 helper table.
 //
 // | Currency Code | Currency Name           | Fraction Digits |
 // |---------------|-------------------------|-----------------|
@@ -875,13 +875,13 @@ pub struct NumberFormatOptions {
 // | OMR           | Omani Rial              | 3               |
 // | CLF           | Chilean UF              | 4               |
 //
-// When `NumberStyle::Currency(code)` is used and the caller has NOT
+// When `number::Style::Currency(code)` is used and the caller has NOT
 // explicitly set `max_fraction_digits`, the formatter MUST look up the
 // ISO 4217 minor unit for `code` and apply it as the default.
 //
 // **Percent Precision Default:**
 //
-// When `NumberStyle::Percent` is used and no explicit fraction digits
+// When `number::Style::Percent` is used and no explicit fraction digits
 // are provided, the default is `max_fraction_digits: 0` (i.e., whole
 // percentages like "42%"). Applications requiring decimal precision
 // (e.g., "4.5%") MUST explicitly set `max_fraction_digits` to the
@@ -898,7 +898,7 @@ pub struct NumberFormatOptions {
 // This minimizes cumulative rounding bias in financial calculations.
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum NumberStyle {
+pub enum Style {
     Decimal,
     Percent,
     Currency(CurrencyCode),
@@ -976,10 +976,10 @@ fn iso4217_minor_units(code: CurrencyCode) -> u8 {
 }
 
 // Currency, percent, unit, and range helpers are inherent methods on
-// NumberFormatter. ars-i18n does not define separate CurrencyFormatter or
+// number::Formatter. ars-i18n does not define separate CurrencyFormatter or
 // UnitFormatter wrapper types.
 
-impl NumberFormatter {
+impl Formatter {
     /// Format a monetary amount using the ISO 4217 precision for the
     /// given `currency_code`.
     ///
@@ -988,22 +988,23 @@ impl NumberFormatter {
     ///
     /// # Examples
     /// ```
-    /// let fmt = NumberFormatter::new(&locale_en_us, opts);
+    /// let fmt = number::Formatter::new(&locale_en_us, opts);
     /// assert_eq!(fmt.format_currency(1234.5, "USD"), "$1,234.50");
     /// assert_eq!(fmt.format_currency(1234.5, "JPY"), "￥1,234");
     /// assert_eq!(fmt.format_currency(1234.5, "KWD"), "KWD 1,234.500");
     /// ```
     pub fn format_currency(&self, amount: f64, currency_code: &str) -> String {
-        let code = CurrencyCode::from_str(currency_code)
+        let code = currency_code
+            .parse::<CurrencyCode>()
             .expect("invalid ISO 4217 currency code");
         let precision = iso4217_minor_units(code);
 
         let mut opts = self.options.clone();
-        opts.style = NumberStyle::Currency(code);
+        opts.style = Style::Currency(code);
         opts.min_fraction_digits = precision;
         opts.max_fraction_digits = precision;
 
-        NumberFormatter::new(&self.locale, opts).format(amount)
+        Self::new(&self.locale, opts).format(amount)
     }
 
     /// Format a fractional value as a percentage.
@@ -1016,11 +1017,11 @@ impl NumberFormatter {
         let frac = max_fraction_digits.unwrap_or(0);
 
         let mut opts = self.options.clone();
-        opts.style = NumberStyle::Percent;
+        opts.style = Style::Percent;
         opts.min_fraction_digits = 0;
         opts.max_fraction_digits = frac;
 
-        NumberFormatter::new(&self.locale, opts).format(value)
+        Self::new(&self.locale, opts).format(value)
     }
 }
 
@@ -1035,28 +1036,52 @@ impl CurrencyCode {
     pub const JPY: Self = Self(*b"JPY");
     pub const CNY: Self = Self(*b"CNY");
 
-    pub fn from_str(s: &str) -> Option<Self> {
-        let bytes = s.as_bytes();
-        if bytes.len() != 3 {
-            return None;
-        }
-        // Validate all bytes are ASCII uppercase letters (A-Z)
-        if !bytes.iter().all(|b| b.is_ascii_uppercase()) {
-            return None;
-        }
-        Some(Self([bytes[0], bytes[1], bytes[2]]))
-    }
-
     pub fn as_str(&self) -> &str {
         core::str::from_utf8(&self.0)
             .expect("CurrencyCode must contain valid ASCII")
     }
 }
 
-impl Default for NumberFormatOptions {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParseCurrencyCodeError {
+    InvalidLength,
+    NotUppercaseAscii,
+}
+
+impl core::fmt::Display for ParseCurrencyCodeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::InvalidLength => {
+                write!(f, "currency code must be exactly 3 uppercase ASCII letters")
+            }
+            Self::NotUppercaseAscii => {
+                write!(f, "currency code must contain only uppercase ASCII letters")
+            }
+        }
+    }
+}
+
+impl core::error::Error for ParseCurrencyCodeError {}
+
+impl core::str::FromStr for CurrencyCode {
+    type Err = ParseCurrencyCodeError;
+
+    fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+        let bytes = s.as_bytes();
+        if bytes.len() != 3 {
+            return Err(ParseCurrencyCodeError::InvalidLength);
+        }
+        if !bytes.iter().all(|b| b.is_ascii_uppercase()) {
+            return Err(ParseCurrencyCodeError::NotUppercaseAscii);
+        }
+        Ok(Self([bytes[0], bytes[1], bytes[2]]))
+    }
+}
+
+impl Default for FormatOptions {
     fn default() -> Self {
         Self {
-            style: NumberStyle::Decimal,
+            style: Style::Decimal,
             unit_display: UnitDisplay::Short,
             min_integer_digits: NonZeroU8::new(1).expect("hardcoded nonzero"),
             min_fraction_digits: 0,
@@ -1072,19 +1097,19 @@ impl Default for NumberFormatOptions {
 ///
 /// `Clone` is derived to support caching in `NUMBER_FORMATTER_CACHE` (§9.3).
 /// The formatter stores precomputed separators and delegates formatting to a
-/// style-specific ICU4X backend selected from `NumberStyle`.
+/// style-specific ICU4X backend selected from `number::Style`.
 #[derive(Clone)]
-pub struct NumberFormatter {
+pub struct Formatter {
     locale: Locale,
-    options: NumberFormatOptions,
+    options: FormatOptions,
     decimal_separator: char,
     grouping_separator: Option<char>,
     /* style-specific backend */
 }
 
-impl NumberFormatter {
+impl Formatter {
     /// Create a new locale-aware number formatter.
-    pub fn new(locale: &Locale, options: NumberFormatOptions) -> Self {
+    pub fn new(locale: &Locale, options: FormatOptions) -> Self {
         /* normalize defaults, precompute separators, and build a style-specific backend */
     }
 
@@ -1099,7 +1124,7 @@ impl NumberFormatter {
     /// accepts locale-specific decimal and grouping separators.
     pub fn parse(&self, input: &str) -> Option<f64> {
         let parsed = parse_locale_number(input, &self.locale)?;
-        if matches!(self.options.style, NumberStyle::Percent) {
+        if matches!(self.options.style, Style::Percent) {
             Some(parsed / 100.0)
         } else {
             Some(parsed)
@@ -1129,7 +1154,7 @@ impl NumberFormatter {
     /// - `icu4x`: ICU4X 2.x does not yet provide a range formatter. Uses a
     ///   language-match heuristic for locale-specific range separators.
     /// - `web-intl`: ars-i18n keeps the same language-match heuristic for the
-    ///   public `NumberFormatter` API. `Intl.NumberFormat.prototype.formatRange`
+    ///   public `number::Formatter` API. `Intl.NumberFormat.prototype.formatRange`
     ///   is not currently surfaced as a separate delivered backend behavior.
     ///
     /// **Implementation**: Uses a language-match heuristic for locale-correct
@@ -1151,7 +1176,7 @@ impl NumberFormatter {
 ````
 
 > **RULE: All numeric values displayed to users MUST use the locale-aware
-> `NumberFormatter`.** Raw `format!("{}", number)` or `to_string()` is prohibited
+> `number::Formatter`.** Raw `format!("{}", number)` or `to_string()` is prohibited
 > in user-facing output. This includes: slider value labels, progress percentages,
 > pagination counts, rating values, and any other numeric display.
 
@@ -1278,12 +1303,12 @@ pub fn decimal_and_group_separators(locale: &Locale) -> (char, char) {
 }
 ````
 
-> **Locale-Specific Grouping Sizes:** `NumberFormatter` respects locale-specific grouping sizes, which are NOT always groups of 3. Indian English (`en-IN`) groups the first 3 digits from the right, then groups of 2 thereafter (e.g., `1234567` → `"12,34,567"`). Chinese (`zh`) uses grouping of 4 digits (万/億). The ICU4X `DecimalFormatter` handles this automatically via locale data; the `web-intl` backend delegates to `Intl.NumberFormat` which also respects these rules. Test guidance: verify `en-IN` formats `1234567` as `"12,34,567"` and `ja-JP` formats `100000000` with appropriate grouping.
+> **Locale-Specific Grouping Sizes:** `number::Formatter` respects locale-specific grouping sizes, which are NOT always groups of 3. Indian English (`en-IN`) groups the first 3 digits from the right, then groups of 2 thereafter (e.g., `1234567` → `"12,34,567"`). Chinese (`zh`) uses grouping of 4 digits (万/億). The ICU4X `DecimalFormatter` handles this automatically via locale data; the `web-intl` backend delegates to `Intl.NumberFormat` which also respects these rules. Test guidance: verify `en-IN` formats `1234567` as `"12,34,567"` and `ja-JP` formats `100000000` with appropriate grouping.
 
 ### 4.2 Percent and Range Formatting
 
 ```rust
-impl NumberFormatter {
+impl Formatter {
     /// Format a fractional value such as `0.47` as a localized percentage.
     ///
     /// Production: Use ICU4X's percent formatter for locale-specific percent
@@ -1558,23 +1583,23 @@ impl CalendarSystem {
 
 The supported public calendar surface is summarized below.
 
-| Calendar | Public eras | Month-code support | Notes |
-| --- | --- | --- | --- |
-| `Iso8601` | none | no | canonical ISO slots |
-| `Gregorian` | `bc`, `ad` | no | distinct from `Iso8601` |
-| `Buddhist` | `be` | no | Gregorian-aligned month/day structure |
-| `Japanese` | modern imperial eras | no | bounded modern era list |
-| `Hebrew` | `am` | yes | leap months require `MonthCode` correctness |
-| `IslamicCivil` | `ah` | no | tabular civil calendar |
-| `IslamicUmmAlQura` | `ah` | no | Umm al-Qura |
-| `Persian` | `ap` | no | Solar Hijri |
-| `Indian` | `shaka` | no | Indian national calendar |
-| `Chinese` | none | yes | leap-month calendar |
-| `Coptic` | `bce`, `ce` | no | inverse-era behavior |
-| `Dangi` | none | yes | leap-month calendar |
-| `Ethiopic` | `aa`, `am` | no | ordered-era rollover |
-| `EthiopicAmeteAlem` | `aa` | no | single-era public view |
-| `Roc` | `broc`, `roc` | no | inverse-era rollover |
+| Calendar            | Public eras          | Month-code support | Notes                                       |
+| ------------------- | -------------------- | ------------------ | ------------------------------------------- |
+| `Iso8601`           | none                 | no                 | canonical ISO slots                         |
+| `Gregorian`         | `bc`, `ad`           | no                 | distinct from `Iso8601`                     |
+| `Buddhist`          | `be`                 | no                 | Gregorian-aligned month/day structure       |
+| `Japanese`          | modern imperial eras | no                 | bounded modern era list                     |
+| `Hebrew`            | `am`                 | yes                | leap months require `MonthCode` correctness |
+| `IslamicCivil`      | `ah`                 | no                 | tabular civil calendar                      |
+| `IslamicUmmAlQura`  | `ah`                 | no                 | Umm al-Qura                                 |
+| `Persian`           | `ap`                 | no                 | Solar Hijri                                 |
+| `Indian`            | `shaka`              | no                 | Indian national calendar                    |
+| `Chinese`           | none                 | yes                | leap-month calendar                         |
+| `Coptic`            | `bce`, `ce`          | no                 | inverse-era behavior                        |
+| `Dangi`             | none                 | yes                | leap-month calendar                         |
+| `Ethiopic`          | `aa`, `am`           | no                 | ordered-era rollover                        |
+| `EthiopicAmeteAlem` | `aa`                 | no                 | single-era public view                      |
+| `Roc`               | `broc`, `roc`        | no                 | inverse-era rollover                        |
 
 The invariants enforced by `CalendarDate::new(...)` are:
 
@@ -2629,7 +2654,7 @@ pub trait Translate {
 - **Match on locale first, then on `self`** — this groups all strings for the same language together, making it easy to review and maintain a single language at a time.
 - **Always include a fallback arm** (`_` → English) as the last locale match arm.
 - Use `ars_i18n::select_plural()` for plural-aware variants.
-- Use `ars_i18n::NumberFormatter` / `DateFormatter` within `translate()` for locale-aware number and date formatting.
+- Use `ars_i18n::number::Formatter` / `DateFormatter` within `translate()` for locale-aware number and date formatting.
 - The `intl` parameter provides access to calendar data, plural rules, and other CLDR data needed inside `translate()`.
 
 #### 7.4.3 Worked Example
@@ -3076,13 +3101,13 @@ Calendar support remains part of the unconditional public API. Cargo features se
 /// Ambient formatter reuse is handled by adapter hooks rather than a public
 /// global cache API.
 ///
-/// `ars-i18n` keeps `NumberFormatter::new()` as the explicit constructor for
+/// `ars-i18n` keeps `number::Formatter::new()` as the explicit constructor for
 /// any code that already has a resolved `Locale`. Adapters derive memoized
 /// formatters from `ArsProvider` context through `use_number_formatter(...)`
 /// so formatter lifetime follows component/provider scope instead of a
 /// thread-local cache.
 ///
-/// `NumberFormatter` may internally use `Arc` to share backend state between
+/// `number::Formatter` may internally use `Arc` to share backend state between
 /// clones, but that ownership cleanup does not by itself guarantee that every
 /// backend is `Send + Sync` on every target. In particular, the `web-intl`
 /// backend still wraps browser `Intl` objects.
@@ -3103,8 +3128,8 @@ on browser `Intl`.
 // public surface is genuinely backend-specific.
 
 // ── Number formatting ──
-// Number formatting keeps a single public `NumberFormatter` type.
-// Backend selection is internal to `NumberFormatter::new()`, so there is no
+// Number formatting keeps a single public `number::Formatter` type.
+// Backend selection is internal to `number::Formatter::new()`, so there is no
 // public `DefaultNumberFormatter` alias and no public backend wrapper type.
 
 // ── Date formatting ──
@@ -3166,7 +3191,7 @@ pub(crate) struct WebIntlNumberFormatter {
 
 #[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
 impl WebIntlNumberFormatter {
-    pub(crate) fn new(locale: &Locale, options: &NumberFormatOptions) -> Self {
+    pub(crate) fn new(locale: &Locale, options: &FormatOptions) -> Self {
         use js_sys::{Array, Intl};
         use wasm_bindgen::JsValue;
 
@@ -3193,7 +3218,7 @@ impl WebIntlNumberFormatter {
 }
 ```
 
-`NumberFormatter::new()` normalizes the public options first, then selects either
+`number::Formatter::new()` normalizes the public options first, then selects either
 the ICU4X formatter family, the internal browser helper above, or the native
 fallback path. No public `JsIntlNumberFormatter` / `DefaultNumberFormatter`
 surface is exposed for numbers.

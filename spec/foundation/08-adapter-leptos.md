@@ -1854,7 +1854,7 @@ pub fn use_locale() -> Signal<Locale> {
 ### 13.2 use_number_formatter()
 
 ```rust
-use ars_i18n::{NumberFormatOptions, NumberFormatter};
+use ars_i18n::number;
 
 /// Resolve a provider-derived number formatter from ArsProvider locale context.
 ///
@@ -1864,14 +1864,14 @@ use ars_i18n::{NumberFormatOptions, NumberFormatter};
 /// changes.
 ///
 /// Leptos 0.8 only exposes public `Memo` constructors for `Send + Sync`
-/// values. Because `NumberFormatter` is not guaranteed to be thread-safe on
+/// values. Because `number::Formatter` is not guaranteed to be thread-safe on
 /// every backend, the Leptos adapter returns a local derived `Signal` backed
 /// by a component-local cache instead of a `Memo`.
 pub fn use_number_formatter<F>(
     options: F,
-) -> Signal<NumberFormatter, LocalStorage>
+) -> Signal<number::Formatter, LocalStorage>
 where
-    F: Fn() -> NumberFormatOptions + 'static,
+    F: Fn() -> number::FormatOptions + 'static,
 {
     use_resolved_number_formatter(None, options)
 }
@@ -1885,14 +1885,14 @@ where
 pub(crate) fn use_resolved_number_formatter<F>(
     adapter_props_locale: Option<&Locale>,
     options: F,
-) -> Signal<NumberFormatter, LocalStorage>
+) -> Signal<number::Formatter, LocalStorage>
 where
-    F: Fn() -> NumberFormatOptions + 'static,
+    F: Fn() -> number::FormatOptions + 'static,
 {
     let explicit_locale = adapter_props_locale.cloned();
     let locale = use_locale();
     let cache =
-        StoredValue::<Option<(Locale, NumberFormatOptions, NumberFormatter)>, LocalStorage>::new_local(
+        StoredValue::<Option<(Locale, number::FormatOptions, number::Formatter)>, LocalStorage>::new_local(
             None,
         );
 
@@ -1907,7 +1907,7 @@ where
                 }
             }
 
-            let formatter = NumberFormatter::new(&resolved_locale, resolved_options.clone());
+            let formatter = number::Formatter::new(&resolved_locale, resolved_options.clone());
             *cached = Some((resolved_locale, resolved_options, formatter.clone()));
             formatter
         })

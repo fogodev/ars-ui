@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/ars-a11y",
+    "crates/ars-components",
     "crates/ars-collections",
     "crates/ars-core",
     "crates/ars-derive",

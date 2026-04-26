@@ -589,13 +589,15 @@ discovery.
 
 ```rust
 /// Returns the attributes for the dismiss button.
-pub fn dismiss_button_attrs(on_dismiss: &dyn Fn(), label: &str) -> AttrMap {
+pub fn dismiss_button_attrs(label: &str) -> AttrMap {
     let mut p = AttrMap::new();
     let [(scope_attr, scope_val), (part_attr, part_val)] = dismissable::Part::DismissButton.data_attrs();
     p.set(scope_attr, scope_val);
     p.set(part_attr, part_val);
+    p.set(HtmlAttr::Role, "button");
+    p.set(HtmlAttr::TabIndex, "0");
     p.set(HtmlAttr::Aria(AriaAttr::Label), label); // Caller provides localized label from Messages struct
-    // Adapter adds: style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"
+    p.set_bool(HtmlAttr::Data("ars-visually-hidden"), true);
     p
 }
 ```

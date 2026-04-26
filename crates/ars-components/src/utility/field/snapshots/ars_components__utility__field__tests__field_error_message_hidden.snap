@@ -1,0 +1,44 @@
+---
+source: crates/ars-components/src/utility/field/mod.rs
+assertion_line: 866
+expression: "snapshot_attrs(&service.connect(&|_| {}).error_message_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "error-message",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "field",
+            ),
+        ),
+        (
+            Hidden,
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Id,
+            String(
+                "email-error-message",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "alert",
+            ),
+        ),
+    ],
+    styles: [],
+}

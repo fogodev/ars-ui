@@ -47,8 +47,8 @@ pub struct Props {
     pub help_text: Option<String>,
     /// Show skeleton state while data is loading.
     pub loading: bool,
-    /// Formatting options passed to ars-i18n NumberFormatter.
-    pub format_options: Option<NumberFormatOptions>,
+    /// Formatting options passed to ars-i18n number::Formatter.
+    pub format_options: Option<number::FormatOptions>,
 }
 
 impl Default for Props {
@@ -114,7 +114,7 @@ impl<'a> Api<'a> {
     pub fn formatted_change(&self) -> Option<String> {
         let change = self.props.change?;
         let locale = &self.locale;
-        let fmt = NumberFormatter::new(
+        let fmt = number::Formatter::new(
             locale,
             self.props.format_options.clone().unwrap_or_default(),
         );
@@ -292,9 +292,9 @@ a `trend` or `change` value is provided. It uses `Trend` enum to indicate direct
 
 ## 4. Internationalization
 
-- `Value` is formatted by the host application using `NumberFormatter` from `ars-i18n`
+- `Value` is formatted by the host application using `number::Formatter` from `ars-i18n`
   before being passed as the `value` prop; Stat does not format internally.
-- `Change` delta uses `NumberFormatter::format_percent()` for locale-aware percentage
+- `Change` delta uses `number::Formatter::format_percent()` for locale-aware percentage
   rendering (e.g. "12,5 %" in French).
 - When Stat formatting is derived from ambient `ArsProvider` locale inside an
   adapter, adapters should use `use_number_formatter(...)` rather than a
@@ -344,12 +344,12 @@ impl ComponentMessages for Messages {}
 ### 4.2 Currency and Unit Formatting
 
 When `Stat` displays monetary or unit values, the `value` prop MUST be pre-formatted
-by the host application using `ars-i18n::NumberFormatter`. Currency and measurement
-formatting are selected through `NumberStyle` rather than separate wrapper types:
+by the host application using `ars-i18n::number::Formatter`. Currency and measurement
+formatting are selected through `number::Style` rather than separate wrapper types:
 
 ```rust
 pub fn format_currency_value(locale: &Locale, code: CurrencyCode, value: f64) -> String {
-    NumberFormatter::new(locale, NumberFormatOptions::default())
+    number::Formatter::new(locale, number::FormatOptions::default())
         .format_currency(value, code.as_str())
 }
 
@@ -359,12 +359,12 @@ pub fn format_unit_value(
     display: UnitDisplay,
     value: f64,
 ) -> String {
-    NumberFormatter::new(
+    number::Formatter::new(
         locale,
-        NumberFormatOptions {
-            style: NumberStyle::Unit(unit),
+        number::FormatOptions {
+            style: number::Style::Unit(unit),
             unit_display: display,
-            ..NumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     )
     .format(value)
@@ -377,7 +377,7 @@ use ICU MessageFormat-style interpolation for locale-aware string building.
 
 ### 4.3 Currency Symbol Placement
 
-`NumberFormatter` with `NumberStyle::Currency` handles locale-aware currency symbol placement. To streamline currency display in Stat, Progress, and Meter components:
+`number::Formatter` with `number::Style::Currency` handles locale-aware currency symbol placement. To streamline currency display in Stat, Progress, and Meter components:
 
 **Stat `currency` Prop:**
 
@@ -386,7 +386,7 @@ pub struct Props {
     // ... existing fields ...
     /// Optional ISO 4217 currency code (e.g., "USD", "EUR", "JPY").
     /// When set, the `value` field is interpreted as a raw numeric value
-    /// and formatted using `NumberFormatter::format_currency()`.
+    /// and formatted using `number::Formatter::format_currency()`.
     pub currency: Option<CurrencyCode>,
 }
 ```
@@ -397,7 +397,7 @@ pub struct Props {
 - Spacing between symbol and value is locale-dependent (e.g., `€1.00` in `en-IE` vs `1,00 €` in `de-DE`).
 - Narrow symbol variants (e.g., `$` vs `US$`) are selected automatically when the currency is unambiguous in the locale context.
 
-**Progress/Meter**: These components do not directly format currency values. When used to display monetary progress (e.g., fundraising), the application MUST pre-format `value_label` using `NumberFormatter` and pass it as a string prop.
+**Progress/Meter**: These components do not directly format currency values. When used to display monetary progress (e.g., fundraising), the application MUST pre-format `value_label` using `number::Formatter` and pass it as a string prop.
 
 ## 5. Library Parity
 

@@ -9,7 +9,8 @@
 //! The [`Validators`] type alias is a convenience re-export of
 //! [`ValidatorsBuilder`] for ergonomic use in end-user code.
 
-use std::fmt::{self, Debug};
+use alloc::{string::String, vec::Vec};
+use core::fmt::{self, Debug};
 
 use super::{
     BoxedValidator, Context, Errors, Result, Validator, boxed_validator,
@@ -180,7 +181,7 @@ impl ValidatorsBuilder {
     pub fn try_pattern(
         self,
         regex: impl Into<String>,
-    ) -> std::result::Result<Self, PatternValidatorError> {
+    ) -> core::result::Result<Self, PatternValidatorError> {
         Ok(self.add(PatternValidator::new(regex)?))
     }
 
@@ -247,6 +248,8 @@ pub type Validators = ValidatorsBuilder;
 
 #[cfg(test)]
 mod tests {
+    use alloc::{format, string::String, vec};
+
     use super::*;
     use crate::validation::{Error, ErrorCode, Errors};
 

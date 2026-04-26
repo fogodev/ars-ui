@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility]
 shared_deps: []
 related: []
 references:
-  react-aria: Meter
+    react-aria: Meter
 ---
 
 # Meter
@@ -38,7 +38,7 @@ pub struct Props {
     /// The value considered optimal.
     pub optimum: Option<f64>,
     /// Format options for the value.
-    pub format_options: Option<NumberFormatOptions>,
+    pub format_options: Option<number::FormatOptions>,
 }
 
 impl Default for Props {
@@ -276,7 +276,7 @@ Meter
 
 ## 4. Internationalization
 
-- `aria-valuetext` and `ValueText` formatted via `NumberFormatter` from `ars-i18n`.
+- `aria-valuetext` and `ValueText` formatted via `number::Formatter` from `ars-i18n`.
 - Segment colors (optimal = green, sub-optimal = yellow, sub-sub-optimal = red) are conveyed
   via `data-ars-segment` for CSS styling; color alone is never the sole indicator — a
   descriptive `aria-valuetext` must also be present.
@@ -343,13 +343,13 @@ The adapter tracks the previous zone and announces the new zone name via `LiveAn
 
 ### 5.1 Props
 
-| Feature                    | ars-ui                    | React Aria                 | Notes                                        |
-| -------------------------- | ------------------------- | -------------------------- | -------------------------------------------- |
-| `value`                    | `f64`                     | `number`                   | Equivalent                                   |
-| `min` / `max`              | `f64`                     | `minValue` / `maxValue`    | Equivalent                                   |
-| `low` / `high` / `optimum` | `Option<f64>`             | --                         | ars-ui original; follows HTML `<meter>` spec |
-| `format_options`           | `NumberFormatOptions`     | `Intl.NumberFormatOptions` | Equivalent                                   |
-| `valueLabel`               | Via `Messages.value_text` | `ReactNode`                | ars-ui uses message function pattern         |
+| Feature                    | ars-ui                    | React Aria                   | Notes                                        |
+| -------------------------- | ------------------------- | ---------------------------- | -------------------------------------------- |
+| `value`                    | `f64`                     | `number`                     | Equivalent                                   |
+| `min` / `max`              | `f64`                     | `minValue` / `maxValue`      | Equivalent                                   |
+| `low` / `high` / `optimum` | `Option<f64>`             | --                           | ars-ui original; follows HTML `<meter>` spec |
+| `format_options`           | `number::FormatOptions`   | `Intl.number::FormatOptions` | Equivalent                                   |
+| `valueLabel`               | Via `Messages.value_text` | `ReactNode`                  | ars-ui uses message function pattern         |
 
 **Gaps:** None.
 

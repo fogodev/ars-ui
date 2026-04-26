@@ -1,159 +1,152 @@
 ---
 component: Form
 category: utility
-tier: stateless
+tier: stateful
 foundation_deps: [architecture, accessibility, forms]
 shared_deps: []
-related: [field, fieldset]
+related: [field, fieldset, form-submit]
 references:
-  radix-ui: Form
-  react-aria: Form
+    radix-ui: Form
+    react-aria: Form
 ---
 
 # Form
 
-The Form component renders a `<form>` element with pre-wired integration to `FormContext` and the form submission lifecycle. It handles `onSubmit`/`onReset` event binding, validation behavior selection, server-side error injection, and accessible status announcements.
+Form is the canonical specification for the framework-agnostic `ars_components::utility::form`
+machine. It models the high-level `<form>` component lifecycle for common cases: submit, reset,
+server-error synchronization, validation behavior selection, and status announcements.
 
-> **Canonical specification:** The full state machine, validation behavior, i18n messages, and adapter integration are defined in `spec/foundation/07-forms.md` §14. This file provides an inline summary for quick reference.
+Shared validator types, form registry/context, and the domain-level `form::Messages` bundle live in
+`spec/foundation/07-forms.md`. This file owns the Form component machine and connect API.
 
-**Ark UI equivalent:** — (no direct equivalent)
-**React Aria equivalent:** Form
+## 1. State Machine
 
-## 1. API
+### 1.1 Validation Behavior
 
-### 1.1 Props
+`ValidationBehavior` has two variants:
 
-See `07-forms.md` §14 for the full definition.
+- `Native`
+- `Aria`
 
-```rust
-/// Controls how validation errors are reported to the user.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ValidationBehavior {
-    /// Use native HTML constraint validation (browser tooltip UI).
-    Native,
-    /// Use ARIA-based validation display (custom ErrorMessage parts).
-    Aria,
-}
+`Aria` is the default.
 
-#[derive(Clone, Debug, PartialEq, HasId)]
-pub struct Props {
-    pub id: String,
-    /// How validation errors are reported. Default: `Aria`.
-    pub validation_behavior: ValidationBehavior,
-    /// Server-side validation errors keyed by field name. When set, the machine
-    /// sends `Event::SetServerErrors` via `on_props_changed` to inject these
-    /// errors into the form's field error display. This is the declarative
-    /// alternative to the imperative `Event::SetServerErrors`.
-    pub validation_errors: BTreeMap<String, Vec<String>>,
-    /// The URL to submit the form to. Sets the `action` attribute on `<form>`.
-    /// When `None`, the form submits to the current page URL (browser default).
-    pub action: Option<String>,
-    /// Optional ARIA role override for the form element. Set to `"search"` to
-    /// create a search landmark (`role="search"`). When `None`, the `<form>`
-    /// element uses its implicit role.
-    pub role: Option<String>,
-}
-```
+### 1.2 States
 
-### 1.2 Connect / API
+- `Idle`
+- `Submitting`
 
-| Method                  | Purpose                                                                              |
-| ----------------------- | ------------------------------------------------------------------------------------ |
-| `root_attrs()`          | `<form>` element — sets `novalidate` (Aria mode), `aria-busy` (submitting), `action` |
-| `status_region_attrs()` | Hidden live region — `role="status"`, `aria-atomic="true"`                           |
-| `is_submitting()`       | Whether the form is currently submitting                                             |
-| `status_message()`      | Current status announcement text (success/error)                                     |
+### 1.3 Events
+
+- `Submit`
+- `SubmitComplete { success: bool }`
+- `Reset`
+- `SetServerErrors(BTreeMap<String, Vec<String>>)`
+- `ClearServerErrors`
+- `SetValidationBehavior(ValidationBehavior)`
+- `SetStatusMessage(Option<String>)`
+
+### 1.4 Context
+
+The machine context stores:
+
+- `validation_behavior`
+- `is_submitting`
+- `server_errors`
+- `status_message`
+- `last_submit_succeeded`
+- `ids`
+
+### 1.5 Props
+
+The core machine props are:
+
+- `id: String`
+- `validation_behavior: ValidationBehavior`
+- `validation_errors: BTreeMap<String, Vec<String>>`
+- `action: Option<String>`
+- `role: Option<String>`
+
+The machine uses `type Messages = ()`. Localized wording is resolved separately through the
+domain-level `ars_forms::form::Messages` bundle.
+
+### 1.6 Connect API
+
+`form::Api` exposes:
+
+- `root_attrs()`
+- `status_region_attrs()`
+- `is_submitting()`
+- `status_message()`
+
+The structural parts are:
+
+- `Root`
+- `StatusRegion`
 
 ## 2. Anatomy
 
 ```text
 Form
-├── Root          <form>   data-ars-scope="form" data-ars-part="root"
-└── StatusRegion  <div>    data-ars-part="status-region" role="status"
+├── Root          <form>  data-ars-scope="form" data-ars-part="root"
+└── StatusRegion  <div>   data-ars-part="status-region" role="status"
 ```
-
-| Part         | Element  | Key Attributes                                                  |
-| ------------ | -------- | --------------------------------------------------------------- |
-| Root         | `<form>` | `data-ars-scope="form"`, `data-ars-part="root"`, `novalidate`   |
-| StatusRegion | `<div>`  | `data-ars-part="status-region"`, `role="status"`, `aria-atomic` |
 
 ## 3. Accessibility
 
-### 3.1 ARIA Roles, States, and Properties
+### 3.1 Root Attributes
 
-| Attribute     | Element      | Source                        | Notes                                                       |
-| ------------- | ------------ | ----------------------------- | ----------------------------------------------------------- |
-| `novalidate`  | Root         | `validation_behavior == Aria` | Suppresses browser validation when using ARIA-based display |
-| `aria-busy`   | Root         | `ctx.is_submitting`           | Set `"true"` while form is submitting                       |
-| `role`        | StatusRegion | `"status"`                    | Implicit `aria-live="polite"`                               |
-| `aria-atomic` | StatusRegion | `"true"`                      | Entire message announced as a unit                          |
+`root_attrs()` emits:
 
-Key adapter responsibilities (see `07-forms.md` §14.6 for the complete list):
+- `data-ars-state="idle|submitting"`
+- `novalidate` when `validation_behavior == Aria`
+- `aria-busy="true"` while submitting
+- sanitized `action` when present
+- optional `role` override when present
 
-- Prevent default on `submit` when `validation_behavior == Aria`
-- Run validation on all registered fields before calling the submit callback
-- Inject server errors into Field components via `Event::SetServerErrors`
-- Announce results via the StatusRegion (success message or error count)
+### 3.2 Status Region
 
-## 4. Internationalization
+`status_region_attrs()` emits:
 
-The `form::Messages` struct provides localizable messages for form
-announcements (submit success, error counts, validation messages). It uses
-`MessageFn` closures with `Send + Sync` bounds per the ComponentMessages
-pattern.
+- `role="status"`
+- `aria-live="polite"`
+- `aria-atomic="true"`
 
-This is separate from `form::component::Machine::Messages`, which remains `()`.
-Adapters resolve `form::Messages` alongside the machine rather than passing it
-through the core machine's associated `Messages` type.
+The region exists so adapters can announce submit success and failure outcomes without coupling that
+wording to the machine itself.
 
-See `07-forms.md` §14.7 for the full `Messages` definition, default values,
-provider context pattern, and locale fallback strategy.
+## 4. Integration
+
+### 4.1 Adapter Responsibilities
+
+Adapters must:
+
+1. Prevent default submit behavior when `validation_behavior == Aria`.
+2. Run validation on registered fields before dispatching `Event::Submit`.
+3. Synchronize server errors into child fields.
+4. Reset registered field state on `Reset`.
+5. Resolve localized status text through `ars_forms::form::Messages` and send it via
+   `SetStatusMessage`.
+
+### 4.2 Shared Form Contracts
+
+Use `07-forms.md` for:
+
+- `ars_forms::form::Context`
+- validator registration and execution
+- domain-level `form::Messages`
+- hidden-input participation and submission data behavior
+
+### 4.3 Relationship to `form_submit::Machine`
+
+`form::Machine` is the high-level component machine for typical form rendering. Use
+[`form-submit`](form-submit.md) when you need the lower-level validation/submission lifecycle with
+explicit `Validating`, `ValidationFailed`, `Succeeded`, and `Failed` states.
 
 ## 5. Library Parity
 
-> Compared against: Radix UI (`Form`), React Aria (`Form`).
+Compared against Radix UI `Form` and React Aria `Form`:
 
-### 5.1 Props
-
-| Feature             | ars-ui                | Radix UI                    | React Aria           | Notes                                                          |
-| ------------------- | --------------------- | --------------------------- | -------------------- | -------------------------------------------------------------- |
-| Validation behavior | `validation_behavior` | --                          | `validationBehavior` | Radix uses match-based validation; RA and ars-ui use mode enum |
-| Server errors       | `validation_errors`   | `serverInvalid` (per-field) | `validationErrors`   | Radix uses per-field prop; ars-ui/RA use form-level map        |
-| Action              | `action`              | --                          | `action`             | React Aria has action                                          |
-| Role                | `role`                | --                          | `role`               | Both ars-ui and RA support search role                         |
-| Clear server errors | --                    | `onClearServerErrors`       | --                   | Radix-specific callback                                        |
-
-**Gaps:** None. Radix's `onClearServerErrors` is handled by ars-ui's form submission lifecycle (server errors are cleared on re-submit).
-
-### 5.2 Anatomy
-
-| Part          | ars-ui         | Radix UI        | React Aria | Notes                                                             |
-| ------------- | -------------- | --------------- | ---------- | ----------------------------------------------------------------- |
-| Root          | `Root`         | `Root`          | `Form`     | All libraries                                                     |
-| StatusRegion  | `StatusRegion` | --              | --         | ars-ui addition for accessible announcements                      |
-| Field         | --             | `Field`         | --         | Radix embeds Field in Form; ars-ui has separate Field component   |
-| Label         | --             | `Label`         | --         | Radix embeds Label; ars-ui has separate Field.Label               |
-| Control       | --             | `Control`       | --         | Radix-specific                                                    |
-| Message       | --             | `Message`       | --         | Radix has match-based messages; ars-ui uses ErrorMessage in Field |
-| ValidityState | --             | `ValidityState` | --         | Radix render-prop pattern                                         |
-| Submit        | --             | `Submit`        | --         | Radix has Submit part; ars-ui uses Button with type="submit"      |
-
-**Gaps:** None. Radix's richer Form anatomy (Field/Label/Control/Message/ValidityState/Submit) maps to ars-ui's separate `Field`, `Fieldset`, and `Button` components.
-
-### 5.3 Features
-
-| Feature               | ars-ui | Radix UI | React Aria |
-| --------------------- | ------ | -------- | ---------- |
-| Native validation     | Yes    | Yes      | Yes        |
-| ARIA-based validation | Yes    | --       | Yes        |
-| Server-side errors    | Yes    | Yes      | Yes        |
-| Form status region    | Yes    | --       | --         |
-| Submit prevention     | Yes    | --       | --         |
-
-**Gaps:** None.
-
-### 5.4 Summary
-
-- **Overall:** Full parity.
-- **Divergences:** Radix UI embeds Field/Label/Control/Message/Submit into Form anatomy; ars-ui keeps these as separate components. Radix uses `ValidityState` render prop and match-based `Message`; ars-ui uses `Field` ErrorMessage with `role="alert"`.
-- **Recommended additions:** None.
+- ars-ui matches the semantic `<form>` surface and validation-mode split.
+- ars-ui keeps `Field`, `Fieldset`, and `Button` as separate building blocks rather than embedding
+  them inside Form anatomy.
+- ars-ui adds a dedicated status region so submit announcements are a first-class contract.

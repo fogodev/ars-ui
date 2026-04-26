@@ -1,0 +1,25 @@
+[package]
+name                   = "ars-components"
+version                = "0.1.0"
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+description            = "Framework-agnostic component machines for ars-ui"
+repository.workspace   = true
+
+[features]
+default = ["std"]
+std     = ["ars-core/std", "ars-forms/std", "ars-i18n/std", "ars-interactions/std"]
+
+[dependencies]
+ars-core         = { path = "../ars-core", default-features = false }
+ars-forms        = { path = "../ars-forms", default-features = false }
+ars-i18n         = { path = "../ars-i18n", default-features = false }
+ars-interactions = { path = "../ars-interactions", default-features = false }
+
+[dev-dependencies]
+insta    = { version = "1", features = ["yaml"] }
+proptest = "1"
+
+[lints]
+workspace = true

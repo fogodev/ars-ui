@@ -12,10 +12,7 @@ use ars_core::{
     PlatformEffects, Rect, StyleStrategy, resolve_messages as core_resolve_messages,
 };
 use ars_forms::field::FileRef;
-use ars_i18n::{
-    Direction, IntlBackend, Locale, NumberFormatOptions, NumberFormatter, StubIntlBackend,
-    Translate, locales,
-};
+use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend, Translate, locales, number};
 use dioxus::prelude::*;
 
 /// Options for opening a platform file picker.
@@ -550,9 +547,9 @@ pub(crate) fn resolve_locale(adapter_props_locale: Option<&Locale>) -> Locale {
 
 /// Resolves a memoized number formatter from the current provider locale.
 #[must_use]
-pub fn use_number_formatter<F>(options: F) -> Memo<NumberFormatter>
+pub fn use_number_formatter<F>(options: F) -> Memo<number::Formatter>
 where
-    F: Fn() -> NumberFormatOptions + 'static,
+    F: Fn() -> number::FormatOptions + 'static,
 {
     use_resolved_number_formatter(None, options)
 }
@@ -562,9 +559,9 @@ where
 pub(crate) fn use_resolved_number_formatter<F>(
     adapter_props_locale: Option<&Locale>,
     options: F,
-) -> Memo<NumberFormatter>
+) -> Memo<number::Formatter>
 where
-    F: Fn() -> NumberFormatOptions + 'static,
+    F: Fn() -> number::FormatOptions + 'static,
 {
     let explicit_locale = adapter_props_locale.cloned();
 
@@ -577,7 +574,7 @@ where
             .clone()
             .unwrap_or_else(|| locale.read().clone());
 
-        NumberFormatter::new(&resolved_locale, resolved_options.clone())
+        number::Formatter::new(&resolved_locale, resolved_options.clone())
     }))
 }
 
@@ -670,9 +667,7 @@ mod tests {
         ColorMode, DefaultModalityContext, I18nRegistries, ModalityContext, NullPlatformEffects,
         StyleStrategy,
     };
-    use ars_i18n::{
-        Direction, IntlBackend, Locale, NumberFormatOptions, StubIntlBackend, Translate, locales,
-    };
+    use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend, Translate, locales, number};
     use dioxus::dioxus_core::{NoOpMutations, ScopeId};
 
     use super::*;
@@ -1009,7 +1004,7 @@ mod tests {
     #[test]
     fn use_number_formatter_falls_back_without_provider() {
         fn app() -> Element {
-            let formatter = use_number_formatter(NumberFormatOptions::default);
+            let formatter = use_number_formatter(number::FormatOptions::default);
 
             assert_eq!(formatter.read().format(1234.56), "1,234.56");
 
@@ -1030,7 +1025,7 @@ mod tests {
 
             use_context_provider(|| ctx);
 
-            let formatter = use_number_formatter(NumberFormatOptions::default);
+            let formatter = use_number_formatter(number::FormatOptions::default);
 
             assert_eq!(formatter.read().format(1234.56), "1.234,56");
 
@@ -1058,7 +1053,7 @@ mod tests {
 
             let mut phase = use_signal(|| 0u8);
 
-            let formatter = use_number_formatter(NumberFormatOptions::default);
+            let formatter = use_number_formatter(number::FormatOptions::default);
 
             outputs.borrow_mut().push(formatter.read().format(1234.56));
 
@@ -1091,7 +1086,7 @@ mod tests {
             let explicit = locales::de_de();
 
             let formatter =
-                use_resolved_number_formatter(Some(&explicit), NumberFormatOptions::default);
+                use_resolved_number_formatter(Some(&explicit), number::FormatOptions::default);
 
             assert_eq!(formatter.read().format(1234.56), "1.234,56");
 
@@ -1129,7 +1124,7 @@ mod tests {
             };
 
             let formatter =
-                use_resolved_number_formatter(Some(&explicit), NumberFormatOptions::default);
+                use_resolved_number_formatter(Some(&explicit), number::FormatOptions::default);
 
             outputs.borrow_mut().push(formatter.read().format(1234.56));
 
@@ -1170,12 +1165,12 @@ mod tests {
             let mut use_percent = use_signal(|| false);
 
             let options = if use_percent() {
-                NumberFormatOptions {
-                    style: ars_i18n::NumberStyle::Percent,
-                    ..NumberFormatOptions::default()
+                number::FormatOptions {
+                    style: ars_i18n::number::Style::Percent,
+                    ..number::FormatOptions::default()
                 }
             } else {
-                NumberFormatOptions::default()
+                number::FormatOptions::default()
             };
 
             let formatter = use_number_formatter(move || options.clone());
@@ -1283,7 +1278,7 @@ mod tests {
 
             drop(t(AppText::Greeting));
 
-            let _ = prelude_use_number_formatter(NumberFormatOptions::default);
+            let _ = prelude_use_number_formatter(number::FormatOptions::default);
 
             rsx! {
                 div {}
@@ -1506,9 +1501,7 @@ mod wasm_tests {
         StyleStrategy,
     };
     use ars_forms::field::FileRef;
-    use ars_i18n::{
-        Direction, IntlBackend, Locale, NumberFormatOptions, StubIntlBackend, Translate, locales,
-    };
+    use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend, Translate, locales, number};
     use dioxus::{
         dioxus_core::{AttributeValue, Mutation, Mutations, NoOpMutations, ScopeId, VirtualDom},
         prelude::*,
@@ -1917,7 +1910,7 @@ mod wasm_tests {
                 "Hello"
             );
 
-            let formatter = use_number_formatter(NumberFormatOptions::default);
+            let formatter = use_number_formatter(number::FormatOptions::default);
 
             assert_eq!(formatter.read().format(1234.56), "1,234.56");
 
@@ -2198,7 +2191,7 @@ mod wasm_tests {
         fn app() -> Element {
             use_context_provider(|| test_context(locales::de_de(), Arc::new(StubIntlBackend)));
 
-            let formatter = use_number_formatter(NumberFormatOptions::default);
+            let formatter = use_number_formatter(number::FormatOptions::default);
 
             assert_eq!(formatter.read().format(1234.56), "1.234,56");
 
@@ -2226,7 +2219,7 @@ mod wasm_tests {
 
             let mut phase = use_signal(|| 0u8);
 
-            let formatter = use_number_formatter(NumberFormatOptions::default);
+            let formatter = use_number_formatter(number::FormatOptions::default);
 
             outputs.borrow_mut().push(formatter.read().format(1234.56));
 
@@ -2260,7 +2253,7 @@ mod wasm_tests {
             let explicit = locales::de_de();
 
             let formatter =
-                use_resolved_number_formatter(Some(&explicit), NumberFormatOptions::default);
+                use_resolved_number_formatter(Some(&explicit), number::FormatOptions::default);
 
             assert_eq!(formatter.read().format(1234.56), "1.234,56");
 
@@ -2296,7 +2289,7 @@ mod wasm_tests {
             };
 
             let formatter =
-                use_resolved_number_formatter(Some(&explicit), NumberFormatOptions::default);
+                use_resolved_number_formatter(Some(&explicit), number::FormatOptions::default);
 
             outputs.borrow_mut().push(formatter.read().format(1234.56));
 
@@ -2337,12 +2330,12 @@ mod wasm_tests {
             let mut use_percent = use_signal(|| false);
 
             let options = if use_percent() {
-                NumberFormatOptions {
-                    style: ars_i18n::NumberStyle::Percent,
-                    ..NumberFormatOptions::default()
+                number::FormatOptions {
+                    style: ars_i18n::number::Style::Percent,
+                    ..number::FormatOptions::default()
                 }
             } else {
-                NumberFormatOptions::default()
+                number::FormatOptions::default()
             };
 
             let formatter = use_number_formatter(move || options.clone());

@@ -4,10 +4,11 @@
 //! validators, form submission announcements, and adapter-owned messaging
 //! helpers.
 //!
-//! It is intentionally distinct from [`crate::form::component::Machine`]`::Messages`.
-//! The form component machine keeps `type Messages = ()`; adapters resolve
-//! [`Messages`] separately and use it when formatting validation and status
-//! text around the machine.
+//! It is intentionally distinct from the form-machine `Messages` type in
+//! `ars_components::utility::form`. Adapters resolve [`Messages`] separately
+//! and use it when formatting validation and status text around the machine.
+
+use alloc::{format, string::String};
 
 use ars_core::{ComponentMessages, MessageFn};
 use ars_i18n::Locale;
@@ -22,10 +23,10 @@ type FloatLocaleMessage = dyn Fn(f64, &Locale) -> String + Send + Sync;
 /// provide a single locale-aware message bundle to all form-related logic in a
 /// subtree while keeping English defaults available for zero-config usage.
 ///
-/// This is a **domain-level** message bundle, not the associated
-/// `Machine::Messages` type for [`crate::form::component::Machine`]. The form
-/// component machine keeps `type Messages = ()`; adapters and validator helpers
-/// consume [`Messages`] separately when generating localized strings.
+/// This is a domain-level message bundle, not the associated `Machine::Messages`
+/// type for `ars_components::utility::form::Machine`. The form machine keeps
+/// `type Messages = ()`; adapters and validator helpers consume [`Messages`]
+/// separately when generating localized strings.
 #[derive(Clone, Debug)]
 pub struct Messages {
     /// Message announced via a status region on successful submission.

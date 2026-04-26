@@ -26,7 +26,7 @@ use ars_core::AttrMap;
 ///
 /// ```rust,ignore
 /// let press = use_press(press_config.clone());
-/// let hover = use_hover(hover_config);
+/// let hover = use_hover();
 /// let focus = use_focus(focus_config);
 ///
 /// // All three sets of data attributes are applied to the element.
@@ -42,6 +42,7 @@ where
     I: IntoIterator<Item = AttrMap>,
 {
     let mut merged = AttrMap::new();
+
     for attrs in attrs_iter {
         // When the optional debug feature is enabled, warn when the same CSS
         // property is set by multiple interaction sources with different values.
@@ -57,8 +58,10 @@ where
                 );
             }
         }
+
         merged.merge(attrs);
     }
+
     merged
 }
 
@@ -81,6 +84,8 @@ macro_rules! merge_attrs {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{string::String, vec::Vec};
+
     use ars_core::{AriaAttr, CssProperty, HtmlAttr};
 
     use super::*;
@@ -124,25 +129,28 @@ mod tests {
     #[test]
     fn concatenates_class_with_dedup() {
         let mut a = AttrMap::new();
-        a.set(HtmlAttr::Class, "base");
-        a.set(HtmlAttr::Class, "pressed");
+        a.set(HtmlAttr::Class, "base")
+            .set(HtmlAttr::Class, "pressed");
 
         let mut b = AttrMap::new();
         b.set(HtmlAttr::Class, "hovered");
 
         let mut c = AttrMap::new();
-        c.set(HtmlAttr::Class, "base");
-        c.set(HtmlAttr::Class, "focused");
+        c.set(HtmlAttr::Class, "base")
+            .set(HtmlAttr::Class, "focused");
 
         let merged = merge_attrs([a, b, c]);
 
         // All unique tokens present, duplicates removed.
         let class = merged.get(&HtmlAttr::Class).expect("class should be set");
+
         let tokens = class.split_whitespace().collect::<Vec<_>>();
+
         assert!(tokens.contains(&"base"), "missing 'base': {class}");
         assert!(tokens.contains(&"pressed"), "missing 'pressed': {class}");
         assert!(tokens.contains(&"hovered"), "missing 'hovered': {class}");
         assert!(tokens.contains(&"focused"), "missing 'focused': {class}");
+
         // "base" appears only once.
         assert_eq!(
             tokens.iter().filter(|&&t| t == "base").count(),
@@ -177,17 +185,18 @@ mod tests {
     #[test]
     fn style_last_write_wins_per_property() {
         let mut a = AttrMap::new();
-        a.set_style(CssProperty::Width, "10px");
-        a.set_style(CssProperty::Height, "20px");
+        a.set_style(CssProperty::Width, "10px")
+            .set_style(CssProperty::Height, "20px");
 
         let mut b = AttrMap::new();
         b.set_style(CssProperty::Width, "30px");
 
         let mut c = AttrMap::new();
-        c.set_style(CssProperty::Height, "40px");
-        c.set_style(CssProperty::Color, "red");
+        c.set_style(CssProperty::Height, "40px")
+            .set_style(CssProperty::Color, "red");
 
         let merged = merge_attrs([a, b, c]);
+
         let styles = merged.styles();
 
         let width = styles.iter().find(|(k, _)| *k == CssProperty::Width);
@@ -202,17 +211,20 @@ mod tests {
     #[test]
     fn empty_iterator_returns_empty_map() {
         let merged = merge_attrs(Vec::<AttrMap>::new());
+
         assert_eq!(merged, AttrMap::new());
     }
 
     #[test]
     fn single_element_is_identity() {
         let mut map = AttrMap::new();
-        map.set(HtmlAttr::Role, "button");
-        map.set(HtmlAttr::Class, "primary");
-        map.set_style(CssProperty::Width, "100px");
+
+        map.set(HtmlAttr::Role, "button")
+            .set(HtmlAttr::Class, "primary")
+            .set_style(CssProperty::Width, "100px");
 
         let expected = map.clone();
+
         let merged = merge_attrs([map]);
 
         assert_eq!(merged, expected);
@@ -246,15 +258,16 @@ mod tests {
     #[test]
     fn overlay_values_take_precedence() {
         let mut base = AttrMap::new();
-        base.set(HtmlAttr::Role, "button");
-        base.set(HtmlAttr::Class, "base");
+        base.set(HtmlAttr::Role, "button")
+            .set(HtmlAttr::Class, "base");
 
         let mut overlay = AttrMap::new();
-        overlay.set(HtmlAttr::Role, "switch");
-        overlay.set(HtmlAttr::Class, "overlay");
-        overlay.set(HtmlAttr::Aria(AriaAttr::DescribedBy), "hint");
-        overlay.set(HtmlAttr::Aria(AriaAttr::DescribedBy), "error");
-        overlay.set_style(CssProperty::Width, "20px");
+        overlay
+            .set(HtmlAttr::Role, "switch")
+            .set(HtmlAttr::Class, "overlay")
+            .set(HtmlAttr::Aria(AriaAttr::DescribedBy), "hint")
+            .set(HtmlAttr::Aria(AriaAttr::DescribedBy), "error")
+            .set_style(CssProperty::Width, "20px");
 
         let merged = merge_attrs([base, overlay]);
 
@@ -361,10 +374,12 @@ mod tests {
         // The function must not panic; the warning is best-effort.
         // We verify the merge result is correct (last-write-wins).
         let merged = merge_attrs([a, b]);
+
         let width = merged
             .styles()
             .iter()
             .find(|(k, _)| *k == CssProperty::Width);
+
         assert_eq!(width.map(|(_, v)| v.as_str()), Some("20px"));
     }
 
@@ -378,10 +393,12 @@ mod tests {
 
         // Same value → no warning, merge still works.
         let merged = merge_attrs([a, b]);
+
         let width = merged
             .styles()
             .iter()
             .find(|(k, _)| *k == CssProperty::Width);
+
         assert_eq!(width.map(|(_, v)| v.as_str()), Some("10px"));
     }
 

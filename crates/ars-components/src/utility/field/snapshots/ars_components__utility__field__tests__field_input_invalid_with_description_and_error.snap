@@ -1,0 +1,64 @@
+---
+source: crates/ars-components/src/utility/field/mod.rs
+assertion_line: 832
+expression: "snapshot_attrs(&service.connect(&|_| {}).input_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "field",
+            ),
+        ),
+        (
+            Aria(
+                ErrorMessage,
+            ),
+            String(
+                "email-error-message",
+            ),
+        ),
+        (
+            Aria(
+                Invalid,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "email-label",
+            ),
+        ),
+        (
+            Aria(
+                DescribedBy,
+            ),
+            String(
+                "email-description email-error-message",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "email-input",
+            ),
+        ),
+    ],
+    styles: [],
+}

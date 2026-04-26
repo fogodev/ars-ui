@@ -1,0 +1,26 @@
+---
+source: crates/ars-components/src/utility/form_submit.rs
+assertion_line: 1058
+expression: "snapshot_attrs(&service.connect(&|_| {}).submit_button_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "submit-button",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "form-submit",
+            ),
+        ),
+    ],
+    styles: [],
+}

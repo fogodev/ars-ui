@@ -160,10 +160,10 @@ The adapter does not publish or consume framework context. The composing overlay
 
 ## 16. Implementation Dependencies
 
-| Dependency        | Required?   | Dependency type  | Why it must exist first                                                                                             | Notes                                                             |
-| ----------------- | ----------- | ---------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `PlatformEffects` | required    | shared helper    | `on_animation_end`, `on_reduced_motion_change`, `set_timeout`, `clear_timeout` provide the DOM interaction surface. | Core spec delegates all DOM work to `PlatformEffects`.            |
-| `ars-provider`    | recommended | context contract | Provides DOM environment scoping for composing overlays.                                                            | Presence itself does not read it, but composing overlays benefit. |
+| Dependency               | Required?   | Dependency type  | Why it must exist first                                                                                | Notes                                                                                  |
+| ------------------------ | ----------- | ---------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| animation runtime helper | required    | shared helper    | style reads, listener setup, timeout fallback, reduced-motion observation, and `AnimationEnd` dispatch | Core spec keeps the machine pure and delegates DOM work to the adapter/runtime helper. |
+| `ars-provider`           | recommended | context contract | Provides DOM environment scoping for composing overlays.                                               | Presence itself does not read it, but composing overlays benefit.                      |
 
 ## 17. Recommended Implementation Sequence
 
@@ -171,8 +171,12 @@ The adapter does not publish or consume framework context. The composing overlay
 2. Create `NodeRef<html::Div>` for the animated root element.
 3. Set up a reactive effect that watches the `present` prop signal and calls `api.sync_present()`.
 4. Set `Context.node_id` after the element mounts on the client (inside a client-only effect that reads the `NodeRef`).
-5. Implement the `"listen-animation-end"` effect: after the machine enters `UnmountPending`, set `data-ars-state="closed"`, schedule a `requestAnimationFrame`, read `getComputedStyle()`, attach `animationend`/`transitionend` listeners with dual-completion flags, install the 5000ms fallback timeout, the `matchMedia` change listener, and the `visibilitychange` handler.
-6. Implement the `"mounting-timeout"` effect for `lazy_mount`: start a 5000ms timeout when entering `Mounting`; dispatch `ContentReady` if it fires.
+5. Implement an adapter-owned animation runtime helper: after the machine enters `UnmountPending`,
+   set `data-ars-state="closed"`, schedule any required `requestAnimationFrame` reads, attach
+   `animationend` / `transitionend` listeners, install a bounded timeout fallback, and dispatch
+   `Event::AnimationEnd` when the exit finishes.
+6. For `lazy_mount`, dispatch `ContentReady` after lazy content settles; if the adapter wants a
+   timeout safety net, it belongs in the same runtime helper layer rather than inside the core machine.
 7. Set `will-change: transform, opacity` on animation start; remove on animation end.
 8. Gate child rendering on `api.is_mounted()` — render children only when mounted.
 9. Wire `on_cleanup` to synchronously cancel all listeners, timeouts, and guards.
@@ -229,12 +233,12 @@ The adapter does not publish or consume framework context. The composing overlay
 
 ## 22. Shared Adapter Helper Notes
 
-| Helper concept                                   | Required?   | Responsibility                                                                                                          | Reused by                                           | Notes                                     |
-| ------------------------------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------- |
-| `PlatformEffects::on_animation_end`              | required    | Encapsulates animation/transition detection, listener setup, reduced-motion guard, fallback timeout, and cleanup.       | `presence` (all overlay components that compose it) | Web implementation follows core spec §11. |
-| `PlatformEffects::on_reduced_motion_change`      | required    | Registers `matchMedia` change listener for `prefers-reduced-motion`.                                                    | `presence`                                          | Returns cleanup function.                 |
-| reflow batching cache                            | recommended | Per-frame `getComputedStyle()` cache to avoid layout thrashing when multiple Presence instances unmount simultaneously. | `presence` instances in the same frame              | Cleared at the start of each rAF frame.   |
-| `PlatformEffects::set_timeout` / `clear_timeout` | required    | Monotonic timeout management using `performance.now()`.                                                                 | `presence`, mounting timeout, transition safety-net | Handles visibility-change pausing.        |
+| Helper concept           | Required?   | Responsibility                                                                                                          | Reused by                                           | Notes                                     |
+| ------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------- |
+| animation runtime helper | required    | Encapsulates animation/transition detection, listener setup, reduced-motion guard, fallback timeout, and cleanup.       | `presence` (all overlay components that compose it) | Web implementation follows core spec §11. |
+| reduced-motion observer  | recommended | Registers `matchMedia` change listener for `prefers-reduced-motion` when the adapter supports live preference changes.  | `presence`                                          | Returns cleanup function.                 |
+| reflow batching cache    | recommended | Per-frame `getComputedStyle()` cache to avoid layout thrashing when multiple Presence instances unmount simultaneously. | `presence` instances in the same frame              | Cleared at the start of each rAF frame.   |
+| timeout helper           | required    | Monotonic timeout management using `performance.now()`.                                                                 | `presence` transition safety-net                    | Handles visibility-change pausing.        |
 
 ## 23. Framework-Specific Behavior
 
@@ -242,7 +246,9 @@ Leptos uses `NodeRef<html::Div>` for the animated root element, which resolves t
 
 `on_cleanup` provides synchronous disposal for all listeners, timeouts, and guards. The adapter registers a single `on_cleanup` callback that runs the `completed` guard, cancels all timeouts, and removes all event listeners in one pass.
 
-Reactive effects use `Effect::new` or `RenderEffect::new` to watch the `present` prop signal. The effect calls `api.sync_present(new_value)` to drive the state machine. The machine's transition effects (`"listen-animation-end"`, `"mounting-timeout"`) are driven by the service's effect system, not by additional Leptos effects.
+Reactive effects use `Effect::new` or `RenderEffect::new` to watch the `present` prop signal. The
+effect calls `api.sync_present(new_value)` to drive the state machine. Animation runtime work is
+adapter-owned and reacts to machine state changes; it is not encoded as core-machine effects.
 
 Child rendering is gated by a reactive `is_mounted` signal derived from the machine context. When `is_mounted` transitions from true to false, Leptos removes the children from the DOM. When it transitions from false to true, Leptos inserts them.
 
@@ -314,10 +320,8 @@ pub fn use_presence(props: presence::Props) -> PresenceHandle {
         }
     });
 
-    // 3. Machine effects ("listen-animation-end", "mounting-timeout")
-    //    are handled internally by the service effect system.
-    //    PlatformEffects::on_animation_end encapsulates:
-    //      - double-rAF for style read timing
+    // 3. Adapter-owned animation runtime helper:
+    //      - double-rAF for style read timing when needed
     //      - getComputedStyle() with per-frame cache
     //      - animationend + transitionend listeners (dual-completion)
     //      - reduced-motion guard (immediate AnimationEnd)

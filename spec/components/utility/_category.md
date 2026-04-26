@@ -35,6 +35,7 @@ reading any overlay or form component specification.
 - [FocusRing](focus-ring.md)
 - [FocusScope](focus-scope.md)
 - [Form](form.md)
+- [FormSubmit](form-submit.md)
 - [Group](group.md)
 - [Heading](heading.md)
 - [Highlight](highlight.md)
@@ -63,11 +64,12 @@ reading any overlay or form component specification.
 | `DownloadTrigger` | No                            | `<a download>` native download                        | File download buttons                     |
 | `DropZone`        | Yes (drag-over, drop)         | `aria-description`, `role="button"`                   | `FileUpload`                              |
 | `ArsProvider`     | No                            | Context provider (no DOM output)                      | `FocusScope`, SSR                         |
-| `Field`           | No                            | `<label>` + error/description association             | Form inputs                               |
-| `Fieldset`        | No                            | `<fieldset>` + `<legend>`                             | Form groups                               |
+| `Field`           | Yes (context-driven)          | `<label>` + error/description association             | Form inputs                               |
+| `Fieldset`        | Yes (context-driven)          | `<fieldset>` + `<legend>`                             | Form groups                               |
 | `FocusRing`       | No                            | `data-ars-focus-visible`                              | All interactive components                |
 | `FocusScope`      | Yes (trap activation)         | Focus trap (Tab interception)                         | `Dialog`, `AlertDialog`, `Drawer`         |
-| `Form`            | No                            | `<form>` semantic element, validation                 | Form submission and validation            |
+| `Form`            | Yes                           | `<form>` semantic element, validation                 | Form submission and validation            |
+| `FormSubmit`      | Yes                           | submit lifecycle + busy/disabled submit semantics     | Advanced form flows                       |
 | `Group`           | No                            | `role="group"`, state propagation via context         | Non-form grouping, `NumberField` clusters |
 | `Heading`         | No                            | `role="heading"`, `aria-level`                        | `Section` headings                        |
 | `Highlight`       | No                            | `<mark>` for matches                                  | `Search` results, `Combobox`              |

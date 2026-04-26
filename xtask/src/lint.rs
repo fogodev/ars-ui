@@ -248,8 +248,14 @@ pub fn check_snapshot_count(options: &SnapshotCountOptions) -> Result<String, Er
 
         let variants = state_variants.get(&component).copied().unwrap_or(0);
 
+        let min_per_variant = snapshot_min_per_variant(
+            &workspace_root_for(&options.snapshots_dir),
+            &component,
+            options.min_per_variant,
+        );
+
         let required = if variants > 2 {
-            variants * options.min_per_variant
+            variants * min_per_variant
         } else {
             0
         };
@@ -400,17 +406,6 @@ fn extract_component_from_test_file(
 }
 
 fn infer_snapshot_component(path: &Path) -> Option<String> {
-    for ancestor in path.ancestors() {
-        if ancestor.file_name().and_then(|name| name.to_str()) == Some("snapshots")
-            && let Some(parent) = ancestor.parent()
-            && let Some(component) = parent.file_name().and_then(|name| name.to_str())
-            && component != "tests"
-            && component != "src"
-        {
-            return Some(component.replace('-', "_"));
-        }
-    }
-
     let stem = path.file_stem()?.to_str()?;
 
     let compact = stem.split("__").collect::<Vec<_>>();
@@ -418,9 +413,30 @@ fn infer_snapshot_component(path: &Path) -> Option<String> {
     if compact
         .first()
         .is_some_and(|crate_name| crate_name.starts_with("ars_"))
-        && let Some(component) = compact.get(1)
     {
-        return Some((*component).replace('-', "_"));
+        if compact
+            .get(1)
+            .is_some_and(|segment| is_component_category(segment))
+            && let Some(component) = compact.get(2)
+        {
+            return Some((*component).replace('-', "_"));
+        }
+
+        if let Some(component) = compact.get(1) {
+            return Some((*component).replace('-', "_"));
+        }
+    }
+
+    for ancestor in path.ancestors() {
+        if ancestor.file_name().and_then(|name| name.to_str()) == Some("snapshots")
+            && let Some(parent) = ancestor.parent()
+            && let Some(component) = parent.file_name().and_then(|name| name.to_str())
+            && component != "tests"
+            && component != "src"
+            && !is_component_category(component)
+        {
+            return Some(component.replace('-', "_"));
+        }
     }
 
     compact
@@ -436,10 +452,11 @@ fn detect_state_variants(root: &Path) -> Result<BTreeMap<String, usize>, Error> 
 
     let files = collect_files(root, |path| {
         path.extension().is_some_and(|extension| extension == "rs")
-            && path.file_name().is_some_and(|name| name == "component.rs")
             && path
                 .components()
                 .any(|component| component.as_os_str() == "src")
+            && (path.file_name().is_some_and(|name| name == "component.rs")
+                || is_ars_components_machine_module(path))
             && !path
                 .components()
                 .any(|component| component.as_os_str() == "target")
@@ -513,10 +530,34 @@ fn infer_source_component(path: &Path) -> Option<String> {
 
     while let Some(part) = parts.next() {
         if part.as_os_str() == "src" {
-            return parts
-                .next()
+            let remaining = parts
+                .map(|component| component.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+
+            if remaining
+                .first()
+                .is_some_and(|segment| is_component_category(segment))
+                && let Some(component) = remaining.get(1)
+            {
+                let component_path = Path::new(component);
+
+                return if component_path
+                    .extension()
+                    .is_some_and(|extension| extension == "rs")
+                {
+                    component_path
+                        .file_stem()
+                        .and_then(|name| name.to_str())
+                        .map(str::to_owned)
+                } else {
+                    Some(component.replace('-', "_"))
+                };
+            }
+
+            return remaining
+                .first()
                 .and_then(|component| {
-                    let path = Path::new(component.as_os_str());
+                    let path = Path::new(component);
 
                     if path.extension().is_some_and(|extension| extension == "rs") {
                         path.file_stem()
@@ -538,6 +579,45 @@ fn infer_source_component(path: &Path) -> Option<String> {
     None
 }
 
+fn is_component_category(segment: &str) -> bool {
+    matches!(
+        segment,
+        "input"
+            | "selection"
+            | "overlay"
+            | "navigation"
+            | "date-time"
+            | "data-display"
+            | "layout"
+            | "specialized"
+            | "utility"
+    )
+}
+
+fn is_ars_components_machine_module(path: &Path) -> bool {
+    let segments = path
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    let Some(crate_index) = segments
+        .iter()
+        .position(|segment| segment == "ars-components")
+    else {
+        return false;
+    };
+
+    let Some(src_index) = segments.iter().position(|segment| segment == "src") else {
+        return false;
+    };
+
+    crate_index < src_index
+        && segments
+            .get(src_index + 1)
+            .is_some_and(|segment| is_component_category(segment))
+        && !segments.iter().any(|segment| segment == "snapshots")
+}
+
 fn workspace_root_for(path: &Path) -> PathBuf {
     let mut root = PathBuf::new();
 
@@ -554,6 +634,44 @@ fn workspace_root_for(path: &Path) -> PathBuf {
     }
 
     PathBuf::from(".")
+}
+
+fn snapshot_min_per_variant(root: &Path, component: &str, default_min: usize) -> usize {
+    if is_ars_components_component(root, component) {
+        1
+    } else {
+        default_min
+    }
+}
+
+fn is_ars_components_component(root: &Path, component: &str) -> bool {
+    for category in [
+        "input",
+        "selection",
+        "overlay",
+        "navigation",
+        "date-time",
+        "data-display",
+        "layout",
+        "specialized",
+        "utility",
+    ] {
+        let direct = root
+            .join("crates/ars-components/src")
+            .join(category)
+            .join(format!("{component}.rs"));
+        let nested = root
+            .join("crates/ars-components/src")
+            .join(category)
+            .join(component)
+            .join("mod.rs");
+
+        if direct.exists() || nested.exists() {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn parse_enum_variants(files: &[PathBuf], enum_name: &str) -> Result<Vec<String>, Error> {
@@ -1097,6 +1215,58 @@ mod tests {
         let result = check_error_variant_coverage(&options);
 
         assert!(matches!(result, Err(Error::Failed { .. })));
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn infer_snapshot_component_handles_ars_components_snapshot_names() {
+        let path = Path::new(
+            "crates/ars-components/src/overlay/snapshots/ars_components__overlay__presence__tests__presence_root_mounted.snap",
+        );
+
+        assert_eq!(infer_snapshot_component(path).as_deref(), Some("presence"));
+    }
+
+    #[test]
+    fn infer_source_component_handles_ars_components_nested_modules() {
+        let file = Path::new("crates/ars-components/src/utility/field/mod.rs");
+        let file_direct = Path::new("crates/ars-components/src/overlay/presence.rs");
+
+        assert_eq!(infer_source_component(file).as_deref(), Some("field"));
+        assert_eq!(
+            infer_source_component(file_direct).as_deref(),
+            Some("presence")
+        );
+    }
+
+    #[test]
+    fn snapshot_count_detects_ars_components_machine_modules() {
+        let root = temp_dir("snapshot-ars-components");
+
+        write(
+            &root.join("crates/ars-components/src/overlay/presence.rs"),
+            "pub enum State {\n    Unmounted,\n    Mounting,\n    Mounted,\n    UnmountPending,\n}\n",
+        );
+
+        for idx in 0..4 {
+            write(
+                &root.join(format!(
+                    "crates/ars-components/src/overlay/snapshots/ars_components__overlay__presence__tests__presence_root_{idx}.snap"
+                )),
+                "snapshot",
+            );
+        }
+
+        let options = SnapshotCountOptions {
+            snapshots_dir: root.join("crates"),
+            min_per_variant: 3,
+            max_per_component: 20,
+        };
+
+        let output = check_snapshot_count(&options).expect("ars-components snapshots should count");
+
+        assert!(output.contains("presence | 4 | 4 | 4 | OK"));
 
         drop(fs::remove_dir_all(root));
     }

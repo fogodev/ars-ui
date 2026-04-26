@@ -8,18 +8,27 @@ repository.workspace   = true
 rust-version.workspace = true
 
 [features]
-default          = ["email-validation", "url-validation"]
+default = ["std", "email-validation", "url-validation"]
 email-validation = ["dep:addr-spec"]
-url-validation   = ["dep:url"]
-serde            = []
+serde = []
+std = [
+    "ars-collections/std",
+    "ars-core/std",
+    "ars-i18n/std",
+    "indexmap/std",
+    "regex/std",
+    "url?/std"
+]
+url-validation = ["dep:url"]
 
 [dependencies]
-ars-collections = { path = "../ars-collections" }
-ars-core        = { path = "../ars-core" }
+ars-collections = { path = "../ars-collections", default-features = false }
+ars-core        = { path = "../ars-core", default-features = false }
 ars-i18n        = { path = "../ars-i18n", default-features = false }
-indexmap        = "2.14"
-regex           = "1.12"
-url             = { version = "2.5", optional = true }
+hashbrown       = { version = "0.17", default-features = false, features = ["default-hasher"] }
+indexmap        = { version = "2.14", default-features = false }
+regex           = { version = "1.12", default-features = false }
+url             = { version = "2.5", optional = true, default-features = false }
 
 [dependencies.addr-spec]
 version  = "0.9.1"

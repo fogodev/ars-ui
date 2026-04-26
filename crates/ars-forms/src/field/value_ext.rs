@@ -89,6 +89,11 @@ impl ValueExt for Option<f64> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{
+        string::{String, ToString},
+        vec,
+    };
+
     use super::*;
 
     #[test]

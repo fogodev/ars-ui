@@ -65,8 +65,9 @@ pub struct Context {
     /// True while the exit animation is running.
     pub unmounting: bool,
     /// DOM node ID for the animated element. Set by the adapter after mounting.
-    /// The effect uses this ID with `PlatformEffects` to read computed styles
-    /// and attach animation/transition listeners.
+    /// Adapter-owned animation runtime helpers may use this ID to read computed
+    /// styles and attach animation/transition listeners when translating DOM
+    /// completion into `Event::AnimationEnd`.
     pub node_id: Option<String>,
 }
 ```
@@ -111,45 +112,21 @@ pub struct Props {
 
 When the user has `prefers-reduced-motion: reduce` set in their OS/browser preferences:
 
-1. **All animations MUST complete in 0ms** or be omitted entirely. Presence detects this via `window.matchMedia('(prefers-reduced-motion: reduce)')`.
-2. When reduced motion is active:
-    - `skip_animation` in Props is effectively `true` regardless of its configured value.
-    - The `Mounted → Unmount` transition skips `UnmountPending` entirely and goes directly to `Unmounted`.
-    - Entry animations (`data-ars-state="open"`) still apply but with `animation-duration: 0s` — the element appears instantly.
-3. Presence MUST **not wait** for `animationend` or `transitionend` events when reduced motion is active, as these events may never fire when durations are zero.
-4. The `matchMedia` query is evaluated **once** at effect setup time and cached for the lifecycle of that effect. However, Presence MUST also register a dynamic listener to handle mid-animation preference changes as described below.
+1. The adapter SHOULD resolve that preference into `Props::reduce_motion`.
+2. When `reduce_motion` is true:
+    - entry and exit animations are treated as instant
+    - the `Mounted → Unmount` transition skips `UnmountPending` and goes directly to `Unmounted`
+    - adapters MUST NOT wait for `animationend` / `transitionend`
+3. `skip_animation` is a component-level override for instant exit even when reduced motion is not
+   active.
+4. If an adapter supports live reduced-motion preference changes while an exit animation is in
+   progress, it may immediately dispatch `Event::AnimationEnd`.
 
-**Dynamic `prefers-reduced-motion` Change Listener:**
+**Dynamic `prefers-reduced-motion` Changes:**
 
-Presence MUST register a `change` event listener on the `MediaQueryList` returned by `window.matchMedia("(prefers-reduced-motion: reduce)")` to handle the case where a user enables reduced motion while an exit animation is in progress.
-
-```rust
-// Setup: register alongside the animationend listener in the
-// "listen-animation-end" effect.
-let platform = use_platform_effects();
-
-let cleanup = platform.on_reduced_motion_change(Box::new(move |reduced| {
-    if reduced {
-        // User just enabled reduced motion.
-        // Only fire if the machine is currently in an animating state.
-        if matches!(current_state(), State::UnmountPending) {
-            send(Event::AnimationEnd);
-        }
-    }
-}));
-
-// Cleanup: remove the listener when the effect is disposed or
-// the element unmounts, to prevent leaked listeners.
-on_cleanup(move || {
-    cleanup();
-});
-```
-
-**Behaviour constraints:**
-
-- The listener MUST check the current machine state before firing `Event::AnimationEnd`. If the machine is not in `UnmountPending` (i.e., no animation is running), the `change` event is ignored.
-- Only one `change` listener may be active per Presence instance at any time — it is registered and torn down with the same lifecycle as the `animationend` listener.
-- When the listener fires `AnimationEnd`, the normal transition path applies: `UnmountPending → Unmounted`, and the element is removed from the DOM immediately.
+If an adapter/runtime helper observes a reduced-motion preference change while an exit animation is
+in progress, it may immediately dispatch `Event::AnimationEnd`. The helper must check that the
+machine is still in `UnmountPending` before doing so.
 
 ### 1.6 Page Visibility Pausing
 
@@ -157,7 +134,7 @@ When the page becomes hidden (user switches tabs, minimizes window), animations 
 
 **`visibilitychange` Handling:**
 
-- Listen to `document.addEventListener('visibilitychange', ...)` in the `"listen-animation-end"` effect.
+- Adapter-owned animation runtime helpers may listen to `document.addEventListener('visibilitychange', ...)`.
 - When `document.visibilityState === "hidden"`:
   - Pause the 5000ms fallback timeout by recording elapsed time via `performance.now()`.
   - Browsers may throttle or pause `requestAnimationFrame` callbacks in background tabs — do not rely on rAF for timing while hidden.
@@ -171,17 +148,20 @@ When the page becomes hidden (user switches tabs, minimizes window), animations 
 
 **Timing:**
 
-- All duration calculations in Presence effects MUST use `performance.now()` (monotonic clock) rather than `Date.now()` to avoid issues with system clock changes and to get sub-millisecond precision.
+- All duration calculations in adapter-owned Presence runtime helpers MUST use `performance.now()`
+  (monotonic clock) rather than `Date.now()`.
 
 ### 1.7 Visibility Change Edge Cases
 
-The following edge cases MUST be handled correctly by the visibility-change integration in the `"listen-animation-end"` effect:
+The following edge cases MUST be handled correctly by any visibility-aware Presence runtime helper:
 
 1. **Timeout vs `animationend` race**: When the page returns to visibility, both the resumed fallback timeout and a belated `animationend` event may fire in close succession. The first event to call `send(Event::AnimationEnd)` wins and transitions the machine out of `UnmountPending`. The second call is a **no-op** because the machine has already transitioned to `Unmounted` — the state machine naturally ignores `AnimationEnd` events when not in an animating state. No additional deduplication logic is required.
 
 2. **Element disconnected while tab hidden**: If the element is removed from the DOM while the tab is hidden (e.g., by a parent component unmounting), the visibility-resume handler MUST check `element.isConnected` before calling `getComputedStyle()`. Reading computed style on a disconnected element returns empty/default values and can cause incorrect state transitions. If the element is disconnected, skip the `getComputedStyle()` check and let the normal cleanup path handle unmounting.
 
-3. **Duplicate listener guard**: Only **one** `animationend` listener may be active on the element at any time. The effect MUST track whether a listener is already registered (e.g., via a boolean flag or by storing the listener handle) and skip registration if one exists. This prevents the scenario where repeated visibility toggles (hidden → visible → hidden → visible) accumulate multiple `animationend` listeners, each of which would independently call `send(Event::AnimationEnd)` and potentially interfere with future animation cycles.
+3. **Duplicate listener guard**: Only **one** `animationend` listener may be active on the element
+   at any time. The runtime helper must track whether a listener is already registered and skip
+   duplicate registration.
 
 ### 1.8 Animation Completion Race with Unmount
 
@@ -191,15 +171,17 @@ When a component is being removed from the DOM while an animation is still in pr
 
 2. **Cancel pending animations immediately**: When the component is being removed from the DOM, do NOT wait for `animationend` or `transitionend` events. Use `animation.cancel()` (Web Animations API) or remove the animation class synchronously to halt running animations.
 
-3. **Prevent late callbacks after teardown**: If `animationend` or `transitionend` fires after teardown has started, the callback MUST be a no-op. The `completed` guard (`SharedFlag`) in the `"listen-animation-end"` effect serves this purpose — set it to `true` during cleanup. Adapter-managed node mutation cleanup may also guard detached-node DOM writes where needed.
+3. **Prevent late callbacks after teardown**: If `animationend` or `transitionend` fires after
+   teardown has started, the callback MUST be a no-op. Runtime helpers should guard completion so
+   detached-node callbacks cannot re-enter dropped component state.
 
 4. **State access guard**: Animation callbacks that access component state (context, props, signals) MUST verify the component is still alive before reading or writing state. The exact ownership pattern is adapter-specific; the invariant is that teardown must prevent callbacks from observing dropped state.
 
-5. **Cleanup ordering**: The effect cleanup function MUST:
-    - Set the `completed` flag to `true` (prevents any pending listener from firing)
-    - Cancel the fallback timeout
-    - Remove `animationend` and `transitionend` event listeners
-    - Call `animation.cancel()` on any Web Animations API animations
+5. **Cleanup ordering**: The runtime helper cleanup MUST:
+    - prevent any pending listener from firing
+    - cancel fallback timers
+    - remove `animationend` and `transitionend` listeners
+    - cancel adapter-owned animation handles where applicable
     - All of the above synchronously, in a single synchronous cleanup call
 
 ### 1.9 Full Machine Implementation
@@ -243,61 +225,37 @@ impl ars_core::Machine for Machine {
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
-            // ── Present becomes true ─────────────────────────────────────────
-            // When lazy_mount is true, go through Mounting first so lazy content
-            // can resolve before the entry animation starts. The adapter MUST
-            // dispatch ContentReady after lazy content has settled.
-            (State::Unmounted, Event::Mount) if props.lazy_mount => {
-                Some(TransitionPlan::to(State::Mounting).apply(|ctx| {
+            (State::Unmounted, Event::Mount) if props.lazy_mount => Some(
+                TransitionPlan::to(State::Mounting).apply(|ctx| {
                     ctx.present = true;
                     ctx.mounted = true;
                     ctx.unmounting = false;
-                    // Note: data-ars-state remains unset — entry animation does NOT
-                    // trigger until the transition to Mounted.
-                }).with_named_effect("mounting-timeout", |_ctx, _props, send| {
-                    // Safety-net timeout for Mounting state.
-                    // If ContentReady is never dispatched (lazy content fails to load),
-                    // forcibly transition to Mounted after 5000ms.
-                    let platform = use_platform_effects();
-                    let handle = platform.set_timeout(5000, Box::new(move || {
-                        send(Event::ContentReady);
-                    }));
-                    let pc = platform.clone();
-                    Box::new(move || { pc.clear_timeout(handle); }) as CleanupFn
-                }))
-            }
+                }),
+            ),
             (State::Unmounted, Event::Mount) => Some(TransitionPlan::to(State::Mounted).apply(|ctx| {
                 ctx.present = true;
                 ctx.mounted = true;
                 ctx.unmounting = false;
             })),
-            // Lazy content has settled — now safe to start the entry animation.
-            // The adapter sets data-ars-state="open" on transition to Mounted.
-            (State::Mounting, Event::ContentReady) => Some(TransitionPlan::to(State::Mounted).apply(|ctx| {
-                // Context already has present=true, mounted=true from Mounting.
-                // Entry animation triggers now via data-ars-state="open".
-            })),
-            // `(Mounting, AnimationEnd)` — intentionally ignored. AnimationEnd
-            // during mounting comes from parent animation bubbling (e.g., an
-            // ancestor element's entry animation completing) and does not
-            // affect mount lifecycle. The Mounting state waits exclusively for
-            // `ContentReady` to proceed to `Mounted`.
+            (State::Mounting, Event::ContentReady) => Some(
+                TransitionPlan::to(State::Mounted).apply(|ctx| {
+                    ctx.present = true;
+                    ctx.mounted = true;
+                    ctx.unmounting = false;
+                }),
+            ),
             (State::Mounting, Event::AnimationEnd) => None,
-
-            // If unmount is requested while still mounting, go straight to Unmounted.
             (State::Mounting, Event::Unmount) => Some(TransitionPlan::to(State::Unmounted).apply(|ctx| {
                 ctx.present = false;
                 ctx.mounted = false;
                 ctx.unmounting = false;
             })),
-            // Cancels a pending unmount if present becomes true again during exit.
             (State::UnmountPending, Event::Mount) => Some(TransitionPlan::to(State::Mounted).apply(|ctx| {
                 ctx.present = true;
+                ctx.mounted = true;
                 ctx.unmounting = false;
             })),
-
-            // ── Present becomes false ────────────────────────────────────────
-            (State::Mounted, Event::Unmount) if props.skip_animation => {
+            (State::Mounted, Event::Unmount) if props.skip_animation || props.reduce_motion => {
                 // skip_animation is true (e.g., prefers-reduced-motion) — skip
                 // UnmountPending entirely to avoid waiting for animationend that
                 // will never fire.
@@ -311,65 +269,10 @@ impl ars_core::Machine for Machine {
                 ctx.present = false;
                 ctx.unmounting = true;
                 // mounted remains true — element stays in DOM during exit animation
-            }).with_named_effect("listen-animation-end", |ctx, _props, send| {
-                // Read the DOM node ID from context (set by adapter after mounting).
-                let node_id = match ctx.node_id.clone() {
-                    Some(id) => id,
-                    None => {
-                        // No DOM node ID — cannot detect animation, unmount immediately.
-                        send(Event::AnimationEnd);
-                        return no_cleanup() as CleanupFn;
-                    }
-                };
-
-                // Delegate all animation/transition detection and completion
-                // listening to PlatformEffects. The platform handles:
-                //   - Reading computed styles (animationDuration, transitionDuration)
-                //   - Installing animationend/transitionend listeners
-                //   - The reduced-motion guard (fires immediately if active)
-                //   - The 5000ms fallback timeout
-                //   - Cleanup of listeners and timeouts
-                //
-                // The adapter MUST run the platform call inside a requestAnimationFrame
-                // callback after setting data-ars-state="closed", to ensure the browser
-                // has applied the new styles before reading computed properties.
-                //
-                // **Reflow batching:** All computed style reads MUST be batched
-                // into a single rAF callback to avoid layout thrashing. Cache
-                // detection results per element so that repeated reads within a
-                // frame are free.
-                // Check BOTH `animationDuration` AND `transitionDuration` — not
-                // just animation — to correctly detect transition-only exit
-                // effects.
-                let platform = use_platform_effects();
-                let send_weak = Rc::downgrade(&send);
-
-                // `on_animation_end` installs listeners for animationend and
-                // transitionend on the element identified by `node_id`, reads
-                // computed styles to detect which types are active, handles the
-                // reduced-motion guard (fires callback immediately if reduced
-                // motion is active or both durations are zero), waits for BOTH
-                // animation and transition to complete when both are active, and
-                // installs a 5000ms fallback timeout. Returns a cleanup function.
-                //
-                // Race condition safeguards (handled by the platform):
-                // 1. Verify element is still connected before DOM operations.
-                // 2. Filter events by target to ignore bubbled child events.
-                // 3. Stop propagation to prevent parent animation bubbling.
-                // 4. Only the FIRST completion event triggers the callback;
-                //    all remaining listeners and timers are cancelled immediately.
-                let cleanup = platform.on_animation_end(&node_id, Box::new(move || {
-                    if let Some(send) = send_weak.upgrade() {
-                        send(Event::AnimationEnd);
-                    }
-                }));
-
-                cleanup
             })),
-
-            // ── Animation completes ──────────────────────────────────────────
             (State::UnmountPending, Event::AnimationEnd) => {
                 Some(TransitionPlan::to(State::Unmounted).apply(move |ctx| {
+                    ctx.present = false;
                     ctx.mounted = false;
                     ctx.unmounting = false;
                 }))
@@ -416,63 +319,27 @@ impl ars_core::Machine for Machine {
 }
 ```
 
-> **Animation-agnostic detection:** Presence detects CSS animations and transitions automatically
-> by reading `getComputedStyle()`. No `animation_type` prop is needed. Both `animation-*` and
-> `transition-*` CSS properties are supported simultaneously. The effect inspects
-> `animationName` (for CSS animations) and `transitionProperty` (for CSS transitions) to
-> determine which event listeners to install.
+> **Pure-core rule:** Presence owns only mount/unmount lifecycle state. It does not install DOM
+> listeners or read computed styles inside `transition()`.
 >
-> **Reflow batching for `getComputedStyle()`:** When multiple Presence instances unmount in the same frame (e.g., a Dialog closing its overlay and content simultaneously), each instance's effect reads `getComputedStyle()`. To avoid N forced reflows, the adapter MUST batch all style reads into a single `requestAnimationFrame` callback. Implementation: maintain a per-frame `WeakRef<Element> → CachedStyleDetection` map. The first read for an element computes and caches; subsequent reads within the same frame return the cached result. The cache is cleared at the start of the next frame.
+> **Adapter runtime boundary:** Adapters own the runtime that turns DOM animation completion into
+> `Event::AnimationEnd`. That runtime may read `getComputedStyle()`, wait for rAF, listen for
+> `animationend` / `transitionend`, and install timeouts. Presence only specifies the state machine
+> boundary event.
 >
-> **Both durations checked:** The effect MUST check both `animationDuration` AND `transitionDuration` (not just one) to correctly detect elements that use CSS transitions without CSS animations, and vice versa.
+> **Dead-state prevention:** No Presence instance may remain indefinitely in `Mounting` or
+> `UnmountPending`. If lazy content never settles, adapters must eventually dispatch
+> `ContentReady` or abort the mount. If exit completion never arrives, adapters must eventually
+> dispatch `AnimationEnd`.
 >
-> **5000ms timeout fallback:** If neither `animationend` nor `transitionend` fires within 5000ms (e.g., animation cancelled mid-flight, browser bug, element removed from DOM), the fallback timeout fires `AnimationEnd` to prevent the element from being permanently stuck in `UnmountPending`.
+> **Runtime policy:** The preferred adapter implementation is a shared helper that:
 >
-> **Animation detection is in the effect, not in `transition()`.** The `Mounted → Unmount` transition always enters `UnmountPending` without reading the DOM. The `"listen-animation-end"` effect is responsible for all DOM reads (`getComputedStyle`) and deciding whether to set up listeners or fire `AnimationEnd` immediately. This keeps `transition()` a pure function per the architecture contract (`01-architecture.md` §2.1).
->
-> **Reduced-motion guard (handled by effect):** The effect checks `window.matchMedia('(prefers-reduced-motion: reduce)')` and `getComputedStyle(node).animationDuration` / `transitionDuration`. If reduced motion is active or both durations are `'0s'`, the effect fires `AnimationEnd` immediately, causing the machine to proceed to `Unmounted` without waiting.
->
-> **Fallback timeout (5000ms):** The effect always installs a 5000ms safety-net timeout alongside any event listeners. If neither `animationend` nor `transitionend` fires within 5 seconds (e.g., animation removed mid-flight, browser bug), the timeout fires `AnimationEnd` to prevent a permanent hang. The timeout is cancelled by the effect cleanup on state change. **Only the FIRST `animationend` or `transitionend` event completes the transition. All listeners and timers MUST be cancelled immediately on the first event to prevent double-firing.** When the fallback timeout fires, it must also cancel all remaining event listeners. Conversely, when an event listener fires first, it must cancel the fallback timer.
->
-> **Timeout integration for ALL animation-waiting states:** The 5000ms fallback timeout MUST be applied to every state that waits for an animation or transition event. Specifically:
->
-> - **`UnmountPending`**: Already has the timeout via the `"listen-animation-end"` effect (see implementation above).
-> - **`Mounting` (when entry animation is pending)**: If `ContentReady` is never dispatched (e.g., lazy content fails to load), a 5000ms timeout MUST fire `ContentReady` to prevent the element from being stuck in `Mounting` forever. This is implemented as a `"mounting-timeout"` effect on the `(Unmounted, Mount) when lazy_mount` transition.
-> - **Entry animation (Mounted state)**: If the entry animation (`data-ars-state="open"`) never fires `animationend`, the element is already visible and functional — no timeout is needed (the element is usable despite the missing animation event).
->
-> **Dead state prevention rule**: No Presence state may wait indefinitely for a DOM event. Every state that installs an event listener MUST also install a safety-net timeout. After the timeout fires, the machine forcibly completes the pending transition (close → Unmounted, or mount → Mounted).
->
-> **Animation detection timing:** After setting `data-ars-state="closed"` to trigger the CSS exit animation, the adapter MUST wait one animation frame (`requestAnimationFrame`) before the effect reads `getComputedStyle(node).animationName` or `transitionProperty`. This ensures the browser has applied the new styles. **Safari requirement:** always use `requestAnimationFrame` before reading computed styles — Safari may return stale values without it. Additionally, `getComputedStyle()` caches MUST be invalidated after DOM mutations (class changes, attribute updates) by forcing a style recalculation via `requestAnimationFrame` or accessing `offsetHeight` before reading animation properties.
->
-> **Style detection timing.** After inserting an element into the DOM, `getComputedStyle()`
-> may return stale or empty values for animation/transition properties. Use double-rAF
-> (two nested `requestAnimationFrame` calls) before reading computed styles to ensure
-> the browser has completed style calculation:
->
-> ```js
-> requestAnimationFrame(() => {
->     requestAnimationFrame(() => {
->         const style = getComputedStyle(element);
->         // Now safe to read transitionDuration, animationName, etc.
->     });
-> });
-> ```
->
-> **Mounting state for lazy content:** The `Mounting` state allows lazy content (e.g., suspended components) to resolve before entry animations begin. When `lazy_mount=true`, the `(Unmounted, Mount)` transition goes to `Mounting` instead of `Mounted`. The element is inserted into the DOM but `data-ars-state="open"` is NOT set yet — no entry animation runs. The adapter MUST dispatch `ContentReady` after lazy content has settled, which transitions to `Mounted` and triggers the entry animation. When `lazy_mount=false`, the `Mounting` state is bypassed entirely (`Unmounted` → `Mounted` directly). If `Unmount` is received while in `Mounting`, the machine transitions directly to `Unmounted` without any exit animation.
->
-> **Dual animation/transition support:** The effect listens for BOTH `animationend` AND `transitionend` events. When both an animation and a transition are active, the effect waits for BOTH to complete before sending `AnimationEnd`. Two `SharedFlag` instances (`anim_done`, `trans_done`) track completion; each is pre-set to `true` if that type is not active. Each listener sets its flag and checks the other before firing `AnimationEnd`. If only `transition-property` is detected (no `animation-name`), only `transitionend` is attached, and vice versa. If neither is detected, `AnimationEnd` fires immediately.
->
-> **Transition completion detection.** When `transition-property:all` is set, the browser fires
-> one `transitionend` event per animated property, making event counting unreliable.
-> Instead, use the longest-duration approach:
->
-> 1. Read `getComputedStyle(element).transitionDuration` and `transitionDelay`
-> 2. Parse all durations, compute `max(duration + delay)` for the longest transition
-> 3. Set a `setTimeout(max_total_duration + 10ms)` as the completion signal
-> 4. If a `transitionend` fires for the longest-duration property **BEFORE** the timeout, cancel
->    the timeout and complete immediately
-> 5. The timeout serves as a safety net for cases where `transitionend` doesn't fire
->    (e.g., display:none mid-transition, element removed from DOM)
+> - batches style reads
+> - checks both animation and transition durations
+> - respects reduced motion
+> - installs a bounded timeout fallback
+> - filters bubbled child events
+> - performs idempotent cleanup
 
 ### 1.10 Connect / API
 
@@ -643,7 +510,8 @@ The following overlay components **MUST** wrap their content in a Presence machi
 
 2. **Exit** (visible → unmount):
     - The overlay component sets `data-ars-state="closed"` — CSS exit animation triggers.
-    - Presence transitions to `UnmountPending` and the `"listen-animation-end"` effect attaches `animationend`/`transitionend` listeners.
+    - Presence transitions to `UnmountPending`; adapter-owned animation runtime installs any
+      needed `animationend` / `transitionend` listeners and timeout fallback.
     - On animation/transition end, Presence transitions to `Unmounted` — the adapter removes the element from the DOM.
     - If no exit animation/transition is detected (or `skip_animation` is true), Presence skips `UnmountPending` and unmounts immediately.
 
@@ -666,7 +534,10 @@ Presence MAY integrate optional animation performance monitoring for debugging a
 
 **rAF Stall Detection:**
 
-- During `UnmountPending`, the `"listen-animation-end"` effect schedules a `requestAnimationFrame` callback. If no frame callback fires within **100ms** (indicating the main thread is blocked or the tab is throttled), log a warning: `"Presence: animation frame stall detected (>100ms)"`.
+- During `UnmountPending`, an adapter-owned animation runtime helper may schedule a
+  `requestAnimationFrame` callback. If no frame callback fires within **100ms** (indicating the
+  main thread is blocked or the tab is throttled), log a warning:
+  `"Presence: animation frame stall detected (>100ms)"`.
 - Use `performance.now()` timestamps to measure the gap between requesting and receiving animation frames.
 
 **PerformanceObserver Integration (Optional Debug Mode):**
@@ -693,13 +564,14 @@ To maintain 60fps during Presence enter/exit animations:
 
 On hidden tabs, browsers throttle `requestAnimationFrame` to ≤1fps. To prevent animations from stalling:
 
-1. Presence sets a timeout fallback equal to animation duration + 500ms.
+1. The adapter/runtime helper sets a timeout fallback equal to animation duration + 500ms.
 2. If `animationend`/`transitionend` doesn't fire before the timeout, the state machine force-completes the animation (transitions to the final state).
 3. When the tab becomes visible again (`visibilitychange` event), any pending animations are re-evaluated.
 
-## 11. Platform Implementation: `on_animation_end` (Web)
+## 11. Adapter Runtime Helper (Web)
 
-The `PlatformEffects::on_animation_end(node_id, callback)` method encapsulates the full animation/transition detection algorithm. The web implementation (`WebPlatformEffects`) MUST follow this specification:
+Adapters should centralize Presence exit detection in a shared helper that translates DOM animation
+completion into `Event::AnimationEnd`. A web implementation should follow this specification:
 
 ### 11.1 Detection Phase
 

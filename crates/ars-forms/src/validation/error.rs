@@ -3,6 +3,8 @@
 //! Defines [`Error`], [`ErrorCode`], and [`Errors`] —
 //! the building blocks for reporting field-level validation failures.
 
+use alloc::{string::String, vec::Vec};
+
 use ars_i18n::Locale;
 
 use crate::form::Messages;
@@ -204,6 +206,8 @@ impl Errors {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{string::ToString, vec};
+
     use ars_i18n::locales;
 
     use super::*;
@@ -331,6 +335,7 @@ mod tests {
     #[test]
     fn validation_errors_has_code_matches_pattern_payload() {
         let pattern = String::from(r"^[a-z]+$");
+
         let errors = Errors(vec![Error::pattern(
             pattern.clone(),
             &Messages::default(),

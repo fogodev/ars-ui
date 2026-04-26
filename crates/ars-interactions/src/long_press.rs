@@ -5,7 +5,8 @@
 //! description wiring, and the adapter-facing configuration needed to integrate
 //! timing and cross-interaction cancellation with `Press`.
 
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use alloc::{rc::Rc, string::String};
+use core::{cell::RefCell, time::Duration};
 
 use ars_core::{AttrMap, Callback, ComponentIds, HtmlAttr, MessageFn, SharedState, TimerHandle};
 use ars_i18n::Locale;
@@ -25,10 +26,13 @@ pub enum LongPressState {
     Timing {
         /// The modality that started the hold.
         pointer_type: PointerType,
+
         /// The x-coordinate where the hold began, if available.
         origin_x: Option<f64>,
+
         /// The y-coordinate where the hold began, if available.
         origin_y: Option<f64>,
+
         /// Handle for the pending threshold timer.
         timer_handle: TimerHandle,
     },
@@ -45,8 +49,10 @@ pub enum LongPressState {
 pub enum LongPressEventType {
     /// The hold began and the interaction entered the pending timing state.
     LongPressStart,
+
     /// The threshold elapsed while the hold was still active.
     LongPress,
+
     /// The long press was cancelled before reaching the threshold.
     LongPressCancel,
 }
@@ -159,7 +165,9 @@ impl LongPressResult {
     pub fn description_attrs(&self, ids: &ComponentIds) -> Option<AttrMap> {
         self.config.accessibility_description.as_ref().map(|_desc| {
             let mut desc = AttrMap::new();
+
             desc.set(HtmlAttr::Id, ids.part("long-press-desc"));
+
             desc
         })
     }
@@ -189,6 +197,7 @@ impl LongPressResult {
         timer_handle: TimerHandle,
     ) {
         let mut state = self.state.borrow_mut();
+
         let mut held_modifiers = self.held_modifiers.borrow_mut();
 
         reduce_long_press(
@@ -215,6 +224,7 @@ impl LongPressResult {
     #[must_use]
     pub fn fire_long_press(&mut self, locale: &Locale) -> Option<String> {
         let mut state = self.state.borrow_mut();
+
         let mut held_modifiers = self.held_modifiers.borrow_mut();
 
         let announcement = reduce_long_press(
@@ -233,6 +243,7 @@ impl LongPressResult {
     /// Ends the active long press, cancelling it if the threshold has not fired.
     pub fn end_long_press(&mut self, client_x: Option<f64>, client_y: Option<f64>) {
         let mut state = self.state.borrow_mut();
+
         let mut held_modifiers = self.held_modifiers.borrow_mut();
 
         reduce_long_press(
@@ -249,6 +260,7 @@ impl LongPressResult {
     /// Cancels the active long press without firing the threshold action.
     pub fn cancel_long_press(&mut self, client_x: Option<f64>, client_y: Option<f64>) {
         let mut state = self.state.borrow_mut();
+
         let mut held_modifiers = self.held_modifiers.borrow_mut();
 
         reduce_long_press(
@@ -265,6 +277,7 @@ impl LongPressResult {
     /// Updates the held pointer position, cancelling when movement exceeds the dead-zone.
     pub fn move_long_press(&mut self, client_x: f64, client_y: f64) {
         let mut state = self.state.borrow_mut();
+
         let mut held_modifiers = self.held_modifiers.borrow_mut();
 
         reduce_long_press(
@@ -285,15 +298,11 @@ impl LongPressResult {
 /// below provide the state-machine logic used by unit tests and future adapter
 /// integration.
 #[must_use]
-pub fn use_long_press(config: LongPressConfig, _ids: &ComponentIds) -> LongPressResult {
-    let state = Rc::new(RefCell::new(LongPressState::Idle));
-    let held_modifiers = Rc::new(RefCell::new(KeyModifiers::default()));
-    let is_long_pressing = is_long_pressing(*state.borrow());
-
+pub fn use_long_press(config: LongPressConfig) -> LongPressResult {
     LongPressResult {
-        is_long_pressing,
-        state,
-        held_modifiers,
+        is_long_pressing: false,
+        state: Rc::new(RefCell::new(LongPressState::Idle)),
+        held_modifiers: Rc::new(RefCell::new(KeyModifiers::default())),
         config,
     }
 }
@@ -307,15 +316,19 @@ enum InternalEvent {
         modifiers: KeyModifiers,
         timer_handle: TimerHandle,
     },
+
     TimerFired,
+
     Release {
         client_x: Option<f64>,
         client_y: Option<f64>,
     },
+
     Cancel {
         client_x: Option<f64>,
         client_y: Option<f64>,
     },
+
     Move {
         client_x: f64,
         client_y: f64,
@@ -515,10 +528,9 @@ fn exceeds_move_threshold(origin_x: f64, origin_y: f64, client_x: f64, client_y:
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
-    };
+    use alloc::{format, sync::Arc, vec, vec::Vec};
+    use core::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
 
     use ars_core::{AttrValue, HtmlAttr};
     use ars_i18n::locales;
@@ -628,13 +640,10 @@ mod tests {
     fn long_press_description_attrs_returns_predictable_id() {
         let ids = ComponentIds::from_id("btn-1");
 
-        let result = use_long_press(
-            LongPressConfig {
-                accessibility_description: Some(String::from("Long press for more options")),
-                ..LongPressConfig::default()
-            },
-            &ids,
-        );
+        let result = use_long_press(LongPressConfig {
+            accessibility_description: Some(String::from("Long press for more options")),
+            ..LongPressConfig::default()
+        });
 
         let desc_attrs = result
             .description_attrs(&ids)
@@ -647,16 +656,14 @@ mod tests {
     fn long_press_description_attrs_returns_none_without_description() {
         let ids = ComponentIds::from_id("btn-2");
 
-        let result = use_long_press(LongPressConfig::default(), &ids);
+        let result = use_long_press(LongPressConfig::default());
 
         assert!(result.description_attrs(&ids).is_none());
     }
 
     #[test]
     fn use_long_press_returns_idle_state_and_not_pressing() {
-        let ids = ComponentIds::from_id("btn-3");
-
-        let result = use_long_press(LongPressConfig::default(), &ids);
+        let result = use_long_press(LongPressConfig::default());
 
         assert_eq!(*result.state.borrow(), LongPressState::Idle);
         assert!(!result.is_long_pressing);
@@ -665,9 +672,7 @@ mod tests {
 
     #[test]
     fn begin_long_press_public_method_enters_timing_and_tracks_timer() {
-        let ids = ComponentIds::from_id("btn-4");
-
-        let mut result = use_long_press(LongPressConfig::default(), &ids);
+        let mut result = use_long_press(LongPressConfig::default());
 
         result.begin_long_press(
             PointerType::Touch,
@@ -692,15 +697,10 @@ mod tests {
 
     #[test]
     fn begin_long_press_public_method_ignores_disabled_config() {
-        let ids = ComponentIds::from_id("btn-4c");
-
-        let mut result = use_long_press(
-            LongPressConfig {
-                disabled: true,
-                ..LongPressConfig::default()
-            },
-            &ids,
-        );
+        let mut result = use_long_press(LongPressConfig {
+            disabled: true,
+            ..LongPressConfig::default()
+        });
 
         result.begin_long_press(
             PointerType::Touch,
@@ -719,20 +719,15 @@ mod tests {
     fn repeated_begin_long_press_is_ignored_while_active() {
         let start_calls = Arc::new(AtomicUsize::new(0));
 
-        let ids = ComponentIds::from_id("btn-4b");
-
-        let mut result = use_long_press(
-            LongPressConfig {
-                on_long_press_start: Some({
-                    let start_calls = Arc::clone(&start_calls);
-                    Callback::new(move |_: LongPressEvent| {
-                        start_calls.fetch_add(1, Ordering::SeqCst);
-                    })
-                }),
-                ..LongPressConfig::default()
-            },
-            &ids,
-        );
+        let mut result = use_long_press(LongPressConfig {
+            on_long_press_start: Some({
+                let start_calls = Arc::clone(&start_calls);
+                Callback::new(move |_: LongPressEvent| {
+                    start_calls.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..LongPressConfig::default()
+        });
 
         result.begin_long_press(
             PointerType::Touch,
@@ -764,17 +759,12 @@ mod tests {
 
     #[test]
     fn fire_long_press_public_method_returns_announcement_and_sets_cancel_flag() {
-        let ids = ComponentIds::from_id("btn-5");
-
         let shared_flag = SharedState::new(None);
 
-        let mut result = use_long_press(
-            LongPressConfig {
-                long_press_cancel_flag: Some(shared_flag.clone()),
-                ..LongPressConfig::default()
-            },
-            &ids,
-        );
+        let mut result = use_long_press(LongPressConfig {
+            long_press_cancel_flag: Some(shared_flag.clone()),
+            ..LongPressConfig::default()
+        });
 
         result.begin_long_press(
             PointerType::Keyboard,
@@ -805,9 +795,7 @@ mod tests {
 
     #[test]
     fn fire_long_press_public_method_from_idle_returns_none() {
-        let ids = ComponentIds::from_id("btn-5b");
-
-        let mut result = use_long_press(LongPressConfig::default(), &ids);
+        let mut result = use_long_press(LongPressConfig::default());
 
         let announcement = result.fire_long_press(&locales::en_us());
 
@@ -818,9 +806,7 @@ mod tests {
 
     #[test]
     fn end_long_press_public_method_returns_to_idle_after_fire() {
-        let ids = ComponentIds::from_id("btn-6");
-
-        let mut result = use_long_press(LongPressConfig::default(), &ids);
+        let mut result = use_long_press(LongPressConfig::default());
 
         result.begin_long_press(
             PointerType::Mouse,
@@ -842,20 +828,15 @@ mod tests {
     fn end_long_press_public_method_before_threshold_fires_cancel() {
         let cancel_count = Arc::new(AtomicUsize::new(0));
 
-        let ids = ComponentIds::from_id("btn-6b");
-
-        let mut result = use_long_press(
-            LongPressConfig {
-                on_long_press_cancel: Some({
-                    let cancel_count = Arc::clone(&cancel_count);
-                    Callback::new(move |_: LongPressEvent| {
-                        cancel_count.fetch_add(1, Ordering::SeqCst);
-                    })
-                }),
-                ..LongPressConfig::default()
-            },
-            &ids,
-        );
+        let mut result = use_long_press(LongPressConfig {
+            on_long_press_cancel: Some({
+                let cancel_count = Arc::clone(&cancel_count);
+                Callback::new(move |_: LongPressEvent| {
+                    cancel_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..LongPressConfig::default()
+        });
 
         result.begin_long_press(
             PointerType::Mouse,
@@ -876,20 +857,15 @@ mod tests {
     fn cancel_long_press_public_method_before_threshold_fires_cancel() {
         let cancel_count = Arc::new(AtomicUsize::new(0));
 
-        let ids = ComponentIds::from_id("btn-6c");
-
-        let mut result = use_long_press(
-            LongPressConfig {
-                on_long_press_cancel: Some({
-                    let cancel_count = Arc::clone(&cancel_count);
-                    Callback::new(move |_: LongPressEvent| {
-                        cancel_count.fetch_add(1, Ordering::SeqCst);
-                    })
-                }),
-                ..LongPressConfig::default()
-            },
-            &ids,
-        );
+        let mut result = use_long_press(LongPressConfig {
+            on_long_press_cancel: Some({
+                let cancel_count = Arc::clone(&cancel_count);
+                Callback::new(move |_: LongPressEvent| {
+                    cancel_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..LongPressConfig::default()
+        });
 
         result.begin_long_press(
             PointerType::Pen,
@@ -910,20 +886,15 @@ mod tests {
     fn cancel_long_press_public_method_after_fire_is_noop() {
         let cancel_count = Arc::new(AtomicUsize::new(0));
 
-        let ids = ComponentIds::from_id("btn-6d");
-
-        let mut result = use_long_press(
-            LongPressConfig {
-                on_long_press_cancel: Some({
-                    let cancel_count = Arc::clone(&cancel_count);
-                    Callback::new(move |_: LongPressEvent| {
-                        cancel_count.fetch_add(1, Ordering::SeqCst);
-                    })
-                }),
-                ..LongPressConfig::default()
-            },
-            &ids,
-        );
+        let mut result = use_long_press(LongPressConfig {
+            on_long_press_cancel: Some({
+                let cancel_count = Arc::clone(&cancel_count);
+                Callback::new(move |_: LongPressEvent| {
+                    cancel_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..LongPressConfig::default()
+        });
 
         result.begin_long_press(
             PointerType::Keyboard,
@@ -946,20 +917,15 @@ mod tests {
     fn move_long_press_public_method_cancels_when_threshold_exceeded() {
         let cancel_count = Arc::new(AtomicUsize::new(0));
 
-        let ids = ComponentIds::from_id("btn-6e");
-
-        let mut result = use_long_press(
-            LongPressConfig {
-                on_long_press_cancel: Some({
-                    let cancel_count = Arc::clone(&cancel_count);
-                    Callback::new(move |_: LongPressEvent| {
-                        cancel_count.fetch_add(1, Ordering::SeqCst);
-                    })
-                }),
-                ..LongPressConfig::default()
-            },
-            &ids,
-        );
+        let mut result = use_long_press(LongPressConfig {
+            on_long_press_cancel: Some({
+                let cancel_count = Arc::clone(&cancel_count);
+                Callback::new(move |_: LongPressEvent| {
+                    cancel_count.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+            ..LongPressConfig::default()
+        });
 
         result.begin_long_press(
             PointerType::Touch,
@@ -978,9 +944,7 @@ mod tests {
 
     #[test]
     fn move_long_press_public_method_within_threshold_keeps_active() {
-        let ids = ComponentIds::from_id("btn-6f");
-
-        let mut result = use_long_press(LongPressConfig::default(), &ids);
+        let mut result = use_long_press(LongPressConfig::default());
 
         result.begin_long_press(
             PointerType::Touch,

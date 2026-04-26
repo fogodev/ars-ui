@@ -199,7 +199,7 @@ exist).
 ```rust
 /// Formats a count value as a string with a maximum of 99.
 pub fn format_count(value: u64, locale: &Locale) -> String {
-    let formatter = NumberFormatter::new(locale, NumberFormatOptions::default());
+    let formatter = number::Formatter::new(locale, number::FormatOptions::default());
     if value > 99 {
         format!("{}+", formatter.format(99.0))
     } else {
@@ -211,7 +211,7 @@ pub fn format_count(value: u64, locale: &Locale) -> String {
 ## 4. Internationalization
 
 - Numeric values in badges (e.g. notification counts) are formatted with
-  `NumberFormatter` from `ars-i18n`. When locale is inherited from
+  `number::Formatter` from `ars-i18n`. When locale is inherited from
   `ArsProvider`, adapters should derive the formatter through
   `use_number_formatter(...)`.
 - Textual labels like "New" or "Beta" must come from a localized message catalog; do not

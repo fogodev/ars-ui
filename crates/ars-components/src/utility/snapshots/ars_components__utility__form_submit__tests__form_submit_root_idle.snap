@@ -1,0 +1,40 @@
+---
+source: crates/ars-components/src/utility/form_submit.rs
+assertion_line: 982
+expression: "snapshot_attrs(&service.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "form-submit",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "idle",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "test-form",
+            ),
+        ),
+    ],
+    styles: [],
+}

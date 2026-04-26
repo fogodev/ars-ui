@@ -87,8 +87,8 @@ pub struct Props {
     pub max: f64,
     /// Layout orientation. Controls `aria-orientation` and `data-ars-orientation`.
     pub orientation: Orientation,
-    /// Formatting options passed to ars-i18n NumberFormatter.
-    pub format_options: Option<NumberFormatOptions>,
+    /// Formatting options passed to ars-i18n number::Formatter.
+    pub format_options: Option<number::FormatOptions>,
     // on_value_change callback is registered in the adapter layer, not in Props.
 }
 
@@ -286,7 +286,7 @@ impl<'a> Api<'a> {
         if self.is_complete() {
             return (self.ctx.messages.complete)(&self.ctx.locale);
         }
-        let fmt = NumberFormatter::new(
+        let fmt = number::Formatter::new(
             &self.ctx.locale,
             self.props.format_options.clone().unwrap_or_default(),
         );
@@ -437,7 +437,7 @@ impl Default for Messages {
 }
 impl ComponentMessages for Messages {}
 
-// Note: Percentage values MUST be formatted using `NumberFormatter` with
+// Note: Percentage values MUST be formatted using `number::Formatter` with
 // `style: Percent` for locale-aware display (e.g. "47 %" in French,
 // "47%" in English). See `04-internationalization.md` §NumberFormatter.
 ```
@@ -480,7 +480,7 @@ Progress
 
 ## 4. Internationalization
 
-- `aria-valuetext` uses `NumberFormatter::format_percent()` from `ars-i18n` for locale-aware
+- `aria-valuetext` uses `number::Formatter::format_percent()` from `ars-i18n` for locale-aware
   percentage formatting (e.g. "47 %" in French, "47%" in English). When locale
   is inherited from `ArsProvider`, adapters should derive the formatter through
   `use_number_formatter(...)`.
@@ -523,7 +523,7 @@ Progress
 | `default_value`  | `Option<f64>`             | `number` (50)                | --               | --                         | Only Ark UI has a default value                              |
 | `min` / `max`    | `f64`                     | `number`                     | `max` only       | `minValue` / `maxValue`    | ars-ui and Ark UI have both bounds                           |
 | `indeterminate`  | Derived from `value=None` | --                           | `value=null`     | `isIndeterminate`          | Different representations, same behavior                     |
-| `format_options` | `NumberFormatOptions`     | `NumberFormatOptions`        | --               | `Intl.NumberFormatOptions` | ars-ui and Ark UI match                                      |
+| `format_options` | `number::FormatOptions`   | `NumberFormatOptions`        | --               | `Intl.NumberFormatOptions` | ars-ui and Ark UI match                                      |
 | `orientation`    | `Orientation`             | `'horizontal' \| 'vertical'` | --               | --                         | Added from Ark UI                                            |
 | `locale`         | `Option<Locale>`          | `string`                     | --               | --                         | ars-ui and Ark UI both support locale                        |
 | `getValueLabel`  | --                        | --                           | `fn(value, max)` | `valueLabel: ReactNode`    | ars-ui covers via `Messages` + `value_text()`                |
