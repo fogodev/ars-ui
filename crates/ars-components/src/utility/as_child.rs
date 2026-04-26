@@ -98,10 +98,14 @@ impl AsChildMerge for AttrMap {
 /// - `log::warn!` when `feature = "debug"` is enabled (works on native + wasm
 ///   when the consumer wires a `log` subscriber; this is the structured
 ///   diagnostic path used by the rest of the workspace).
-/// - `eprintln!` when only `debug_assertions` is on and the `std` feature is
-///   active (covers the common `cargo test`/`cargo build` dev case on native
-///   targets, mirroring the stdout branch of
-///   `leptos::logging::console_debug_warn`).
+/// - `eprintln!` when only `debug_assertions` is on, the `std` feature is
+///   active, and the target is **not browser wasm**. The `not all(target_arch
+///   = "wasm32", not(any(target_os = "emscripten", target_os = "wasi")))`
+///   guard mirrors the predicate used by `leptos::logging::console_debug_warn`
+///   to decide between `eprintln!` and `web_sys::console::warn_1`. Browser
+///   wasm targets (`wasm32-unknown-unknown`) intentionally compile out the
+///   fallback so adapters surface the warning via their own
+///   `web_sys::console` plumbing instead.
 ///
 /// On wasm dev builds without `feature = "debug"` the warning is intentionally
 /// silent at the agnostic-core layer — `ars-components` cannot pull in
@@ -118,7 +122,15 @@ fn warn_role_conflict(component: &AttrMap, child: &AttrMap) {
             "as_child: overriding child role '{child_role}' with component role '{component_role}'"
         );
 
-        #[cfg(all(debug_assertions, not(feature = "debug"), feature = "std"))]
+        #[cfg(all(
+            debug_assertions,
+            not(feature = "debug"),
+            feature = "std",
+            not(all(
+                target_arch = "wasm32",
+                not(any(target_os = "emscripten", target_os = "wasi"))
+            ))
+        ))]
         eprintln!(
             "[ars-components] as_child: overriding child role '{child_role}' with component role '{component_role}'"
         );
