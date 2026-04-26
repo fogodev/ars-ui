@@ -34,7 +34,7 @@ AttrMap {
                 "ars-state",
             ),
             String(
-                "open",
+                "closed",
             ),
         ),
     ],

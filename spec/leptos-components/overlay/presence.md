@@ -56,7 +56,7 @@ The public surface matches the full core `Props`: `present`, `lazy_mount`, `skip
 | ------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------- | ----------------------------------------------------- | --------------------------------------------- |
 | `Root` (animated element) | `api.root_attrs()`: `data-ars-scope`, `data-ars-part`, `data-ars-state`, `data-ars-presence` | `will-change` during animation setup/teardown | consumer structural and styling attrs | core data attrs win; `class`/`style` merge additively | adapter-owned attrs on consumer-owned element |
 
-- `data-ars-state` is `"open"` when present, `"closed"` when unmounting. CSS animations target these values.
+- `data-ars-state` is `"open"` only in `Mounted`; `Mounting`, `UnmountPending`, and `Unmounted` expose `"closed"`. CSS animations target the transition into or out of `Mounted`.
 - `data-ars-presence` is `"mounted"` when idle, `"exiting"` during exit animation.
 - The adapter sets `will-change: transform, opacity` before animation starts and removes it after animation completes.
 
@@ -353,7 +353,7 @@ pub fn use_presence(props: presence::Props) -> PresenceHandle {
 ## 26. Adapter Invariants
 
 - Children must be absent from the DOM when the machine is in `Unmounted` state.
-- `data-ars-state` must be `"open"` when present and `"closed"` when unmounting. The adapter must set `"closed"` before the rAF that reads `getComputedStyle()`.
+- `data-ars-state` must be `"open"` only in `Mounted`; `Mounting` stays `"closed"` until `ContentReady`. The adapter must set `"closed"` before the rAF that reads `getComputedStyle()`.
 - `animationend`/`transitionend` listeners must never attach during SSR.
 - Only one `animationend` listener and one `transitionend` listener may be active on the root element at any time.
 - The `completed` guard must be set to `true` synchronously during cleanup, before any listener removal.
@@ -433,7 +433,7 @@ Cheap verification recipe:
 - [ ] `present` prop changes drive `api.sync_present()` via reactive effect.
 - [ ] `Context.node_id` is set after client mount from the root element's ID.
 - [ ] Children are conditionally rendered based on `api.is_mounted()`.
-- [ ] `data-ars-state` is `"open"` when present, `"closed"` when unmounting.
+- [ ] `data-ars-state` is `"open"` only in `Mounted`; `Mounting`, `UnmountPending`, and `Unmounted` are `"closed"`.
 - [ ] `data-ars-presence` is `"mounted"` when idle, `"exiting"` during exit animation.
 - [ ] `animationend` and `transitionend` listeners attach only on `UnmountPending` entry, inside a double-rAF.
 - [ ] `getComputedStyle()` reads are batched into a per-frame cache.

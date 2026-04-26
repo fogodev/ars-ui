@@ -263,7 +263,11 @@ impl<'a> Api<'a> {
             .set(part_attr, part_val)
             .set(
                 HtmlAttr::Data("ars-state"),
-                if self.is_present() { "open" } else { "closed" },
+                if matches!(self.state, State::Mounted) {
+                    "open"
+                } else {
+                    "closed"
+                },
             )
             .set(
                 HtmlAttr::Data("ars-presence"),
@@ -518,6 +522,23 @@ mod tests {
         let api = service.connect(&|_| {});
 
         assert_eq!(api.part_attrs(Part::Root), api.root_attrs());
+    }
+
+    #[test]
+    fn mounting_root_attrs_stay_closed_until_content_ready() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
+
+        drop(service.set_props(Props {
+            present: true,
+            lazy_mount: true,
+            ..test_props()
+        }));
+
+        let attrs = service.connect(&|_| {}).root_attrs();
+
+        assert_eq!(service.state(), &State::Mounting);
+        assert_eq!(attrs.get(&HtmlAttr::Data("ars-state")), Some("closed"));
+        assert_eq!(attrs.get(&HtmlAttr::Data("ars-presence")), Some("mounted"));
     }
 
     #[test]

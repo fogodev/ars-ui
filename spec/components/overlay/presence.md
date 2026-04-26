@@ -388,9 +388,13 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
 
-        // data-ars-state="open" when present, "closed" when unmounting.
-        // CSS exit animations should target [data-ars-state="closed"].
-        attrs.set(HtmlAttr::Data("ars-state"), if self.is_present() { "open" } else { "closed" });
+        // data-ars-state="open" only once lazy content is ready and the machine
+        // has entered Mounted. Mounting and exit phases stay "closed".
+        // CSS entry animations should target the transition into Mounted.
+        attrs.set(
+            HtmlAttr::Data("ars-state"),
+            if matches!(self.state, State::Mounted) { "open" } else { "closed" },
+        );
 
         // data-ars-presence indicates the current animation phase:
         //   "exiting"   — exit animation is playing (element still in DOM)
@@ -450,6 +454,7 @@ The overlay component that composes Presence (Dialog, Tooltip, etc.) is responsi
 ## 4. Internationalization
 
 - No translatable strings. Presence has no user-facing text.
+- `data-ars-state` is `"open"` only in `Mounted`; `Mounting`, `UnmountPending`, and `Unmounted` expose `"closed"`.
 - `data-ars-state` values (`open`, `closed`) and `data-ars-presence` values (`mounted`, `exiting`) are stable API tokens, not localized.
 
 ## 5. CSS Integration
