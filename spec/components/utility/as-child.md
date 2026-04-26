@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility]
 shared_deps: []
 related: []
 references:
-  ark-ui: asChild
-  radix-ui: Slot
+    ark-ui: asChild
+    radix-ui: Slot
 ---
 
 # AsChild
@@ -26,13 +26,15 @@ Use cases:
 
 ```rust
 /// Include in any component's Props struct that supports the as_child pattern.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Props {
     /// When true, render the component's props onto the single child element
     /// rather than the default element.
     pub as_child: bool,
 }
 ```
+
+`Default` lets components compose `Props { as_child: true, ..default() }` without restating the other fields. `Eq` is implied by `bool: Eq` and is added so the derived bound matches the underlying field type.
 
 ### 1.2 Connect / API
 
@@ -83,9 +85,14 @@ When `as_child=true`, no wrapper element is added to the DOM. The child element 
 
 When merging component attributes onto a child element via `as_child`, ARIA attributes follow these rules:
 
-1. **`role` conflicts:** Component role takes precedence. If the child element already has a different `role`, emit a `cfg(debug_assertions)` warning: "as_child: overriding child role '{child_role}' with component role '{component_role}'".
+1. **`role` conflicts:** Component role takes precedence. When the child element already has a different `role`, emit a development warning with message `"as_child: overriding child role '{child_role}' with component role '{component_role}'"`.
 
-2. **`aria-describedby` / `aria-labelledby`:** Concatenate values (space-separated) rather than overwriting. The component's IDs come first: `"{component_ids} {child_ids}"`.
+    The warning compiles in under `cfg(any(debug_assertions, feature = "debug"))` so it auto-fires in any dev build without requiring an explicit feature flag. Emission routes:
+    - `feature = "debug"` enabled → `log::warn!` (structured logging, works on native and wasm whenever the consumer has wired a `log` subscriber). This is the standard diagnostic-build path used elsewhere in the workspace.
+    - `debug_assertions` only, with `feature = "std"` → `eprintln!` on native targets, mirroring the stdout branch of `leptos::logging::console_debug_warn`.
+    - On wasm dev builds without `feature = "debug"`, `ars-components` itself stays silent (it cannot pull `web_sys`). Framework adapters (`ars-leptos`, `ars-dioxus`) are responsible for re-emitting the warning to the browser console, the same way Leptos surfaces its own internal dev warnings via `web_sys::console::warn_1`.
+
+2. **`aria-describedby` / `aria-labelledby`:** Concatenate values (space-separated) with deduplication rather than overwriting. Both sets of IDs end up in the merged value. Token order is unspecified — assistive technology treats these attributes as unordered ID lists, and the merge is implemented via `AttrMap::merge` (see §1.2), which appends component tokens after existing child tokens.
 
 3. **All other ARIA attributes** (`aria-expanded`, `aria-selected`, `aria-controls`, etc.): Component value takes precedence (standard merge rule).
 

@@ -1,5 +1,8 @@
 //! Utility component machines.
 
+/// `as_child` pattern primitives.
+pub mod as_child;
+
 /// Dismissable helpers.
 pub mod dismissable;
 

@@ -1,0 +1,37 @@
+---
+source: crates/ars-components/src/utility/as_child.rs
+expression: snapshot_attrs(&merged)
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "button",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "consumer-link",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}
