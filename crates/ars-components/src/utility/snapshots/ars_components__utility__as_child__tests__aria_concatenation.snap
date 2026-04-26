@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/utility/as_child.rs
+expression: snapshot_attrs(&merged)
+---
+AttrMap {
+    attrs: [
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "child-label component-label",
+            ),
+        ),
+        (
+            Aria(
+                DescribedBy,
+            ),
+            String(
+                "child-hint component-hint",
+            ),
+        ),
+    ],
+    styles: [],
+}

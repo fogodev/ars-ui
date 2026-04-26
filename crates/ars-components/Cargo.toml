@@ -10,12 +10,14 @@ repository.workspace   = true
 [features]
 default = ["std"]
 std     = ["ars-core/std", "ars-forms/std", "ars-i18n/std", "ars-interactions/std"]
+debug   = ["dep:log", "ars-core/debug", "ars-interactions/debug"]
 
 [dependencies]
 ars-core         = { path = "../ars-core", default-features = false }
 ars-forms        = { path = "../ars-forms", default-features = false }
 ars-i18n         = { path = "../ars-i18n", default-features = false }
 ars-interactions = { path = "../ars-interactions", default-features = false }
+log              = { version = "0.4", default-features = false, optional = true }
 
 [dev-dependencies]
 insta    = { version = "1", features = ["yaml"] }

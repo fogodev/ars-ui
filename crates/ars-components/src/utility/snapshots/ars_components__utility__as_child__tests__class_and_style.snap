@@ -1,0 +1,24 @@
+---
+source: crates/ars-components/src/utility/as_child.rs
+expression: snapshot_attrs(&merged)
+---
+AttrMap {
+    attrs: [
+        (
+            Class,
+            String(
+                "base hovered primary",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Width,
+            "100px",
+        ),
+        (
+            Color,
+            "blue",
+        ),
+    ],
+}
