@@ -1,0 +1,1367 @@
+//! Number formatting options and helpers.
+
+use alloc::{format, string::String};
+use core::{
+    fmt::{self, Debug, Display},
+    num::NonZeroU8,
+    str::{self, FromStr},
+};
+
+#[cfg(any(
+    feature = "icu4x",
+    not(all(feature = "web-intl", target_arch = "wasm32"))
+))]
+use fixed_decimal::{Decimal, SignDisplay as FixedSignDisplay};
+pub use icu_experimental::measure::measureunit::MeasureUnit;
+#[cfg(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32")))]
+use {alloc::sync::Arc, icu_experimental::measure::parser::ids::CLDR_IDS_TRIE};
+#[cfg(feature = "icu4x")]
+use {
+    icu::decimal::DecimalFormatter,
+    icu::decimal::{
+        DecimalFormatterPreferences,
+        options::{DecimalFormatterOptions, GroupingStrategy},
+    },
+    icu_experimental::dimension::{
+        currency::{
+            CurrencyCode as IcuCurrencyCode,
+            formatter::{CurrencyFormatter as IcuCurrencyFormatter, CurrencyFormatterPreferences},
+            options::CurrencyFormatterOptions,
+        },
+        percent::{
+            formatter::{PercentFormatter, PercentFormatterPreferences},
+            options::PercentFormatterOptions,
+        },
+        units::{
+            formatter::{UnitsFormatter, UnitsFormatterPreferences},
+            options::{UnitsFormatterOptions, Width},
+        },
+    },
+    tinystr::TinyAsciiStr,
+};
+
+use crate::Locale;
+
+#[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+mod web_intl;
+
+/// Options controlling locale-aware number formatting.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FormatOptions {
+    /// The high-level number style to format.
+    pub style: Style,
+
+    /// The display width to use when formatting [`Style::Unit`] values.
+    pub unit_display: UnitDisplay,
+
+    /// The minimum number of digits to display before the decimal separator.
+    pub min_integer_digits: NonZeroU8,
+
+    /// The minimum number of digits to display after the decimal separator.
+    pub min_fraction_digits: u8,
+
+    /// The maximum number of digits to display after the decimal separator.
+    pub max_fraction_digits: u8,
+
+    /// Whether locale-appropriate grouping separators should be emitted.
+    pub use_grouping: bool,
+
+    /// How positive, negative, and zero values should display a sign.
+    pub sign_display: SignDisplay,
+
+    /// The rounding rule to apply before the number is formatted.
+    pub rounding_mode: RoundingMode,
+}
+
+/// The overall presentation style for formatted numbers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Style {
+    /// A plain decimal number.
+    Decimal,
+
+    /// A percentage value.
+    Percent,
+
+    /// A monetary value in the given ISO 4217 currency.
+    Currency(CurrencyCode),
+
+    /// A measurement value in the given CLDR unit.
+    Unit(MeasureUnit),
+}
+
+/// The width used when formatting measurement units.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UnitDisplay {
+    /// Locale-appropriate long unit names.
+    Long,
+
+    /// Locale-appropriate short unit names.
+    #[default]
+    Short,
+
+    /// Locale-appropriate narrow unit names.
+    Narrow,
+}
+
+/// Sign display policy for formatted numbers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignDisplay {
+    /// Show a sign only for negative values.
+    Auto,
+
+    /// Always show a sign for non-negative and negative values.
+    Always,
+
+    /// Never show a sign.
+    Never,
+
+    /// Show a sign for non-zero values only.
+    ExceptZero,
+
+    /// Show only the negative sign.
+    Negative,
+}
+
+/// Rounding mode used before formatting a value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum RoundingMode {
+    /// Round to nearest, with ties resolved to the nearest even digit.
+    #[default]
+    HalfEven,
+
+    /// Round to nearest, with ties resolved away from zero.
+    HalfUp,
+
+    /// Round to nearest, with ties resolved toward zero.
+    HalfDown,
+
+    /// Round toward positive infinity.
+    Ceiling,
+
+    /// Round toward negative infinity.
+    Floor,
+
+    /// Round toward zero.
+    Truncate,
+}
+
+/// An ISO 4217 currency code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CurrencyCode(
+    /// Uppercase ASCII bytes encoding the currency identifier.
+    pub [u8; 3],
+);
+
+impl CurrencyCode {
+    /// United States Dollar.
+    pub const USD: Self = Self(*b"USD");
+
+    /// Euro.
+    pub const EUR: Self = Self(*b"EUR");
+
+    /// British Pound Sterling.
+    pub const GBP: Self = Self(*b"GBP");
+
+    /// Japanese Yen.
+    pub const JPY: Self = Self(*b"JPY");
+
+    /// Chinese Yuan Renminbi.
+    pub const CNY: Self = Self(*b"CNY");
+
+    /// Return this currency code as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        str::from_utf8(&self.0).expect("CurrencyCode contains valid ASCII")
+    }
+
+    #[cfg(feature = "icu4x")]
+    fn as_icu(self) -> IcuCurrencyCode {
+        let code = TinyAsciiStr::<3>::try_from_utf8(self.as_str().as_bytes())
+            .expect("CurrencyCode contains a valid TinyAsciiStr");
+
+        IcuCurrencyCode(code)
+    }
+}
+
+/// Errors returned when parsing an ISO 4217 currency code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParseCurrencyCodeError {
+    /// The code was not exactly three bytes long.
+    InvalidLength,
+
+    /// The code contained a non-uppercase-ASCII byte.
+    NotUppercaseAscii,
+}
+
+impl Display for ParseCurrencyCodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidLength => {
+                write!(f, "currency code must be exactly 3 uppercase ASCII letters")
+            }
+
+            Self::NotUppercaseAscii => {
+                write!(f, "currency code must contain only uppercase ASCII letters")
+            }
+        }
+    }
+}
+
+impl core::error::Error for ParseCurrencyCodeError {}
+
+impl FromStr for CurrencyCode {
+    type Err = ParseCurrencyCodeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bytes = s.as_bytes();
+
+        if bytes.len() != 3 {
+            return Err(ParseCurrencyCodeError::InvalidLength);
+        }
+
+        if !bytes.iter().all(u8::is_ascii_uppercase) {
+            return Err(ParseCurrencyCodeError::NotUppercaseAscii);
+        }
+
+        Ok(Self([bytes[0], bytes[1], bytes[2]]))
+    }
+}
+
+impl Default for FormatOptions {
+    fn default() -> Self {
+        Self {
+            style: Style::Decimal,
+            unit_display: UnitDisplay::Short,
+            min_integer_digits: NonZeroU8::new(1).expect("hardcoded nonzero"),
+            min_fraction_digits: 0,
+            max_fraction_digits: 3,
+            use_grouping: true,
+            sign_display: SignDisplay::Auto,
+            rounding_mode: RoundingMode::HalfEven,
+        }
+    }
+}
+
+/// A locale-aware formatter for decimals, percents, currencies, and units.
+#[derive(Clone)]
+pub struct Formatter {
+    locale: Locale,
+    options: FormatOptions,
+    decimal_separator: char,
+    grouping_separator: Option<char>,
+    backend: FormatterBackend,
+}
+
+#[derive(Clone)]
+enum FormatterBackend {
+    #[cfg(feature = "icu4x")]
+    Decimal(Arc<DecimalFormatter>),
+
+    #[cfg(feature = "icu4x")]
+    Percent(Arc<PercentFormatter<DecimalFormatter>>),
+
+    #[cfg(feature = "icu4x")]
+    Currency(Arc<IcuCurrencyFormatter>),
+
+    #[cfg(feature = "icu4x")]
+    Unit(Arc<UnitsFormatter>),
+
+    #[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+    WebIntl(Arc<web_intl::WebIntlNumberFormatter>),
+
+    #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
+    Fallback,
+}
+
+impl Debug for Formatter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Formatter")
+            .field("locale", &self.locale)
+            .field("options", &self.options)
+            .field("decimal_separator", &self.decimal_separator)
+            .field("grouping_separator", &self.grouping_separator)
+            .finish()
+    }
+}
+
+impl PartialEq for Formatter {
+    fn eq(&self, other: &Self) -> bool {
+        self.locale == other.locale
+            && self.options == other.options
+            && self.decimal_separator == other.decimal_separator
+            && self.grouping_separator == other.grouping_separator
+    }
+}
+
+impl Eq for Formatter {}
+
+impl Formatter {
+    /// Create a new locale-aware formatter for the given locale and options.
+    #[must_use]
+    pub fn new(locale: &Locale, options: FormatOptions) -> Self {
+        let options = normalize_style_defaults(options);
+
+        let (decimal_separator, grouping_separator) = decimal_and_group_separators(locale);
+
+        let backend = FormatterBackend::for_locale_and_style(locale, &options);
+
+        Self {
+            locale: locale.clone(),
+            options,
+            decimal_separator,
+            grouping_separator: Some(grouping_separator),
+            backend,
+        }
+    }
+
+    /// Format a numeric value according to this formatter's locale and style.
+    #[must_use]
+    pub fn format(&self, value: f64) -> String {
+        match &self.backend {
+            #[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+            FormatterBackend::WebIntl(formatter) => {
+                formatter.format(self.prepare_browser_value(value))
+            }
+
+            #[cfg(feature = "icu4x")]
+            FormatterBackend::Decimal(formatter) => {
+                formatter.format(&self.prepare_decimal(value)).to_string()
+            }
+
+            #[cfg(feature = "icu4x")]
+            FormatterBackend::Percent(formatter) => {
+                formatter.format(&self.prepare_decimal(value)).to_string()
+            }
+
+            #[cfg(feature = "icu4x")]
+            FormatterBackend::Currency(formatter) => {
+                #[cfg(not(feature = "std"))]
+                use alloc::string::ToString as _;
+
+                let Style::Currency(code) = self.options.style else {
+                    unreachable!("currency backend must match currency style");
+                };
+
+                formatter
+                    .format_fixed_decimal(&self.prepare_decimal(value), &code.as_icu())
+                    .to_string()
+            }
+
+            #[cfg(feature = "icu4x")]
+            FormatterBackend::Unit(formatter) => formatter
+                .format_fixed_decimal(&self.prepare_decimal(value))
+                .to_string(),
+
+            #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
+            FormatterBackend::Fallback => fallback_format(value, self),
+        }
+    }
+
+    /// Parse a locale-formatted number back into a numeric value.
+    pub fn parse(&self, input: &str) -> Option<f64> {
+        let parsed = parse_locale_number(input, &self.locale)?;
+
+        if matches!(self.options.style, Style::Percent) {
+            Some(parsed / 100.0)
+        } else {
+            Some(parsed)
+        }
+    }
+
+    /// Return this formatter's decimal separator.
+    #[must_use]
+    pub const fn decimal_separator(&self) -> char {
+        self.decimal_separator
+    }
+
+    /// Return this formatter's grouping separator, when one is known.
+    #[must_use]
+    pub const fn grouping_separator(&self) -> Option<char> {
+        self.grouping_separator
+    }
+
+    /// Format a monetary amount using the given ISO 4217 currency code.
+    #[must_use]
+    pub fn format_currency(&self, amount: f64, currency_code: &str) -> String {
+        let code = currency_code
+            .parse::<CurrencyCode>()
+            .expect("invalid ISO 4217 currency code");
+
+        let precision = iso4217_minor_units(code);
+
+        let mut options = self.options.clone();
+
+        options.style = Style::Currency(code);
+        options.min_fraction_digits = precision;
+        options.max_fraction_digits = precision;
+
+        Self::new(&self.locale, options).format(amount)
+    }
+
+    /// Format a fractional value as a percentage.
+    #[must_use]
+    pub fn format_percent(&self, value: f64, max_fraction_digits: Option<u8>) -> String {
+        let mut options = self.options.clone();
+
+        options.style = Style::Percent;
+        options.min_fraction_digits = 0;
+        options.max_fraction_digits = max_fraction_digits.unwrap_or(0);
+
+        Self::new(&self.locale, options).format(value)
+    }
+
+    /// Format a start/end numeric range using a locale-sensitive separator.
+    #[must_use]
+    pub fn format_range(&self, start: f64, end: f64, locale: &Locale) -> String {
+        let separator = match locale.language() {
+            "fr" => " – ",
+            "ja" | "zh" | "ko" => "〜",
+            _ => "–",
+        };
+
+        format!("{}{}{}", self.format(start), separator, self.format(end))
+    }
+
+    #[cfg(any(
+        feature = "icu4x",
+        not(all(feature = "web-intl", target_arch = "wasm32"))
+    ))]
+    fn prepare_decimal(&self, value: f64) -> Decimal {
+        let rounded = self.prepare_numeric_value(value, true);
+
+        let precision = usize::from(self.options.max_fraction_digits);
+
+        let decimal_literal = if precision == 0 {
+            format!("{rounded:.0}")
+        } else {
+            format!("{rounded:.precision$}")
+        };
+
+        let mut decimal = Decimal::from_str(&decimal_literal).unwrap_or_default();
+
+        decimal.absolute.trim_end();
+
+        decimal
+            .absolute
+            .pad_end(-i16::from(self.options.min_fraction_digits));
+
+        decimal
+            .absolute
+            .pad_start(i16::from(self.options.min_integer_digits.get()));
+
+        decimal.apply_sign_display(self.options.sign_display.into_fixed_decimal());
+
+        decimal
+    }
+
+    #[cfg(all(feature = "web-intl", target_arch = "wasm32"))]
+    const fn prepare_browser_value(&self, value: f64) -> f64 {
+        if value.is_finite() { value } else { 0.0 }
+    }
+
+    #[cfg(not(all(feature = "web-intl", target_arch = "wasm32")))]
+    fn prepare_numeric_value(&self, value: f64, scale_percent: bool) -> f64 {
+        let scaled = if scale_percent && matches!(self.options.style, Style::Percent) {
+            value * 100.0
+        } else {
+            value
+        };
+
+        if !scaled.is_finite() {
+            return 0.0;
+        }
+
+        round_value(
+            scaled,
+            self.options.max_fraction_digits,
+            self.options.rounding_mode,
+        )
+    }
+}
+
+impl FormatterBackend {
+    #[cfg(feature = "icu4x")]
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "Formatter clones share backend state, but ICU4X formatter handles are still thread-affine here."
+    )]
+    fn for_locale_and_style(locale: &Locale, options: &FormatOptions) -> Self {
+        match &options.style {
+            Style::Decimal => Self::Decimal(Arc::new(build_decimal_formatter(locale, options))),
+
+            Style::Percent => {
+                let formatter = PercentFormatter::try_new(
+                    PercentFormatterPreferences::from(locale.as_icu()),
+                    PercentFormatterOptions::default(),
+                )
+                .expect("compiled_data guarantees percent formatter availability");
+
+                Self::Percent(Arc::new(formatter))
+            }
+
+            Style::Currency(_) => {
+                let formatter = IcuCurrencyFormatter::try_new(
+                    CurrencyFormatterPreferences::from(locale.as_icu()),
+                    CurrencyFormatterOptions::default(),
+                )
+                .expect("compiled_data guarantees currency formatter availability");
+
+                Self::Currency(Arc::new(formatter))
+            }
+
+            Style::Unit(unit) => {
+                let unit_id = resolve_measure_unit_id(unit)
+                    .expect("unit formatter requires a resolvable CLDR unit id");
+
+                let mut formatter_options = UnitsFormatterOptions::default();
+
+                formatter_options.width = options.unit_display.into_icu_width();
+
+                let formatter = UnitsFormatter::try_new(
+                    UnitsFormatterPreferences::from(locale.as_icu()),
+                    &unit_id,
+                    formatter_options,
+                )
+                .expect("compiled_data guarantees unit formatter availability");
+
+                Self::Unit(Arc::new(formatter))
+            }
+        }
+    }
+
+    #[cfg(all(not(feature = "icu4x"), feature = "web-intl", target_arch = "wasm32"))]
+    fn for_locale_and_style(locale: &Locale, options: &FormatOptions) -> Self {
+        let formatter = web_intl::WebIntlNumberFormatter::new(locale, options);
+
+        Self::WebIntl(Arc::new(formatter))
+    }
+
+    #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
+    const fn for_locale_and_style(_locale: &Locale, _options: &FormatOptions) -> Self {
+        Self::Fallback
+    }
+}
+
+/// Normalize non-Latin decimal digits into ASCII digits.
+#[must_use]
+pub fn normalize_digits(input: &str) -> String {
+    input
+        .chars()
+        .map(|c| {
+            if c.is_ascii_digit() {
+                c
+            } else if ('\u{0660}'..='\u{0669}').contains(&c) {
+                char::from(b'0' + (c as u32 - 0x0660) as u8)
+            } else if ('\u{06F0}'..='\u{06F9}').contains(&c) {
+                char::from(b'0' + (c as u32 - 0x06F0) as u8)
+            } else if ('\u{0966}'..='\u{096F}').contains(&c) {
+                char::from(b'0' + (c as u32 - 0x0966) as u8)
+            } else if ('\u{09E6}'..='\u{09EF}').contains(&c) {
+                char::from(b'0' + (c as u32 - 0x09E6) as u8)
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
+/// Parse a locale-aware numeric string.
+pub fn parse_locale_number(input: &str, locale: &Locale) -> Option<f64> {
+    let transliterated = normalize_digits(input);
+
+    let (decimal_sep, group_sep) = decimal_and_group_separators(locale);
+
+    let filtered = filter_numeric_characters(&transliterated, decimal_sep, group_sep);
+
+    let chosen_decimal = choose_decimal_separator(&filtered, decimal_sep, group_sep);
+
+    let normalized = normalize_numeric_syntax(&filtered, chosen_decimal);
+
+    normalized.parse::<f64>().ok()
+}
+
+/// Determine the decimal and grouping separators for a locale.
+#[must_use]
+pub fn decimal_and_group_separators(locale: &Locale) -> (char, char) {
+    #[cfg(feature = "icu4x")]
+    {
+        let formatter = DecimalFormatter::try_new(
+            DecimalFormatterPreferences::from(locale.as_icu()),
+            DecimalFormatterOptions::default(),
+        )
+        .expect("compiled_data guarantees decimal formatter availability");
+
+        let formatted = formatter
+            .format(&Decimal::from_str("12345.6").expect("static decimal string must parse"))
+            .to_string();
+
+        parse_separators(&formatted)
+    }
+
+    #[cfg(all(not(feature = "icu4x"), feature = "web-intl", target_arch = "wasm32"))]
+    {
+        web_intl::decimal_and_group_separators(locale)
+    }
+
+    #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
+    {
+        fallback_separators(locale)
+    }
+}
+
+fn filter_numeric_characters(input: &str, decimal_sep: char, group_sep: char) -> String {
+    input
+        .chars()
+        .filter(|c| {
+            c.is_ascii_digit()
+                || matches!(*c, '+' | '-' | '.' | ',')
+                || *c == '\u{2212}'
+                || matches!(*c, '\u{066B}' | '\u{066C}' | '\u{00A0}' | '\u{202F}')
+                || c.is_ascii_whitespace()
+                || *c == decimal_sep
+                || *c == group_sep
+        })
+        .collect()
+}
+
+fn normalize_numeric_syntax(input: &str, decimal_separator: Option<char>) -> String {
+    let mut normalized = String::with_capacity(input.len());
+
+    let mut seen_sign = false;
+
+    for c in input.chars() {
+        if c.is_ascii_digit() {
+            normalized.push(c);
+        } else if matches!(c, '+' | '-' | '\u{2212}') && !seen_sign && normalized.is_empty() {
+            normalized.push(if c == '\u{2212}' { '-' } else { c });
+
+            seen_sign = true;
+        } else if Some(c) == decimal_separator {
+            normalized.push('.');
+        }
+    }
+
+    normalized
+}
+
+fn choose_decimal_separator(input: &str, locale_decimal: char, locale_group: char) -> Option<char> {
+    let locale_decimal_occurs = input.contains(locale_decimal);
+
+    if locale_decimal_occurs {
+        return Some(locale_decimal);
+    }
+
+    if input.contains('\u{066B}') {
+        return Some('\u{066B}');
+    }
+
+    let last = input
+        .char_indices()
+        .rev()
+        .find(|(_, c)| matches!(*c, '.' | ',' | '\u{066B}'));
+
+    let (idx, separator) = last?;
+
+    let digits_after = input[idx + separator.len_utf8()..]
+        .chars()
+        .filter(char::is_ascii_digit)
+        .count();
+
+    let occurrences = input.chars().filter(|c| *c == separator).count();
+
+    let other_separator_present = input
+        .chars()
+        .any(|c| matches!(c, '.' | ',' | '\u{066B}') && c != separator);
+
+    if separator == '\u{066C}' {
+        return None;
+    }
+
+    if separator == locale_group && digits_after == 3 && !other_separator_present {
+        return None;
+    }
+
+    if occurrences > 1 && digits_after == 3 && !other_separator_present {
+        return None;
+    }
+
+    Some(separator)
+}
+
+#[cfg(feature = "icu4x")]
+fn parse_separators(formatted: &str) -> (char, char) {
+    let mut decimal_sep = '.';
+
+    let mut group_sep = ',';
+
+    if let Some((idx, ch)) = formatted
+        .char_indices()
+        .rev()
+        .find(|(_, c)| !c.is_numeric() && !matches!(*c, '+' | '-'))
+    {
+        let has_digit_after = formatted[idx + ch.len_utf8()..]
+            .chars()
+            .any(char::is_numeric);
+
+        if has_digit_after {
+            decimal_sep = ch;
+        }
+    }
+
+    let integer_part = formatted.split(decimal_sep).next().unwrap_or(formatted);
+
+    if let Some(ch) = integer_part
+        .chars()
+        .find(|c| !c.is_numeric() && !matches!(*c, '+' | '-'))
+    {
+        group_sep = ch;
+    }
+
+    (decimal_sep, group_sep)
+}
+
+fn normalize_style_defaults(mut options: FormatOptions) -> FormatOptions {
+    if options.min_fraction_digits == 0 && options.max_fraction_digits == 3 {
+        match options.style {
+            Style::Percent => {
+                options.max_fraction_digits = 0;
+            }
+
+            Style::Currency(code) => {
+                let precision = iso4217_minor_units(code);
+
+                options.min_fraction_digits = precision;
+
+                options.max_fraction_digits = precision;
+            }
+
+            Style::Decimal | Style::Unit(_) => {}
+        }
+    }
+
+    options
+}
+
+fn iso4217_minor_units(code: CurrencyCode) -> u8 {
+    match code.as_str() {
+        "BHD" | "KWD" | "OMR" | "IQD" | "LYD" | "TND" => 3,
+
+        "CLF" | "UYW" => 4,
+
+        "JPY" | "KRW" | "VND" | "ISK" | "CLP" | "UGX" | "GNF" | "XOF" | "XAF" | "XPF" | "RWF"
+        | "DJF" | "KMF" | "VUV" | "PYG" => 0,
+
+        _ => 2,
+    }
+}
+
+#[cfg(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32")))]
+fn resolve_measure_unit_id(unit: &MeasureUnit) -> Option<String> {
+    #[cfg(not(feature = "std"))]
+    use alloc::borrow::ToOwned as _;
+
+    if let Some(id) = unit.id {
+        return Some(id.to_owned());
+    }
+
+    for (candidate, _) in CLDR_IDS_TRIE.iter() {
+        let Ok(parsed) = MeasureUnit::try_from_str(&candidate) else {
+            continue;
+        };
+
+        if parsed == *unit {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+#[cfg(feature = "icu4x")]
+fn build_decimal_formatter(locale: &Locale, options: &FormatOptions) -> DecimalFormatter {
+    let mut formatter_options = DecimalFormatterOptions::default();
+
+    formatter_options.grouping_strategy = Some(if options.use_grouping {
+        GroupingStrategy::Auto
+    } else {
+        GroupingStrategy::Never
+    });
+
+    DecimalFormatter::try_new(
+        DecimalFormatterPreferences::from(locale.as_icu()),
+        formatter_options,
+    )
+    .expect("compiled_data guarantees decimal formatter availability")
+}
+
+#[cfg(any(test, not(all(feature = "web-intl", target_arch = "wasm32"))))]
+fn round_value(value: f64, fraction_digits: u8, mode: RoundingMode) -> f64 {
+    let factor = core_maths::CoreFloat::powi(10_f64, i32::from(fraction_digits));
+
+    let scaled = value * factor;
+
+    let rounded = match mode {
+        RoundingMode::HalfEven => round_half_even(scaled),
+        RoundingMode::HalfUp => round_half_away_from_zero(scaled),
+        RoundingMode::HalfDown => round_half_toward_zero(scaled),
+        RoundingMode::Ceiling => core_maths::CoreFloat::ceil(scaled),
+        RoundingMode::Floor => core_maths::CoreFloat::floor(scaled),
+        RoundingMode::Truncate => core_maths::CoreFloat::trunc(scaled),
+    };
+
+    rounded / factor
+}
+
+#[cfg(any(test, not(all(feature = "web-intl", target_arch = "wasm32"))))]
+fn round_half_even(value: f64) -> f64 {
+    let abs = value.abs();
+
+    let floor = core_maths::CoreFloat::floor(abs);
+
+    let fraction = abs - floor;
+
+    let rounded = if fraction < 0.5 {
+        floor
+    } else if fraction > 0.5 {
+        floor + 1.0
+    } else if core_maths::CoreFloat::rem_euclid(floor, 2.0) == 0.0 {
+        floor
+    } else {
+        floor + 1.0
+    };
+
+    rounded.copysign(value)
+}
+
+#[cfg(any(test, not(all(feature = "web-intl", target_arch = "wasm32"))))]
+fn round_half_away_from_zero(value: f64) -> f64 {
+    let abs = value.abs();
+
+    let floor = core_maths::CoreFloat::floor(abs);
+
+    let fraction = abs - floor;
+
+    let rounded = if fraction >= 0.5 { floor + 1.0 } else { floor };
+
+    rounded.copysign(value)
+}
+
+#[cfg(any(test, not(all(feature = "web-intl", target_arch = "wasm32"))))]
+fn round_half_toward_zero(value: f64) -> f64 {
+    let abs = value.abs();
+
+    let floor = core_maths::CoreFloat::floor(abs);
+
+    let fraction = abs - floor;
+
+    let rounded = if fraction > 0.5 { floor + 1.0 } else { floor };
+
+    rounded.copysign(value)
+}
+
+#[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
+fn fallback_separators(locale: &Locale) -> (char, char) {
+    match locale.language() {
+        "de" | "pt" => (',', '.'),
+
+        "fr" => (',', ' '),
+
+        "ar" => ('٫', '٬'),
+
+        _ => ('.', ','),
+    }
+}
+
+#[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
+fn fallback_format(value: f64, formatter: &Formatter) -> String {
+    let mut output = formatter.prepare_decimal(value).to_string();
+
+    if formatter.decimal_separator != '.' {
+        output = output.replace('.', &String::from(formatter.decimal_separator));
+    }
+
+    output
+}
+
+impl SignDisplay {
+    #[cfg(any(
+        feature = "icu4x",
+        not(all(feature = "web-intl", target_arch = "wasm32"))
+    ))]
+    const fn into_fixed_decimal(self) -> FixedSignDisplay {
+        match self {
+            Self::Auto => FixedSignDisplay::Auto,
+            Self::Always => FixedSignDisplay::Always,
+            Self::Never => FixedSignDisplay::Never,
+            Self::ExceptZero => FixedSignDisplay::ExceptZero,
+            Self::Negative => FixedSignDisplay::Negative,
+        }
+    }
+}
+
+impl UnitDisplay {
+    #[cfg(feature = "icu4x")]
+    const fn into_icu_width(self) -> Width {
+        match self {
+            Self::Long => Width::Long,
+            Self::Short => Width::Short,
+            Self::Narrow => Width::Narrow,
+        }
+    }
+}
+
+#[cfg(all(test, feature = "web-intl", target_arch = "wasm32"))]
+#[path = "../../tests/unit/number_web_intl.rs"]
+mod number_web_intl_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::locales;
+
+    #[test]
+    fn currency_code_rejects_invalid_text_and_roundtrips_valid_codes() {
+        assert_eq!(
+            "usd".parse::<CurrencyCode>(),
+            Err(ParseCurrencyCodeError::NotUppercaseAscii)
+        );
+        assert_eq!(
+            "US".parse::<CurrencyCode>(),
+            Err(ParseCurrencyCodeError::InvalidLength)
+        );
+        assert_eq!(
+            "US1".parse::<CurrencyCode>(),
+            Err(ParseCurrencyCodeError::NotUppercaseAscii)
+        );
+        assert_eq!(
+            "USD"
+                .parse::<CurrencyCode>()
+                .map(|code| String::from(code.as_str())),
+            Ok(String::from("USD"))
+        );
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn number_formatter_debug_includes_locale_and_separator_fields() {
+        let formatter = Formatter::new(&locales::de_de(), FormatOptions::default());
+        let debug = format!("{formatter:?}");
+
+        assert!(debug.contains("Formatter"));
+        assert!(debug.contains("de-DE"));
+        assert!(debug.contains("decimal_separator"));
+        assert!(debug.contains("grouping_separator"));
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn formats_en_us_integers_and_decimals() {
+        let formatter = Formatter::new(&locales::en_us(), FormatOptions::default());
+
+        assert_eq!(formatter.format(1234.0), "1,234");
+        assert_eq!(formatter.format(1234.56), "1,234.56");
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn formats_grouping_and_decimal_separators_for_en_us_and_de_de() {
+        let en_us = Formatter::new(&locales::en_us(), FormatOptions::default());
+
+        let de_de = Formatter::new(&locales::de_de(), FormatOptions::default());
+
+        assert_eq!(en_us.format(1234.56), "1,234.56");
+        assert_eq!(de_de.format(1234.56), "1.234,56");
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn round_trips_parse_for_en_us_and_de_de() {
+        let en_us = Formatter::new(&locales::en_us(), FormatOptions::default());
+
+        let de_de = Formatter::new(&locales::de_de(), FormatOptions::default());
+
+        assert_eq!(en_us.parse("1,234.56"), Some(1234.56));
+        assert_eq!(de_de.parse("1.234,56"), Some(1234.56));
+        assert_eq!(de_de.parse("1.5"), Some(1.5));
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn exposes_decimal_and_grouping_separator_accessors() {
+        let en_us = Formatter::new(&locales::en_us(), FormatOptions::default());
+
+        let de_de = Formatter::new(&locales::de_de(), FormatOptions::default());
+
+        assert_eq!(en_us.decimal_separator(), '.');
+        assert_eq!(en_us.grouping_separator(), Some(','));
+        assert_eq!(de_de.decimal_separator(), ',');
+        assert_eq!(de_de.grouping_separator(), Some('.'));
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn formats_percent_from_fractional_input() {
+        let options = FormatOptions {
+            style: Style::Percent,
+            ..FormatOptions::default()
+        };
+
+        let en_us = Formatter::new(&locales::en_us(), options.clone());
+
+        let de_de = Formatter::new(&locales::de_de(), options);
+
+        assert_eq!(en_us.format(0.47), "47%");
+        assert_eq!(de_de.format(0.47), "47 %");
+        assert_eq!(en_us.format_percent(0.475, Some(1)), "47.5%");
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn parses_percent_back_to_fraction() {
+        let options = FormatOptions {
+            style: Style::Percent,
+            ..FormatOptions::default()
+        };
+
+        let formatter = Formatter::new(&locales::en_us(), options);
+
+        assert_eq!(formatter.parse("47%"), Some(0.47));
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn formats_currency_with_locale_correct_symbol_placement() {
+        let base = Formatter::new(&locales::en_us(), FormatOptions::default());
+
+        let de = Formatter::new(&locales::de_de(), FormatOptions::default());
+
+        let ja = Formatter::new(&locales::ja_jp(), FormatOptions::default());
+
+        assert_eq!(base.format_currency(1234.5, "USD"), "$1,234.50");
+        assert_eq!(de.format_currency(1234.5, "EUR"), "1.234,50 €");
+        assert_eq!(ja.format_currency(1234.5, "JPY"), "￥1,234");
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn formats_unit_values_for_multiple_widths() {
+        let unit = MeasureUnit::try_from_str("kilogram").expect("kilogram is a valid CLDR unit");
+
+        let long = Formatter::new(
+            &locales::en_us(),
+            FormatOptions {
+                style: Style::Unit(unit.clone()),
+                unit_display: UnitDisplay::Long,
+                ..FormatOptions::default()
+            },
+        )
+        .format(5.0);
+
+        let short = Formatter::new(
+            &locales::en_us(),
+            FormatOptions {
+                style: Style::Unit(unit.clone()),
+                unit_display: UnitDisplay::Short,
+                ..FormatOptions::default()
+            },
+        )
+        .format(5.0);
+
+        let narrow = Formatter::new(
+            &locales::en_us(),
+            FormatOptions {
+                style: Style::Unit(unit),
+                unit_display: UnitDisplay::Narrow,
+                ..FormatOptions::default()
+            },
+        )
+        .format(5.0);
+
+        assert_ne!(long, short);
+        assert_ne!(short, narrow);
+        assert!(long.contains("kil"));
+        assert!(short.contains("kg"));
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn parses_numeric_core_from_currency_or_unit_affixed_strings() {
+        let currency = Formatter::new(&locales::en_us(), FormatOptions::default());
+
+        let unit = MeasureUnit::try_from_str("celsius").expect("celsius is a valid CLDR unit");
+
+        let unit_formatter = Formatter::new(
+            &locales::de_de(),
+            FormatOptions {
+                style: Style::Unit(unit),
+                unit_display: UnitDisplay::Short,
+                min_fraction_digits: 1,
+                max_fraction_digits: 1,
+                ..FormatOptions::default()
+            },
+        );
+
+        let currency_text = currency.format_currency(1234.5, "USD");
+
+        let unit_text = unit_formatter.format(37.0);
+
+        assert_eq!(currency.parse(&currency_text), Some(1234.5));
+        assert_eq!(unit_formatter.parse(&unit_text), Some(37.0));
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn parse_returns_none_when_numeric_core_is_missing() {
+        let formatter = Formatter::new(&locales::en_us(), FormatOptions::default());
+
+        assert_eq!(formatter.parse("not a number"), None);
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn normalizes_arabic_indic_digits_during_parse() {
+        let locale = locales::ar();
+
+        let formatter = Formatter::new(&locale, FormatOptions::default());
+
+        assert_eq!(formatter.parse("١٬٢٣٤٫٥٦"), Some(1234.56));
+    }
+
+    #[test]
+    fn normalize_digits_supports_multiple_unicode_decimal_sets() {
+        assert_eq!(normalize_digits("۱۲۳۴۵۶۷۸۹۰"), "1234567890");
+        assert_eq!(normalize_digits("१२३४५६७८९०"), "1234567890");
+        assert_eq!(normalize_digits("১২৩৪৫৬৭৮৯০"), "1234567890");
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn respects_non_uniform_grouping() {
+        let locale = Locale::parse("en-IN").expect("en-IN is a valid locale");
+
+        let formatter = Formatter::new(&locale, FormatOptions::default());
+
+        assert_eq!(formatter.format(1234567.0), "12,34,567");
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn formats_without_grouping_when_disabled() {
+        let formatter = Formatter::new(
+            &locales::en_us(),
+            FormatOptions {
+                use_grouping: false,
+                ..FormatOptions::default()
+            },
+        );
+
+        assert_eq!(formatter.format(1234.56), "1234.56");
+    }
+
+    #[test]
+    fn rounds_values_for_all_rounding_modes() {
+        assert_eq!(round_value(1.25, 1, RoundingMode::HalfEven), 1.2);
+        assert_eq!(round_value(1.35, 1, RoundingMode::HalfEven), 1.4);
+        assert_eq!(round_value(2.5, 0, RoundingMode::HalfEven), 2.0);
+        assert_eq!(round_value(3.5, 0, RoundingMode::HalfEven), 4.0);
+        assert_eq!(round_value(-1.25, 1, RoundingMode::HalfUp), -1.3);
+        assert_eq!(round_value(-1.25, 1, RoundingMode::HalfDown), -1.2);
+        assert_eq!(round_value(1.21, 1, RoundingMode::Ceiling), 1.3);
+        assert_eq!(round_value(-1.21, 1, RoundingMode::Floor), -1.3);
+        assert_eq!(round_value(-1.29, 1, RoundingMode::Truncate), -1.2);
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn sign_display_variants_map_to_fixed_decimal_policies() {
+        assert_eq!(
+            SignDisplay::Auto.into_fixed_decimal(),
+            FixedSignDisplay::Auto
+        );
+        assert_eq!(
+            SignDisplay::Always.into_fixed_decimal(),
+            FixedSignDisplay::Always
+        );
+        assert_eq!(
+            SignDisplay::Never.into_fixed_decimal(),
+            FixedSignDisplay::Never
+        );
+        assert_eq!(
+            SignDisplay::ExceptZero.into_fixed_decimal(),
+            FixedSignDisplay::ExceptZero
+        );
+        assert_eq!(
+            SignDisplay::Negative.into_fixed_decimal(),
+            FixedSignDisplay::Negative
+        );
+    }
+
+    #[test]
+    fn normalizes_currency_style_defaults_from_minor_units() {
+        let bhd = normalize_style_defaults(FormatOptions {
+            style: Style::Currency("BHD".parse::<CurrencyCode>().expect("valid code")),
+            ..FormatOptions::default()
+        });
+
+        let clf = normalize_style_defaults(FormatOptions {
+            style: Style::Currency("CLF".parse::<CurrencyCode>().expect("valid code")),
+            ..FormatOptions::default()
+        });
+
+        let jpy = normalize_style_defaults(FormatOptions {
+            style: Style::Currency(CurrencyCode::JPY),
+            ..FormatOptions::default()
+        });
+
+        assert_eq!((bhd.min_fraction_digits, bhd.max_fraction_digits), (3, 3));
+        assert_eq!((clf.min_fraction_digits, clf.max_fraction_digits), (4, 4));
+        assert_eq!((jpy.min_fraction_digits, jpy.max_fraction_digits), (0, 0));
+        assert_eq!(iso4217_minor_units(CurrencyCode::USD), 2);
+    }
+
+    #[test]
+    fn parses_signed_and_grouped_numbers_with_locale_heuristics() {
+        let en_us = locales::en_us();
+
+        let de_de = locales::de_de();
+
+        let ar = locales::ar();
+
+        assert_eq!(parse_locale_number("-1,234.56", &en_us), Some(-1234.56));
+        assert_eq!(parse_locale_number("−1,234.56", &en_us), Some(-1234.56));
+        assert_eq!(parse_locale_number("+1,234,567", &en_us), Some(1234567.0));
+        assert_eq!(parse_locale_number("+1.234", &de_de), Some(1234.0));
+        assert_eq!(parse_locale_number("١٬٢٣٤", &ar), Some(1234.0));
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn cloned_number_formatters_preserve_formatting_behavior() {
+        let options = FormatOptions {
+            min_fraction_digits: 2,
+            max_fraction_digits: 2,
+            ..FormatOptions::default()
+        };
+
+        let formatter = Formatter::new(&locales::en_us(), options);
+        let cloned = formatter.clone();
+
+        assert_eq!(formatter.format(1234.5), cloned.format(1234.5));
+        assert_eq!(formatter.decimal_separator(), cloned.decimal_separator());
+        assert_eq!(formatter.grouping_separator(), cloned.grouping_separator());
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn format_range_uses_locale_specific_separators() {
+        let formatter = Formatter::new(&locales::en_us(), FormatOptions::default());
+
+        assert_eq!(formatter.format_range(1.0, 2.5, &locales::en_us()), "1–2.5");
+        assert_eq!(formatter.format_range(1.0, 2.5, &locales::fr()), "1 – 2.5");
+        assert_eq!(formatter.format_range(1.0, 2.5, &locales::ja()), "1〜2.5");
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn prepare_decimal_defaults_non_finite_values() {
+        let formatter = Formatter::new(&locales::en_us(), FormatOptions::default());
+
+        assert_eq!(formatter.prepare_decimal(f64::INFINITY), Decimal::default());
+        assert_eq!(
+            formatter.prepare_decimal(f64::NEG_INFINITY),
+            Decimal::default()
+        );
+        assert_eq!(formatter.prepare_decimal(f64::NAN), Decimal::default());
+    }
+
+    #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
+    #[test]
+    fn fallback_format_preserves_digit_padding_and_sign_display() {
+        let formatter = Formatter::new(
+            &locales::de_de(),
+            FormatOptions {
+                min_integer_digits: NonZeroU8::new(3).expect("hardcoded nonzero"),
+                min_fraction_digits: 1,
+                max_fraction_digits: 3,
+                sign_display: SignDisplay::Always,
+                ..FormatOptions::default()
+            },
+        );
+
+        assert_eq!(formatter.format(5.2), "+005,2");
+        assert_eq!(formatter.format(5.0), "+005,0");
+    }
+
+    #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
+    #[test]
+    fn fallback_format_respects_negative_zero_sign_policies() {
+        let auto = Formatter::new(
+            &locales::en_us(),
+            FormatOptions {
+                sign_display: SignDisplay::Auto,
+                ..FormatOptions::default()
+            },
+        );
+        let negative = Formatter::new(
+            &locales::en_us(),
+            FormatOptions {
+                sign_display: SignDisplay::Negative,
+                ..FormatOptions::default()
+            },
+        );
+        let except_zero = Formatter::new(
+            &locales::en_us(),
+            FormatOptions {
+                sign_display: SignDisplay::ExceptZero,
+                ..FormatOptions::default()
+            },
+        );
+
+        assert_eq!(auto.format(-0.0), "-0");
+        assert_eq!(negative.format(-0.0), "0");
+        assert_eq!(except_zero.format(12.0), "+12");
+        assert_eq!(except_zero.format(0.0), "0");
+    }
+
+    #[test]
+    fn choose_decimal_separator_treats_grouping_marks_as_non_decimal() {
+        assert_eq!(choose_decimal_separator("1,234,567", '.', ','), None);
+        assert_eq!(choose_decimal_separator("1.234", ',', '.'), None);
+        assert_eq!(choose_decimal_separator("١٬٢٣٤", '٫', '٬'), None);
+        assert_eq!(choose_decimal_separator("1.234.567", ',', ' '), None);
+        assert_eq!(choose_decimal_separator("1,234.5", '.', ','), Some('.'));
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn parse_separators_handles_suffixes_and_plain_digits() {
+        assert_eq!(parse_separators("37 kg"), ('.', ' '));
+        assert_eq!(parse_separators("1234"), ('.', ','));
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn resolve_measure_unit_id_uses_embedded_cldr_id_when_present() {
+        let mut unit =
+            MeasureUnit::try_from_str("kilogram").expect("kilogram is a valid CLDR unit");
+
+        unit.id = Some("kilogram");
+
+        assert_eq!(
+            resolve_measure_unit_id(&unit),
+            Some(String::from("kilogram"))
+        );
+    }
+
+    #[test]
+    fn round_half_even_rounds_up_when_fraction_exceeds_half() {
+        assert_eq!(round_half_even(1.6), 2.0);
+        assert_eq!(round_half_even(-1.6), -2.0);
+    }
+
+    #[test]
+    fn round_half_up_and_half_down_cover_non_tie_paths() {
+        assert_eq!(round_half_away_from_zero(1.4), 1.0);
+        assert_eq!(round_half_toward_zero(1.6), 2.0);
+    }
+}

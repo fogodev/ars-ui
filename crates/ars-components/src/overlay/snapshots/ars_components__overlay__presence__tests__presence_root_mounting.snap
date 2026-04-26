@@ -1,0 +1,42 @@
+---
+source: crates/ars-components/src/overlay/presence.rs
+assertion_line: 533
+expression: "snapshot_attrs(&service.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-presence",
+            ),
+            String(
+                "mounted",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "presence",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "closed",
+            ),
+        ),
+    ],
+    styles: [],
+}

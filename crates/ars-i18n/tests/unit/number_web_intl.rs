@@ -1,4 +1,4 @@
-//! WASM `NumberFormatter` tests for the `web-intl` backend.
+//! WASM `number::Formatter` tests for the `web-intl` backend.
 //!
 //! Run with:
 //! `wasm-pack test --headless --chrome crates/ars-i18n --no-default-features --features std,web-intl`.
@@ -13,10 +13,7 @@ use js_sys::{
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
-use crate::{
-    CurrencyCode, Locale, NumberFormatOptions as ArsNumberFormatOptions, NumberFormatter,
-    NumberStyle, RoundingMode, SignDisplay, UnitDisplay,
-};
+use crate::{CurrencyCode, Locale, RoundingMode, SignDisplay, UnitDisplay, number};
 
 wasm_bindgen_test_configure!(run_in_browser);
 
@@ -24,10 +21,10 @@ fn locale(tag: &str) -> Locale {
     Locale::parse(tag).expect("test locale should parse")
 }
 
-fn style_options(style: NumberStyle) -> ArsNumberFormatOptions {
-    ArsNumberFormatOptions {
+fn style_options(style: number::Style) -> number::FormatOptions {
+    number::FormatOptions {
         style,
-        ..ArsNumberFormatOptions::default()
+        ..number::FormatOptions::default()
     }
 }
 
@@ -109,7 +106,7 @@ impl Drop for NegativeSignDisplaySupportGuard {
 
 #[wasm_bindgen_test]
 fn web_intl_decimal_formats_en_us_with_grouping_and_decimal_separator() {
-    let formatter = NumberFormatter::new(&locale("en-US"), ArsNumberFormatOptions::default());
+    let formatter = number::Formatter::new(&locale("en-US"), number::FormatOptions::default());
 
     assert_eq!(formatter.format(1234.56), "1,234.56");
     assert_eq!(formatter.decimal_separator(), '.');
@@ -118,7 +115,7 @@ fn web_intl_decimal_formats_en_us_with_grouping_and_decimal_separator() {
 
 #[wasm_bindgen_test]
 fn web_intl_decimal_formats_de_de_with_locale_separators() {
-    let formatter = NumberFormatter::new(&locale("de-DE"), ArsNumberFormatOptions::default());
+    let formatter = number::Formatter::new(&locale("de-DE"), number::FormatOptions::default());
 
     assert_eq!(formatter.format(1234.56), "1.234,56");
     assert_eq!(formatter.decimal_separator(), ',');
@@ -127,7 +124,7 @@ fn web_intl_decimal_formats_de_de_with_locale_separators() {
 
 #[wasm_bindgen_test]
 fn web_intl_decimal_formats_arabic_indic_digits() {
-    let formatter = NumberFormatter::new(&locale("ar-EG"), ArsNumberFormatOptions::default());
+    let formatter = number::Formatter::new(&locale("ar-EG"), number::FormatOptions::default());
 
     let formatted = formatter.format(1234.56);
 
@@ -138,7 +135,7 @@ fn web_intl_decimal_formats_arabic_indic_digits() {
 
 #[wasm_bindgen_test]
 fn web_intl_percent_preserves_fractional_input_semantics() {
-    let formatter = NumberFormatter::new(&locale("en-US"), style_options(NumberStyle::Percent));
+    let formatter = number::Formatter::new(&locale("en-US"), style_options(number::Style::Percent));
 
     assert_eq!(formatter.format(0.47), "47%");
     assert_eq!(formatter.format_percent(0.47, None), "47%");
@@ -148,9 +145,9 @@ fn web_intl_percent_preserves_fractional_input_semantics() {
 
 #[wasm_bindgen_test]
 fn web_intl_currency_uses_iso_minor_unit_defaults() {
-    let en = NumberFormatter::new(&locale("en-US"), ArsNumberFormatOptions::default());
+    let en = number::Formatter::new(&locale("en-US"), number::FormatOptions::default());
 
-    let ja = NumberFormatter::new(&locale("ja-JP"), ArsNumberFormatOptions::default());
+    let ja = number::Formatter::new(&locale("ja-JP"), number::FormatOptions::default());
 
     assert_eq!(en.format_currency(1234.5, "USD"), "$1,234.50");
     assert_eq!(ja.format_currency(1234.5, "JPY"), "￥1,234");
@@ -158,9 +155,9 @@ fn web_intl_currency_uses_iso_minor_unit_defaults() {
 
 #[wasm_bindgen_test]
 fn web_intl_currency_and_decimal_output_round_trip_through_parse() {
-    let de = NumberFormatter::new(&locale("de-DE"), ArsNumberFormatOptions::default());
+    let de = number::Formatter::new(&locale("de-DE"), number::FormatOptions::default());
 
-    let currency = NumberFormatter::new(&locale("en-US"), ArsNumberFormatOptions::default());
+    let currency = number::Formatter::new(&locale("en-US"), number::FormatOptions::default());
 
     let decimal_text = de.format(1234.56);
 
@@ -172,7 +169,7 @@ fn web_intl_currency_and_decimal_output_round_trip_through_parse() {
 
 #[wasm_bindgen_test]
 fn web_intl_parse_accepts_unicode_minus_from_browser_shaped_output() {
-    let formatter = NumberFormatter::new(&locale("sv-SE"), ArsNumberFormatOptions::default());
+    let formatter = number::Formatter::new(&locale("sv-SE"), number::FormatOptions::default());
 
     let positive = formatter.format(1234.5);
     let negative = formatter.format(-1234.5);
@@ -189,12 +186,12 @@ fn web_intl_parse_accepts_unicode_minus_from_browser_shaped_output() {
 fn web_intl_unit_formatting_uses_browser_backend() {
     let unit = crate::MeasureUnit::try_from_str("kilogram").expect("kilogram should parse");
 
-    let formatter = NumberFormatter::new(
+    let formatter = number::Formatter::new(
         &locale("en-US"),
-        ArsNumberFormatOptions {
-            style: NumberStyle::Unit(unit),
+        number::FormatOptions {
+            style: number::Style::Unit(unit),
             unit_display: UnitDisplay::Short,
-            ..ArsNumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     );
 
@@ -207,14 +204,14 @@ fn web_intl_unit_formatting_uses_browser_backend() {
 fn web_intl_unsupported_units_fall_back_to_decimal_formatting() {
     let (unit, unit_id) = unsupported_browser_measure_unit();
 
-    let decimal = NumberFormatter::new(&locale("en-US"), ArsNumberFormatOptions::default());
+    let decimal = number::Formatter::new(&locale("en-US"), number::FormatOptions::default());
 
-    let formatter = NumberFormatter::new(
+    let formatter = number::Formatter::new(
         &locale("en-US"),
-        ArsNumberFormatOptions {
-            style: NumberStyle::Unit(unit),
+        number::FormatOptions {
+            style: number::Style::Unit(unit),
             unit_display: UnitDisplay::Short,
-            ..ArsNumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     );
 
@@ -231,14 +228,14 @@ fn web_intl_units_fall_back_to_decimal_when_supported_values_of_is_unavailable()
 
     let unit = crate::MeasureUnit::try_from_str("kilogram").expect("kilogram should parse");
 
-    let decimal = NumberFormatter::new(&locale("en-US"), ArsNumberFormatOptions::default());
+    let decimal = number::Formatter::new(&locale("en-US"), number::FormatOptions::default());
 
-    let formatter = NumberFormatter::new(
+    let formatter = number::Formatter::new(
         &locale("en-US"),
-        ArsNumberFormatOptions {
-            style: NumberStyle::Unit(unit),
+        number::FormatOptions {
+            style: number::Style::Unit(unit),
             unit_display: UnitDisplay::Short,
-            ..ArsNumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     );
 
@@ -260,12 +257,12 @@ fn web_intl_rounding_modes_cover_remaining_browser_mappings() {
     ];
 
     for (rounding_mode, value, expected) in cases {
-        let formatter = NumberFormatter::new(
+        let formatter = number::Formatter::new(
             &locale("en-US"),
-            ArsNumberFormatOptions {
+            number::FormatOptions {
                 max_fraction_digits: 1,
                 rounding_mode,
-                ..ArsNumberFormatOptions::default()
+                ..number::FormatOptions::default()
             },
         );
 
@@ -275,11 +272,11 @@ fn web_intl_rounding_modes_cover_remaining_browser_mappings() {
 
 #[wasm_bindgen_test]
 fn web_intl_grouping_flag_is_reflected_in_output() {
-    let formatter = NumberFormatter::new(
+    let formatter = number::Formatter::new(
         &locale("en-US"),
-        ArsNumberFormatOptions {
+        number::FormatOptions {
             use_grouping: false,
-            ..ArsNumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     );
 
@@ -289,12 +286,12 @@ fn web_intl_grouping_flag_is_reflected_in_output() {
 
 #[wasm_bindgen_test]
 fn web_intl_normalizes_inverted_fraction_digit_bounds_before_formatting() {
-    let formatter = NumberFormatter::new(
+    let formatter = number::Formatter::new(
         &locale("en-US"),
-        ArsNumberFormatOptions {
+        number::FormatOptions {
             min_fraction_digits: 3,
             max_fraction_digits: 1,
-            ..ArsNumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     );
 
@@ -303,23 +300,23 @@ fn web_intl_normalizes_inverted_fraction_digit_bounds_before_formatting() {
 
 #[wasm_bindgen_test]
 fn web_intl_clamps_out_of_range_digit_bounds_before_formatting() {
-    let actual = NumberFormatter::new(
+    let actual = number::Formatter::new(
         &locale("en-US"),
-        ArsNumberFormatOptions {
+        number::FormatOptions {
             min_integer_digits: NonZeroU8::new(42).expect("42 should be non-zero"),
             min_fraction_digits: 150,
             max_fraction_digits: 200,
-            ..ArsNumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     );
 
-    let expected = NumberFormatter::new(
+    let expected = number::Formatter::new(
         &locale("en-US"),
-        ArsNumberFormatOptions {
+        number::FormatOptions {
             min_integer_digits: NonZeroU8::new(21).expect("21 should be non-zero"),
             min_fraction_digits: 100,
             max_fraction_digits: 100,
-            ..ArsNumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     );
 
@@ -328,11 +325,11 @@ fn web_intl_clamps_out_of_range_digit_bounds_before_formatting() {
 
 #[wasm_bindgen_test]
 fn web_intl_sign_display_is_reflected_in_output() {
-    let formatter = NumberFormatter::new(
+    let formatter = number::Formatter::new(
         &locale("en-US"),
-        ArsNumberFormatOptions {
+        number::FormatOptions {
             sign_display: SignDisplay::Always,
-            ..ArsNumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     );
 
@@ -341,19 +338,19 @@ fn web_intl_sign_display_is_reflected_in_output() {
 
 #[wasm_bindgen_test]
 fn web_intl_other_sign_display_variants_are_preserved() {
-    let never = NumberFormatter::new(
+    let never = number::Formatter::new(
         &locale("en-US"),
-        ArsNumberFormatOptions {
+        number::FormatOptions {
             sign_display: SignDisplay::Never,
-            ..ArsNumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     );
 
-    let except_zero = NumberFormatter::new(
+    let except_zero = number::Formatter::new(
         &locale("en-US"),
-        ArsNumberFormatOptions {
+        number::FormatOptions {
             sign_display: SignDisplay::ExceptZero,
-            ..ArsNumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     );
 
@@ -364,19 +361,19 @@ fn web_intl_other_sign_display_variants_are_preserved() {
 
 #[wasm_bindgen_test]
 fn web_intl_negative_sign_display_differs_from_auto_for_negative_zero() {
-    let auto = NumberFormatter::new(
+    let auto = number::Formatter::new(
         &locale("en-US"),
-        ArsNumberFormatOptions {
+        number::FormatOptions {
             sign_display: SignDisplay::Auto,
-            ..ArsNumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     );
 
-    let negative = NumberFormatter::new(
+    let negative = number::Formatter::new(
         &locale("en-US"),
-        ArsNumberFormatOptions {
+        number::FormatOptions {
             sign_display: SignDisplay::Negative,
-            ..ArsNumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     );
 
@@ -388,11 +385,11 @@ fn web_intl_negative_sign_display_differs_from_auto_for_negative_zero() {
 fn web_intl_negative_sign_display_falls_back_when_browser_rejects_it() {
     let _guard = NegativeSignDisplaySupportGuard::unsupported();
 
-    let formatter = NumberFormatter::new(
+    let formatter = number::Formatter::new(
         &locale("en-US"),
-        ArsNumberFormatOptions {
+        number::FormatOptions {
             sign_display: SignDisplay::Negative,
-            ..ArsNumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     );
 
@@ -401,12 +398,12 @@ fn web_intl_negative_sign_display_falls_back_when_browser_rejects_it() {
 
 #[wasm_bindgen_test]
 fn web_intl_rounding_mode_half_even_matches_browser_support() {
-    let formatter = NumberFormatter::new(
+    let formatter = number::Formatter::new(
         &locale("en-US"),
-        ArsNumberFormatOptions {
+        number::FormatOptions {
             max_fraction_digits: 1,
             rounding_mode: RoundingMode::HalfEven,
-            ..ArsNumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     );
 
@@ -418,21 +415,21 @@ fn web_intl_rounding_mode_half_even_matches_browser_support() {
 fn web_intl_unit_display_variants_cover_browser_option_mapping() {
     let unit = crate::MeasureUnit::try_from_str("kilogram").expect("kilogram should parse");
 
-    let long = NumberFormatter::new(
+    let long = number::Formatter::new(
         &locale("en-US"),
-        ArsNumberFormatOptions {
-            style: NumberStyle::Unit(unit.clone()),
+        number::FormatOptions {
+            style: number::Style::Unit(unit.clone()),
             unit_display: UnitDisplay::Long,
-            ..ArsNumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     );
 
-    let narrow = NumberFormatter::new(
+    let narrow = number::Formatter::new(
         &locale("en-US"),
-        ArsNumberFormatOptions {
-            style: NumberStyle::Unit(unit),
+        number::FormatOptions {
+            style: number::Style::Unit(unit),
             unit_display: UnitDisplay::Narrow,
-            ..ArsNumberFormatOptions::default()
+            ..number::FormatOptions::default()
         },
     );
 

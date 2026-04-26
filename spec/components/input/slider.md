@@ -186,8 +186,8 @@ pub struct Props {
     /// Formatter for the current value used specifically for `aria-valuetext` on the thumb element.
     /// When `Some`, the returned string is set as `aria-valuetext`, enabling screen readers to
     /// announce a human-readable representation (e.g., "$50" or "50 percent") instead of a raw number.
-    /// Integrates with `NumberFormatter` for locale-aware display: pass the value through
-    /// `NumberFormatter::format()` inside the callback to get locale-appropriate grouping and
+    /// Integrates with `number::Formatter` for locale-aware display: pass the value through
+    /// `number::Formatter::format()` inside the callback to get locale-appropriate grouping and
     /// decimal separators (e.g., "1.234,56" in de-DE).
     /// When `None`, falls back to `value_format` if set, otherwise uses the raw numeric value.
     pub format_value: Option<Callback<f64, String>>,
@@ -251,10 +251,10 @@ impl Default for Props {
 
 ### 1.5 Locale-Aware Value Display
 
-Slider and RangeSlider MUST format all user-visible numeric values using the resolved locale's `NumberFormatter`:
+Slider and RangeSlider MUST format all user-visible numeric values using the resolved locale's `number::Formatter`:
 
 - **Value labels**: The current value displayed near the thumb (e.g., tooltip or adjacent text) MUST be formatted with locale-appropriate decimal and grouping separators.
-- **Tick mark labels**: If `marks` are provided with numeric labels, each label MUST be formatted through `NumberFormatter`.
+- **Tick mark labels**: If `marks` are provided with numeric labels, each label MUST be formatted through `number::Formatter`.
 - **Min/max labels**: If displayed, min and max values MUST use locale formatting.
 - **`aria-valuetext`**: When a custom `value_label` function is not provided, `aria-valuetext` MUST contain the locale-formatted value (e.g., `"1.234,56"` in de-DE).
 
@@ -900,7 +900,7 @@ Slider
 
 - **Locale resolution**: The effective locale is `props.locale.unwrap_or_else(|| context_locale())`.
 - **RTL**: Arrow keys swap direction for horizontal sliders. Thumb and range positions mirror.
-- **`aria-valuetext`**: Uses `NumberFormatter` to format value per the resolved locale.
+- **`aria-valuetext`**: Uses `number::Formatter` to format value per the resolved locale.
 - **Output display**: Formatted per the resolved locale.
 - **Marks labels**: User-provided, localized by consumer.
 - **Percentage display**: Formatted per locale in the Output part.

@@ -4,12 +4,17 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use ars_components::overlay::presence;
+use ars_core::{ConnectApi, HtmlAttr};
 use dioxus::dioxus_core::{NoOpMutations, ScopeId};
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
 use super::{test_support, test_support::*, *};
 
 wasm_bindgen_test_configure!(run_in_browser);
+
+type PresenceDerivedSnapshot = (bool, bool, bool, Option<String>, Option<String>);
+type PresenceSnapshot = (PresenceDerivedSnapshot, presence::State);
 
 #[wasm_bindgen_test]
 fn use_machine_updates_state_on_wasm() {
@@ -142,6 +147,125 @@ fn derive_and_reactive_props_sync_on_wasm() {
             ((false, 0), PropState::Off, 0),
             ((true, 0), PropState::On, 0),
             ((true, 1), PropState::On, 1),
+        ]
+    );
+}
+
+#[wasm_bindgen_test]
+fn presence_machine_exposes_live_presence_attrs_on_wasm() {
+    let snapshots = Rc::new(RefCell::new(Vec::<PresenceSnapshot>::new()));
+
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "Dioxus root props are moved into the render function."
+    )]
+    fn app(snapshots: Rc<RefCell<Vec<PresenceSnapshot>>>) -> Element {
+        let machine = use_machine::<presence::Machine>(presence::Props {
+            id: String::from("presence"),
+            present: false,
+            lazy_mount: false,
+            skip_animation: false,
+            reduce_motion: false,
+        });
+
+        let derived = machine.derive(|api| {
+            (
+                api.is_present(),
+                api.is_mounted(),
+                api.is_unmounting(),
+                api.root_attrs()
+                    .get(&HtmlAttr::Data("ars-state"))
+                    .map(str::to_owned),
+                api.part_attrs(presence::Part::Root)
+                    .get(&HtmlAttr::Data("ars-presence"))
+                    .map(str::to_owned),
+            )
+        });
+
+        let mut phase = use_signal(|| 0u8);
+
+        snapshots
+            .borrow_mut()
+            .push((derived(), *machine.state.peek()));
+
+        match phase() {
+            0 => {
+                phase.set(1);
+                machine.send.call(presence::Event::Mount);
+            }
+
+            1 => {
+                phase.set(2);
+                machine.send.call(presence::Event::Unmount);
+            }
+
+            2 => {
+                phase.set(3);
+
+                machine.send.call(presence::Event::AnimationEnd);
+            }
+
+            _ => {}
+        }
+
+        rsx! {
+            div {}
+        }
+    }
+
+    let mut dom = VirtualDom::new_with_props(app, Rc::clone(&snapshots));
+
+    dom.rebuild_in_place();
+    dom.mark_dirty(ScopeId::APP);
+    dom.render_immediate(&mut NoOpMutations);
+    dom.mark_dirty(ScopeId::APP);
+    dom.render_immediate(&mut NoOpMutations);
+    dom.mark_dirty(ScopeId::APP);
+    dom.render_immediate(&mut NoOpMutations);
+
+    assert_eq!(
+        snapshots.borrow().as_slice(),
+        &[
+            (
+                (
+                    false,
+                    false,
+                    false,
+                    Some(String::from("closed")),
+                    Some(String::from("mounted")),
+                ),
+                presence::State::Unmounted,
+            ),
+            (
+                (
+                    true,
+                    true,
+                    false,
+                    Some(String::from("open")),
+                    Some(String::from("mounted")),
+                ),
+                presence::State::Mounted,
+            ),
+            (
+                (
+                    false,
+                    true,
+                    true,
+                    Some(String::from("closed")),
+                    Some(String::from("exiting")),
+                ),
+                presence::State::UnmountPending,
+            ),
+            (
+                (
+                    false,
+                    false,
+                    false,
+                    Some(String::from("closed")),
+                    Some(String::from("mounted")),
+                ),
+                presence::State::Unmounted,
+            ),
         ]
     );
 }

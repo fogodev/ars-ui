@@ -1,31 +1,33 @@
-//! Form runtime context, localized messages, component machine, and focus
-//! helpers.
+//! Form runtime context, localized messages, and focus helpers.
 
-pub mod component;
 mod context;
 mod messages;
 
-pub use component::ValidationBehavior;
+use alloc::string::String;
+
 pub use context::{AnyValidator, Context, CrossFieldValidator, Data, Mode};
+use hashbrown::DefaultHashBuilder;
 use indexmap::IndexMap;
 pub use messages::Messages;
 
 use crate::field::Descriptors;
 
+type OrderedIndexMap<K, V> = IndexMap<K, V, DefaultHashBuilder>;
+
 /// Find the first invalid field and return its input ID.
 ///
 /// Iterates fields in DOM order (which is registration order in the
-/// [`IndexMap`]) and finds the first with a validation error. Returns
+/// [`OrderedIndexMap`]) and finds the first with a validation error. Returns
 /// `None` if all fields are valid or the invalid field has no entry
 /// in `field_descriptors`.
 ///
 /// Must be called after all async validators have settled (i.e., after
-/// `form_submit::Machine` enters `ValidationFailed` state, not while in
-/// `Validating`).
+/// `ars_components::utility::form_submit::Machine` enters
+/// `ValidationFailed` state, not while in `Validating`).
 #[must_use]
 pub fn first_invalid_field_id(
     form: &Context,
-    field_descriptors: &IndexMap<String, Descriptors>,
+    field_descriptors: &OrderedIndexMap<String, Descriptors>,
 ) -> Option<String> {
     form.fields
         .iter()
@@ -36,6 +38,11 @@ pub fn first_invalid_field_id(
 
 #[cfg(test)]
 mod tests {
+    use alloc::{
+        string::{String, ToString},
+        vec,
+    };
+
     use super::*;
     use crate::{
         field::Value,
@@ -50,7 +57,7 @@ mod tests {
         form
     }
 
-    fn make_descriptors(form_id: &str, names: &[&str]) -> IndexMap<String, Descriptors> {
+    fn make_descriptors(form_id: &str, names: &[&str]) -> OrderedIndexMap<String, Descriptors> {
         names
             .iter()
             .map(|name| ((*name).to_string(), Descriptors::new(form_id, name)))
@@ -69,15 +76,20 @@ mod tests {
     #[test]
     fn returns_none_when_all_valid() {
         let form = make_form_with_fields(&["email", "name"]);
+
         let descriptors = make_descriptors("form", &["email", "name"]);
+
         assert_eq!(first_invalid_field_id(&form, &descriptors), None);
     }
 
     #[test]
     fn returns_first_invalid_field_input_id() {
         let mut form = make_form_with_fields(&["email", "name"]);
+
         set_field_invalid(&mut form, "email");
+
         let descriptors = make_descriptors("form", &["email", "name"]);
+
         assert_eq!(
             first_invalid_field_id(&form, &descriptors),
             Some("form-email-input".into())
@@ -87,8 +99,11 @@ mod tests {
     #[test]
     fn returns_second_field_when_first_is_valid() {
         let mut form = make_form_with_fields(&["email", "name"]);
+
         set_field_invalid(&mut form, "name");
+
         let descriptors = make_descriptors("form", &["email", "name"]);
+
         assert_eq!(
             first_invalid_field_id(&form, &descriptors),
             Some("form-name-input".into())
@@ -98,18 +113,24 @@ mod tests {
     #[test]
     fn returns_none_when_invalid_field_not_in_descriptors() {
         let mut form = make_form_with_fields(&["email", "name"]);
+
         set_field_invalid(&mut form, "email");
+
         // Descriptors only have "name", not "email"
         let descriptors = make_descriptors("form", &["name"]);
+
         assert_eq!(first_invalid_field_id(&form, &descriptors), None);
     }
 
     #[test]
     fn respects_insertion_order_for_multiple_invalid() {
         let mut form = make_form_with_fields(&["email", "name", "phone"]);
+
         set_field_invalid(&mut form, "name");
         set_field_invalid(&mut form, "email");
+
         let descriptors = make_descriptors("form", &["email", "name", "phone"]);
+
         // email was registered first, so it's first in iteration order
         assert_eq!(
             first_invalid_field_id(&form, &descriptors),
@@ -122,19 +143,16 @@ mod tests {
         // Field is invalid but NOT touched — function still returns it
         // because it checks validation, not show_error()
         let mut form = make_form_with_fields(&["email"]);
+
         set_field_invalid(&mut form, "email");
+
         assert!(!form.fields.get("email").unwrap().touched);
+
         let descriptors = make_descriptors("form", &["email"]);
+
         assert_eq!(
             first_invalid_field_id(&form, &descriptors),
             Some("form-email-input".into())
         );
-    }
-
-    #[test]
-    fn reexports_validation_behavior() {
-        let behavior = ValidationBehavior::default();
-
-        assert_eq!(behavior, ValidationBehavior::Aria);
     }
 }

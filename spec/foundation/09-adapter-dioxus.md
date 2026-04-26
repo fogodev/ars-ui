@@ -2205,7 +2205,7 @@ pub fn use_locale() -> Signal<Locale> {
 ### 16.2 use_number_formatter()
 
 ```rust
-use ars_i18n::{NumberFormatOptions, NumberFormatter};
+use ars_i18n::number;
 
 /// Resolve a memoized number formatter from ArsProvider locale context.
 ///
@@ -2213,9 +2213,9 @@ use ars_i18n::{NumberFormatOptions, NumberFormatter};
 /// Dioxus components. The `options` closure may read reactive props/signals;
 /// the memo rebuilds when either the locale signal or the closure output
 /// changes.
-pub fn use_number_formatter<F>(options: F) -> Memo<NumberFormatter>
+pub fn use_number_formatter<F>(options: F) -> Memo<number::Formatter>
 where
-    F: Fn() -> NumberFormatOptions + 'static,
+    F: Fn() -> number::FormatOptions + 'static,
 {
     use_resolved_number_formatter(None, options)
 }
@@ -2229,16 +2229,16 @@ where
 pub(crate) fn use_resolved_number_formatter<F>(
     adapter_props_locale: Option<&Locale>,
     options: F,
-) -> Memo<NumberFormatter>
+) -> Memo<number::Formatter>
 where
-    F: Fn() -> NumberFormatOptions + 'static,
+    F: Fn() -> number::FormatOptions + 'static,
 {
     let explicit_locale = adapter_props_locale.cloned();
     let locale = use_locale();
 
     use_memo(move || {
         let resolved_locale = explicit_locale.clone().unwrap_or_else(|| locale.read().clone());
-        NumberFormatter::new(&resolved_locale, options())
+        number::Formatter::new(&resolved_locale, options())
     })
 }
 ```
@@ -2532,16 +2532,16 @@ The `dioxus_id_counter()` function (thread-local on WASM, `AtomicU64` on native)
 
 2. **SSR counter reset**: When the `dioxus/server` feature is active, the ID counter MUST be reset at the start of each SSR request to prevent cross-request counter leakage:
 
-   ```rust
-   #[cfg(all(feature = "ssr", target_arch = "wasm32"))]
-   pub fn reset_id_counter() {
-       DIOXUS_ID_COUNTER.with(|c| c.set(0));
-   }
-   #[cfg(all(feature = "ssr", not(target_arch = "wasm32")))]
-   pub fn reset_id_counter() {
-       DIOXUS_ID_COUNTER.store(0, core::sync::atomic::Ordering::Relaxed);
-   }
-   ```
+    ```rust
+    #[cfg(all(feature = "ssr", target_arch = "wasm32"))]
+    pub fn reset_id_counter() {
+        DIOXUS_ID_COUNTER.with(|c| c.set(0));
+    }
+    #[cfg(all(feature = "ssr", not(target_arch = "wasm32")))]
+    pub fn reset_id_counter() {
+        DIOXUS_ID_COUNTER.store(0, core::sync::atomic::Ordering::Relaxed);
+    }
+    ```
 
 3. **Hydration mismatch detection**: In debug builds, the client SHOULD compare server-rendered IDs (extracted from the hydrated DOM) with client-generated IDs. On mismatch, emit a console warning:
    `"ars-ui hydration ID mismatch: server='ars-dialog-7', client='ars-dialog-9'. Component IDs may be non-deterministic across SSR/client boundaries."`

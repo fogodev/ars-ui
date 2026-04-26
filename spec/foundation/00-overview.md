@@ -69,7 +69,8 @@ Every component supports RTL layouts, locale-aware formatting, and translatable 
 | `ars-i18n`         | Locale system, RTL, date/number/string formatting, calendar systems                                                                                                 |
 | `ars-interactions` | Press, hover, focus, long press, move, drag-and-drop abstractions                                                                                                   |
 | `ars-collections`  | Collection trait, selection model, virtualization, async loading                                                                                                    |
-| `ars-forms`        | Validation framework, form context, field association                                                                                                               |
+| `ars-forms`        | Validation framework, form context, field association, hidden-input helpers                                                                                         |
+| `ars-components`   | Framework-agnostic component machines and connect APIs                                                                                                              |
 | `ars-derive`       | Internal proc-macro crate for `#[derive(HasId)]` and `#[derive(ComponentPart)]`                                                                                     |
 | `ars-dom`          | web-sys/wasm-bindgen DOM utilities, positioning, portal, focus, scroll, URL sanitization, background inert, modality tracking, media queries                        |
 | `ars-leptos`       | Leptos adapter — component wrappers, signal integration                                                                                                             |
@@ -151,10 +152,10 @@ CSS example:
 
 ```css
 [data-ars-scope="accordion"][data-ars-part="item-trigger"] {
-  cursor: pointer;
+    cursor: pointer;
 }
 [data-ars-scope="accordion"][data-ars-part="item-trigger"][data-ars-state="open"] {
-  font-weight: bold;
+    font-weight: bold;
 }
 ```
 

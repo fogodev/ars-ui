@@ -8,6 +8,8 @@
 //! When using the Field component (§13), `Descriptors` is not needed —
 //! the Field component handles all ID generation and ARIA linkage internally.
 
+use alloc::{format, string::String, vec::Vec};
+
 use super::state::State;
 
 /// IDs for all elements of a form field.
@@ -132,6 +134,11 @@ pub struct InputAria {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{
+        string::{String, ToString},
+        vec,
+    };
+
     use super::*;
     use crate::{
         field::Value,

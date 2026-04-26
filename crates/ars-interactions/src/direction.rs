@@ -13,6 +13,7 @@ use crate::KeyboardKey;
 pub enum LogicalDirection {
     /// "Next" in reading order (right in LTR, left in RTL).
     Forward,
+
     /// "Previous" in reading order (left in LTR, right in RTL).
     Backward,
 }
@@ -28,8 +29,10 @@ pub const fn resolve_arrow_key(
     match (key, direction) {
         (KeyboardKey::ArrowRight, ResolvedDirection::Ltr)
         | (KeyboardKey::ArrowLeft, ResolvedDirection::Rtl) => Some(LogicalDirection::Forward),
+
         (KeyboardKey::ArrowLeft, ResolvedDirection::Ltr)
         | (KeyboardKey::ArrowRight, ResolvedDirection::Rtl) => Some(LogicalDirection::Backward),
+
         _ => None,
     }
 }

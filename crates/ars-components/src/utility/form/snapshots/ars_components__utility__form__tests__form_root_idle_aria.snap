@@ -1,0 +1,46 @@
+---
+source: crates/ars-components/src/utility/form.rs
+assertion_line: 708
+expression: "snapshot_attrs(&service.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "form",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "idle",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "checkout",
+            ),
+        ),
+        (
+            NoValidate,
+            Bool(
+                true,
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -5,6 +5,8 @@
 //! [`Config`], [`Value`], and helper functions that produce [`AttrMap`]s
 //! matching the component attribute system.
 
+use alloc::{string::String, vec::Vec};
+
 use ars_core::{AttrMap, HtmlAttr};
 
 /// Configuration for a hidden input that submits with native forms.
@@ -12,10 +14,13 @@ use ars_core::{AttrMap, HtmlAttr};
 pub struct Config {
     /// The `name` attribute for the hidden input.
     pub name: String,
+
     /// The value to submit.
     pub value: Value,
+
     /// Optional `form` attribute for cross-form association.
     pub form_id: Option<String>,
+
     /// Whether the hidden input is disabled (excluded from submission).
     pub disabled: bool,
 }
@@ -25,8 +30,10 @@ pub struct Config {
 pub enum Value {
     /// Single value.
     Single(String),
+
     /// Multiple values (rendered as multiple hidden inputs with the same name).
     Multiple(Vec<String>),
+
     /// No value (omitted from submission).
     None,
 }
@@ -34,15 +41,19 @@ pub enum Value {
 /// Builds the common attributes shared by single and multi hidden inputs.
 fn base_attrs(config: &Config, value: &str) -> AttrMap {
     let mut map = AttrMap::new();
-    map.set(HtmlAttr::Type, "hidden");
-    map.set(HtmlAttr::Name, &config.name);
-    map.set(HtmlAttr::Value, value);
+
+    map.set(HtmlAttr::Type, "hidden")
+        .set(HtmlAttr::Name, &config.name)
+        .set(HtmlAttr::Value, value);
+
     if config.disabled {
         map.set(HtmlAttr::Disabled, true);
     }
+
     if let Some(ref form_id) = config.form_id {
         map.set(HtmlAttr::Form, form_id);
     }
+
     map
 }
 
@@ -58,10 +69,12 @@ fn base_attrs(config: &Config, value: &str) -> AttrMap {
 pub fn attrs(config: &Config) -> Option<AttrMap> {
     match &config.value {
         Value::Single(v) => Some(base_attrs(config, v)),
+
         Value::Multiple(_) => {
             debug_assert!(false, "Use multi_attrs for Value::Multiple");
             None
         }
+
         Value::None => None,
     }
 }
@@ -76,6 +89,8 @@ pub fn multi_attrs(config: &Config, values: &[String]) -> Vec<AttrMap> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{string::ToString, vec};
+
     use ars_core::AttrValue;
 
     use super::*;
@@ -103,7 +118,9 @@ mod tests {
             form_id: None,
             disabled: false,
         };
+
         let map = attrs(&config).expect("should produce attrs");
+
         assert_eq!(get_str(&map, HtmlAttr::Type), Some("hidden"));
         assert_eq!(get_str(&map, HtmlAttr::Name), Some("country"));
         assert_eq!(get_str(&map, HtmlAttr::Value), Some("us"));
@@ -117,6 +134,7 @@ mod tests {
             form_id: None,
             disabled: false,
         };
+
         assert!(attrs(&config).is_none());
     }
 
@@ -142,7 +160,9 @@ mod tests {
             form_id: None,
             disabled: true,
         };
+
         let map = attrs(&config).expect("should produce attrs");
+
         assert!(has_bool(&map, HtmlAttr::Disabled));
     }
 
@@ -154,7 +174,9 @@ mod tests {
             form_id: Some("form-1".to_string()),
             disabled: false,
         };
+
         let map = attrs(&config).expect("should produce attrs");
+
         assert_eq!(get_str(&map, HtmlAttr::Form), Some("form-1"));
     }
 
@@ -166,9 +188,13 @@ mod tests {
             form_id: None,
             disabled: false,
         };
+
         let values = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+
         let result = multi_attrs(&config, &values);
+
         assert_eq!(result.len(), 3);
+
         for (i, map) in result.iter().enumerate() {
             assert_eq!(get_str(map, HtmlAttr::Type), Some("hidden"));
             assert_eq!(get_str(map, HtmlAttr::Name), Some("tags"));
@@ -184,10 +210,15 @@ mod tests {
             form_id: Some("myform".to_string()),
             disabled: true,
         };
+
         let values = vec!["x".to_string()];
+
         let result = multi_attrs(&config, &values);
+
         assert_eq!(result.len(), 1);
+
         let map = &result[0];
+
         assert!(has_bool(map, HtmlAttr::Disabled));
         assert_eq!(get_str(map, HtmlAttr::Form), Some("myform"));
     }

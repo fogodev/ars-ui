@@ -4,11 +4,13 @@
 //! [`DebouncedAsyncValidator`] for debouncing rapid-fire async validation
 //! (e.g., server-side uniqueness checks on each keystroke).
 
-use std::{
+use alloc::{
+    boxed::Box,
     collections::BTreeMap,
-    fmt::{self, Debug},
+    string::{String, ToString},
     sync::Arc,
 };
+use core::fmt::{self, Debug};
 
 use ars_i18n::Locale;
 
@@ -152,10 +154,14 @@ impl Debug for DebouncedAsyncValidator {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, AtomicU32, Ordering},
+    use alloc::{
+        format,
+        string::{String, ToString},
+        sync::Arc,
+        vec::Vec,
     };
+    use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+    use std::sync::Mutex;
 
     use super::*;
     use crate::{field::Value, validation::validator::Context};
@@ -489,9 +495,11 @@ mod tests {
         let cancelled = Arc::new(AtomicBool::new(false));
 
         let validator = Arc::new(StubAsyncValidator) as BoxedAsyncValidator;
+
         let spawn_async = Arc::new(|_v: BoxedAsyncValidator, _val: Value, _ctx: OwnedContext| {});
 
         let mut debounced = DebouncedAsyncValidator::new(validator, 100, spawn_async);
+
         let ctx = Context::standalone("field");
 
         let cancelled_clone = Arc::clone(&cancelled);
@@ -527,9 +535,13 @@ mod tests {
         use core::task::{Context as TaskContext, Poll, Waker};
 
         let validator = StubAsyncValidator;
+
         let value = Value::Text("test".to_string());
+
         let ctx = Context::standalone("field");
+
         let mut future = validator.validate_async(&value, &ctx);
+
         let mut task_ctx = TaskContext::from_waker(Waker::noop());
 
         assert!(matches!(
@@ -553,7 +565,7 @@ mod tests {
             &'a self,
             _value: &'a Value,
             _ctx: &'a Context<'a>,
-        ) -> std::pin::Pin<Box<dyn Future<Output = super::super::result::Result> + Send + 'a>>
+        ) -> core::pin::Pin<Box<dyn Future<Output = super::super::result::Result> + Send + 'a>>
         {
             Box::pin(async { Ok(()) })
         }
@@ -565,7 +577,7 @@ mod tests {
             &'a self,
             _value: &'a Value,
             _ctx: &'a Context<'a>,
-        ) -> std::pin::Pin<Box<dyn Future<Output = super::super::result::Result> + 'a>> {
+        ) -> core::pin::Pin<Box<dyn Future<Output = super::super::result::Result> + 'a>> {
             Box::pin(async { Ok(()) })
         }
     }

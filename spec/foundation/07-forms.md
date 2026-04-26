@@ -1,20 +1,23 @@
-# Forms Specification (`ars-forms`)
+# Forms Foundation Specification
 
 ## 1. Overview
 
-The `ars-forms` crate provides a complete form management system for ars-ui components. It handles:
+The forms foundation defines the shared validation, form-context, field-association, and
+submission-domain contracts used by ars-ui components. In code, these responsibilities are split
+between `ars-forms` and `ars-components`:
 
 - **Validation**: built-in (HTML5 constraints), custom (Rust closures), server-side errors
 - **Form context**: field registration, submission lifecycle, cross-field validation
 - **Field association**: label ↔ input ↔ description ↔ error message linkage for accessibility
 - **Hidden inputs**: allowing complex components (Select, DatePicker) to participate in native HTML form submission
 - **Async validation**: debounced remote validation (e.g., username availability)
+- **Component machines**: `Field`, `Fieldset`, `Form`, and `FormSubmit` live in `ars-components`
 
 > **When to use each form approach:**
 >
 > - **`Context.submit()`** — Simple synchronous forms with client-side validation only.
 > - **`form_submit::Machine`** — Standard forms with async validation and server submission.
-> - **`form::component::Machine` (§14)** — Standard forms rendered as a `<form>` component; simplified 2-state lifecycle with server error integration.
+> - **`form::Machine`** — Standard forms rendered as a `<form>` component; simplified 2-state lifecycle with server error integration.
 
 <!-- Section map: §1 Overview, §2 Core Types, §3 Validator Trait, §4 Async Validation,
      §5 Form Context, §6 Field Association, §7 Hidden Inputs, §8 Form Submit Machine,
@@ -32,18 +35,21 @@ Design goals:
 
 Types use module-based namespacing (project convention: `module::Type` instead of `PrefixType`):
 
-| Module                | Types                                                                                                                                                                         | Crate path                          |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| `field`               | `State`, `Value`, `FileRef`, `Context`, `Descriptors`, `InputAria`, `ValueExt`, `SelectionExt`, `CheckboxExt`                                                                 | `ars_forms::field::*`               |
-| `field::component`    | `Machine`, `State`, `Event`, `Context`, `Props`, `Api`, `Part`                                                                                                                | `ars_forms::field::component::*`    |
-| `fieldset`            | `Context` (inherited child-field context alias)                                                                                                                               | `ars_forms::fieldset::*`            |
-| `fieldset::component` | `Machine`, `State`, `Event`, `Context`, `Props`, `Api`, `Part`                                                                                                                | `ars_forms::fieldset::component::*` |
-| `validation`          | `Error`, `ErrorCode`, `Errors`, `Result`, `ResultExt`, `Validator`, `BoxedValidator`, `Context`, `OwnedContext`, `AsyncValidator`, `BoxedAsyncValidator`, `boxed_validator()` | `ars_forms::validation::*`          |
-| `form`                | `Context`, `Data`, `Mode`, `CrossFieldValidator`, `AnyValidator`                                                                                                              | `ars_forms::form::*`                |
-| `form::component`     | `ValidationBehavior`, `Machine`, `State`, `Event`, `Context`, `Props`, `Api`, `Part`                                                                                          | `ars_forms::form::component::*`     |
-| `hidden_input`        | `Config`, `Value`, `attrs()`, `multi_attrs()`                                                                                                                                 | `ars_forms::hidden_input::*`        |
+| Module         | Types                                                                                                                                                                         | Crate path                                |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `field`        | `State`, `Value`, `FileRef`, `Context`, `Descriptors`, `InputAria`, `ValueExt`, `SelectionExt`, `CheckboxExt`                                                                 | `ars_forms::field::*`                     |
+| `field`        | `Machine`, `State`, `Event`, `Context`, `Props`, `Api`, `Part`                                                                                                                | `ars_components::utility::field::*`       |
+| `fieldset`     | `Context` (inherited child-field context alias)                                                                                                                               | `ars_forms::fieldset::*`                  |
+| `fieldset`     | `Machine`, `State`, `Event`, `Context`, `Props`, `Api`, `Part`                                                                                                                | `ars_components::utility::fieldset::*`    |
+| `validation`   | `Error`, `ErrorCode`, `Errors`, `Result`, `ResultExt`, `Validator`, `BoxedValidator`, `Context`, `OwnedContext`, `AsyncValidator`, `BoxedAsyncValidator`, `boxed_validator()` | `ars_forms::validation::*`                |
+| `form`         | `Context`, `Data`, `Mode`, `CrossFieldValidator`, `AnyValidator`, `Messages`                                                                                                  | `ars_forms::form::*`                      |
+| `form`         | `ValidationBehavior`, `Machine`, `State`, `Event`, `Context`, `Props`, `Api`, `Part`                                                                                          | `ars_components::utility::form::*`        |
+| `form_submit`  | `Machine`, `State`, `Event`, `Context`, `Props`, `Api`, `Part`                                                                                                                | `ars_components::utility::form_submit::*` |
+| `hidden_input` | `Config`, `Value`, `attrs()`, `multi_attrs()`                                                                                                                                 | `ars_forms::hidden_input::*`              |
 
-Code examples in this spec use the short (unqualified) names since each section defines types within their module context.
+The canonical machine/API specifications for `Field`, `Fieldset`, `Form`, and `FormSubmit` live in
+`spec/components/utility/*.md`. This foundation file defines the shared domain contracts those
+machines build on.
 
 ---
 
@@ -1379,15 +1385,20 @@ impl Drop for DebouncedAsyncValidator {
 
 ## 5. Form Context
 
-> **Design note:** `Context` is a plain data structure, not a `Machine` implementor. It holds mutable form state (field registry, validation results, dirty/touched tracking). The `form_submit::Machine` in §8 embeds `Context` in its `Context` type and drives the submission lifecycle as a proper state machine. The `form::component::Machine` in §14 manages its own simplified context; integration with `Context` is done at the adapter layer via context propagation. Direct mutation of `Context` is valid within Machine `apply` closures.
+> **Design note:** `Context` is a plain data structure, not a `Machine` implementor. It holds
+> mutable form state (field registry, validation results, dirty/touched tracking). The
+> `form_submit::Machine` component embeds `Context` in its machine context and drives the explicit
+> submit lifecycle. The `form::Machine` component manages its own simplified context; integration
+> with `ars_forms::form::Context` is done at the adapter layer via context propagation. Direct
+> mutation of `Context` is valid within Machine `apply` closures.
 >
 > **Decision matrix — which approach to use:**
 >
-> | Scenario                                       | Use                              | Why                                                                  |
-> | ---------------------------------------------- | -------------------------------- | -------------------------------------------------------------------- |
-> | Full form with validation + async submit       | `form_submit::Machine` (§8)      | Full lifecycle: Idle → Validating → Submitting → Success/Failed      |
-> | Simple form without validation states          | `form::component::Machine` (§14) | Lightweight: just collects fields and submits                        |
-> | Programmatic submission from outside a Machine | `Context.submit()` (§5.1)        | Direct call from adapter hooks when no state machine drives the form |
+> | Scenario                                       | Use                         | Why                                                                  |
+> | ---------------------------------------------- | --------------------------- | -------------------------------------------------------------------- |
+> | Full form with validation + async submit       | `form_submit::Machine` (§8) | Full lifecycle: Idle → Validating → Submitting → Success/Failed      |
+> | Simple form without validation states          | `form::Machine` (§14)       | Lightweight: just collects fields and submits                        |
+> | Programmatic submission from outside a Machine | `Context.submit()` (§5.1)   | Direct call from adapter hooks when no state machine drives the form |
 
 ### 5.1 `Context`
 
@@ -1875,7 +1886,7 @@ impl Context {
     /// simple forms that don't need a full state machine.
     /// **Note:** `is_submitting` is only meaningful for the duration of the synchronous
     /// `handler` call. For async submission, use `form_submit::Machine` (§8) or
-    /// `form::component::Machine` (§14), which properly manage the Submitting state across async boundaries.
+    /// `form::Machine` (§14), which properly manage the Submitting state across async boundaries.
     /// Note: adapter wrappers may require the submit handler closure to be `Send`
     /// so it can be used uniformly across targets and runtimes.
     /// Submit the form with a synchronous handler.
@@ -2316,6 +2327,11 @@ template expressions (e.g., conditionally showing a "clear" button when
 
 ## 8. Form Submit State Machine
 
+> **Canonical component spec:** `spec/components/utility/form-submit.md` is the canonical contract
+> for the `ars_components::utility::form_submit` machine. This section remains as the shared-forms
+> foundation companion because it explains how the machine composes with `ars_forms::form::Context`
+> and validator infrastructure.
+
 ```rust
 use ars_core::{TransitionPlan, PendingEffect, WeakSend, ConnectApi, AttrMap, HtmlAttr, AriaAttr};
 use ars_core::ComponentIds;
@@ -2385,7 +2401,7 @@ pub mod form_submit {
         type Context = Context;
         type Props = Props;
         type Api<'a> = Api<'a>;
-        type Messages = Messages;
+        type Messages = ();
 
         fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
             (
@@ -2992,6 +3008,10 @@ mod tests {
 
 ## 12. Fieldset Component
 
+> **Canonical component spec:** `spec/components/utility/fieldset.md` is the canonical contract for
+> the `ars_components::utility::fieldset` machine. This section focuses on how the component relates
+> to shared forms context and accessibility rules.
+>
 > Cross-references: Equivalent to Ark-UI `Fieldset`, HTML `<fieldset>` semantics.
 
 ### 12.1 Purpose
@@ -3096,7 +3116,7 @@ impl Default for Props {
 #### 12.2.5 Fieldset Component Full Machine Implementation
 
 ```rust
-// inside `fieldset::component`
+// inside `fieldset`
 pub struct Machine;
 
 impl ars_core::Machine for Machine {
@@ -3394,7 +3414,7 @@ pub type Context = crate::field::Context;
 - `effective_invalid = field_props.invalid || field_ctx.invalid`
 - `effective_readonly = field_props.readonly || field_ctx.readonly`
 
-The merge happens at the **adapter layer** (not inside the core machine), because the core `field::component::Machine` has no access to framework context. The adapter passes the merged values as props to `field::component::Machine`, keeping the core machine framework-agnostic. See §13.4 for the merge code pattern.
+The merge happens at the **adapter layer** (not inside the core machine), because the core `field::Machine` has no access to framework context. The adapter passes the merged values as props to `field::Machine`, keeping the core machine framework-agnostic. See §13.4 for the merge code pattern.
 
 ### 12.7 I18n Considerations
 
@@ -3405,6 +3425,10 @@ The merge happens at the **adapter layer** (not inside the core machine), becaus
 
 ## 13. Field Component (Generic Wrapper)
 
+> **Canonical component spec:** `spec/components/utility/field.md` is the canonical contract for the
+> `ars_components::utility::field` machine. This section focuses on its interaction with shared
+> validation and field-context contracts.
+>
 > Cross-references: Equivalent to Ark-UI `Field`, React Aria `Label` + `Group` + `FieldError` + `Description`.
 
 ### 13.1 Purpose
@@ -3522,7 +3546,7 @@ impl Default for Props {
 #### 13.2.5 Field Component Full Machine Implementation
 
 ```rust
-// inside `field::component`
+// inside `field`
 pub struct Machine;
 
 impl ars_core::Machine for Machine {
@@ -3793,7 +3817,7 @@ impl<'a> Api<'a> {
 
 ### 13.4 Integration with Fieldset
 
-When nested inside a `Fieldset`, the `Field` merges its own state with the `Fieldset` context (see §12.6 `Context`). The merge is performed at the **adapter layer**, not inside the core machine — the core `field::component::Machine` has no access to framework context.
+When nested inside a `Fieldset`, the `Field` merges its own state with the `Fieldset` context (see §12.6 `Context`). The merge is performed at the **adapter layer**, not inside the core machine — the core `field::Machine` has no access to framework context.
 
 **Adapter-layer merge pattern:**
 
@@ -3813,7 +3837,7 @@ let effective_readonly = props.readonly
 
 // 3. Build merged props for the core machine.
 // id, required, dir from props; disabled, invalid, readonly merged from Context.
-let merged_props = field::component::Props {
+let merged_props = field::Props {
     disabled: effective_disabled,
     invalid: effective_invalid,
     readonly: effective_readonly,
@@ -3821,7 +3845,7 @@ let merged_props = field::component::Props {
 };
 
 // 4. Pass merged props to the core machine — it sees the final merged values.
-let machine = use_machine::<field::component::Machine>(merged_props);
+let machine = use_machine::<field::Machine>(merged_props);
 ```
 
 This keeps the core machine framework-agnostic while allowing each adapter to use its native context mechanism (`provide_context` in Leptos, `use_context_provider` in Dioxus).
@@ -3835,7 +3859,11 @@ This keeps the core machine framework-agnostic while allowing each adapter to us
 
 ## 14. Form Component
 
-> **Relationship to form_submit::Machine:** The `form_submit::Machine` (§8) is a lower-level 6-state submission lifecycle machine with explicit validation states, designed for advanced flows (multi-step async validation, complex retry logic). The `form::component::Machine` (this section) is a standalone high-level component with a simplified 2-state model (Idle, Submitting). They are independent alternatives — **not composed together**. Most consumers should use `form::component::Machine` via the Form component; use `form_submit::Machine` only when you need fine-grained control over the validation→submission lifecycle. Both machines integrate with `Context` via adapter-provided context propagation.
+> **Canonical component spec:** `spec/components/utility/form.md` is the canonical contract for the
+> `ars_components::utility::form` machine. This section focuses on shared form-domain integration,
+> including the external `form::Messages` bundle.
+>
+> **Relationship to form_submit::Machine:** The `form_submit::Machine` (§8) is a lower-level 6-state submission lifecycle machine with explicit validation states, designed for advanced flows (multi-step async validation, complex retry logic). The `form::Machine` (this section) is a standalone high-level component with a simplified 2-state model (Idle, Submitting). They are independent alternatives — **not composed together**. Most consumers should use `form::Machine` via the Form component; use `form_submit::Machine` only when you need fine-grained control over the validation→submission lifecycle. Both machines integrate with `Context` via adapter-provided context propagation.
 >
 > Cross-references: Equivalent to React Aria `Form`.
 
@@ -3930,9 +3958,9 @@ pub enum Event {
 
 #### 14.3.3 Form Component Context
 
-> **Authoritative source:** `form::component::Context` is the authoritative source for `server_errors` and `is_submitting`. `Context` mirrors these values downstream via the adapter effect (§14.6). On divergence, the machine context wins — `Context` is a read-only projection for child components that don't have access to the machine.
+> **Authoritative source:** `form::Context` is the authoritative source for `server_errors` and `is_submitting`. `Context` mirrors these values downstream via the adapter effect (§14.6). On divergence, the machine context wins — `Context` is a read-only projection for child components that don't have access to the machine.
 >
-> **Sync timing:** The adapter MUST synchronize `Context` from `form::component::Context` synchronously within the same `apply` closure (not in a deferred effect). This ensures child components reading `Context` during the same render cycle see consistent values. The pattern is: `apply` updates `machine.context`, then immediately writes `form_context.is_submitting = machine.context.is_submitting` (and similarly for `server_errors`) before the closure returns.
+> **Sync timing:** The adapter MUST synchronize `Context` from `form::Context` synchronously within the same `apply` closure (not in a deferred effect). This ensures child components reading `Context` during the same render cycle see consistent values. The pattern is: `apply` updates `machine.context`, then immediately writes `form_context.is_submitting = machine.context.is_submitting` (and similarly for `server_errors`) before the closure returns.
 
 ```rust
 #[derive(Clone, Debug, PartialEq)]
@@ -3991,17 +4019,17 @@ impl Default for Props {
 
 #### 14.3.5 Form Component Full Machine Implementation
 
-> **Relationship to `form_submit::Machine` (§8):** `form::component::Machine` is the high-level
+> **Relationship to `form_submit::Machine` (§8):** `form::Machine` is the high-level
 > Form component machine with a simplified 2-state model (Idle, Submitting). It is
 > intended for typical form use cases. `form_submit::Machine` (§8) is a lower-level
 > 6-state machine with explicit validation states, designed for advanced flows
 > (multi-step async validation, complex retry logic). They are NOT composed together —
-> choose one based on your use case. Most consumers should use `form::component::Machine` via the
+> choose one based on your use case. Most consumers should use `form::Machine` via the
 > Form component; use `form_submit::Machine` only when you need fine-grained control
 > over the validation→submission lifecycle.
 
 ```rust
-// inside `form::component`
+// inside `form`
 
 pub struct Machine;
 
@@ -4028,7 +4056,7 @@ impl ars_core::Machine for Machine {
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
         // NOTE: `id` is immutable after init — ComponentIds are computed once
         // in init() and cached in Context. Changing id at runtime is not supported.
-        assert_eq!(old.id, new.id, "form::component::Props.id must remain stable after init");
+        assert_eq!(old.id, new.id, "form::Props.id must remain stable after init");
         let mut events = Vec::new();
         if old.validation_behavior != new.validation_behavior {
             events.push(Event::SetValidationBehavior(new.validation_behavior));
@@ -4230,13 +4258,13 @@ Framework adapters must:
 7. **Announce results** via the `StatusRegion`: on submit success, post a configurable success message; on submit failure with multiple errors, post "N errors found" before moving focus to the first invalid field
 8. **Exclude disabled fields** from submission data (see §15)
 
-> **Adapter integration:** The adapter syncs `form::component::Context.server_errors` with `Context.server_errors` via a reactive effect that watches the machine's context and calls `Context::set_server_errors()` whenever the machine's server_errors field changes.
+> **Adapter integration:** The adapter syncs `form::Context.server_errors` with `Context.server_errors` via a reactive effect that watches the machine's context and calls `Context::set_server_errors()` whenever the machine's server_errors field changes.
 
 ### 14.7 I18n — Messages
 
 `form::Messages` is a **domain-level** message bundle for validation and
 submission announcements. It is intentionally distinct from
-`form::component::Machine::Messages`: the form component machine keeps
+`form::Machine::Messages`: the form component machine keeps
 `type Messages = ()`, and adapters resolve `form::Messages` separately when
 formatting error and status text.
 

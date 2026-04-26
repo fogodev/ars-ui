@@ -13,7 +13,8 @@ ars-ui/
     ars-i18n/                   # Locale, RTL, formatting, calendars
     ars-interactions/           # Press, hover, focus, long press, move, DnD
     ars-collections/            # Collection trait, selection, virtualization, async loading
-    ars-forms/                  # Validation, form context, fields
+    ars-forms/                  # Validation, form context, field association, hidden inputs
+    ars-components/             # Framework-agnostic component machines and connect APIs
     ars-dom/                    # web-sys DOM utilities, positioning, portal, focus, scroll, URL sanitization, inert
     ars-leptos/                 # Leptos adapter
     ars-dioxus/                 # Dioxus adapter
@@ -30,10 +31,11 @@ ars-ui/
                 |  \      |           |
                 |   \     |           | (abstract event mapping; DOM normalization in ars-dom)
                 |    \    |           |
-      ars-collections  ars-forms      |
+      ars-collections  ars-forms  ars-components
                 |          |          |
                 |   ars-forms --> ars-i18n  (date/time types: CalendarDate, Time, DateRange)
                 |   ars-forms --> ars-core  (ComponentIds)
+                |   ars-components --> ars-core, ars-forms, ars-i18n, ars-interactions
                 |          |          |
                 |     ars-a11y ──┐    |
                 |     ars-i18n ──┼──> ars-dom  (web-sys, wasm-bindgen)
@@ -47,7 +49,7 @@ ars-ui/
 > to `compute_position()` without pulling in `web-sys`. The dotted arrow indicates
 > this optional relationship.
 >
-> **Explicit edges:** ars-a11y, ars-i18n → ars-core; ars-interactions → ars-core, ars-a11y, ars-i18n; ars-collections → ars-core, ars-a11y [, ars-i18n (optional, feature = "i18n")]; ars-forms → ars-core, ars-a11y, ars-i18n; ars-dom → ars-core, ars-a11y, ars-i18n, ars-interactions; ars-leptos, ars-dioxus → ars-dom (+ all transitive). Note: `ars-dom` does **not** depend on `ars-forms` — form-specific DOM behavior (hidden inputs, field focus) is handled at the adapter layer (`ars-leptos`, `ars-dioxus`), which depends on both `ars-dom` and `ars-forms`. Note: `ars-interactions → ars-i18n` is required for `DragAnnouncements` which uses `Locale` and `Direction` from `ars-i18n`, and `ars-interactions → ars-a11y` is required for `LiveAnnouncer` / `AnnouncementPriority` integration in keyboard drag-and-drop and other live announcements.
+> **Explicit edges:** ars-a11y, ars-i18n → ars-core; ars-interactions → ars-core, ars-a11y, ars-i18n; ars-collections → ars-core, ars-a11y [, ars-i18n (optional, feature = "i18n")]; ars-forms → ars-core, ars-a11y, ars-i18n; ars-components → ars-core, ars-forms, ars-i18n, ars-interactions; ars-dom → ars-core, ars-a11y, ars-i18n, ars-interactions; ars-leptos, ars-dioxus → ars-dom (+ all transitive, and to ars-components when consuming shared machines). Note: `ars-dom` does **not** depend on `ars-forms` or `ars-components` — browser/runtime behavior remains adapter-owned. Note: `ars-interactions → ars-i18n` is required for `DragAnnouncements` which uses `Locale` and `Direction` from `ars-i18n`, and `ars-interactions → ars-a11y` is required for `LiveAnnouncer` / `AnnouncementPriority` integration in keyboard drag-and-drop and other live announcements.
 >
 > **Note:** The previous `ars-forms → ars-collections` edge has been removed. `ars-forms` defines abstract trait bounds (`SelectionFormExt`, `CheckboxFormExt`) that downstream crates satisfy — the dependency direction is reversed (components depend on forms traits, not vice versa).
 
@@ -581,7 +583,7 @@ This enables `data-ars-state` values and Service debug logging.
 > ```
 >
 > This pattern is used consistently across **all** component specs and foundation machines
-> (e.g., `form_submit::Machine`, `fieldset::component::Machine`, `field::component::Machine`). Adapter code
+> (e.g., `form_submit::Machine`, `fieldset::Machine`, `field::Machine`). Adapter code
 > that needs to reference the trait generically (e.g., `use_machine<M: ars_core::Machine>`)
 > imports it at the adapter level where no local `Machine` struct exists.
 >

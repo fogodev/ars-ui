@@ -57,7 +57,7 @@ The public surface matches the full core `Props`: `present`, `lazy_mount`, `skip
 | ------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------- | --------------------------------------------- |
 | `Root` (animated element) | `api.root_attrs()`: `data-ars-scope`, `data-ars-part`, `data-ars-state`, `data-ars-presence` | `will-change` during animation setup/teardown (web only) | consumer structural and styling attrs | core data attrs win; `class`/`style` merge additively | adapter-owned attrs on consumer-owned element |
 
-- `data-ars-state` is `"open"` when present, `"closed"` when unmounting. CSS animations target these values.
+- `data-ars-state` is `"open"` only in `Mounted`; `Mounting`, `UnmountPending`, and `Unmounted` expose `"closed"`. CSS animations target the transition into or out of `Mounted`.
 - `data-ars-presence` is `"mounted"` when idle, `"exiting"` during exit animation.
 - The adapter sets `will-change: transform, opacity` before animation starts and removes it after animation completes (web targets only).
 
@@ -164,10 +164,10 @@ The adapter does not publish or consume framework context via `use_context_provi
 
 ## 16. Implementation Dependencies
 
-| Dependency        | Required?   | Dependency type  | Why it must exist first                                                                                             | Notes                                                                                                         |
-| ----------------- | ----------- | ---------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `PlatformEffects` | required    | shared helper    | `on_animation_end`, `on_reduced_motion_change`, `set_timeout`, `clear_timeout` provide the DOM interaction surface. | Core spec delegates all DOM work to `PlatformEffects`. Desktop/Mobile implementations provide fallback paths. |
-| `ars-provider`    | recommended | context contract | Provides DOM environment scoping for composing overlays.                                                            | Presence itself does not read it, but composing overlays benefit.                                             |
+| Dependency               | Required?   | Dependency type  | Why it must exist first                                                                                | Notes                                                                                                                                         |
+| ------------------------ | ----------- | ---------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| animation runtime helper | required    | shared helper    | style reads, listener setup, timeout fallback, reduced-motion observation, and `AnimationEnd` dispatch | Core spec keeps the machine pure and delegates DOM work to the adapter/runtime helper. Desktop/Mobile implementations provide fallback paths. |
+| `ars-provider`           | recommended | context contract | Provides DOM environment scoping for composing overlays.                                               | Presence itself does not read it, but composing overlays benefit.                                                                             |
 
 ## 17. Recommended Implementation Sequence
 
@@ -175,8 +175,13 @@ The adapter does not publish or consume framework context via `use_context_provi
 2. Generate a stable root element ID via `use_hook`.
 3. Set up a reactive effect that watches the `present` prop signal and calls `api.sync_present()`.
 4. Set `Context.node_id` after the element mounts on the client (inside a client-only effect that looks up the DOM element by ID).
-5. Implement the `"listen-animation-end"` effect: after the machine enters `UnmountPending`, set `data-ars-state="closed"`, schedule a `requestAnimationFrame` (web), read `getComputedStyle()`, attach `animationend`/`transitionend` listeners with dual-completion flags, install the 5000ms fallback timeout, the `matchMedia` change listener, and the `visibilitychange` handler. On Desktop/Mobile, fire `AnimationEnd` immediately if CSS animation support is absent.
-6. Implement the `"mounting-timeout"` effect for `lazy_mount`: start a 5000ms timeout when entering `Mounting`; dispatch `ContentReady` if it fires.
+5. Implement an adapter-owned animation runtime helper: after the machine enters `UnmountPending`,
+   set `data-ars-state="closed"`, schedule any required `requestAnimationFrame` work (web), attach
+   `animationend` / `transitionend` listeners, install a bounded timeout fallback, and dispatch
+   `Event::AnimationEnd`. On Desktop/Mobile, fire `AnimationEnd` immediately if CSS animation
+   support is absent.
+6. For `lazy_mount`, dispatch `ContentReady` after lazy content settles; if the adapter wants a
+   timeout safety net, it belongs in the same runtime helper layer rather than inside the core machine.
 7. Set `will-change: transform, opacity` on animation start; remove on animation end (web only).
 8. Gate child rendering on `api.is_mounted()` — render children only when mounted.
 9. Wire `use_drop` to synchronously cancel all listeners, timeouts, and guards.
@@ -238,13 +243,13 @@ The adapter does not publish or consume framework context via `use_context_provi
 
 ## 22. Shared Adapter Helper Notes
 
-| Helper concept                                   | Required?   | Responsibility                                                                                                          | Reused by                                           | Notes                                                                                                                                       |
-| ------------------------------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PlatformEffects::on_animation_end`              | required    | Encapsulates animation/transition detection, listener setup, reduced-motion guard, fallback timeout, and cleanup.       | `presence` (all overlay components that compose it) | Web implementation follows core spec §11. Desktop/Mobile implementation fires callback immediately when CSS animation APIs are unavailable. |
-| `PlatformEffects::on_reduced_motion_change`      | required    | Registers `matchMedia` change listener (web) or platform accessibility listener (Desktop/Mobile).                       | `presence`                                          | Returns cleanup function.                                                                                                                   |
-| reflow batching cache                            | recommended | Per-frame `getComputedStyle()` cache to avoid layout thrashing when multiple Presence instances unmount simultaneously. | `presence` instances in the same frame              | Web only. Cleared at the start of each rAF frame.                                                                                           |
-| `PlatformEffects::set_timeout` / `clear_timeout` | required    | Monotonic timeout management.                                                                                           | `presence`, mounting timeout, transition safety-net | Uses `performance.now()` on web; platform timer on Desktop/Mobile. Handles visibility-change pausing on web.                                |
-| platform capability helper                       | recommended | Detects CSS animation support on the current target.                                                                    | `presence`, overlay components                      | Returns whether `animationend`/`transitionend` and `getComputedStyle()` are available.                                                      |
+| Helper concept             | Required?   | Responsibility                                                                                                                               | Reused by                                           | Notes                                                                                                                                       |
+| -------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| animation runtime helper   | required    | Encapsulates animation/transition detection, listener setup, reduced-motion guard, fallback timeout, and cleanup.                            | `presence` (all overlay components that compose it) | Web implementation follows core spec §11. Desktop/Mobile implementation fires callback immediately when CSS animation APIs are unavailable. |
+| reduced-motion observer    | recommended | Registers `matchMedia` change listener (web) or platform accessibility listener (Desktop/Mobile) when live preference changes are supported. | `presence`                                          | Returns cleanup function.                                                                                                                   |
+| reflow batching cache      | recommended | Per-frame `getComputedStyle()` cache to avoid layout thrashing when multiple Presence instances unmount simultaneously.                      | `presence` instances in the same frame              | Web only. Cleared at the start of each rAF frame.                                                                                           |
+| timeout helper             | required    | Monotonic timeout management.                                                                                                                | `presence` transition safety-net                    | Uses `performance.now()` on web; platform timer on Desktop/Mobile. Handles visibility-change pausing on web.                                |
+| platform capability helper | recommended | Detects CSS animation support on the current target.                                                                                         | `presence`, overlay components                      | Returns whether `animationend`/`transitionend` and `getComputedStyle()` are available.                                                      |
 
 ## 23. Framework-Specific Behavior
 
@@ -252,7 +257,9 @@ Dioxus uses element IDs (not `NodeRef`) for DOM element lookup. The adapter gene
 
 `use_drop` provides synchronous disposal for all listeners, timeouts, and guards. The adapter registers a single `use_drop` callback that runs the `completed` guard, cancels all timeouts, and removes all event listeners in one pass.
 
-Reactive effects use `use_effect` to watch the `present` prop signal. The effect calls `api.sync_present(new_value)` to drive the state machine. The machine's transition effects (`"listen-animation-end"`, `"mounting-timeout"`) are driven by the service's effect system.
+Reactive effects use `use_effect` to watch the `present` prop signal. The effect calls
+`api.sync_present(new_value)` to drive the state machine. Animation runtime work is adapter-owned
+and reacts to machine state changes; it is not encoded as core-machine effects.
 
 Child rendering is gated by a reactive `is_mounted` signal derived from the machine context. When `is_mounted` transitions from true to false, Dioxus removes the children from the virtual tree. When it transitions from false to true, Dioxus inserts them.
 
@@ -325,9 +332,7 @@ pub fn use_presence(props: presence::Props) -> PresenceHandle {
         service.update_context(|ctx| ctx.node_id = Some(root_id.clone()));
     });
 
-    // 3. Machine effects ("listen-animation-end", "mounting-timeout")
-    //    are handled internally by the service effect system.
-    //    PlatformEffects::on_animation_end encapsulates:
+    // 3. Adapter-owned animation runtime helper:
     //      - platform capability probe (CSS animation support)
     //      - double-rAF for style read timing (web)
     //      - getComputedStyle() with per-frame cache (web)
@@ -362,7 +367,7 @@ pub fn use_presence(props: presence::Props) -> PresenceHandle {
 ## 26. Adapter Invariants
 
 - Children must be absent from the DOM/virtual tree when the machine is in `Unmounted` state.
-- `data-ars-state` must be `"open"` when present and `"closed"` when unmounting. The adapter must set `"closed"` before the rAF that reads `getComputedStyle()` (web).
+- `data-ars-state` must be `"open"` only in `Mounted`; `Mounting` stays `"closed"` until `ContentReady`. The adapter must set `"closed"` before the rAF that reads `getComputedStyle()` (web).
 - `animationend`/`transitionend` listeners must never attach during SSR.
 - Only one `animationend` listener and one `transitionend` listener may be active on the root element at any time (web).
 - The `completed` guard must be set to `true` synchronously during cleanup, before any listener removal.
@@ -451,7 +456,7 @@ Cheap verification recipe:
 - [ ] `present` prop changes drive `api.sync_present()` via reactive effect.
 - [ ] `Context.node_id` is set after client mount from the generated root element ID.
 - [ ] Children are conditionally rendered based on `api.is_mounted()`.
-- [ ] `data-ars-state` is `"open"` when present, `"closed"` when unmounting.
+- [ ] `data-ars-state` is `"open"` only in `Mounted`; `Mounting`, `UnmountPending`, and `Unmounted` are `"closed"`.
 - [ ] `data-ars-presence` is `"mounted"` when idle, `"exiting"` during exit animation.
 - [ ] `animationend` and `transitionend` listeners attach only on `UnmountPending` entry, inside a double-rAF (web).
 - [ ] `getComputedStyle()` reads are batched into a per-frame cache (web).

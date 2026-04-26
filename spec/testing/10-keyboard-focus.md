@@ -1703,7 +1703,7 @@ fn long_press_description_attrs_returns_aria_describedby_link() {
         accessibility_description: Some("Long press for more options".into()),
         ..Default::default()
     };
-    let result = use_long_press(config, &ids);
+    let result = use_long_press(config);
 
     let desc_attrs = result.description_attrs(&ids)
         .expect("description_attrs must return Some when accessibility_description is set");
@@ -1715,7 +1715,7 @@ fn long_press_description_attrs_returns_aria_describedby_link() {
 fn long_press_no_description_returns_none() {
     let ids = ComponentIds::from_id("btn-2");
     let config = LongPressConfig::default();
-    let result = use_long_press(config, &ids);
+    let result = use_long_press(config);
 
     assert!(result.description_attrs(&ids).is_none(),
         "description_attrs must return None when no accessibility_description");

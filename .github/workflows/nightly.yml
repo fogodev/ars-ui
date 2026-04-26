@@ -27,7 +27,7 @@ jobs:
           key: ${{ runner.os }}-cargo-nightly-proptest-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
-      - run: cargo test -p ars-core -- --ignored proptest
+      - run: cargo test -p ars-core -p ars-components -- --ignored proptest
 
   a11y-audit:
     name: Accessibility Audit

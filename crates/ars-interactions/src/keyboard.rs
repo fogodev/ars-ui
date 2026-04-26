@@ -4,7 +4,7 @@
 //! components that need direct `keydown` and `keyup` handling without bundling
 //! behavior such as press, focus, or movement semantics.
 
-use std::string::String;
+use alloc::string::String;
 
 /// Re-export of the canonical named-key enum from `ars-core`.
 ///
@@ -80,18 +80,22 @@ pub struct KeyboardEventData {
 pub enum ArsKeyboardEvent {
     /// A key was pressed down.
     KeyDown(KeyboardEventData),
+
     /// A key was released.
     KeyUp(KeyboardEventData),
 }
 
 #[cfg(test)]
 mod tests {
+    use alloc::borrow::ToOwned;
+
     use super::{ArsKeyboardEvent, KeyboardConfig, KeyboardEventData, KeyboardKey};
     use crate::keyboard::KeyboardKey as ReexportedKeyboardKey;
 
     #[test]
     fn keyboard_config_default_disabled_false() {
         let config = KeyboardConfig::default();
+
         assert!(!config.disabled);
     }
 
@@ -139,6 +143,7 @@ mod tests {
                 assert_eq!(inner.key, KeyboardKey::Enter);
                 assert_eq!(inner.code, "Enter");
             }
+
             ArsKeyboardEvent::KeyUp(_) => panic!("expected KeyDown"),
         }
 
@@ -147,6 +152,7 @@ mod tests {
                 assert_eq!(inner.key, KeyboardKey::Enter);
                 assert_eq!(inner.code, "Enter");
             }
+
             ArsKeyboardEvent::KeyDown(_) => panic!("expected KeyUp"),
         }
     }
@@ -154,6 +160,7 @@ mod tests {
     #[test]
     fn named_key_round_trips_through_keyboard_key() {
         let key = KeyboardKey::from_key_str("ArrowLeft");
+
         assert_eq!(key, KeyboardKey::ArrowLeft);
         assert_eq!(key.as_w3c_str(), "ArrowLeft");
     }
@@ -249,6 +256,7 @@ mod tests {
     #[test]
     fn keyboard_module_reexports_keyboard_key() {
         let key = ReexportedKeyboardKey::from_key_str("Enter");
+
         assert_eq!(key, KeyboardKey::Enter);
     }
 }

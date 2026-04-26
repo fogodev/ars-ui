@@ -5,10 +5,10 @@
 //! [`FormContext`](crate::FormContext) to support async validation (e.g.,
 //! server-side uniqueness checks).
 
-use std::{
+use alloc::{boxed::Box, string::String, sync::Arc};
+use core::{
     fmt::{self, Debug},
     pin::Pin,
-    sync::Arc,
 };
 
 use super::{
@@ -145,11 +145,11 @@ where
 
 #[cfg(test)]
 mod tests {
+    use alloc::{format, string::ToString, sync::Arc, vec};
     use core::{
         pin::Pin,
         task::{Context as TaskContext, Poll, Waker},
     };
-    use std::sync::Arc;
 
     use super::*;
     use crate::{
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn block_on_ready_panics_for_pending_future() {
-        let result = std::panic::catch_unwind(|| block_on_ready(std::future::pending::<()>()));
+        let result = std::panic::catch_unwind(|| block_on_ready(core::future::pending::<()>()));
 
         assert!(result.is_err());
     }
@@ -372,8 +372,11 @@ mod tests {
         fn assert_send<T: Send>(_: &T) {}
 
         let validator = AsyncFnValidator::new(|_text: String, _ctx: OwnedContext| async { Ok(()) });
+
         let value = Value::Text("test".to_string());
+
         let ctx = Context::standalone("field");
+
         let future = validator.validate_async(&value, &ctx);
 
         assert_send(&future);

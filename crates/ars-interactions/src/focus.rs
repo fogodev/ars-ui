@@ -9,11 +9,10 @@
 //! elements: the container is marked as focus-containing when any descendant has
 //! focus, matching CSS `:focus-within` but exposed as a data attribute.
 
-use std::{
+use alloc::{rc::Rc, sync::Arc};
+use core::{
     cell::RefCell,
     fmt::{self, Debug},
-    rc::Rc,
-    sync::Arc,
 };
 
 use ars_core::{AttrMap, Callback, HtmlAttr, ModalityContext};
@@ -74,10 +73,13 @@ impl FocusState {
 pub enum FocusEventType {
     /// The element received focus.
     Focus,
+
     /// The element lost focus.
     Blur,
+
     /// A descendant within the container received focus.
     FocusWithin,
+
     /// Focus left the container entirely.
     BlurWithin,
 }
@@ -248,13 +250,17 @@ impl FocusResult {
     #[must_use]
     pub fn current_attrs(&self, config: &FocusConfig) -> AttrMap {
         let state = self.state.borrow();
+
         let mut attrs = AttrMap::new();
+
         if state.is_focused() {
             attrs.set_bool(HtmlAttr::Data("ars-focused"), true);
         }
+
         if state.is_focus_visible(config.modality.as_ref()) {
             attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
         }
+
         attrs
     }
 }
@@ -286,15 +292,17 @@ impl FocusWithinResult {
     /// Call this inside `connect()` — not once at init time — to ensure
     /// the returned attributes are always up to date.
     #[must_use]
-    pub fn current_attrs(&self, config: &FocusWithinConfig) -> AttrMap {
-        let _config = config;
+    pub fn current_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
+
         if *self.state.borrow() {
             attrs.set_bool(HtmlAttr::Data("ars-focus-within"), true);
         }
+
         if *self.visible.borrow() {
             attrs.set_bool(HtmlAttr::Data("ars-focus-within-visible"), true);
         }
+
         attrs
     }
 }
@@ -315,37 +323,27 @@ impl FocusWithinResult {
 )]
 pub fn use_focus(config: FocusConfig) -> FocusResult {
     let state = Rc::new(RefCell::new(FocusState::Unfocused));
-    let focused = state.borrow().is_focused();
     let focus_visible = state.borrow().is_focus_visible(config.modality.as_ref());
 
     FocusResult {
         state,
-        focused,
+        focused: false,
         focus_visible,
     }
 }
 
-/// Creates a focus-within interaction state container with the given configuration.
+/// Creates a focus-within interaction state container.
 ///
 /// Returns a [`FocusWithinResult`] tracking whether any descendant has focus.
-/// Event handlers are registered as typed methods on the component's `Api` struct
-/// by the framework adapter.
+/// Event handlers and config-driven behavior are adapter-owned.
 #[must_use]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "spec API takes ownership; adapters will consume the config for event handler registration"
-)]
-pub fn use_focus_within(config: FocusWithinConfig) -> FocusWithinResult {
+pub fn use_focus_within() -> FocusWithinResult {
     let state = Rc::new(RefCell::new(false));
     let visible = Rc::new(RefCell::new(false));
 
-    let _is_disabled = config.disabled;
-    let focus_within = *state.borrow();
-    let is_focus_within_visible = *visible.borrow();
-
     FocusWithinResult {
-        focus_within,
-        is_focus_within_visible,
+        focus_within: false,
+        is_focus_within_visible: false,
         state,
         visible,
     }
@@ -353,13 +351,10 @@ pub fn use_focus_within(config: FocusWithinConfig) -> FocusWithinResult {
 
 #[cfg(test)]
 mod tests {
-    use std::{
+    use alloc::{format, rc::Rc, sync::Arc};
+    use core::{
         cell::RefCell,
-        rc::Rc,
-        sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        },
+        sync::atomic::{AtomicUsize, Ordering},
     };
 
     use ars_core::{
@@ -402,13 +397,16 @@ mod tests {
     #[test]
     fn unfocused_to_focused_by_keyboard_when_last_modality_is_keyboard() {
         let modality = DefaultModalityContext::new();
+
         modality.on_key_down(KeyboardKey::Tab, KeyModifiers::default());
 
         // When modality is Keyboard, focus should transition to FocusedByKeyboard
         let last = modality.last_pointer_type();
+
         assert_eq!(last, Some(PointerType::Keyboard));
 
         let state = FocusState::FocusedByKeyboard;
+
         assert!(state.is_focused());
         assert!(state.is_focus_visible(&modality));
     }
@@ -416,9 +414,11 @@ mod tests {
     #[test]
     fn unfocused_to_focused_by_pointer_when_last_modality_is_mouse() {
         let modality = DefaultModalityContext::new();
+
         modality.on_pointer_down(PointerType::Mouse);
 
         let state = FocusState::FocusedByPointer;
+
         assert!(state.is_focused());
         assert!(!state.is_focus_visible(&modality));
     }
@@ -426,9 +426,11 @@ mod tests {
     #[test]
     fn unfocused_to_focused_by_pointer_when_last_modality_is_touch() {
         let modality = DefaultModalityContext::new();
+
         modality.on_pointer_down(PointerType::Touch);
 
         let state = FocusState::FocusedByPointer;
+
         assert!(state.is_focused());
         assert!(!state.is_focus_visible(&modality));
     }
@@ -436,9 +438,11 @@ mod tests {
     #[test]
     fn unfocused_to_focused_by_pointer_when_last_modality_is_pen() {
         let modality = DefaultModalityContext::new();
+
         modality.on_pointer_down(PointerType::Pen);
 
         let state = FocusState::FocusedByPointer;
+
         assert!(state.is_focused());
         assert!(!state.is_focus_visible(&modality));
     }
@@ -451,7 +455,9 @@ mod tests {
         assert_eq!(modality.last_pointer_type(), None);
 
         let state = FocusState::FocusedProgrammatic;
+
         assert!(state.is_focused());
+
         // No prior pointer interaction → focus ring shown
         assert!(state.is_focus_visible(&modality));
     }
@@ -461,6 +467,7 @@ mod tests {
     #[test]
     fn focus_visible_true_only_for_keyboard() {
         let modality = DefaultModalityContext::new();
+
         modality.on_pointer_down(PointerType::Mouse);
 
         assert!(FocusState::FocusedByKeyboard.is_focus_visible(&modality));
@@ -477,10 +484,12 @@ mod tests {
 
         // After pointer → not visible
         modality.on_pointer_down(PointerType::Mouse);
+
         assert!(!FocusState::FocusedProgrammatic.is_focus_visible(&modality));
 
         // After keyboard → visible again
         modality.on_key_down(KeyboardKey::Tab, KeyModifiers::default());
+
         assert!(FocusState::FocusedProgrammatic.is_focus_visible(&modality));
     }
 
@@ -496,7 +505,9 @@ mod tests {
     #[test]
     fn focus_event_type_is_copy() {
         let t = FocusEventType::Focus;
+
         let t2 = t;
+
         assert_eq!(t, t2);
     }
 
@@ -508,7 +519,9 @@ mod tests {
             event_type: FocusEventType::Focus,
             pointer_type: Some(PointerType::Mouse),
         };
+
         let cloned = event.clone();
+
         assert_eq!(cloned.event_type, FocusEventType::Focus);
         assert_eq!(cloned.pointer_type, Some(PointerType::Mouse));
     }
@@ -519,7 +532,9 @@ mod tests {
             event_type: FocusEventType::Blur,
             pointer_type: None,
         };
+
         let debug = format!("{event:?}");
+
         assert!(debug.contains("Blur"));
     }
 
@@ -528,6 +543,7 @@ mod tests {
     #[test]
     fn focus_config_default_values() {
         let config = FocusConfig::default();
+
         assert!(!config.disabled);
         assert!(config.on_focus.is_none());
         assert!(config.on_blur.is_none());
@@ -537,7 +553,9 @@ mod tests {
     #[test]
     fn focus_config_debug_default_shows_none_callbacks() {
         let config = FocusConfig::default();
+
         let debug = format!("{config:?}");
+
         assert!(debug.contains("disabled: false"));
         assert!(debug.contains("on_focus: None"));
         assert!(debug.contains("on_blur: None"));
@@ -547,7 +565,9 @@ mod tests {
     #[test]
     fn focus_config_debug_with_callbacks_shows_callback() {
         let focus_calls = Arc::new(AtomicUsize::new(0));
+
         let blur_calls = Arc::new(AtomicUsize::new(0));
+
         let config = FocusConfig {
             on_focus: Some({
                 let focus_calls = Arc::clone(&focus_calls);
@@ -563,15 +583,20 @@ mod tests {
             }),
             ..FocusConfig::default()
         };
+
         let debug = format!("{config:?}");
+
         assert!(debug.contains("on_focus: Some(Callback(..))"));
         assert!(debug.contains("on_blur: Some(Callback(..))"));
+
         let event = FocusEvent {
             event_type: FocusEventType::Focus,
             pointer_type: Some(PointerType::Mouse),
         };
+
         config.on_focus.as_ref().expect("callback")(event.clone());
         config.on_blur.as_ref().expect("callback")(event);
+
         assert_eq!(focus_calls.load(Ordering::SeqCst), 1);
         assert_eq!(blur_calls.load(Ordering::SeqCst), 1);
     }
@@ -579,34 +604,42 @@ mod tests {
     #[test]
     fn focus_config_clone_shares_modality() {
         let config = FocusConfig::default();
+
         let cloned = config.clone();
+
         assert!(Arc::ptr_eq(&config.modality, &cloned.modality));
     }
 
     #[test]
     fn focus_config_partial_eq_same_modality() {
         let config1 = FocusConfig::default();
+
         let config2 = config1.clone();
+
         assert_eq!(config1, config2);
     }
 
     #[test]
     fn focus_config_partial_eq_different_modality() {
         let config1 = FocusConfig::default();
+
         let config2 = FocusConfig {
             modality: Arc::new(NullModalityContext),
             ..FocusConfig::default()
         };
+
         assert_ne!(config1, config2);
     }
 
     #[test]
     fn focus_config_partial_eq_detects_disabled_mismatch() {
         let left = FocusConfig::default();
+
         let right = FocusConfig {
             disabled: true,
             ..FocusConfig::default()
         };
+
         assert_ne!(left, right);
     }
 
@@ -614,8 +647,10 @@ mod tests {
     fn focus_config_partial_eq_detects_focus_callback_mismatch() {
         let mut left = FocusConfig::default();
         let mut right = left.clone();
+
         left.on_focus = Some(Callback::new(observe_focus));
         right.on_focus = Some(Callback::new(observe_focus));
+
         assert_ne!(left, right);
     }
 
@@ -623,11 +658,15 @@ mod tests {
     fn focus_config_partial_eq_detects_blur_callback_mismatch() {
         let mut left = FocusConfig::default();
         let mut right = left.clone();
+
         let shared = Callback::new(observe_focus);
+
         left.on_focus = Some(shared.clone());
         right.on_focus = Some(shared);
+
         left.on_blur = Some(Callback::new(observe_focus));
         right.on_blur = Some(Callback::new(observe_focus));
+
         assert_ne!(left, right);
     }
 
@@ -635,14 +674,20 @@ mod tests {
     fn focus_config_partial_eq_detects_visible_change_callback_mismatch() {
         let mut left = FocusConfig::default();
         let mut right = left.clone();
+
         let shared_focus = Callback::new(observe_focus);
+
         left.on_focus = Some(shared_focus.clone());
         right.on_focus = Some(shared_focus);
+
         let shared_blur = Callback::new(observe_focus);
+
         left.on_blur = Some(shared_blur.clone());
         right.on_blur = Some(shared_blur);
+
         left.on_focus_visible_change = Some(Callback::new(observe_bool));
         right.on_focus_visible_change = Some(Callback::new(observe_bool));
+
         assert_ne!(left, right);
     }
 
@@ -651,6 +696,7 @@ mod tests {
     #[test]
     fn focus_within_config_default_values() {
         let config = FocusWithinConfig::default();
+
         assert!(!config.disabled);
         assert!(config.on_focus_within.is_none());
         assert!(config.on_blur_within.is_none());
@@ -660,7 +706,9 @@ mod tests {
     #[test]
     fn focus_within_config_debug_output() {
         let config = FocusWithinConfig::default();
+
         let debug = format!("{config:?}");
+
         assert!(debug.contains("disabled: false"));
         assert!(debug.contains("on_focus_within: None"));
     }
@@ -672,6 +720,7 @@ mod tests {
             disabled: true,
             ..FocusWithinConfig::default()
         };
+
         assert_ne!(left, right);
     }
 
@@ -679,8 +728,10 @@ mod tests {
     fn focus_within_config_partial_eq_detects_focus_callback_mismatch() {
         let mut left = FocusWithinConfig::default();
         let mut right = left.clone();
+
         left.on_focus_within = Some(Callback::new(observe_focus));
         right.on_focus_within = Some(Callback::new(observe_focus));
+
         assert_ne!(left, right);
     }
 
@@ -688,11 +739,15 @@ mod tests {
     fn focus_within_config_partial_eq_detects_blur_callback_mismatch() {
         let mut left = FocusWithinConfig::default();
         let mut right = left.clone();
+
         let shared_focus = Callback::new(observe_focus);
+
         left.on_focus_within = Some(shared_focus.clone());
         right.on_focus_within = Some(shared_focus);
+
         left.on_blur_within = Some(Callback::new(observe_focus));
         right.on_blur_within = Some(Callback::new(observe_focus));
+
         assert_ne!(left, right);
     }
 
@@ -700,14 +755,19 @@ mod tests {
     fn focus_within_config_partial_eq_detects_visible_change_callback_mismatch() {
         let mut left = FocusWithinConfig::default();
         let mut right = left.clone();
+
         let shared_focus = Callback::new(observe_focus);
+
         left.on_focus_within = Some(shared_focus.clone());
         right.on_focus_within = Some(shared_focus);
+
         let shared_blur = Callback::new(observe_focus);
         left.on_blur_within = Some(shared_blur.clone());
         right.on_blur_within = Some(shared_blur);
+
         left.on_focus_within_visible_change = Some(Callback::new(observe_bool));
         right.on_focus_within_visible_change = Some(Callback::new(observe_bool));
+
         assert_ne!(left, right);
     }
 
@@ -720,8 +780,11 @@ mod tests {
             focused: false,
             focus_visible: false,
         };
+
         let config = FocusConfig::default();
+
         let attrs = result.current_attrs(&config);
+
         assert!(!attrs.contains(&HtmlAttr::Data("ars-focused")));
         assert!(!attrs.contains(&HtmlAttr::Data("ars-focus-visible")));
     }
@@ -733,8 +796,11 @@ mod tests {
             focused: true,
             focus_visible: true,
         };
+
         let config = FocusConfig::default();
+
         let attrs = result.current_attrs(&config);
+
         assert_eq!(
             attrs.get_value(&HtmlAttr::Data("ars-focused")),
             Some(&AttrValue::Bool(true))
@@ -752,8 +818,11 @@ mod tests {
             focused: true,
             focus_visible: false,
         };
+
         let config = FocusConfig::default();
+
         let attrs = result.current_attrs(&config);
+
         assert!(attrs.contains(&HtmlAttr::Data("ars-focused")));
         assert!(!attrs.contains(&HtmlAttr::Data("ars-focus-visible")));
     }
@@ -773,18 +842,23 @@ mod tests {
 
         // No prior pointer → focus-visible should be true
         let attrs = result.current_attrs(&config);
+
         assert!(attrs.contains(&HtmlAttr::Data("ars-focus-visible")));
 
         // After pointer interaction on config's modality → not visible
         config.modality.on_pointer_down(PointerType::Mouse);
+
         let attrs = result.current_attrs(&config);
+
         assert!(!attrs.contains(&HtmlAttr::Data("ars-focus-visible")));
 
         // After keyboard → visible again
         config
             .modality
             .on_key_down(KeyboardKey::Tab, KeyModifiers::default());
+
         let attrs = result.current_attrs(&config);
+
         assert!(attrs.contains(&HtmlAttr::Data("ars-focus-visible")));
     }
 
@@ -798,8 +872,9 @@ mod tests {
             state: Rc::new(RefCell::new(false)),
             visible: Rc::new(RefCell::new(false)),
         };
-        let config = FocusWithinConfig::default();
-        let attrs = result.current_attrs(&config);
+
+        let attrs = result.current_attrs();
+
         assert!(!attrs.contains(&HtmlAttr::Data("ars-focus-within")));
         assert!(!attrs.contains(&HtmlAttr::Data("ars-focus-within-visible")));
     }
@@ -812,8 +887,9 @@ mod tests {
             state: Rc::new(RefCell::new(true)),
             visible: Rc::new(RefCell::new(false)),
         };
-        let config = FocusWithinConfig::default();
-        let attrs = result.current_attrs(&config);
+
+        let attrs = result.current_attrs();
+
         assert_eq!(
             attrs.get_value(&HtmlAttr::Data("ars-focus-within")),
             Some(&AttrValue::Bool(true))
@@ -829,8 +905,9 @@ mod tests {
             state: Rc::new(RefCell::new(false)),
             visible: Rc::new(RefCell::new(true)),
         };
-        let config = FocusWithinConfig::default();
-        let attrs = result.current_attrs(&config);
+
+        let attrs = result.current_attrs();
+
         assert!(!attrs.contains(&HtmlAttr::Data("ars-focus-within")));
         assert_eq!(
             attrs.get_value(&HtmlAttr::Data("ars-focus-within-visible")),
@@ -846,8 +923,9 @@ mod tests {
             state: Rc::new(RefCell::new(true)),
             visible: Rc::new(RefCell::new(true)),
         };
-        let config = FocusWithinConfig::default();
-        let attrs = result.current_attrs(&config);
+
+        let attrs = result.current_attrs();
+
         assert!(attrs.contains(&HtmlAttr::Data("ars-focus-within")));
         assert!(attrs.contains(&HtmlAttr::Data("ars-focus-within-visible")));
     }
@@ -857,18 +935,21 @@ mod tests {
     #[test]
     fn use_focus_returns_unfocused_state() {
         let result = use_focus(FocusConfig::default());
+
         assert_eq!(*result.state.borrow(), FocusState::Unfocused);
     }
 
     #[test]
     fn use_focus_returns_focused_false() {
         let result = use_focus(FocusConfig::default());
+
         assert!(!result.focused);
     }
 
     #[test]
     fn use_focus_returns_focus_visible_false() {
         let result = use_focus(FocusConfig::default());
+
         assert!(!result.focus_visible);
     }
 
@@ -878,20 +959,24 @@ mod tests {
             disabled: true,
             ..FocusConfig::default()
         };
+
         let result = use_focus(config);
+
         assert_eq!(*result.state.borrow(), FocusState::Unfocused);
         assert!(!result.focused);
     }
 
     #[test]
     fn use_focus_within_returns_initial_false() {
-        let result = use_focus_within(FocusWithinConfig::default());
+        let result = use_focus_within();
+
         assert!(!result.focus_within);
     }
 
     #[test]
     fn use_focus_within_returns_visible_false() {
-        let result = use_focus_within(FocusWithinConfig::default());
+        let result = use_focus_within();
+
         assert!(!result.is_focus_within_visible);
     }
 
@@ -900,15 +985,19 @@ mod tests {
     #[test]
     fn focus_state_is_copy() {
         let a = FocusState::FocusedByKeyboard;
+
         let b = a; // Copy, not move
+
         assert_eq!(a, b);
     }
 
     #[test]
     fn focus_state_clone_matches_copy() {
         let a = FocusState::FocusedByPointer;
+
         #[expect(clippy::clone_on_copy, reason = "explicitly testing Clone impl")]
         let b = a.clone();
+
         assert_eq!(a, b);
     }
 
@@ -917,7 +1006,9 @@ mod tests {
     #[test]
     fn focus_result_debug_output() {
         let result = use_focus(FocusConfig::default());
+
         let debug = format!("{result:?}");
+
         assert!(debug.contains("FocusResult"));
         assert!(debug.contains("focused: false"));
         assert!(debug.contains("focus_visible: false"));
@@ -925,8 +1016,10 @@ mod tests {
 
     #[test]
     fn focus_within_result_debug_output() {
-        let result = use_focus_within(FocusWithinConfig::default());
+        let result = use_focus_within();
+
         let debug = format!("{result:?}");
+
         assert!(debug.contains("FocusWithinResult"));
         assert!(debug.contains("focus_within: false"));
     }
@@ -936,24 +1029,30 @@ mod tests {
     #[test]
     fn focus_within_config_clone_shares_modality() {
         let config = FocusWithinConfig::default();
+
         let cloned = config.clone();
+
         assert!(Arc::ptr_eq(&config.modality, &cloned.modality));
     }
 
     #[test]
     fn focus_within_config_partial_eq_same() {
         let config1 = FocusWithinConfig::default();
+
         let config2 = config1.clone();
+
         assert_eq!(config1, config2);
     }
 
     #[test]
     fn focus_within_config_partial_eq_different_modality() {
         let config1 = FocusWithinConfig::default();
+
         let config2 = FocusWithinConfig {
             modality: Arc::new(NullModalityContext),
             ..FocusWithinConfig::default()
         };
+
         assert_ne!(config1, config2);
     }
 
@@ -965,36 +1064,25 @@ mod tests {
             event_type: FocusEventType::FocusWithin,
             pointer_type: None,
         };
+
         let cloned = event.clone();
+
         assert_eq!(cloned.event_type, FocusEventType::FocusWithin);
         assert_eq!(cloned.pointer_type, None);
-    }
-
-    // ── use_focus_within disabled config ─────────────────────────────
-
-    #[test]
-    fn use_focus_within_disabled_config_still_creates_result() {
-        let config = FocusWithinConfig {
-            disabled: true,
-            ..FocusWithinConfig::default()
-        };
-        let result = use_focus_within(config);
-        assert!(!result.focus_within);
-        assert!(!result.is_focus_within_visible);
     }
 
     // ── FocusWithin tracking test ───────────────────────────────────
 
     #[test]
     fn focus_within_tracking_child_focus_propagates() {
-        let result = use_focus_within(FocusWithinConfig::default());
+        let result = use_focus_within();
 
         // Simulate child focus: adapter sets state to true
         *result.state.borrow_mut() = true;
         *result.visible.borrow_mut() = true;
 
-        let config = FocusWithinConfig::default();
-        let attrs = result.current_attrs(&config);
+        let attrs = result.current_attrs();
+
         assert!(attrs.contains(&HtmlAttr::Data("ars-focus-within")));
         assert!(attrs.contains(&HtmlAttr::Data("ars-focus-within-visible")));
 
@@ -1002,7 +1090,8 @@ mod tests {
         *result.state.borrow_mut() = false;
         *result.visible.borrow_mut() = false;
 
-        let attrs = result.current_attrs(&config);
+        let attrs = result.current_attrs();
+
         assert!(!attrs.contains(&HtmlAttr::Data("ars-focus-within")));
         assert!(!attrs.contains(&HtmlAttr::Data("ars-focus-within-visible")));
     }

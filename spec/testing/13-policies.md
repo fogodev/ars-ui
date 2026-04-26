@@ -344,8 +344,8 @@ adapter-level component coverage starts for that component.
 - **Warning threshold:** When total snapshot count exceeds 500, a CI warning is emitted.
 - **Per-component limit:** No single component should have more than 20 snapshot files. Components exceeding this should consolidate state variants.
 - **Quarterly audit:** Review snapshot growth each quarter. Prune snapshots for removed or significantly refactored components.
-- **Review budget guideline:** Each new component starts review with a snapshot plan of 3 snapshots per state variant × number of anatomy parts.
-- **CI floor:** Each component implementation file (`component.rs`) with more than two `State` variants must have at least 3 snapshots per state variant.
+- **Review budget guideline:** Each new rendered component starts review with a snapshot plan of 3 snapshots per state variant × number of anatomy parts. `ars-components` machine modules instead plan snapshots around output-affecting connect-API attrs.
+- **CI floor:** Rendered `component.rs` files with more than two `State` variants must have at least 3 snapshots per state variant. Canonical `ars-components` machine modules with more than two variants must have at least 1 snapshot per state variant.
 
 Each component is budgeted a maximum of **20 snapshots**. The review guideline formula is:
 
@@ -396,6 +396,7 @@ and those operational floors may temporarily lag the long-term targets below.
 | ----------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Line coverage (ars-core)            | >= 90%                                                                                            | All state machines, `transition()`, `connect()`, context logic                                                                                                                                                                        |
 | Line coverage (ars-a11y)            | >= 85%                                                                                            | Accessibility utilities                                                                                                                                                                                                               |
+| Line coverage (ars-components)      | >= 90%                                                                                            | Framework-agnostic component machines and connect APIs                                                                                                                                                                                |
 | Line coverage (ars-i18n)            | >= 80%                                                                                            | I18N, some paths locale-dependent                                                                                                                                                                                                     |
 | Line coverage (ars-interactions)    | >= 80%                                                                                            | Interaction handlers                                                                                                                                                                                                                  |
 | Line coverage (ars-collections)     | >= 85%                                                                                            | Collection data structures                                                                                                                                                                                                            |
@@ -408,19 +409,19 @@ and those operational floors may temporarily lag the long-term targets below.
 | Line coverage (ars-test-harness-\*) | Measured and enforced in CI via ratcheted floor; see [14-ci.md](14-ci.md#22-per-crate-thresholds) | Framework-specific harness backends                                                                                                                                                                                                   |
 | Line coverage (xtask)               | Measured and enforced in CI via ratcheted floor; see [14-ci.md](14-ci.md#22-per-crate-thresholds) | Build, CI, spec, and tooling commands                                                                                                                                                                                                 |
 | Branch coverage (critical paths)    | Per-crate line minimum                                                                            | Branch coverage targets are set 10% below line coverage minimums, reflecting the higher difficulty of achieving branch coverage. Critical path functions should aim for 100% branch coverage at code review time, not enforced by CI. |
-| Snapshot count per component state  | >= 3                                                                                              | At minimum: root attrs, primary interactive part, ARIA live region (if applicable)                                                                                                                                                    |
+| Snapshot count per component state  | Rendered components: >= 3; `ars-components` core machines: >= 1                                   | Rendered components snapshot root attrs, primary interactive part, and ARIA live region where applicable; `ars-components` snapshots focus on output-affecting connect-API attrs per state variant                                    |
 | Property-based test iterations      | >= 1000                                                                                           | Per state machine, using `proptest` or equivalent                                                                                                                                                                                     |
 
 > CI enforcement: see [14-ci.md](14-ci.md#2-coverage-pipeline).
 
-**Snapshot count enforcement**: Every component implementation file (`component.rs`) with more than two `State` variants MUST have at least 3 snapshot tests per variant. Components with fewer fail the snapshot-count lint. The lint runs via `cargo xtask lint snapshot-count` and parses `*.snap` files in the test directory.
+**Snapshot count enforcement**: Every stateful component implementation file with more than two `State` variants MUST meet a per-variant floor. Rendered component modules (`component.rs`) require at least 3 snapshots per variant. Canonical `ars-components` machine modules require at least 1 snapshot per variant, focused on output-affecting connect-API attrs. Components with fewer fail the snapshot-count lint. The lint runs via `cargo xtask lint snapshot-count` and parses `*.snap` files in the test directory.
 
 > CI integration: see [14-ci.md](14-ci.md#24-snapshot-count-linting).
 
 **Property-based iteration count**: The `proptest` configuration in `Cargo.toml` MUST set
 `PROPTEST_CASES=1000` as minimum. Nightly CI runs MAY increase to 10,000 for deeper coverage:
 
-> **Pipeline scope:** Property-based tests (`proptest`) run in the **nightly pipeline** ([14-ci.md section 3.1](14-ci.md#31-extended-property-based-testing)) with `PROPTEST_CASES=1000`. They are excluded from the PR pipeline via `#[ignore]` to keep PR feedback fast. The nightly job runs `cargo test -p ars-core -- --ignored` to execute them.
+> **Pipeline scope:** Property-based tests (`proptest`) run in the **nightly pipeline** ([14-ci.md section 3.1](14-ci.md#31-extended-property-based-testing)) with `PROPTEST_CASES=1000`. They are excluded from the PR pipeline via `#[ignore]` to keep PR feedback fast. The nightly job runs the ignored proptests for every core state-machine crate that defines them, including `ars-core` and `ars-components`.
 
 ```toml
 # In workspace Cargo.toml [profile.test]

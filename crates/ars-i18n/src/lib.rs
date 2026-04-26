@@ -3,7 +3,7 @@
 //! locale-aware case mapping, and logical-to-physical layout geometry.
 //!
 //! This crate provides the core i18n primitives shared across all ars-ui components:
-//! a BCP 47 [`Locale`] wrapper, a locale-aware [`NumberFormatter`], a
+//! a BCP 47 [`Locale`] wrapper, a locale-aware [`number::Formatter`], a
 //! [`Direction`] enum for LTR/RTL text flow, a [`StringCollator`] for
 //! locale-aware sorting, an [`Orientation`] enum for horizontal/vertical
 //! layout axes, RTL-aware layout geometry types ([`LogicalSide`],
@@ -32,7 +32,7 @@ mod detect;
 mod layout;
 mod locale;
 mod locale_stack;
-mod number;
+pub mod number;
 mod plural;
 mod provider;
 mod relative_time;
@@ -65,8 +65,8 @@ pub use layout::{LogicalRect, LogicalSide, PhysicalRect, PhysicalSide};
 pub use locale::{Locale, LocaleParseError, locales};
 pub use locale_stack::LocaleStack;
 pub use number::{
-    CurrencyCode, MeasureUnit, NumberFormatOptions, NumberFormatter, NumberStyle, RoundingMode,
-    SignDisplay, UnitDisplay, decimal_and_group_separators, normalize_digits, parse_locale_number,
+    CurrencyCode, MeasureUnit, RoundingMode, SignDisplay, UnitDisplay,
+    decimal_and_group_separators, normalize_digits, parse_locale_number,
 };
 #[cfg(feature = "icu4x")]
 pub use plural::{DefaultPluralRules, Icu4xPluralRules};

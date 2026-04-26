@@ -1,179 +1,135 @@
 ---
 component: Fieldset
 category: utility
-tier: stateless
+tier: stateful
 foundation_deps: [architecture, accessibility, forms]
 shared_deps: []
-related: [field]
+related: [field, form]
 references:
-  ark-ui: Fieldset
+    ark-ui: Fieldset
 ---
 
 # Fieldset
 
-Groups related form fields with `<fieldset>`/`<legend>` semantics and shared disabled/error state propagation. When `disabled` is set on the fieldset, all child fields inherit the disabled state. Error messages can be associated with the group as a whole.
+Fieldset is the canonical specification for the framework-agnostic
+`ars_components::utility::fieldset` machine. It models shared disabled, invalid, and readonly
+state for a group of related fields while preserving native `<fieldset>` and `<legend>` semantics.
 
-> **Canonical specification:** The full state machine and form context integration are defined in `spec/foundation/07-forms.md` §12. This file provides an inline summary for quick reference.
+Shared child-field context contracts live in `spec/foundation/07-forms.md`. This file owns the
+Fieldset machine, connect API, anatomy, and root attribute behavior.
 
-**Ark UI equivalent:** Fieldset
-**React Aria equivalent:** — (no direct equivalent; uses native `<fieldset>`)
+## 1. State Machine
 
-## 1. API
+### 1.1 State
 
-### 1.1 Props
+`Fieldset` has a single `Idle` state. Context holds:
 
-> This is an adapter-level convenience summary. The canonical Props definition is in `07-forms.md` §12.2.4.
+- `disabled`
+- `invalid`
+- `readonly`
+- `dir`
+- `errors`
+- `has_description`
+- `ids`
 
-```rust
-#[derive(Clone, Debug, PartialEq, HasId)]
-pub struct Props {
-    pub id: String,
-    /// Whether the entire fieldset and all contained inputs are disabled.
-    pub disabled: bool,
-    /// Whether the fieldset is in an invalid state.
-    pub invalid: bool,
-    /// Whether the fieldset is read-only.
-    pub readonly: bool,
-    /// Layout direction for RTL support.
-    pub dir: Option<Direction>,
-}
-```
+### 1.2 Props
 
-### 1.2 Connect / API
+The core machine props are:
 
-The canonical state machine and full connect API are defined in `spec/foundation/07-forms.md` §12. The summary below covers the key attribute outputs.
+- `id: String`
+- `disabled: bool`
+- `invalid: bool`
+- `readonly: bool`
+- `dir: Option<Direction>`
 
-```rust
-#[derive(ComponentPart)]
-#[scope = "fieldset"]
-pub enum Part {
-    Root,
-    Legend,
-    Description,
-    ErrorMessage,
-}
+The `id` is immutable after initialization because the derived `ComponentIds` are cached in
+context.
 
-/// Attributes for the root `<fieldset>` element.
-pub fn root_attrs(&self) -> AttrMap {
-    let mut attrs = AttrMap::new();
-    attrs.set(HtmlAttr::Id, self.ctx.ids.id());
-    let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
-    attrs.set(scope_attr, scope_val);
-    attrs.set(part_attr, part_val);
-    // Native <fieldset disabled> propagates to all contained form elements.
-    if self.ctx.disabled {
-        attrs.set_bool(HtmlAttr::Disabled, true);
-    }
-    if let Some(dir) = self.ctx.dir {
-        attrs.set(HtmlAttr::Dir, dir.as_html_attr());
-    }
-    let mut describedby_parts: Vec<String> = Vec::new();
-    describedby_parts.push(self.ctx.ids.part("description"));
-    if !self.ctx.errors.is_empty() {
-        describedby_parts.push(self.ctx.ids.part("error-message"));
-    }
-    if !describedby_parts.is_empty() {
-        attrs.set(
-            HtmlAttr::Aria(AriaAttr::DescribedBy),
-            describedby_parts.join(" "),
-        );
-    }
-    attrs
-}
+### 1.3 Events
 
-/// Attributes for the `<legend>` element.
-pub fn legend_attrs(&self) -> AttrMap {
-    let mut attrs = AttrMap::new();
-    attrs.set(HtmlAttr::Id, self.ctx.ids.part("legend"));
-    let [(_, _), (part_attr, part_val)] = Part::Legend.data_attrs();
-    attrs.set(part_attr, part_val);
-    attrs
-}
+The machine accepts context-synchronization events:
 
-/// Attributes for the description/help text element.
-pub fn description_attrs(&self) -> AttrMap {
-    let mut attrs = AttrMap::new();
-    attrs.set(HtmlAttr::Id, self.ctx.ids.part("description"));
-    let [(_, _), (part_attr, part_val)] = Part::Description.data_attrs();
-    attrs.set(part_attr, part_val);
-    attrs
-}
+- `SetErrors(Vec<Error>)`
+- `ClearErrors`
+- `SetDisabled(bool)`
+- `SetInvalid(bool)`
+- `SetReadonly(bool)`
+- `SetDir(Option<Direction>)`
+- `SetHasDescription(bool)`
 
-/// Attributes for the error message element.
-pub fn error_message_attrs(&self) -> AttrMap {
-    let mut attrs = AttrMap::new();
-    attrs.set(HtmlAttr::Id, self.ctx.ids.part("error-message"));
-    attrs.set(HtmlAttr::Role, "alert");
-    let [(_, _), (part_attr, part_val)] = Part::ErrorMessage.data_attrs();
-    attrs.set(part_attr, part_val);
-    if self.ctx.errors.is_empty() {
-        attrs.set_bool(HtmlAttr::Hidden, true);
-    }
-    attrs
-}
-```
+`invalid` is derived as `props.invalid || !errors.is_empty()`.
+
+### 1.4 Connect API
+
+`fieldset::Api` exposes:
+
+- `root_attrs()`
+- `legend_attrs()`
+- `description_attrs()`
+- `error_message_attrs()`
+- `content_attrs()`
+- `errors()`
+- `is_disabled()`
+- `is_invalid()`
+- `is_readonly()`
+
+The structural parts are:
+
+- `Root`
+- `Legend`
+- `Description`
+- `ErrorMessage`
+- `Content`
 
 ## 2. Anatomy
 
 ```text
 Fieldset
 ├── Root          <fieldset>  data-ars-scope="fieldset" data-ars-part="root"
-├── Legend         <legend>   data-ars-part="legend"
-├── Description   <div>      data-ars-part="description" (optional)
-├── {child fields}            Field components inherit disabled state via Context
-└── ErrorMessage  <span>     data-ars-part="error-message" role="alert"
+├── Legend        <legend>    data-ars-part="legend"
+├── Description   <span>      data-ars-part="description" id="{description-id}" (optional)
+├── ErrorMessage  <span>      data-ars-part="error-message" id="{error-id}" role="alert"
+└── Content       <div>       data-ars-part="content"
 ```
-
-| Part         | Element      | Key Attributes                                                  |
-| ------------ | ------------ | --------------------------------------------------------------- |
-| Root         | `<fieldset>` | `data-ars-scope="fieldset"`, `data-ars-part="root"`, `disabled` |
-| Legend       | `<legend>`   | `data-ars-part="legend"`                                        |
-| Description  | `<div>`      | `data-ars-part="description"`, wired via `aria-describedby`     |
-| ErrorMessage | `<span>`     | `data-ars-part="error-message"`, `role="alert"`                 |
 
 ## 3. Accessibility
 
-### 3.1 ARIA Roles, States, and Properties
+### 3.1 Root Attributes
 
-- Renders as `<fieldset>` with `<legend>` for the legend text. The native `<fieldset>` carries an implicit role — no explicit `role` attribute is needed.
-- When `disabled`, sets native `disabled` on the fieldset element (not just `aria-disabled`), which propagates to all contained form controls.
-- Error message linked via `aria-describedby` on the fieldset element pointing to the error message part ID.
-- **Note:** `aria-invalid` is intentionally NOT set on the `<fieldset>` element. Screen readers (particularly NVDA and JAWS) do not reliably announce `aria-invalid` on fieldset elements. Validation errors are communicated through the `ErrorMessage` anatomy part (which uses `role="alert"`) and through individual Field components within the fieldset.
+`root_attrs()` emits:
 
-When rendering as a native `<fieldset>` with `<legend>`, no explicit `aria-labelledby` is needed — the browser provides implicit labeling. If an adapter renders a non-native container element (e.g., `<div role="group">`), it MUST set `aria-labelledby` pointing to the legend element's ID to maintain the accessible name association.
+- native `disabled` when the group is disabled
+- `dir` when present
+- `aria-describedby` including the description ID only when the description part is rendered
+- `aria-describedby` including the error-message ID only when errors are present
 
-## 4. Adapter Context Propagation
+### 3.2 Invalid Contract
 
-Adapters MUST provide `Context` to descendant fields via framework context (`provide_context` in Leptos, `use_context_provider` in Dioxus). Child Field components consume this context to inherit disabled, invalid, and readonly states from their parent Fieldset.
+Fieldset intentionally does **not** set `aria-invalid` on the root `<fieldset>`. Screen readers do
+not reliably announce `aria-invalid` there. Group-level invalidity is expressed through the
+error-message part and through descendant Field/input wiring.
+
+## 4. Integration
+
+### 4.1 Child Field Context
+
+Adapters publish shared field context from Fieldset to descendant Field components. Child Field
+instances merge parent `disabled`, `invalid`, and `readonly` values before constructing
+`field::Props`.
+
+### 4.2 Shared Form Contracts
+
+Use `07-forms.md` for:
+
+- the shared child-field context shape
+- form registration and validation coordination
+- validator and error types
 
 ## 5. Library Parity
 
-> Compared against: Ark UI (`Fieldset`).
+Compared against Ark UI `Fieldset`:
 
-### 5.1 Props
-
-| Feature   | ars-ui     | Ark UI    | Notes                                              |
-| --------- | ---------- | --------- | -------------------------------------------------- |
-| Invalid   | `invalid`  | `invalid` | Both libraries                                     |
-| Disabled  | `disabled` | --        | ars-ui addition; Ark Fieldset has no disabled prop |
-| Read-only | `readonly` | --        | ars-ui addition                                    |
-| Dir       | `dir`      | --        | ars-ui addition                                    |
-
-**Gaps:** None.
-
-### 5.2 Anatomy
-
-| Part         | ars-ui         | Ark UI       | Notes            |
-| ------------ | -------------- | ------------ | ---------------- |
-| Root         | `Root`         | `Root`       | Both libraries   |
-| Legend       | `Legend`       | `Legend`     | Both libraries   |
-| Description  | `Description`  | `HelperText` | Different naming |
-| ErrorMessage | `ErrorMessage` | `ErrorText`  | Different naming |
-
-**Gaps:** None.
-
-### 5.3 Summary
-
-- **Overall:** Full parity.
-- **Divergences:** Ark's `HelperText`/`ErrorText` map to ars-ui's `Description`/`ErrorMessage`. ars-ui adds `disabled` and `readonly` propagation.
-- **Recommended additions:** None.
+- ars-ui matches the grouped `<fieldset>` / `<legend>` model.
+- ars-ui explicitly models a `Content` part for child composition.
+- ars-ui adds shared `disabled`, `invalid`, and `readonly` propagation because those states are
+  central to the broader form architecture.

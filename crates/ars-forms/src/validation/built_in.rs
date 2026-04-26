@@ -4,13 +4,14 @@
 //! length constraints, numeric bounds, pattern matching, email addresses,
 //! step increments, URLs, and closure-backed custom logic.
 
-use std::fmt::{self, Display};
+use alloc::{format, string::String, vec};
+use core::fmt::{self, Display};
 
 use regex::Regex;
 
 use super::{
     BoxedValidator, Context, Error, ErrorCode, Errors, Result, Validator, boxed_validator,
-    validator::DEFAULT_VALIDATOR_LOCALE,
+    validator::default_validator_locale,
 };
 use crate::{field::Value, form::Messages};
 
@@ -44,10 +45,10 @@ impl Validator for RequiredValidator {
         };
 
         if is_empty {
-            let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
+            let locale = ctx.locale.cloned().unwrap_or_else(default_validator_locale);
 
             let error = self.message.as_ref().map_or_else(
-                || Error::required(&Messages::default(), locale),
+                || Error::required(&Messages::default(), &locale),
                 |message| Error {
                     message: message.clone(),
                     code: ErrorCode::Required,
@@ -90,11 +91,11 @@ impl Validator for MinLengthValidator {
     fn validate(&self, value: &Value, ctx: &Context) -> Result {
         let value = value.to_string_for_validation();
 
-        let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
+        let locale = ctx.locale.cloned().unwrap_or_else(default_validator_locale);
 
         if value.chars().count() < self.min {
             let error = self.message.clone().map_or_else(
-                || Error::min_length(self.min, &Messages::default(), locale),
+                || Error::min_length(self.min, &Messages::default(), &locale),
                 |message| Error {
                     message,
                     code: ErrorCode::MinLength(self.min),
@@ -137,11 +138,11 @@ impl Validator for MaxLengthValidator {
     fn validate(&self, value: &Value, ctx: &Context) -> Result {
         let value = value.to_string_for_validation();
 
-        let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
+        let locale = ctx.locale.cloned().unwrap_or_else(default_validator_locale);
 
         if value.chars().count() > self.max {
             let error = self.message.clone().map_or_else(
-                || Error::max_length(self.max, &Messages::default(), locale),
+                || Error::max_length(self.max, &Messages::default(), &locale),
                 |message| Error {
                     message,
                     code: ErrorCode::MaxLength(self.max),
@@ -186,11 +187,11 @@ impl Validator for MinValidator {
             return Ok(());
         };
 
-        let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
+        let locale = ctx.locale.cloned().unwrap_or_else(default_validator_locale);
 
         if !number.is_finite() || !self.min.is_finite() || number < self.min {
             let error = self.message.clone().map_or_else(
-                || Error::min(self.min, &Messages::default(), locale),
+                || Error::min(self.min, &Messages::default(), &locale),
                 |message| Error {
                     message,
                     code: ErrorCode::Min(self.min),
@@ -235,11 +236,11 @@ impl Validator for MaxValidator {
             return Ok(());
         };
 
-        let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
+        let locale = ctx.locale.cloned().unwrap_or_else(default_validator_locale);
 
         if !number.is_finite() || !self.max.is_finite() || number > self.max {
             let error = self.message.clone().map_or_else(
-                || Error::max(self.max, &Messages::default(), locale),
+                || Error::max(self.max, &Messages::default(), &locale),
                 |message| Error {
                     message,
                     code: ErrorCode::Max(self.max),
@@ -302,8 +303,9 @@ impl Display for PatternValidatorError {
     }
 }
 
-impl std::error::Error for PatternValidatorError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for PatternValidatorError {
+    #[cfg(feature = "std")]
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
             Self::PatternTooLong { .. } => None,
             Self::InvalidRegex { source } => Some(source),
@@ -319,7 +321,7 @@ impl PatternValidator {
     /// Returns [`PatternValidatorError::PatternTooLong`] when `pattern`
     /// exceeds 1024 UTF-8 bytes, or [`PatternValidatorError::InvalidRegex`]
     /// when the anchored pattern is not valid `regex` syntax.
-    pub fn new(pattern: impl Into<String>) -> std::result::Result<Self, PatternValidatorError> {
+    pub fn new(pattern: impl Into<String>) -> core::result::Result<Self, PatternValidatorError> {
         let pattern = pattern.into();
 
         const MAX_PATTERN_LEN: usize = 1024;
@@ -372,10 +374,10 @@ impl Validator for PatternValidator {
         if self.compiled.is_match(&value) {
             Ok(())
         } else {
-            let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
+            let locale = ctx.locale.cloned().unwrap_or_else(default_validator_locale);
 
             let error = self.message.clone().map_or_else(
-                || Error::pattern(self.pattern.clone(), &Messages::default(), locale),
+                || Error::pattern(self.pattern.clone(), &Messages::default(), &locale),
                 |message| Error {
                     message,
                     code: ErrorCode::Pattern(self.pattern.clone()),
@@ -418,10 +420,10 @@ impl Validator for EmailValidator {
             return Ok(());
         }
 
-        let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
+        let locale = ctx.locale.cloned().unwrap_or_else(default_validator_locale);
 
         let error = self.message.clone().map_or_else(
-            || Error::email(&Messages::default(), locale),
+            || Error::email(&Messages::default(), &locale),
             |message| Error {
                 message,
                 code: ErrorCode::Email,
@@ -491,10 +493,10 @@ impl Validator for StepValidator {
                 || !self.step.is_finite()
                 || self.step <= 0.0
             {
-                let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
+                let locale = ctx.locale.cloned().unwrap_or_else(default_validator_locale);
 
                 let error = self.message.clone().map_or_else(
-                    || Error::step(self.step, &Messages::default(), locale),
+                    || Error::step(self.step, &Messages::default(), &locale),
                     |message| Error {
                         message,
                         code: ErrorCode::Step(self.step),
@@ -509,10 +511,10 @@ impl Validator for StepValidator {
             let tolerance = (quotient.abs().max(1.0) * f64::EPSILON * 16.0).min(1e-9);
 
             if (quotient - nearest_step).abs() > tolerance {
-                let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
+                let locale = ctx.locale.cloned().unwrap_or_else(default_validator_locale);
 
                 let error = self.message.clone().map_or_else(
-                    || Error::step(self.step, &Messages::default(), locale),
+                    || Error::step(self.step, &Messages::default(), &locale),
                     |message| Error {
                         message,
                         code: ErrorCode::Step(self.step),
@@ -556,10 +558,10 @@ impl Validator for UrlValidator {
             && !value.is_empty()
             && !is_valid_url(value)
         {
-            let locale = ctx.locale.unwrap_or(&DEFAULT_VALIDATOR_LOCALE);
+            let locale = ctx.locale.cloned().unwrap_or_else(default_validator_locale);
 
             let error = self.message.clone().map_or_else(
-                || Error::url(&Messages::default(), locale),
+                || Error::url(&Messages::default(), &locale),
                 |message| Error {
                     message,
                     code: ErrorCode::Url,
@@ -954,8 +956,11 @@ mod tests {
         let invalid = PatternValidator::new("(").expect_err("invalid regex should fail");
         let too_long = PatternValidator::new("a".repeat(1025)).expect_err("oversized regex");
 
-        assert!(std::error::Error::source(&invalid).is_some());
-        assert!(std::error::Error::source(&too_long).is_none());
+        #[cfg(feature = "std")]
+        assert!(core::error::Error::source(&invalid).is_some());
+        #[cfg(not(feature = "std"))]
+        assert!(core::error::Error::source(&invalid).is_none());
+        assert!(core::error::Error::source(&too_long).is_none());
     }
 
     #[test]
@@ -1465,7 +1470,7 @@ mod tests {
 
         let ctx = Context {
             field_name: "x",
-            form_values: &std::collections::BTreeMap::new(),
+            form_values: &alloc::collections::BTreeMap::new(),
             locale: Some(&locale),
         };
 

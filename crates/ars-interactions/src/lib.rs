@@ -4,10 +4,16 @@
 //! components and provides [`compose::merge_attrs`] for merging attribute maps
 //! from multiple interaction sources into a single [`ars_core::AttrMap`].
 
+#![cfg_attr(not(feature = "std"), no_std)]
+#![warn(clippy::std_instead_of_core)]
+
+extern crate alloc;
+#[cfg(test)]
+extern crate std;
+
 pub mod companion_css;
 pub mod compose;
 pub mod direction;
-pub mod dismissable;
 pub mod drag_drop;
 pub mod focus;
 pub mod hover;
@@ -23,7 +29,6 @@ pub use ars_core::{
 };
 pub use compose::merge_attrs;
 pub use direction::{LogicalDirection, resolve_arrow_key};
-pub use dismissable::dismiss_button_attrs;
 /// Test-only helpers for constructing drag payloads in downstream crates.
 #[cfg(feature = "test-support")]
 pub use drag_drop::test_support;

@@ -166,32 +166,23 @@ impl HoverResult {
 // use_hover factory
 // ---------------------------------------------------------------------------
 
-/// Creates a hover interaction state machine with the given configuration.
+/// Creates a hover interaction state machine.
 ///
 /// Returns a [`HoverResult`] holding the initial `NotHovered` state. Event
-/// handlers are registered as typed methods on the component's `Api` struct
-/// by the framework adapter — this factory only creates the core state container.
+/// handlers and config-driven behavior are adapter-owned — this factory only
+/// creates the core state container.
 #[must_use]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "spec API takes ownership; adapters will consume the config for event handler registration"
-)]
-pub fn use_hover(config: HoverConfig) -> HoverResult {
-    let state = SharedState::new(HoverState::NotHovered);
-
-    let _is_disabled = config.disabled;
-
-    let hovered = state.get().is_hovered();
-
-    HoverResult { hovered, state }
+pub fn use_hover() -> HoverResult {
+    HoverResult {
+        hovered: false,
+        state: SharedState::new(HoverState::NotHovered),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
+    use alloc::{format, sync::Arc};
+    use core::sync::atomic::{AtomicUsize, Ordering};
 
     use ars_core::{AttrValue, DefaultModalityContext, HtmlAttr, PointerType};
 
@@ -503,28 +494,15 @@ mod tests {
 
     #[test]
     fn use_hover_returns_not_hovered_state() {
-        let result = use_hover(HoverConfig::default());
+        let result = use_hover();
 
         assert_eq!(result.state.get(), HoverState::NotHovered);
     }
 
     #[test]
     fn use_hover_returns_hovered_false() {
-        let result = use_hover(HoverConfig::default());
+        let result = use_hover();
 
-        assert!(!result.hovered);
-    }
-
-    #[test]
-    fn use_hover_disabled_config_still_creates_result() {
-        let config = HoverConfig {
-            disabled: true,
-            ..HoverConfig::default()
-        };
-
-        let result = use_hover(config);
-
-        assert_eq!(result.state.get(), HoverState::NotHovered);
         assert!(!result.hovered);
     }
 

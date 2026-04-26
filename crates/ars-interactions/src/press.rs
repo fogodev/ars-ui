@@ -5,7 +5,8 @@
 //! into a single consistent model. It tracks whether the element is currently
 //! being pressed and whether the pointer is within the element's bounds.
 
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use alloc::{rc::Rc, vec::Vec};
+use core::{cell::RefCell, time::Duration};
 
 use ars_core::{AttrMap, Callback, HtmlAttr, SharedFlag, SharedState};
 
@@ -640,15 +641,11 @@ impl PressResult {
 /// framework adapter — this factory only creates the core state container.
 #[must_use]
 pub fn use_press(config: PressConfig) -> PressResult {
-    let state = Rc::new(RefCell::new(PressState::Idle));
-
-    let pressed = state.borrow().is_pressed_inside();
-
     PressResult {
-        state,
+        state: Rc::new(RefCell::new(PressState::Idle)),
         active_presses: Rc::default(),
         config,
-        pressed,
+        pressed: false,
     }
 }
 
@@ -676,13 +673,10 @@ fn derive_press_state(active_presses: &[ActivePress]) -> PressState {
 
 #[cfg(test)]
 mod tests {
-    use std::{
+    use alloc::{format, rc::Rc, sync::Arc, vec, vec::Vec};
+    use core::{
         cell::RefCell,
-        rc::Rc,
-        sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        },
+        sync::atomic::{AtomicUsize, Ordering},
         time::Duration,
     };
 

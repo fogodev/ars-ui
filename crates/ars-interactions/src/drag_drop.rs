@@ -4,13 +4,10 @@
 //! target configuration structs, state-machine helpers, and MIME-type
 //! acceptance logic used by drag-and-drop-enabled components.
 
-use std::{
+use alloc::{borrow::ToOwned, format, rc::Rc, string::String, sync::Arc, vec::Vec};
+use core::{
     cell::RefCell,
     fmt::{self, Debug},
-    rc::Rc,
-    string::String,
-    sync::Arc,
-    vec::Vec,
 };
 
 use ars_a11y::{AnnouncementPriority, LiveAnnouncer};
@@ -32,12 +29,16 @@ type DropDefaultAnnouncementFn = MessageFn<dyn Fn(usize, &str, &Locale) -> Strin
 pub struct DragAnnouncements {
     /// Announces that a drag session has started.
     pub drag_start: DragStartDefaultAnnouncementFn,
+
     /// Announces that focus has moved onto a drop target.
     pub drag_enter: TargetAnnouncementFn,
+
     /// Announces that focus has moved off a drop target.
     pub drag_leave: TargetAnnouncementFn,
+
     /// Announces that a drop completed successfully.
     pub drop: DropDefaultAnnouncementFn,
+
     /// Announces that the drag session was cancelled.
     pub drag_cancel: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
 }
@@ -89,8 +90,10 @@ impl Debug for DragAnnouncements {
 pub struct KeyboardDropTarget {
     /// The DOM id or framework-stable identifier for the target element.
     pub element_id: String,
+
     /// Human-readable label announced to assistive technology users.
     pub label: String,
+
     /// Drop-target configuration cloned from the mounted target.
     pub config: DropConfig,
 }
@@ -143,12 +146,14 @@ impl KeyboardDragRegistry {
     pub fn next(&mut self) -> Option<&KeyboardDropTarget> {
         if self.targets.is_empty() {
             self.current_index = None;
+
             return None;
         }
 
-        self.current_index = Some(match self.current_index {
-            Some(index) => (index + 1) % self.targets.len(),
-            None => 0,
+        self.current_index = Some(if let Some(index) = self.current_index {
+            (index + 1) % self.targets.len()
+        } else {
+            0
         });
 
         self.current()
@@ -159,6 +164,7 @@ impl KeyboardDragRegistry {
     pub fn prev(&mut self) -> Option<&KeyboardDropTarget> {
         if self.targets.is_empty() {
             self.current_index = None;
+
             return None;
         }
 
@@ -201,10 +207,13 @@ pub enum DragItem {
     File {
         /// Display name of the file.
         name: String,
+
         /// File MIME type.
         mime_type: String,
+
         /// File size in bytes.
         size: u64,
+
         /// Opaque file handle resolved by `ars-dom`.
         handle: FileHandle,
     },
@@ -213,6 +222,7 @@ pub enum DragItem {
     Directory {
         /// Display name of the directory.
         name: String,
+
         /// Opaque directory handle resolved by `ars-dom`.
         handle: DirectoryHandle,
     },
@@ -221,6 +231,7 @@ pub enum DragItem {
     Custom {
         /// MIME type string used for transfer interoperability.
         mime_type: String,
+
         /// Serialized custom payload data.
         data: String,
     },
@@ -237,7 +248,7 @@ pub struct DirectoryHandle(());
 /// Test-only helpers for constructing opaque drag payloads in downstream crates.
 #[cfg(feature = "test-support")]
 pub mod test_support {
-    use std::string::String;
+    use alloc::string::String;
 
     use super::{DirectoryHandle, DragItem, FileHandle};
 
@@ -271,10 +282,13 @@ pub mod test_support {
 pub enum DropOperation {
     /// Move items from source to target.
     Move,
+
     /// Copy items to the target.
     Copy,
+
     /// Create a link or shortcut to the source items.
     Link,
+
     /// Reject the drop.
     Cancel,
 }
@@ -351,6 +365,7 @@ impl Debug for DragConfig {
 pub struct DragStartEvent {
     /// Items included in the drag payload.
     pub items: Vec<DragItem>,
+
     /// Input modality that initiated the drag.
     pub pointer_type: PointerType,
 }
@@ -360,10 +375,13 @@ pub struct DragStartEvent {
 pub struct DragEndEvent {
     /// Items included in the drag payload.
     pub items: Vec<DragItem>,
+
     /// Final drop operation.
     pub operation: DropOperation,
+
     /// Input modality that initiated the drag.
     pub pointer_type: PointerType,
+
     /// Whether a drop target accepted the payload.
     pub was_dropped: bool,
 }
@@ -407,11 +425,12 @@ impl DropConfig {
     /// Returns whether any preview item matches this target's accepted MIME types.
     #[must_use]
     fn accepts_preview_items(&self, items: &[DragItemPreview]) -> bool {
-        match &self.accepted_types {
-            None => true,
-            Some(accepted_types) => items
+        if let Some(accepted_types) = &self.accepted_types {
+            items
                 .iter()
-                .any(|item| preview_matches_accepted_types(item, accepted_types)),
+                .any(|item| preview_matches_accepted_types(item, accepted_types))
+        } else {
+            true
         }
     }
 }
@@ -422,8 +441,10 @@ pub enum DropIndicatorPosition {
     /// Show the indicator over the target itself.
     #[default]
     OnTarget,
+
     /// Show the indicator before the target in reading order.
     Before,
+
     /// Show the indicator after the target in reading order.
     After,
 }
@@ -433,8 +454,10 @@ pub enum DropIndicatorPosition {
 pub struct DropTargetEvent {
     /// Preview items for the active drag payload.
     pub items: Vec<DragItemPreview>,
+
     /// Operation currently being offered.
     pub operation: DropOperation,
+
     /// Input modality that initiated the drag.
     pub pointer_type: PointerType,
 }
@@ -444,6 +467,7 @@ pub struct DropTargetEvent {
 pub struct DragItemPreview {
     /// High-level item category.
     pub kind: DragItemKind,
+
     /// MIME types exposed by the item.
     pub mime_types: Vec<String>,
 }
@@ -453,14 +477,19 @@ pub struct DragItemPreview {
 pub enum DragItemKind {
     /// Plain text content.
     Text,
+
     /// URI/URL content.
     Uri,
+
     /// HTML content.
     Html,
+
     /// A file payload.
     File,
+
     /// A directory payload.
     Directory,
+
     /// Custom application data.
     Custom,
 }
@@ -483,10 +512,13 @@ impl From<&DragItem> for DragItemKind {
 pub struct DropEvent {
     /// Fully resolved dropped items.
     pub items: Vec<DragItem>,
+
     /// Accepted drop operation.
     pub operation: DropOperation,
+
     /// Input modality that initiated the drag.
     pub pointer_type: PointerType,
+
     /// Position of the accepted drop within the target.
     pub drop_position: DropIndicatorPosition,
 }
@@ -500,24 +532,31 @@ pub struct DropEvent {
 pub enum DragState {
     /// No drag is active.
     Idle,
+
     /// A drag is active and no drop target is currently hovered.
     Dragging {
         /// Items included in the active drag payload.
         items: Vec<DragItem>,
+
         /// Input modality that initiated the drag.
         pointer_type: PointerType,
     },
+
     /// A drag is active and a valid drop target is currently hovered.
     DragOver {
         /// Items included in the active drag payload.
         items: Vec<DragItem>,
+
         /// Input modality that initiated the drag.
         pointer_type: PointerType,
+
         /// Identifier for the currently hovered drop target.
         target_id: String,
+
         /// Operation that would occur if dropped now.
         current_operation: DropOperation,
     },
+
     /// A drop was accepted and cleanup is pending.
     Dropped {
         /// Operation accepted by the drop target.
@@ -533,6 +572,7 @@ pub enum DragState {
 pub struct DragResult {
     /// Data attributes to spread onto the draggable element.
     pub attrs: AttrMap,
+
     /// Whether this element is currently being dragged.
     pub dragging: bool,
 
@@ -696,6 +736,7 @@ impl DragResult {
 
             DragState::Idle | DragState::Dragging { .. } | DragState::Dropped { .. } => {
                 self.refresh_snapshot();
+
                 return None;
             }
         };
@@ -756,6 +797,7 @@ impl DragResult {
 
             DragState::Idle | DragState::Dropped { .. } => {
                 self.refresh_snapshot();
+
                 return None;
             }
         };
@@ -825,10 +867,13 @@ impl DragResult {
 pub struct DropResult {
     /// Data attributes to spread onto the drop target element.
     pub attrs: AttrMap,
+
     /// Whether a dragged item is currently over this target.
     pub drag_over: bool,
+
     /// The operation that will occur if dropped now.
     pub drop_operation: Option<DropOperation>,
+
     /// Where the drop indicator line should appear.
     pub indicator_position: Option<DropIndicatorPosition>,
 
@@ -985,6 +1030,7 @@ impl DropResult {
 
         if self.enter_count <= 0 {
             self.enter_count = 0;
+
             self.refresh_snapshot();
 
             return;
@@ -1182,6 +1228,7 @@ fn build_drop_attrs(
             );
         }
     }
+
     attrs
 }
 
@@ -1275,6 +1322,7 @@ fn mime_type_matches(accepted: &str, actual: &str) -> bool {
 
 fn normalize_mime_type(mime_type: &str) -> String {
     let normalized = mime_type.trim().to_ascii_lowercase();
+
     if normalized == "image/jpg" {
         "image/jpeg".to_owned()
     } else {
@@ -1283,21 +1331,20 @@ fn normalize_mime_type(mime_type: &str) -> String {
 }
 
 fn accepts_preview_items(config: &DropConfig, items: &[DragItemPreview]) -> bool {
-    match &config.accepted_types {
-        None => true,
-        Some(accepted_types) => items
+    if let Some(accepted_types) = &config.accepted_types {
+        items
             .iter()
-            .any(|item| preview_matches_accepted_types(item, accepted_types)),
+            .any(|item| preview_matches_accepted_types(item, accepted_types))
+    } else {
+        true
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fmt::Write as _,
-        mem::discriminant,
-        sync::{Arc, Mutex},
-    };
+    use alloc::{borrow::ToOwned, format, string::String, sync::Arc, vec, vec::Vec};
+    use core::{fmt::Write as _, mem::discriminant};
+    use std::sync::Mutex;
 
     use ars_a11y::LiveAnnouncer;
     use ars_core::{AttrValue, Callback, HtmlAttr, MessageFn};
@@ -1347,13 +1394,18 @@ mod tests {
     fn preview_from_item(item: &DragItem) -> DragItemPreview {
         match item {
             DragItem::Text(_) => preview(DragItemKind::Text, &["text/plain"]),
+
             DragItem::Uri(_) => preview(DragItemKind::Uri, &["text/uri-list"]),
+
             DragItem::Html(_) => preview(DragItemKind::Html, &["text/html"]),
+
             DragItem::File { mime_type, .. } => DragItemPreview {
                 kind: DragItemKind::File,
                 mime_types: vec![mime_type.clone()],
             },
+
             DragItem::Directory { .. } => preview(DragItemKind::Directory, &["inode/directory"]),
+
             DragItem::Custom { mime_type, .. } => DragItemPreview {
                 kind: DragItemKind::Custom,
                 mime_types: vec![mime_type.clone()],
@@ -1635,13 +1687,17 @@ mod tests {
         // Navigate to drop-c (index 2): next→0, next→1, next→2
         let _ = registry.next();
         let _ = registry.next();
+
         let current = registry.next().expect("should reach drop-c");
+
         assert_eq!(current.element_id, "drop-c");
 
         // Unregister drop-a (index 0) which is before the selected target (index 2).
         // The selected index should shift down by 1 to keep pointing at drop-c.
         registry.unregister("drop-a");
+
         let current = registry.current().expect("selection should be preserved");
+
         assert_eq!(current.element_id, "drop-c");
     }
 
@@ -1655,12 +1711,15 @@ mod tests {
 
         // Navigate to drop-a (index 0)
         let current = registry.next().expect("should reach drop-a");
+
         assert_eq!(current.element_id, "drop-a");
 
         // Unregister drop-c (index 2) which is after the selected target (index 0).
         // The selected index should remain unchanged.
         registry.unregister("drop-c");
+
         let current = registry.current().expect("selection should be preserved");
+
         assert_eq!(current.element_id, "drop-a");
     }
 
@@ -2014,6 +2073,7 @@ mod tests {
                 assert_eq!(items.len(), 1);
                 assert_eq!(pointer_type, PointerType::Mouse);
             }
+
             state => panic!("unexpected state after start_drag: {state:?}"),
         }
     }
@@ -2039,6 +2099,7 @@ mod tests {
             DragState::Dragging { pointer_type, .. } => {
                 assert_eq!(pointer_type, PointerType::Keyboard);
             }
+
             state => panic!("unexpected state after keyboard drag start: {state:?}"),
         }
 
@@ -2138,6 +2199,7 @@ mod tests {
                 assert_eq!(target_id, "target-1");
                 assert_eq!(current_operation, DropOperation::Copy);
             }
+
             state => panic!("unexpected state after enter_target: {state:?}"),
         }
     }
@@ -2199,6 +2261,7 @@ mod tests {
                 assert_eq!(items.len(), 1);
                 assert_eq!(pointer_type, PointerType::Mouse);
             }
+
             state => panic!("unexpected state after leave_target: {state:?}"),
         }
     }
@@ -2240,6 +2303,7 @@ mod tests {
                 assert_eq!(target_id, "target-2");
                 assert_eq!(current_operation, DropOperation::Move);
             }
+
             state => panic!("unexpected state after retargeting drag over: {state:?}"),
         }
     }
@@ -2598,6 +2662,7 @@ mod tests {
                 assert_eq!(target_id, "drop-a");
                 assert_eq!(pointer_type, PointerType::Keyboard);
             }
+
             state => panic!("unexpected state after keyboard enter: {state:?}"),
         }
 
@@ -3536,6 +3601,7 @@ mod tests {
         let mut registry = KeyboardDragRegistry::new();
 
         let mut drag = use_drag(DragConfig::default());
+
         let mut drop_result = use_drop(DropConfig::default());
 
         registry.register(keyboard_target("drop-a", "Inbox", DropConfig::default()));

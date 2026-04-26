@@ -1,6 +1,5 @@
-//! Field runtime state, inherited context, descriptors, and component machine.
+//! Field runtime state, inherited context, and descriptors.
 
-pub mod component;
 mod context;
 pub mod descriptors;
 mod state;

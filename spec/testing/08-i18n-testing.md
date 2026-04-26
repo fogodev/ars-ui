@@ -1302,7 +1302,7 @@ fn unknown_locale_falls_back_to_english() {
 ### 8.5 Intl Backend Threading
 
 Verify that the `intl` parameter is correctly passed through for locale-aware formatting
-within `translate()`. This tests the case where `translate()` uses `NumberFormatter` or
+within `translate()`. This tests the case where `translate()` uses `number::Formatter` or
 `DateFormatter` from the ICU provider.
 
 ```rust
@@ -1315,11 +1315,11 @@ impl Translate for Price {
     fn translate(&self, locale: &Locale, intl: &dyn IntlBackend) -> String {
         match self {
             Self::Total { amount } => {
-                let formatter = ars_i18n::NumberFormatter::new(
+                let formatter = ars_i18n::number::Formatter::new(
                     locale,
-                    ars_i18n::NumberFormatOptions {
-                        style: ars_i18n::NumberStyle::Currency(ars_i18n::CurrencyCode::USD),
-                        ..ars_i18n::NumberFormatOptions::default()
+                    ars_i18n::number::FormatOptions {
+                        style: ars_i18n::number::Style::Currency(ars_i18n::CurrencyCode::USD),
+                        ..ars_i18n::number::FormatOptions::default()
                     },
                 );
                 match locale.language().as_str() {

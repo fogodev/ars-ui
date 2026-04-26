@@ -13,10 +13,7 @@ use ars_core::{
     ColorMode, DefaultModalityContext, I18nRegistries, ModalityContext, NullPlatformEffects,
     PlatformEffects, StyleStrategy, resolve_messages as core_resolve_messages,
 };
-use ars_i18n::{
-    Direction, IntlBackend, Locale, NumberFormatOptions, NumberFormatter, StubIntlBackend,
-    Translate, locales,
-};
+use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend, Translate, locales, number};
 use leptos::{prelude::*, reactive::owner::LocalStorage};
 
 /// Reactive environment context published by the Leptos `ArsProvider`.
@@ -258,14 +255,14 @@ pub fn use_modality_context() -> Arc<dyn ModalityContext> {
 /// Resolves a provider-derived number formatter from the current provider locale.
 ///
 /// Leptos 0.8 only exposes public `Memo` constructors for `Send + Sync` values.
-/// `NumberFormatter` is intentionally not guaranteed to be thread-safe on every
+/// `number::Formatter` is intentionally not guaranteed to be thread-safe on every
 /// backend, so the adapter uses a local derived signal plus component-local
 /// cache to preserve provider-derived reuse semantics without inventing
 /// unsupported thread-safe guarantees.
 #[must_use]
-pub fn use_number_formatter<F>(options: F) -> Signal<NumberFormatter, LocalStorage>
+pub fn use_number_formatter<F>(options: F) -> Signal<number::Formatter, LocalStorage>
 where
-    F: Fn() -> NumberFormatOptions + 'static,
+    F: Fn() -> number::FormatOptions + 'static,
 {
     use_resolved_number_formatter(None, options)
 }
@@ -275,18 +272,18 @@ where
 pub(crate) fn use_resolved_number_formatter<F>(
     adapter_props_locale: Option<&Locale>,
     options: F,
-) -> Signal<NumberFormatter, LocalStorage>
+) -> Signal<number::Formatter, LocalStorage>
 where
-    F: Fn() -> NumberFormatOptions + 'static,
+    F: Fn() -> number::FormatOptions + 'static,
 {
     let explicit_locale = adapter_props_locale.cloned();
 
     let locale = use_locale();
 
-    let cache =
-        StoredValue::<Option<(Locale, NumberFormatOptions, NumberFormatter)>, LocalStorage>::new_local(
-            None,
-        );
+    let cache = StoredValue::<
+        Option<(Locale, number::FormatOptions, number::Formatter)>,
+        LocalStorage,
+    >::new_local(None);
 
     Signal::derive_local(move || {
         let resolved_locale = explicit_locale.clone().unwrap_or_else(|| locale.get());
@@ -305,7 +302,7 @@ where
                 return;
             }
 
-            let next_formatter = NumberFormatter::new(&resolved_locale, resolved_options.clone());
+            let next_formatter = number::Formatter::new(&resolved_locale, resolved_options.clone());
 
             *cached = Some((resolved_locale, resolved_options, next_formatter.clone()));
 
@@ -363,9 +360,7 @@ mod tests {
         ColorMode, DefaultModalityContext, I18nRegistries, ModalityContext, NullPlatformEffects,
         StyleStrategy,
     };
-    use ars_i18n::{
-        Direction, IntlBackend, Locale, NumberFormatOptions, StubIntlBackend, Translate, locales,
-    };
+    use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend, Translate, locales, number};
     use leptos::prelude::{Get, GetUntracked, Memo, Owner, RwSignal, Set, Signal};
 
     use super::{
@@ -716,7 +711,7 @@ mod tests {
     fn use_number_formatter_falls_back_without_provider() {
         let owner = Owner::new();
         owner.with(|| {
-            let formatter = use_number_formatter(NumberFormatOptions::default);
+            let formatter = use_number_formatter(number::FormatOptions::default);
 
             assert_eq!(formatter.get().format(1234.56), "1,234.56");
         });
@@ -731,7 +726,7 @@ mod tests {
                 Arc::new(StubIntlBackend),
             ));
 
-            let formatter = use_number_formatter(NumberFormatOptions::default);
+            let formatter = use_number_formatter(number::FormatOptions::default);
 
             assert_eq!(formatter.get().format(1234.56), "1.234,56");
         });
@@ -746,7 +741,7 @@ mod tests {
 
             crate::provide_ars_context(context);
 
-            let formatter = use_number_formatter(NumberFormatOptions::default);
+            let formatter = use_number_formatter(number::FormatOptions::default);
 
             assert_eq!(formatter.get().format(1234.56), "1,234.56");
 
@@ -765,7 +760,7 @@ mod tests {
                 Arc::new(StubIntlBackend),
             ));
 
-            let formatter = use_number_formatter(NumberFormatOptions::default);
+            let formatter = use_number_formatter(number::FormatOptions::default);
 
             let first = formatter.get_untracked();
             let second = formatter.get_untracked();
@@ -787,7 +782,7 @@ mod tests {
             let explicit = locales::de_de();
 
             let formatter =
-                use_resolved_number_formatter(Some(&explicit), NumberFormatOptions::default);
+                use_resolved_number_formatter(Some(&explicit), number::FormatOptions::default);
 
             assert_eq!(formatter.get().format(1234.56), "1.234,56");
         });
@@ -806,7 +801,7 @@ mod tests {
 
             use crate::prelude::use_number_formatter as prelude_use_number_formatter;
 
-            let _ = prelude_use_number_formatter(NumberFormatOptions::default);
+            let _ = prelude_use_number_formatter(number::FormatOptions::default);
         });
     }
 }
@@ -818,9 +813,7 @@ mod wasm_tests {
     use ars_core::{
         ColorMode, I18nRegistries, ModalityContext, NullPlatformEffects, StyleStrategy,
     };
-    use ars_i18n::{
-        Direction, IntlBackend, Locale, NumberFormatOptions, StubIntlBackend, Translate, locales,
-    };
+    use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend, Translate, locales, number};
     use leptos::prelude::*;
     #[cfg(feature = "csr")]
     use leptos::{mount::mount_to, wasm_bindgen::JsCast};
@@ -1150,7 +1143,7 @@ mod wasm_tests {
     fn use_number_formatter_falls_back_without_provider_on_wasm() {
         let owner = Owner::new();
         owner.with(|| {
-            let formatter = use_number_formatter(NumberFormatOptions::default);
+            let formatter = use_number_formatter(number::FormatOptions::default);
 
             assert_eq!(formatter.get().format(1234.56), "1,234.56");
         });
@@ -1164,7 +1157,7 @@ mod wasm_tests {
                 reactive_test_context(locales::de_de(), Arc::new(StubIntlBackend)).0,
             );
 
-            let formatter = use_number_formatter(NumberFormatOptions::default);
+            let formatter = use_number_formatter(number::FormatOptions::default);
 
             assert_eq!(formatter.get().format(1234.56), "1.234,56");
         });
@@ -1179,7 +1172,7 @@ mod wasm_tests {
 
             crate::provide_ars_context(context);
 
-            let formatter = use_number_formatter(NumberFormatOptions::default);
+            let formatter = use_number_formatter(number::FormatOptions::default);
 
             assert_eq!(formatter.get().format(1234.56), "1,234.56");
 
@@ -1197,7 +1190,7 @@ mod wasm_tests {
                 reactive_test_context(locales::en_us(), Arc::new(StubIntlBackend)).0,
             );
 
-            let formatter = use_number_formatter(NumberFormatOptions::default);
+            let formatter = use_number_formatter(number::FormatOptions::default);
 
             let first = formatter.get_untracked();
             let second = formatter.get_untracked();
@@ -1219,12 +1212,12 @@ mod wasm_tests {
 
             let formatter = use_number_formatter(move || {
                 if use_percent.get() {
-                    NumberFormatOptions {
-                        style: ars_i18n::NumberStyle::Percent,
-                        ..NumberFormatOptions::default()
+                    number::FormatOptions {
+                        style: number::Style::Percent,
+                        ..number::FormatOptions::default()
                     }
                 } else {
-                    NumberFormatOptions::default()
+                    number::FormatOptions::default()
                 }
             });
 
@@ -1246,7 +1239,7 @@ mod wasm_tests {
 
             let explicit = locales::de_de();
             let formatter =
-                use_resolved_number_formatter(Some(&explicit), NumberFormatOptions::default);
+                use_resolved_number_formatter(Some(&explicit), number::FormatOptions::default);
 
             assert_eq!(formatter.get().format(1234.56), "1.234,56");
         });

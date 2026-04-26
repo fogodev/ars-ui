@@ -16,7 +16,7 @@ csr     = ["leptos/csr"]
 # Pre-compiled CLDR data via ICU4X. Default backend on native targets and the
 # server-side rendering path. Use `--no-default-features --features csr,ars-i18n/web-intl`
 # to swap icu4x for the browser-native Intl API on wasm32 builds.
-icu4x   = ["ars-i18n/std", "ars-i18n/icu4x"]
+icu4x = ["ars-i18n/std", "ars-i18n/icu4x"]
 
 [dependencies]
 ars-a11y         = { path = "../ars-a11y" }
@@ -29,8 +29,11 @@ ars-interactions = { path = "../ars-interactions" }
 leptos           = { version = "0.8", default-features = false }
 log              = { version = "0.4", default-features = false, optional = true }
 
+[dev-dependencies]
+ars-components = { path = "../ars-components" }
+
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-wasm-bindgen = "0.2"
+wasm-bindgen      = "0.2"
 wasm-bindgen-test = "0.3"
 
 [lints]

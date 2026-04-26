@@ -1,0 +1,32 @@
+---
+source: crates/ars-components/src/utility/field/mod.rs
+assertion_line: 856
+expression: "snapshot_attrs(&service.connect(&|_| {}).description_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "description",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "field",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "email-description",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -4,10 +4,7 @@
 //! [`BoxedValidator`] for type-erased storage, and [`Context`]
 //! which provides cross-field access during validation.
 
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, LazyLock},
-};
+use alloc::{borrow::ToOwned, collections::BTreeMap, string::String, sync::Arc};
 
 use ars_i18n::Locale;
 
@@ -20,8 +17,9 @@ use crate::field::Value;
 /// `None`. This produces correct English validation messages but may produce
 /// incorrect pluralization for other languages until callers supply a
 /// locale-aware context.
-pub(super) static DEFAULT_VALIDATOR_LOCALE: LazyLock<Locale> =
-    LazyLock::new(|| Locale::parse("en").expect("valid locale"));
+pub(super) fn default_validator_locale() -> Locale {
+    ars_i18n::locales::en()
+}
 
 /// Context available to validators during validation.
 ///
@@ -85,9 +83,7 @@ impl<'a> Context<'a> {
     /// of a form. Uses an empty `form_values` map and no locale, which is
     /// sufficient for single-field validation without cross-field dependencies.
     pub fn standalone(field_name: &'a str) -> Self {
-        use std::sync::LazyLock;
-
-        static EMPTY_MAP: LazyLock<BTreeMap<String, Value>> = LazyLock::new(BTreeMap::new);
+        static EMPTY_MAP: BTreeMap<String, Value> = BTreeMap::new();
 
         Self {
             field_name,
@@ -122,6 +118,11 @@ pub fn boxed_validator(v: impl Validator + 'static) -> BoxedValidator {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{
+        string::{String, ToString},
+        vec,
+    };
+
     use super::*;
     use crate::validation::{Error, ErrorCode, Errors};
 
@@ -223,6 +224,6 @@ mod tests {
 
     #[test]
     fn default_validator_locale_is_en() {
-        assert_eq!(DEFAULT_VALIDATOR_LOCALE.to_bcp47(), "en");
+        assert_eq!(default_validator_locale().to_bcp47(), "en");
     }
 }

@@ -5,6 +5,8 @@
 //! provides it via framework context; child `Field` components consume it to
 //! inherit disabled/invalid/readonly state.
 
+use alloc::string::String;
+
 /// Propagated via framework context (Leptos `provide_context`, Dioxus
 /// `use_context_provider`) from `Fieldset` (or `CheckboxGroup`, `RadioGroup`)
 /// to child Field components.
@@ -16,9 +18,9 @@
 /// - `effective_invalid = field_props.invalid || field_ctx.invalid`
 /// - `effective_readonly = field_props.readonly || field_ctx.readonly`
 ///
-/// The merge happens at the **adapter layer** (not inside the core machine),
-/// because the core `field::component::Machine` has no access to framework
-/// context.
+/// The merge happens at the adapter layer (not inside the core machine),
+/// because `ars_components::utility::field::Machine` has no access to
+/// framework context.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Context {
     /// Optional field name inherited from the parent group (e.g., checkbox group name).

@@ -1,0 +1,38 @@
+---
+source: crates/ars-components/src/utility/fieldset.rs
+assertion_line: 748
+expression: "snapshot_attrs(&service.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "fieldset",
+            ),
+        ),
+        (
+            Dir,
+            String(
+                "rtl",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "billing",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -95,7 +95,7 @@ Each interaction's `connect` function produces an `AttrMap` (data attributes, AR
 ```rust
 // In Button's connect():
 let press = use_press(press_config.clone());
-let hover = use_hover(hover_config);
+let hover = use_hover();
 let focus = use_focus(focus_config);
 
 let mut attrs = merge_attrs([press.current_attrs(&press_config), hover.current_attrs(), focus.current_attrs()]);
@@ -678,8 +678,6 @@ pub fn use_press(config: PressConfig) -> PressResult {
     let state = Rc::new(RefCell::new(PressState::Idle));
     let active_presses = Rc::new(RefCell::new(Vec::new()));
 
-    let pressed = state.borrow().is_pressed_inside();
-
     // Event handlers are registered as typed methods on the component's Api struct:
     //   pointerdown  → Idle ──→ PressedInside (captures pointer)
     //   pointerup    → PressedInside ──→ Idle (fires on_press if inside, fires on_press_up always)
@@ -690,7 +688,12 @@ pub fn use_press(config: PressConfig) -> PressResult {
     //   keyup(Enter|Space)   → PressedInside ──→ Idle (fires on_press, fires on_press_up)
     //   touch/pointercancel  → PressedInside|PressedOutside ──→ Idle (fires on_press_up)
 
-    PressResult { state, active_presses, config, pressed }
+    PressResult {
+        state,
+        active_presses,
+        config,
+        pressed: false,
+    }
 }
 
 ///
@@ -987,15 +990,11 @@ fn had_pointer_interaction(modality: &dyn ModalityContext) -> bool {
 /// Creates a hover interaction state machine with the given configuration.
 ///
 /// Returns a [`HoverResult`] holding the initial `NotHovered` state. Event
-/// handlers are registered as typed methods on the component's `Api` struct
-/// by the framework adapter — this factory only creates the core state container.
+/// handlers and config-driven behavior are adapter-owned — this factory only
+/// creates the core state container.
 #[must_use]
-pub fn use_hover(config: HoverConfig) -> HoverResult {
+pub fn use_hover() -> HoverResult {
     let state = SharedState::new(HoverState::NotHovered);
-    let _is_disabled = config.disabled;
-
-    let hovered = state.get().is_hovered();
-
     // Event handlers are registered as typed methods on the component's Api struct:
     //   pointerenter → NotHovered ──→ Hovered (mouse/pen only; ignores touch)
     //   pointerleave → Hovered ──→ NotHovered
@@ -1003,7 +1002,7 @@ pub fn use_hover(config: HoverConfig) -> HoverResult {
     // becomes true while Hovered,
     //   immediately transition to NotHovered (prevents stale hover on mobile).
 
-    HoverResult { hovered, state }
+    HoverResult { hovered: false, state }
 }
 
 /// The output of [`use_hover`], providing live attribute generation and state access.
@@ -1301,7 +1300,6 @@ When a `focus` event fires on an element, `ars-interactions` reads `config.modal
 pub fn use_focus(config: FocusConfig) -> FocusResult {
     let state = Rc::new(RefCell::new(FocusState::Unfocused));
 
-    let focused = state.borrow().is_focused();
     let focus_visible = state.borrow().is_focus_visible(config.modality.as_ref());
 
     // Event handlers are registered as typed methods on the component's Api struct:
@@ -1311,7 +1309,11 @@ pub fn use_focus(config: FocusConfig) -> FocusResult {
     //           Programmatic → FocusedProgrammatic (defers to shared modality context)
     //   blur  → any focused state ──→ Unfocused
 
-    FocusResult { focused, focus_visible, state }
+    FocusResult {
+        focused: false,
+        focus_visible,
+        state,
+    }
 }
 
 pub struct FocusResult {
@@ -1336,12 +1338,9 @@ impl FocusResult {
     }
 }
 
-pub fn use_focus_within(config: FocusWithinConfig) -> FocusWithinResult {
+pub fn use_focus_within() -> FocusWithinResult {
     let state = Rc::new(RefCell::new(false));  // tracks whether focus is within
     let visible = Rc::new(RefCell::new(false)); // tracks focus-visible within
-
-    let focus_within = *state.borrow();
-    let is_focus_within_visible = *visible.borrow();
 
     // Event handlers are registered as typed methods on the component's Api struct:
     //   focusin  → set focus_within = true; check config.modality for visibility
@@ -1369,7 +1368,12 @@ pub fn use_focus_within(config: FocusWithinConfig) -> FocusWithinResult {
     //   3. If `document.activeElement` is the `<body>` element after the
     //      microtask, focus has genuinely left the container.
 
-    FocusWithinResult { focus_within, is_focus_within_visible, state: state.clone(), visible: visible.clone() }
+    FocusWithinResult {
+        focus_within: false,
+        is_focus_within_visible: false,
+        state: state.clone(),
+        visible: visible.clone(),
+    }
 }
 
 pub struct FocusWithinResult {
@@ -1382,8 +1386,7 @@ pub struct FocusWithinResult {
 impl FocusWithinResult {
     /// Returns the current data attributes for the focus-within interaction.
     /// Frameworks must call this each render to get up-to-date attrs.
-    pub fn current_attrs(&self, config: &FocusWithinConfig) -> AttrMap {
-        let _config = config;
+    pub fn current_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         if *self.state.borrow() {
             attrs.set_bool(HtmlAttr::Data("ars-focus-within"), true);
@@ -1637,12 +1640,8 @@ impl LongPressResult {
 /// When used standalone (without Press composition), the component connect function
 /// MUST set both `aria-disabled="true"` and `data-ars-disabled="true"` when
 /// `config.disabled` is true, and MUST keep `tabindex="0"` per 03-accessibility.md §13.
-pub fn use_long_press(config: LongPressConfig, ids: &ComponentIds) -> LongPressResult {
+pub fn use_long_press(config: LongPressConfig) -> LongPressResult {
     let state = Rc::new(RefCell::new(LongPressState::Idle));
-
-    // Snapshot at call time. Adapters expose as a reactive signal; `current_attrs()`
-    // provides live state for attribute rendering.
-    let is_long_pressing = matches!(*state.borrow(), LongPressState::Timing { .. } | LongPressState::LongPressed { .. });
 
     // Event handlers are registered as typed methods on the component's Api struct
     // and delegate into the adapter-facing helpers on LongPressResult:
@@ -1653,7 +1652,11 @@ pub fn use_long_press(config: LongPressConfig, ids: &ComponentIds) -> LongPressR
     //   move_long_press()   → Timing ──→ Idle when move exceeds threshold_px
     //   end_long_press()    → LongPressed ──→ Idle (no action)
 
-    LongPressResult { is_long_pressing, state, config }
+    LongPressResult {
+        is_long_pressing: false,
+        state,
+        config,
+    }
 }
 ```
 
@@ -2718,7 +2721,7 @@ use ars_core::AttrMap;
 ///
 /// ```rust
 /// let press = use_press(press_config.clone());
-/// let hover = use_hover(hover_config);
+/// let hover = use_hover();
 /// let focus = use_focus(focus_config);
 ///
 /// // All three sets of data attributes are applied to the element.
@@ -2771,7 +2774,7 @@ pub fn button_attrs(&self) -> AttrMap {
         ..Default::default()
     };
     let press_result = use_press(press_config.clone());
-    let hover_result = use_hover(HoverConfig::default());
+    let hover_result = use_hover();
     let focus_result = use_focus(FocusConfig::default());
 
     // 2. Build component-level attrs
@@ -2885,12 +2888,11 @@ pub fn thumb_attrs(&self, index: usize) -> AttrMap {
     let focus = use_focus(FocusConfig::default());
 
     // Long press: show value tooltip after 800ms.
-    // ids is passed for description_attrs() which generates the aria-describedby linkage.
     let long_press = use_long_press(LongPressConfig {
         threshold: Duration::from_millis(800),
         accessibility_description: Some(self.ctx.messages.long_press_description.clone()),
         ..Default::default()
-    }, &self.ctx.ids);
+    });
 
     // Component-specific attrs.
     let mut thumb_attrs = AttrMap::new();
@@ -2951,7 +2953,7 @@ let long_press_fired = SharedState::new(None);
 let long_press = use_long_press(LongPressConfig {
     long_press_cancel_flag: Some(long_press_fired.clone()),
     ..Default::default()
-}, &ids);
+});
 
 // Pass to Press — checks the same shared state on release
 let press = use_press(PressConfig {

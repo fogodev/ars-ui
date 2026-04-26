@@ -1,5 +1,7 @@
 use std::sync::{Arc, Mutex};
 
+use ars_components::overlay::presence;
+use ars_core::{ConnectApi, HtmlAttr};
 use leptos::reactive::traits::GetUntracked;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
@@ -85,6 +87,91 @@ fn reactive_props_sync_state_and_context_on_wasm() {
         machine.service.with_value(|service| {
             assert_eq!(service.context().sync_count, 1);
         });
+    });
+}
+
+#[wasm_bindgen_test]
+fn presence_machine_exposes_live_presence_attrs_on_wasm() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let machine = use_machine::<presence::Machine>(presence::Props {
+            id: String::from("presence"),
+            present: false,
+            lazy_mount: false,
+            skip_animation: false,
+            reduce_motion: false,
+        });
+
+        let derived = machine.derive(|api| {
+            (
+                api.is_present(),
+                api.is_mounted(),
+                api.is_unmounting(),
+                api.root_attrs()
+                    .get(&HtmlAttr::Data("ars-state"))
+                    .map(str::to_owned),
+                api.part_attrs(presence::Part::Root)
+                    .get(&HtmlAttr::Data("ars-presence"))
+                    .map(str::to_owned),
+            )
+        });
+
+        assert_eq!(
+            derived.get_untracked(),
+            (
+                false,
+                false,
+                false,
+                Some(String::from("closed")),
+                Some(String::from("mounted")),
+            )
+        );
+        assert_eq!(machine.state.get_untracked(), presence::State::Unmounted);
+
+        machine.send.run(presence::Event::Mount);
+
+        assert_eq!(machine.state.get_untracked(), presence::State::Mounted);
+        assert_eq!(
+            derived.get_untracked(),
+            (
+                true,
+                true,
+                false,
+                Some(String::from("open")),
+                Some(String::from("mounted")),
+            )
+        );
+
+        machine.send.run(presence::Event::Unmount);
+
+        assert_eq!(
+            machine.state.get_untracked(),
+            presence::State::UnmountPending
+        );
+        assert_eq!(
+            derived.get_untracked(),
+            (
+                false,
+                true,
+                true,
+                Some(String::from("closed")),
+                Some(String::from("exiting")),
+            )
+        );
+
+        machine.send.run(presence::Event::AnimationEnd);
+
+        assert_eq!(machine.state.get_untracked(), presence::State::Unmounted);
+        assert_eq!(
+            derived.get_untracked(),
+            (
+                false,
+                false,
+                false,
+                Some(String::from("closed")),
+                Some(String::from("mounted")),
+            )
+        );
     });
 }
 

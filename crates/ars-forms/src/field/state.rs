@@ -85,6 +85,11 @@ impl State {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{
+        string::{String, ToString},
+        vec,
+    };
+
     use super::*;
     use crate::validation::{Error, ErrorCode, Errors};
 

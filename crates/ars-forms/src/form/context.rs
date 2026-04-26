@@ -7,13 +7,20 @@
 //! composition. [`Data`] is the collected field data passed to submit
 //! handlers.
 
-use std::{
+use alloc::{
     collections::BTreeMap,
-    fmt::{self, Debug},
+    format,
+    string::{String, ToString},
     sync::Arc,
+    vec,
+    vec::Vec,
 };
+use core::fmt::{self, Debug};
 
+use hashbrown::DefaultHashBuilder;
 use indexmap::IndexMap;
+
+type OrderedIndexMap<K, V> = IndexMap<K, V, DefaultHashBuilder>;
 
 use crate::{
     field::{State, Value},
@@ -27,15 +34,16 @@ use crate::{
 ///
 /// `Context` is a plain data structure, not a `Machine` implementor. It
 /// holds mutable form state (field registry, validation results, dirty/touched
-/// tracking). The `form_submit::Machine` embeds `Context` in its `Context`
-/// type and drives the submission lifecycle as a proper state machine.
+/// tracking). `ars_components::utility::form_submit::Machine` embeds
+/// `Context` in its `Context` type and drives the submission lifecycle as a
+/// proper state machine.
 #[derive(Clone)]
 pub struct Context {
     /// State of each registered field.
     ///
     /// Uses [`IndexMap`] (insertion-ordered) so that "focus first invalid field"
     /// iterates fields in DOM registration order, not alphabetical order.
-    pub fields: IndexMap<String, State>,
+    pub fields: OrderedIndexMap<String, State>,
 
     /// Whether the form is currently being submitted.
     pub is_submitting: bool,
@@ -240,7 +248,7 @@ impl Context {
     #[must_use]
     pub fn new(mode: Mode) -> Self {
         Self {
-            fields: IndexMap::new(),
+            fields: OrderedIndexMap::default(),
             is_submitting: false,
             is_submitted: false,
             server_errors: BTreeMap::new(),
@@ -516,11 +524,12 @@ impl Context {
     }
 
     /// Performs direct synchronous validation and submission without the
-    /// `form_submit::Machine`.
+    /// form-submit machine.
     ///
     /// **Note:** `is_submitting` is only meaningful for the duration of the
     /// synchronous `handler` call. For async submission, use
-    /// `form_submit::Machine` (§8) or `form::component::Machine` (§14).
+    /// `ars_components::utility::form_submit::Machine` (§8) or
+    /// `ars_components::utility::form::Machine` (§14).
     ///
     /// `collect_form_data()` includes all fields regardless of disabled state.
     /// If disabled fields must be excluded, the caller should filter
@@ -581,8 +590,8 @@ impl Context {
 
     /// Whether any registered fields have async validators pending.
     ///
-    /// Used by `form_submit::Machine` to decide between sync and async
-    /// validation paths.
+    /// Used by `ars_components::utility::form_submit::Machine` to decide
+    /// between sync and async validation paths.
     #[must_use]
     pub fn has_async_validators(&self) -> bool {
         !self.async_validators.is_empty()
@@ -647,7 +656,7 @@ impl Context {
 #[derive(Clone, Debug, Default)]
 pub struct Data {
     /// The field values, keyed by field name.
-    pub fields: IndexMap<String, Value>,
+    pub fields: OrderedIndexMap<String, Value>,
 }
 
 impl Data {

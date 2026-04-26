@@ -5,7 +5,8 @@
 //! arrow/home/end/page movement, and live movement attributes into a single
 //! framework-agnostic interaction surface.
 
-use std::{cell::RefCell, rc::Rc};
+use alloc::{rc::Rc, vec::Vec};
+use core::cell::RefCell;
 
 use ars_core::{AttrMap, Callback, HtmlAttr, KeyModifiers, KeyboardKey, ResolvedDirection};
 
@@ -54,8 +55,10 @@ pub struct MoveEvent {
 pub enum MoveEventType {
     /// Movement has started.
     MoveStart,
+
     /// A movement delta is being delivered.
     Move,
+
     /// Movement has ended.
     MoveEnd,
 }
@@ -66,16 +69,21 @@ pub enum MoveState {
     /// No movement is active.
     #[default]
     Idle,
+
     /// Movement is active and tracking the last seen pointer position.
     Moving {
         /// Input modality that initiated the movement.
         pointer_type: PointerType,
+
         /// Last seen client X for delta computation.
         last_x: f64,
+
         /// Last seen client Y for delta computation.
         last_y: f64,
+
         /// Cached horizontal CSS scale factor for inverse delta correction.
         scale_x: f64,
+
         /// Cached vertical CSS scale factor for inverse delta correction.
         scale_y: f64,
     },
@@ -177,6 +185,7 @@ impl MoveResult {
                 } => {
                     let raw_dx = client_x - *last_x;
                     let raw_dy = client_y - *last_y;
+
                     *last_x = client_x;
                     *last_y = client_y;
 
@@ -267,6 +276,7 @@ impl MoveResult {
             delta_y,
             modifiers,
         );
+
         true
     }
 
@@ -293,6 +303,7 @@ impl MoveResult {
                     ..
                 } if self.active_move_keys.is_empty() => {
                     *state = MoveState::Idle;
+
                     true
                 }
 
@@ -326,7 +337,9 @@ impl MoveResult {
 
                 MoveState::Moving { pointer_type, .. } => {
                     *state = MoveState::Idle;
+
                     self.active_move_keys.clear();
+
                     Some(pointer_type)
                 }
             }
@@ -380,8 +393,10 @@ impl MoveResult {
 
     fn untrack_active_move_key(&mut self, key: KeyboardKey) -> bool {
         let original_len = self.active_move_keys.len();
+
         self.active_move_keys
             .retain(|active_key| *active_key != key);
+
         self.active_move_keys.len() != original_len
     }
 }
@@ -420,6 +435,7 @@ fn key_to_delta(
             } else {
                 f64::NEG_INFINITY
             };
+
             Some((home, 0.0))
         }
 
@@ -429,12 +445,14 @@ fn key_to_delta(
             } else {
                 f64::INFINITY
             };
+
             Some((end, 0.0))
         }
 
         KeyboardKey::PageUp => Some((0.0, -step * 10.0)),
 
         KeyboardKey::PageDown => Some((0.0, step * 10.0)),
+
         _ => None,
     }
 }
@@ -463,7 +481,8 @@ fn sanitize_scale(scale: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
+    use alloc::{string::String, sync::Arc, vec::Vec};
+    use std::sync::Mutex;
 
     use ars_core::{AttrValue, ResolvedDirection};
 
@@ -975,6 +994,7 @@ mod tests {
         assert_eq!(moves.len(), 2);
         assert_eq!(moves[0].delta_x, 1.0);
         assert_eq!(moves[1].delta_x, -1.0);
+
         drop(moves);
 
         assert!(!result.handle_key_up(KeyboardKey::ArrowLeft, KeyModifiers::default()));

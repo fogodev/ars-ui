@@ -21,7 +21,7 @@ The project needs a fully stable foundation before component work starts. Compon
 | `ars-leptos`       | 1,195  | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, attr_map_to_leptos, use_style_strategy, AdapterCapabilities. Missing: ArsProvider context (#190), reactive props (#190), controlled value helper (#190), emit/emit_map (#191), event mapping (#191), nonce CSS collector (#191), safe event listeners (#191), LiveAnnouncer context bridge (#513)                                                                                                                                                                                         |
 | `ars-dioxus`       | 762    | Partial  | use_machine, UseMachineReturn, EphemeralRef, use_id, attr_map_to_dioxus, use_style_strategy, AdapterCapabilities. Missing: ArsProvider context (#193), reactive props (#193), controlled value helper (#193), emit/emit_map (#194), event mapping (#194), nonce CSS collector (#194), safe event listeners (#194), LiveAnnouncer context bridge (#512), DioxusPlatform (#195), SSR hydration (#196), error boundary (#197)                                                                                                                     |
 | `ars-collections`  | 6,221  | 90%      | Key, Node, NodeType, Collection trait, StaticCollection, TreeCollection, CollectionBuilder, selection (Mode/Behavior/Set/State/DisabledBehavior), navigation helpers, typeahead, AsyncCollection/AsyncLoader, Virtualizer/LayoutStrategy/VirtualLayout, FilteredCollection, SortedCollection, CollationSupport (i18n). Missing: MutableListData/MutableTreeData, CollectionChangeAnnouncement/CollectionMessages, OnAction, DnD types                                                                                                          |
-| `ars-i18n`         | 1,928  | Partial  | Locale (ICU4X-backed), Direction, Orientation, NumberFormatter, CurrencyCode, BiDi isolation, Weekday, IntlBackend trait (stub), placeholder date/time types                                                                                                                                                                                                                                                                                                                                                                                   |
+| `ars-i18n`         | 1,928  | Partial  | Locale (ICU4X-backed), Direction, Orientation, number::Formatter, CurrencyCode, BiDi isolation, Weekday, IntlBackend trait (stub), placeholder date/time types                                                                                                                                                                                                                                                                                                                                                                                 |
 
 ### Architecture spec (01-architecture.md) completion — 2026-04-10 audit
 
@@ -43,7 +43,7 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 | Architecture core  | `01-architecture.md`         | ~5000 lines, 10 sections | 95%              | 4 remaining gaps tracked above; core contract is stable                                                                                                                                                                                                                                     |
 | Interactions       | `05-interactions.md`         | ~4000 lines, 12 sections | 60%              | 8 tasks closed; 6 open (#76, #77, #159–#162). Blocks Slider, DnD components, custom keyboard handlers                                                                                                                                                                                       |
 | Collections        | `06-collections.md`          | ~5700 lines, 10 sections | 90%              | 4 tasks remain (12 pts): mutable wrappers, announcements, DnD, coverage. Core collection/selection/tree/async/virtual complete.                                                                                                                                                             |
-| I18n               | `04-internationalization.md` | ~4000 lines, 16 sections | 25%              | Blocks number/date components, RTL. Locale + NumberFormatter done; 16 tasks remaining (48 pts ICU4X + web-intl parity)                                                                                                                                                                      |
+| I18n               | `04-internationalization.md` | ~4000 lines, 16 sections | 25%              | Blocks number/date components, RTL. Locale + number::Formatter done; 16 tasks remaining (48 pts ICU4X + web-intl parity)                                                                                                                                                                    |
 | DOM utilities      | `11-dom-utilities.md`        | ~2800 lines, 10 sections | 50%              | 8 tasks closed; 8 open (#69, #72, #85, #88, #112–#114, #176). Blocks all overlay components                                                                                                                                                                                                 |
 | Accessibility      | `03-accessibility.md`        | ~4340 lines, 14 sections | 95%              | Wave 4 complete (13 tasks closed). 3 audit follow-up tasks remain (5 pts): ARIA assertion helpers (#554, 3pts), `set_readonly` (#555, 1pt), public focus selectors (#556, 1pt)                                                                                                              |
 | Forms              | `07-forms.md`                | ~4300 lines, 15 sections | 50%              | 3 tasks closed; 8 open (#164–#171, 26 pts). Blocks Field, Fieldset, Form components and validator builder API                                                                                                                                                                               |
@@ -857,7 +857,7 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 | [#160](https://github.com/fogodev/ars-ui/issues/160) | Implement Drag/Drop state machines and use_drag/use_drop                 | 3      | #4   | #159, #76  |
 | [#161](https://github.com/fogodev/ars-ui/issues/161) | Implement keyboard DnD protocol and screen reader announcements          | 3      | #4   | #160       |
 | [#162](https://github.com/fogodev/ars-ui/issues/162) | Implement Keyboard interaction types in ars-interactions                 | 2      | #4   | —          |
-| [#79](https://github.com/fogodev/ars-ui/issues/79)   | Implement NumberFormatter trait with ICU4X backend in ars-i18n           | 5      | #54  | #75        |
+| [#79](https://github.com/fogodev/ars-ui/issues/79)   | Implement number::Formatter trait with ICU4X backend in ars-i18n         | 5      | #54  | #75        |
 | [#128](https://github.com/fogodev/ars-ui/issues/128) | CalendarDate internal type, calendar system extensions, and error types  | 5      | #54  | #75        |
 | [#129](https://github.com/fogodev/ars-ui/issues/129) | DateFormatter with ICU4X backend                                         | 3      | #54  | #128       |
 | [#130](https://github.com/fogodev/ars-ui/issues/130) | RelativeTimeFormatter with ICU4X backend                                 | 3      | #54  | #75        |
@@ -914,7 +914,7 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
 
 | GitHub                                               | Title                                                                          | Points | Epic | Deps      |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------ | ------ | ---- | --------- |
-| [#124](https://github.com/fogodev/ars-ui/issues/124) | Implement web-intl NumberFormatter backend in ars-i18n                         | 5      | #54  | #75, #79  |
+| [#124](https://github.com/fogodev/ars-ui/issues/124) | Implement web-intl number::Formatter backend in ars-i18n                       | 5      | #54  | #75, #79  |
 | [#125](https://github.com/fogodev/ars-ui/issues/125) | Implement web-intl DateFormatter and RelativeTimeFormatter backend in ars-i18n | 5      | #54  | #75, #129 |
 | [#126](https://github.com/fogodev/ars-ui/issues/126) | Implement web-intl plural and ordinal rules backend in ars-i18n                | 3      | #54  | #75       |
 | [#141](https://github.com/fogodev/ars-ui/issues/141) | web-intl StringCollator backend                                                | 3      | #54  | #136      |
@@ -1063,7 +1063,7 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
   - Doc comments on `is_composing` explain IME suppression requirement.
 - Spec impact: `No spec change required`.
 
-#### W4-4: Implement NumberFormatter trait with ICU4X backend in ars-i18n
+#### W4-4: Implement number::Formatter trait with ICU4X backend in ars-i18n
 
 - Points: `5`
 - Layer: `Subsystem`
@@ -1079,7 +1079,7 @@ Issues #145 and #146 are trivial and unblocked. #147 is self-contained. #148 dep
   - Unit tests for grouping separators (e.g., "1,234.56" in en-US, "1.234,56" in de-DE).
   - Unit tests for parsing formatted numbers back to numeric values.
 - Acceptance criteria:
-  - `NumberFormatter` trait with `format()`, `parse()`, `separator()` methods.
+  - `number::Formatter` trait with `format()`, `parse()`, `separator()` methods.
   - ICU4X-backed implementation for locale-aware formatting.
   - Support for decimal, percent, and currency formatting modes.
 - Spec impact: `No spec change required`.
@@ -1321,7 +1321,7 @@ See epic #54 for the full wave structure, dependency graph, and ICU4X ↔ web-in
 
 ### Wave 5 Task Details
 
-#### W5-1: Implement web-intl NumberFormatter backend in ars-i18n
+#### W5-1: Implement web-intl number::Formatter backend in ars-i18n
 
 - Points: `5`
 - Layer: `Subsystem`
@@ -1331,7 +1331,7 @@ See epic #54 for the full wave structure, dependency graph, and ICU4X ↔ web-in
 - Spec refs:
   - `spec/foundation/04-internationalization.md`
   - `spec/testing/14-ci.md`
-- Goal: implement the browser `Intl.NumberFormat` backend behind the existing `ars-i18n::NumberFormatter` public API.
+- Goal: implement the browser `Intl.NumberFormat` backend behind the existing `ars-i18n::number::Formatter` public API.
 - Files to create/modify:
   - `crates/ars-i18n/Cargo.toml`
   - `crates/ars-i18n/src/lib.rs`
@@ -1345,7 +1345,7 @@ See epic #54 for the full wave structure, dependency graph, and ICU4X ↔ web-in
   - Tests or smoke coverage for locale separator extraction and parsing behavior under `web-intl`.
 - Acceptance criteria:
   - `web-intl` is a real backend, not an empty feature flag.
-  - `NumberFormatter` keeps the same public API under both `icu4x` and `web-intl`.
+  - `number::Formatter` keeps the same public API under both `icu4x` and `web-intl`.
   - Browser builds use `Intl.NumberFormat` for decimal, percent, and currency formatting.
   - `format_percent(0.47, None)` preserves ars-ui fractional semantics and formats as `47%`.
   - `format_currency()` preserves ISO-4217 minor-unit defaults.
@@ -1353,7 +1353,7 @@ See epic #54 for the full wave structure, dependency graph, and ICU4X ↔ web-in
   - `parse()` remains locale-aware for browser-backed formatting.
   - `icu4x` and `web-intl` cannot be enabled together.
   - CI and verification include the wasm `web-intl` cargo check path required by the spec.
-- Spec impact: `Likely yes` to remove stale backend-specific public wrapper sketches if the concrete `NumberFormatter` API remains canonical.
+- Spec impact: `Likely yes` to remove stale backend-specific public wrapper sketches if the concrete `number::Formatter` API remains canonical.
 
 #### W5-2: Implement web-intl DateFormatter and RelativeTimeFormatter backend in ars-i18n
 
