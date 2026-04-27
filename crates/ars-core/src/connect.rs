@@ -2411,6 +2411,7 @@ impl serde::Serialize for CssProperty {
 #[cfg(test)]
 mod tests {
     use alloc::{
+        format,
         string::{String, ToString},
         vec,
     };

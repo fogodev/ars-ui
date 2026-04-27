@@ -169,12 +169,22 @@ fn install_dismissable_listeners(
     inside_boundaries: ReadSignal<Vec<String>>,
     overlay_id: String,
 ) {
-    let state = Rc::new(DismissableState {
-        overlay_id,
-        props,
-        teardown: RefCell::new(None),
-        overlay_pushed: RefCell::new(false),
-        cleaned_up: RefCell::new(false),
+    // `use_hook` runs the initializer exactly once for the component's
+    // lifetime and returns the same `Rc` on every subsequent render.
+    // Without this, every render would allocate a *fresh*
+    // `DismissableState`: `use_drop` only captures the first render's
+    // closure (so its state would never receive `teardown`), while
+    // `use_effect` runs against later renders' fresh states (which
+    // install the listeners and overlay-stack entry). Unmount would
+    // then skip cleanup, leaking document listeners and stack entries.
+    let state = use_hook(|| {
+        Rc::new(DismissableState {
+            overlay_id,
+            props,
+            teardown: RefCell::new(None),
+            overlay_pushed: RefCell::new(false),
+            cleaned_up: RefCell::new(false),
+        })
     });
 
     use_effect({
@@ -184,8 +194,11 @@ fn install_dismissable_listeners(
         }
     });
 
-    use_drop(move || {
-        teardown(&state);
+    use_drop({
+        let state = Rc::clone(&state);
+        move || {
+            teardown(&state);
+        }
     });
 }
 
