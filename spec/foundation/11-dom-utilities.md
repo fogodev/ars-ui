@@ -3076,6 +3076,11 @@ pub struct OutsideInteractionConfig {
     pub overlay_id: String,
     pub inside_boundaries: Rc<dyn Fn() -> Vec<String>>,
     pub exclude_ids: Rc<dyn Fn() -> Vec<String>>,
+    /// Modal-style click-through guard, evaluated **once per
+    /// `pointerdown` event** so adapters can wire reactive sources
+    /// without re-installing the listener triplet when the underlying
+    /// flag toggles.
+    pub disable_outside_pointer_events: Rc<dyn Fn() -> bool>,
     pub on_pointer_outside: Box<dyn Fn(f64, f64, PointerType)>,
     pub on_focus_outside: Box<dyn Fn()>,
     pub on_escape: Box<dyn Fn() -> bool>,

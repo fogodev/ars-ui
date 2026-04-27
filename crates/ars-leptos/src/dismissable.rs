@@ -240,7 +240,11 @@ fn attach(
             overlay_id: state.overlay_id.clone(),
             inside_boundaries: Rc::new(move || inside_boundaries.get_untracked()),
             exclude_ids: Rc::new(move || exclude_ids.clone()),
-            disable_outside_pointer_events,
+            // Leptos component bodies run once, so the props captured
+            // here are stable for the component lifetime; wrap the
+            // boolean in a closure to match the agnostic helper's
+            // `Rc<dyn Fn() -> bool>` shape.
+            disable_outside_pointer_events: Rc::new(move || disable_outside_pointer_events),
             on_pointer_outside: Box::new(move |client_x, client_y, pointer_type| {
                 let attempt = DismissAttempt::new(InteractOutsideEvent::PointerOutside {
                     client_x,

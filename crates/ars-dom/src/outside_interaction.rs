@@ -181,14 +181,17 @@ pub struct OutsideInteractionConfig {
     /// Snapshot reader for the exclude id list. Called once per event.
     pub exclude_ids: Rc<dyn Fn() -> Vec<String>>,
 
-    /// Modal-style click-through guard. When `true`, an outside `pointerdown`
-    /// that fires while the overlay is topmost calls
-    /// [`Event::prevent_default`](web_sys::Event::prevent_default) and
-    /// [`Event::stop_propagation`](web_sys::Event::stop_propagation) on the
-    /// event so the underlying element does not also receive the click.
-    /// Mirrors the `spec/components/utility/dismissable.md` §3 contract for
-    /// `Props::disable_outside_pointer_events`.
-    pub disable_outside_pointer_events: bool,
+    /// Modal-style click-through guard. The closure is evaluated **once
+    /// per `pointerdown` event** so adapters can wire reactive sources
+    /// (signals, `RefCell<Props>` snapshots) without re-installing the
+    /// listener triplet when the underlying flag toggles. When the closure
+    /// returns `true` and the click is outside the boundary, the helper
+    /// calls [`Event::prevent_default`](web_sys::Event::prevent_default)
+    /// and [`Event::stop_propagation`](web_sys::Event::stop_propagation)
+    /// on the event so the underlying element does not also receive the
+    /// click. Mirrors the `spec/components/utility/dismissable.md` §3
+    /// contract for `Props::disable_outside_pointer_events`.
+    pub disable_outside_pointer_events: Rc<dyn Fn() -> bool>,
 
     /// Invoked after the boundary check passes for an outside pointer event.
     pub on_pointer_outside: Box<dyn Fn(f64, f64, PointerType)>,
@@ -209,10 +212,7 @@ impl Debug for OutsideInteractionConfig {
             .field("overlay_id", &self.overlay_id)
             .field("inside_boundaries", &"<closure>")
             .field("exclude_ids", &"<closure>")
-            .field(
-                "disable_outside_pointer_events",
-                &self.disable_outside_pointer_events,
-            )
+            .field("disable_outside_pointer_events", &"<closure>")
             .field("on_pointer_outside", &"<closure>")
             .field("on_focus_outside", &"<closure>")
             .field("on_escape", &"<closure>")
@@ -335,7 +335,7 @@ struct SharedConfig {
     overlay_id: String,
     inside_boundaries: Rc<dyn Fn() -> Vec<String>>,
     exclude_ids: Rc<dyn Fn() -> Vec<String>>,
-    disable_outside_pointer_events: bool,
+    disable_outside_pointer_events: Rc<dyn Fn() -> bool>,
     on_pointer_outside: Box<dyn Fn(f64, f64, PointerType)>,
     on_focus_outside: Box<dyn Fn()>,
     on_escape: Box<dyn Fn() -> bool>,
@@ -417,8 +417,12 @@ fn build_pointer_listener(shared: Rc<SharedConfig>) -> Closure<dyn FnMut(Pointer
         // Modal-style click-through guard: when the consumer requested
         // `disable_outside_pointer_events`, intercept the `pointerdown`
         // before any underlying element receives it. The dismiss callback
-        // path still runs below so the overlay can still react.
-        if shared.disable_outside_pointer_events {
+        // path still runs below so the overlay can still react. The flag
+        // is read through the closure so adapter prop updates between
+        // renders (e.g. a Dialog flipping `disable_outside_pointer_events`
+        // when its modality switches) take effect without reinstalling
+        // the listener triplet.
+        if (shared.disable_outside_pointer_events)() {
             event.prevent_default();
             Event::stop_propagation(&event);
         }
@@ -573,7 +577,7 @@ mod tests {
             overlay_id: "ovl-1".into(),
             inside_boundaries: Rc::new(Vec::new),
             exclude_ids: Rc::new(Vec::new),
-            disable_outside_pointer_events: true,
+            disable_outside_pointer_events: Rc::new(|| true),
             on_pointer_outside: Box::new(|_, _, _| {}),
             on_focus_outside: Box::new(|| {}),
             on_escape: Box::new(|| true),
@@ -583,7 +587,7 @@ mod tests {
 
         assert!(formatted.contains("OutsideInteractionConfig"));
         assert!(formatted.contains("ovl-1"));
-        assert!(formatted.contains("disable_outside_pointer_events: true"));
+        assert!(formatted.contains("disable_outside_pointer_events: \"<closure>\""));
         assert!(formatted.contains("inside_boundaries: \"<closure>\""));
         assert!(formatted.contains("on_escape: \"<closure>\""));
     }
@@ -943,7 +947,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-1".into(),
                 inside_boundaries: arc_static(Vec::new()),
                 exclude_ids: arc_static(Vec::new()),
-                disable_outside_pointer_events: false,
+                disable_outside_pointer_events: Rc::new(|| false),
                 on_pointer_outside: Box::new(move |_, _, _| {
                     pointer_calls_for_cb.set(pointer_calls_for_cb.get() + 1);
                 }),
@@ -993,7 +997,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-2".into(),
                 inside_boundaries: arc_static(Vec::new()),
                 exclude_ids: arc_static(Vec::new()),
-                disable_outside_pointer_events: false,
+                disable_outside_pointer_events: Rc::new(|| false),
                 on_pointer_outside: Box::new(move |_, _, _| {
                     fired_for_cb.store(true, Ordering::SeqCst);
                 }),
@@ -1035,7 +1039,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-3".into(),
                 inside_boundaries: arc_static(Vec::new()),
                 exclude_ids: arc_static(Vec::new()),
-                disable_outside_pointer_events: false,
+                disable_outside_pointer_events: Rc::new(|| false),
                 on_pointer_outside: Box::new(move |_, _, _| {
                     fired_for_cb.fetch_add(1, Ordering::SeqCst);
                 }),
@@ -1083,7 +1087,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-4".into(),
                 inside_boundaries: arc_static(Vec::new()),
                 exclude_ids: arc_static(Vec::new()),
-                disable_outside_pointer_events: false,
+                disable_outside_pointer_events: Rc::new(|| false),
                 on_pointer_outside: Box::new(move |_, _, _| {
                     fired_for_cb.store(true, Ordering::SeqCst);
                 }),
@@ -1125,7 +1129,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-5".into(),
                 inside_boundaries: arc_static(Vec::new()),
                 exclude_ids: arc_static(Vec::new()),
-                disable_outside_pointer_events: false,
+                disable_outside_pointer_events: Rc::new(|| false),
                 on_pointer_outside: Box::new(|_, _, _| {}),
                 on_focus_outside: Box::new(|| {}),
                 on_escape: Box::new(move || {
@@ -1167,7 +1171,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-6".into(),
                 inside_boundaries: arc_static(Vec::new()),
                 exclude_ids: arc_static(Vec::new()),
-                disable_outside_pointer_events: false,
+                disable_outside_pointer_events: Rc::new(|| false),
                 on_pointer_outside: Box::new(|_, _, _| {}),
                 on_focus_outside: Box::new(|| {}),
                 on_escape: Box::new(move || {
@@ -1213,7 +1217,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-7".into(),
                 inside_boundaries: Rc::new(move || boundaries_for_reader.borrow().clone()),
                 exclude_ids: arc_static(Vec::new()),
-                disable_outside_pointer_events: false,
+                disable_outside_pointer_events: Rc::new(|| false),
                 on_pointer_outside: Box::new(move |_, _, _| {
                     fired_for_cb.fetch_add(1, Ordering::SeqCst);
                 }),
@@ -1282,7 +1286,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-8".into(),
                 inside_boundaries: arc_static(Vec::new()),
                 exclude_ids: arc_static(Vec::new()),
-                disable_outside_pointer_events: true,
+                disable_outside_pointer_events: Rc::new(|| true),
                 on_pointer_outside: Box::new(move |_, _, _| {
                     dismiss_fired_for_cb.store(true, Ordering::SeqCst);
                 }),
@@ -1353,7 +1357,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-9".into(),
                 inside_boundaries: arc_static(Vec::new()),
                 exclude_ids: arc_static(Vec::new()),
-                disable_outside_pointer_events: false,
+                disable_outside_pointer_events: Rc::new(|| false),
                 on_pointer_outside: Box::new(|_, _, _| {}),
                 on_focus_outside: Box::new(|| {}),
                 on_escape: Box::new(|| true),
@@ -1443,7 +1447,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-cap".into(),
                 inside_boundaries: arc_static(Vec::new()),
                 exclude_ids: arc_static(Vec::new()),
-                disable_outside_pointer_events: false,
+                disable_outside_pointer_events: Rc::new(|| false),
                 on_pointer_outside: Box::new(move |_, _, _| {
                     fired_for_cb.store(true, Ordering::SeqCst);
                 }),

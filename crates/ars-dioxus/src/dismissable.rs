@@ -177,15 +177,29 @@ fn install_dismissable_listeners(
     // `use_effect` runs against later renders' fresh states (which
     // install the listeners and overlay-stack entry). Unmount would
     // then skip cleanup, leaking document listeners and stack entries.
+    //
+    // `props` lives inside the state behind a `RefCell` so subsequent
+    // renders can publish updated callbacks, `exclude_ids`, and the
+    // `disable_outside_pointer_events` flag without re-installing the
+    // listener triplet — the listener closures read through
+    // `state.props.borrow()` at fire-time, and the helper's
+    // `disable_outside_pointer_events` closure does the same. Without
+    // this, the listeners would stay bound to whatever `Props` value
+    // was active at install time and silently ignore prop updates.
     let state = use_hook(|| {
         Rc::new(DismissableState {
             overlay_id,
-            props,
+            props: RefCell::new(props.clone()),
             teardown: RefCell::new(None),
             overlay_pushed: RefCell::new(false),
             cleaned_up: RefCell::new(false),
         })
     });
+
+    // Refresh the cached props on every render so callback identities,
+    // exclude-id sets, and the modal flag are always read from the
+    // most recent component invocation.
+    *state.props.borrow_mut() = props;
 
     use_effect({
         let state = Rc::clone(&state);
@@ -205,7 +219,7 @@ fn install_dismissable_listeners(
 #[cfg(feature = "web")]
 struct DismissableState {
     overlay_id: String,
-    props: Props,
+    props: RefCell<Props>,
     teardown: RefCell<Option<Box<dyn FnOnce()>>>,
     overlay_pushed: RefCell<bool>,
     cleaned_up: RefCell<bool>,
@@ -249,85 +263,96 @@ fn attach(
 
     *state.overlay_pushed.borrow_mut() = true;
 
-    let Props {
-        on_interact_outside,
-        on_escape_key_down,
-        on_dismiss,
-        disable_outside_pointer_events,
-        exclude_ids,
-    } = state.props.clone();
-
-    let on_dismiss_for_pointer = on_dismiss.clone();
-    let on_dismiss_for_focus = on_dismiss.clone();
-    let on_dismiss_for_escape = on_dismiss;
-
-    let on_interact_outside_for_pointer = on_interact_outside.clone();
-    let on_interact_outside_for_focus = on_interact_outside;
-
+    // Each dynamic field on `Props` is reached through `state.props`
+    // at fire-time so re-renders that publish new callbacks,
+    // `exclude_ids`, or a flipped `disable_outside_pointer_events`
+    // flag take effect without tearing down and re-attaching the
+    // listener triplet.
     let teardown_fn = ars_dom::install_outside_interaction_listeners(
         &root_element,
         OutsideInteractionConfig {
             overlay_id: state.overlay_id.clone(),
             inside_boundaries: Rc::new(move || inside_boundaries.peek().clone()),
-            exclude_ids: Rc::new(move || exclude_ids.clone()),
-            disable_outside_pointer_events,
-            on_pointer_outside: Box::new(move |client_x, client_y, pointer_type| {
-                let attempt = DismissAttempt::new(InteractOutsideEvent::PointerOutside {
-                    client_x,
-                    client_y,
-                    pointer_type,
-                });
+            exclude_ids: Rc::new({
+                let state = Rc::clone(state);
+                move || state.props.borrow().exclude_ids.clone()
+            }),
+            disable_outside_pointer_events: Rc::new({
+                let state = Rc::clone(state);
+                move || state.props.borrow().disable_outside_pointer_events
+            }),
+            on_pointer_outside: Box::new({
+                let state = Rc::clone(state);
+                move |client_x, client_y, pointer_type| {
+                    let props = state.props.borrow();
 
-                if let Some(cb) = on_interact_outside_for_pointer.as_ref() {
-                    cb(attempt.clone());
-                }
+                    let attempt = DismissAttempt::new(InteractOutsideEvent::PointerOutside {
+                        client_x,
+                        client_y,
+                        pointer_type,
+                    });
 
-                if attempt.is_prevented() {
-                    return;
-                }
+                    if let Some(cb) = props.on_interact_outside.as_ref() {
+                        cb(attempt.clone());
+                    }
 
-                if let Some(cb) = on_dismiss_for_pointer.as_ref() {
-                    cb(DismissReason::OutsidePointer);
+                    if attempt.is_prevented() {
+                        return;
+                    }
+
+                    if let Some(cb) = props.on_dismiss.as_ref() {
+                        cb(DismissReason::OutsidePointer);
+                    }
                 }
             }),
-            on_focus_outside: Box::new(move || {
-                let attempt = DismissAttempt::new(InteractOutsideEvent::FocusOutside);
+            on_focus_outside: Box::new({
+                let state = Rc::clone(state);
+                move || {
+                    let props = state.props.borrow();
 
-                if let Some(cb) = on_interact_outside_for_focus.as_ref() {
-                    cb(attempt.clone());
-                }
+                    let attempt = DismissAttempt::new(InteractOutsideEvent::FocusOutside);
 
-                if attempt.is_prevented() {
-                    return;
-                }
+                    if let Some(cb) = props.on_interact_outside.as_ref() {
+                        cb(attempt.clone());
+                    }
 
-                if let Some(cb) = on_dismiss_for_focus.as_ref() {
-                    cb(DismissReason::OutsideFocus);
+                    if attempt.is_prevented() {
+                        return;
+                    }
+
+                    if let Some(cb) = props.on_dismiss.as_ref() {
+                        cb(DismissReason::OutsideFocus);
+                    }
                 }
             }),
-            on_escape: Box::new(move || {
-                let attempt = DismissAttempt::new(());
+            on_escape: Box::new({
+                let state = Rc::clone(state);
+                move || {
+                    let props = state.props.borrow();
 
-                if let Some(cb) = on_escape_key_down.as_ref() {
-                    cb(attempt.clone());
+                    let attempt = DismissAttempt::new(());
+
+                    if let Some(cb) = props.on_escape_key_down.as_ref() {
+                        cb(attempt.clone());
+                    }
+
+                    // Whether or not the consumer vetoed the dismiss
+                    // decision, the topmost overlay received the Escape
+                    // and gets to consume it. Returning `true` here
+                    // makes the helper call `Event::stop_propagation`
+                    // so ancestor overlays and global `keydown`
+                    // handlers don't also react to the same keystroke
+                    // (per `spec/foundation/05-interactions.md` §12.6).
+                    if attempt.is_prevented() {
+                        return true;
+                    }
+
+                    if let Some(cb) = props.on_dismiss.as_ref() {
+                        cb(DismissReason::Escape);
+                    }
+
+                    true
                 }
-
-                // Whether or not the consumer vetoed the dismiss decision,
-                // the topmost overlay received the Escape and gets to
-                // consume it. Returning `true` here makes the helper call
-                // `Event::stop_propagation` so ancestor overlays and
-                // global `keydown` handlers don't also react to the same
-                // keystroke (per `spec/foundation/05-interactions.md`
-                // §12.6).
-                if attempt.is_prevented() {
-                    return true;
-                }
-
-                if let Some(cb) = on_dismiss_for_escape.as_ref() {
-                    cb(DismissReason::Escape);
-                }
-
-                true
             }),
         },
     );
