@@ -479,9 +479,34 @@ fn build_keydown_listener(shared: Rc<SharedConfig>) -> Closure<dyn FnMut(Keyboar
     }) as Box<dyn FnMut(KeyboardEvent)>)
 }
 
+/// Resolves the DOM element actually under the pointer for the supplied
+/// `pointerdown` event.
+///
+/// Pointer-capture interactions (drag, pan, slider thumb capture) keep
+/// `event.target()` bound to the *capturing* element regardless of where
+/// the pointer currently is — relying on `event.target()` alone would
+/// classify outside pointerdowns as inside whenever the active overlay
+/// has an in-flight pointer capture, suppressing dismissal. To match the
+/// actual pointer location we ask the document to hit-test the
+/// `(client_x, client_y)` coordinates first via
+/// [`Document::element_from_point`] and fall back to `event.target()` only
+/// when hit-testing returns nothing (e.g. coordinates outside the
+/// viewport, or the page document is not yet attached).
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn resolve_pointer_target(event: &PointerEvent) -> Option<Element> {
-    event.target().and_then(|t| t.dyn_into::<Element>().ok())
+    let from_coordinates = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| {
+            // `element_from_point` takes `f32` and returns `None` for
+            // coordinates outside the visible viewport. Both branches are
+            // load-bearing: coordinates inside the viewport return the
+            // topmost element, coordinates outside trigger the fallback
+            // below. The `i32 → f32` widening is lossless for any
+            // realistic viewport coordinate range.
+            document.element_from_point(event.client_x() as f32, event.client_y() as f32)
+        });
+
+    from_coordinates.or_else(|| event.target().and_then(|t| t.dyn_into::<Element>().ok()))
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -580,6 +605,29 @@ mod wasm_tests {
             .expect("div must be HtmlElement");
 
         element.set_id(id);
+
+        // Default `<div>` elements have zero intrinsic height in the
+        // flow layout, which makes them invisible to
+        // `Document::element_from_point` — and the pointer-target
+        // resolver in `outside_interaction.rs` consults that helper
+        // first to handle pointer-capture scenarios. Forcing a small
+        // `block` size keeps every appended fixture hit-testable so
+        // synthetic pointerdown events centered on the element resolve
+        // to it (matching real-browser click semantics).
+        element
+            .style()
+            .set_property("display", "block")
+            .expect("style display");
+
+        element
+            .style()
+            .set_property("min-width", "10px")
+            .expect("style min-width");
+
+        element
+            .style()
+            .set_property("min-height", "10px")
+            .expect("style min-height");
 
         parent
             .append_child(&element)
@@ -787,16 +835,45 @@ mod wasm_tests {
         Rc::new(move || values.clone())
     }
 
-    fn dispatch_pointerdown_at(target: &EventTarget) {
+    fn dispatch_pointerdown_at(target: &Element) {
+        // Match real browser behavior: a real `pointerdown` carries
+        // `clientX` / `clientY` that fall inside the dispatched element's
+        // bounding rect, and `Document::element_from_point(clientX,
+        // clientY)` returns that same element. The pointer-target
+        // resolver in `outside_interaction.rs` consults
+        // `element_from_point` first to handle pointer-capture cases (see
+        // the `pointer_capture_with_outside_coords_resolves_via_element_from_point`
+        // test). Default-zero coords would resolve to whatever sits at
+        // viewport `(0, 0)` instead of the dispatched element, which
+        // would skew every other test in this file. Centering the
+        // synthetic event on the target's bbox keeps behavior aligned
+        // with real-world clicks.
+        let rect = target.get_bounding_client_rect();
+        // `as i32` truncation is harmless: PointerEventInit takes `i32`
+        // pixel coordinates, and bbox values are integral in tests.
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "PointerEventInit takes i32 pixel coords; bbox values are integral in tests."
+        )]
+        let center_x = (rect.left() + rect.width() / 2.0) as i32;
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "PointerEventInit takes i32 pixel coords; bbox values are integral in tests."
+        )]
+        let center_y = (rect.top() + rect.height() / 2.0) as i32;
+
         let init = web_sys::PointerEventInit::new();
 
         init.set_bubbles(true);
         init.set_cancelable(true);
+        init.set_client_x(center_x);
+        init.set_client_y(center_y);
 
         let event = PointerEvent::new_with_event_init_dict("pointerdown", &init)
             .expect("PointerEvent must construct");
 
-        target
+        let target_event_target: EventTarget = target.clone().into();
+        target_event_target
             .dispatch_event(&event)
             .expect("dispatch_event must succeed");
     }
@@ -1272,6 +1349,113 @@ mod wasm_tests {
         teardown();
 
         remove_overlay("li-overlay-9");
+
+        cleanup(&[&root, &outside]);
+    }
+
+    /// Pointer-capture scenario: when the captured element pins
+    /// `event.target` to an *inside* node, the listener must still
+    /// classify the pointerdown by the actual pointer location via
+    /// `Document::element_from_point(client_x, client_y)` — otherwise
+    /// captured drags through outside regions never trigger dismissal.
+    #[wasm_bindgen_test]
+    fn pointer_capture_with_outside_coords_resolves_via_element_from_point() {
+        reset_overlay_stack();
+
+        // Position the overlay root at (0,0)–(100,100) and an outside
+        // element at (200,200)–(250,250). Synthesizing a pointerdown
+        // dispatched on the root (mimicking pointer capture) but with
+        // client coordinates inside the outside element exercises the
+        // `element_from_point` resolution path.
+        let root = append_div(&body(), "li-root-cap");
+        root.style()
+            .set_property("position", "absolute")
+            .expect("set position");
+        root.style().set_property("left", "0px").expect("set left");
+        root.style().set_property("top", "0px").expect("set top");
+        root.style()
+            .set_property("width", "100px")
+            .expect("set width");
+        root.style()
+            .set_property("height", "100px")
+            .expect("set height");
+
+        let outside = append_div(&body(), "li-outside-cap");
+        outside
+            .style()
+            .set_property("position", "absolute")
+            .expect("set position");
+        outside
+            .style()
+            .set_property("left", "200px")
+            .expect("set left");
+        outside
+            .style()
+            .set_property("top", "200px")
+            .expect("set top");
+        outside
+            .style()
+            .set_property("width", "50px")
+            .expect("set width");
+        outside
+            .style()
+            .set_property("height", "50px")
+            .expect("set height");
+
+        push_overlay(OverlayEntry {
+            id: "li-overlay-cap".into(),
+            modal: false,
+            z_index: None,
+        });
+
+        let fired = Arc::new(AtomicBool::new(false));
+        let fired_for_cb = Arc::clone(&fired);
+
+        let teardown = install_outside_interaction_listeners(
+            &root,
+            OutsideInteractionConfig {
+                overlay_id: "li-overlay-cap".into(),
+                inside_boundaries: arc_static(Vec::new()),
+                exclude_ids: arc_static(Vec::new()),
+                disable_outside_pointer_events: false,
+                on_pointer_outside: Box::new(move |_, _, _| {
+                    fired_for_cb.store(true, Ordering::SeqCst);
+                }),
+                on_focus_outside: Box::new(|| {}),
+                on_escape: Box::new(|| true),
+            },
+        );
+
+        // Dispatch a pointerdown on `root` (target = root, "captured"
+        // element) with coordinates inside the outside element. Without
+        // the `element_from_point` resolution, `event.target = root`
+        // would classify the pointerdown as inside and suppress
+        // dismissal — exactly the bug Codex flagged.
+        let init = web_sys::PointerEventInit::new();
+        init.set_bubbles(true);
+        init.set_cancelable(true);
+        init.set_client_x(220);
+        init.set_client_y(220);
+
+        let event = PointerEvent::new_with_event_init_dict("pointerdown", &init)
+            .expect("PointerEvent must construct");
+
+        let root_target: EventTarget = root.clone().unchecked_into();
+        root_target
+            .dispatch_event(&event)
+            .expect("dispatch_event must succeed");
+
+        assert!(
+            fired.load(Ordering::SeqCst),
+            "pointer-capture with outside coordinates must dismiss — \
+             `element_from_point` should resolve the actual pointer \
+             location even when `event.target` is pinned to a captured \
+             inside element",
+        );
+
+        teardown();
+
+        remove_overlay("li-overlay-cap");
 
         cleanup(&[&root, &outside]);
     }

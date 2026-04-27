@@ -282,8 +282,15 @@ fn attach(
                     cb(attempt.clone());
                 }
 
+                // Whether or not the consumer vetoed the dismiss decision,
+                // the topmost overlay received the Escape and gets to
+                // consume it. Returning `true` here makes the helper call
+                // `Event::stop_propagation` so ancestor overlays and
+                // global `keydown` handlers don't also react to the same
+                // keystroke (per `spec/foundation/05-interactions.md`
+                // §12.6).
                 if attempt.is_prevented() {
-                    return false;
+                    return true;
                 }
 
                 if let Some(cb) = on_dismiss_for_escape.as_ref() {
@@ -529,7 +536,6 @@ mod wasm_tests {
 
     use ars_core::{I18nRegistries, MessageFn, MessagesRegistry};
     use ars_i18n::{Locale, locales};
-    use ars_interactions::InteractOutsideEvent;
     use leptos::{mount::mount_to, prelude::*, reactive::owner::Owner};
     use wasm_bindgen::JsCast;
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
@@ -537,7 +543,7 @@ mod wasm_tests {
 
     // Explicit imports to shadow `leptos::prelude::Props` (the
     // component-props trait) with the dismissable struct.
-    use super::{DismissReason, Messages, Props, Region};
+    use super::{DismissAttempt, DismissReason, Messages, Props, Region};
 
     wasm_bindgen_test_configure!(run_in_browser);
 
@@ -567,6 +573,67 @@ mod wasm_tests {
     /// Tick the Leptos reactive cycle once.
     async fn tick() {
         leptos::task::tick().await;
+    }
+
+    /// Builds a `pointerdown` `PointerEvent` whose `clientX` / `clientY`
+    /// fall inside `target`'s bounding rect.
+    ///
+    /// `ars_dom::install_outside_interaction_listeners` resolves the
+    /// pointer-event target via `Document::element_from_point(clientX,
+    /// clientY)` first (with `event.target()` as fallback) so it
+    /// classifies pointer-capture interactions correctly. Synthetic
+    /// pointerdowns with default-zero coords would resolve to whatever
+    /// sits at viewport `(0, 0)` rather than the dispatched element,
+    /// so each test that wants the "real" target classification
+    /// centers the event on the target's bounding rect.
+    fn pointerdown_centered_on(target: &Element) -> web_sys::PointerEvent {
+        let rect = target.get_bounding_client_rect();
+        // `as i32` truncation is harmless: PointerEventInit takes `i32`
+        // pixel coordinates, and bbox values fall well within `i32`.
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "PointerEventInit takes i32 pixel coords; bbox values fit i32."
+        )]
+        let center_x = (rect.left() + rect.width() / 2.0) as i32;
+
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "PointerEventInit takes i32 pixel coords; bbox values fit i32."
+        )]
+        let center_y = (rect.top() + rect.height() / 2.0) as i32;
+
+        let init = PointerEventInit::new();
+
+        init.set_bubbles(true);
+        init.set_cancelable(true);
+        init.set_pointer_type("mouse");
+        init.set_client_x(center_x);
+        init.set_client_y(center_y);
+
+        web_sys::PointerEvent::new_with_event_init_dict("pointerdown", &init)
+            .expect("pointerdown event should construct")
+    }
+
+    /// Forces `target` to render with non-zero pixel dimensions so
+    /// `Document::element_from_point` can hit-test it. Default
+    /// `<div>` / `<button>` flow elements often render zero-height in a
+    /// fresh test container, which would make
+    /// `pointerdown_centered_on` resolve to `body`/`html` instead of
+    /// the intended target.
+    fn ensure_hit_testable(target: &Element) {
+        let html: HtmlElement = target.clone().unchecked_into();
+
+        html.style()
+            .set_property("display", "block")
+            .expect("style display");
+
+        html.style()
+            .set_property("min-width", "10px")
+            .expect("style min-width");
+
+        html.style()
+            .set_property("min-height", "10px")
+            .expect("style min-height");
     }
 
     #[wasm_bindgen_test]
@@ -724,6 +791,121 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    async fn prevent_dismiss_in_on_escape_key_down_still_consumes_event_on_wasm() {
+        let owner = Owner::new();
+        owner.set();
+
+        let escape_calls = Arc::new(AtomicUsize::new(0));
+        let dismiss_log = Arc::new(Mutex::new(Vec::<DismissReason>::new()));
+        let outer_keydown_calls = Arc::new(AtomicUsize::new(0));
+
+        let container = with_container();
+        let parent: HtmlElement = container.clone().unchecked_into();
+
+        // Outer keydown listener on the container — this should NOT
+        // fire when the inner overlay's `on_escape` consumes the event.
+        let outer_for_listener = Arc::clone(&outer_keydown_calls);
+
+        let outer_listener =
+            wasm_bindgen::closure::Closure::wrap(Box::new(move |_event: web_sys::KeyboardEvent| {
+                outer_for_listener.fetch_add(1, Ordering::SeqCst);
+            })
+                as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+        let outer_target: web_sys::EventTarget = container.clone().unchecked_into();
+
+        outer_target
+            .add_event_listener_with_callback("keydown", outer_listener.as_ref().unchecked_ref())
+            .expect("outer listener must attach");
+
+        let escape_for_props = Arc::clone(&escape_calls);
+        let dismiss_for_props = Arc::clone(&dismiss_log);
+
+        let _handle = mount_to(parent, move || {
+            let escape_for_callback = Arc::clone(&escape_for_props);
+            let dismiss_for_callback = Arc::clone(&dismiss_for_props);
+            let props = Props::new()
+                .on_escape_key_down(move |attempt: DismissAttempt<()>| {
+                    escape_for_callback.fetch_add(1, Ordering::SeqCst);
+                    attempt.prevent_dismiss();
+                })
+                .on_dismiss(move |reason: DismissReason| {
+                    dismiss_for_callback
+                        .lock()
+                        .expect("dismiss_log mutex must not be poisoned")
+                        .push(reason);
+                });
+
+            view! {
+                <Region props=props>
+                    <span>"content"</span>
+                </Region>
+            }
+        });
+
+        tick().await;
+
+        let dismiss_button = container
+            .query_selector("button[data-ars-part='dismiss-button']")
+            .expect("query_selector should succeed")
+            .expect("dismiss button must exist");
+
+        let root: Element = dismiss_button
+            .parent_element()
+            .expect("dismiss button must have a parent");
+
+        let init = KeyboardEventInit::new();
+
+        init.set_key("Escape");
+        init.set_bubbles(true);
+        init.set_cancelable(true);
+
+        let event = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init)
+            .expect("keydown event should construct");
+
+        root.dispatch_event(&event)
+            .expect("dispatch_event should succeed");
+
+        tick().await;
+
+        assert_eq!(
+            escape_calls.load(Ordering::SeqCst),
+            1,
+            "on_escape_key_down must fire once for the Escape keydown",
+        );
+
+        let dismiss_log_inner = dismiss_log
+            .lock()
+            .expect("dismiss_log mutex must not be poisoned");
+
+        assert!(
+            dismiss_log_inner.is_empty(),
+            "calling DismissAttempt::prevent_dismiss must veto the on_dismiss call",
+        );
+
+        drop(dismiss_log_inner);
+
+        // The critical assertion: even though the consumer vetoed
+        // dismissal, the topmost overlay still consumed the Escape so
+        // ancestor / global keydown handlers never see it. Without the
+        // fix this counter is 1 (event bubbled to the outer listener).
+        assert_eq!(
+            outer_keydown_calls.load(Ordering::SeqCst),
+            0,
+            "Escape on a topmost overlay must always stop_propagation, \
+             even when dismissal is vetoed — the outer keydown listener \
+             must not receive the event",
+        );
+
+        drop(outer_target.remove_event_listener_with_callback(
+            "keydown",
+            outer_listener.as_ref().unchecked_ref(),
+        ));
+
+        container.remove();
+    }
+
+    #[wasm_bindgen_test]
     async fn outside_pointerdown_fires_on_dismiss_with_outside_pointer_reason_on_wasm() {
         let owner = Owner::new();
         owner.set();
@@ -767,14 +949,9 @@ mod wasm_tests {
             .append_child(&outside)
             .expect("append_child should succeed");
 
-        let init = PointerEventInit::new();
+        ensure_hit_testable(&outside);
 
-        init.set_bubbles(true);
-        init.set_cancelable(true);
-        init.set_pointer_type("mouse");
-
-        let event = web_sys::PointerEvent::new_with_event_init_dict("pointerdown", &init)
-            .expect("pointerdown event should construct");
+        let event = pointerdown_centered_on(&outside);
 
         outside
             .dispatch_event(&event)
@@ -916,14 +1093,9 @@ mod wasm_tests {
             .append_child(&outside)
             .expect("append_child should succeed");
 
-        let init = PointerEventInit::new();
+        ensure_hit_testable(&outside);
 
-        init.set_bubbles(true);
-        init.set_cancelable(true);
-        init.set_pointer_type("mouse");
-
-        let event = web_sys::PointerEvent::new_with_event_init_dict("pointerdown", &init)
-            .expect("pointerdown event should construct");
+        let event = pointerdown_centered_on(&outside);
 
         outside
             .dispatch_event(&event)
@@ -996,14 +1168,9 @@ mod wasm_tests {
             .append_child(&trigger)
             .expect("append_child should succeed");
 
-        let init = PointerEventInit::new();
+        ensure_hit_testable(&trigger);
 
-        init.set_bubbles(true);
-        init.set_cancelable(true);
-        init.set_pointer_type("mouse");
-
-        let event = web_sys::PointerEvent::new_with_event_init_dict("pointerdown", &init)
-            .expect("pointerdown event should construct");
+        let event = pointerdown_centered_on(&trigger);
 
         trigger
             .dispatch_event(&event)
@@ -1192,14 +1359,9 @@ mod wasm_tests {
             .append_child(&outside)
             .expect("append_child should succeed");
 
-        let init = PointerEventInit::new();
+        ensure_hit_testable(&outside);
 
-        init.set_bubbles(true);
-        init.set_cancelable(true);
-        init.set_pointer_type("mouse");
-
-        let first_event = web_sys::PointerEvent::new_with_event_init_dict("pointerdown", &init)
-            .expect("pointerdown event should construct");
+        let first_event = pointerdown_centered_on(&outside);
 
         outside
             .dispatch_event(&first_event)
@@ -1225,8 +1387,7 @@ mod wasm_tests {
 
         tick().await;
 
-        let second_event = web_sys::PointerEvent::new_with_event_init_dict("pointerdown", &init)
-            .expect("pointerdown event should construct");
+        let second_event = pointerdown_centered_on(&outside);
 
         outside
             .dispatch_event(&second_event)

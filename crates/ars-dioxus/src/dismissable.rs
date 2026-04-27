@@ -299,8 +299,15 @@ fn attach(
                     cb(attempt.clone());
                 }
 
+                // Whether or not the consumer vetoed the dismiss decision,
+                // the topmost overlay received the Escape and gets to
+                // consume it. Returning `true` here makes the helper call
+                // `Event::stop_propagation` so ancestor overlays and
+                // global `keydown` handlers don't also react to the same
+                // keystroke (per `spec/foundation/05-interactions.md`
+                // §12.6).
                 if attempt.is_prevented() {
-                    return false;
+                    return true;
                 }
 
                 if let Some(cb) = on_dismiss_for_escape.as_ref() {
