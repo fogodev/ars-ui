@@ -336,6 +336,44 @@ mod tests {
         assert!(result.nonce_css.is_empty());
     }
 
+    /// SSR / static-string path materializes reactive variants to
+    /// their current value via the closure. Adapter wasm tests cover
+    /// the live reactive subscription path; this is the static
+    /// snapshot contract `attr_map_to_leptos` exposes for SSR.
+    #[test]
+    fn inline_strategy_materializes_reactive_string_to_current_value() {
+        let mut map = AttrMap::new();
+
+        map.set(
+            HtmlAttr::Aria(ars_core::AriaAttr::Label),
+            AttrValue::reactive(|| String::from("Schließen")),
+        );
+
+        let result = attr_map_to_leptos(map, &StyleStrategy::Inline, None);
+
+        assert_eq!(
+            result.attrs,
+            vec![(String::from("aria-label"), String::from("Schließen"))]
+        );
+    }
+
+    #[test]
+    fn inline_strategy_materializes_reactive_bool_with_presence_semantics() {
+        let mut map = AttrMap::new();
+
+        map.set(HtmlAttr::Disabled, AttrValue::reactive_bool(|| true))
+            .set(HtmlAttr::Required, AttrValue::reactive_bool(|| false));
+
+        let result = attr_map_to_leptos(map, &StyleStrategy::Inline, None);
+
+        // `true` materializes to an empty value (presence); `false`
+        // skips the attribute entirely — symmetric with static `Bool`.
+        assert_eq!(
+            result.attrs,
+            vec![(String::from("disabled"), String::new())]
+        );
+    }
+
     #[test]
     fn bool_false_and_none_are_filtered_while_bool_true_is_empty_string() {
         let mut map = AttrMap::new();

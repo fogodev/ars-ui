@@ -566,6 +566,46 @@ mod tests {
         assert!(result.cssom_styles.is_empty());
     }
 
+    /// Reactive variants are evaluated at conversion time — Dioxus
+    /// re-runs component bodies whenever a tracked signal changes, so
+    /// each render produces a fresh Attribute with the closure's
+    /// current value. This test pins the materialisation contract:
+    /// the rendered Attribute must carry the closure's current return
+    /// value, not a placeholder.
+    #[test]
+    fn attr_map_to_dioxus_materializes_reactive_string_to_current_value() {
+        let mut map = AttrMap::new();
+
+        map.set(
+            HtmlAttr::Aria(AriaAttr::Label),
+            AttrValue::reactive(|| String::from("Schließen")),
+        );
+
+        let result = attr_map_to_dioxus(map, &StyleStrategy::Inline, None);
+
+        let aria = find_attr(&result.attrs, "aria-label").expect("aria-label attr present");
+
+        assert_eq!(text_value(aria), Some("Schließen"));
+    }
+
+    /// Reactive booleans materialize with HTML presence semantics
+    /// symmetric with [`AttrValue::Bool`]: `true` renders the
+    /// attribute with an empty value, `false` skips it.
+    #[test]
+    fn attr_map_to_dioxus_reactive_bool_follows_presence_semantics() {
+        let mut map = AttrMap::new();
+
+        map.set(HtmlAttr::Disabled, AttrValue::reactive_bool(|| true))
+            .set(HtmlAttr::Required, AttrValue::reactive_bool(|| false));
+
+        let result = attr_map_to_dioxus(map, &StyleStrategy::Inline, None);
+
+        let disabled = find_attr(&result.attrs, "disabled").expect("disabled attr present");
+
+        assert_eq!(text_value(disabled), Some(""));
+        assert!(find_attr(&result.attrs, "required").is_none());
+    }
+
     #[test]
     fn attr_map_to_dioxus_attr_value_none_is_filtered() {
         let mut map = AttrMap::new();

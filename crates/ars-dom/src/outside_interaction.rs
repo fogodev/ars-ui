@@ -561,6 +561,32 @@ mod tests {
     fn id_matches_inside_set_returns_false_for_empty_lists() {
         assert!(!id_matches_inside_set("anything", &[], &[]));
     }
+
+    /// `OutsideInteractionConfig` is `Debug` so adapters can dump the
+    /// struct in tracing/log output. The closures must redact to a
+    /// stable placeholder so the format does not depend on capture
+    /// addresses, and every plain field must be visible.
+    #[cfg(feature = "web")]
+    #[test]
+    fn outside_interaction_config_debug_includes_fields_and_redacts_closures() {
+        let config = OutsideInteractionConfig {
+            overlay_id: "ovl-1".into(),
+            inside_boundaries: Rc::new(Vec::new),
+            exclude_ids: Rc::new(Vec::new),
+            disable_outside_pointer_events: true,
+            on_pointer_outside: Box::new(|_, _, _| {}),
+            on_focus_outside: Box::new(|| {}),
+            on_escape: Box::new(|| true),
+        };
+
+        let formatted = format!("{config:?}");
+
+        assert!(formatted.contains("OutsideInteractionConfig"));
+        assert!(formatted.contains("ovl-1"));
+        assert!(formatted.contains("disable_outside_pointer_events: true"));
+        assert!(formatted.contains("inside_boundaries: \"<closure>\""));
+        assert!(formatted.contains("on_escape: \"<closure>\""));
+    }
 }
 
 #[cfg(all(test, feature = "web", target_arch = "wasm32"))]

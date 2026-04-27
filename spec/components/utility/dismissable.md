@@ -149,6 +149,9 @@ pub fn dismiss_button_attrs(label: &str) -> AttrMap {
     attrs.set(scope_attr, scope_val);
     attrs.set(part_attr, part_val);
     attrs.set(HtmlAttr::Role, "button");
+    // Force `type="button"` so dismiss controls inside a `<form>` never
+    // double as the implicit submit button.
+    attrs.set(HtmlAttr::Type, "button");
     attrs.set(HtmlAttr::TabIndex, "0");
     attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
     attrs.set_bool(HtmlAttr::Data("ars-visually-hidden"), true);
@@ -168,9 +171,9 @@ Dismissable
 └── DismissButton  <button>  (visually hidden, end of region)
 ```
 
-| Part            | Element    | Key attributes                                                                 |
-| --------------- | ---------- | ------------------------------------------------------------------------------ |
-| `DismissButton` | `<button>` | `data-ars-scope="dismissable"`, `data-ars-part="dismiss-button"`, `aria-label` |
+| Part            | Element    | Key attributes                                                                                  |
+| --------------- | ---------- | ----------------------------------------------------------------------------------------------- |
+| `DismissButton` | `<button>` | `data-ars-scope="dismissable"`, `data-ars-part="dismiss-button"`, `aria-label`, `type="button"` |
 
 Adapters should render the element as a native `<button>` whenever possible. The helper still sets
 button semantics so the attrs remain usable with alternate render paths.

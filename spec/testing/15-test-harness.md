@@ -745,8 +745,15 @@ impl DesktopHarness {
 
     /// Drains pending Dioxus work — queued events, dirty scopes, and effects —
     /// until the runtime is idle. Mirrors the wasm-tier
-    /// `HarnessBackend::flush` contract; under the hood it calls
-    /// `VirtualDom::process_events`.
+    /// `HarnessBackend::flush` contract.
+    ///
+    /// `process_events` alone only converts the event queue into dirty marks —
+    /// it does **not** re-render dirty scopes. To make sure signal writes
+    /// triggered by callbacks under test are visible to subsequent assertions,
+    /// the implementation loops `process_events` + `render_immediate` until
+    /// `render_immediate_to_vec` reports zero edits (i.e. the runtime is
+    /// quiescent), with a hard ceiling on iterations to surface re-render
+    /// loops as a panic instead of a hang.
     pub fn flush(&mut self);
 }
 ```

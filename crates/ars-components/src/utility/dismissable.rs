@@ -395,6 +395,11 @@ pub fn dismiss_button_attrs(label: impl Into<AttrValue>) -> AttrMap {
         .set(scope_attr, scope_val)
         .set(part_attr, part_val)
         .set(HtmlAttr::Role, "button")
+        // Force `type="button"` so a dismiss control inside a `<form>`
+        // never doubles as the implicit submit button — without this
+        // the browser default would submit the surrounding form when
+        // the user activates the dismiss button.
+        .set(HtmlAttr::Type, "button")
         .set(HtmlAttr::TabIndex, "0")
         .set(HtmlAttr::Aria(AriaAttr::Label), label)
         .set_bool(HtmlAttr::Data("ars-visually-hidden"), true);
@@ -410,6 +415,34 @@ mod tests {
     use ars_core::AttrValue;
 
     use super::*;
+
+    // ── Messages tests ─────────────────────────────────────────────
+
+    #[test]
+    fn messages_default_dismiss_label_returns_dismiss_for_any_locale() {
+        let messages = Messages::default();
+        let locale = Locale::parse("en-US").expect("en-US must parse");
+
+        assert_eq!((messages.dismiss_label)(&locale), "Dismiss");
+    }
+
+    #[test]
+    fn messages_default_pair_compares_equal_via_arc_identity() {
+        // Two `Messages::default()` values build distinct Arc-backed
+        // closures, so `PartialEq` (which uses `Arc::ptr_eq` under the
+        // hood via `MessageFn`) should report inequality. Cloning a
+        // single instance, by contrast, shares the Arc and compares
+        // equal — this is the contract every adapter relies on when it
+        // memoizes a Messages bundle.
+        let lhs = Messages::default();
+        let rhs = Messages::default();
+
+        assert_ne!(lhs, rhs);
+
+        let cloned = lhs.clone();
+
+        assert_eq!(lhs, cloned);
+    }
 
     // ── Part tests ─────────────────────────────────────────────────
 
@@ -641,6 +674,13 @@ mod tests {
         let attrs = dismiss_button_attrs("Dismiss");
 
         assert_eq!(attrs.get(&HtmlAttr::TabIndex), Some("0"));
+    }
+
+    #[test]
+    fn dismiss_button_attrs_sets_type_button() {
+        let attrs = dismiss_button_attrs("Dismiss");
+
+        assert_eq!(attrs.get(&HtmlAttr::Type), Some("button"));
     }
 
     #[test]

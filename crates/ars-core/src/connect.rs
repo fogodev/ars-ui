@@ -3252,6 +3252,94 @@ mod tests {
         assert_eq!(value.as_str(), Some("owned"));
     }
 
+    /// `as_str` cannot return a borrow into a closure-produced
+    /// `String` (the closure owns that allocation), so the reactive
+    /// variants deliberately return `None`. Adapter conversions must
+    /// route through `materialize_string` instead.
+    #[test]
+    fn attr_value_as_str_returns_none_for_reactive_variants() {
+        let reactive = AttrValue::reactive(|| String::from("Schließen"));
+        let reactive_bool = AttrValue::reactive_bool(|| true);
+
+        assert_eq!(reactive.as_str(), None);
+        assert_eq!(reactive_bool.as_str(), None);
+    }
+
+    #[test]
+    fn attr_value_materialize_string_covers_every_variant() {
+        // Static string round-trip
+        assert_eq!(
+            AttrValue::String(String::from("hello")).materialize_string(),
+            Some(String::from("hello"))
+        );
+
+        // Bool presence semantics
+        assert_eq!(
+            AttrValue::Bool(true).materialize_string(),
+            Some(String::new())
+        );
+        assert_eq!(AttrValue::Bool(false).materialize_string(), None);
+
+        // Reactive variants invoke the closure
+        assert_eq!(
+            AttrValue::reactive(|| String::from("Cerrar")).materialize_string(),
+            Some(String::from("Cerrar"))
+        );
+        assert_eq!(
+            AttrValue::reactive_bool(|| true).materialize_string(),
+            Some(String::new())
+        );
+        assert_eq!(
+            AttrValue::reactive_bool(|| false).materialize_string(),
+            None
+        );
+
+        // None always materializes to None
+        assert_eq!(AttrValue::None.materialize_string(), None);
+    }
+
+    /// Cloning the reactive variants shares the underlying `Arc` —
+    /// `PartialEq` is `Arc::ptr_eq`, so clones compare equal even
+    /// though structural comparison of `dyn Fn` is impossible.
+    #[test]
+    fn attr_value_reactive_clone_preserves_arc_identity() {
+        let original = AttrValue::reactive(|| String::from("x"));
+        let cloned = original.clone();
+
+        assert_eq!(original, cloned);
+
+        let original_bool = AttrValue::reactive_bool(|| true);
+        let cloned_bool = original_bool.clone();
+
+        assert_eq!(original_bool, cloned_bool);
+    }
+
+    /// Two independently-constructed reactive `AttrValue`s carry
+    /// distinct `Arc`s and therefore compare unequal — this is the
+    /// invariant adapter memoisation relies on to detect "the same
+    /// closure" vs "a fresh closure" without structural comparison.
+    #[test]
+    fn attr_value_reactive_distinct_constructions_compare_unequal() {
+        let a = AttrValue::reactive(|| String::from("x"));
+        let b = AttrValue::reactive(|| String::from("x"));
+
+        assert_ne!(a, b);
+    }
+
+    /// `Debug` for reactive variants must redact the inner closure to
+    /// a stable `<closure>` placeholder so log output never depends on
+    /// capture addresses.
+    #[test]
+    fn attr_value_reactive_debug_redacts_closure() {
+        let formatted = format!("{:?}", AttrValue::reactive(|| String::from("x")));
+        let formatted_bool = format!("{:?}", AttrValue::reactive_bool(|| true));
+
+        assert!(formatted.contains("Reactive"));
+        assert!(formatted.contains("<closure>"));
+        assert!(formatted_bool.contains("ReactiveBool"));
+        assert!(formatted_bool.contains("<closure>"));
+    }
+
     #[cfg(feature = "serde")]
     #[test]
     fn attr_map_serializes_for_ssr() {

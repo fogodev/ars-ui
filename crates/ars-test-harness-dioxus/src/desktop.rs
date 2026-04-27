@@ -118,8 +118,38 @@ impl DesktopHarness {
     /// the most recent interaction has been applied. Call it after
     /// dispatching a callback so any reactive effects scheduled in
     /// response get a chance to run before the next assertion.
+    ///
+    /// `process_events` alone only converts the event queue into dirty
+    /// marks; it does **not** re-render dirty scopes. To make sure
+    /// signal writes triggered by callbacks are visible to subsequent
+    /// assertions, this loops `process_events` + `render_immediate`
+    /// until `render_immediate_to_vec` reports zero edits (i.e. nothing
+    /// was actually rendered) — that is the public-API equivalent of
+    /// "the runtime is now idle". A hard ceiling on iterations guards
+    /// against pathological re-render loops in the component under
+    /// test.
     pub fn flush(&mut self) {
-        self.vdom.process_events();
+        // Hard ceiling on flush iterations. Real reactive components
+        // converge in 1–2 passes; anything past this bound indicates a
+        // re-render loop (a `use_effect` writing a signal it reads,
+        // for example). Crashing the test loudly is preferable to
+        // hanging.
+        const MAX_ITERATIONS: usize = 16;
+
+        for _ in 0..MAX_ITERATIONS {
+            self.vdom.process_events();
+
+            let mutations = self.vdom.render_immediate_to_vec();
+
+            if mutations.edits.is_empty() {
+                return;
+            }
+        }
+
+        panic!(
+            "DesktopHarness::flush did not reach quiescence within {MAX_ITERATIONS} iterations; \
+             a component under test is likely caught in a re-render loop"
+        );
     }
 }
 

@@ -113,6 +113,59 @@ fn harness_drops_cleanly() {
     );
 }
 
+/// Regression for the `flush` contract: dirty scopes must actually be
+/// re-rendered before `flush` returns.
+///
+/// Earlier the harness only called `VirtualDom::process_events`, which
+/// converts queued events into dirty marks but does **not** re-render
+/// dirty scopes — so signal writes done in `use_effect` (the canonical
+/// path for callback-driven reactive updates in non-web Dioxus tests)
+/// never reached the second render pass. The fixed `flush` loops
+/// until `render_immediate_to_vec` reports zero edits, so this test
+/// asserts the body counter increments at least twice — once for the
+/// initial rebuild, once more for the effect-driven write.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Dioxus root props are moved into the render function."
+)]
+fn effect_driven_rerender_fixture(renders: SharedCounter) -> Element {
+    let mut count = use_signal(|| 0_u32);
+
+    // Subscribe so any later signal write re-runs the body.
+    let _ = count();
+    *renders.borrow_mut() += 1;
+
+    // First render queues the effect; flushing must actually run it,
+    // mark the scope dirty via the `count` write, and *then* re-render
+    // — that second pass is what the previous `process_events`-only
+    // flush silently dropped.
+    use_effect(move || {
+        if count.peek().to_owned() == 0 {
+            count.set(1);
+        }
+    });
+
+    rsx! { div {} }
+}
+
+#[test]
+fn flush_drives_dirty_scope_rerender() {
+    let renders: SharedCounter = Rc::new(RefCell::new(0));
+
+    let mut harness =
+        DesktopHarness::launch_with_props(effect_driven_rerender_fixture, Rc::clone(&renders));
+
+    harness.flush();
+
+    let after_flush = *renders.borrow();
+
+    assert!(
+        after_flush >= 2,
+        "flush must drive a re-render after the use_effect signal write \
+         (got renders={after_flush})",
+    );
+}
+
 #[test]
 fn launch_with_locale_installs_ars_provider_context() {
     let captured: Arc<Mutex<Option<Locale>>> = Arc::new(Mutex::new(None));
