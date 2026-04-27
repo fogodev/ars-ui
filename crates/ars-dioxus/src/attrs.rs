@@ -102,6 +102,36 @@ pub fn attr_map_to_dioxus(
                 false,
             )),
 
+            // Reactive variants are evaluated at conversion time. Dioxus
+            // re-runs component bodies whenever a tracked signal changes,
+            // so calling the closure during each `attr_map_to_dioxus`
+            // invocation is the framework-idiomatic reactive path —
+            // each render produces a fresh Attribute with the current
+            // value. The Reactive variants exist on the agnostic
+            // `AttrMap` so consumers writing component glue do not need
+            // to reach for adapter-specific reactive primitives.
+            AttrValue::Reactive(f) => Some(Attribute::new(
+                intern_attr_name(&key),
+                AttributeValue::Text(f()),
+                None,
+                false,
+            )),
+
+            // Reactive booleans follow the HTML presence/absence
+            // semantics symmetric with the static [`AttrValue::Bool`]
+            // path: `true` materializes to an empty-value Attribute,
+            // `false` skips the attribute entirely. Dioxus re-runs
+            // component bodies on signal changes, so each render's
+            // conversion picks up the current closure result.
+            AttrValue::ReactiveBool(f) => f().then(|| {
+                Attribute::new(
+                    intern_attr_name(&key),
+                    AttributeValue::Text(String::new()),
+                    None,
+                    false,
+                )
+            }),
+
             AttrValue::Bool(false) | AttrValue::None => None,
         })
         .collect::<Vec<_>>();

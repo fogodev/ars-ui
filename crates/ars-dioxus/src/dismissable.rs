@@ -240,8 +240,8 @@ fn attach(
         on_interact_outside,
         on_escape_key_down,
         on_dismiss,
+        disable_outside_pointer_events,
         exclude_ids,
-        ..
     } = state.props.clone();
 
     let on_dismiss_for_pointer = on_dismiss.clone();
@@ -257,6 +257,7 @@ fn attach(
             overlay_id: state.overlay_id.clone(),
             inside_boundaries: Rc::new(move || inside_boundaries.peek().clone()),
             exclude_ids: Rc::new(move || exclude_ids.clone()),
+            disable_outside_pointer_events,
             on_pointer_outside: Box::new(move |client_x, client_y, pointer_type| {
                 let attempt = DismissAttempt::new(InteractOutsideEvent::PointerOutside {
                     client_x,
@@ -399,13 +400,17 @@ pub fn Region(props: RegionProps) -> Element {
 
     let messages = use_messages::<Messages>(messages_override.as_ref(), locale_override.as_ref());
 
-    // `resolve_locale` reads `use_locale` — it must run at component-body
-    // level, not inside `use_hook`'s closure (Dioxus forbids hooks-in-hooks).
+    // Both `resolve_locale` and the bundle resolution above subscribe to
+    // their reactive sources (`use_locale`, `use_context::<I18nRegistries>`)
+    // through the Dioxus runtime; deriving `dismiss_label` at the component-
+    // body level lets the rendered `aria-label` re-resolve when the
+    // surrounding `ArsProvider`'s locale or the `I18nRegistries` bundle
+    // updates at runtime. Memoizing with `use_hook` would freeze the label
+    // at first render and break runtime language switching.
     let resolved_locale = resolve_locale(locale_override.as_ref());
+    let dismiss_label = (messages.dismiss_label)(&resolved_locale);
 
-    let dismiss_label = use_hook(|| (messages.dismiss_label)(&resolved_locale));
-
-    let dismiss_attrs = dismiss_button_attrs(&dismiss_label);
+    let dismiss_attrs = dismiss_button_attrs(dismiss_label);
 
     let inline_attrs = attr_map_to_dioxus_inline_attrs(dismiss_attrs);
     let start_attrs = inline_attrs.clone();
@@ -479,7 +484,7 @@ mod tests {
 mod wasm_tests {
     use std::sync::{Arc, Mutex};
 
-    use ars_core::MessageFn;
+    use ars_core::{I18nRegistries, MessageFn, MessagesRegistry};
     use ars_i18n::{Locale, locales};
     use dioxus::prelude::*;
     use wasm_bindgen::JsCast;
@@ -764,6 +769,127 @@ mod wasm_tests {
         assert_eq!(
             label, "Schließen",
             "Region locale override must flow through use_messages so dismiss_label sees the German locale",
+        );
+
+        container.remove();
+    }
+
+    #[derive(Clone)]
+    struct LocaleSwapFixtureProps {
+        initial_locale: Locale,
+        swapped_locale: Locale,
+    }
+
+    impl PartialEq for LocaleSwapFixtureProps {
+        fn eq(&self, other: &Self) -> bool {
+            self.initial_locale == other.initial_locale
+                && self.swapped_locale == other.swapped_locale
+        }
+    }
+
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "Dioxus root props are moved into the render function."
+    )]
+    #[expect(
+        unused_qualifications,
+        reason = "rsx! macro expansion adds qualified paths around onclick closure capture."
+    )]
+    fn locale_swap_fixture(state: LocaleSwapFixtureProps) -> Element {
+        let mut locale_signal = use_signal(|| state.initial_locale.clone());
+        let swapped_for_handler = state.swapped_locale.clone();
+
+        // Locale-aware Messages bundle so the rendered `aria-label` differs
+        // between English and German.
+        let messages = Messages {
+            dismiss_label: MessageFn::new(|locale: &Locale| {
+                if locale.language() == "de" {
+                    String::from("Schließen")
+                } else {
+                    String::from("Dismiss")
+                }
+            }),
+        };
+
+        let mut registries = I18nRegistries::new();
+
+        registries.register::<Messages>(MessagesRegistry::new(messages));
+
+        let registries = Arc::new(registries);
+
+        rsx! {
+            crate::ArsProvider { locale: locale_signal, i18n_registries: registries,
+                Region { props: Props::new(),
+                    span { "content" }
+                }
+                // Hidden swap-trigger button — the test clicks this to
+                // mutate the locale signal from inside the Dioxus runtime
+                // (signals can only be set from inside the runtime scope).
+                button {
+                    id: "swap-trigger",
+                    onclick: move |_| {
+                        locale_signal.set(swapped_for_handler.clone());
+                    },
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
+    async fn region_aria_label_updates_when_provider_locale_signal_changes_on_wasm() {
+        let container = with_container();
+
+        let dom = VirtualDom::new_with_props(
+            locale_swap_fixture,
+            LocaleSwapFixtureProps {
+                initial_locale: locales::en_us(),
+                swapped_locale: locales::de_de(),
+            },
+        );
+
+        dioxus_web::launch::launch_virtual_dom(
+            dom,
+            dioxus_web::Config::new().rootelement(container.clone()),
+        );
+
+        flush().await;
+
+        let dismiss_button = container
+            .query_selector("button[data-ars-part='dismiss-button']")
+            .expect("query_selector should succeed")
+            .expect("dismiss button must exist");
+
+        let initial = dismiss_button
+            .get_attribute("aria-label")
+            .expect("dismiss button must carry an aria-label");
+
+        assert_eq!(
+            initial, "Dismiss",
+            "Region aria-label must reflect the initial English locale from the provider",
+        );
+
+        // Click the swap trigger to mutate the locale signal from inside
+        // the runtime. Dioxus then invalidates the Region's component
+        // scope; the `dismiss_label` re-derives in the next render and
+        // updates the rendered `aria-label`.
+        let trigger = container
+            .query_selector("#swap-trigger")
+            .expect("query_selector should succeed")
+            .expect("swap trigger must exist");
+
+        let html_trigger: web_sys::HtmlElement = trigger.unchecked_into();
+
+        html_trigger.click();
+
+        flush().await;
+
+        let updated = dismiss_button
+            .get_attribute("aria-label")
+            .expect("dismiss button must still carry an aria-label after locale swap");
+
+        assert_eq!(
+            updated, "Schließen",
+            "Region aria-label must re-resolve through use_messages when the provider locale signal updates at runtime",
         );
 
         container.remove();

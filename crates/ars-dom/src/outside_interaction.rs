@@ -181,6 +181,15 @@ pub struct OutsideInteractionConfig {
     /// Snapshot reader for the exclude id list. Called once per event.
     pub exclude_ids: Rc<dyn Fn() -> Vec<String>>,
 
+    /// Modal-style click-through guard. When `true`, an outside `pointerdown`
+    /// that fires while the overlay is topmost calls
+    /// [`Event::prevent_default`](web_sys::Event::prevent_default) and
+    /// [`Event::stop_propagation`](web_sys::Event::stop_propagation) on the
+    /// event so the underlying element does not also receive the click.
+    /// Mirrors the `spec/components/utility/dismissable.md` §3 contract for
+    /// `Props::disable_outside_pointer_events`.
+    pub disable_outside_pointer_events: bool,
+
     /// Invoked after the boundary check passes for an outside pointer event.
     pub on_pointer_outside: Box<dyn Fn(f64, f64, PointerType)>,
 
@@ -200,6 +209,10 @@ impl Debug for OutsideInteractionConfig {
             .field("overlay_id", &self.overlay_id)
             .field("inside_boundaries", &"<closure>")
             .field("exclude_ids", &"<closure>")
+            .field(
+                "disable_outside_pointer_events",
+                &self.disable_outside_pointer_events,
+            )
             .field("on_pointer_outside", &"<closure>")
             .field("on_focus_outside", &"<closure>")
             .field("on_escape", &"<closure>")
@@ -244,6 +257,7 @@ pub fn install_outside_interaction_listeners(
         overlay_id: config.overlay_id,
         inside_boundaries: config.inside_boundaries,
         exclude_ids: config.exclude_ids,
+        disable_outside_pointer_events: config.disable_outside_pointer_events,
         on_pointer_outside: config.on_pointer_outside,
         on_focus_outside: config.on_focus_outside,
         on_escape: config.on_escape,
@@ -321,6 +335,7 @@ struct SharedConfig {
     overlay_id: String,
     inside_boundaries: Rc<dyn Fn() -> Vec<String>>,
     exclude_ids: Rc<dyn Fn() -> Vec<String>>,
+    disable_outside_pointer_events: bool,
     on_pointer_outside: Box<dyn Fn(f64, f64, PointerType)>,
     on_focus_outside: Box<dyn Fn()>,
     on_escape: Box<dyn Fn() -> bool>,
@@ -397,6 +412,15 @@ fn build_pointer_listener(shared: Rc<SharedConfig>) -> Closure<dyn FnMut(Pointer
             &exclude_ids,
         ) {
             return;
+        }
+
+        // Modal-style click-through guard: when the consumer requested
+        // `disable_outside_pointer_events`, intercept the `pointerdown`
+        // before any underlying element receives it. The dismiss callback
+        // path still runs below so the overlay can still react.
+        if shared.disable_outside_pointer_events {
+            event.prevent_default();
+            Event::stop_propagation(&event);
         }
 
         let pointer_type = classify_pointer_type(&event.pointer_type());
@@ -816,6 +840,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-1".into(),
                 inside_boundaries: arc_static(Vec::new()),
                 exclude_ids: arc_static(Vec::new()),
+                disable_outside_pointer_events: false,
                 on_pointer_outside: Box::new(move |_, _, _| {
                     pointer_calls_for_cb.set(pointer_calls_for_cb.get() + 1);
                 }),
@@ -865,6 +890,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-2".into(),
                 inside_boundaries: arc_static(Vec::new()),
                 exclude_ids: arc_static(Vec::new()),
+                disable_outside_pointer_events: false,
                 on_pointer_outside: Box::new(move |_, _, _| {
                     fired_for_cb.store(true, Ordering::SeqCst);
                 }),
@@ -906,6 +932,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-3".into(),
                 inside_boundaries: arc_static(Vec::new()),
                 exclude_ids: arc_static(Vec::new()),
+                disable_outside_pointer_events: false,
                 on_pointer_outside: Box::new(move |_, _, _| {
                     fired_for_cb.fetch_add(1, Ordering::SeqCst);
                 }),
@@ -953,6 +980,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-4".into(),
                 inside_boundaries: arc_static(Vec::new()),
                 exclude_ids: arc_static(Vec::new()),
+                disable_outside_pointer_events: false,
                 on_pointer_outside: Box::new(move |_, _, _| {
                     fired_for_cb.store(true, Ordering::SeqCst);
                 }),
@@ -994,6 +1022,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-5".into(),
                 inside_boundaries: arc_static(Vec::new()),
                 exclude_ids: arc_static(Vec::new()),
+                disable_outside_pointer_events: false,
                 on_pointer_outside: Box::new(|_, _, _| {}),
                 on_focus_outside: Box::new(|| {}),
                 on_escape: Box::new(move || {
@@ -1035,6 +1064,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-6".into(),
                 inside_boundaries: arc_static(Vec::new()),
                 exclude_ids: arc_static(Vec::new()),
+                disable_outside_pointer_events: false,
                 on_pointer_outside: Box::new(|_, _, _| {}),
                 on_focus_outside: Box::new(|| {}),
                 on_escape: Box::new(move || {
@@ -1080,6 +1110,7 @@ mod wasm_tests {
                 overlay_id: "li-overlay-7".into(),
                 inside_boundaries: Rc::new(move || boundaries_for_reader.borrow().clone()),
                 exclude_ids: arc_static(Vec::new()),
+                disable_outside_pointer_events: false,
                 on_pointer_outside: Box::new(move |_, _, _| {
                     fired_for_cb.fetch_add(1, Ordering::SeqCst);
                 }),
@@ -1103,6 +1134,144 @@ mod wasm_tests {
         teardown();
 
         remove_overlay("li-overlay-7");
+
+        cleanup(&[&root, &outside]);
+    }
+
+    #[wasm_bindgen_test]
+    fn disable_outside_pointer_events_blocks_click_through() {
+        reset_overlay_stack();
+
+        let root = append_div(&body(), "li-root-8");
+        let outside = append_div(&body(), "li-outside-8");
+
+        push_overlay(OverlayEntry {
+            id: "li-overlay-8".into(),
+            modal: true,
+            z_index: None,
+        });
+
+        let outside_clicked = Arc::new(AtomicBool::new(false));
+        let outside_clicked_for_listener = Arc::clone(&outside_clicked);
+
+        // Register a `pointerdown` listener directly on the outside element
+        // so we can verify that — when `disable_outside_pointer_events` is
+        // honored — the underlying element does not also receive the event.
+        let outside_listener = Closure::wrap(Box::new(move |_: PointerEvent| {
+            outside_clicked_for_listener.store(true, Ordering::SeqCst);
+        }) as Box<dyn FnMut(PointerEvent)>);
+
+        let outside_target: EventTarget = outside.clone().unchecked_into();
+
+        outside_target
+            .add_event_listener_with_callback(
+                "pointerdown",
+                outside_listener.as_ref().unchecked_ref(),
+            )
+            .expect("listener attach must succeed");
+
+        let dismiss_fired = Arc::new(AtomicBool::new(false));
+        let dismiss_fired_for_cb = Arc::clone(&dismiss_fired);
+
+        let teardown = install_outside_interaction_listeners(
+            &root,
+            OutsideInteractionConfig {
+                overlay_id: "li-overlay-8".into(),
+                inside_boundaries: arc_static(Vec::new()),
+                exclude_ids: arc_static(Vec::new()),
+                disable_outside_pointer_events: true,
+                on_pointer_outside: Box::new(move |_, _, _| {
+                    dismiss_fired_for_cb.store(true, Ordering::SeqCst);
+                }),
+                on_focus_outside: Box::new(|| {}),
+                on_escape: Box::new(|| true),
+            },
+        );
+
+        dispatch_pointerdown_at(outside.as_ref());
+
+        // Dismiss callback must still fire — the overlay reacts to the
+        // outside click — but the underlying outside element must NOT have
+        // received the event because `prevent_default` + `stop_propagation`
+        // blocked the click-through.
+        assert!(
+            dismiss_fired.load(Ordering::SeqCst),
+            "on_pointer_outside must fire so the overlay still gets to react",
+        );
+        assert!(
+            !outside_clicked.load(Ordering::SeqCst),
+            "disable_outside_pointer_events must block the underlying element from also receiving the pointerdown",
+        );
+
+        drop(outside_target.remove_event_listener_with_callback(
+            "pointerdown",
+            outside_listener.as_ref().unchecked_ref(),
+        ));
+
+        teardown();
+
+        remove_overlay("li-overlay-8");
+
+        cleanup(&[&root, &outside]);
+    }
+
+    #[wasm_bindgen_test]
+    fn disable_outside_pointer_events_false_lets_click_through() {
+        reset_overlay_stack();
+
+        let root = append_div(&body(), "li-root-9");
+        let outside = append_div(&body(), "li-outside-9");
+
+        push_overlay(OverlayEntry {
+            id: "li-overlay-9".into(),
+            modal: false,
+            z_index: None,
+        });
+
+        let outside_clicked = Arc::new(AtomicBool::new(false));
+        let outside_clicked_for_listener = Arc::clone(&outside_clicked);
+
+        let outside_listener = Closure::wrap(Box::new(move |_: PointerEvent| {
+            outside_clicked_for_listener.store(true, Ordering::SeqCst);
+        }) as Box<dyn FnMut(PointerEvent)>);
+
+        let outside_target: EventTarget = outside.clone().unchecked_into();
+
+        outside_target
+            .add_event_listener_with_callback(
+                "pointerdown",
+                outside_listener.as_ref().unchecked_ref(),
+            )
+            .expect("listener attach must succeed");
+
+        let teardown = install_outside_interaction_listeners(
+            &root,
+            OutsideInteractionConfig {
+                overlay_id: "li-overlay-9".into(),
+                inside_boundaries: arc_static(Vec::new()),
+                exclude_ids: arc_static(Vec::new()),
+                disable_outside_pointer_events: false,
+                on_pointer_outside: Box::new(|_, _, _| {}),
+                on_focus_outside: Box::new(|| {}),
+                on_escape: Box::new(|| true),
+            },
+        );
+
+        dispatch_pointerdown_at(outside.as_ref());
+
+        assert!(
+            outside_clicked.load(Ordering::SeqCst),
+            "with disable_outside_pointer_events=false the underlying element must still receive pointerdown",
+        );
+
+        drop(outside_target.remove_event_listener_with_callback(
+            "pointerdown",
+            outside_listener.as_ref().unchecked_ref(),
+        ));
+
+        teardown();
+
+        remove_overlay("li-overlay-9");
 
         cleanup(&[&root, &outside]);
     }

@@ -36,12 +36,23 @@ pub fn attr_map_to_leptos(
 ) -> LeptosAttrResult {
     let parts = map.into_parts();
 
+    // SSR / static-string path: materialize reactive variants to a
+    // one-shot value so the rendered output snapshots the current closure
+    // result. Reactive subscribers don't survive past serialization on
+    // this path; the inline-attrs entrypoint below preserves reactivity
+    // when the attrs are spread into a live `view!`.
     let mut attrs = parts
         .attrs
         .into_iter()
         .filter_map(|(key, value)| match value {
             AttrValue::String(text) => Some((key.to_string(), text)),
             AttrValue::Bool(true) => Some((key.to_string(), String::new())),
+            AttrValue::Reactive(f) => Some((key.to_string(), f())),
+            // Reactive booleans materialize to HTML presence semantics
+            // matching the static [`AttrValue::Bool`] path: `true` →
+            // empty value (attribute present), `false` → skip the
+            // attribute entirely.
+            AttrValue::ReactiveBool(f) => f().then_some((key.to_string(), String::new())),
             AttrValue::Bool(false) | AttrValue::None => None,
         })
         .collect::<Vec<_>>();
@@ -106,12 +117,66 @@ pub fn attr_map_to_leptos_inline_attrs(
 ) -> Vec<leptos::tachys::html::attribute::any_attribute::AnyAttribute> {
     use leptos::tachys::html::attribute::any_attribute::IntoAnyAttribute;
 
-    let LeptosAttrResult { attrs, .. } = attr_map_to_leptos(map, &StyleStrategy::Inline, None);
+    let parts = map.into_parts();
 
-    attrs
+    let mut out: Vec<leptos::tachys::html::attribute::any_attribute::AnyAttribute> = parts
+        .attrs
         .into_iter()
-        .map(|(name, value)| leptos::attr::custom::custom_attribute(name, value).into_any_attr())
-        .collect()
+        .filter_map(|(key, value)| {
+            let name = key.to_string();
+            match value {
+                AttrValue::String(text) => {
+                    Some(leptos::attr::custom::custom_attribute(name, text).into_any_attr())
+                }
+                AttrValue::Bool(true) => Some(
+                    leptos::attr::custom::custom_attribute(name, String::new()).into_any_attr(),
+                ),
+                AttrValue::Reactive(f) => {
+                    // tachys's `AttributeValue for F where F: ReactiveFunction`
+                    // wraps the closure in a `RenderEffect`, so the rendered
+                    // attribute updates whenever the signals read inside the
+                    // closure change.
+                    let closure = move || f();
+                    Some(leptos::attr::custom::custom_attribute(name, closure).into_any_attr())
+                }
+                AttrValue::ReactiveBool(f) => {
+                    // Reactive booleans follow the HTML presence/absence
+                    // semantics symmetric with the static [`AttrValue::Bool`]
+                    // path: `true` renders the attribute with an empty
+                    // value, `false` removes it from the rendered DOM.
+                    // tachys's `AttributeValue for Option<V>` skips the
+                    // attribute when the closure returns `None`, so the
+                    // reactive output toggles presence as the underlying
+                    // signal changes. Consumers that need ARIA-style
+                    // `"true"` / `"false"` literal values (`aria-busy`,
+                    // `aria-disabled`, `aria-expanded`, etc.) should use
+                    // [`AttrValue::reactive`] with a closure that returns
+                    // the literal string.
+                    let closure = move || f().then(String::new);
+                    Some(leptos::attr::custom::custom_attribute(name, closure).into_any_attr())
+                }
+                AttrValue::Bool(false) | AttrValue::None => None,
+            }
+        })
+        .collect();
+
+    // Keep parity with the SSR/static path: when there are styles, fold them
+    // into a single `style=""` inline attribute so the inline strategy
+    // matches what `attr_map_to_leptos` would have produced.
+    if !parts.styles.is_empty() {
+        let style = parts
+            .styles
+            .into_iter()
+            .map(|(property, value)| format!("{property}: {value};"))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        out.push(
+            leptos::attr::custom::custom_attribute(String::from("style"), style).into_any_attr(),
+        );
+    }
+
+    out
 }
 
 /// Applies CSS properties directly to an element via CSSOM.

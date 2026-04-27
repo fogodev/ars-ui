@@ -21,7 +21,7 @@ use core::{
 };
 
 use ars_core::{
-    AriaAttr, AttrMap, Callback, ComponentMessages, ComponentPart, HtmlAttr, MessageFn,
+    AriaAttr, AttrMap, AttrValue, Callback, ComponentMessages, ComponentPart, HtmlAttr, MessageFn,
 };
 use ars_i18n::Locale;
 use ars_interactions::InteractOutsideEvent;
@@ -378,8 +378,16 @@ impl Props {
 /// Produces scope/part data attributes, native button semantics
 /// (`role="button"`, `tabindex="0"`), a visually-hidden marker, and
 /// the caller-provided `aria-label`.
+///
+/// `label` accepts any `impl Into<AttrValue>` — pass a `&str` or
+/// [`String`] for a static label, or pass any closure
+/// `Fn() -> String + Send + Sync + 'static` for a reactive label that
+/// re-evaluates whenever the closure's tracked dependencies change.
+/// This lets adapters wire runtime-localizable `aria-label` values
+/// (e.g. resolving the dismiss-button label through the surrounding
+/// `ArsProvider`'s locale signal) without bypassing the helper.
 #[must_use]
-pub fn dismiss_button_attrs(label: &str) -> AttrMap {
+pub fn dismiss_button_attrs(label: impl Into<AttrValue>) -> AttrMap {
     let mut attrs = AttrMap::new();
     let [(scope_attr, scope_val), (part_attr, part_val)] = Part::DismissButton.data_attrs();
 

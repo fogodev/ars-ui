@@ -223,8 +223,8 @@ fn attach(
         on_interact_outside,
         on_escape_key_down,
         on_dismiss,
+        disable_outside_pointer_events,
         exclude_ids,
-        ..
     } = state.props.clone();
 
     let on_dismiss_for_pointer = on_dismiss.clone();
@@ -240,6 +240,7 @@ fn attach(
             overlay_id: state.overlay_id.clone(),
             inside_boundaries: Rc::new(move || inside_boundaries.get_untracked()),
             exclude_ids: Rc::new(move || exclude_ids.clone()),
+            disable_outside_pointer_events,
             on_pointer_outside: Box::new(move |client_x, client_y, pointer_type| {
                 let attempt = DismissAttempt::new(InteractOutsideEvent::PointerOutside {
                     client_x,
@@ -371,13 +372,24 @@ pub fn Region(
 
     let boundaries = inside_boundaries.unwrap_or_else(|| Signal::stored(Vec::new()));
 
-    let resolved_messages =
-        use_messages::<Messages>(messages_override.as_ref(), locale_override.as_ref());
-
-    let dismiss_label =
-        (resolved_messages.dismiss_label)(&resolve_locale(locale_override.as_ref()));
-
-    let dismiss_attrs = dismiss_button_attrs(&dismiss_label);
+    // Build dismiss-button attrs with a reactive `aria-label` closure so
+    // the rendered attribute updates whenever the surrounding
+    // `ArsProvider` swaps locale at runtime — or whenever the
+    // `I18nRegistries` bundle is replaced. `dismiss_button_attrs` accepts
+    // any `impl Into<AttrValue>`; passing a `Fn() -> String + Send +
+    // Sync + 'static` closure routes through the blanket
+    // `From<F> for AttrValue` impl that wraps it as
+    // `AttrValue::Reactive`. The closure subscribes to `use_locale()` via
+    // [`resolve_locale`] and to the registries via [`use_messages`] each
+    // time it runs, so tachys's reactive attribute path keeps the DOM
+    // aria-label in sync.
+    let messages_for_label = messages_override.clone();
+    let locale_for_label = locale_override.clone();
+    let dismiss_attrs = dismiss_button_attrs(move || {
+        let messages =
+            use_messages::<Messages>(messages_for_label.as_ref(), locale_for_label.as_ref());
+        (messages.dismiss_label)(&resolve_locale(locale_for_label.as_ref()))
+    });
 
     let inline_attrs = attr_map_to_leptos_inline_attrs(dismiss_attrs);
     let start_attrs = inline_attrs.clone();
@@ -515,7 +527,7 @@ mod wasm_tests {
         atomic::{AtomicUsize, Ordering},
     };
 
-    use ars_core::MessageFn;
+    use ars_core::{I18nRegistries, MessageFn, MessagesRegistry};
     use ars_i18n::{Locale, locales};
     use ars_interactions::InteractOutsideEvent;
     use leptos::{mount::mount_to, prelude::*, reactive::owner::Owner};
@@ -1056,6 +1068,81 @@ mod wasm_tests {
         assert_eq!(
             label, "Schließen",
             "Region locale override must flow through use_messages so dismiss_label sees the German locale",
+        );
+
+        container.remove();
+    }
+
+    #[wasm_bindgen_test]
+    async fn region_aria_label_updates_when_provider_locale_signal_changes_on_wasm() {
+        let owner = Owner::new();
+        owner.set();
+
+        let container = with_container();
+        let parent: HtmlElement = container.clone().unchecked_into();
+
+        // RwSignal so the test body can swap the provider's locale at runtime.
+        let locale_signal = RwSignal::new(locales::en_us());
+
+        let _handle = mount_to(parent, move || {
+            // Locale-aware Messages bundle so the rendered `aria-label`
+            // differs between English and German.
+            let messages = Messages {
+                dismiss_label: MessageFn::new(|locale: &Locale| {
+                    if locale.language() == "de" {
+                        String::from("Schließen")
+                    } else {
+                        String::from("Dismiss")
+                    }
+                }),
+            };
+
+            let mut registries = I18nRegistries::new();
+
+            registries.register::<Messages>(MessagesRegistry::new(messages));
+
+            view! {
+                <crate::ArsProvider
+                    locale=locale_signal
+                    i18n_registries=Arc::new(registries)
+                >
+                    <Region props=Props::new()>
+                        <span>"content"</span>
+                    </Region>
+                </crate::ArsProvider>
+            }
+        });
+
+        tick().await;
+
+        let button = container
+            .query_selector("button[data-ars-part='dismiss-button']")
+            .expect("query_selector should succeed")
+            .expect("at least one dismiss button must exist");
+
+        let initial = button
+            .get_attribute("aria-label")
+            .expect("dismiss button must carry an aria-label");
+
+        assert_eq!(
+            initial, "Dismiss",
+            "Region aria-label must reflect the initial English locale from the provider",
+        );
+
+        // Swap the provider's locale; the `Reactive` variant's closure
+        // re-runs through tachys's `RenderEffect` and the rendered
+        // attribute updates without a remount.
+        locale_signal.set(locales::de_de());
+
+        tick().await;
+
+        let updated = button
+            .get_attribute("aria-label")
+            .expect("dismiss button must still carry an aria-label after locale swap");
+
+        assert_eq!(
+            updated, "Schließen",
+            "Region aria-label must re-resolve through use_messages when the provider locale signal updates at runtime",
         );
 
         container.remove();
