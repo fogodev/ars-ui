@@ -538,8 +538,18 @@ pub fn use_locale() -> Signal<Locale> {
 }
 
 /// Resolves the effective locale for an adapter component instance.
+///
+/// Returns `adapter_props_locale.cloned()` when set, otherwise reads the
+/// surrounding [`ArsProvider`](ArsContext) locale via [`use_locale`] and
+/// clones it. Subscribes the calling component to locale changes (via
+/// `Signal::read`), so locale-dependent output stays reactive.
+///
+/// This mirrors the Leptos
+/// [`resolve_locale`](ars_leptos::resolve_locale) utility — adapter
+/// component authors should reach for this helper instead of
+/// hand-rolling the `Option` + provider fallback chain.
 #[must_use]
-pub(crate) fn resolve_locale(adapter_props_locale: Option<&Locale>) -> Locale {
+pub fn resolve_locale(adapter_props_locale: Option<&Locale>) -> Locale {
     adapter_props_locale
         .cloned()
         .unwrap_or_else(|| use_locale().read().clone())

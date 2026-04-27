@@ -28,27 +28,110 @@ pass the final string to `dismiss_button_attrs`.
 ### 1.1 Props
 
 ```rust
+/// Why a dismissable surface was dismissed.
+///
+/// Passed to `on_dismiss` after the dismiss decision is finalized.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DismissReason {
+    /// A pointer event landed outside the dismissable surface and outside
+    /// every registered inside-boundary or portal-owner.
+    OutsidePointer,
+
+    /// Focus moved to an element outside the dismissable surface.
+    OutsideFocus,
+
+    /// The user pressed `Escape` while the dismissable was the topmost overlay.
+    Escape,
+
+    /// One of the visually-hidden dismiss buttons (or the adapter handle's
+    /// `dismiss`, e.g. `dismissable::Handle::dismiss`) was activated.
+    DismissButton,
+}
+
+/// Veto-capable wrapper passed to `on_interact_outside` and `on_escape_key_down`.
+///
+/// Calling `prevent_dismiss()` sets a shared atomic flag the adapter checks
+/// before dispatching `on_dismiss`. `Clone` shares the veto identity so
+/// observation from any clone is visible to the original.
+pub struct DismissAttempt<E> {
+    pub event: E,
+    veto: Arc<AtomicBool>,
+}
+
+impl<E> DismissAttempt<E> {
+    pub fn new(event: E) -> Self { /* … */ }
+    pub fn prevent_dismiss(&self) { /* … */ }
+    pub fn is_prevented(&self) -> bool { /* … */ }
+}
+
 /// Props for the `Dismissable` component.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Props {
-    /// Called when the user interacts outside the dismissable element.
-    /// The adapter invokes this on `pointerdown` outside, or `focusin` on an element outside.
-    pub on_interact_outside: Option<Callback<dyn Fn(InteractOutsideEvent)>>,
-    /// Called when the user presses the Escape key while focus is inside.
-    pub on_escape_key_down: Option<Callback<dyn Fn()>>,
-    /// Called when a dismiss trigger fires (combines outside interaction and Escape).
-    pub on_dismiss: Option<Callback<dyn Fn()>>,
-    /// When true, outside pointer events are intercepted and prevented from reaching
-    /// underlying elements (pointer-events overlay). Default: false.
+    /// Called **before** the final dismiss decision. The callback receives a
+    /// `DismissAttempt<InteractOutsideEvent>` and may call
+    /// `prevent_dismiss()` on it to veto the upcoming `on_dismiss` invocation.
+    /// The adapter fires this on `pointerdown` outside or `focusin` on an
+    /// element outside the registered boundary.
+    pub on_interact_outside:
+        Option<Callback<dyn Fn(DismissAttempt<InteractOutsideEvent>) + Send + Sync>>,
+
+    /// Called **before** the final dismiss decision when the user presses
+    /// `Escape` while the dismissable is the topmost overlay. The callback
+    /// receives a `DismissAttempt<()>` and may call `prevent_dismiss()` on
+    /// it to veto the upcoming `on_dismiss` invocation.
+    pub on_escape_key_down: Option<Callback<dyn Fn(DismissAttempt<()>) + Send + Sync>>,
+
+    /// Called **after** the dismiss decision is finalized — observational only,
+    /// not cancelable. The callback receives a `DismissReason` identifying
+    /// which path triggered the dismissal.
+    pub on_dismiss: Option<Callback<dyn Fn(DismissReason) + Send + Sync>>,
+
+    /// When true, outside pointer events are intercepted and prevented from
+    /// reaching underlying elements (pointer-events overlay). Default: false.
     pub disable_outside_pointer_events: bool,
-    /// DOM IDs of elements that should NOT trigger an outside interaction when clicked.
-    /// Typically includes the trigger button that opened the overlay.
+
+    /// DOM IDs of elements that should NOT trigger an outside interaction when
+    /// clicked. Typically includes the trigger button that opened the overlay.
+    ///
+    /// **IDs are mandatory for participation.** Adapter containment walks
+    /// the DOM ancestor chain comparing each node's `id` attribute (and
+    /// `data-ars-portal-owner` for portaled subtrees). Elements without
+    /// an `id` cannot be matched against `exclude_ids` or against the
+    /// adapter's reactive `inside_boundaries` set — wrappers that need to
+    /// register a node as inside-boundary must ensure it has an `id`.
     pub exclude_ids: Vec<String>,
 }
 ```
 
 `Props` contains only behavioral configuration. It does not carry locale, messages, or visual
 styling.
+
+The struct fields are public so adapter destructure patterns (and proptest fuzzers that map
+generated values 1:1 to fields) keep working, but the documented construction path is the inherent
+builder:
+
+```rust
+impl Props {
+    pub fn new() -> Self;
+
+    pub fn on_interact_outside<F>(self, f: F) -> Self
+    where F: Fn(DismissAttempt<InteractOutsideEvent>) + Send + Sync + 'static;
+
+    pub fn on_escape_key_down<F>(self, f: F) -> Self
+    where F: Fn(DismissAttempt<()>) + Send + Sync + 'static;
+
+    pub fn on_dismiss<F>(self, f: F) -> Self
+    where F: Fn(DismissReason) + Send + Sync + 'static;
+
+    pub fn disable_outside_pointer_events(self, value: bool) -> Self;
+    pub fn exclude_ids<I, S>(self, ids: I) -> Self
+    where I: IntoIterator<Item = S>, S: Into<String>;
+}
+```
+
+Each callback setter accepts the closure directly (no `Some(Callback::new(_))` wrapping at the call
+site) and `exclude_ids` accepts any `IntoIterator<Item: Into<String>>`. See §5 Integration for the
+canonical chain.
 
 ### 1.2 Connect / Helper API
 
@@ -97,6 +180,25 @@ button semantics so the attrs remain usable with alternate render paths.
 DismissButton exists so screen reader and keyboard users can dismiss an overlay without having to
 discover Escape handling.
 
+The anatomy in §2 specifies **two** visually-hidden DismissButtons — one at the start of the
+region, one at the end. Both fire `on_dismiss(DismissButton)` identically; the duplication is
+deliberate and serves three assistive-technology paths:
+
+1. **Forward and backward tab exits.** When focus is trapped inside the overlay, `Tab` from the
+   last interactive element wraps to the first and `Shift+Tab` from the first wraps to the last. A
+   dismiss target at each boundary keeps the overlay one keystroke from dismissed regardless of
+   direction.
+2. **Reading-order proximity for screen readers.** SR users typically traverse overlays linearly.
+   The start button is announced immediately when focus enters the overlay so users learn the exit
+   up front; the end button is the next interactive stop after the user has read through the
+   content top-to-bottom so they do not have to navigate back through the body to find a dismiss
+   control.
+3. **Rotor / element-list discovery.** Buttons-list rotors (VoiceOver, NVDA, JAWS) surface both
+   instances, letting users pick whichever is closest to their current focus point.
+
+Sighted users see neither button — `dismiss_button_attrs` sets `data-ars-visually-hidden`. The
+duplication is strictly an assistive-technology concern; it has no visual cost.
+
 When `disable_outside_pointer_events` is true:
 
 - only pointer interaction is blocked
@@ -105,27 +207,33 @@ When `disable_outside_pointer_events` is true:
 
 ## 4. Behavior
 
-| Trigger                                              | Action                                                                       |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------- |
-| pointer interaction outside and not in `exclude_ids` | call `on_interact_outside`, then `on_dismiss` when not vetoed by the adapter |
-| focus moves outside and not in `exclude_ids`         | call `on_interact_outside`, then `on_dismiss` when not vetoed by the adapter |
-| Escape while focus is inside                         | call `on_escape_key_down`, then `on_dismiss`                                 |
+| Trigger                                              | Action                                                                                                                                       |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| pointer interaction outside and not in `exclude_ids` | call `on_interact_outside(DismissAttempt::new(InteractOutsideEvent::PointerOutside { … }))`, then `on_dismiss(OutsidePointer)` if not vetoed |
+| focus moves outside and not in `exclude_ids`         | call `on_interact_outside(DismissAttempt::new(InteractOutsideEvent::FocusOutside))`, then `on_dismiss(OutsideFocus)` if not vetoed           |
+| Escape while topmost                                 | call `on_escape_key_down(DismissAttempt::new(()))`, then `on_dismiss(Escape)` if not vetoed                                                  |
+| visually-hidden DismissButton clicked / programmatic | call `on_dismiss(DismissButton)` directly (no veto-capable callbacks run first)                                                              |
 
 Dismissable specifies the normalized behavior surface. Document listeners, node containment checks,
-and SSR gating remain adapter responsibilities.
+the **node-boundary registration helper** (`ars_dom::outside_interaction::target_is_inside_boundary`),
+the **platform capability helper**
+(`ars_dom::outside_interaction::install_outside_interaction_listeners`), and SSR gating remain
+adapter responsibilities.
 
 ## 5. Integration
 
 Overlay components compose Dismissable internally:
 
 ```rust
-let dismissable = dismissable::Props {
-    on_dismiss: Some(Callback::new_void(move || machine.send(Event::Close))),
-    on_escape_key_down: Some(Callback::new_void(move || machine.send(Event::Close))),
-    disable_outside_pointer_events: props.modal,
-    exclude_ids: vec![trigger_id.clone()],
-    ..Default::default()
-};
+let dismissable = dismissable::Props::new()
+    .on_dismiss(move |_reason: DismissReason| {
+        machine.send(Event::Close);
+    })
+    // Wrappers that want to refuse dismissal — e.g. unsaved-form guards —
+    // call `attempt.prevent_dismiss()` here. `on_dismiss` won't fire.
+    .on_escape_key_down(move |_attempt: DismissAttempt<()>| {})
+    .disable_outside_pointer_events(props.modal)
+    .exclude_ids([trigger_id.clone()]);
 
 let dismiss_label = (messages.dismiss_label)(locale);
 let dismiss_button = dismissable::dismiss_button_attrs(&dismiss_label);

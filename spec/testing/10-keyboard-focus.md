@@ -53,7 +53,7 @@ fn presence_rapid_toggle_no_stuck_state() {
 
 #[test]
 fn presence_rapid_toggle_net_absent() {
-    let mut svc = Service::new(presence::Props { present: true, ..Default::default() }, Env::default(), Default::default());
+    let mut svc = Service::new(presence::Props::new().present(true), Env::default(), Default::default());
     // true → false → true → false (net: absent)
     svc.send(presence::Event::SetPresent(false));
     svc.send(presence::Event::SetPresent(true));
@@ -64,7 +64,7 @@ fn presence_rapid_toggle_net_absent() {
 
 #[test]
 fn presence_triple_toggle_during_unmount_pending() {
-    let mut svc = Service::new(presence::Props { present: true, ..Default::default() }, Env::default(), Default::default());
+    let mut svc = Service::new(presence::Props::new().present(true), Env::default(), Default::default());
     // Start unmount
     svc.send(presence::Event::SetPresent(false));
     assert_eq!(*svc.state(), presence::State::UnmountPending);

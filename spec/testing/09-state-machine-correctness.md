@@ -1506,14 +1506,11 @@ use ars_core::{Service, Machine};
 
 #[test]
 fn form_submit_idle_to_validating_to_submitting() {
-    let props = form_submit::Props {
-        id: "test-submit".into(),
-        validation_mode: ValidationMode::default(),
-        spawn_async_validation: Callback::new(|(validators, send)| {
-            no_cleanup()
-        }),
-        schedule_microtask: Callback::new(|f| f()),
-    };
+    let props = form_submit::Props::new(
+        "test-submit",
+        |(validators, send)| no_cleanup(),
+        |f| f(),
+    );
     let mut svc = Service::new(props, Env::default(), Default::default());
     assert_eq!(*svc.state(), form_submit::State::Idle);
 
@@ -1529,14 +1526,11 @@ fn form_submit_idle_to_validating_to_submitting() {
 
 #[test]
 fn form_submit_reset_returns_to_idle() {
-    let props = form_submit::Props {
-        id: "test-submit".into(),
-        validation_mode: ValidationMode::default(),
-        spawn_async_validation: Callback::new(|(validators, send)| {
-            no_cleanup()
-        }),
-        schedule_microtask: Callback::new(|f| f()),
-    };
+    let props = form_submit::Props::new(
+        "test-submit",
+        |(validators, send)| no_cleanup(),
+        |f| f(),
+    );
     let mut svc = Service::new(props, Env::default(), Default::default());
     svc.send(form_submit::Event::Submit);
     svc.send(form_submit::Event::ValidationFailed);

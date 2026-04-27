@@ -86,6 +86,34 @@ pub fn attr_map_to_leptos(
     }
 }
 
+/// Convenience wrapper around [`attr_map_to_leptos`] for callers that
+/// always render with [`StyleStrategy::Inline`] and only need a list of
+/// [`leptos::tachys::html::attribute::any_attribute::AnyAttribute`]
+/// values ready for spreading via `{..attrs}` in `view!`.
+///
+/// Each `(name, value)` pair returned by [`attr_map_to_leptos`] is wrapped
+/// through [`leptos::attr::custom::custom_attribute`] +
+/// [`leptos::tachys::html::attribute::any_attribute::IntoAnyAttribute::into_any_attr`]
+/// so the result is the same shape consumers spread with `{..}` in
+/// `view!`.
+///
+/// Use the full [`attr_map_to_leptos`] when [`StyleStrategy::Cssom`] or
+/// [`StyleStrategy::Nonce`] is in play and the caller needs to apply
+/// `cssom_styles` to the DOM or inject `nonce_css` into a `<style>` block.
+#[must_use]
+pub fn attr_map_to_leptos_inline_attrs(
+    map: AttrMap,
+) -> Vec<leptos::tachys::html::attribute::any_attribute::AnyAttribute> {
+    use leptos::tachys::html::attribute::any_attribute::IntoAnyAttribute;
+
+    let LeptosAttrResult { attrs, .. } = attr_map_to_leptos(map, &StyleStrategy::Inline, None);
+
+    attrs
+        .into_iter()
+        .map(|(name, value)| leptos::attr::custom::custom_attribute(name, value).into_any_attr())
+        .collect()
+}
+
 /// Applies CSS properties directly to an element via CSSOM.
 #[cfg(not(feature = "ssr"))]
 pub fn apply_styles_cssom(el: &leptos::web_sys::HtmlElement, styles: &[(CssProperty, String)]) {
@@ -384,6 +412,47 @@ mod wasm_tests {
         assert_eq!(
             result.attrs,
             vec![(String::from("disabled"), String::new())]
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn attr_map_to_leptos_inline_attrs_returns_one_any_attr_per_underlying_pair_on_wasm() {
+        // Two attrs (`class`, `style`) folded by the Inline strategy.
+        let mut map = AttrMap::new();
+
+        map.set(HtmlAttr::Class, "btn")
+            .set_style(CssProperty::Width, "100px");
+
+        let attrs = attr_map_to_leptos_inline_attrs(map.clone());
+
+        // Same length the underlying helper produces — guarantees the
+        // wrapper folds styles (Inline) and doesn't accidentally drop or
+        // duplicate entries while mapping into `AnyAttribute`.
+        let baseline = attr_map_to_leptos(map, &StyleStrategy::Inline, None);
+
+        assert_eq!(
+            attrs.len(),
+            baseline.attrs.len(),
+            "wrapper must yield one AnyAttribute per (name, value) pair the Inline strategy produces",
+        );
+
+        assert_eq!(attrs.len(), 2);
+    }
+
+    #[wasm_bindgen_test]
+    fn attr_map_to_leptos_inline_attrs_drops_false_and_none_entries_on_wasm() {
+        let mut map = AttrMap::new();
+
+        map.set(HtmlAttr::Class, "kept")
+            .set_bool(HtmlAttr::Disabled, false)
+            .set(HtmlAttr::Title, AttrValue::None);
+
+        let attrs = attr_map_to_leptos_inline_attrs(map);
+
+        assert_eq!(
+            attrs.len(),
+            1,
+            "Bool(false) and AttrValue::None must not flow through the wrapper",
         );
     }
 

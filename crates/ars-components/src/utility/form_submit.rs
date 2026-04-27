@@ -122,8 +122,8 @@ pub struct Context {
 }
 
 type SpawnAsyncValidationInput = (Vec<(String, BoxedAsyncValidator)>, WeakSend<Event>);
-type SpawnAsyncValidationFn = dyn Fn(SpawnAsyncValidationInput) -> Box<dyn FnOnce()>;
-type ScheduleMicrotaskFn = dyn Fn(Box<dyn FnOnce()>);
+type SpawnAsyncValidationFn = dyn Fn(SpawnAsyncValidationInput) -> Box<dyn FnOnce()> + Send + Sync;
+type ScheduleMicrotaskFn = dyn Fn(Box<dyn FnOnce()>) + Send + Sync;
 
 // ────────────────────────────────────────────────────────────────────
 // Props
@@ -166,6 +166,44 @@ impl Debug for Props {
             .field("id", &self.id)
             .field("validation_mode", &self.validation_mode)
             .finish_non_exhaustive()
+    }
+}
+
+impl Props {
+    /// Constructs a new [`Props`] from the three required adapter inputs:
+    /// the DOM `id`, the async-validation spawn callback, and the
+    /// microtask scheduler. [`validation_mode`](Self::validation_mode)
+    /// starts at [`Mode::default`] and can be overridden via the
+    /// builder setter.
+    ///
+    /// `spawn_async_validation` is wrapped in [`Callback::new`] and
+    /// receives `(validators, send) -> CleanupFn`; adapters typically
+    /// pass a thin wrapper around `spawn_local` (Leptos) or `spawn`
+    /// (Dioxus). `schedule_microtask` is wrapped in [`Callback::new`]
+    /// and receives a boxed closure to run on the next microtask
+    /// (`queueMicrotask` on WASM, `tokio::spawn` or equivalent on
+    /// native).
+    #[must_use]
+    pub fn new<I, A, M>(id: I, spawn_async_validation: A, schedule_microtask: M) -> Self
+    where
+        I: Into<String>,
+        A: Fn(SpawnAsyncValidationInput) -> Box<dyn FnOnce()> + Send + Sync + 'static,
+        M: Fn(Box<dyn FnOnce()>) + Send + Sync + 'static,
+    {
+        Self {
+            id: id.into(),
+            validation_mode: Mode::default(),
+            spawn_async_validation: Callback::new(spawn_async_validation),
+            schedule_microtask: Callback::new(schedule_microtask),
+        }
+    }
+
+    /// Sets [`validation_mode`](Self::validation_mode) — when client-side
+    /// validation runs (on submit, on change, on blur, …).
+    #[must_use]
+    pub const fn validation_mode(mut self, mode: Mode) -> Self {
+        self.validation_mode = mode;
+        self
     }
 }
 
@@ -1621,5 +1659,56 @@ mod tests {
         let service = Service::<Machine>::new(test_props(), &Env::default(), &());
 
         assert_eq!(service.context().ids.id(), "test-form");
+    }
+
+    // ── Builder tests ──────────────────────────────────────────────
+
+    #[test]
+    fn props_new_initializes_with_supplied_id_and_default_mode() {
+        let props = Props::new(
+            "form",
+            |_: (Vec<(String, BoxedAsyncValidator)>, WeakSend<Event>)| -> Box<dyn FnOnce()> {
+                Box::new(|| {})
+            },
+            |_: Box<dyn FnOnce()>| {},
+        );
+
+        assert_eq!(props.id, "form");
+        assert_eq!(props.validation_mode, Mode::default());
+    }
+
+    #[test]
+    fn props_builder_validation_mode_setter_overrides_default() {
+        let props = Props::new(
+            "form",
+            |_: (Vec<(String, BoxedAsyncValidator)>, WeakSend<Event>)| -> Box<dyn FnOnce()> {
+                Box::new(|| {})
+            },
+            |_: Box<dyn FnOnce()>| {},
+        )
+        .validation_mode(Mode::on_change());
+
+        assert_eq!(props.validation_mode, Mode::on_change());
+    }
+
+    #[test]
+    fn props_builder_schedule_microtask_setter_invokes_supplied_closure() {
+        let calls = Arc::new(atomic::AtomicUsize::new(0));
+        let calls_for_props = Arc::clone(&calls);
+
+        let props = Props::new(
+            "form",
+            |_: (Vec<(String, BoxedAsyncValidator)>, WeakSend<Event>)| -> Box<dyn FnOnce()> {
+                Box::new(|| {})
+            },
+            move |task: Box<dyn FnOnce()>| {
+                calls_for_props.fetch_add(1, atomic::Ordering::SeqCst);
+                task();
+            },
+        );
+
+        (props.schedule_microtask)(Box::new(|| {}));
+
+        assert_eq!(calls.load(atomic::Ordering::SeqCst), 1);
     }
 }

@@ -43,7 +43,7 @@ pub struct InteractOutsideStandalone {
     pub portal_owner_ids: Vec<String>,
 
     /// Callback invoked when an outside interaction is detected.
-    pub on_interact_outside: Option<Callback<dyn Fn(InteractOutsideEvent)>>,
+    pub on_interact_outside: Option<Callback<dyn Fn(InteractOutsideEvent) + Send + Sync>>,
 
     /// Whether outside-interaction detection is active for this registration.
     pub enabled: bool,

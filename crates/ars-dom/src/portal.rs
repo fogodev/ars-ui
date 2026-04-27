@@ -3,6 +3,14 @@
 #[cfg(any(test, all(feature = "web", target_arch = "wasm32")))]
 use std::string::String;
 
+/// HTML attribute name carrying the owning overlay id on a portal mount node.
+///
+/// Outside-interaction detection (`crate::outside_interaction`) walks DOM
+/// ancestors comparing this attribute against the registered overlay /
+/// inside-boundary ids so portaled subtrees are recognised as "inside" their
+/// owning overlay.
+pub const PORTAL_OWNER_ATTR: &str = "data-ars-portal-owner";
+
 #[cfg(all(feature = "web", not(target_arch = "wasm32")))]
 use wasm_bindgen::{JsCast, JsValue};
 #[cfg(all(feature = "web", target_arch = "wasm32"))]

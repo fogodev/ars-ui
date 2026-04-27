@@ -178,7 +178,7 @@ pub struct Props {
     /// The marks of the slider.
     pub marks: Vec<Mark>,
     /// When set, tick mark labels use this formatter instead of raw numeric values.
-    pub tick_format: Option<Callback<dyn Fn(f64) -> String>>,
+    pub tick_format: Option<Callback<dyn Fn(f64) -> String + Send + Sync>>,
     /// Formatter for the current value display and `aria-valuetext`.
     /// When `None`, the raw numeric value is used as a string.
     /// Example: `Some(Callback::new(|v| format!("{:.0}%", v)))` renders "50%" instead of "50".

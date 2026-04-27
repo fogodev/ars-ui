@@ -137,7 +137,7 @@ pub enum DisabledBehavior {
 ///
 /// Distinct from selection change: action activates the item associated with
 /// the provided [`Key`].
-pub type OnAction = Option<Callback<dyn Fn(Key)>>;
+pub type OnAction = Option<Callback<dyn Fn(Key) + Send + Sync>>;
 
 /// The full selection state for a collection-based component.
 #[derive(Clone, Debug, Default, PartialEq)]

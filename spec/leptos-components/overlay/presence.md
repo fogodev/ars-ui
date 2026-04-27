@@ -264,13 +264,14 @@ pub fn Presence(
     #[prop(optional)] skip_animation: bool,
     children: Children,
 ) -> impl IntoView {
-    let handle = use_presence(presence::Props {
-        id: generate_id("presence"),
-        present: present.get_untracked(),
-        lazy_mount,
-        skip_animation,
-        reduce_motion: false, // auto-detected by adapter
-    });
+    let handle = use_presence(
+        presence::Props::new()
+            .id(generate_id("presence"))
+            .present(present.get_untracked())
+            .lazy_mount(lazy_mount)
+            .skip_animation(skip_animation),
+        // reduce_motion: auto-detected by adapter, left at default `false`
+    );
 
     // Sync present prop reactively.
     Effect::new(move |_| {

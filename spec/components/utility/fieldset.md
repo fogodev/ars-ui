@@ -45,6 +45,17 @@ The core machine props are:
 The `id` is immutable after initialization because the derived `ComponentIds` are cached in
 context.
 
+Construct via the inherent builder: `Props::new()` returns the default; setters (`id`, `disabled`,
+`invalid`, `readonly`, `dir`) accept the natural argument and return `Self` for chaining. The
+`dir` setter accepts a `Direction` and wraps it in `Some` automatically.
+
+```rust
+let props = fieldset::Props::new()
+    .id("billing-address")
+    .disabled(true)
+    .dir(Direction::Rtl);
+```
+
 ### 1.3 Events
 
 The machine accepts context-synchronization events:

@@ -153,24 +153,24 @@ pub struct PressConfig {
     pub scroll_threshold_px: u16,
 
     /// Called when the element is pressed (pointer down AND within element).
-    pub on_press_start: Option<Callback<dyn Fn(PressEvent)>>,
+    pub on_press_start: Option<Callback<dyn Fn(PressEvent) + Send + Sync>>,
 
     /// Called when press ends (pointer up, key up, or cancellation).
-    pub on_press_end: Option<Callback<dyn Fn(PressEvent)>>,
+    pub on_press_end: Option<Callback<dyn Fn(PressEvent) + Send + Sync>>,
 
     /// Called on activation: pointer released inside the element, or Enter/Space
     /// released after having been pressed on this element.
-    pub on_press: Option<Callback<dyn Fn(PressEvent)>>,
+    pub on_press: Option<Callback<dyn Fn(PressEvent) + Send + Sync>>,
 
     /// Called when the pointer's inside/outside state changes while a press is active.
     /// `true` = pointer re-entered the element; `false` = pointer exited.
-    pub on_press_change: Option<Callback<dyn Fn(bool)>>,
+    pub on_press_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
 
     /// Fired when a press is released (pointer up / key up / touch end),
     /// regardless of whether the release was inside or outside the element.
     /// Distinct from `on_press_end` (fires on any press conclusion) and `on_press`
     /// (fires only for activations inside the element).
-    pub on_press_up: Option<Callback<dyn Fn(PressEvent)>>,
+    pub on_press_up: Option<Callback<dyn Fn(PressEvent) + Send + Sync>>,
 
     /// Maximum duration to hold pointer capture before automatically releasing.
     /// Prevents stuck capture states caused by missed `pointerup` events (e.g.,
@@ -857,13 +857,13 @@ pub struct HoverConfig {
     pub disabled: bool,
 
     /// Called when the pointer enters the element.
-    pub on_hover_start: Option<Callback<dyn Fn(HoverEvent)>>,
+    pub on_hover_start: Option<Callback<dyn Fn(HoverEvent) + Send + Sync>>,
 
     /// Called when the pointer leaves the element.
-    pub on_hover_end: Option<Callback<dyn Fn(HoverEvent)>>,
+    pub on_hover_end: Option<Callback<dyn Fn(HoverEvent) + Send + Sync>>,
 
     /// Called whenever hover state changes.
-    pub on_hover_change: Option<Callback<dyn Fn(bool)>>,
+    pub on_hover_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
 }
 
 /// A normalized hover event. Only produced for Mouse and Pen pointer types;
@@ -1085,13 +1085,13 @@ pub struct FocusConfig {
     pub modality: Arc<dyn ModalityContext>,
 
     /// Called when the element receives focus.
-    pub on_focus: Option<Callback<dyn Fn(FocusEvent)>>,
+    pub on_focus: Option<Callback<dyn Fn(FocusEvent) + Send + Sync>>,
 
     /// Called when the element loses focus.
-    pub on_blur: Option<Callback<dyn Fn(FocusEvent)>>,
+    pub on_blur: Option<Callback<dyn Fn(FocusEvent) + Send + Sync>>,
 
     /// Called when focus-visible state changes.
-    pub on_focus_visible_change: Option<Callback<dyn Fn(bool)>>,
+    pub on_focus_visible_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
 }
 
 /// Configuration for focus-within tracking on a container element.
@@ -1105,13 +1105,13 @@ pub struct FocusWithinConfig {
     pub modality: Arc<dyn ModalityContext>,
 
     /// Called when focus enters the container (any descendant focused).
-    pub on_focus_within: Option<Callback<dyn Fn(FocusEvent)>>,
+    pub on_focus_within: Option<Callback<dyn Fn(FocusEvent) + Send + Sync>>,
 
     /// Called when focus leaves the container entirely.
-    pub on_blur_within: Option<Callback<dyn Fn(FocusEvent)>>,
+    pub on_blur_within: Option<Callback<dyn Fn(FocusEvent) + Send + Sync>>,
 
     /// Called when focus-within-visible state changes.
-    pub on_focus_within_visible_change: Option<Callback<dyn Fn(bool)>>,
+    pub on_focus_within_visible_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
 }
 
 impl Default for FocusConfig {
@@ -1469,13 +1469,13 @@ pub struct LongPressConfig {
     pub long_press_announcement: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
 
     /// Called when the hold begins and the interaction enters `Timing`.
-    pub on_long_press_start: Option<Callback<dyn Fn(LongPressEvent)>>,
+    pub on_long_press_start: Option<Callback<dyn Fn(LongPressEvent) + Send + Sync>>,
 
     /// Called when the threshold elapses while still pressed.
-    pub on_long_press: Option<Callback<dyn Fn(LongPressEvent)>>,
+    pub on_long_press: Option<Callback<dyn Fn(LongPressEvent) + Send + Sync>>,
 
     /// Called when the long press is cancelled before the threshold fires.
-    pub on_long_press_cancel: Option<Callback<dyn Fn(LongPressEvent)>>,
+    pub on_long_press_cancel: Option<Callback<dyn Fn(LongPressEvent) + Send + Sync>>,
 
     /// Shared state used to suppress the co-located `Press` activation after a
     /// completed long press.
@@ -1699,13 +1699,13 @@ pub struct MoveConfig {
     pub disabled: bool,
 
     /// Called when movement begins (pointer down or first arrow key).
-    pub on_move_start: Option<Callback<dyn Fn(MoveEvent)>>,
+    pub on_move_start: Option<Callback<dyn Fn(MoveEvent) + Send + Sync>>,
 
     /// Called for each movement delta.
-    pub on_move: Option<Callback<dyn Fn(MoveEvent)>>,
+    pub on_move: Option<Callback<dyn Fn(MoveEvent) + Send + Sync>>,
 
     /// Called when movement ends (pointer up or no more arrow keys).
-    pub on_move_end: Option<Callback<dyn Fn(MoveEvent)>>,
+    pub on_move_end: Option<Callback<dyn Fn(MoveEvent) + Send + Sync>>,
 }
 
 /// A normalized move event describing a positional delta.
@@ -2070,10 +2070,10 @@ pub struct DragConfig {
     pub allowed_operations: Option<Vec<DropOperation>>,
 
     /// Called when drag begins.
-    pub on_drag_start: Option<Callback<dyn Fn(DragStartEvent)>>,
+    pub on_drag_start: Option<Callback<dyn Fn(DragStartEvent) + Send + Sync>>,
 
     /// Called when the drag ends (regardless of outcome).
-    pub on_drag_end: Option<Callback<dyn Fn(DragEndEvent)>>,
+    pub on_drag_end: Option<Callback<dyn Fn(DragEndEvent) + Send + Sync>>,
 
     /// For multi-item drag: returns additional selected items to include.
     /// When both `items` and `get_items` are set, their results are **unioned**:
@@ -2117,17 +2117,17 @@ pub struct DropConfig {
     pub disabled: bool,
 
     /// Called when dragged items enter this target.
-    pub on_drag_enter: Option<Callback<dyn Fn(DropTargetEvent)>>,
+    pub on_drag_enter: Option<Callback<dyn Fn(DropTargetEvent) + Send + Sync>>,
 
     /// Called when dragged items leave this target.
-    pub on_drag_leave: Option<Callback<dyn Fn(DropTargetEvent)>>,
+    pub on_drag_leave: Option<Callback<dyn Fn(DropTargetEvent) + Send + Sync>>,
 
     /// Called on each dragover tick; return the DropOperation to accept.
     /// Return DropOperation::Cancel to reject the drop.
-    pub on_drag_over: Option<Callback<dyn Fn(DropTargetEvent) -> DropOperation>>,
+    pub on_drag_over: Option<Callback<dyn Fn(DropTargetEvent) -> DropOperation + Send + Sync>>,
 
     /// Called when items are dropped onto this target.
-    pub on_drop: Option<Callback<dyn Fn(DropEvent)>>,
+    pub on_drop: Option<Callback<dyn Fn(DropEvent) + Send + Sync>>,
 
     /// The drop operations this target accepts.
     /// If None, accepts all operations offered by the source.
@@ -4231,7 +4231,7 @@ pub struct InteractOutsideStandalone {
     /// Portal-owner IDs corresponding to `data-ars-portal-owner` markers that
     /// should be treated as inside this interaction boundary.
     pub portal_owner_ids: Vec<String>,
-    pub on_interact_outside: Option<Callback<dyn Fn(InteractOutsideEvent)>>,
+    pub on_interact_outside: Option<Callback<dyn Fn(InteractOutsideEvent) + Send + Sync>>,
     pub enabled: bool,
     pub pointer_gracing: Option<u32>,
 }

@@ -94,13 +94,7 @@ fn reactive_props_sync_state_and_context_on_wasm() {
 fn presence_machine_exposes_live_presence_attrs_on_wasm() {
     let owner = Owner::new();
     owner.with(|| {
-        let machine = use_machine::<presence::Machine>(presence::Props {
-            id: String::from("presence"),
-            present: false,
-            lazy_mount: false,
-            skip_animation: false,
-            reduce_motion: false,
-        });
+        let machine = use_machine::<presence::Machine>(presence::Props::new().id("presence"));
 
         let derived = machine.derive(|api| {
             (

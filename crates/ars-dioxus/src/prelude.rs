@@ -44,15 +44,21 @@
 //! `<Dialog>` in their app need this?" If yes, add it. If only component
 //! implementors inside this crate need it, keep it as a regular import.
 
-// -- User-facing configuration types --
 // -- User-facing traits --
 pub use ars_i18n::{Direction, Locale, Orientation, ResolvedDirection, Translate};
 
+// -- Component modules --
+//
+// Consumers reach component types via the module qualifier
+// (e.g. `dismissable::Props`, `dismissable::Region`, `dismissable::Handle`,
+// `dismissable::DismissReason`, `dismissable::use_dismissable`); never via
+// flattened aliases such as `DismissableProps` or `DismissableRegion`.
+//
+// The adapter `dismissable` module re-exports the agnostic
+// `ars_components::utility::dismissable::*` surface, so this single
+// re-export covers both the framework-agnostic types (`Props`, `Messages`,
+// `DismissReason`, …) and the Dioxus-side wrappers (`Handle`, `Region`,
+// `RegionProps`, `use_dismissable`).
+pub use crate::dismissable;
 // -- User-facing helpers --
 pub use crate::{t, use_number_formatter};
-
-// -- Component modules --
-// (none yet — added as components are implemented, e.g.:
-//   pub use crate::{button, Button};
-//   pub use crate::{dialog, Dialog};
-// )

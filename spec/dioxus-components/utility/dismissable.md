@@ -14,13 +14,59 @@ This spec maps the core [`Dismissable`](../../components/utility/dismissable.md)
 
 ## 2. Public Adapter API
 
+The adapter exposes everything through a single `dismissable` module
+(reachable via `use ars_dioxus::prelude::*;`). The module re-exports the
+agnostic `ars_components::utility::dismissable::*` surface alongside the
+Dioxus-side wrappers, so callers spell every type with the same prefix:
+
 ```rust
-pub fn use_dismissable(
-    root_id: String,
+pub fn dismissable::use_dismissable(
+    root_ref: ReadSignal<Option<Rc<MountedData>>>,
     props: dismissable::Props,
-    inside_boundaries: Vec<String>,
-) -> DismissableHandle
+    inside_boundaries: ReadSignal<Vec<String>>,
+) -> dismissable::Handle
+
+#[derive(Clone, Copy)]
+pub struct dismissable::Handle {
+    /// Arena-backed Dioxus callback. Invoke with `dismiss.call(())` to
+    /// fire `props.on_dismiss(DismissReason::DismissButton)` if a
+    /// callback is registered.
+    pub dismiss: dioxus::prelude::Callback<()>,
+    /// Stable id used for overlay-stack registration, portal-owner
+    /// matching, and DOM root resolution. Stored in the Dioxus arena via
+    /// [`CopyValue`] so `Handle` is `Copy`. Read the underlying `String`
+    /// with `overlay_id.read()` (borrow guard) or
+    /// `overlay_id.with(|id| …)` (closure).
+    pub overlay_id: dioxus::prelude::CopyValue<String>,
+}
+
+#[derive(Props, Clone, Debug, PartialEq)]
+pub struct RegionProps {
+    pub props: dismissable::Props,
+    #[props(optional)]
+    pub inside_boundaries: Option<ReadSignal<Vec<String>>>,
+    /// Optional locale override — falls through to the surrounding
+    /// `ArsProvider` locale when [`None`].
+    #[props(optional)]
+    pub locale: Option<ars_i18n::Locale>,
+    /// Optional message bundle override — falls through to the
+    /// adapter's [`use_messages`] resolution chain (props →
+    /// `I18nRegistries` → `Messages::default`) when [`None`].
+    #[props(optional)]
+    pub messages: Option<dismissable::Messages>,
+    pub children: Element,
+}
+
+#[component]
+pub fn Region(props: RegionProps) -> Element
 ```
+
+`Handle` is intentionally `Copy`. Both fields live in the active Dioxus
+scope's arena — [`Callback`](dioxus::prelude::Callback) and
+[`CopyValue`](dioxus::prelude::CopyValue) are both arena-backed `Copy`
+newtypes. Consumers can move the handle into multiple closures or pass
+it through the rsx tree without explicit clones; it stays valid until
+the owning scope unmounts.
 
 The public surface matches the full core `Props`, including `on_interact_outside`, `on_escape_key_down`, `on_dismiss`, `disable_outside_pointer_events`, `exclude_ids`, `messages`, and `locale`.
 
@@ -177,10 +223,10 @@ Dismissable state is primarily interaction-driven. Configuration props are gener
 
 ## 22. Shared Adapter Helper Notes
 
-| Helper concept                    | Required?   | Responsibility                                                                       | Reused by                                                      | Notes                                                                      |
-| --------------------------------- | ----------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| node-boundary registration helper | required    | Register and release the root and any portal-aware inside boundaries.                | `dismissable`, overlays, `focus-scope`                         | IDs are insufficient once live-node containment is required.               |
-| platform capability helper        | recommended | Normalize outside-interaction assumptions for browser, Desktop, and webview targets. | `dismissable`, `download-trigger`, `drop-zone`, `action-group` | Should surface target-specific caveats without duplicating listener logic. |
+| Helper concept                    | Required?   | Responsibility                                                                                                                                                                                                  | Reused by                                                      | Notes                                                                                                                                                                        |
+| --------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| node-boundary registration helper | required    | `ars_dom::outside_interaction::target_is_inside_boundary` — walks DOM ancestors checking root containment, ancestor `id` matches, and `data-ars-portal-owner` ↔ overlay-stack portal ownership.                 | `dismissable`, overlays, `focus-scope`                         | IDs are insufficient once live-node containment is required; portal-owner walking is the documented path. See `spec/foundation/11-dom-utilities.md` §12.1.                   |
+| platform capability helper        | recommended | `ars_dom::outside_interaction::install_outside_interaction_listeners` — installs document `pointerdown`+`focusin` and root-scoped `keydown` listeners gated on `overlay_stack::is_topmost`; returns a teardown. | `dismissable`, `download-trigger`, `drop-zone`, `action-group` | Web wires real listeners; non-web Dioxus targets (Desktop, mobile, SSR) return a no-op teardown so adapters call uniformly. See `spec/foundation/11-dom-utilities.md` §12.2. |
 
 ## 23. Framework-Specific Behavior
 
@@ -189,47 +235,59 @@ Dioxus uses platform-aware listener registration and hook cleanup. Optional envi
 ## 24. Canonical Implementation Sketch
 
 ```rust
+use ars_dioxus::{attr_map_to_dioxus, prelude::*};
 use dioxus::prelude::*;
 
-#[derive(Props, Clone, PartialEq)]
-pub struct DismissableRegionProps {
+#[derive(Props, Clone, Debug, PartialEq)]
+pub struct RegionProps {
     pub props: dismissable::Props,
+    #[props(optional)]
+    pub inside_boundaries: Option<ReadSignal<Vec<String>>>,
     pub children: Element,
 }
 
 #[component]
-pub fn DismissableRegion(props: DismissableRegionProps) -> Element {
-    let root_id = use_hook(|| "dismissable-root".to_string());
-    let dismiss_label = "Dismiss";
-    let dismiss_attrs = dismissable::dismiss_button_attrs(dismiss_label);
+pub fn Region(props: RegionProps) -> Element {
+    let RegionProps { props, inside_boundaries, children } = props;
 
-    let _handle = use_dismissable(root_id.clone(), props.props.clone(), Vec::new());
+    let boundaries_fallback = use_signal(Vec::<String>::new);
+    let boundaries = inside_boundaries.unwrap_or_else(|| ReadSignal::from(boundaries_fallback));
+
+    let messages = use_messages::<dismissable::Messages>(None, None);
+    let locale = use_locale();
+    let dismiss_label = use_hook(|| (messages.dismiss_label)(&locale.peek()));
+
+    let attrs = dismissable::dismiss_button_attrs(&dismiss_label);
+    let start_attrs = attr_map_to_dioxus(attrs.clone(), &ars_core::StyleStrategy::Inline, None).attrs;
+    let end_attrs = attr_map_to_dioxus(attrs, &ars_core::StyleStrategy::Inline, None).attrs;
+
+    // `onmounted` populates the ref once the root <div> is in the DOM;
+    // `use_dismissable` reads it inside the listener-install effect.
+    // Mirrors the Leptos adapter's `NodeRef` pattern.
+    let mut root_ref = use_signal(|| None::<Rc<MountedData>>);
+
+    // `Handle` is `Copy`, so the same value can move into both onclick
+    // closures without explicit clones.
+    let handle = use_dismissable(ReadSignal::from(root_ref), props, boundaries);
 
     rsx! {
-        div { id: "{root_id}",
-            button {
-                ..dismiss_attrs.clone(),
-                onclick: move |_| {
-                    if let Some(cb) = props.props.on_dismiss.as_ref() {
-                        cb.call(());
-                    }
-                }
-            }
-            {props.children}
-            button {
-                ..dismiss_attrs,
-                onclick: move |_| {
-                    if let Some(cb) = props.props.on_dismiss.as_ref() {
-                        cb.call(());
-                    }
-                }
-            }
+        div {
+            onmounted: move |evt| { root_ref.set(Some(evt.data())); },
+            button { onclick: move |_| { handle.dismiss.call(()); }, ..start_attrs }
+            {children}
+            button { onclick: move |_| { handle.dismiss.call(()); }, ..end_attrs }
         }
     }
 }
 ```
 
-Both dismiss buttons must be native `<button>` elements.
+For the common case the adapter ships [`dismissable::Region`] (with
+[`dismissable::RegionProps`]) which already renders the paired-button
+anatomy above. Both dismiss buttons must be native `<button>` elements;
+both fire `props.on_dismiss(dismissable::DismissReason::DismissButton)`
+directly via the handle,
+bypassing the veto-capable callbacks (the user explicitly clicked the
+visually-hidden control, so dismissal is unconditional).
 
 ## 25. Reference Implementation Skeleton
 
@@ -299,7 +357,7 @@ Cheap verification recipe:
 
 1. Render the region with both dismiss buttons and assert the documented structure before testing outside interactions.
 2. Fire outside pointer, outside focus, or Escape in isolation and verify veto-capable callbacks run before `on_dismiss`.
-3. Unmount the region and assert document listeners plus registered inside boundaries are released; on Dioxus Desktop or webview targets, repeat the outside-click check on the target runtime rather than only in a browser harness.
+3. Unmount the region and assert document listeners plus registered inside boundaries are released; on Dioxus Desktop or webview targets, repeat the outside-click check on the target runtime through `ars_test_harness_dioxus::desktop::DesktopHarness` (the headless [`VirtualDom`] harness for non-web Dioxus builds, documented in [`spec/testing/15-test-harness.md`](../../testing/15-test-harness.md) §5.4), asserting that mounting the region returns a structurally-valid `dismissable::Handle` with a non-empty `overlay_id`, that `Handle::dismiss` invokes `on_dismiss` with `DismissReason::DismissButton`, that `on_interact_outside`, `on_escape_key_down`, and `on_dismiss` stay silent across `flush()` (no document listeners install on the non-web cfg branch), and that dropping the harness runs `use_drop`-style cleanup without synthesising any callback firings.
 
 ## 31. Implementation Checklist
 

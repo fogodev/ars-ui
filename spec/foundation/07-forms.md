@@ -2700,6 +2700,8 @@ pub mod form_submit {
 ```
 
 > **Async validation at submit:** When `submit()` is called, the `form_submit::Machine` transitions to `Validating`. The machine first runs all synchronous validators via `validate_all()`. If any fields have registered async validators, the machine spawns them via `PendingEffect` and remains in `Validating` until all complete. When all async validators settle, the adapter sends a single `ValidationPassed` or `ValidationFailed` event. `ValidationPassed` triggers a transition to `Submitting`; `ValidationFailed` transitions to the `ValidationFailed` state. The `validation_generation` counter prevents stale results from overwriting newer validations.
+>
+> **Constructing `Props`:** The struct has no `Default` (the two adapter callbacks are required), so use the inherent constructor `Props::new(id, spawn_async_validation, schedule_microtask)`. Both callbacks are wrapped in `Callback::new` automatically; `validation_mode` starts at `Mode::default()` and can be overridden with the `.validation_mode(mode)` builder setter. Fields stay `pub` for adapter-internal destructure.
 
 ### 8.1 Server-Side Validation Error Sync Pattern
 
@@ -3112,6 +3114,11 @@ impl Default for Props {
     }
 }
 ```
+
+> **Constructing `Props`:** The fields stay `pub` for adapter-internal destructure but the
+> documented construction path is the inherent builder. `Props::new()` returns the default;
+> setters (`id`, `disabled`, `invalid`, `readonly`, `dir`) return `Self` for chaining. The `dir`
+> setter wraps the supplied `Direction` in `Some` automatically.
 
 #### 12.2.5 Fieldset Component Full Machine Implementation
 
@@ -3542,6 +3549,11 @@ impl Default for Props {
     }
 }
 ```
+
+> **Constructing `Props`:** The fields stay `pub` for adapter-internal destructure but the
+> documented construction path is the inherent builder. `Props::new()` returns the default;
+> setters (`id`, `required`, `disabled`, `readonly`, `invalid`, `dir`) return `Self` for chaining.
+> The `dir` setter wraps the supplied `Direction` in `Some` automatically.
 
 #### 13.2.5 Field Component Full Machine Implementation
 
@@ -4016,6 +4028,12 @@ impl Default for Props {
     }
 }
 ```
+
+> **Constructing `Props`:** The fields stay `pub` for adapter-internal destructure but the
+> documented construction path is the inherent builder. `Props::new()` returns the default;
+> setters (`id`, `validation_behavior`, `validation_errors`, `action`, `role`) return `Self` for
+> chaining. The `action` and `role` setters take `impl Into<String>` and wrap the value in `Some`
+> automatically.
 
 #### 14.3.5 Form Component Full Machine Implementation
 

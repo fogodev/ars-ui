@@ -2412,6 +2412,21 @@ Dioxus supports two complementary testing styles:
    a backend-owned browser task boundary behind the harness `flush()` /
    `tick()` helpers. Public `dioxus-web` launch APIs consume the `VirtualDom`,
    so shared-harness tests must not assume access to `wait_for_work()`.
+3. **Non-web (Desktop, mobile, SSR) test passes** use
+   `ars_test_harness_dioxus::desktop::DesktopHarness`, a headless `VirtualDom`
+   wrapper that exercises the `cfg(not(feature = "web"))` graceful-degrade path
+   adapter components follow on those platforms. The harness exposes
+   `launch(...)` / `launch_with_props(...)` /
+   `launch_with_locale(builder, locale)` for mounting plus a `flush()` drain
+   that mirrors the wasm-tier `HarnessBackend::flush` contract, and is the
+   canonical target for spec checklist items that require validation "on the
+   target runtime rather than only in a browser harness" — for example
+   [`spec/dioxus-components/utility/dismissable.md`](../dioxus-components/utility/dismissable.md)
+   §29-§31. The whole module is gated `cfg(not(target_arch = "wasm32"))`, so it
+   builds and runs through `cargo test` on native CI without GUI dependencies
+   while leaving the wasm-pack path for the existing `DioxusHarnessBackend`
+   untouched. See [`spec/testing/15-test-harness.md`](../testing/15-test-harness.md)
+   §5.4 for the full API and rationale.
 
 Shared-harness Dioxus tests should not rely on ad hoc zero-delay timer shims to
 observe locale or DOM updates. Interaction helpers already flush the Dioxus

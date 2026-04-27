@@ -154,6 +154,26 @@ pub fn attr_map_to_dioxus(
     }
 }
 
+/// Convenience wrapper around [`attr_map_to_dioxus`] for callers that
+/// always render with [`StyleStrategy::Inline`] and only need the
+/// [`Attribute`] vector ready for spreading via `..attrs`.
+///
+/// Equivalent to:
+///
+/// ```ignore
+/// let DioxusAttrResult { attrs, .. } =
+///     attr_map_to_dioxus(map, &StyleStrategy::Inline, None);
+/// ```
+///
+/// Use the full [`attr_map_to_dioxus`] when [`StyleStrategy::Cssom`] or
+/// [`StyleStrategy::Nonce`] is in play and the caller needs to apply
+/// `cssom_styles` to the DOM or inject `nonce_css` into a `<style>`
+/// block.
+#[must_use]
+pub fn attr_map_to_dioxus_inline_attrs(map: AttrMap) -> Vec<Attribute> {
+    attr_map_to_dioxus(map, &StyleStrategy::Inline, None).attrs
+}
+
 // ── CSSOM helper ────────────────────────────────────────────────────
 
 /// Apply styles to a DOM element via the CSSOM API.
@@ -352,6 +372,46 @@ mod tests {
 
         assert!(result.cssom_styles.is_empty());
         assert!(result.nonce_css.is_empty());
+    }
+
+    #[test]
+    fn attr_map_to_dioxus_inline_attrs_matches_full_helper() {
+        let attrs = attr_map_to_dioxus_inline_attrs(build_test_map());
+
+        let class_attr = find_attr(&attrs, "class").expect("class attr present");
+
+        assert_eq!(text_value(class_attr), Some("btn"));
+
+        let style_attr = find_attr(&attrs, "style").expect("style attr present");
+
+        assert_eq!(text_value(style_attr), Some("width: 100px;"));
+
+        assert_eq!(
+            attrs.len(),
+            2,
+            "Inline strategy folds styles into a single `style` attr; no additional fields leak through",
+        );
+    }
+
+    #[test]
+    fn attr_map_to_dioxus_inline_attrs_filters_false_and_none_values() {
+        let mut map = AttrMap::new();
+
+        map.set(HtmlAttr::Class, "kept")
+            .set_bool(HtmlAttr::Disabled, false)
+            .set(HtmlAttr::Aria(AriaAttr::Label), AttrValue::None);
+
+        let attrs = attr_map_to_dioxus_inline_attrs(map);
+
+        assert!(find_attr(&attrs, "class").is_some());
+        assert!(
+            find_attr(&attrs, "disabled").is_none(),
+            "Bool(false) entries must be dropped — wrapper must not bypass the underlying filter",
+        );
+        assert!(
+            find_attr(&attrs, "aria-label").is_none(),
+            "AttrValue::None entries must be dropped",
+        );
     }
 
     #[test]

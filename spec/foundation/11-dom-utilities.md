@@ -3016,3 +3016,105 @@ applies anywhere a component renders `HtmlAttr::Href`, `HtmlAttr::Action`, or
 
 `ars-dom` does not own this contract. DOM-facing crates consume the shared
 `ars-core` helpers when they need to render URL-valued attributes.
+
+---
+
+## 12. Outside-Interaction Helpers
+
+`ars-dom` exposes the two shared adapter helpers required by
+`spec/{leptos,dioxus}-components/utility/dismissable.md` §22 — the **node-boundary
+registration helper** and the **platform capability helper**. Both live in
+`crates/ars-dom/src/outside_interaction.rs` and are consumed by `dismissable`
+and any overlay or focus-scope adapter that needs portal-aware containment
+checks plus the document `pointerdown` / `focusin` / root-scoped `keydown`
+listener triplet.
+
+### 12.1 Node-Boundary Registration Helper
+
+```rust
+/// Pure id-set predicate, extracted from the DOM walk so it can be
+/// unit-tested without a browser.
+#[must_use]
+pub fn id_matches_inside_set(
+    id: &str,
+    exclude_ids: &[String],
+    inside_boundaries: &[String],
+) -> bool;
+
+/// Walks DOM ancestors of `target` checking root containment, ancestor `id`
+/// matches against `exclude_ids` ∪ `inside_boundaries`, and the
+/// `data-ars-portal-owner` attribute against `overlay_id` ∪ `inside_boundaries`
+/// or any overlay stacked above `overlay_id` per the global overlay stack.
+#[must_use]
+pub fn target_is_inside_boundary(
+    target: Option<&web_sys::Element>,
+    root: &web_sys::Element,
+    overlay_id: &str,
+    inside_boundaries: &[String],
+    exclude_ids: &[String],
+) -> bool;
+```
+
+The DOM walk applies, in order:
+
+1. `root.contains(target)` short-circuits the walk.
+2. Each ancestor's `id` is checked via `id_matches_inside_set`.
+3. `data-ars-portal-owner` ∈ `{overlay_id} ∪ inside_boundaries` returns
+   inside; portal-owner equal to a stacked-above overlay
+   (`overlay_stack::is_above(owner, overlay_id)`) is treated as inside the
+   parent overlay per `spec/foundation/05-interactions.md` §12.8 rule 2.
+
+`target_is_inside_boundary` is web-only; non-wasm builds expose a stub
+returning `false`. Adapters that need richer registration semantics (live
+node handles, dynamic sets) can layer their own bookkeeping above
+`id_matches_inside_set`.
+
+### 12.2 Platform Capability Helper
+
+```rust
+pub struct OutsideInteractionConfig {
+    pub overlay_id: String,
+    pub inside_boundaries: Rc<dyn Fn() -> Vec<String>>,
+    pub exclude_ids: Rc<dyn Fn() -> Vec<String>>,
+    pub on_pointer_outside: Box<dyn Fn(f64, f64, PointerType)>,
+    pub on_focus_outside: Box<dyn Fn()>,
+    pub on_escape: Box<dyn Fn() -> bool>,
+}
+
+#[must_use]
+pub fn install_outside_interaction_listeners(
+    root: &web_sys::Element,
+    config: OutsideInteractionConfig,
+) -> Box<dyn FnOnce()>;
+```
+
+The web build:
+
+- attaches a document-scoped `pointerdown` (capture phase) and `focusin`
+  listener;
+- attaches a root-scoped `keydown` listener (per
+  `spec/foundation/05-interactions.md` §12.6, Escape on the root, not the
+  document, so a parent overlay never sees the same keystroke);
+- gates each listener on `overlay_stack::is_topmost(&overlay_id)`;
+- runs `target_is_inside_boundary` for the pointer / focus paths, calling
+  the `on_pointer_outside` / `on_focus_outside` callback only when the
+  target is genuinely outside;
+- returns a `Box<dyn FnOnce()>` teardown that removes every listener.
+
+`Send + Sync` is intentionally **not** required on the closures — the
+helper only attaches listeners on wasm (single-threaded), and the non-wasm
+web fallback returns the no-op teardown without invoking them.
+
+The `inside_boundaries` and `exclude_ids` closures are evaluated on every
+event so reactive registries (Leptos `Signal<Vec<String>>`, Dioxus
+`ReadSignal<Vec<String>>`, plain `Rc<RefCell<Vec<String>>>`) can be
+re-read without re-installing the triplet. The `on_escape` callback returns
+`bool` — `true` asks the helper to call `Event::stop_propagation` on the
+keystroke as defense in depth on top of the topmost gate.
+
+### 12.3 Reusers
+
+| Helper                                  | Spec callers                                                                 |
+| --------------------------------------- | ---------------------------------------------------------------------------- |
+| `target_is_inside_boundary`             | `dismissable`, `focus-scope`, every overlay (`Dialog`, `Popover`, `Menu`, …) |
+| `install_outside_interaction_listeners` | `dismissable`, `download-trigger`, `drop-zone`, `action-group`               |

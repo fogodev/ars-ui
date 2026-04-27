@@ -319,10 +319,10 @@ pub struct DragConfig {
     pub allowed_operations: Option<Vec<DropOperation>>,
 
     /// Called when dragging begins.
-    pub on_drag_start: Option<Callback<dyn Fn(DragStartEvent)>>,
+    pub on_drag_start: Option<Callback<dyn Fn(DragStartEvent) + Send + Sync>>,
 
     /// Called when dragging ends, regardless of outcome.
-    pub on_drag_end: Option<Callback<dyn Fn(DragEndEvent)>>,
+    pub on_drag_end: Option<Callback<dyn Fn(DragEndEvent) + Send + Sync>>,
 
     /// Additional selected items to include for multi-item drag.
     pub get_items: Option<DragItemsFn>,
@@ -393,16 +393,16 @@ pub struct DropConfig {
     pub disabled: bool,
 
     /// Called when dragged items enter this target.
-    pub on_drag_enter: Option<Callback<dyn Fn(DropTargetEvent)>>,
+    pub on_drag_enter: Option<Callback<dyn Fn(DropTargetEvent) + Send + Sync>>,
 
     /// Called when dragged items leave this target.
-    pub on_drag_leave: Option<Callback<dyn Fn(DropTargetEvent)>>,
+    pub on_drag_leave: Option<Callback<dyn Fn(DropTargetEvent) + Send + Sync>>,
 
     /// Called during drag-over to determine the accepted operation.
-    pub on_drag_over: Option<Callback<dyn Fn(DropTargetEvent) -> DropOperation>>,
+    pub on_drag_over: Option<Callback<dyn Fn(DropTargetEvent) -> DropOperation + Send + Sync>>,
 
     /// Called when items are dropped onto this target.
-    pub on_drop: Option<Callback<dyn Fn(DropEvent)>>,
+    pub on_drop: Option<Callback<dyn Fn(DropEvent) + Send + Sync>>,
 
     /// Drop operations accepted by this target.
     pub accepted_operations: Option<Vec<DropOperation>>,

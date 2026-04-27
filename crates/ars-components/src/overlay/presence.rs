@@ -73,6 +73,62 @@ pub struct Props {
     pub reduce_motion: bool,
 }
 
+impl Props {
+    /// Returns a fresh [`Props`] with every field at its [`Default`]
+    /// value: empty `id`, content not present, no lazy mount, no
+    /// skip-animation, no reduce-motion.
+    ///
+    /// Documented entry point for the builder chain — chain
+    /// [`id`](Self::id), [`present`](Self::present), and the other
+    /// setters to populate configuration without struct-literal
+    /// boilerplate.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets [`id`](Self::id) to the supplied component instance id.
+    /// Accepts any [`Into<String>`] so callers can pass `&str`, `String`,
+    /// `Cow<str>`, etc.
+    #[must_use]
+    pub fn id(mut self, id: impl Into<String>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    /// Sets [`present`](Self::present) — whether the content should be
+    /// present.
+    #[must_use]
+    pub const fn present(mut self, value: bool) -> Self {
+        self.present = value;
+        self
+    }
+
+    /// Sets [`lazy_mount`](Self::lazy_mount) — whether lazy-mounted
+    /// content must resolve before entering `Mounted`.
+    #[must_use]
+    pub const fn lazy_mount(mut self, value: bool) -> Self {
+        self.lazy_mount = value;
+        self
+    }
+
+    /// Sets [`skip_animation`](Self::skip_animation) — whether exit
+    /// animation should be skipped.
+    #[must_use]
+    pub const fn skip_animation(mut self, value: bool) -> Self {
+        self.skip_animation = value;
+        self
+    }
+
+    /// Sets [`reduce_motion`](Self::reduce_motion) — whether reduced
+    /// motion should force instant show and hide.
+    #[must_use]
+    pub const fn reduce_motion(mut self, value: bool) -> Self {
+        self.reduce_motion = value;
+        self
+    }
+}
+
 /// Presence has no localized messages.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Messages;
@@ -621,5 +677,28 @@ mod tests {
             "presence_root_unmounted",
             snapshot_attrs(&service.connect(&|_| {}).root_attrs())
         );
+    }
+
+    // ── Builder tests ──────────────────────────────────────────────
+
+    #[test]
+    fn props_new_returns_default_values() {
+        assert_eq!(Props::new(), Props::default());
+    }
+
+    #[test]
+    fn props_builder_chain_applies_each_setter() {
+        let props = Props::new()
+            .id("presence-1")
+            .present(true)
+            .lazy_mount(true)
+            .skip_animation(true)
+            .reduce_motion(true);
+
+        assert_eq!(props.id, "presence-1");
+        assert!(props.present);
+        assert!(props.lazy_mount);
+        assert!(props.skip_animation);
+        assert!(props.reduce_motion);
     }
 }

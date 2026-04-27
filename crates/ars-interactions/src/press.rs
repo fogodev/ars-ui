@@ -112,24 +112,24 @@ pub struct PressConfig {
     pub scroll_threshold_px: u16,
 
     /// Called when the element is pressed (pointer down AND within element).
-    pub on_press_start: Option<Callback<dyn Fn(PressEvent)>>,
+    pub on_press_start: Option<Callback<dyn Fn(PressEvent) + Send + Sync>>,
 
     /// Called when press ends (pointer up, key up, or cancellation).
-    pub on_press_end: Option<Callback<dyn Fn(PressEvent)>>,
+    pub on_press_end: Option<Callback<dyn Fn(PressEvent) + Send + Sync>>,
 
     /// Called on activation: pointer released inside the element, or Enter/Space
     /// released after having been pressed on this element.
-    pub on_press: Option<Callback<dyn Fn(PressEvent)>>,
+    pub on_press: Option<Callback<dyn Fn(PressEvent) + Send + Sync>>,
 
     /// Called when the pointer's inside/outside state changes while a press is
     /// active. `true` = pointer re-entered the element; `false` = pointer exited.
-    pub on_press_change: Option<Callback<dyn Fn(bool)>>,
+    pub on_press_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
 
     /// Fired when a press is released (pointer up / key up / touch end),
     /// regardless of whether the release was inside or outside the element.
     /// Distinct from `on_press_end` (fires on any press conclusion) and
     /// `on_press` (fires only for activations inside the element).
-    pub on_press_up: Option<Callback<dyn Fn(PressEvent)>>,
+    pub on_press_up: Option<Callback<dyn Fn(PressEvent) + Send + Sync>>,
 
     /// Maximum duration to hold pointer capture before automatically releasing.
     /// Prevents stuck capture states caused by missed `pointerup` events.

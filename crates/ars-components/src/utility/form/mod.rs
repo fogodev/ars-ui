@@ -125,6 +125,61 @@ pub struct Props {
     pub role: Option<String>,
 }
 
+impl Props {
+    /// Returns a fresh [`Props`] with every field at its [`Default`]
+    /// value: empty `id`, [`ValidationBehavior::default`], no
+    /// validation errors, no `action`, no `role` override.
+    ///
+    /// Documented entry point for the builder chain.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets [`id`](Self::id) — the adapter-provided base ID for the
+    /// form root. Immutable for the lifetime of a machine instance.
+    #[must_use]
+    pub fn id(mut self, id: impl Into<String>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    /// Sets [`validation_behavior`](Self::validation_behavior) — how
+    /// validation errors are reported (native HTML validation vs.
+    /// ARIA attributes).
+    #[must_use]
+    pub const fn validation_behavior(mut self, behavior: ValidationBehavior) -> Self {
+        self.validation_behavior = behavior;
+        self
+    }
+
+    /// Replaces [`validation_errors`](Self::validation_errors) with the
+    /// supplied map of declarative server-side validation errors keyed
+    /// by field name.
+    #[must_use]
+    pub fn validation_errors(mut self, errors: BTreeMap<String, Vec<String>>) -> Self {
+        self.validation_errors = errors;
+        self
+    }
+
+    /// Sets [`action`](Self::action) — the URL the form submits to.
+    /// Wraps the supplied value in [`Some`].
+    #[must_use]
+    pub fn action(mut self, action: impl Into<String>) -> Self {
+        self.action = Some(action.into());
+        self
+    }
+
+    /// Sets [`role`](Self::role) — the explicit ARIA role override for
+    /// the form root (e.g. `"search"` for a search landmark). Wraps
+    /// the supplied value in [`Some`].
+    #[must_use]
+    pub fn role(mut self, role: impl Into<String>) -> Self {
+        self.role = Some(role.into());
+        self
+    }
+}
+
 /// Framework-agnostic form component state machine.
 #[derive(Debug)]
 pub struct Machine;
@@ -830,5 +885,31 @@ mod tests {
         let events = Machine::on_props_changed(&old, &new);
 
         assert_eq!(events, vec![Event::ClearServerErrors]);
+    }
+
+    // ── Builder tests ──────────────────────────────────────────────
+
+    #[test]
+    fn props_new_returns_default_values() {
+        assert_eq!(Props::new(), Props::default());
+    }
+
+    #[test]
+    fn props_builder_chain_applies_each_setter() {
+        let mut errors = BTreeMap::new();
+        errors.insert("email".into(), vec!["taken".into()]);
+
+        let props = Props::new()
+            .id("form-1")
+            .validation_behavior(ValidationBehavior::Native)
+            .validation_errors(errors.clone())
+            .action("/submit")
+            .role("search");
+
+        assert_eq!(props.id, "form-1");
+        assert_eq!(props.validation_behavior, ValidationBehavior::Native);
+        assert_eq!(props.validation_errors, errors);
+        assert_eq!(props.action.as_deref(), Some("/submit"));
+        assert_eq!(props.role.as_deref(), Some("search"));
     }
 }

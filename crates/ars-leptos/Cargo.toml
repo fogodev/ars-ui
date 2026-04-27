@@ -21,6 +21,7 @@ icu4x = ["ars-i18n/std", "ars-i18n/icu4x"]
 [dependencies]
 ars-a11y         = { path = "../ars-a11y" }
 ars-collections  = { path = "../ars-collections" }
+ars-components   = { path = "../ars-components" }
 ars-core         = { path = "../ars-core" }
 ars-dom          = { path = "../ars-dom" }
 ars-forms        = { path = "../ars-forms" }
@@ -29,12 +30,10 @@ ars-interactions = { path = "../ars-interactions" }
 leptos           = { version = "0.8", default-features = false }
 log              = { version = "0.4", default-features = false, optional = true }
 
-[dev-dependencies]
-ars-components = { path = "../ars-components" }
-
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen      = "0.2"
 wasm-bindgen-test = "0.3"
+web-sys           = { version = "0.3", features = ["EventInit", "KeyboardEventInit", "PointerEventInit"] }
 
 [lints]
 workspace = true

@@ -35,6 +35,26 @@ pub struct Props {
     pub as_child: bool,
 }
 
+impl Props {
+    /// Returns a fresh [`Props`] with [`as_child`](Self::as_child) set
+    /// to `false` — the default render path.
+    ///
+    /// Documented entry point for the builder chain.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { as_child: false }
+    }
+
+    /// Sets [`as_child`](Self::as_child) — when `true`, the component
+    /// merges its attributes onto the single consumer-provided child
+    /// element instead of rendering its own root element.
+    #[must_use]
+    pub const fn as_child(mut self, value: bool) -> Self {
+        self.as_child = value;
+        self
+    }
+}
+
 /// Merges one set of [`AttrMap`] values onto another, combining attributes
 /// and styles per the rules in `spec/components/utility/as-child.md` §3.2.
 ///
@@ -432,5 +452,18 @@ mod tests {
         let merged = component.merge_onto(child);
 
         assert_snapshot!("class_and_style", snapshot_attrs(&merged));
+    }
+
+    // ── Builder tests ──────────────────────────────────────────────
+
+    #[test]
+    fn props_new_returns_default_values() {
+        assert_eq!(Props::new(), Props::default());
+    }
+
+    #[test]
+    fn props_builder_chain_applies_as_child_setter() {
+        assert!(Props::new().as_child(true).as_child);
+        assert!(!Props::new().as_child(false).as_child);
     }
 }

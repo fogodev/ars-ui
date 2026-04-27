@@ -179,7 +179,7 @@ pub struct Props {
     /// When true, automatically fires `on_value_complete` when all digits are entered.
     pub auto_submit: bool,
     /// Callback fired when all slots are filled.
-    pub on_value_complete: Option<Callback<dyn Fn(&str)>>,
+    pub on_value_complete: Option<Callback<dyn Fn(&str) + Send + Sync>>,
 }
 
 impl Default for Props {

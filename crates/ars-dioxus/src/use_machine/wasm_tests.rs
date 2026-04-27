@@ -160,13 +160,7 @@ fn presence_machine_exposes_live_presence_attrs_on_wasm() {
         reason = "Dioxus root props are moved into the render function."
     )]
     fn app(snapshots: Rc<RefCell<Vec<PresenceSnapshot>>>) -> Element {
-        let machine = use_machine::<presence::Machine>(presence::Props {
-            id: String::from("presence"),
-            present: false,
-            lazy_mount: false,
-            skip_animation: false,
-            reduce_motion: false,
-        });
+        let machine = use_machine::<presence::Machine>(presence::Props::new().id("presence"));
 
         let derived = machine.derive(|api| {
             (
