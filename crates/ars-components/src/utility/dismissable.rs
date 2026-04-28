@@ -9,10 +9,11 @@
 //! The module intentionally stays free of DOM or framework types so that
 //! attribute generation can be tested with pure unit tests.
 //!
-//! **Dismiss-button wording is not part of [`Props`].** Callers resolve a
-//! localized label in their own message bundle and pass the final string to
+//! **Dismiss-button wording is not part of [`Props`].** [`Messages`] provides
+//! the shared default label bundle, but callers resolve the localized label in
+//! their adapter or overlay layer and pass the final string to
 //! [`dismiss_button_attrs`]. This keeps the shared utility focused on behavior
-//! and structure rather than owning overlay-specific wording.
+//! and structure rather than resolving i18n itself.
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 use core::{
@@ -21,45 +22,11 @@ use core::{
 };
 
 use ars_core::{
-    AriaAttr, AttrMap, AttrValue, Callback, ComponentMessages, ComponentPart, HtmlAttr, MessageFn,
+    AriaAttr, AttrMap, AttrValue, Callback, ComponentMessages, ComponentPart, ConnectApi, HtmlAttr,
+    MessageFn,
 };
 use ars_i18n::Locale;
 use ars_interactions::InteractOutsideEvent;
-
-// ────────────────────────────────────────────────────────────────────
-// Messages
-// ────────────────────────────────────────────────────────────────────
-
-/// Localizable messages for the dismissable utility.
-///
-/// Adapters resolve this bundle through the standard provider stack so the
-/// visually-hidden dismiss buttons get a locale-aware `aria-label` even
-/// when the embedding overlay does not pass one explicitly. Overlay
-/// components that own their own wording (e.g. "Dismiss popover") build
-/// the label themselves and pass it directly to [`dismiss_button_attrs`]
-/// without going through this bundle.
-#[derive(Clone, Debug)]
-pub struct Messages {
-    /// Returns the localized aria-label for the visually-hidden dismiss
-    /// buttons.
-    pub dismiss_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
-}
-
-impl Default for Messages {
-    fn default() -> Self {
-        Self {
-            dismiss_label: MessageFn::new(|_locale: &Locale| String::from("Dismiss")),
-        }
-    }
-}
-
-impl PartialEq for Messages {
-    fn eq(&self, other: &Self) -> bool {
-        self.dismiss_label == other.dismiss_label
-    }
-}
-
-impl ComponentMessages for Messages {}
 
 // ────────────────────────────────────────────────────────────────────
 // DismissReason
@@ -163,6 +130,32 @@ impl<E: PartialEq> PartialEq for DismissAttempt<E> {
         self.event == other.event && Arc::ptr_eq(&self.veto, &other.veto)
     }
 }
+
+// ────────────────────────────────────────────────────────────────────
+// Messages
+// ────────────────────────────────────────────────────────────────────
+
+/// Localizable strings for the Dismissable structural helper.
+///
+/// The bundle intentionally contains only the generic fallback label used by
+/// adapter-owned region wrappers. Overlay components that need more specific
+/// wording should resolve their own final label and pass it to [`Api::new`] or
+/// [`dismiss_button_attrs`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Messages {
+    /// Accessible label for the visually-hidden dismiss buttons.
+    pub dismiss_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+}
+
+impl Default for Messages {
+    fn default() -> Self {
+        Self {
+            dismiss_label: MessageFn::static_str("Dismiss"),
+        }
+    }
+}
+
+impl ComponentMessages for Messages {}
 
 // ────────────────────────────────────────────────────────────────────
 // Part
@@ -370,6 +363,94 @@ impl Props {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Api
+// ────────────────────────────────────────────────────────────────────
+
+/// Stateless connect API for deriving Dismissable DOM attributes.
+///
+/// The API owns the already-resolved dismiss-button label as structural
+/// adapter input, not as user-facing copy. Overlay components remain
+/// responsible for resolving the best localized phrase for their context and
+/// passing the final value here.
+pub struct Api {
+    props: Props,
+    dismiss_button_label: AttrValue,
+}
+
+impl Debug for Api {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("dismissable::Api")
+            .field("props", &self.props)
+            .field("dismiss_button_label", &self.dismiss_button_label)
+            .finish()
+    }
+}
+
+impl Api {
+    /// Creates a new Dismissable attribute API.
+    ///
+    /// `dismiss_button_label` is the final accessible label for both
+    /// visually-hidden dismiss buttons. It accepts static strings and reactive
+    /// [`AttrValue`] inputs so adapters can pass provider-resolved localized
+    /// labels without adding wording to [`Props`].
+    #[must_use]
+    pub fn new(props: Props, dismiss_button_label: impl Into<AttrValue>) -> Self {
+        Self {
+            props,
+            dismiss_button_label: dismiss_button_label.into(),
+        }
+    }
+
+    /// Returns root container attributes for the dismissable boundary.
+    ///
+    /// The root is deliberately structural: document listeners, containment
+    /// checks, and platform capability fallbacks are adapter-owned.
+    #[must_use]
+    pub fn root_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
+
+        attrs.set(scope_attr, scope_val).set(part_attr, part_val);
+
+        if self.props.disable_outside_pointer_events {
+            attrs.set_bool(HtmlAttr::Data("ars-disable-outside-pointer-events"), true);
+        }
+
+        attrs
+    }
+
+    /// Returns attributes for either visually-hidden dismiss button.
+    #[must_use]
+    pub fn dismiss_button_attrs(&self) -> AttrMap {
+        dismiss_button_attrs(self.dismiss_button_label.clone())
+    }
+
+    /// Returns whether outside pointer events should be intercepted by the
+    /// adapter-owned document listener layer.
+    #[must_use]
+    pub const fn disable_outside_pointer_events(&self) -> bool {
+        self.props.disable_outside_pointer_events
+    }
+
+    /// Returns the DOM ids excluded from outside-interaction dismissal.
+    #[must_use]
+    pub fn exclude_ids(&self) -> &[String] {
+        &self.props.exclude_ids
+    }
+}
+
+impl ConnectApi for Api {
+    type Part = Part;
+
+    fn part_attrs(&self, part: Self::Part) -> AttrMap {
+        match part {
+            Part::Root => self.root_attrs(),
+            Part::DismissButton => self.dismiss_button_attrs(),
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
 // dismiss_button_attrs
 // ────────────────────────────────────────────────────────────────────
 
@@ -409,39 +490,20 @@ pub fn dismiss_button_attrs(label: impl Into<AttrValue>) -> AttrMap {
 
 #[cfg(test)]
 mod tests {
-    use alloc::sync::Arc;
+    use alloc::{format, sync::Arc};
     use core::sync::atomic::{AtomicUsize, Ordering};
 
-    use ars_core::AttrValue;
+    use ars_core::{AttrValue, ConnectApi};
+    use insta::assert_snapshot;
 
     use super::*;
 
-    // ── Messages tests ─────────────────────────────────────────────
-
-    #[test]
-    fn messages_default_dismiss_label_returns_dismiss_for_any_locale() {
-        let messages = Messages::default();
-        let locale = Locale::parse("en-US").expect("en-US must parse");
-
-        assert_eq!((messages.dismiss_label)(&locale), "Dismiss");
+    fn api(props: Props) -> Api {
+        Api::new(props, "Dismiss")
     }
 
-    #[test]
-    fn messages_default_pair_compares_equal_via_arc_identity() {
-        // Two `Messages::default()` values build distinct Arc-backed
-        // closures, so `PartialEq` (which uses `Arc::ptr_eq` under the
-        // hood via `MessageFn`) should report inequality. Cloning a
-        // single instance, by contrast, shares the Arc and compares
-        // equal — this is the contract every adapter relies on when it
-        // memoizes a Messages bundle.
-        let lhs = Messages::default();
-        let rhs = Messages::default();
-
-        assert_ne!(lhs, rhs);
-
-        let cloned = lhs.clone();
-
-        assert_eq!(lhs, cloned);
+    fn snapshot_attrs(attrs: &AttrMap) -> String {
+        format!("{attrs:#?}")
     }
 
     // ── Part tests ─────────────────────────────────────────────────
@@ -727,6 +789,14 @@ mod tests {
     }
 
     #[test]
+    fn messages_default_dismiss_label_returns_dismiss() {
+        let messages = Messages::default();
+        let locale = Locale::parse("en-US").expect("en-US must parse");
+
+        assert_eq!((messages.dismiss_label)(&locale), "Dismiss");
+    }
+
+    #[test]
     fn dismiss_attempt_starts_un_prevented() {
         let attempt = DismissAttempt::new(InteractOutsideEvent::EscapeKey);
 
@@ -804,10 +874,29 @@ mod tests {
 
     #[test]
     fn props_builder_chain_applies_each_setter() {
+        let interact_calls = Arc::new(AtomicUsize::new(0));
+        let escape_calls = Arc::new(AtomicUsize::new(0));
+        let dismiss_calls = Arc::new(AtomicUsize::new(0));
+
         let props = Props::new()
-            .on_interact_outside(|_attempt: DismissAttempt<InteractOutsideEvent>| {})
-            .on_escape_key_down(|_attempt: DismissAttempt<()>| {})
-            .on_dismiss(|_reason: DismissReason| {})
+            .on_interact_outside({
+                let interact_calls = Arc::clone(&interact_calls);
+                move |_attempt: DismissAttempt<InteractOutsideEvent>| {
+                    interact_calls.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+            .on_escape_key_down({
+                let escape_calls = Arc::clone(&escape_calls);
+                move |_attempt: DismissAttempt<()>| {
+                    escape_calls.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+            .on_dismiss({
+                let dismiss_calls = Arc::clone(&dismiss_calls);
+                move |_reason: DismissReason| {
+                    dismiss_calls.fetch_add(1, Ordering::SeqCst);
+                }
+            })
             .disable_outside_pointer_events(true)
             .exclude_ids(["trigger", "panel"]);
 
@@ -816,6 +905,18 @@ mod tests {
         assert!(props.on_dismiss.is_some());
         assert!(props.disable_outside_pointer_events);
         assert_eq!(props.exclude_ids, vec!["trigger", "panel"]);
+
+        props.on_interact_outside.as_ref().expect("callback")(DismissAttempt::new(
+            InteractOutsideEvent::EscapeKey,
+        ));
+
+        props.on_escape_key_down.as_ref().expect("callback")(DismissAttempt::new(()));
+
+        props.on_dismiss.as_ref().expect("callback")(DismissReason::DismissButton);
+
+        assert_eq!(interact_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(escape_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(dismiss_calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -831,5 +932,129 @@ mod tests {
         props.on_dismiss.as_ref().expect("callback")(DismissReason::DismissButton);
 
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    // ── Api / connect tests ────────────────────────────────────────
+
+    #[test]
+    fn root_attrs_sets_scope_and_part() {
+        let attrs = api(Props::new()).root_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Data("ars-scope")), Some("dismissable"));
+        assert_eq!(attrs.get(&HtmlAttr::Data("ars-part")), Some("root"));
+    }
+
+    #[test]
+    fn root_attrs_omits_pointer_blocking_marker_by_default() {
+        let attrs = api(Props::new()).root_attrs();
+
+        assert_eq!(
+            attrs.get_value(&HtmlAttr::Data("ars-disable-outside-pointer-events")),
+            None
+        );
+    }
+
+    #[test]
+    fn root_attrs_sets_pointer_blocking_marker_when_enabled() {
+        let attrs = api(Props::new().disable_outside_pointer_events(true)).root_attrs();
+
+        assert_eq!(
+            attrs.get_value(&HtmlAttr::Data("ars-disable-outside-pointer-events")),
+            Some(&AttrValue::Bool(true))
+        );
+    }
+
+    #[test]
+    fn api_reports_behavioral_props() {
+        let api = api(Props::new()
+            .disable_outside_pointer_events(true)
+            .exclude_ids(["trigger", "portal"]));
+
+        assert!(api.disable_outside_pointer_events());
+        assert_eq!(api.exclude_ids(), ["trigger", "portal"]);
+    }
+
+    #[test]
+    fn api_dismiss_button_attrs_uses_constructor_label() {
+        let attrs = Api::new(Props::new(), "Close dialog").dismiss_button_attrs();
+
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::Label)),
+            Some("Close dialog")
+        );
+    }
+
+    #[test]
+    fn part_attrs_delegates_to_root_attrs() {
+        let api = api(Props::new().disable_outside_pointer_events(true));
+
+        assert_eq!(api.part_attrs(Part::Root), api.root_attrs());
+    }
+
+    #[test]
+    fn part_attrs_delegates_to_dismiss_button_attrs() {
+        let api = Api::new(Props::new(), "Close dialog");
+
+        assert_eq!(
+            api.part_attrs(Part::DismissButton),
+            api.dismiss_button_attrs()
+        );
+    }
+
+    #[test]
+    fn api_debug_includes_props_and_label() {
+        let debug = format!("{:?}", Api::new(Props::new(), "Dismiss"));
+
+        assert!(debug.contains("dismissable::Api"));
+        assert!(debug.contains("Props"));
+        assert!(debug.contains("Dismiss"));
+    }
+
+    #[test]
+    fn dismissable_root_default_snapshot() {
+        assert_snapshot!(
+            "dismissable_root_default",
+            snapshot_attrs(&api(Props::new()).root_attrs())
+        );
+    }
+
+    #[test]
+    fn dismissable_root_pointer_blocking_snapshot() {
+        assert_snapshot!(
+            "dismissable_root_pointer_blocking",
+            snapshot_attrs(&api(Props::new().disable_outside_pointer_events(true)).root_attrs())
+        );
+    }
+
+    #[test]
+    fn dismissable_dismiss_button_default_snapshot() {
+        assert_snapshot!(
+            "dismissable_dismiss_button_default",
+            snapshot_attrs(&api(Props::new()).dismiss_button_attrs())
+        );
+    }
+
+    #[test]
+    fn dismissable_dismiss_button_custom_label_snapshot() {
+        assert_snapshot!(
+            "dismissable_dismiss_button_custom_label",
+            snapshot_attrs(&Api::new(Props::new(), "Close dialog").dismiss_button_attrs())
+        );
+    }
+
+    #[test]
+    fn dismissable_part_root_snapshot() {
+        assert_snapshot!(
+            "dismissable_part_root",
+            snapshot_attrs(&api(Props::new()).part_attrs(Part::Root))
+        );
+    }
+
+    #[test]
+    fn dismissable_part_dismiss_button_snapshot() {
+        assert_snapshot!(
+            "dismissable_part_dismiss_button",
+            snapshot_attrs(&api(Props::new()).part_attrs(Part::DismissButton))
+        );
     }
 }

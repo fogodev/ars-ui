@@ -818,6 +818,8 @@ mod wasm_tests {
     #[cfg(feature = "csr")]
     use leptos::{mount::mount_to, wasm_bindgen::JsCast};
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+    #[cfg(feature = "csr")]
+    use web_sys::{Document, HtmlElement};
 
     #[cfg(feature = "csr")]
     use super::ArsProvider;
@@ -1246,19 +1248,19 @@ mod wasm_tests {
     }
 
     #[cfg(feature = "csr")]
-    fn document() -> leptos::web_sys::Document {
-        leptos::web_sys::window()
+    fn document() -> Document {
+        web_sys::window()
             .expect("window should exist")
             .document()
             .expect("document should exist")
     }
 
     #[cfg(feature = "csr")]
-    fn append_container() -> leptos::web_sys::HtmlElement {
+    fn append_container() -> HtmlElement {
         let container = document()
             .create_element("div")
             .expect("container creation should succeed")
-            .dyn_into::<leptos::web_sys::HtmlElement>()
+            .dyn_into::<HtmlElement>()
             .expect("container should be an HtmlElement");
 
         document()

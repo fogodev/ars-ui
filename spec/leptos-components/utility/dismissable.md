@@ -43,12 +43,8 @@ pub struct Handle {
 pub fn Region(
     props: dismissable::Props,
     #[prop(optional, into)] inside_boundaries: Option<Signal<Vec<String>>>,
-    /// Optional locale override — falls through to the surrounding
-    /// `ArsProvider` locale when [`None`].
-    #[prop(optional)] locale: Option<ars_i18n::Locale>,
-    /// Optional message bundle override — falls through to the
-    /// adapter's `use_messages` resolution chain (props →
-    /// `I18nRegistries` → `Messages::default`) when [`None`].
+    #[prop(optional, into)] dismiss_label: Option<Signal<String>>,
+    #[prop(optional, into)] locale: Option<Signal<Locale>>,
     #[prop(optional)] messages: Option<dismissable::Messages>,
     children: Children,
 ) -> impl IntoView
@@ -62,7 +58,7 @@ directly. Consumers can move the handle into multiple closures or pass
 it through the view tree without explicit clones; it stays valid until
 the owning `Owner` is dropped.
 
-The public surface matches the full core `Props`, including `on_interact_outside`, `on_escape_key_down`, `on_dismiss`, `disable_outside_pointer_events`, `exclude_ids`, `messages`, and `locale`.
+The public surface matches the full core `Props`, including `on_interact_outside`, `on_escape_key_down`, `on_dismiss`, `disable_outside_pointer_events`, and `exclude_ids`. The agnostic core owns the shared `dismissable::Messages` fallback bundle, while the adapter-owned `Region` resolves that bundle from `ArsProvider` / `locale`, falling back to `"Dismiss"`; `dismiss_label` is an explicit final-label override.
 
 ## 3. Mapping to Core Component Contract
 
@@ -235,15 +231,38 @@ use leptos::{html, prelude::*, tachys::html::attribute::any_attribute::AnyAttrib
 pub fn Region(
     props: dismissable::Props,
     #[prop(optional, into)] inside_boundaries: Option<Signal<Vec<String>>>,
+    #[prop(optional, into)] dismiss_label: Option<Signal<String>>,
+    #[prop(optional, into)] locale: Option<Signal<Locale>>,
+    #[prop(optional)] messages: Option<dismissable::Messages>,
     children: Children,
 ) -> impl IntoView {
     let root_ref = NodeRef::<html::Div>::new();
     let boundaries = inside_boundaries.unwrap_or_else(|| Signal::stored(Vec::new()));
-    let messages = use_messages::<dismissable::Messages>(None, None);
-    let locale = use_locale();
-    let label = (messages.dismiss_label)(&locale.get_untracked());
 
-    let attrs = dismissable::dismiss_button_attrs(&label);
+    let provider_locale = use_locale();
+    let registries = current_ars_context()
+        .map_or_else(|| Arc::new(I18nRegistries::new()), |ctx| Arc::clone(&ctx.i18n_registries));
+    let dismiss_label = dismiss_label.unwrap_or_else(|| {
+        Signal::derive(move || {
+            let resolved_locale = locale.as_ref().map_or_else(|| provider_locale.get(), |locale| locale.get());
+            let resolved_messages =
+                resolve_messages(messages.as_ref(), registries.as_ref(), &resolved_locale);
+
+            (resolved_messages.dismiss_label)(&resolved_locale)
+        })
+    });
+
+    let api = dismissable::Api::new(props.clone(), move || dismiss_label.get());
+    let root_attrs = attr_map_to_leptos(
+        api.root_attrs(),
+        &ars_core::StyleStrategy::Inline,
+        None,
+    )
+    .attrs
+    .into_iter()
+    .map(|(name, value)| leptos::attr::custom::custom_attribute(name, value).into_any_attr())
+    .collect();
+    let attrs = api.dismiss_button_attrs();
     let leptos_attrs: Vec<AnyAttribute> = attr_map_to_leptos(
         attrs,
         &ars_core::StyleStrategy::Inline,
@@ -259,7 +278,7 @@ pub fn Region(
     let handle = dismissable::use_dismissable(root_ref, props.clone(), boundaries);
 
     view! {
-        <div node_ref=root_ref>
+        <div {..root_attrs} node_ref=root_ref>
             <button {..leptos_attrs.clone()} on:click=move |_| { handle.dismiss.run(()); } />
             {children()}
             <button {..leptos_attrs} on:click=move |_| { handle.dismiss.run(()); } />

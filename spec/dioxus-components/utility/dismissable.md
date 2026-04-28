@@ -45,13 +45,10 @@ pub struct RegionProps {
     pub props: dismissable::Props,
     #[props(optional)]
     pub inside_boundaries: Option<ReadSignal<Vec<String>>>,
-    /// Optional locale override — falls through to the surrounding
-    /// `ArsProvider` locale when [`None`].
     #[props(optional)]
-    pub locale: Option<ars_i18n::Locale>,
-    /// Optional message bundle override — falls through to the
-    /// adapter's [`use_messages`] resolution chain (props →
-    /// `I18nRegistries` → `Messages::default`) when [`None`].
+    pub dismiss_label: Option<String>,
+    #[props(optional, into)]
+    pub locale: Option<Signal<Locale>>,
     #[props(optional)]
     pub messages: Option<dismissable::Messages>,
     pub children: Element,
@@ -68,7 +65,7 @@ newtypes. Consumers can move the handle into multiple closures or pass
 it through the rsx tree without explicit clones; it stays valid until
 the owning scope unmounts.
 
-The public surface matches the full core `Props`, including `on_interact_outside`, `on_escape_key_down`, `on_dismiss`, `disable_outside_pointer_events`, `exclude_ids`, `messages`, and `locale`.
+The public surface matches the full core `Props`, including `on_interact_outside`, `on_escape_key_down`, `on_dismiss`, `disable_outside_pointer_events`, and `exclude_ids`. The agnostic core owns the shared `dismissable::Messages` fallback bundle, while the adapter-owned `Region` resolves that bundle from `ArsProvider` / `locale`, falling back to `"Dismiss"`; `dismiss_label` is an explicit final-label override.
 
 ## 3. Mapping to Core Component Contract
 
@@ -243,21 +240,33 @@ pub struct RegionProps {
     pub props: dismissable::Props,
     #[props(optional)]
     pub inside_boundaries: Option<ReadSignal<Vec<String>>>,
+    #[props(optional)]
+    pub dismiss_label: Option<String>,
+    #[props(optional, into)]
+    pub locale: Option<Signal<Locale>>,
+    #[props(optional)]
+    pub messages: Option<dismissable::Messages>,
     pub children: Element,
 }
 
 #[component]
 pub fn Region(props: RegionProps) -> Element {
-    let RegionProps { props, inside_boundaries, children } = props;
+    let RegionProps { props, inside_boundaries, dismiss_label, locale, messages, children } = props;
 
     let boundaries_fallback = use_signal(Vec::<String>::new);
     let boundaries = inside_boundaries.unwrap_or_else(|| ReadSignal::from(boundaries_fallback));
 
-    let messages = use_messages::<dismissable::Messages>(None, None);
-    let locale = use_locale();
-    let dismiss_label = use_hook(|| (messages.dismiss_label)(&locale.peek()));
+    let provider_locale = resolve_locale(None);
+    let resolved_locale = locale
+        .as_ref()
+        .map_or(provider_locale, |locale| locale.read().clone());
+    let resolved_messages = use_messages(messages.as_ref(), Some(&resolved_locale));
+    let dismiss_label =
+        dismiss_label.unwrap_or_else(|| (resolved_messages.dismiss_label)(&resolved_locale));
 
-    let attrs = dismissable::dismiss_button_attrs(&dismiss_label);
+    let api = dismissable::Api::new(props.clone(), dismiss_label);
+    let root_attrs = attr_map_to_dioxus(api.root_attrs(), &ars_core::StyleStrategy::Inline, None).attrs;
+    let attrs = api.dismiss_button_attrs();
     let start_attrs = attr_map_to_dioxus(attrs.clone(), &ars_core::StyleStrategy::Inline, None).attrs;
     let end_attrs = attr_map_to_dioxus(attrs, &ars_core::StyleStrategy::Inline, None).attrs;
 
@@ -272,6 +281,7 @@ pub fn Region(props: RegionProps) -> Element {
 
     rsx! {
         div {
+            ..root_attrs,
             onmounted: move |evt| { root_ref.set(Some(evt.data())); },
             button { onclick: move |_| { handle.dismiss.call(()); }, ..start_attrs }
             {children}

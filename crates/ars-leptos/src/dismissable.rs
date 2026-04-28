@@ -9,8 +9,8 @@
 //! re-implementing each piece per overlay.
 //!
 //! This module re-exports the agnostic `ars_components::utility::dismissable`
-//! surface (`Props`, `Messages`, `Part`, `DismissReason`,
-//! `DismissAttempt`, `dismiss_button_attrs`) so consumers reach every
+//! surface (`Props`, `Messages`, `Part`, `DismissReason`, `DismissAttempt`,
+//! `dismiss_button_attrs`) so consumers reach every
 //! dismissable type through a single namespace —
 //! `dismissable::Props`, `dismissable::Region`, `dismissable::Handle`,
 //! `dismissable::use_dismissable`, etc.
@@ -23,11 +23,16 @@
 //! See `spec/leptos-components/utility/dismissable.md` for the full
 //! adapter contract.
 
-use std::fmt::{self, Debug};
+use std::{
+    fmt::{self, Debug},
+    sync::Arc,
+};
 
 pub use ars_components::utility::dismissable::{
-    DismissAttempt, DismissReason, Messages, Part, Props, dismiss_button_attrs,
+    Api, DismissAttempt, DismissReason, Messages, Part, Props, dismiss_button_attrs,
 };
+use ars_core::{I18nRegistries, resolve_messages};
+use ars_i18n::Locale;
 use leptos::{callback::Callback as LeptosCallback, html, prelude::*};
 #[cfg(not(feature = "ssr"))]
 use {
@@ -42,7 +47,7 @@ use {
 use crate::{
     attrs::attr_map_to_leptos_inline_attrs,
     id::use_id,
-    provider::{resolve_locale, use_messages},
+    provider::{current_ars_context, use_locale},
 };
 
 // ────────────────────────────────────────────────────────────────────
@@ -195,6 +200,13 @@ struct DismissableState {
 }
 
 #[cfg(not(feature = "ssr"))]
+#[cfg_attr(
+    all(test, target_arch = "wasm32"),
+    expect(
+        unused_qualifications,
+        reason = "production code uses the Leptos web_sys re-export; web-sys is only a direct wasm test dependency"
+    )
+)]
 fn attach(
     state: &Rc<DismissableState>,
     root_ref: NodeRef<html::Div>,
@@ -358,58 +370,64 @@ pub fn Region(
     #[prop(optional, into)]
     inside_boundaries: Option<Signal<Vec<String>>>,
 
-    /// Optional locale override — falls through to the surrounding
-    /// `ArsProvider` locale when [`None`].
-    #[prop(optional)]
-    locale: Option<ars_i18n::Locale>,
+    /// Explicit accessible-label override for both visually-hidden
+    /// dismiss buttons.
+    ///
+    /// When omitted, [`Region`] resolves [`Messages`] from the nearest
+    /// `ArsProvider` message registry and locale, falling back to
+    /// `"Dismiss"`. Overlay components may pass context-specific
+    /// wording such as `"Close dialog"` or `"Dismiss popover"`.
+    #[prop(optional, into)]
+    dismiss_label: Option<Signal<String>>,
 
-    /// Optional message bundle override — falls through to the adapter's
-    /// [`use_messages`] resolution chain (props → `I18nRegistries` →
-    /// `Messages::default`) when [`None`].
+    /// Explicit locale override used when resolving provider/default
+    /// [`Messages`].
+    #[prop(optional, into)]
+    locale: Option<Signal<Locale>>,
+
+    /// Explicit message-bundle override used when `dismiss_label` is
+    /// omitted.
     #[prop(optional)]
     messages: Option<Messages>,
 
     /// Children rendered between the start and end dismiss buttons.
     children: Children,
 ) -> impl IntoView {
-    // Re-bind the prop-supplied overrides so the parameter values are
-    // owned locals — Leptos requires component props to be received by
-    // value, but `clippy::needless_pass_by_value` would otherwise
-    // complain that the parameters are only read via `.as_ref()`.
-    let messages_override = messages;
-    let locale_override = locale;
-
     let root_ref = NodeRef::<html::Div>::new();
 
     let boundaries = inside_boundaries.unwrap_or_else(|| Signal::stored(Vec::new()));
 
-    // Build dismiss-button attrs with a reactive `aria-label` closure so
-    // the rendered attribute updates whenever the surrounding
-    // `ArsProvider` swaps locale at runtime — or whenever the
-    // `I18nRegistries` bundle is replaced. `dismiss_button_attrs` accepts
-    // any `impl Into<AttrValue>`; passing a `Fn() -> String + Send +
-    // Sync + 'static` closure routes through the blanket
-    // `From<F> for AttrValue` impl that wraps it as
-    // `AttrValue::Reactive`. The closure subscribes to `use_locale()` via
-    // [`resolve_locale`] and to the registries via [`use_messages`] each
-    // time it runs, so tachys's reactive attribute path keeps the DOM
-    // aria-label in sync.
-    let messages_for_label = messages_override.clone();
-    let locale_for_label = locale_override.clone();
-    let dismiss_attrs = dismiss_button_attrs(move || {
-        let messages =
-            use_messages::<Messages>(messages_for_label.as_ref(), locale_for_label.as_ref());
-        (messages.dismiss_label)(&resolve_locale(locale_for_label.as_ref()))
+    let provider_locale = use_locale();
+
+    let registries = current_ars_context().map_or_else(
+        || Arc::new(I18nRegistries::new()),
+        |ctx| Arc::clone(&ctx.i18n_registries),
+    );
+
+    let dismiss_label = dismiss_label.unwrap_or_else(|| {
+        Signal::derive(move || {
+            let resolved_locale = locale
+                .as_ref()
+                .map_or_else(|| provider_locale.get(), |locale| locale.get());
+
+            let resolved_messages =
+                resolve_messages(messages.as_ref(), registries.as_ref(), &resolved_locale);
+
+            (resolved_messages.dismiss_label)(&resolved_locale)
+        })
     });
 
-    let inline_attrs = attr_map_to_leptos_inline_attrs(dismiss_attrs);
+    let api = Api::new(props.clone(), move || dismiss_label.get());
+
+    let root_attrs = attr_map_to_leptos_inline_attrs(api.root_attrs());
+    let inline_attrs = attr_map_to_leptos_inline_attrs(api.dismiss_button_attrs());
     let start_attrs = inline_attrs.clone();
     let end_attrs = inline_attrs;
 
     let handle = use_dismissable(root_ref, props, boundaries);
 
     view! {
-        <div node_ref=root_ref>
+        <div {..root_attrs} node_ref=root_ref>
             <button
                 {..start_attrs}
                 on:click=move |_| { handle.dismiss.run(()); }
@@ -539,7 +557,7 @@ mod wasm_tests {
     };
 
     use ars_core::{I18nRegistries, MessageFn, MessagesRegistry};
-    use ars_i18n::{Locale, locales};
+    use ars_i18n::Locale;
     use leptos::{mount::mount_to, prelude::*, reactive::owner::Owner};
     use wasm_bindgen::JsCast;
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
@@ -552,7 +570,7 @@ mod wasm_tests {
     wasm_bindgen_test_configure!(run_in_browser);
 
     fn document() -> Document {
-        leptos::web_sys::window()
+        web_sys::window()
             .and_then(|w| w.document())
             .expect("browser document should exist")
     }
@@ -572,6 +590,28 @@ mod wasm_tests {
             .expect("append_child should succeed");
 
         container
+    }
+
+    fn spanish_messages() -> Arc<I18nRegistries> {
+        let mut registries = I18nRegistries::new();
+
+        registries.register(MessagesRegistry::new(Messages::default()).register(
+            "es",
+            Messages {
+                dismiss_label: MessageFn::static_str("Cerrar"),
+            },
+        ));
+
+        Arc::new(registries)
+    }
+
+    fn first_dismiss_button_label(container: &Element) -> String {
+        container
+            .query_selector("button[data-ars-part='dismiss-button']")
+            .expect("query_selector should succeed")
+            .expect("at least one dismiss button must exist")
+            .get_attribute("aria-label")
+            .expect("dismiss button must carry an aria-label")
     }
 
     /// Tick the Leptos reactive cycle once.
@@ -666,6 +706,39 @@ mod wasm_tests {
             buttons.length(),
             2,
             "Region must render exactly two visually-hidden dismiss buttons (start + end)",
+        );
+
+        container.remove();
+    }
+
+    #[wasm_bindgen_test]
+    async fn region_default_label_uses_provider_messages_on_wasm() {
+        let owner = Owner::new();
+        owner.set();
+
+        let container = with_container();
+        let parent: HtmlElement = container.clone().unchecked_into();
+        let registries = spanish_messages();
+
+        let _handle = mount_to(parent, move || {
+            view! {
+                <crate::ArsProvider
+                    locale=Locale::parse("es-MX").expect("locale should parse")
+                    i18n_registries=Arc::clone(&registries)
+                >
+                    <Region props=Props::new()>
+                        <span>"content"</span>
+                    </Region>
+                </crate::ArsProvider>
+            }
+        });
+
+        tick().await;
+
+        assert_eq!(
+            first_dismiss_button_label(&container),
+            "Cerrar",
+            "Region default dismiss label must resolve through provider messages",
         );
 
         container.remove();
@@ -1196,91 +1269,60 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
-    async fn region_locale_override_resolves_label_through_use_messages_on_wasm() {
+    async fn region_dismiss_label_prop_overrides_provider_messages_on_wasm() {
         let owner = Owner::new();
         owner.set();
 
         let container = with_container();
         let parent: HtmlElement = container.clone().unchecked_into();
+        let registries = spanish_messages();
 
         let _handle = mount_to(parent, move || {
-            let messages = Messages {
-                dismiss_label: MessageFn::new(|locale: &Locale| {
-                    if locale.language() == "de" {
-                        String::from("Schließen")
-                    } else {
-                        String::from("Dismiss")
-                    }
-                }),
-            };
-
             view! {
-                <Region
-                    props=Props::new()
-                    locale=locales::de_de()
-                    messages=messages
+                <crate::ArsProvider
+                    locale=Locale::parse("es-MX").expect("locale should parse")
+                    i18n_registries=Arc::clone(&registries)
                 >
-                    <span>"content"</span>
-                </Region>
+                    <Region
+                        props=Props::new()
+                        dismiss_label="Close dialog"
+                    >
+                        <span>"content"</span>
+                    </Region>
+                </crate::ArsProvider>
             }
         });
 
         tick().await;
 
-        let button = container
-            .query_selector("button[data-ars-part='dismiss-button']")
-            .expect("query_selector should succeed")
-            .expect("at least one dismiss button must exist");
-
-        let label = button
-            .get_attribute("aria-label")
-            .expect("dismiss button must carry an aria-label");
-
         assert_eq!(
-            label, "Schließen",
-            "Region locale override must flow through use_messages so dismiss_label sees the German locale",
+            first_dismiss_button_label(&container),
+            "Close dialog",
+            "Region dismiss_label prop must override provider messages",
         );
 
         container.remove();
     }
 
     #[wasm_bindgen_test]
-    async fn region_aria_label_updates_when_provider_locale_signal_changes_on_wasm() {
+    async fn region_dismiss_label_signal_updates_button_label_on_wasm() {
         let owner = Owner::new();
         owner.set();
 
         let container = with_container();
         let parent: HtmlElement = container.clone().unchecked_into();
 
-        // RwSignal so the test body can swap the provider's locale at runtime.
-        let locale_signal = RwSignal::new(locales::en_us());
+        let label_signal = RwSignal::new(String::from("Dismiss"));
+        let dismiss_label: Signal<String> = Signal::from(label_signal);
 
         let _handle = mount_to(parent, move || {
-            // Locale-aware Messages bundle so the rendered `aria-label`
-            // differs between English and German.
-            let messages = Messages {
-                dismiss_label: MessageFn::new(|locale: &Locale| {
-                    if locale.language() == "de" {
-                        String::from("Schließen")
-                    } else {
-                        String::from("Dismiss")
-                    }
-                }),
-            };
-
-            let mut registries = I18nRegistries::new();
-
-            registries.register::<Messages>(MessagesRegistry::new(messages));
-
             view! {
-                <crate::ArsProvider
-                    locale=locale_signal
-                    i18n_registries=Arc::new(registries)
+                <Region
+                    props=Props::new()
+                    dismiss_label=dismiss_label
                 >
-                    <Region props=Props::new()>
-                        <span>"content"</span>
-                    </Region>
-                </crate::ArsProvider>
+                    <span>"content"</span>
+                </Region>
             }
         });
 
@@ -1297,23 +1339,20 @@ mod wasm_tests {
 
         assert_eq!(
             initial, "Dismiss",
-            "Region aria-label must reflect the initial English locale from the provider",
+            "Region aria-label must reflect the initial dismiss_label signal value",
         );
 
-        // Swap the provider's locale; the `Reactive` variant's closure
-        // re-runs through tachys's `RenderEffect` and the rendered
-        // attribute updates without a remount.
-        locale_signal.set(locales::de_de());
+        label_signal.set(String::from("Close dialog"));
 
         tick().await;
 
         let updated = button
             .get_attribute("aria-label")
-            .expect("dismiss button must still carry an aria-label after locale swap");
+            .expect("dismiss button must still carry an aria-label after label change");
 
         assert_eq!(
-            updated, "Schließen",
-            "Region aria-label must re-resolve through use_messages when the provider locale signal updates at runtime",
+            updated, "Close dialog",
+            "Region aria-label must update when the dismiss_label signal changes",
         );
 
         container.remove();
