@@ -945,8 +945,8 @@ The adapter MUST:
 /// A toast that tracks an async operation through loading -> success/error states.
 pub struct Promise<T, E> {
     pub loading: toast::Data,
-    pub success: Callback<dyn Fn(T) -> toast::Data>,
-    pub error: Callback<dyn Fn(E) -> toast::Data>,
+    pub success: Callback<dyn Fn(T) -> toast::Data + Send + Sync>,
+    pub error: Callback<dyn Fn(E) -> toast::Data + Send + Sync>,
 }
 
 impl Queue {

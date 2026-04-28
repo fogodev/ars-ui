@@ -102,6 +102,36 @@ pub fn attr_map_to_dioxus(
                 false,
             )),
 
+            // Reactive variants are evaluated at conversion time. Dioxus
+            // re-runs component bodies whenever a tracked signal changes,
+            // so calling the closure during each `attr_map_to_dioxus`
+            // invocation is the framework-idiomatic reactive path —
+            // each render produces a fresh Attribute with the current
+            // value. The Reactive variants exist on the agnostic
+            // `AttrMap` so consumers writing component glue do not need
+            // to reach for adapter-specific reactive primitives.
+            AttrValue::Reactive(f) => Some(Attribute::new(
+                intern_attr_name(&key),
+                AttributeValue::Text(f()),
+                None,
+                false,
+            )),
+
+            // Reactive booleans follow the HTML presence/absence
+            // semantics symmetric with the static [`AttrValue::Bool`]
+            // path: `true` materializes to an empty-value Attribute,
+            // `false` skips the attribute entirely. Dioxus re-runs
+            // component bodies on signal changes, so each render's
+            // conversion picks up the current closure result.
+            AttrValue::ReactiveBool(f) => f().then(|| {
+                Attribute::new(
+                    intern_attr_name(&key),
+                    AttributeValue::Text(String::new()),
+                    None,
+                    false,
+                )
+            }),
+
             AttrValue::Bool(false) | AttrValue::None => None,
         })
         .collect::<Vec<_>>();
@@ -152,6 +182,26 @@ pub fn attr_map_to_dioxus(
         cssom_styles,
         nonce_css,
     }
+}
+
+/// Convenience wrapper around [`attr_map_to_dioxus`] for callers that
+/// always render with [`StyleStrategy::Inline`] and only need the
+/// [`Attribute`] vector ready for spreading via `..attrs`.
+///
+/// Equivalent to:
+///
+/// ```ignore
+/// let DioxusAttrResult { attrs, .. } =
+///     attr_map_to_dioxus(map, &StyleStrategy::Inline, None);
+/// ```
+///
+/// Use the full [`attr_map_to_dioxus`] when [`StyleStrategy::Cssom`] or
+/// [`StyleStrategy::Nonce`] is in play and the caller needs to apply
+/// `cssom_styles` to the DOM or inject `nonce_css` into a `<style>`
+/// block.
+#[must_use]
+pub fn attr_map_to_dioxus_inline_attrs(map: AttrMap) -> Vec<Attribute> {
+    attr_map_to_dioxus(map, &StyleStrategy::Inline, None).attrs
 }
 
 // ── CSSOM helper ────────────────────────────────────────────────────
@@ -355,6 +405,46 @@ mod tests {
     }
 
     #[test]
+    fn attr_map_to_dioxus_inline_attrs_matches_full_helper() {
+        let attrs = attr_map_to_dioxus_inline_attrs(build_test_map());
+
+        let class_attr = find_attr(&attrs, "class").expect("class attr present");
+
+        assert_eq!(text_value(class_attr), Some("btn"));
+
+        let style_attr = find_attr(&attrs, "style").expect("style attr present");
+
+        assert_eq!(text_value(style_attr), Some("width: 100px;"));
+
+        assert_eq!(
+            attrs.len(),
+            2,
+            "Inline strategy folds styles into a single `style` attr; no additional fields leak through",
+        );
+    }
+
+    #[test]
+    fn attr_map_to_dioxus_inline_attrs_filters_false_and_none_values() {
+        let mut map = AttrMap::new();
+
+        map.set(HtmlAttr::Class, "kept")
+            .set_bool(HtmlAttr::Disabled, false)
+            .set(HtmlAttr::Aria(AriaAttr::Label), AttrValue::None);
+
+        let attrs = attr_map_to_dioxus_inline_attrs(map);
+
+        assert!(find_attr(&attrs, "class").is_some());
+        assert!(
+            find_attr(&attrs, "disabled").is_none(),
+            "Bool(false) entries must be dropped — wrapper must not bypass the underlying filter",
+        );
+        assert!(
+            find_attr(&attrs, "aria-label").is_none(),
+            "AttrValue::None entries must be dropped",
+        );
+    }
+
+    #[test]
     fn attr_map_to_dioxus_cssom_strategy_returns_styles_separately() {
         let result = attr_map_to_dioxus(build_test_map(), &StyleStrategy::Cssom, None);
 
@@ -474,6 +564,46 @@ mod tests {
         assert!(find_attr(&result.attrs, "data-ars-style-id").is_none());
         assert!(result.nonce_css.is_empty());
         assert!(result.cssom_styles.is_empty());
+    }
+
+    /// Reactive variants are evaluated at conversion time — Dioxus
+    /// re-runs component bodies whenever a tracked signal changes, so
+    /// each render produces a fresh Attribute with the closure's
+    /// current value. This test pins the materialisation contract:
+    /// the rendered Attribute must carry the closure's current return
+    /// value, not a placeholder.
+    #[test]
+    fn attr_map_to_dioxus_materializes_reactive_string_to_current_value() {
+        let mut map = AttrMap::new();
+
+        map.set(
+            HtmlAttr::Aria(AriaAttr::Label),
+            AttrValue::reactive(|| String::from("Schließen")),
+        );
+
+        let result = attr_map_to_dioxus(map, &StyleStrategy::Inline, None);
+
+        let aria = find_attr(&result.attrs, "aria-label").expect("aria-label attr present");
+
+        assert_eq!(text_value(aria), Some("Schließen"));
+    }
+
+    /// Reactive booleans materialize with HTML presence semantics
+    /// symmetric with [`AttrValue::Bool`]: `true` renders the
+    /// attribute with an empty value, `false` skips it.
+    #[test]
+    fn attr_map_to_dioxus_reactive_bool_follows_presence_semantics() {
+        let mut map = AttrMap::new();
+
+        map.set(HtmlAttr::Disabled, AttrValue::reactive_bool(|| true))
+            .set(HtmlAttr::Required, AttrValue::reactive_bool(|| false));
+
+        let result = attr_map_to_dioxus(map, &StyleStrategy::Inline, None);
+
+        let disabled = find_attr(&result.attrs, "disabled").expect("disabled attr present");
+
+        assert_eq!(text_value(disabled), Some(""));
+        assert!(find_attr(&result.attrs, "required").is_none());
     }
 
     #[test]

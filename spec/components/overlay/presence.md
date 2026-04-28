@@ -108,6 +108,11 @@ pub struct Props {
 }
 ```
 
+The struct fields are public for adapter destructure and proptest fuzzing, but the documented
+construction path is the inherent builder. `Props::new()` returns the default; per-field setters
+(`id`, `present`, `lazy_mount`, `skip_animation`, `reduce_motion`) accept the natural argument type
+and return `Self` for chaining. Example: `presence::Props::new().id("dialog-1").present(true)`.
+
 ### 1.5 Reduced Motion
 
 When the user has `prefers-reduced-motion: reduce` set in their OS/browser preferences:

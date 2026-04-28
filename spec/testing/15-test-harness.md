@@ -4,14 +4,15 @@
 
 The `TestHarness` is the unified testing API for ars-ui adapter tests. It wraps a rendered component inside an isolated DOM container and provides methods for querying elements, simulating user interactions, and inspecting state -- all without framework-specific boilerplate.
 
-### 1.1 Two-Tier Testing Model
+### 1.1 Testing Tiers
 
 1. **Service-level tests** -- pure Rust, no DOM. Exercise `Service::send()` / `transition()` / `connect()` directly. Do not use `TestHarness` (see [02-integration-tests.md](02-integration-tests.md)).
-2. **Adapter-level tests** -- mount a real component into a WASM DOM and assert rendered output. Use `TestHarness` as their primary API.
+2. **Adapter-level tests (WASM DOM)** -- mount a real component into a WASM DOM and assert rendered output. Use `TestHarness` as their primary API. This is the primary adapter testing surface and covers all browser-runtime behavior (listeners, focus, pointer/keyboard interaction, ARIA queries, animation timing, …).
+3. **Adapter-level tests (non-web Dioxus runtime)** -- mount a Dioxus component on a bare `VirtualDom` (no `dioxus-web`, no real WRY/webview window) to validate the `cfg(not(feature = "web"))` graceful-degrade path adapter components follow on Desktop, mobile, and SSR builds. Use [`ars_test_harness_dioxus::desktop::DesktopHarness`](#54-non-web-dioxus-backend) as the entry point. Tests in this tier express expectations through callbacks captured by the fixture component (no DOM querying). They run as plain `#[test]` on native targets, alongside the workspace's other native unit and integration tests.
 
-> **Relationship to the three-tier model:** [00-overview.md section 1.1](00-overview.md#11-testing-tiers) defines a three-tier model (Unit, Integration, Adapter). The test harness applies to **tier 3 (Adapter)** only. Tier 1 (Unit) tests use `Machine::transition` directly; tier 2 (Integration) tests use `Service` directly. The harness abstracts the adapter-level mount/interact/assert cycle for tier 3.
+> **Relationship to the three-tier model:** [00-overview.md section 1.1](00-overview.md#11-testing-tiers) defines a three-tier model (Unit, Integration, Adapter). The test harness applies to **tier 3 (Adapter)** only. Tier 1 (Unit) tests use `Machine::transition` directly; tier 2 (Integration) tests use `Service` directly. The harness abstracts the adapter-level mount/interact/assert cycle for tier 3, which now covers both the WASM-DOM sub-tier (item 2) and the non-web Dioxus sub-tier (item 3).
 
-`TestHarness` renders a component through the adapter, then exposes a framework-agnostic DOM-query and interaction API. Test code looks the same regardless of whether the Leptos or Dioxus backend is active.
+`TestHarness` renders a component through the adapter, then exposes a framework-agnostic DOM-query and interaction API. Test code looks the same regardless of whether the Leptos or Dioxus backend is active. The non-web Dioxus harness deliberately exposes a smaller, callback-oriented surface — it does not query DOM nodes, it only drives the runtime and observes fixture-side state.
 
 ### 1.2 Crate Structure
 
@@ -25,12 +26,19 @@ ars-test-harness/          # Framework-agnostic harness API
 
 ars-test-harness-leptos/   # Leptos backend + adapter-owned render() wrappers
 ars-test-harness-dioxus/   # Dioxus backend + adapter-owned render() wrappers
+  src/lib.rs               # wasm-only DioxusHarnessBackend + render() wrappers
+  src/desktop.rs           # non-web Dioxus runtime (DesktopHarness)
 ars-test-ext-{component}/  # Per-component extension crates (optional)
 ```
 
 `ars-test-harness` stays backend-agnostic. Each adapter crate owns the
 zero-argument `render(...)` and `mount_with_locale(...)` wrappers that delegate
 to the core constructors with that adapter's concrete backend instance.
+
+`ars-test-harness-dioxus::desktop` is gated on
+`cfg(not(target_arch = "wasm32"))` and lives alongside the wasm-only
+`DioxusHarnessBackend` in the same crate; native test runs see only the
+desktop module, wasm-pack runs see only the wasm-tier API.
 
 ---
 
@@ -682,6 +690,107 @@ the `VirtualDom`, `flush()` cannot await `wait_for_work()` directly; instead it
 waits for a backend-owned browser task boundary plus trailing microtask turn.
 Shared-harness DOM tests rely on that backend-owned flush behavior rather than
 ad hoc timer shims in test code.
+
+### 5.4 Non-Web Dioxus Backend
+
+Adapter components that target Dioxus also compile for Desktop (`dioxus-desktop`),
+mobile (`dioxus-mobile`), and SSR (`dioxus/server`). On those platforms the
+`web` feature is disabled, the browser-only listener install path is gated
+out via `cfg(feature = "web")`, and the component degrades to its
+structural surface (rendered tree, returned handles, callback wiring)
+without document/window listeners. The non-web Dioxus tier exists to
+exercise that graceful-degrade path.
+
+The entrypoint is `ars_test_harness_dioxus::desktop::DesktopHarness`. It
+wraps a `dioxus_core::VirtualDom` directly — no `dioxus-web`, no real
+WRY/webview window — because the cfg branch under test is identical
+regardless of which renderer would normally drive the runtime. Real
+Desktop launching adds GUI dependencies (xvfb, GTK, webkitgtk in CI),
+serialised event loops, and window-lifecycle flake without any
+additional coverage delta over a `VirtualDom`-only fixture.
+
+API contract:
+
+```rust
+/// Headless `VirtualDom` wrapper for non-web Dioxus component tests.
+pub struct DesktopHarness { /* ... */ }
+
+impl DesktopHarness {
+    /// Mounts a no-prop component fn item and runs the initial rebuild.
+    #[must_use]
+    pub fn launch(component: fn() -> Element) -> Self;
+
+    /// Mounts a component with custom root props and runs the initial rebuild.
+    /// `P: Clone + 'static` mirrors `VirtualDom::new_with_props`.
+    #[must_use]
+    pub fn launch_with_props<P, M>(
+        component: impl ComponentFunction<P, M>,
+        props: P,
+    ) -> Self
+    where
+        P: Clone + 'static,
+        M: 'static;
+
+    /// Mounts a closure-rendered subtree wrapped in `ars_dioxus::ArsProvider`
+    /// with the supplied `Locale`. Mirrors the wasm tier's
+    /// `HarnessBackend::mount_with_locale` contract — when a non-web component
+    /// test needs to exercise locale-sensitive output (for example the
+    /// dismissable region's `dismiss_label`), this entrypoint installs the
+    /// provider context before rebuilding so `use_locale` and `use_messages`
+    /// resolve to the requested locale.
+    #[must_use]
+    pub fn launch_with_locale<F>(builder: F, locale: Locale) -> Self
+    where
+        F: Fn() -> Element + 'static;
+
+    /// Drains pending Dioxus work — queued events, dirty scopes, and effects —
+    /// until the runtime is idle. Mirrors the wasm-tier
+    /// `HarnessBackend::flush` contract.
+    ///
+    /// `process_events` alone only converts the event queue into dirty marks —
+    /// it does **not** re-render dirty scopes. To make sure signal writes
+    /// triggered by callbacks under test are visible to subsequent assertions,
+    /// the implementation loops `process_events` + `render_immediate` until
+    /// `render_immediate_to_vec` reports zero edits (i.e. the runtime is
+    /// quiescent), with a hard ceiling on iterations to surface re-render
+    /// loops as a panic instead of a hang.
+    pub fn flush(&mut self);
+}
+```
+
+`DesktopHarness` deliberately does not implement `HarnessBackend`. The
+backend trait's signatures take `&web_sys::HtmlElement` containers and
+return `AnyService` futures wired into the wasm test runtime — both
+contracts are tied to the browser. The non-web tier instead exposes a
+small, synchronous surface that test authors drive directly: mount,
+flush, drop. Test code expresses expectations through fixture-side
+recorders (`Arc<Mutex<Vec<…>>>`, `Rc<RefCell<…>>`, `Arc<AtomicUsize>`)
+captured by callbacks the fixture passes into the component's `Props`.
+
+```rust
+#[test]
+fn region_mounts_on_desktop_without_panic() {
+    let state = build_state();
+    let _harness = DesktopHarness::launch_with_props(fixture, state.clone());
+
+    let id = state.handle_slot
+        .borrow()
+        .as_ref()
+        .expect("fixture must populate the handle slot during the initial rebuild")
+        .overlay_id
+        .peek()
+        .clone();
+
+    assert!(!id.is_empty());
+}
+```
+
+Use this tier whenever a component spec calls for "validation on the
+target runtime rather than only in a browser harness" — for example
+[`spec/dioxus-components/utility/dismissable.md`](../dioxus-components/utility/dismissable.md)
+§29-§31. Future overlay components that follow the same `cfg(feature =
+"web")` graceful-degrade pattern (Dialog, Popover, Tooltip, …) reuse the
+same harness.
 
 ---
 

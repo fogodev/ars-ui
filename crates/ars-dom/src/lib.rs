@@ -36,6 +36,7 @@ mod debug;
 pub mod focus;
 pub mod media;
 pub mod modality;
+pub mod outside_interaction;
 pub mod overlay_stack;
 #[cfg(feature = "web")]
 pub mod platform;
@@ -60,6 +61,9 @@ pub use media::{
     prefers_reduced_motion, prefers_reduced_transparency,
 };
 pub use modality::ModalityManager;
+pub use outside_interaction::{OutsideInteractionConfig, id_matches_inside_set};
+#[cfg(feature = "web")]
+pub use outside_interaction::{install_outside_interaction_listeners, target_is_inside_boundary};
 pub use overlay_stack::{
     OverlayEntry, contains_overlay, is_above, is_topmost, overlay_count, overlays_above,
     push_overlay, remove_overlay, reset_overlay_stack, topmost_overlay,

@@ -11,6 +11,7 @@
 //! - [`use_id`] — hydration-safe deterministic ID generation
 
 mod attrs;
+pub mod dismissable;
 mod ephemeral;
 mod id;
 pub mod prelude;
@@ -21,7 +22,7 @@ mod use_machine;
 pub use attrs::apply_styles_cssom;
 pub use attrs::{
     ArsNonceCssCtx, ArsNonceStyle, DioxusAttrResult, append_nonce_css, attr_map_to_dioxus,
-    intern_attr_name, use_style_strategy,
+    attr_map_to_dioxus_inline_attrs, intern_attr_name, use_style_strategy,
 };
 pub use ephemeral::EphemeralRef;
 #[cfg(feature = "ssr")]
@@ -33,8 +34,8 @@ pub use provider::DesktopPlatform;
 pub use provider::WebPlatform;
 pub use provider::{
     ArsContext, ArsProvider, ArsProviderProps, DioxusPlatform, DragData, FilePickerOptions,
-    NullPlatform, t, use_intl_backend, use_locale, use_messages, use_modality_context,
-    use_number_formatter, use_platform, warn_missing_provider,
+    NullPlatform, resolve_locale, t, use_intl_backend, use_locale, use_messages,
+    use_modality_context, use_number_formatter, use_platform, warn_missing_provider,
 };
 pub use use_machine::{UseMachineReturn, use_machine, use_machine_with_reactive_props};
 

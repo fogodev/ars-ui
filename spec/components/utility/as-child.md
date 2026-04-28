@@ -34,7 +34,10 @@ pub struct Props {
 }
 ```
 
-`Default` lets components compose `Props { as_child: true, ..default() }` without restating the other fields. `Eq` is implied by `bool: Eq` and is added so the derived bound matches the underlying field type.
+The struct field is `pub` so adapter destructure patterns keep working, but the documented
+construction path is the inherent builder: `Props::new()` returns the default and
+`Props::new().as_child(true)` toggles the flag. `Eq` is implied by `bool: Eq` and is added so
+the derived bound matches the underlying field type.
 
 ### 1.2 Connect / API
 

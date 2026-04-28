@@ -12,6 +12,7 @@
 
 mod attrs;
 mod controlled;
+pub mod dismissable;
 mod ephemeral;
 mod id;
 pub mod prelude;
@@ -20,7 +21,9 @@ mod use_machine;
 
 #[cfg(not(feature = "ssr"))]
 pub use attrs::apply_styles_cssom;
-pub use attrs::{LeptosAttrResult, attr_map_to_leptos, use_style_strategy};
+pub use attrs::{
+    LeptosAttrResult, attr_map_to_leptos, attr_map_to_leptos_inline_attrs, use_style_strategy,
+};
 pub use controlled::use_controlled_prop;
 pub use ephemeral::EphemeralRef;
 #[cfg(feature = "ssr")]

@@ -111,6 +111,62 @@ pub struct Props {
     pub dir: Option<Direction>,
 }
 
+impl Props {
+    /// Returns a fresh [`Props`] with every field at its [`Default`]
+    /// value: empty `id`, all booleans `false`, no `dir` override.
+    ///
+    /// Documented entry point for the builder chain.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets [`id`](Self::id) — the adapter-provided base ID for the
+    /// field root. Immutable for the lifetime of a machine instance.
+    #[must_use]
+    pub fn id(mut self, id: impl Into<String>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    /// Sets [`required`](Self::required).
+    #[must_use]
+    pub const fn required(mut self, value: bool) -> Self {
+        self.required = value;
+        self
+    }
+
+    /// Sets [`disabled`](Self::disabled).
+    #[must_use]
+    pub const fn disabled(mut self, value: bool) -> Self {
+        self.disabled = value;
+        self
+    }
+
+    /// Sets [`readonly`](Self::readonly).
+    #[must_use]
+    pub const fn readonly(mut self, value: bool) -> Self {
+        self.readonly = value;
+        self
+    }
+
+    /// Sets [`invalid`](Self::invalid) — the prop-driven invalid flag
+    /// applied before error-driven state.
+    #[must_use]
+    pub const fn invalid(mut self, value: bool) -> Self {
+        self.invalid = value;
+        self
+    }
+
+    /// Sets [`dir`](Self::dir) — the configured text direction for
+    /// RTL-aware rendering. Wraps the supplied value in [`Some`].
+    #[must_use]
+    pub const fn dir(mut self, dir: Direction) -> Self {
+        self.dir = Some(dir);
+        self
+    }
+}
+
 /// Framework-agnostic field component state machine.
 #[derive(Debug)]
 pub struct Machine;
@@ -913,5 +969,30 @@ mod tests {
         assert!(debug.contains("Api"));
         assert!(debug.contains("email"));
         assert!(debug.contains("Context"));
+    }
+
+    // ── Builder tests ──────────────────────────────────────────────
+
+    #[test]
+    fn props_new_returns_default_values() {
+        assert_eq!(Props::new(), Props::default());
+    }
+
+    #[test]
+    fn props_builder_chain_applies_each_setter() {
+        let props = Props::new()
+            .id("field-1")
+            .required(true)
+            .disabled(true)
+            .readonly(true)
+            .invalid(true)
+            .dir(Direction::Rtl);
+
+        assert_eq!(props.id, "field-1");
+        assert!(props.required);
+        assert!(props.disabled);
+        assert!(props.readonly);
+        assert!(props.invalid);
+        assert_eq!(props.dir, Some(Direction::Rtl));
     }
 }

@@ -2,6 +2,14 @@
 //!
 //! This crate owns the Dioxus-specific [`HarnessBackend`] implementation plus
 //! adapter-facing `render(...)` helpers used by Dioxus component tests.
+//!
+//! For non-web Dioxus targets (Desktop, mobile, SSR) the [`desktop`] module
+//! provides a headless [`VirtualDom`](dioxus::prelude::VirtualDom) harness
+//! that exercises the `cfg(not(feature = "web"))` graceful-degrade path
+//! adapter components follow on those platforms.
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod desktop;
 
 use std::{
     any::{Any, type_name},

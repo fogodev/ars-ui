@@ -909,8 +909,8 @@ impl<T: ?Sized> AsRef<T> for Callback<T> {
     fn as_ref(&self) -> &T { self.0.as_ref() }
 }
 
-/// Callback supports an optional return type via `Callback<dyn Fn(Args) -> Out>`.
-/// When the return type is `()` (the default), you can write `Callback<dyn Fn(Args)>`
+/// Callback supports an optional return type via `Callback<dyn Fn(Args) -> Out + Send + Sync>`.
+/// When the return type is `()` (the default), you can write `Callback<dyn Fn(Args) + Send + Sync>`
 /// as shorthand — `Fn(Args)` is sugar for `Fn(Args) -> ()` in Rust.
 ///
 /// This mirrors the Leptos `Callback<In, Out = ()>` and Dioxus `Callback<Args, Ret = ()>`
@@ -918,37 +918,37 @@ impl<T: ?Sized> AsRef<T> for Callback<T> {
 ///
 /// Constructors and `From` impls use raw `Arc` construction for dyn trait object
 /// coercion (`Arc` lacks `CoerceUnsized`).
-impl<Args: 'static, Out: 'static> Callback<dyn Fn(Args) -> Out> {
+impl<Args: 'static, Out: 'static> Callback<dyn Fn(Args) -> Out + Send + Sync> {
     pub fn new(f: impl Fn(Args) -> Out + Send + Sync + 'static) -> Self {
         Self(alloc::sync::Arc::new(f))
     }
 }
 
-/// Constructor for zero-argument `Callback<dyn Fn()>`.
+/// Constructor for zero-argument `Callback<dyn Fn() + Send + Sync>`.
 ///
 /// `dyn Fn()` and `dyn Fn(Args) -> Out` are distinct trait objects in Rust,
 /// so the generic `Callback::new` (which requires one `Args` parameter)
-/// cannot produce `Callback<dyn Fn()>`. This fills that gap for
+/// cannot produce `Callback<dyn Fn() + Send + Sync>`. This fills that gap for
 /// void callbacks (e.g. `on_dismiss`, `on_escape_key_down`).
-impl Callback<dyn Fn()> {
+impl Callback<dyn Fn() + Send + Sync> {
     pub fn new_void(f: impl Fn() + Send + Sync + 'static) -> Self {
         Self(alloc::sync::Arc::new(f))
     }
 }
 
 // From impls for ergonomic construction
-impl<F: Fn(Args) -> Out + Send + Sync + 'static, Args: 'static, Out: 'static> From<F> for Callback<dyn Fn(Args) -> Out> {
+impl<F: Fn(Args) -> Out + Send + Sync + 'static, Args: 'static, Out: 'static> From<F> for Callback<dyn Fn(Args) -> Out + Send + Sync> {
     fn from(f: F) -> Self { Callback(alloc::sync::Arc::new(f)) }
 }
 
 // From impls for zero-argument closures (`dyn Fn()`)
-impl<F: Fn() + Send + Sync + 'static> From<F> for Callback<dyn Fn()> {
+impl<F: Fn() + Send + Sync + 'static> From<F> for Callback<dyn Fn() + Send + Sync> {
     fn from(f: F) -> Self { Callback(alloc::sync::Arc::new(f)) }
 }
 
 // Usage examples:
 //   let cb = callback(|s: String| log::info!("{s}"));  // Preferred: free function
-//   let cb2: Callback<dyn Fn(String)> = Callback::new(|s: String| log::info!("{s}")); // Also valid
+//   let cb2: Callback<dyn Fn(String) + Send + Sync> = Callback::new(|s: String| log::info!("{s}")); // Also valid
 //   cb("hello".into());   // Deref makes this work directly
 //   (&*cb)("hello");      // Equivalent explicit deref
 //   cb.as_ref()("hello"); // AsRef alternative
@@ -959,10 +959,10 @@ impl<F: Fn() + Send + Sync + 'static> From<F> for Callback<dyn Fn()> {
 A free function `callback()` is provided for ergonomic construction with better type inference. The compiler can infer `Args` from the closure signature without requiring turbofish syntax:
 
 ```rust
-/// Ergonomic constructor for `Callback<dyn Fn(Args) -> Out>`.
+/// Ergonomic constructor for `Callback<dyn Fn(Args) -> Out + Send + Sync>`.
 /// Avoids the turbofish syntax required by `Callback::new()` in generic contexts.
 /// For void-return callbacks, `Out` infers to `()` automatically.
-pub fn callback<Args: 'static, Out: 'static>(f: impl Fn(Args) -> Out + Send + Sync + 'static) -> Callback<dyn Fn(Args) -> Out> {
+pub fn callback<Args: 'static, Out: 'static>(f: impl Fn(Args) -> Out + Send + Sync + 'static) -> Callback<dyn Fn(Args) -> Out + Send + Sync> {
     Callback::new(f)
 }
 ```
@@ -1044,7 +1044,7 @@ New code should prefer `Callback<T>` for all event-handling use cases.
      Generic code that must accept either Callback or MessageFn should use a simple
      conversion: both types Deref to the inner closure, so `&*cb` yields `&dyn Fn(...)`. -->
 
-Code that previously used `impl SmartCallback<T>` bounds should instead accept `&dyn Fn(Args)` directly, or be generic over `F: Fn(Args)`. Both `Callback<dyn Fn(Args)>` and `MessageFn<dyn Fn(Args)>` implement `Deref` to their inner closure, so callers can pass `&*callback` or `&*message_fn` to any function expecting a borrowed closure reference.
+Code that previously used `impl SmartCallback<T>` bounds should instead accept `&dyn Fn(Args)` directly, or be generic over `F: Fn(Args)`. Both `Callback<dyn Fn(Args) + Send + Sync>` and `MessageFn<dyn Fn(Args)>` implement `Deref` to their inner closure, so callers can pass `&*callback` or `&*message_fn` to any function expecting a borrowed closure reference.
 
 > **Default English Messages:** Each component module MUST provide a `default()` impl on its `XyzMessages` struct that returns fallback English messages. Adapters override these defaults via Props fields or context injection (e.g., `ArsProvider`). This ensures components render meaningful text even when no i18n configuration is present. See `04-internationalization.md` for the full message override chain.
 
@@ -1056,11 +1056,11 @@ Code that previously used `impl SmartCallback<T>` bounds should instead accept `
 /// | Type | Defined In | Purpose | Example |
 /// |------|-----------|---------|---------|
 /// | `MessageFn<T>` | `ars-core` (callback.rs) | i18n translatable string closures | `MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync>` |
-/// | `Callback<T>` | here (`01-architecture.md`) | Event/format callbacks in Props | `Callback<dyn Fn(String)>`, `Callback<dyn Fn(f64) -> String>` |
+/// | `Callback<T>` | here (`01-architecture.md`) | Event/format callbacks in Props | `Callback<dyn Fn(String) + Send + Sync>`, `Callback<dyn Fn(f64) -> String + Send + Sync>` |
 /// | `CleanupFn` | here (`01-architecture.md`) | Effect cleanup (returned by setup) | `Box<dyn FnOnce()>` |
 /// | `&dyn Fn(Event)` | connect()/Api structs | Borrowed send callback in connect | `send: &'a dyn Fn(M::Event)` |
 ///
-/// **Do NOT use raw `Arc<dyn Fn(...)>` in Props structs** — always use `Callback<dyn Fn(...)>`.
+/// **Do NOT use raw `Arc<dyn Fn(...)>` in Props structs** — always use `Callback<dyn Fn(...) + Send + Sync>`.
 /// This ensures correct cfg-gating between `Arc` (native) and `Rc` (WASM).
 ///
 /// **Cfg-gated Props example:** When writing generic Props that contain `Callback` fields,
@@ -1070,7 +1070,7 @@ Code that previously used `impl SmartCallback<T>` bounds should instead accept `
 /// #[derive(Clone, HasId)]
 /// pub struct MyProps {
 ///     pub id: String,
-///     pub on_change: Option<Callback<dyn Fn(String)>>,
+///     pub on_change: Option<Callback<dyn Fn(String) + Send + Sync>>,
 ///     pub on_submit: Option<Callback<dyn Fn(())>>,
 /// }
 ///
@@ -1146,7 +1146,7 @@ Code that previously used `impl SmartCallback<T>` bounds should instead accept `
 ///
 /// ```rust
 /// // In your library crate — define a newtype around the callback.
-/// pub struct OnChange(pub Callback<dyn Fn(String)>);
+/// pub struct OnChange(pub Callback<dyn Fn(String) + Send + Sync>);
 ///
 /// // It is valid to require Send + Sync when the captured state satisfies it.
 ///```

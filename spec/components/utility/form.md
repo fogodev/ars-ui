@@ -69,6 +69,19 @@ The core machine props are:
 The machine uses `type Messages = ()`. Localized wording is resolved separately through the
 domain-level `ars_forms::form::Messages` bundle.
 
+Construct via the inherent builder: `Props::new()` returns the default; setters
+(`id`, `validation_behavior`, `validation_errors`, `action`, `role`) accept owned values or
+`impl Into<String>` and return `Self` for chaining. `Option<String>` setters wrap the supplied
+value in `Some` automatically:
+
+```rust
+let props = form::Props::new()
+    .id("checkout")
+    .validation_behavior(ValidationBehavior::Aria)
+    .action("/submit")
+    .role("search");
+```
+
 ### 1.6 Connect API
 
 `form::Api` exposes:

@@ -98,13 +98,13 @@ pub struct LongPressConfig {
     pub long_press_announcement: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
 
     /// Called when the hold begins and the interaction enters `Timing`.
-    pub on_long_press_start: Option<Callback<dyn Fn(LongPressEvent)>>,
+    pub on_long_press_start: Option<Callback<dyn Fn(LongPressEvent) + Send + Sync>>,
 
     /// Called when the threshold elapses while the hold is still active.
-    pub on_long_press: Option<Callback<dyn Fn(LongPressEvent)>>,
+    pub on_long_press: Option<Callback<dyn Fn(LongPressEvent) + Send + Sync>>,
 
     /// Called when the interaction is cancelled before reaching the threshold.
-    pub on_long_press_cancel: Option<Callback<dyn Fn(LongPressEvent)>>,
+    pub on_long_press_cancel: Option<Callback<dyn Fn(LongPressEvent) + Send + Sync>>,
 
     /// Shared state used to suppress the co-located `Press` activation after a
     /// completed long press.

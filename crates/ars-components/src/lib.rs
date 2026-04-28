@@ -11,6 +11,8 @@ pub mod overlay;
 /// Utility component machines.
 pub mod utility;
 
+pub use utility::dismissable::{DismissAttempt, DismissReason};
+
 #[cfg(test)]
 mod tests {
     #[test]

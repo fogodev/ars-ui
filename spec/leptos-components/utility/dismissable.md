@@ -14,13 +14,53 @@ This spec maps the core [`Dismissable`](../../components/utility/dismissable.md)
 
 ## 2. Public Adapter API
 
+The adapter exposes everything through a single `dismissable` module
+(reachable via `use ars_leptos::prelude::*;`). The module re-exports the
+agnostic `ars_components::utility::dismissable::*` surface alongside the
+Leptos-side wrappers, so callers spell every type with the same prefix:
+
 ```rust
 pub fn use_dismissable(
     root_ref: NodeRef<html::Div>,
     props: dismissable::Props,
-    inside_boundaries: Vec<String>,
-) -> DismissableHandle
+    inside_boundaries: Signal<Vec<String>>,
+) -> dismissable::Handle
+
+#[derive(Clone, Copy)]
+pub struct Handle {
+    /// Arena-backed Leptos callback. Invoke with `dismiss.run(())` to
+    /// fire `props.on_dismiss(DismissReason::DismissButton)` if a
+    /// callback is registered.
+    pub dismiss: leptos::callback::Callback<()>,
+    /// Stable id used for overlay-stack registration and portal-owner
+    /// matching, stored in the Leptos arena so `Handle` is `Copy`. Read
+    /// the underlying `String` with `overlay_id.read_value()` (clone) or
+    /// `overlay_id.with_value(|id| …)` (borrow).
+    pub overlay_id: leptos::prelude::StoredValue<String>,
+}
+
+#[component]
+pub fn Region(
+    props: dismissable::Props,
+    #[prop(optional, into)] inside_boundaries: Option<Signal<Vec<String>>>,
+    /// Optional locale override — falls through to the surrounding
+    /// `ArsProvider` locale when [`None`].
+    #[prop(optional)] locale: Option<ars_i18n::Locale>,
+    /// Optional message bundle override — falls through to the
+    /// adapter's `use_messages` resolution chain (props →
+    /// `I18nRegistries` → `Messages::default`) when [`None`].
+    #[prop(optional)] messages: Option<dismissable::Messages>,
+    children: Children,
+) -> impl IntoView
 ```
+
+`Handle` is intentionally `Copy`. Both fields live in the active Leptos
+[`Owner`](leptos::reactive::owner::Owner)'s arena — the
+[`Callback`](leptos::callback::Callback) is a `StoredValue<Arc<dyn Fn>>`
+behind a `Copy` newtype, and `overlay_id` is a `StoredValue<String>`
+directly. Consumers can move the handle into multiple closures or pass
+it through the view tree without explicit clones; it stays valid until
+the owning `Owner` is dropped.
 
 The public surface matches the full core `Props`, including `on_interact_outside`, `on_escape_key_down`, `on_dismiss`, `disable_outside_pointer_events`, `exclude_ids`, `messages`, and `locale`.
 
@@ -176,10 +216,10 @@ Dismissable state is primarily interaction-driven. Configuration props are gener
 
 ## 22. Shared Adapter Helper Notes
 
-| Helper concept                    | Required?   | Responsibility                                                                       | Reused by                                                      | Notes                                                                      |
-| --------------------------------- | ----------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| node-boundary registration helper | required    | Register and release the root and any portal-aware inside boundaries.                | `dismissable`, overlays, `focus-scope`                         | IDs are insufficient once live-node containment is required.               |
-| platform capability helper        | recommended | Normalize outside-interaction assumptions for browser, Desktop, and webview targets. | `dismissable`, `download-trigger`, `drop-zone`, `action-group` | Should surface target-specific caveats without duplicating listener logic. |
+| Helper concept                    | Required?   | Responsibility                                                                                                                                                                                                  | Reused by                                                      | Notes                                                                                                                                                      |
+| --------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| node-boundary registration helper | required    | `ars_dom::outside_interaction::target_is_inside_boundary` — walks DOM ancestors checking root containment, ancestor `id` matches, and `data-ars-portal-owner` ↔ overlay-stack portal ownership.                 | `dismissable`, overlays, `focus-scope`                         | IDs are insufficient once live-node containment is required; portal-owner walking is the documented path. See `spec/foundation/11-dom-utilities.md` §12.1. |
+| platform capability helper        | recommended | `ars_dom::outside_interaction::install_outside_interaction_listeners` — installs document `pointerdown`+`focusin` and root-scoped `keydown` listeners gated on `overlay_stack::is_topmost`; returns a teardown. | `dismissable`, `download-trigger`, `drop-zone`, `action-group` | Web wires real listeners; non-wasm targets return a no-op teardown so adapters call uniformly. See `spec/foundation/11-dom-utilities.md` §12.2.            |
 
 ## 23. Framework-Specific Behavior
 
@@ -188,33 +228,51 @@ Leptos uses client-only DOM listener setup plus `on_cleanup`. Optional environme
 ## 24. Canonical Implementation Sketch
 
 ```rust
-use leptos::prelude::*;
+use ars_leptos::{attr_map_to_leptos, prelude::*};
+use leptos::{html, prelude::*, tachys::html::attribute::any_attribute::AnyAttribute};
 
 #[component]
-pub fn DismissableRegion(props: dismissable::Props, children: Children) -> impl IntoView {
+pub fn Region(
+    props: dismissable::Props,
+    #[prop(optional, into)] inside_boundaries: Option<Signal<Vec<String>>>,
+    children: Children,
+) -> impl IntoView {
     let root_ref = NodeRef::<html::Div>::new();
-    let dismiss_label = "Dismiss";
-    let dismiss_attrs = dismissable::dismiss_button_attrs(dismiss_label);
+    let boundaries = inside_boundaries.unwrap_or_else(|| Signal::stored(Vec::new()));
+    let messages = use_messages::<dismissable::Messages>(None, None);
+    let locale = use_locale();
+    let label = (messages.dismiss_label)(&locale.get_untracked());
 
-    let _handle = use_dismissable(root_ref, props.clone(), Vec::new());
+    let attrs = dismissable::dismiss_button_attrs(&label);
+    let leptos_attrs: Vec<AnyAttribute> = attr_map_to_leptos(
+        attrs,
+        &ars_core::StyleStrategy::Inline,
+        None,
+    )
+    .attrs
+    .into_iter()
+    .map(|(name, value)| leptos::attr::custom::custom_attribute(name, value).into_any_attr())
+    .collect();
+
+    // `Handle` is `Copy`, so the same value can move into both onclick
+    // closures without explicit clones.
+    let handle = dismissable::use_dismissable(root_ref, props.clone(), boundaries);
 
     view! {
         <div node_ref=root_ref>
-            <button {..dismiss_attrs.clone()} on:click=move |_| {
-                if let Some(cb) = props.on_dismiss.as_ref() {
-                    cb.run(());
-                }
-            } />
+            <button {..leptos_attrs.clone()} on:click=move |_| { handle.dismiss.run(()); } />
             {children()}
-            <button {..dismiss_attrs} on:click=move |_| {
-                if let Some(cb) = props.on_dismiss.as_ref() {
-                    cb.run(());
-                }
-            } />
+            <button {..leptos_attrs} on:click=move |_| { handle.dismiss.run(()); } />
         </div>
     }
 }
 ```
+
+For the common case the adapter ships [`dismissable::Region`] which already
+renders the paired-button anatomy above. Both buttons fire
+`props.on_dismiss(dismissable::DismissReason::DismissButton)` directly,
+bypassing the veto-capable callbacks (the user explicitly clicked the
+visually-hidden control, so dismissal is unconditional).
 
 Both dismiss buttons must be native `<button>` elements.
 

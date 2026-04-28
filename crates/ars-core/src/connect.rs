@@ -5,8 +5,8 @@
 //! a framework-agnostic vocabulary for converting machine state into DOM-facing
 //! metadata without relying on raw string literals throughout the codebase.
 
-use alloc::{string::String, vec::Vec};
-use core::fmt::{self, Display};
+use alloc::{string::String, sync::Arc, vec::Vec};
+use core::fmt::{self, Debug, Display};
 
 /// Typed `aria-*` attribute names used by [`HtmlAttr::Aria`].
 #[non_exhaustive]
@@ -1856,9 +1856,31 @@ impl Display for CssProperty {
     }
 }
 
-/// Stringly, boolean, or absent attribute values stored in an [`AttrMap`].
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+/// Type alias for an [`AttrValue::Reactive`] closure — takes no arguments and
+/// returns the current [`String`] value of the attribute. The closure is
+/// `Send + Sync` so adapter conversions are free to share it across threads
+/// (Leptos's reactive runtime requires `Send` bounds even on single-threaded
+/// targets); `'static` so it can be stored in `Arc` and outlive the
+/// originating component scope.
+pub type ReactiveStringFn = dyn Fn() -> String + Send + Sync + 'static;
+
+/// Type alias for an [`AttrValue::ReactiveBool`] closure — takes no arguments
+/// and returns the current `bool` value of the attribute. Same `Send + Sync +
+/// 'static` reasoning as [`ReactiveStringFn`].
+pub type ReactiveBoolFn = dyn Fn() -> bool + Send + Sync + 'static;
+
+/// Stringly, boolean, reactive, or absent attribute values stored in an
+/// [`AttrMap`].
+///
+/// The `Reactive` and `ReactiveBool` variants carry a closure that produces
+/// the current value on demand. Adapter conversions (e.g.
+/// [`attr_map_to_leptos_inline_attrs`](crate::AttrMap) — see the adapter
+/// crates) translate them to framework-native reactive primitives so the
+/// rendered attribute updates when the closure's tracked dependencies
+/// change. Static consumers (`as_str`, SSR snapshots) materialize the
+/// closure to a one-shot value.
+///
+/// [`attr_map_to_leptos_inline_attrs`]: ../../ars_leptos/attrs/fn.attr_map_to_leptos_inline_attrs.html
 pub enum AttrValue {
     /// String attribute value.
     String(String),
@@ -1866,19 +1888,148 @@ pub enum AttrValue {
     /// Boolean attribute value.
     Bool(bool),
 
+    /// Reactive string attribute value — the closure is called every time
+    /// the attribute needs to be (re-)rendered. Use
+    /// [`AttrValue::reactive`] to construct.
+    Reactive(Arc<ReactiveStringFn>),
+
+    /// Reactive boolean attribute value — the closure is called every time
+    /// the attribute needs to be (re-)rendered. Use
+    /// [`AttrValue::reactive_bool`] to construct.
+    ReactiveBool(Arc<ReactiveBoolFn>),
+
     /// Attribute should be removed.
     None,
 }
 
 impl AttrValue {
-    /// Returns the string representation of this value, or `None` for absent values.
+    /// Constructs an [`AttrValue::Reactive`] from any closure that returns a
+    /// fresh [`String`] on each invocation. The closure is wrapped in
+    /// [`Arc`] so the resulting [`AttrValue`] stays cheaply cloneable.
+    pub fn reactive<F>(f: F) -> Self
+    where
+        F: Fn() -> String + Send + Sync + 'static,
+    {
+        Self::Reactive(Arc::new(f))
+    }
+
+    /// Constructs an [`AttrValue::ReactiveBool`] from any closure that
+    /// returns a fresh `bool` on each invocation. The closure is wrapped in
+    /// [`Arc`] so the resulting [`AttrValue`] stays cheaply cloneable.
+    pub fn reactive_bool<F>(f: F) -> Self
+    where
+        F: Fn() -> bool + Send + Sync + 'static,
+    {
+        Self::ReactiveBool(Arc::new(f))
+    }
+
+    /// Returns the borrowed string representation of a **static** value.
+    /// Returns [`None`] for [`AttrValue::None`] and for the reactive
+    /// variants — the latter cannot return a borrow because the closure
+    /// owns its return value. Use [`materialize_string`](Self::materialize_string)
+    /// to invoke a reactive closure and obtain an owned [`String`].
     #[must_use]
     pub const fn as_str(&self) -> Option<&str> {
         match self {
             Self::String(value) => Some(value.as_str()),
             Self::Bool(true) => Some("true"),
             Self::Bool(false) => Some("false"),
-            Self::None => None,
+            Self::Reactive(_) | Self::ReactiveBool(_) | Self::None => None,
+        }
+    }
+
+    /// Materializes this value to a one-shot owned [`String`].
+    ///
+    /// Boolean variants ([`AttrValue::Bool`] and [`AttrValue::ReactiveBool`])
+    /// follow HTML presence/absence semantics symmetric with the adapter
+    /// rendering paths: `true` materializes to an empty string (attribute
+    /// present, no value), `false` returns [`None`] so the attribute is
+    /// skipped. The string variants always return the contained value;
+    /// [`AttrValue::None`] returns [`None`]. Reactive variants invoke
+    /// their closure exactly once.
+    #[must_use]
+    pub fn materialize_string(&self) -> Option<String> {
+        match self {
+            Self::String(value) => Some(value.clone()),
+            Self::Bool(true) => Some(String::new()),
+            Self::Reactive(f) => Some(f()),
+            Self::ReactiveBool(f) => f().then(String::new),
+            Self::Bool(false) | Self::None => None,
+        }
+    }
+}
+
+impl Clone for AttrValue {
+    fn clone(&self) -> Self {
+        match self {
+            Self::String(value) => Self::String(value.clone()),
+            Self::Bool(value) => Self::Bool(*value),
+            Self::Reactive(f) => Self::Reactive(Arc::clone(f)),
+            Self::ReactiveBool(f) => Self::ReactiveBool(Arc::clone(f)),
+            Self::None => Self::None,
+        }
+    }
+}
+
+impl Debug for AttrValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::String(value) => f.debug_tuple("String").field(value).finish(),
+            Self::Bool(value) => f.debug_tuple("Bool").field(value).finish(),
+            Self::Reactive(_) => f.debug_tuple("Reactive").field(&"<closure>").finish(),
+            Self::ReactiveBool(_) => f.debug_tuple("ReactiveBool").field(&"<closure>").finish(),
+            Self::None => f.write_str("None"),
+        }
+    }
+}
+
+impl PartialEq for AttrValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::String(a), Self::String(b)) => a == b,
+            (Self::Bool(a), Self::Bool(b)) => a == b,
+            (Self::Reactive(a), Self::Reactive(b)) => Arc::ptr_eq(a, b),
+            (Self::ReactiveBool(a), Self::ReactiveBool(b)) => Arc::ptr_eq(a, b),
+            (Self::None, Self::None) => true,
+            _ => false,
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for AttrValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // Reactive variants collapse to their non-reactive equivalents at
+        // serialization time — `AttrMap` only ever serializes during SSR
+        // (no `Deserialize` impl exists), and SSR consumers receive a
+        // static HTML attribute snapshot, not a closure. Emitting a
+        // `Reactive` / `ReactiveBool` tag would carry a "ghost reactivity"
+        // marker that nothing downstream can act on, so the closure
+        // materializes once and the resulting `String` / `Bool` variant
+        // is emitted directly. This also keeps the on-the-wire shape
+        // stable when a future component swaps a static label for a
+        // reactive one.
+        match self {
+            Self::String(value) => {
+                serializer.serialize_newtype_variant("AttrValue", 0, "String", value)
+            }
+
+            Self::Bool(value) => {
+                serializer.serialize_newtype_variant("AttrValue", 1, "Bool", value)
+            }
+
+            Self::Reactive(f) => {
+                serializer.serialize_newtype_variant("AttrValue", 0, "String", &f())
+            }
+
+            Self::ReactiveBool(f) => {
+                serializer.serialize_newtype_variant("AttrValue", 1, "Bool", &f())
+            }
+
+            Self::None => serializer.serialize_unit_variant("AttrValue", 2, "None"),
         }
     }
 }
@@ -2198,6 +2349,25 @@ impl From<bool> for AttrValue {
     }
 }
 
+/// Blanket conversion from any closure that returns a fresh [`String`] —
+/// the closure is wrapped in [`Arc`] and stored as an
+/// [`AttrValue::Reactive`]. This lets helpers like
+/// `dismiss_button_attrs` accept either a static `&str` / `String`
+/// label or a reactive closure with the same `impl Into<AttrValue>`
+/// parameter type.
+///
+/// `&str`, `String`, `&String`, and `bool` do not implement
+/// `Fn() -> String`, so the existing concrete `From` impls remain
+/// unambiguous.
+impl<F> From<F> for AttrValue
+where
+    F: Fn() -> String + Send + Sync + 'static,
+{
+    fn from(f: F) -> Self {
+        Self::reactive(f)
+    }
+}
+
 #[cfg(feature = "serde")]
 impl serde::Serialize for AriaAttr {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -2241,6 +2411,7 @@ impl serde::Serialize for CssProperty {
 #[cfg(test)]
 mod tests {
     use alloc::{
+        format,
         string::{String, ToString},
         vec,
     };
@@ -3082,6 +3253,94 @@ mod tests {
         assert_eq!(value.as_str(), Some("owned"));
     }
 
+    /// `as_str` cannot return a borrow into a closure-produced
+    /// `String` (the closure owns that allocation), so the reactive
+    /// variants deliberately return `None`. Adapter conversions must
+    /// route through `materialize_string` instead.
+    #[test]
+    fn attr_value_as_str_returns_none_for_reactive_variants() {
+        let reactive = AttrValue::reactive(|| String::from("Schließen"));
+        let reactive_bool = AttrValue::reactive_bool(|| true);
+
+        assert_eq!(reactive.as_str(), None);
+        assert_eq!(reactive_bool.as_str(), None);
+    }
+
+    #[test]
+    fn attr_value_materialize_string_covers_every_variant() {
+        // Static string round-trip
+        assert_eq!(
+            AttrValue::String(String::from("hello")).materialize_string(),
+            Some(String::from("hello"))
+        );
+
+        // Bool presence semantics
+        assert_eq!(
+            AttrValue::Bool(true).materialize_string(),
+            Some(String::new())
+        );
+        assert_eq!(AttrValue::Bool(false).materialize_string(), None);
+
+        // Reactive variants invoke the closure
+        assert_eq!(
+            AttrValue::reactive(|| String::from("Cerrar")).materialize_string(),
+            Some(String::from("Cerrar"))
+        );
+        assert_eq!(
+            AttrValue::reactive_bool(|| true).materialize_string(),
+            Some(String::new())
+        );
+        assert_eq!(
+            AttrValue::reactive_bool(|| false).materialize_string(),
+            None
+        );
+
+        // None always materializes to None
+        assert_eq!(AttrValue::None.materialize_string(), None);
+    }
+
+    /// Cloning the reactive variants shares the underlying `Arc` —
+    /// `PartialEq` is `Arc::ptr_eq`, so clones compare equal even
+    /// though structural comparison of `dyn Fn` is impossible.
+    #[test]
+    fn attr_value_reactive_clone_preserves_arc_identity() {
+        let original = AttrValue::reactive(|| String::from("x"));
+        let cloned = original.clone();
+
+        assert_eq!(original, cloned);
+
+        let original_bool = AttrValue::reactive_bool(|| true);
+        let cloned_bool = original_bool.clone();
+
+        assert_eq!(original_bool, cloned_bool);
+    }
+
+    /// Two independently-constructed reactive `AttrValue`s carry
+    /// distinct `Arc`s and therefore compare unequal — this is the
+    /// invariant adapter memoisation relies on to detect "the same
+    /// closure" vs "a fresh closure" without structural comparison.
+    #[test]
+    fn attr_value_reactive_distinct_constructions_compare_unequal() {
+        let a = AttrValue::reactive(|| String::from("x"));
+        let b = AttrValue::reactive(|| String::from("x"));
+
+        assert_ne!(a, b);
+    }
+
+    /// `Debug` for reactive variants must redact the inner closure to
+    /// a stable `<closure>` placeholder so log output never depends on
+    /// capture addresses.
+    #[test]
+    fn attr_value_reactive_debug_redacts_closure() {
+        let formatted = format!("{:?}", AttrValue::reactive(|| String::from("x")));
+        let formatted_bool = format!("{:?}", AttrValue::reactive_bool(|| true));
+
+        assert!(formatted.contains("Reactive"));
+        assert!(formatted.contains("<closure>"));
+        assert!(formatted_bool.contains("ReactiveBool"));
+        assert!(formatted_bool.contains("<closure>"));
+    }
+
     #[cfg(feature = "serde")]
     #[test]
     fn attr_map_serializes_for_ssr() {
@@ -3105,5 +3364,32 @@ mod tests {
             .expect("StyleStrategy must serialize");
 
         assert!(json.contains("nonce-123"));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn reactive_attr_value_serializes_as_static_string_variant() {
+        // Reactive variants must collapse to their non-reactive equivalent
+        // on the wire: SSR consumers receive a static `String` payload,
+        // never a `Reactive` tag they can't act on.
+        let value = AttrValue::reactive(|| String::from("Schließen"));
+
+        let json = serde_json::to_string(&value).expect("AttrValue must serialize");
+
+        assert!(json.contains("Schließen"));
+        assert!(json.contains("\"String\""));
+        assert!(!json.contains("\"Reactive\""));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn reactive_bool_attr_value_serializes_as_static_bool_variant() {
+        let value = AttrValue::reactive_bool(|| true);
+
+        let json = serde_json::to_string(&value).expect("AttrValue must serialize");
+
+        assert!(json.contains("true"));
+        assert!(json.contains("\"Bool\""));
+        assert!(!json.contains("\"ReactiveBool\""));
     }
 }

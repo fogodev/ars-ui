@@ -329,6 +329,32 @@ fn apply_attr_value(element: &web_sys::Element, attr: HtmlAttr, value: &AttrValu
             );
         }
 
+        // Reactive variants are evaluated once at write time. The live
+        // region announcer doesn't subscribe to signals — it pushes a
+        // snapshot of the current message to the DOM. Reactive
+        // re-evaluation on the announcer happens when the caller decides
+        // to re-invoke `apply_attr_value` with an updated `AttrValue`.
+        AttrValue::Reactive(f) => {
+            crate::debug::warn_dom_error(
+                &format!("setting reactive live region attribute {attr}"),
+                element.set_attribute(&attr.to_string(), &f()),
+            );
+        }
+
+        AttrValue::ReactiveBool(f) => {
+            if f() {
+                crate::debug::warn_dom_error(
+                    &format!("setting reactive live region boolean attribute {attr}"),
+                    element.set_attribute(&attr.to_string(), ""),
+                );
+            } else {
+                crate::debug::warn_dom_error(
+                    &format!("removing reactive live region attribute {attr}"),
+                    element.remove_attribute(&attr.to_string()),
+                );
+            }
+        }
+
         AttrValue::Bool(false) | AttrValue::None => {
             crate::debug::warn_dom_error(
                 &format!("removing live region attribute {attr}"),

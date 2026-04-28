@@ -2684,7 +2684,7 @@ pub enum Mode {
 /// Distinct from selection change — action activates the item.
 /// Uses the shared `Callback` abstraction so ownership and equality semantics
 /// stay consistent with other event handlers across all targets.
-pub type OnAction = Option<Callback<dyn Fn(Key)>>;
+pub type OnAction = Option<Callback<dyn Fn(Key) + Send + Sync>>;
 ```
 
 > **Capture semantics**: OnAction callbacks are invoked synchronously during event processing.

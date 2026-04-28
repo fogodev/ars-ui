@@ -284,13 +284,14 @@ pub struct PresenceProps {
 
 #[component]
 pub fn Presence(props: PresenceProps) -> Element {
-    let handle = use_presence(presence::Props {
-        id: generate_id("presence"),
-        present: *props.present.read(),
-        lazy_mount: props.lazy_mount,
-        skip_animation: props.skip_animation,
-        reduce_motion: false, // auto-detected by adapter
-    });
+    let handle = use_presence(
+        presence::Props::new()
+            .id(generate_id("presence"))
+            .present(*props.present.read())
+            .lazy_mount(props.lazy_mount)
+            .skip_animation(props.skip_animation),
+        // reduce_motion: auto-detected by adapter, left at default `false`
+    );
 
     // Sync present prop reactively.
     let present = props.present;

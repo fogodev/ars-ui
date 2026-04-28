@@ -62,6 +62,21 @@ The core machine props are:
 `form_submit::Machine` uses `type Messages = ()`. Announcement wording belongs to the adapter and
 the domain-level form message bundle rather than to the lifecycle machine itself.
 
+`Props` has no `Default` impl — the two adapter-provided callbacks are mandatory. Construct via
+the required-field constructor `Props::new(id, spawn_async_validation, schedule_microtask)`,
+which wraps the closures in `Callback::new` automatically and starts `validation_mode` at
+`Mode::default()`. Override the validation mode with the `.validation_mode(mode)` setter.
+Example:
+
+```rust
+let props = form_submit::Props::new(
+    "checkout",
+    |(validators, send)| { /* spawn_local on Leptos / spawn on Dioxus */ },
+    |task| { /* queueMicrotask on wasm / tokio::spawn equivalent on native */ },
+)
+.validation_mode(Mode::on_blur());
+```
+
 ### 1.5 Effects and Ownership Boundary
 
 The machine owns the lifecycle and effect registration names:

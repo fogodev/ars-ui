@@ -80,13 +80,13 @@ pub struct HoverConfig {
     pub disabled: bool,
 
     /// Called when the pointer enters the element.
-    pub on_hover_start: Option<Callback<dyn Fn(HoverEvent)>>,
+    pub on_hover_start: Option<Callback<dyn Fn(HoverEvent) + Send + Sync>>,
 
     /// Called when the pointer leaves the element.
-    pub on_hover_end: Option<Callback<dyn Fn(HoverEvent)>>,
+    pub on_hover_end: Option<Callback<dyn Fn(HoverEvent) + Send + Sync>>,
 
     /// Called whenever hover state changes.
-    pub on_hover_change: Option<Callback<dyn Fn(bool)>>,
+    pub on_hover_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
 }
 
 // ---------------------------------------------------------------------------

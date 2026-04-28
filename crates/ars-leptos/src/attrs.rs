@@ -36,12 +36,23 @@ pub fn attr_map_to_leptos(
 ) -> LeptosAttrResult {
     let parts = map.into_parts();
 
+    // SSR / static-string path: materialize reactive variants to a
+    // one-shot value so the rendered output snapshots the current closure
+    // result. Reactive subscribers don't survive past serialization on
+    // this path; the inline-attrs entrypoint below preserves reactivity
+    // when the attrs are spread into a live `view!`.
     let mut attrs = parts
         .attrs
         .into_iter()
         .filter_map(|(key, value)| match value {
             AttrValue::String(text) => Some((key.to_string(), text)),
             AttrValue::Bool(true) => Some((key.to_string(), String::new())),
+            AttrValue::Reactive(f) => Some((key.to_string(), f())),
+            // Reactive booleans materialize to HTML presence semantics
+            // matching the static [`AttrValue::Bool`] path: `true` →
+            // empty value (attribute present), `false` → skip the
+            // attribute entirely.
+            AttrValue::ReactiveBool(f) => f().then_some((key.to_string(), String::new())),
             AttrValue::Bool(false) | AttrValue::None => None,
         })
         .collect::<Vec<_>>();
@@ -84,6 +95,88 @@ pub fn attr_map_to_leptos(
         cssom_styles,
         nonce_css,
     }
+}
+
+/// Convenience wrapper around [`attr_map_to_leptos`] for callers that
+/// always render with [`StyleStrategy::Inline`] and only need a list of
+/// [`leptos::tachys::html::attribute::any_attribute::AnyAttribute`]
+/// values ready for spreading via `{..attrs}` in `view!`.
+///
+/// Each `(name, value)` pair returned by [`attr_map_to_leptos`] is wrapped
+/// through [`leptos::attr::custom::custom_attribute`] +
+/// [`leptos::tachys::html::attribute::any_attribute::IntoAnyAttribute::into_any_attr`]
+/// so the result is the same shape consumers spread with `{..}` in
+/// `view!`.
+///
+/// Use the full [`attr_map_to_leptos`] when [`StyleStrategy::Cssom`] or
+/// [`StyleStrategy::Nonce`] is in play and the caller needs to apply
+/// `cssom_styles` to the DOM or inject `nonce_css` into a `<style>` block.
+#[must_use]
+pub fn attr_map_to_leptos_inline_attrs(
+    map: AttrMap,
+) -> Vec<leptos::tachys::html::attribute::any_attribute::AnyAttribute> {
+    use leptos::tachys::html::attribute::any_attribute::IntoAnyAttribute;
+
+    let parts = map.into_parts();
+
+    let mut out: Vec<leptos::tachys::html::attribute::any_attribute::AnyAttribute> = parts
+        .attrs
+        .into_iter()
+        .filter_map(|(key, value)| {
+            let name = key.to_string();
+            match value {
+                AttrValue::String(text) => {
+                    Some(leptos::attr::custom::custom_attribute(name, text).into_any_attr())
+                }
+                AttrValue::Bool(true) => Some(
+                    leptos::attr::custom::custom_attribute(name, String::new()).into_any_attr(),
+                ),
+                AttrValue::Reactive(f) => {
+                    // tachys's `AttributeValue for F where F: ReactiveFunction`
+                    // wraps the closure in a `RenderEffect`, so the rendered
+                    // attribute updates whenever the signals read inside the
+                    // closure change.
+                    let closure = move || f();
+                    Some(leptos::attr::custom::custom_attribute(name, closure).into_any_attr())
+                }
+                AttrValue::ReactiveBool(f) => {
+                    // Reactive booleans follow the HTML presence/absence
+                    // semantics symmetric with the static [`AttrValue::Bool`]
+                    // path: `true` renders the attribute with an empty
+                    // value, `false` removes it from the rendered DOM.
+                    // tachys's `AttributeValue for Option<V>` skips the
+                    // attribute when the closure returns `None`, so the
+                    // reactive output toggles presence as the underlying
+                    // signal changes. Consumers that need ARIA-style
+                    // `"true"` / `"false"` literal values (`aria-busy`,
+                    // `aria-disabled`, `aria-expanded`, etc.) should use
+                    // [`AttrValue::reactive`] with a closure that returns
+                    // the literal string.
+                    let closure = move || f().then(String::new);
+                    Some(leptos::attr::custom::custom_attribute(name, closure).into_any_attr())
+                }
+                AttrValue::Bool(false) | AttrValue::None => None,
+            }
+        })
+        .collect();
+
+    // Keep parity with the SSR/static path: when there are styles, fold them
+    // into a single `style=""` inline attribute so the inline strategy
+    // matches what `attr_map_to_leptos` would have produced.
+    if !parts.styles.is_empty() {
+        let style = parts
+            .styles
+            .into_iter()
+            .map(|(property, value)| format!("{property}: {value};"))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        out.push(
+            leptos::attr::custom::custom_attribute(String::from("style"), style).into_any_attr(),
+        );
+    }
+
+    out
 }
 
 /// Applies CSS properties directly to an element via CSSOM.
@@ -243,6 +336,44 @@ mod tests {
         assert!(result.nonce_css.is_empty());
     }
 
+    /// SSR / static-string path materializes reactive variants to
+    /// their current value via the closure. Adapter wasm tests cover
+    /// the live reactive subscription path; this is the static
+    /// snapshot contract `attr_map_to_leptos` exposes for SSR.
+    #[test]
+    fn inline_strategy_materializes_reactive_string_to_current_value() {
+        let mut map = AttrMap::new();
+
+        map.set(
+            HtmlAttr::Aria(ars_core::AriaAttr::Label),
+            AttrValue::reactive(|| String::from("Schließen")),
+        );
+
+        let result = attr_map_to_leptos(map, &StyleStrategy::Inline, None);
+
+        assert_eq!(
+            result.attrs,
+            vec![(String::from("aria-label"), String::from("Schließen"))]
+        );
+    }
+
+    #[test]
+    fn inline_strategy_materializes_reactive_bool_with_presence_semantics() {
+        let mut map = AttrMap::new();
+
+        map.set(HtmlAttr::Disabled, AttrValue::reactive_bool(|| true))
+            .set(HtmlAttr::Required, AttrValue::reactive_bool(|| false));
+
+        let result = attr_map_to_leptos(map, &StyleStrategy::Inline, None);
+
+        // `true` materializes to an empty value (presence); `false`
+        // skips the attribute entirely — symmetric with static `Bool`.
+        assert_eq!(
+            result.attrs,
+            vec![(String::from("disabled"), String::new())]
+        );
+    }
+
     #[test]
     fn bool_false_and_none_are_filtered_while_bool_true_is_empty_string() {
         let mut map = AttrMap::new();
@@ -384,6 +515,47 @@ mod wasm_tests {
         assert_eq!(
             result.attrs,
             vec![(String::from("disabled"), String::new())]
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn attr_map_to_leptos_inline_attrs_returns_one_any_attr_per_underlying_pair_on_wasm() {
+        // Two attrs (`class`, `style`) folded by the Inline strategy.
+        let mut map = AttrMap::new();
+
+        map.set(HtmlAttr::Class, "btn")
+            .set_style(CssProperty::Width, "100px");
+
+        let attrs = attr_map_to_leptos_inline_attrs(map.clone());
+
+        // Same length the underlying helper produces — guarantees the
+        // wrapper folds styles (Inline) and doesn't accidentally drop or
+        // duplicate entries while mapping into `AnyAttribute`.
+        let baseline = attr_map_to_leptos(map, &StyleStrategy::Inline, None);
+
+        assert_eq!(
+            attrs.len(),
+            baseline.attrs.len(),
+            "wrapper must yield one AnyAttribute per (name, value) pair the Inline strategy produces",
+        );
+
+        assert_eq!(attrs.len(), 2);
+    }
+
+    #[wasm_bindgen_test]
+    fn attr_map_to_leptos_inline_attrs_drops_false_and_none_entries_on_wasm() {
+        let mut map = AttrMap::new();
+
+        map.set(HtmlAttr::Class, "kept")
+            .set_bool(HtmlAttr::Disabled, false)
+            .set(HtmlAttr::Title, AttrValue::None);
+
+        let attrs = attr_map_to_leptos_inline_attrs(map);
+
+        assert_eq!(
+            attrs.len(),
+            1,
+            "Bool(false) and AttrValue::None must not flow through the wrapper",
         );
     }
 

@@ -22,13 +22,13 @@ pub struct MoveConfig {
     pub disabled: bool,
 
     /// Called when movement begins.
-    pub on_move_start: Option<Callback<dyn Fn(MoveEvent)>>,
+    pub on_move_start: Option<Callback<dyn Fn(MoveEvent) + Send + Sync>>,
 
     /// Called for each movement delta.
-    pub on_move: Option<Callback<dyn Fn(MoveEvent)>>,
+    pub on_move: Option<Callback<dyn Fn(MoveEvent) + Send + Sync>>,
 
     /// Called when movement ends or is cancelled.
-    pub on_move_end: Option<Callback<dyn Fn(MoveEvent)>>,
+    pub on_move_end: Option<Callback<dyn Fn(MoveEvent) + Send + Sync>>,
 }
 
 /// A normalized move event describing a positional delta.
@@ -379,7 +379,11 @@ impl MoveResult {
         }
     }
 
-    fn dispatch_callback(&self, callback: Option<&Callback<dyn Fn(MoveEvent)>>, event: MoveEvent) {
+    fn dispatch_callback(
+        &self,
+        callback: Option<&Callback<dyn Fn(MoveEvent) + Send + Sync>>,
+        event: MoveEvent,
+    ) {
         if let Some(callback) = callback {
             callback(event);
         }

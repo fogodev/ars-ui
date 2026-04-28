@@ -4,6 +4,15 @@
 //! stored in Props structs, cloned cheaply, and
 //! compared by pointer identity. `Clone`, `PartialEq`, `Deref`, and `AsRef`
 //! all delegate to `Arc` with no cfg-gated code.
+//!
+//! ## Thread-safety
+//!
+//! All public constructors (`new`, `new_void`, `From`, [`callback`]) require
+//! `Send + Sync` bounds on the wrapped closure, and the trait objects in the
+//! type signatures (`dyn Fn(...) + Send + Sync`) carry those bounds so
+//! `Callback<…>` is itself `Send + Sync`. This is necessary for adapter
+//! crates whose framework requires cleanup/effect closures to be
+//! thread-safe (e.g. Leptos's `on_cleanup`).
 
 use alloc::sync::Arc;
 use core::{
@@ -17,9 +26,13 @@ use core::{
 /// [`MessageFn`](crate::MessageFn) (used for i18n message closures) and
 /// [`CleanupFn`](crate::CleanupFn) (used for effect cleanup).
 ///
-/// Supports an optional return type via `Callback<dyn Fn(Args) -> Out>`.
-/// When the return type is `()` (the default), write `Callback<dyn Fn(Args)>`
-/// as shorthand.
+/// Supports an optional return type via
+/// `Callback<dyn Fn(Args) -> Out + Send + Sync>`. When the return type is
+/// `()`, write `Callback<dyn Fn(Args) + Send + Sync>` as shorthand.
+///
+/// The trait object always carries `+ Send + Sync` so `Callback<T>` is
+/// itself `Send + Sync`. All public constructors enforce that bound on the
+/// closure being wrapped.
 pub struct Callback<T: ?Sized>(pub(crate) Arc<T>);
 
 impl<T: ?Sized> Clone for Callback<T> {
@@ -54,11 +67,11 @@ impl<T: ?Sized> AsRef<T> for Callback<T> {
     }
 }
 
-// ── Constructors for Callback<dyn Fn(Args) -> Out> ─────────────────
+// ── Constructors for Callback<dyn Fn(Args) -> Out + Send + Sync> ───
 // These use raw Arc construction for dyn trait object coercion.
 
-/// Constructor for `Callback<dyn Fn(Args) -> Out>`.
-impl<Args: 'static, Out: 'static> Callback<dyn Fn(Args) -> Out> {
+/// Constructor for `Callback<dyn Fn(Args) -> Out + Send + Sync>`.
+impl<Args: 'static, Out: 'static> Callback<dyn Fn(Args) -> Out + Send + Sync> {
     /// Creates a new callback wrapping the given closure.
     pub fn new(f: impl Fn(Args) -> Out + Send + Sync + 'static) -> Self {
         Self(Arc::new(f))
@@ -66,26 +79,27 @@ impl<Args: 'static, Out: 'static> Callback<dyn Fn(Args) -> Out> {
 }
 
 impl<F: Fn(Args) -> Out + Send + Sync + 'static, Args: 'static, Out: 'static> From<F>
-    for Callback<dyn Fn(Args) -> Out>
+    for Callback<dyn Fn(Args) -> Out + Send + Sync>
 {
     fn from(f: F) -> Self {
         Callback(Arc::new(f))
     }
 }
 
-// ── Constructors for Callback<dyn Fn()> (zero-argument) ────────────
-// `dyn Fn()` and `dyn Fn(Args) -> Out` are distinct trait objects in Rust,
-// so the generic `Callback::new` cannot produce `Callback<dyn Fn()>`.
+// ── Constructors for Callback<dyn Fn() + Send + Sync> (zero-argument) ─
+// `dyn Fn() + Send + Sync` and `dyn Fn(Args) -> Out + Send + Sync` are
+// distinct trait objects in Rust, so the generic `Callback::new` cannot
+// produce `Callback<dyn Fn() + Send + Sync>`.
 
-/// Constructor for zero-argument `Callback<dyn Fn()>`.
-impl Callback<dyn Fn()> {
+/// Constructor for zero-argument `Callback<dyn Fn() + Send + Sync>`.
+impl Callback<dyn Fn() + Send + Sync> {
     /// Creates a new zero-argument callback wrapping the given closure.
     pub fn new_void(f: impl Fn() + Send + Sync + 'static) -> Self {
         Self(Arc::new(f))
     }
 }
 
-impl<F: Fn() + Send + Sync + 'static> From<F> for Callback<dyn Fn()> {
+impl<F: Fn() + Send + Sync + 'static> From<F> for Callback<dyn Fn() + Send + Sync> {
     fn from(f: F) -> Self {
         Callback(Arc::new(f))
     }
@@ -99,7 +113,7 @@ impl<F: Fn() + Send + Sync + 'static> From<F> for Callback<dyn Fn()> {
 /// requiring turbofish syntax.
 pub fn callback<Args: 'static, Out: 'static>(
     f: impl Fn(Args) -> Out + Send + Sync + 'static,
-) -> Callback<dyn Fn(Args) -> Out> {
+) -> Callback<dyn Fn(Args) -> Out + Send + Sync> {
     Callback::new(f)
 }
 
@@ -173,7 +187,7 @@ mod tests {
 
     #[test]
     fn callback_from_closure_invokes_regular_constructor_path() {
-        let cb: Callback<dyn Fn(i32) -> i32> = Callback::from(|value| value + 2);
+        let cb: Callback<dyn Fn(i32) -> i32 + Send + Sync> = Callback::from(|value| value + 2);
 
         assert_eq!(cb(40), 42);
     }
@@ -182,7 +196,7 @@ mod tests {
     fn callback_from_zero_arg_closure_invokes_void_constructor_path() {
         let flag = Arc::new(core::sync::atomic::AtomicBool::new(false));
 
-        let cb: Callback<dyn Fn()> = {
+        let cb: Callback<dyn Fn() + Send + Sync> = {
             let flag = Arc::clone(&flag);
             Callback::from(move || {
                 flag.store(true, core::sync::atomic::Ordering::SeqCst);

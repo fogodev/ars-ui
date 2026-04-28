@@ -113,13 +113,13 @@ pub struct FocusConfig {
     pub modality: Arc<dyn ModalityContext>,
 
     /// Called when the element receives focus.
-    pub on_focus: Option<Callback<dyn Fn(FocusEvent)>>,
+    pub on_focus: Option<Callback<dyn Fn(FocusEvent) + Send + Sync>>,
 
     /// Called when the element loses focus.
-    pub on_blur: Option<Callback<dyn Fn(FocusEvent)>>,
+    pub on_blur: Option<Callback<dyn Fn(FocusEvent) + Send + Sync>>,
 
     /// Called when focus-visible state changes.
-    pub on_focus_visible_change: Option<Callback<dyn Fn(bool)>>,
+    pub on_focus_visible_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
 }
 
 impl Debug for FocusConfig {
@@ -174,13 +174,13 @@ pub struct FocusWithinConfig {
     pub modality: Arc<dyn ModalityContext>,
 
     /// Called when focus enters the container (any descendant focused).
-    pub on_focus_within: Option<Callback<dyn Fn(FocusEvent)>>,
+    pub on_focus_within: Option<Callback<dyn Fn(FocusEvent) + Send + Sync>>,
 
     /// Called when focus leaves the container entirely.
-    pub on_blur_within: Option<Callback<dyn Fn(FocusEvent)>>,
+    pub on_blur_within: Option<Callback<dyn Fn(FocusEvent) + Send + Sync>>,
 
     /// Called when focus-within-visible state changes.
-    pub on_focus_within_visible_change: Option<Callback<dyn Fn(bool)>>,
+    pub on_focus_within_visible_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
 }
 
 impl Debug for FocusWithinConfig {
