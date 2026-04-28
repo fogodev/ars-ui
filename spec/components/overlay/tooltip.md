@@ -324,6 +324,9 @@ impl ars_core::Machine for Machine {
             (State::Closed, Event::Focus) => {
                 Some(open_plan(props, |ctx| { ctx.focus_active = true; }))
             }
+            (State::Closed, Event::Blur) => {
+                Some(TransitionPlan::context_only(|ctx| { ctx.focus_active = false; }))
+            }
 
             // Timer fired -> show
             (State::OpenPending, Event::OpenTimerFired) => {
@@ -336,7 +339,8 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(|ctx| { ctx.hover_active = true; }))
             }
             (State::OpenPending, Event::Focus) => {
-                Some(open_plan(props, |ctx| { ctx.focus_active = true; }))
+                Some(open_plan(props, |ctx| { ctx.focus_active = true; })
+                    .cancel_effect(OPEN_DELAY_EFFECT))
             }
 
             // Cancel show delay only if BOTH hover and focus are gone
@@ -345,7 +349,8 @@ impl ars_core::Machine for Machine {
                     Some(TransitionPlan::context_only(|ctx| { ctx.hover_active = false; }))
                 } else {
                     Some(TransitionPlan::to(State::Closed)
-                        .apply(|ctx| { ctx.hover_active = false; }))
+                        .apply(|ctx| { ctx.hover_active = false; })
+                        .cancel_effect(OPEN_DELAY_EFFECT))
                 }
             }
             (State::OpenPending, Event::Blur) => {
@@ -353,7 +358,8 @@ impl ars_core::Machine for Machine {
                     Some(TransitionPlan::context_only(|ctx| { ctx.focus_active = false; }))
                 } else {
                     Some(TransitionPlan::to(State::Closed)
-                        .apply(|ctx| { ctx.focus_active = false; }))
+                        .apply(|ctx| { ctx.focus_active = false; })
+                        .cancel_effect(OPEN_DELAY_EFFECT))
                 }
             }
 
@@ -421,17 +427,27 @@ impl ars_core::Machine for Machine {
             }
 
             // Click dismisses tooltip
-            (State::Open | State::OpenPending, Event::CloseOnClick) => {
+            (State::OpenPending, Event::CloseOnClick) => {
                 if !props.close_on_click { return None; }
                 Some(TransitionPlan::to(State::Closed)
-                    .apply(|ctx| { ctx.open = false; ctx.hover_active = false; ctx.focus_active = false; }))
+                    .apply(|ctx| { ctx.open = false; ctx.hover_active = false; ctx.focus_active = false; })
+                    .cancel_effect(OPEN_DELAY_EFFECT))
+            }
+            (State::Open, Event::CloseOnClick) => {
+                if !props.close_on_click { return None; }
+                Some(close_now_plan(props))
             }
 
             // Scroll dismisses tooltip
-            (State::Open | State::OpenPending, Event::CloseOnScroll) => {
+            (State::OpenPending, Event::CloseOnScroll) => {
                 if !props.close_on_scroll { return None; }
                 Some(TransitionPlan::to(State::Closed)
-                    .apply(|ctx| { ctx.open = false; ctx.hover_active = false; ctx.focus_active = false; }))
+                    .apply(|ctx| { ctx.open = false; ctx.hover_active = false; ctx.focus_active = false; })
+                    .cancel_effect(OPEN_DELAY_EFFECT))
+            }
+            (State::Open, Event::CloseOnScroll) => {
+                if !props.close_on_scroll { return None; }
+                Some(close_now_plan(props))
             }
 
             (State::ClosePending, Event::CloseTimerFired) => {
@@ -448,15 +464,30 @@ impl ars_core::Machine for Machine {
             (State::ClosePending, Event::CloseOnEscape) if props.close_on_escape => {
                 Some(close_now_plan(props).cancel_effect(CLOSE_DELAY_EFFECT))
             }
+            (State::ClosePending, Event::CloseOnClick) if props.close_on_click => {
+                Some(close_now_plan(props).cancel_effect(CLOSE_DELAY_EFFECT))
+            }
+            (State::ClosePending, Event::CloseOnScroll) if props.close_on_scroll => {
+                Some(close_now_plan(props).cancel_effect(CLOSE_DELAY_EFFECT))
+            }
 
             // Programmatic open — skip delay, show immediately
-            (State::Closed | State::OpenPending, Event::Open) => {
+            (State::Closed, Event::Open) => {
                 Some(open_plan(props, |_| {}))
+            }
+            (State::OpenPending, Event::Open) => {
+                Some(open_plan(props, |_| {}).cancel_effect(OPEN_DELAY_EFFECT))
             }
 
             // Programmatic close — skip delay, hide immediately
-            (State::Open | State::OpenPending | State::ClosePending, Event::Close) => {
+            (State::Open, Event::Close) => {
                 Some(close_now_plan(props))
+            }
+            (State::OpenPending, Event::Close) => {
+                Some(close_now_plan(props).cancel_effect(OPEN_DELAY_EFFECT))
+            }
+            (State::ClosePending, Event::Close) => {
+                Some(close_now_plan(props).cancel_effect(CLOSE_DELAY_EFFECT))
             }
 
             // Controlled prop synchronization owns visible open state.

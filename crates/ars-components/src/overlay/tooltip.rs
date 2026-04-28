@@ -412,6 +412,12 @@ impl ars_core::Machine for Machine {
                 ctx.focus_active = true;
             })),
 
+            (State::Closed, Event::Blur) => {
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.focus_active = false;
+                }))
+            }
+
             (State::OpenPending, Event::OpenTimerFired) => Some(
                 open_plan(props, |ctx| {
                     ctx.hover_active = true;
@@ -425,9 +431,12 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            (State::OpenPending, Event::Focus) => Some(open_plan(props, |ctx| {
-                ctx.focus_active = true;
-            })),
+            (State::OpenPending, Event::Focus) => Some(
+                open_plan(props, |ctx| {
+                    ctx.focus_active = true;
+                })
+                .cancel_effect(OPEN_DELAY_EFFECT),
+            ),
 
             (State::OpenPending, Event::PointerLeave) if ctx.focus_active => {
                 Some(TransitionPlan::context_only(|ctx: &mut Context| {
@@ -550,10 +559,20 @@ impl ars_core::Machine for Machine {
                 Some(close_now_plan(props).cancel_effect(CLOSE_DELAY_EFFECT))
             }
 
-            (State::Closed | State::OpenPending, Event::Open) => Some(open_plan(props, |_| {})),
+            (State::Closed, Event::Open) => Some(open_plan(props, |_| {})),
 
-            (State::Open | State::OpenPending | State::ClosePending, Event::Close) => {
-                Some(close_now_plan(props))
+            (State::OpenPending, Event::Open) => {
+                Some(open_plan(props, |_| {}).cancel_effect(OPEN_DELAY_EFFECT))
+            }
+
+            (State::Open, Event::Close) => Some(close_now_plan(props)),
+
+            (State::OpenPending, Event::Close) => {
+                Some(close_now_plan(props).cancel_effect(OPEN_DELAY_EFFECT))
+            }
+
+            (State::ClosePending, Event::Close) => {
+                Some(close_now_plan(props).cancel_effect(CLOSE_DELAY_EFFECT))
             }
 
             (_, Event::SetControlledOpen(open)) => Some(sync_controlled_plan(*open, props)),
@@ -1168,6 +1187,7 @@ mod tests {
             effect_names(&result),
             vec![OPEN_CHANGE_EFFECT, ALLOCATE_Z_INDEX_EFFECT]
         );
+        assert_eq!(result.cancel_effects, vec![OPEN_DELAY_EFFECT]);
     }
 
     #[test]
@@ -1265,6 +1285,32 @@ mod tests {
             assert!(!service.context().hover_active);
             assert_eq!(result.cancel_effects, vec![OPEN_DELAY_EFFECT]);
         }
+    }
+
+    #[test]
+    fn tooltip_open_pending_programmatic_open_cancels_open_delay() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
+
+        drop(service.send(Event::PointerEnter));
+
+        let result = service.send(Event::Open);
+
+        assert_eq!(service.state(), &State::Open);
+        assert!(service.context().open);
+        assert_eq!(result.cancel_effects, vec![OPEN_DELAY_EFFECT]);
+    }
+
+    #[test]
+    fn tooltip_open_pending_programmatic_close_cancels_open_delay() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
+
+        drop(service.send(Event::PointerEnter));
+
+        let result = service.send(Event::Close);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+        assert_eq!(result.cancel_effects, vec![OPEN_DELAY_EFFECT]);
     }
 
     #[test]
@@ -1503,6 +1549,59 @@ mod tests {
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().open);
         assert_eq!(result.cancel_effects, vec![CLOSE_DELAY_EFFECT]);
+    }
+
+    #[test]
+    fn tooltip_close_pending_programmatic_close_cancels_delay() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        drop(service.send(Event::PointerLeave));
+
+        let result = service.send(Event::Close);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+        assert_eq!(result.cancel_effects, vec![CLOSE_DELAY_EFFECT]);
+    }
+
+    #[test]
+    fn tooltip_closed_blur_clears_stale_controlled_focus_activity() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                open: Some(false),
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        drop(service.send(Event::Focus));
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(service.context().focus_active);
+
+        let result = service.send(Event::Blur);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+        assert!(!service.context().focus_active);
+        assert!(effect_names(&result).is_empty());
+        assert!(result.cancel_effects.is_empty());
+
+        drop(service.send(Event::PointerEnter));
+
+        let leave = service.send(Event::PointerLeave);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().hover_active);
+        assert_eq!(leave.cancel_effects, vec![OPEN_DELAY_EFFECT]);
     }
 
     #[test]
