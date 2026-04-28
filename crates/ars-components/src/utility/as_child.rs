@@ -152,7 +152,7 @@ fn warn_role_conflict(component: &AttrMap, child: &AttrMap) {
             ))
         ))]
         eprintln!(
-            "[ars-components] as_child: overriding child role '{child_role}' with component role '{component_role}'"
+            "as_child: overriding child role '{child_role}' with component role '{component_role}'"
         );
     }
 }
@@ -161,7 +161,7 @@ fn warn_role_conflict(component: &AttrMap, child: &AttrMap) {
 mod tests {
     use alloc::{string::ToString, vec::Vec};
 
-    use ars_core::{AriaAttr, CssProperty, HtmlAttr};
+    use ars_core::{AriaAttr, AttrValue, CssProperty, HtmlAttr};
     use insta::assert_snapshot;
 
     use super::*;
@@ -180,8 +180,15 @@ mod tests {
     }
 
     #[test]
-    fn props_default_is_disabled() {
+    fn props_default_is_not_as_child() {
         assert_eq!(Props::default(), Props { as_child: false });
+    }
+
+    #[test]
+    fn merge_empty_maps_returns_empty_map() {
+        let merged = AttrMap::new().merge_onto(AttrMap::new());
+
+        assert_eq!(merged, AttrMap::new());
     }
 
     #[test]
@@ -211,6 +218,7 @@ mod tests {
         let component = role("button");
 
         let mut child = AttrMap::new();
+
         child.set(HtmlAttr::Class, "wrapper");
 
         let merged = component.merge_onto(child);
@@ -231,6 +239,7 @@ mod tests {
     #[test]
     fn merge_with_only_child_role_keeps_both() {
         let mut component = AttrMap::new();
+
         component.set(HtmlAttr::Class, "wrapper");
 
         let child = role("link");
@@ -250,9 +259,11 @@ mod tests {
     #[test]
     fn merge_aria_describedby_concatenates() {
         let mut child = AttrMap::new();
+
         child.set(HtmlAttr::Aria(AriaAttr::DescribedBy), "child-hint");
 
         let mut component = AttrMap::new();
+
         component.set(HtmlAttr::Aria(AriaAttr::DescribedBy), "component-hint");
 
         let merged = component.merge_onto(child);
@@ -276,9 +287,11 @@ mod tests {
     #[test]
     fn merge_aria_labelledby_concatenates() {
         let mut child = AttrMap::new();
+
         child.set(HtmlAttr::Aria(AriaAttr::LabelledBy), "child-label");
 
         let mut component = AttrMap::new();
+
         component.set(HtmlAttr::Aria(AriaAttr::LabelledBy), "component-label");
 
         let merged = component.merge_onto(child);
@@ -302,9 +315,11 @@ mod tests {
     #[test]
     fn merge_class_concatenates_with_dedup() {
         let mut child = AttrMap::new();
+
         child.set(HtmlAttr::Class, "base hovered");
 
         let mut component = AttrMap::new();
+
         component.set(HtmlAttr::Class, "base primary");
 
         let merged = component.merge_onto(child);
@@ -326,9 +341,12 @@ mod tests {
     #[test]
     fn merge_style_component_overrides_child() {
         let mut child = AttrMap::new();
+
         child.set_style(CssProperty::Color, "red");
+        child.set_style(CssProperty::Width, "100px");
 
         let mut component = AttrMap::new();
+
         component.set_style(CssProperty::Color, "blue");
 
         let merged = component.merge_onto(child);
@@ -339,16 +357,25 @@ mod tests {
             .map(|(_, value)| value.as_str());
 
         assert_eq!(color, Some("blue"));
+
+        let width = merged
+            .iter_styles()
+            .find(|(prop, _)| *prop == CssProperty::Width)
+            .map(|(_, value)| value.as_str());
+
+        assert_eq!(width, Some("100px"));
     }
 
     #[test]
     fn merge_data_ars_component_wins() {
         let mut child = AttrMap::new();
+
         child
             .set(HtmlAttr::Data("ars-scope"), "custom")
             .set(HtmlAttr::Data("ars-part"), "leaf");
 
         let mut component = AttrMap::new();
+
         component
             .set(HtmlAttr::Data("ars-scope"), "button")
             .set(HtmlAttr::Data("ars-part"), "root");
@@ -362,9 +389,11 @@ mod tests {
     #[test]
     fn merge_other_aria_component_wins() {
         let mut child = AttrMap::new();
+
         child.set_bool(HtmlAttr::Aria(AriaAttr::Expanded), false);
 
         let mut component = AttrMap::new();
+
         component.set_bool(HtmlAttr::Aria(AriaAttr::Expanded), true);
 
         let merged = component.merge_onto(child);
@@ -376,8 +405,84 @@ mod tests {
     }
 
     #[test]
+    fn merge_normal_attr_component_wins() {
+        let mut child = AttrMap::new();
+
+        child.set(HtmlAttr::Id, "child-id");
+
+        let mut component = AttrMap::new();
+
+        component.set(HtmlAttr::Id, "component-id");
+
+        let merged = component.merge_onto(child);
+
+        assert_eq!(merged.get(&HtmlAttr::Id), Some("component-id"));
+    }
+
+    #[test]
+    fn merge_boolean_attr_component_wins() {
+        let mut child = AttrMap::new();
+
+        child.set_bool(HtmlAttr::Disabled, true);
+
+        let mut component = AttrMap::new();
+
+        component.set_bool(HtmlAttr::Disabled, false);
+
+        let merged = component.merge_onto(child);
+
+        assert_eq!(
+            merged.get_value(&HtmlAttr::Disabled),
+            Some(&AttrValue::Bool(false))
+        );
+    }
+
+    #[test]
+    fn merge_token_list_attrs_concatenate_with_dedup() {
+        let token_attrs = [
+            HtmlAttr::Rel,
+            HtmlAttr::Aria(AriaAttr::Controls),
+            HtmlAttr::Aria(AriaAttr::Owns),
+            HtmlAttr::Aria(AriaAttr::FlowTo),
+            HtmlAttr::Aria(AriaAttr::Details),
+        ];
+
+        for attr in token_attrs {
+            let mut child = AttrMap::new();
+
+            child.set(attr, "shared child-only");
+
+            let mut component = AttrMap::new();
+
+            component.set(attr, "shared component-only");
+
+            let merged = component.merge_onto(child);
+
+            let value = merged.get(&attr).expect("token attr should be set");
+
+            let tokens = value.split_whitespace().collect::<Vec<_>>();
+
+            assert!(tokens.contains(&"shared"), "missing shared in {value}");
+            assert!(
+                tokens.contains(&"child-only"),
+                "missing child-only in {value}"
+            );
+            assert!(
+                tokens.contains(&"component-only"),
+                "missing component-only in {value}"
+            );
+            assert_eq!(
+                tokens.iter().filter(|&&token| token == "shared").count(),
+                1,
+                "duplicate shared token for {attr:?}: {value}"
+            );
+        }
+    }
+
+    #[test]
     fn merge_preserves_child_only_attrs() {
         let mut child = AttrMap::new();
+
         child.set(HtmlAttr::Id, "consumer-id");
 
         let component = AttrMap::new();
@@ -392,6 +497,7 @@ mod tests {
         let child = AttrMap::new();
 
         let mut component = AttrMap::new();
+
         component.set(HtmlAttr::TabIndex, "0");
 
         let merged = component.merge_onto(child);
@@ -404,11 +510,13 @@ mod tests {
     #[test]
     fn role_conflict() {
         let mut child = AttrMap::new();
+
         child
             .set(HtmlAttr::Role, "link")
             .set(HtmlAttr::Id, "consumer-link");
 
         let mut component = AttrMap::new();
+
         component
             .set(HtmlAttr::Role, "button")
             .set(HtmlAttr::Data("ars-scope"), "button")
@@ -422,11 +530,13 @@ mod tests {
     #[test]
     fn aria_concatenation() {
         let mut child = AttrMap::new();
+
         child
             .set(HtmlAttr::Aria(AriaAttr::DescribedBy), "child-hint")
             .set(HtmlAttr::Aria(AriaAttr::LabelledBy), "child-label");
 
         let mut component = AttrMap::new();
+
         component
             .set(HtmlAttr::Aria(AriaAttr::DescribedBy), "component-hint")
             .set(HtmlAttr::Aria(AriaAttr::LabelledBy), "component-label");
@@ -439,12 +549,14 @@ mod tests {
     #[test]
     fn class_and_style() {
         let mut child = AttrMap::new();
+
         child
             .set(HtmlAttr::Class, "base hovered")
             .set_style(CssProperty::Color, "red")
             .set_style(CssProperty::Width, "100px");
 
         let mut component = AttrMap::new();
+
         component
             .set(HtmlAttr::Class, "base primary")
             .set_style(CssProperty::Color, "blue");

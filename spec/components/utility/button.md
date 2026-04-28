@@ -39,10 +39,10 @@ A fundamental interactive control. The `Button` is the most commonly used intera
 ### 1.3 Context
 
 ```rust
-use ars_core::{Bindable};
+use ars_core::{Locale, MessageFn};
 
 /// The context for the `Button` component.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Context {
     /// Whether the button is disabled.
     pub disabled: bool,
@@ -64,6 +64,9 @@ pub struct Context {
 ### 1.4 Props
 
 ```rust
+use ars_core::{SafeUrl, UnsafeUrlError};
+use core::fmt::{self, Display};
+
 /// Props for the `Button` component.
 #[derive(Clone, Debug, PartialEq, Eq, HasId)]
 pub struct Props {
@@ -73,10 +76,10 @@ pub struct Props {
     pub disabled: bool,
     /// Whether the button is in a loading state.
     pub loading: bool,
-    /// Consumer-provided variant string (e.g. "primary", "destructive"). Headless: no built-in enum.
-    pub variant: Option<String>,
-    /// Consumer-provided size string (e.g. "sm", "lg", "icon"). Headless: no built-in enum.
-    pub size: Option<String>,
+    /// Visual style token exposed as `data-ars-variant`.
+    pub variant: Variant,
+    /// Visual size token exposed as `data-ars-size`.
+    pub size: Size,
     /// The HTML button type. Defaults to "button" to prevent accidental form submission.
     pub r#type: Type,
     /// The id of the form this button is associated with.
@@ -89,14 +92,14 @@ pub struct Props {
     pub as_child: bool,
     /// When true, removes the button from sequential Tab navigation (sets `tabindex="-1"`).
     pub exclude_from_tab_order: bool,
-    /// Form override: specifies the URL for form submission.
-    pub form_action: Option<String>,
+    /// Form override: safe URL for form submission.
+    pub form_action: Option<SafeUrl>,
     /// Form override: HTTP method for submission.
-    pub form_method: Option<String>,
+    pub form_method: Option<FormMethod>,
     /// Form override: encoding type.
-    pub form_enc_type: Option<String>,
+    pub form_enc_type: Option<FormEncType>,
     /// Form override: browsing context for form response.
-    pub form_target: Option<String>,
+    pub form_target: Option<FormTarget>,
     /// Form override: bypass form validation on submit.
     pub form_no_validate: bool,
     /// Auto-focus the button on mount.
@@ -105,12 +108,196 @@ pub struct Props {
     pub prevent_focus_on_press: bool,
 }
 
+/// Visual style token for the button.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Variant {
+    /// Default neutral button style.
+    #[default]
+    Default,
+    /// Primary action style.
+    Primary,
+    /// Secondary action style.
+    Secondary,
+    /// Destructive or dangerous action style.
+    Destructive,
+    /// Outlined button style.
+    Outline,
+    /// Low-chrome ghost button style.
+    Ghost,
+    /// Link-like button style.
+    Link,
+}
+
+impl Variant {
+    /// Returns the data-attribute token for this variant.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Primary => "primary",
+            Self::Secondary => "secondary",
+            Self::Destructive => "destructive",
+            Self::Outline => "outline",
+            Self::Ghost => "ghost",
+            Self::Link => "link",
+        }
+    }
+}
+
+impl Display for Variant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Visual size token for the button.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Size {
+    /// Small button size.
+    Sm,
+    /// Medium button size.
+    #[default]
+    Md,
+    /// Large button size.
+    Lg,
+    /// Icon-only button size.
+    Icon,
+}
+
+impl Size {
+    /// Returns the data-attribute token for this size.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Sm => "sm",
+            Self::Md => "md",
+            Self::Lg => "lg",
+            Self::Icon => "icon",
+        }
+    }
+}
+
+impl Display for Size {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// The type of the button.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Type {
+    /// A non-submitting button.
+    #[default]
     Button,
+    /// A form submit button.
     Submit,
+    /// A form reset button.
     Reset,
+}
+
+impl Type {
+    /// Returns the HTML `type` token for this button type.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Button => "button",
+            Self::Submit => "submit",
+            Self::Reset => "reset",
+        }
+    }
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Form submission method override for a submit button.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FormMethod {
+    /// Submit using HTTP GET.
+    Get,
+    /// Submit using HTTP POST.
+    Post,
+    /// Close an ancestor dialog without network submission.
+    Dialog,
+}
+
+impl FormMethod {
+    /// Returns the HTML `formmethod` token.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Get => "get",
+            Self::Post => "post",
+            Self::Dialog => "dialog",
+        }
+    }
+}
+
+impl Display for FormMethod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Form encoding type override for a submit button.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FormEncType {
+    /// Standard URL-encoded form body.
+    UrlEncoded,
+    /// Multipart form body, typically for file uploads.
+    MultipartFormData,
+    /// Plain text form body.
+    TextPlain,
+}
+
+impl FormEncType {
+    /// Returns the HTML `formenctype` token.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::UrlEncoded => "application/x-www-form-urlencoded",
+            Self::MultipartFormData => "multipart/form-data",
+            Self::TextPlain => "text/plain",
+        }
+    }
+}
+
+impl Display for FormEncType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Browsing context override for a form submit response.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FormTarget {
+    /// Submit into the current browsing context.
+    Self_,
+    /// Submit into a new browsing context.
+    Blank,
+    /// Submit into the parent browsing context.
+    Parent,
+    /// Submit into the top-level browsing context.
+    Top,
+    /// Submit into a named browsing context.
+    Named(String),
+}
+
+impl FormTarget {
+    /// Returns the HTML `formtarget` token.
+    pub const fn as_str(&self) -> &str {
+        match self {
+            Self::Self_ => "_self",
+            Self::Blank => "_blank",
+            Self::Parent => "_parent",
+            Self::Top => "_top",
+            Self::Named(name) => name.as_str(),
+        }
+    }
+}
+
+impl Display for FormTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 impl Default for Props {
@@ -119,8 +306,8 @@ impl Default for Props {
             id: String::new(),
             disabled: false,
             loading: false,
-            variant: None,
-            size: None,
+            variant: Variant::Default,
+            size: Size::Md,
             r#type: Type::Button,
             form: None,
             name: None,
@@ -137,7 +324,64 @@ impl Default for Props {
         }
     }
 }
+
+impl Props {
+    /// Returns a fresh `Props` with every field at its `Default` value.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets `id`.
+    pub fn id(mut self, id: impl Into<String>) -> Self { self.id = id.into(); self }
+    /// Sets `disabled`.
+    pub const fn disabled(mut self, value: bool) -> Self { self.disabled = value; self }
+    /// Sets `loading`.
+    pub const fn loading(mut self, value: bool) -> Self { self.loading = value; self }
+    /// Sets `variant`.
+    pub const fn variant(mut self, variant: Variant) -> Self { self.variant = variant; self }
+    /// Sets `size`.
+    pub const fn size(mut self, size: Size) -> Self { self.size = size; self }
+    /// Sets `type`.
+    pub const fn button_type(mut self, ty: Type) -> Self { self.r#type = ty; self }
+    /// Sets `form`.
+    pub fn form(mut self, form: impl Into<String>) -> Self { self.form = Some(form.into()); self }
+    /// Sets `name`.
+    pub fn name(mut self, name: impl Into<String>) -> Self { self.name = Some(name.into()); self }
+    /// Sets `value`.
+    pub fn value(mut self, value: impl Into<String>) -> Self { self.value = Some(value.into()); self }
+    /// Sets `as_child`.
+    pub const fn as_child(mut self, value: bool) -> Self { self.as_child = value; self }
+    /// Sets `exclude_from_tab_order`.
+    pub const fn exclude_from_tab_order(mut self, value: bool) -> Self { self.exclude_from_tab_order = value; self }
+    /// Sets `form_action` from an already validated URL.
+    pub fn form_action(mut self, action: SafeUrl) -> Self { self.form_action = Some(action); self }
+    /// Validates and sets `form_action`.
+    pub fn try_form_action(mut self, action: impl Into<String>) -> Result<Self, UnsafeUrlError> {
+        self.form_action = Some(SafeUrl::new(action)?);
+        Ok(self)
+    }
+    /// Sets `form_method`.
+    pub const fn form_method(mut self, method: FormMethod) -> Self { self.form_method = Some(method); self }
+    /// Sets `form_enc_type`.
+    pub const fn form_enc_type(mut self, enc_type: FormEncType) -> Self { self.form_enc_type = Some(enc_type); self }
+    /// Sets `form_target`.
+    pub fn form_target(mut self, target: FormTarget) -> Self { self.form_target = Some(target); self }
+    /// Sets `form_no_validate`.
+    pub const fn form_no_validate(mut self, value: bool) -> Self { self.form_no_validate = value; self }
+    /// Sets `auto_focus`.
+    pub const fn auto_focus(mut self, value: bool) -> Self { self.auto_focus = value; self }
+    /// Sets `prevent_focus_on_press`.
+    pub const fn prevent_focus_on_press(mut self, value: bool) -> Self { self.prevent_focus_on_press = value; self }
+}
 ```
+
+`Props::new()` is the documented entry point for component construction. The
+chainable setters mirror the standardized builder pattern used by
+`Dismissable`: setters consume and return `Self`, boolean setters are `const`
+where possible, string setters accept `impl Into<String>`, and callback-free
+configuration does not require `Some(...)` boilerplate. Submit behavior is
+explicit: `Type::Button` is the default to avoid accidental form submission;
+consumers opt into native submit behavior with `.button_type(Type::Submit)`.
 
 ### 1.5 Event Ordering Contract: Release/Blur
 
@@ -152,7 +396,8 @@ Alternatively, the adapter MAY skip effect setup for intermediate states within 
 ### 1.6 Full Machine Implementation
 
 ```rust
-use ars_core::{TransitionPlan, ComponentIds, AttrMap};
+use ars_core::{AttrMap, TransitionPlan, sanitize_url};
+use core::fmt::{self, Display};
 
 /// The states for the `Button` component.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,6 +406,17 @@ pub enum State {
     Focused,
     Pressed,
     Loading,
+}
+
+impl Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Idle => f.write_str("idle"),
+            Self::Focused => f.write_str("focused"),
+            Self::Pressed => f.write_str("pressed"),
+            Self::Loading => f.write_str("loading"),
+        }
+    }
 }
 
 /// The events for the `Button` component.
@@ -214,7 +470,7 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        if ctx.disabled && !matches!(event, Event::Focus { .. } | Event::Blur | Event::SetDisabled(_) | Event::SetLoading(_)) {
+        if ctx.disabled && !matches!(event, Event::Blur | Event::SetDisabled(_) | Event::SetLoading(_)) {
             return None;
         }
 
@@ -279,7 +535,14 @@ impl ars_core::Machine for Machine {
                 ctx.loading = true;
                 ctx.pressed = false;
             })),
-            (State::Loading, Event::SetLoading(false)) => Some(TransitionPlan::to(State::Idle).apply(|ctx| {
+            (State::Loading, Event::SetLoading(false)) => Some(TransitionPlan::to(if ctx.focused {
+                State::Focused
+            } else {
+                State::Idle
+            }).apply(|ctx| {
+                ctx.loading = false;
+            })),
+            (_, Event::SetLoading(false)) => Some(TransitionPlan::context_only(|ctx| {
                 ctx.loading = false;
             })),
 
@@ -287,11 +550,20 @@ impl ars_core::Machine for Machine {
             (_, Event::Click) => None,
 
             // ── Disabled ────────────────────────────────────────────────────
-            (State::Pressed, Event::SetDisabled(true)) => {
+            (State::Focused | State::Pressed, Event::SetDisabled(true)) => {
                 Some(TransitionPlan::to(State::Idle).apply(|ctx| {
                     ctx.disabled = true;
                     ctx.pressed = false;
                     ctx.focused = false;
+                    ctx.focus_visible = false;
+                }))
+            }
+            (State::Loading, Event::SetDisabled(true)) => {
+                Some(TransitionPlan::context_only(|ctx| {
+                    ctx.disabled = true;
+                    ctx.pressed = false;
+                    ctx.focused = false;
+                    ctx.focus_visible = false;
                 }))
             }
             (_, Event::SetDisabled(disabled)) => {
@@ -348,7 +620,7 @@ pub struct Api<'a> {
 
 impl<'a> Api<'a> {
     pub fn is_loading(&self) -> bool {
-        matches!(self.state, State::Loading)
+        matches!(self.state, State::Loading) || self.ctx.loading
     }
 
     pub fn is_disabled(&self) -> bool {
@@ -367,38 +639,54 @@ impl<'a> Api<'a> {
         self.props.prevent_focus_on_press
     }
 
+    /// Dispatches a focus event.
+    pub fn on_focus(&self, is_keyboard: bool) {
+        (self.send)(Event::Focus { is_keyboard });
+    }
+
+    /// Dispatches a blur event.
+    pub fn on_blur(&self) {
+        (self.send)(Event::Blur);
+    }
+
+    /// Dispatches a press event.
+    pub fn on_press(&self) {
+        (self.send)(Event::Press);
+    }
+
+    /// Dispatches a release event.
+    pub fn on_release(&self) {
+        (self.send)(Event::Release);
+    }
+
+    /// Dispatches a click event.
+    pub fn on_click(&self) {
+        (self.send)(Event::Click);
+    }
+
     /// Root <button> element attributes.
     pub fn root_attrs(&self) -> AttrMap {
         let mut p = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
         p.set(scope_attr, scope_val);
         p.set(part_attr, part_val);
+        p.set(HtmlAttr::Role, "button");
+        p.set(HtmlAttr::Data("ars-state"), self.state.to_string());
 
-        let type_str = match self.props.r#type {
-            Type::Button => "button",
-            Type::Submit => "submit",
-            Type::Reset => "reset",
-        };
-        p.set(HtmlAttr::Type, type_str);
-
-        if let Some(ref variant) = self.props.variant {
-            p.set(HtmlAttr::Data("ars-variant"), variant.as_str());
-        }
-        if let Some(ref size) = self.props.size {
-            p.set(HtmlAttr::Data("ars-size"), size.as_str());
-        }
+        p.set(HtmlAttr::Type, self.props.r#type.as_str());
+        p.set(HtmlAttr::Data("ars-variant"), self.props.variant.as_str());
+        p.set(HtmlAttr::Data("ars-size"), self.props.size.as_str());
 
         if self.is_loading() {
             p.set_bool(HtmlAttr::Data("ars-loading"), true);
             p.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
             p.set(HtmlAttr::Aria(AriaAttr::Busy), "true");
-            let loading_text = (self.ctx.messages.loading_label)(&self.ctx.locale);
-            if !loading_text.is_empty() {
-                p.set(HtmlAttr::Aria(AriaAttr::Label), loading_text);
-            }
-        } else if self.ctx.disabled {
+        }
+
+        if self.ctx.disabled {
             p.set_bool(HtmlAttr::Disabled, true);
             p.set_bool(HtmlAttr::Data("ars-disabled"), true);
+            p.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
 
         if self.ctx.focus_visible {
@@ -417,11 +705,13 @@ impl<'a> Api<'a> {
         if let Some(ref value) = self.props.value {
             p.set(HtmlAttr::Value, value.as_str());
         }
-        if self.props.exclude_from_tab_order {
+        if self.props.exclude_from_tab_order || (self.props.as_child && self.ctx.disabled) {
             p.set(HtmlAttr::TabIndex, "-1");
+        } else if self.props.as_child && !self.ctx.disabled {
+            p.set(HtmlAttr::TabIndex, "0");
         }
         if let Some(ref form_action) = self.props.form_action {
-            p.set(HtmlAttr::FormAction, form_action.as_str());
+            p.set(HtmlAttr::FormAction, sanitize_url(form_action.as_str()));
         }
         if let Some(ref form_method) = self.props.form_method {
             p.set(HtmlAttr::FormMethod, form_method.as_str());
@@ -442,13 +732,6 @@ impl<'a> Api<'a> {
             p.set(HtmlAttr::Data("ars-prevent-focus-on-press"), "true");
         }
 
-        #[cfg(debug_assertions)]
-        if !p.has(HtmlAttr::Aria(AriaAttr::Label)) && !p.has(HtmlAttr::Aria(AriaAttr::LabelledBy)) {
-            // Adapters check whether the button has text content children.
-            // If no text content and no aria-label/aria-labelledby is provided,
-            // emit: "Button has no accessible name. Provide `aria-label` for icon-only buttons."
-        }
-
         p
     }
 
@@ -458,7 +741,27 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::LoadingIndicator.data_attrs();
         p.set(scope_attr, scope_val);
         p.set(part_attr, part_val);
-        p.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
+        if self.is_loading() {
+            p.set_bool(HtmlAttr::Data("ars-loading"), true);
+            p.set(HtmlAttr::Role, "status");
+            p.set(HtmlAttr::Aria(AriaAttr::Live), "polite");
+            let loading_text = (self.ctx.messages.loading_label)(&self.ctx.locale);
+            if !loading_text.is_empty() {
+                p.set(HtmlAttr::Aria(AriaAttr::Label), loading_text);
+            }
+        } else {
+            p.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
+        }
+        p
+    }
+
+    /// Content slot element attributes.
+    pub fn content_attrs(&self) -> AttrMap {
+        let mut p = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Content.data_attrs();
+        p.set(scope_attr, scope_val);
+        p.set(part_attr, part_val);
+        p.set(HtmlAttr::Data("ars-loading"), if self.is_loading() { "true" } else { "false" });
         p
     }
 }
@@ -470,7 +773,7 @@ impl ConnectApi for Api<'_> {
         match part {
             Part::Root => self.root_attrs(),
             Part::LoadingIndicator => self.loading_indicator_attrs(),
-            Part::Content => AttrMap::new(), // Content is a slot, no special attrs
+            Part::Content => self.content_attrs(),
         }
     }
 }
@@ -485,42 +788,57 @@ Button
 └── Content            <span>    data-ars-part="content" (label text / icons slot)
 ```
 
-| Part             | Element    | Key Attributes                                                  |
-| ---------------- | ---------- | --------------------------------------------------------------- |
-| Root             | `<button>` | `data-ars-scope="button"`, `type`, `aria-disabled`, `aria-busy` |
-| LoadingIndicator | `<span>`   | `data-ars-part="loading-indicator"`, `aria-hidden="true"`       |
-| Content          | `<span>`   | `data-ars-part="content"` (label slot)                          |
+| Part             | Element    | Key Attributes                                                                                                             |
+| ---------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Root             | `<button>` | `data-ars-scope="button"`, `data-ars-state`, `data-ars-variant`, `data-ars-size`, `type`, `aria-disabled`, `aria-busy`     |
+| LoadingIndicator | `<span>`   | `data-ars-part="loading-indicator"`, `role="status"` and `aria-live="polite"` when loading, `aria-hidden="true"` when idle |
+| Content          | `<span>`   | `data-ars-part="content"`, `data-ars-loading="true\|false"`                                                                |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Property                 | Value                                                 |
-| ------------------------ | ----------------------------------------------------- |
-| Role                     | `button` (implicit on `<button>`)                     |
-| `type`                   | `"button"` (default, prevents accidental form submit) |
-| `aria-disabled`          | `"true"` when loading or disabled                     |
-| `aria-busy`              | `"true"` when loading                                 |
-| `aria-label`             | Loading text when in loading state                    |
-| `data-ars-focus-visible` | Present only on keyboard focus                        |
+| Property                 | Value                                                          |
+| ------------------------ | -------------------------------------------------------------- |
+| Role                     | `button` (implicit on `<button>`, explicit in attrs)           |
+| `type`                   | `"button"` (default, prevents accidental form submit)          |
+| `aria-disabled`          | `"true"` when loading or disabled                              |
+| `aria-busy`              | `"true"` when loading                                          |
+| `aria-label`             | Not set by root loading state; preserve the button action name |
+| `data-ars-focus-visible` | Present only on keyboard focus                                 |
+| `data-ars-state`         | `"idle"`, `"focused"`, `"pressed"`, or `"loading"`             |
+| `data-ars-variant`       | `Variant::as_str()` visual token                               |
+| `data-ars-size`          | `Size::as_str()` visual token                                  |
 
 - The default element is `<button>`, which has implicit `role="button"`. Never use a `<div>` or `<a>` as a button without explicit ARIA.
-- **Loading state**: Use `aria-disabled="true"` (not `disabled`) to keep the button in the tab order, allowing screen reader users to discover it and hear "Loading…" in the accessible name.
+- **Loading state**: Use `aria-disabled="true"` (not `disabled`) to keep the button in the tab order. Preserve the button's action-oriented accessible name; loading progress is exposed through `aria-busy` on the root and the `LoadingIndicator` status part.
 - **Destructive variant**: No additional ARIA needed. The destructive nature must be communicated in the button label (e.g., "Delete account" not just "Confirm").
 - **Keyboard**: Native `<button>` activates on both Enter and Space. The machine mirrors this — Space fires Press/Release events; Enter fires Click directly.
 - **Icon-only buttons**: Must have an `aria-label` providing a descriptive accessible name (e.g., "Close dialog", "Delete item").
 - Buttons MUST meet the minimum 44x44 CSS pixel touch target size (see foundation/03-accessibility.md §7.1.1).
-- **Disabled and tab order**: The `disabled` HTML attribute removes the button from the tab order. For screen reader discoverability, the loading state uses `aria-disabled="true"` with manual event prevention.
+- **Disabled and tab order**: The `disabled` HTML attribute removes native buttons from the tab order. For `as_child` composition, the agnostic core emits `tabindex="-1"` while disabled so component-owned attrs remove non-button children from sequential keyboard navigation even when the child would otherwise be focusable. For screen reader discoverability, the loading state uses `aria-disabled="true"` with manual event prevention and remains tabbable unless explicitly excluded.
 
-### 3.2 Forced Colors Mode
+### 3.2 Accessible Name Diagnostics
+
+The framework adapters, not the agnostic core, are responsible for accessible-name diagnostics. Adapters can inspect rendered children and merged consumer attributes; the core `root_attrs()` cannot know whether text content, `aria-label`, or `aria-labelledby` will be present after rendering. In debug builds, adapters SHOULD warn when a rendered button has no accessible name, using this wording:
+
+```text
+Button has no accessible name. Provide `aria-label` for icon-only buttons.
+```
+
+### 3.3 Forced Colors Mode
 
 Loading indicator visual elements MUST use `currentColor` or `forced-color-adjust: auto` to remain visible in Windows High Contrast Mode.
 
-### 3.3 Native Element Handler Deduplication
+### 3.4 Native Element Handler Deduplication
 
 When the `Button` component renders onto a native `<button>` element (the default), the framework adapter **must strip** the Space key `keydown`/`keyup` handlers from the `AttrMap` before applying them to the DOM. Native `<button>` elements already synthesize `click` events from Space key presses, so attaching the machine's Space handlers would cause duplicate activation. The adapter should detect this by checking whether the target element is a `<button>` and, if so, omit handlers whose sole purpose is Space key handling. When rendering via `as_child` onto a non-button element (e.g., `<div role="button">`), all keyboard handlers must be preserved.
 
 > **Adapter Note:** Native `<button>` elements handle Enter/Space natively. Adapters must deduplicate keyboard handlers to avoid double-firing.
+
+### 3.5 `as_child` Native Attribute Filtering
+
+The agnostic core always emits the complete root `AttrMap`, including native button and form attributes. Framework adapters that apply `root_attrs()` to a consumer child element MUST filter native-only attributes when the target element cannot legally receive them. For example, `type`, `form`, `formaction`, `formmethod`, `formenctype`, `formtarget`, `formnovalidate`, `name`, and `value` are valid on a native `<button>` but must not be applied blindly to a `<div role="button">`. Adapters SHOULD preserve behavioral and accessibility attrs such as `role`, `tabindex`, `aria-*`, and `data-ars-*` for non-button children.
 
 ## 4. Internationalization
 
@@ -530,7 +848,7 @@ When the `Button` component renders onto a native `<button>` element (the defaul
 /// Localizable strings for the `Button` component.
 #[derive(Clone, Debug)]
 pub struct Messages {
-    /// Accessible label applied when the button is in a loading state.
+    /// Accessible label applied to the loading indicator status part.
     pub loading_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
 }
 
@@ -576,25 +894,25 @@ When `should_prevent_focus_on_press()` returns true, the adapter MUST call `even
 
 ### 5.1 Props
 
-| Feature                | ars-ui                   | React Aria            | Notes                                   |
-| ---------------------- | ------------------------ | --------------------- | --------------------------------------- |
-| Disabled               | `disabled`               | `isDisabled`          | Both libraries                          |
-| Loading/Pending        | `loading`                | `isPending`           | Both libraries; RA calls it `isPending` |
-| Type                   | `r#type: Type`           | `type`                | Both libraries                          |
-| Form                   | `form`                   | `form`                | Both libraries                          |
-| Name                   | `name`                   | `name`                | Both libraries                          |
-| Value                  | `value`                  | `value`               | Both libraries                          |
-| Exclude from tab order | `exclude_from_tab_order` | `excludeFromTabOrder` | Both libraries                          |
-| Prevent focus on press | `prevent_focus_on_press` | `preventFocusOnPress` | Both libraries                          |
-| Auto focus             | `auto_focus`             | `autoFocus`           | Both libraries                          |
-| as_child               | `as_child`               | `render`              | Different composition patterns          |
-| Form action            | `form_action`            | `formAction`          | Both libraries                          |
-| Form method            | `form_method`            | `formMethod`          | Both libraries                          |
-| Form enc type          | `form_enc_type`          | `formEncType`         | Both libraries                          |
-| Form target            | `form_target`            | `formTarget`          | Both libraries                          |
-| Form no validate       | `form_no_validate`       | `formNoValidate`      | Both libraries                          |
-| Variant                | `variant`                | --                    | ars-ui addition (headless pass-through) |
-| Size                   | `size`                   | --                    | ars-ui addition (headless pass-through) |
+| Feature                | ars-ui                       | React Aria            | Notes                                   |
+| ---------------------- | ---------------------------- | --------------------- | --------------------------------------- |
+| Disabled               | `disabled`                   | `isDisabled`          | Both libraries                          |
+| Loading/Pending        | `loading`                    | `isPending`           | Both libraries; RA calls it `isPending` |
+| Type                   | `r#type: Type`               | `type`                | Both libraries                          |
+| Form                   | `form`                       | `form`                | Both libraries                          |
+| Name                   | `name`                       | `name`                | Both libraries                          |
+| Value                  | `value`                      | `value`               | Both libraries                          |
+| Exclude from tab order | `exclude_from_tab_order`     | `excludeFromTabOrder` | Both libraries                          |
+| Prevent focus on press | `prevent_focus_on_press`     | `preventFocusOnPress` | Both libraries                          |
+| Auto focus             | `auto_focus`                 | `autoFocus`           | Both libraries                          |
+| as_child               | `as_child`                   | `render`              | Different composition patterns          |
+| Form action            | `form_action: SafeUrl`       | `formAction`          | ars-ui validates before attr emission   |
+| Form method            | `form_method: FormMethod`    | `formMethod`          | ars-ui uses a closed enum vocabulary    |
+| Form enc type          | `form_enc_type: FormEncType` | `formEncType`         | ars-ui uses a closed enum vocabulary    |
+| Form target            | `form_target: FormTarget`    | `formTarget`          | Known targets are enum variants         |
+| Form no validate       | `form_no_validate`           | `formNoValidate`      | Both libraries                          |
+| Variant                | `variant: Variant`           | --                    | ars-ui typed visual token               |
+| Size                   | `size: Size`                 | --                    | ars-ui typed visual token               |
 
 **Gaps:** None.
 
@@ -635,5 +953,5 @@ When `should_prevent_focus_on_press()` returns true, the adapter MUST call `even
 ### 5.5 Summary
 
 - **Overall:** Full parity.
-- **Divergences:** ars-ui uses a `loading` boolean with explicit `State::Loading`; React Aria uses `isPending`. ars-ui adds `variant`/`size` pass-through props. React Aria exposes hover/focus/key callbacks as props; ars-ui handles these at the adapter layer.
+- **Divergences:** ars-ui uses a `loading` boolean with explicit `State::Loading`; React Aria uses `isPending`. ars-ui adds typed `Variant`/`Size` visual tokens. React Aria exposes hover/focus/key callbacks as props; ars-ui handles these at the adapter layer.
 - **Recommended additions:** None.

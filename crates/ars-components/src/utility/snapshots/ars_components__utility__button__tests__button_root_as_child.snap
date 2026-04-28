@@ -1,0 +1,67 @@
+---
+source: crates/ars-components/src/utility/button.rs
+expression: "snapshot_attrs(&service(test_props().as_child(true)).connect(&|_|\n{}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "button",
+            ),
+        ),
+        (
+            Data(
+                "ars-size",
+            ),
+            String(
+                "md",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "idle",
+            ),
+        ),
+        (
+            Data(
+                "ars-variant",
+            ),
+            String(
+                "default",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "button",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

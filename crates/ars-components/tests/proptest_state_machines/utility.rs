@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use ars_components::utility::{field, fieldset, form, form_submit};
+use ars_components::utility::{button, field, fieldset, form, form_submit};
 use ars_core::{Env, Service, WeakSend, callback};
 use ars_forms::{
     form::Mode,
@@ -42,6 +42,27 @@ fn arb_field_props() -> impl Strategy<Value = field::Props> {
                 dir,
             },
         )
+}
+
+fn arb_button_props() -> impl Strategy<Value = button::Props> {
+    (any::<bool>(), any::<bool>()).prop_map(|(disabled, loading)| {
+        button::Props::new()
+            .id("button")
+            .disabled(disabled)
+            .loading(loading)
+    })
+}
+
+fn arb_button_event() -> impl Strategy<Value = button::Event> {
+    prop_oneof![
+        any::<bool>().prop_map(|is_keyboard| button::Event::Focus { is_keyboard }),
+        Just(button::Event::Blur),
+        Just(button::Event::Press),
+        Just(button::Event::Release),
+        Just(button::Event::Click),
+        any::<bool>().prop_map(button::Event::SetLoading),
+        any::<bool>().prop_map(button::Event::SetDisabled),
+    ]
 }
 
 fn arb_field_event() -> impl Strategy<Value = field::Event> {
@@ -181,6 +202,72 @@ proptest! {
             .and_then(|v| v.parse().ok())
             .unwrap_or(1000)
     ))]
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_button_event_sequences_preserve_invariants(
+        props in arb_button_props(),
+        events in prop::collection::vec(arb_button_event(), 0..128),
+    ) {
+        let mut service = Service::<button::Machine>::new(
+            props,
+            &Env::default(),
+            &button::Messages::default(),
+        );
+
+        for event in events {
+            drop(service.send(event));
+
+            let state = service.state();
+            let ctx = service.context();
+
+            prop_assert_eq!(ctx.loading, matches!(state, button::State::Loading));
+            prop_assert_eq!(ctx.pressed, matches!(state, button::State::Pressed));
+            prop_assert!(
+                !ctx.focus_visible || ctx.focused,
+                "focus-visible cannot outlive focus"
+            );
+
+            if ctx.disabled {
+                prop_assert!(!ctx.focused, "disabled button cannot stay focused");
+                prop_assert!(
+                    !ctx.focus_visible,
+                    "disabled button cannot show focus-visible"
+                );
+                prop_assert!(!ctx.pressed, "disabled button cannot stay pressed");
+            }
+
+            if ctx.loading {
+                prop_assert!(!ctx.pressed, "loading button cannot stay pressed");
+            }
+
+            match state {
+                button::State::Idle => {
+                    prop_assert!(!ctx.focused, "idle button cannot stay focused");
+                    prop_assert!(
+                        !ctx.focus_visible,
+                        "idle button cannot show focus-visible"
+                    );
+                    prop_assert!(!ctx.pressed, "idle button cannot stay pressed");
+                }
+
+                button::State::Focused => {
+                    prop_assert!(ctx.focused, "focused state requires focused context");
+                    prop_assert!(!ctx.pressed, "focused button cannot stay pressed");
+                }
+
+                button::State::Pressed => {
+                    prop_assert!(ctx.pressed, "pressed state requires pressed context");
+                    prop_assert!(!ctx.loading, "pressed button cannot be loading");
+                }
+
+                button::State::Loading => {
+                    prop_assert!(ctx.loading, "loading state requires loading context");
+                    prop_assert!(!ctx.pressed, "loading button cannot be pressed");
+                }
+            }
+        }
+    }
 
     #[test]
     #[ignore = "proptest — nightly extended-proptest job"]

@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/utility/button.rs
+expression: "snapshot_attrs(&service(test_props()).connect(&|_| {}).content_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-loading",
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "content",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}
