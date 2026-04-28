@@ -1,0 +1,59 @@
+---
+source: crates/ars-components/src/input/checkbox/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).control_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "control",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "checkbox",
+            ),
+        ),
+        (
+            Aria(
+                Checked,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "terms-label",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "terms-control",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "checkbox",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

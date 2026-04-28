@@ -11,6 +11,9 @@ pub mod data_display;
 /// Overlay component machines.
 pub mod overlay;
 
+/// Input component machines.
+pub mod input;
+
 /// Utility component machines.
 pub mod utility;
 

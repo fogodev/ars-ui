@@ -1,5 +1,8 @@
 //! Ignored nightly property-based tests for ars-components state machines.
 
+#[path = "proptest_state_machines/input.rs"]
+mod input;
+
 #[path = "proptest_state_machines/overlay.rs"]
 mod overlay;
 
