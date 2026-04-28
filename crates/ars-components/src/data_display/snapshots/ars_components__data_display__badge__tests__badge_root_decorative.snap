@@ -1,0 +1,49 @@
+---
+source: crates/ars-components/src/data_display/badge.rs
+expression: "snapshot_attrs(&api(Props::new().accessibility(Accessibility::Decorative).aria_label(\"Hidden\")).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "badge",
+            ),
+        ),
+        (
+            Data(
+                "ars-size",
+            ),
+            String(
+                "sm",
+            ),
+        ),
+        (
+            Data(
+                "ars-variant",
+            ),
+            String(
+                "subtle",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}

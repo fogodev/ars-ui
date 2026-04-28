@@ -1,0 +1,55 @@
+---
+source: crates/ars-components/src/data_display/badge.rs
+expression: "snapshot_attrs(&api(Props::new().accessibility(Accessibility::Alert).aria_label(\"Payment failed\")).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "badge",
+            ),
+        ),
+        (
+            Data(
+                "ars-size",
+            ),
+            String(
+                "sm",
+            ),
+        ),
+        (
+            Data(
+                "ars-variant",
+            ),
+            String(
+                "subtle",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Payment failed",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "alert",
+            ),
+        ),
+    ],
+    styles: [],
+}

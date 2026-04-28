@@ -1,0 +1,40 @@
+---
+source: crates/ars-components/src/data_display/skeleton.rs
+expression: "snapshot_attrs(&api(Props::new().leading_circle_size(\"2rem\")).circle_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "circle",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "skeleton",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Custom(
+                "ars-skeleton-circle-size",
+            ),
+            "2rem",
+        ),
+    ],
+}

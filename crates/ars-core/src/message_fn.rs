@@ -94,6 +94,15 @@ impl<F: Fn(usize, &Locale) -> String + Send + Sync + 'static> From<F>
     }
 }
 
+/// `From` impl for `MessageFn<dyn Fn(u64, &Locale) -> String + Send + Sync>`.
+impl<F: Fn(u64, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(u64, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
 /// `From` impl for `MessageFn<dyn Fn(f64, &Locale) -> String + Send + Sync>`.
 impl<F: Fn(f64, &Locale) -> String + Send + Sync + 'static> From<F>
     for MessageFn<dyn Fn(f64, &Locale) -> String + Send + Sync>
@@ -115,6 +124,15 @@ impl<F: Fn(&str, &Locale) -> String + Send + Sync + 'static> From<F>
 /// `From` impl for `MessageFn<dyn Fn(usize, &str, &Locale) -> String + Send + Sync>`.
 impl<F: Fn(usize, &str, &Locale) -> String + Send + Sync + 'static> From<F>
     for MessageFn<dyn Fn(usize, &str, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
+/// `From` impl for `MessageFn<dyn Fn(u64, &str, &Locale) -> String + Send + Sync>`.
+impl<F: Fn(u64, &str, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(u64, &str, &Locale) -> String + Send + Sync>
 {
     fn from(f: F) -> Self {
         MessageFn(Arc::new(f))
@@ -154,8 +172,10 @@ mod tests {
 
     type LabelLocaleMessageFn = dyn Fn(&str, &Locale) -> String + Send + Sync;
     type CountLocaleMessageFn = dyn Fn(usize, &Locale) -> String + Send + Sync;
+    type U64CountLocaleMessageFn = dyn Fn(u64, &Locale) -> String + Send + Sync;
     type FloatLocaleMessageFn = dyn Fn(f64, &Locale) -> String + Send + Sync;
     type CountLabelLocaleMessageFn = dyn Fn(usize, &str, &Locale) -> String + Send + Sync;
+    type U64CountLabelLocaleMessageFn = dyn Fn(u64, &str, &Locale) -> String + Send + Sync;
     type CustomLocaleMessageFn = dyn Fn(u8, bool, &Locale) -> String + Send + Sync;
 
     #[test]
@@ -256,6 +276,14 @@ mod tests {
     }
 
     #[test]
+    fn message_fn_u64_arity_from_closure() {
+        let mf: MessageFn<U64CountLocaleMessageFn> =
+            MessageFn::new(|count: u64, _locale: &Locale| format!("{count}+"));
+
+        assert_eq!(mf(100, &locales::en_us()), "100+");
+    }
+
+    #[test]
     fn message_fn_str_arity_from_closure() {
         let mf: MessageFn<LabelLocaleMessageFn> =
             MessageFn::new(|label: &str, _locale: &Locale| format!("Target: {label}"));
@@ -271,6 +299,16 @@ mod tests {
             });
 
         assert_eq!(mf(2, "Library", &locales::en_us()), "2 -> Library");
+    }
+
+    #[test]
+    fn message_fn_u64_str_arity_from_closure() {
+        let mf: MessageFn<U64CountLabelLocaleMessageFn> =
+            MessageFn::new(|count: u64, target: &str, _locale: &Locale| {
+                format!("{count} -> {target}")
+            });
+
+        assert_eq!(mf(200, "Library", &locales::en_us()), "200 -> Library");
     }
 
     #[test]
@@ -319,5 +357,18 @@ mod tests {
 
         assert_eq!(mf, cloned);
         assert_eq!(cloned(1, "Drop", &locales::ja_jp()), "1 Drop ja-JP");
+    }
+
+    #[test]
+    fn message_fn_u64_str_arity_clone_and_deref() {
+        let mf: MessageFn<U64CountLabelLocaleMessageFn> =
+            MessageFn::new(|count: u64, target: &str, locale: &Locale| {
+                format!("{count} {target} {}", locale.to_bcp47())
+            });
+
+        let cloned = mf.clone();
+
+        assert_eq!(mf, cloned);
+        assert_eq!(cloned(100, "Drop", &locales::ja_jp()), "100 Drop ja-JP");
     }
 }
