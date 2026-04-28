@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/utility/button.rs
+expression: "snapshot_attrs(&service(test_props()).connect(&|_|\n{}).loading_indicator_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "loading-indicator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "button",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}

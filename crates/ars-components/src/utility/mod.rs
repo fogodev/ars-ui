@@ -3,6 +3,9 @@
 /// `as_child` pattern primitives.
 pub mod as_child;
 
+/// Button component machine.
+pub mod button;
+
 /// Dismissable helpers.
 pub mod dismissable;
 

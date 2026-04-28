@@ -154,7 +154,7 @@ Exactly one child element is required. Context behavior of the hosting component
 
 | Condition                                                                           | Debug build behavior | Production behavior | Notes                                                                                       |
 | ----------------------------------------------------------------------------------- | -------------------- | ------------------- | ------------------------------------------------------------------------------------------- |
-| anchor-like child receives button semantics without equivalent Space-key activation | debug warning        | warn and ignore     | Diagnostic only; merged semantics remain unchanged until the host fixes the child behavior. |
+| anchor-like child receives button semantics without equivalent Space-key activation | debug warning        | no diagnostic       | Diagnostic only; merged semantics remain unchanged until the host fixes the child behavior. |
 | zero or multiple children in root reassignment mode                                 | fail fast            | fail fast           | `as_child` requires exactly one concrete child element.                                     |
 
 ## 22. Shared Adapter Helper Notes

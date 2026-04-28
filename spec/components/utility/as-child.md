@@ -92,7 +92,7 @@ When merging component attributes onto a child element via `as_child`, ARIA attr
 
     The warning compiles in under `cfg(any(debug_assertions, feature = "debug"))` so it auto-fires in any dev build without requiring an explicit feature flag. Emission routes:
     - `feature = "debug"` enabled → `log::warn!` (structured logging, works on native and wasm whenever the consumer has wired a `log` subscriber). This is the standard diagnostic-build path used elsewhere in the workspace.
-    - `debug_assertions` only, with `feature = "std"` → `eprintln!` on native targets, mirroring the stdout branch of `leptos::logging::console_debug_warn`.
+    - `debug_assertions` only, with `feature = "std"` → `eprintln!` with the exact warning message on native targets, mirroring the stdout branch of `leptos::logging::console_debug_warn`.
     - On wasm dev builds without `feature = "debug"`, `ars-components` itself stays silent (it cannot pull `web_sys`). Framework adapters (`ars-leptos`, `ars-dioxus`) are responsible for re-emitting the warning to the browser console, the same way Leptos surfaces its own internal dev warnings via `web_sys::console::warn_1`.
 
 2. **`aria-describedby` / `aria-labelledby`:** Concatenate values (space-separated) with deduplication rather than overwriting. Both sets of IDs end up in the merged value. Token order is unspecified — assistive technology treats these attributes as unordered ID lists, and the merge is implemented via `AttrMap::merge` (see §1.2), which appends component tokens after existing child tokens.
