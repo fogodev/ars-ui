@@ -1,0 +1,63 @@
+---
+source: crates/ars-components/src/data_display/badge.rs
+expression: "snapshot_attrs(&api(Props::new().accessibility(Accessibility::Status).aria_label(\"3 unread notifications\")).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "badge",
+            ),
+        ),
+        (
+            Data(
+                "ars-size",
+            ),
+            String(
+                "sm",
+            ),
+        ),
+        (
+            Data(
+                "ars-variant",
+            ),
+            String(
+                "subtle",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "3 unread notifications",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "polite",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "status",
+            ),
+        ),
+    ],
+    styles: [],
+}

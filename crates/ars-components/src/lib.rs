@@ -5,6 +5,9 @@
 
 extern crate alloc;
 
+/// Data-display component machines.
+pub mod data_display;
+
 /// Overlay component machines.
 pub mod overlay;
 
