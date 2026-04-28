@@ -5,7 +5,7 @@
 //! a framework-agnostic vocabulary for converting machine state into DOM-facing
 //! metadata without relying on raw string literals throughout the codebase.
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{format, string::String, sync::Arc, vec::Vec};
 use core::fmt::{self, Debug, Display};
 
 /// Typed `aria-*` attribute names used by [`HtmlAttr::Aria`].
@@ -1856,6 +1856,52 @@ impl Display for CssProperty {
     }
 }
 
+/// Escape a string for use as a quoted CSS attribute selector value.
+///
+/// Adapter nonce-style rendering uses this for selectors such as
+/// `[data-ars-style-id="..."]`. The helper escapes quotes, backslashes,
+/// common control characters, and NUL using CSS escape sequences that keep
+/// the generated selector parseable and targeted at the original attribute
+/// value.
+#[must_use]
+pub fn escape_css_attribute_value(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+
+    for character in value.chars() {
+        match character {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\A "),
+            '\r' => escaped.push_str("\\D "),
+            '\t' => escaped.push_str("\\9 "),
+            '\0' => escaped.push_str("\\FFFD "),
+            _ => escaped.push(character),
+        }
+    }
+
+    escaped
+}
+
+/// Convert inline style entries into a nonce-compatible CSS rule.
+///
+/// The generated rule targets the stable adapter-managed
+/// `data-ars-style-id` attribute. Framework adapters use this when
+/// [`StyleStrategy::Nonce`] is active so CSP-constrained applications can
+/// render style declarations through a nonce-bearing `<style>` block instead
+/// of inline `style` attributes.
+#[must_use]
+pub fn styles_to_nonce_css(id: &str, styles: &[(CssProperty, String)]) -> String {
+    let id = escape_css_attribute_value(id);
+
+    let declarations = styles
+        .iter()
+        .map(|(property, value)| format!("  {property}: {value};"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!("[data-ars-style-id=\"{id}\"] {{\n{declarations}\n}}")
+}
+
 /// Type alias for an [`AttrValue::Reactive`] closure — takes no arguments and
 /// returns the current [`String`] value of the attribute. The closure is
 /// `Send + Sync` so adapter conversions are free to share it across threads
@@ -2943,6 +2989,30 @@ mod tests {
         assert_eq!(
             CssProperty::Custom("ars-timer-progress").to_string(),
             "--ars-timer-progress"
+        );
+    }
+
+    #[test]
+    fn escape_css_attribute_value_handles_selector_special_characters() {
+        assert_eq!(
+            escape_css_attribute_value("a\"b\\c\nd\re\tf\0g"),
+            "a\\\"b\\\\c\\A d\\D e\\9 f\\FFFD g"
+        );
+    }
+
+    #[test]
+    fn styles_to_nonce_css_formats_selector_and_declarations() {
+        let css = styles_to_nonce_css(
+            "el\n\"\\\0",
+            &[
+                (CssProperty::Width, String::from("100px")),
+                (CssProperty::Color, String::from("red")),
+            ],
+        );
+
+        assert_eq!(
+            css,
+            "[data-ars-style-id=\"el\\A \\\"\\\\\\FFFD \"] {\n  width: 100px;\n  color: red;\n}"
         );
     }
 

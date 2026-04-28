@@ -670,15 +670,21 @@ fn setup_focus_scope_hydration_safe(
 ### 4.1 AttrMap Conversion
 
 ```rust
-use ars_core::{AttrMap, HtmlAttr, AttrValue, CssProperty, StyleStrategy};
+use ars_core::{
+    AttrMap, AttrMapParts, HtmlAttr, AttrValue, CssProperty, StyleStrategy, styles_to_nonce_css,
+};
+
+pub type LeptosAttribute = leptos::tachys::html::attribute::any_attribute::AnyAttribute;
 
 /// Result of converting an `AttrMap` with strategy awareness.
 pub struct LeptosAttrResult {
-    /// HTML attribute tuples ready for spreading via `{..attrs}`.
-    pub attrs: Vec<(String, String)>,
+    /// Native Leptos attributes ready for spreading via `{..attrs}`.
+    pub attrs: Vec<LeptosAttribute>,
     /// Styles to apply via CSSOM (`element.style().set_property()`).
     /// Non-empty only when strategy is `Cssom`.
     pub cssom_styles: Vec<(CssProperty, String)>,
+    /// Stable key for `nonce_css`; `None` when no nonce rule was generated.
+    pub nonce_css_key: Option<String>,
     /// CSS rule text to inject into a `<style nonce="...">` block.
     /// Non-empty only when strategy is `Nonce`.
     pub nonce_css: String,
@@ -695,17 +701,30 @@ pub fn attr_map_to_leptos(
     strategy: &StyleStrategy,
     element_id: Option<&str>,
 ) -> LeptosAttrResult {
+    use leptos::tachys::html::attribute::any_attribute::IntoAnyAttribute;
+
     let AttrMapParts { attrs, styles } = map.into_parts();
 
-    let mut result: Vec<(String, String)> = attrs.into_iter()
-        .filter_map(|(key, val)| match val {
-            AttrValue::String(s) => Some((key.to_string(), s)),
-            AttrValue::Bool(true) => Some((key.to_string(), String::new())),
+    let mut result: Vec<LeptosAttribute> = attrs.into_iter()
+        .filter_map(|(key, val)| {
+            let name = key.to_string();
+            match val {
+            AttrValue::String(s) => Some(string_attr(name, s)),
+            AttrValue::Bool(true) => Some(string_attr(name, String::new())),
+            AttrValue::Reactive(f) => {
+                let closure = move || f();
+                Some(leptos::attr::custom::custom_attribute(name, closure).into_any_attr())
+            }
+            AttrValue::ReactiveBool(f) => {
+                let closure = move || f().then(String::new);
+                Some(leptos::attr::custom::custom_attribute(name, closure).into_any_attr())
+            }
             AttrValue::Bool(false) | AttrValue::None => None,
-        })
+        }})
         .collect();
 
     let mut cssom_styles = Vec::new();
+    let mut nonce_css_key = None;
     let mut nonce_css = String::new();
 
     match strategy {
@@ -715,7 +734,7 @@ pub fn attr_map_to_leptos(
                     .map(|(prop, val)| format!("{}: {};", prop, val))
                     .collect::<Vec<_>>()
                     .join(" ");
-                result.push(("style".to_string(), style_str));
+                result.push(string_attr("style".to_string(), style_str));
             }
         }
         StyleStrategy::Cssom => {
@@ -724,31 +743,179 @@ pub fn attr_map_to_leptos(
         StyleStrategy::Nonce(_) => {
             if !styles.is_empty() {
                 let id = element_id.expect("element_id is required for Nonce style strategy");
-                result.push(("data-ars-style-id".to_string(), id.to_string()));
+                result.push(string_attr("data-ars-style-id".to_string(), id.to_string()));
+                nonce_css_key = Some(id.to_string());
                 nonce_css = styles_to_nonce_css(id, &styles);
             }
         }
     }
 
-    LeptosAttrResult { attrs: result, cssom_styles, nonce_css }
+    LeptosAttrResult { attrs: result, cssom_styles, nonce_css_key, nonce_css }
 }
 
-/// Apply styles to a DOM element via the CSSOM API.
-/// Used when `StyleStrategy::Cssom` is active.
+fn string_attr(name: String, value: String) -> LeptosAttribute {
+    use leptos::tachys::html::attribute::any_attribute::IntoAnyAttribute;
+    leptos::attr::custom::custom_attribute(name, value).into_any_attr()
+}
+
+/// Tracks CSS properties applied through CSSOM so stale entries can be removed.
 #[cfg(not(feature = "ssr"))]
-pub fn apply_styles_cssom(el: &web_sys::HtmlElement, styles: &[(CssProperty, String)]) {
-    let style = el.style();
-    for (prop, val) in styles {
-        let _ = style.set_property(&prop.to_string(), val);
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CssomStyleHandle {
+    applied: Vec<CssProperty>,
+}
+
+#[cfg(not(feature = "ssr"))]
+impl CssomStyleHandle {
+    pub const fn new() -> Self {
+        Self { applied: Vec::new() }
+    }
+
+    pub fn sync(&mut self, el: &web_sys::HtmlElement, styles: &[(CssProperty, String)]) {
+        let style = el.style();
+        for property in self.applied.drain(..) {
+            if !styles.iter().any(|(next, _)| *next == property) {
+                let _ = style.remove_property(&property.to_string());
+            }
+        }
+        for (prop, val) in styles {
+            let _ = style.set_property(&prop.to_string(), val);
+            self.applied.push(prop.clone());
+        }
+    }
+
+    pub fn clear(&mut self, el: &web_sys::HtmlElement) {
+        let style = el.style();
+        for property in self.applied.drain(..) {
+            let _ = style.remove_property(&property.to_string());
+        }
     }
 }
 
-/// Convert styles to a CSS rule string for nonce-based injection.
-fn styles_to_nonce_css(id: &str, styles: &[(CssProperty, String)]) -> String {
-    let decls: Vec<String> = styles.iter()
-        .map(|(prop, val)| format!("  {}: {};", prop, val))
-        .collect();
-    format!("[data-ars-style-id=\"{}\"] {{\n{}\n}}", id, decls.join("\n"))
+/// Apply styles to a DOM element via the CSSOM API.
+/// Prefer `CssomStyleHandle` or `use_cssom_styles()` when styles can change over time.
+#[cfg(not(feature = "ssr"))]
+pub fn apply_styles_cssom(el: &web_sys::HtmlElement, styles: &[(CssProperty, String)]) {
+    CssomStyleHandle::new().sync(el, styles);
+}
+
+/// Synchronize CSSOM styles from an attribute conversion result to a node ref.
+/// Owns a persistent `CssomStyleHandle`, clears owned properties when the
+/// target node changes, and clears the last touched node on cleanup.
+/// Use `use_cssom_styles()` when the style list itself is reactive.
+#[cfg(not(feature = "ssr"))]
+pub fn use_cssom_styles_from_attrs<E>(target: NodeRef<E>, result: &LeptosAttrResult)
+where
+    E: leptos::tachys::html::element::ElementType,
+    E::Output: JsCast + Clone + 'static,
+{
+    let styles = result.cssom_styles.clone();
+    use_cssom_styles(target, move || styles.clone());
+}
+
+/// Synchronize reactive CSSOM styles to a node ref.
+///
+/// The closure runs inside a Leptos effect. Signal reads in the closure
+/// resubscribe the hook; stale properties are removed on each sync, previous
+/// targets are cleared when the node ref changes, and cleanup clears the last
+/// touched target.
+#[cfg(not(feature = "ssr"))]
+pub fn use_cssom_styles<E, F>(target: NodeRef<E>, styles: F)
+where
+    E: leptos::tachys::html::element::ElementType,
+    E::Output: JsCast + Clone + 'static,
+    F: Fn() -> Vec<(CssProperty, String)> + 'static,
+{
+    let handle: StoredValue<CssomStyleHandle, LocalStorage> =
+        StoredValue::new_local(CssomStyleHandle::new());
+    let applied_element: StoredValue<Option<web_sys::HtmlElement>, LocalStorage> =
+        StoredValue::new_local(None);
+
+    Effect::new(move |_| {
+        let styles = styles();
+        let element = target.get().map(JsCast::unchecked_into);
+        if let Some(previous) = applied_element.get_value() {
+            handle.update_value(|handle| handle.clear(&previous));
+        }
+        let Some(element) = element else {
+            applied_element.set_value(None);
+            return;
+        };
+        handle.update_value(|handle| handle.sync(&element, &styles));
+        applied_element.set_value(Some(element));
+    });
+
+    on_cleanup(move || {
+        if let Some(element) = applied_element.get_value() {
+            handle.update_value(|handle| handle.clear(&element));
+        }
+        applied_element.set_value(None);
+    });
+}
+
+/// Collect nonce CSS generated by `attr_map_to_leptos`.
+///
+/// Components using `StyleStrategy::Nonce` MUST call this after converting
+/// attributes. The helper no-ops when `nonce_css` is empty and replaces any
+/// previous rule with the same `nonce_css_key`.
+pub fn collect_nonce_css_from_attrs(result: &LeptosAttrResult) {
+    if !result.nonce_css.is_empty() {
+        let key = result.nonce_css_key.clone().unwrap_or_else(|| result.nonce_css.clone());
+        upsert_nonce_css(key, result.nonce_css.clone());
+    }
+}
+
+/// Schedule nonce CSS collection after render setup.
+/// Component code should prefer this hook over direct render-phase writes.
+/// Use `use_nonce_css_rule()` when the nonce rule itself is reactive.
+pub fn use_nonce_css_from_attrs(result: &LeptosAttrResult) {
+    let entry = nonce_css_entry_from_attrs(result);
+    use_nonce_css_rule(move || entry.clone());
+}
+
+/// Schedule reactive keyed nonce CSS collection for the current owner.
+///
+/// `Some((key, css))` inserts or replaces a keyed rule. Returning `None`, key
+/// changes, and owner cleanup remove the previously owned key from the
+/// collector.
+pub fn use_nonce_css_rule<F>(rule: F)
+where
+    F: Fn() -> Option<(String, String)> + 'static,
+{
+    let rules = use_context::<ArsNonceCssCtx>().map(|ctx| ctx.rules);
+    let applied_key: StoredValue<Option<String>, LocalStorage> = StoredValue::new_local(None);
+
+    Effect::new(move |_| {
+        let Some(rules) = rules else {
+            applied_key.set_value(None);
+            return;
+        };
+
+        match rule() {
+            Some((key, css)) => {
+                if let Some(previous) = applied_key.get_value() && previous != key {
+                    remove_nonce_css_from_rules(rules, &previous);
+                }
+                upsert_nonce_css_in_rules(rules, key.clone(), css);
+                applied_key.set_value(Some(key));
+            }
+            None => {
+                if let Some(previous) = applied_key.get_value() {
+                    remove_nonce_css_from_rules(rules, &previous);
+                }
+                applied_key.set_value(None);
+            }
+        }
+    });
+
+    on_cleanup(move || {
+        if let Some(rules) = rules
+            && let Some(previous) = applied_key.get_value()
+        {
+            remove_nonce_css_from_rules(rules, &previous);
+        }
+        applied_key.set_value(None);
+    });
 }
 ```
 
@@ -761,11 +928,9 @@ reactively obtain attributes and `send.run(checkbox::Event::Toggle)` (or the app
 
 ```rust
 // In a Leptos component:
-// Two attr spread patterns are used:
-//   1. `{..machine.derive(|api| api.xxx_attrs()).get()}` — direct spread of Vec<(String, String)>
-//      Used when the component does not need StyleStrategy-aware CSS handling.
-//   2. `{..attr_map_to_leptos(api.xxx_attrs(), &strategy, id).attrs}` — strategy-aware spread
-//      Used when the component has CSS properties requiring CSSOM or nonce injection.
+// Always convert AttrMap through `attr_map_to_leptos()` before spreading.
+// `LeptosAttrResult.attrs` uses native Leptos attributes, so reactive
+// AttrValue closures stay live after the first render.
 let strategy = use_style_strategy();
 let root_attrs = machine.derive(move |api| attr_map_to_leptos(api.root_attrs(), &strategy, Some("checkbox-root")));
 let data_state = machine.derive(|api| api.data_state().to_string());
@@ -786,6 +951,10 @@ view! {
     </div>
 }
 ```
+
+When `root_attrs.get().nonce_css` is non-empty, component glue MUST call
+`collect_nonce_css_from_attrs(&root_attrs.get())` during render/effect wiring so
+the provider-owned nonce style block receives the generated rule.
 
 ### 4.3 Event Listener Options
 
@@ -860,46 +1029,82 @@ fallback paths remain silent.
 
 #### 4.5.1 Nonce CSS Collector
 
-For `StyleStrategy::Nonce`, a collector component aggregates CSS rules from all ars components and renders them in a single `<style>` element with the provided nonce.
+`ArsProvider` always owns a nonce CSS collector context for the whole provider subtree. When `style_strategy` is `StyleStrategy::Nonce(nonce)`, the provider renders the collector automatically as a `<style nonce="...">` before descendant content. Components append scoped CSS rules into that provider-owned collector only when `StyleStrategy::Nonce` produces nonce CSS. `ArsNonceCssProvider` is the standalone public wrapper for advanced/manual collector ownership; `ArsNonceStyle` only renders an already-provided collector.
 
-````rust
+```rust
+/// Stable nonce CSS rule keyed by the styled element or rule owner.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NonceCssRule {
+    pub key: String,
+    pub css: String,
+}
+
 /// Context for collecting nonce CSS rules during rendering.
 #[derive(Clone, Debug)]
 pub struct ArsNonceCssCtx {
-    pub rules: RwSignal<Vec<String>>,
+    pub rules: RwSignal<Vec<NonceCssRule>>,
 }
 
-/// Collects nonce CSS from descendant components and renders a `<style nonce="...">` block.
-///
-/// Place this component near the document `<head>`:
-/// ```rust
-/// view! {
-///     <ArsProvider strategy=StyleStrategy::Nonce(nonce.clone())>
-///         <ArsNonceStyle nonce=nonce.clone() />
-///         <App />
-///     </ArsProvider>
-/// }
-/// ```
+/// Create and publish a nonce CSS collector context for the current owner.
+pub fn use_nonce_css_context_provider() -> ArsNonceCssCtx {
+    let context = ArsNonceCssCtx { rules: RwSignal::new(Vec::new()) };
+    provide_context(context.clone());
+    context
+}
+
+/// Provide a nonce CSS collector context and render collected rules with `nonce`.
+#[component]
+pub fn ArsNonceCssProvider(nonce: String, children: Children) -> impl IntoView {
+    use_nonce_css_context_provider();
+
+    view! {
+        <ArsNonceStyle nonce=nonce />
+        {children()}
+    }
+}
+
+/// Renders the current nonce CSS collector as a `<style nonce="...">` block.
+/// `ArsProvider` renders this automatically for `StyleStrategy::Nonce`.
 #[component]
 pub fn ArsNonceStyle(nonce: String) -> impl IntoView {
-    let rules = RwSignal::new(Vec::<String>::new());
-    provide_context(ArsNonceCssCtx { rules });
+    let rules = use_context::<ArsNonceCssCtx>().map(|ctx| ctx.rules);
 
     view! {
         <style nonce=nonce>
-            {move || rules.with(|r| r.join("\n"))}
+            {move || rules.map(|rules| {
+                rules.with(|r| r.iter().map(|rule| rule.css.as_str()).collect::<Vec<_>>().join("\n"))
+            }).unwrap_or_default()}
         </style>
     }
 }
 
-/// Append a CSS rule to the nonce collector.
-/// Called internally by components when `StyleStrategy::Nonce` is active.
+/// Collect a CSS rule using the rule text as its stable key.
+/// This is a low-level manual API; component glue should prefer keyed hooks.
 pub fn append_nonce_css(css: String) {
+    upsert_nonce_css(css.clone(), css);
+}
+
+/// Insert or replace a CSS rule in the nonce collector.
+/// Called internally by components when `StyleStrategy::Nonce` is active.
+pub fn upsert_nonce_css(key: String, css: String) {
     if let Some(ctx) = use_context::<ArsNonceCssCtx>() {
-        ctx.rules.update(|r| r.push(css));
+        ctx.rules.update(|r| {
+            if let Some(rule) = r.iter_mut().find(|rule| rule.key == key) {
+                rule.css = css;
+            } else {
+                r.push(NonceCssRule { key, css });
+            }
+        });
     }
 }
-````
+
+/// Remove a CSS rule from the nonce collector.
+pub fn remove_nonce_css(key: &str) {
+    if let Some(ctx) = use_context::<ArsNonceCssCtx>() {
+        ctx.rules.update(|r| r.retain(|rule| rule.key != key));
+    }
+}
+```
 
 ---
 
@@ -1443,14 +1648,66 @@ The Clipboard component's `feedback_duration_ms` timeout resets the "copied" sta
 
 2. **Idempotent cleanup.** Cleanup functions MUST be safe to call multiple times. Leptos may invoke `on_cleanup` more than once during rapid re-renders or concurrent transitions. Guard against double-removal by checking a `cleaned_up: StoredValue<bool, LocalStorage>` flag.
 
-3. **Weak-guard pattern for stale callbacks.** Store long-lived callbacks (e.g., global `keydown` handlers registered on `document`) as `Weak<Box<dyn Fn(...)>>`. Before invoking, upgrade the weak reference — if the owning scope has been disposed, the upgrade returns `None` and the callback is silently skipped.
+3. **Weak-guard pattern for stale callbacks.** Store long-lived callbacks (e.g., global `keydown` handlers registered on `document`) as `Weak<dyn Fn(...)>`. Before invoking, upgrade the weak reference — if the owning scope has been disposed, the upgrade returns `None` and the callback is silently skipped.
 
-4. **Batch removals, then batch registrations.** Never interleave individual remove/add pairs. Collect all pending removals into a `Vec`, execute them synchronously, then collect and execute all registrations.
+4. **Batch removals, then batch registrations.** `use_safe_event_listeners()` MUST remove all previously registered listeners synchronously before adding any replacement listeners. `use_safe_event_listener()` is a single-listener wrapper around the batch helper.
 
 ```rust
-use leptos::prelude::*;
-use std::rc::{Rc, Weak};
-use web_sys::wasm_bindgen::closure::Closure;
+use leptos::{
+    prelude::*,
+    reactive::owner::LocalStorage,
+    wasm_bindgen::{JsCast, closure::Closure},
+};
+use std::{fmt, rc::{Rc, Weak}};
+
+type ListenerHandler = Rc<dyn Fn(web_sys::Event)>;
+type ListenerHandlerStore = StoredValue<Option<Vec<ListenerHandler>>, LocalStorage>;
+
+struct RegisteredListener {
+    target: web_sys::EventTarget,
+    event_name: &'static str,
+    capture: bool,
+    active: Rc<Cell<bool>>,
+    closure: Closure<dyn FnMut(web_sys::Event)>,
+}
+
+/// DOM event listener definition for batch lifecycle registration.
+#[derive(Clone)]
+pub struct SafeEventListener {
+    event_name: &'static str,
+    options: SafeEventListenerOptions,
+    handler: ListenerHandler,
+}
+
+/// Options passed to DOM event listener registration.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SafeEventListenerOptions {
+    pub capture: bool,
+    pub passive: bool,
+    pub once: bool,
+}
+
+impl fmt::Debug for SafeEventListener {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SafeEventListener")
+            .field("event_name", &self.event_name)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SafeEventListener {
+    pub fn new(event_name: &'static str, handler: impl Fn(web_sys::Event) + 'static) -> Self {
+        Self::new_with_options(event_name, SafeEventListenerOptions::default(), handler)
+    }
+
+    pub fn new_with_options(
+        event_name: &'static str,
+        options: SafeEventListenerOptions,
+        handler: impl Fn(web_sys::Event) + 'static,
+    ) -> Self {
+        Self { event_name, options, handler: Rc::new(handler) }
+    }
+}
 
 /// Attaches an event listener with framework-managed lifecycle cleanup.
 ///
@@ -1459,53 +1716,98 @@ use web_sys::wasm_bindgen::closure::Closure;
 /// in Leptos) require owning the Closure handle. The ars-dom `EventListenerHandle`
 /// utility (11-dom-utilities.md §7) does not integrate with framework reactivity
 /// systems. See v93 follow-up discussion.
-fn use_safe_event_listener(
-    target: NodeRef<html::Div>,
+pub fn use_safe_event_listener<E>(
+    target: NodeRef<E>,
     event_name: &'static str,
     handler: impl Fn(web_sys::Event) + 'static,
-) {
-    let handler: Rc<Box<dyn Fn(web_sys::Event)>> = Rc::new(Box::new(handler));
-    let weak_handler: Weak<Box<dyn Fn(web_sys::Event)>> = Rc::downgrade(&handler);
+) where
+    E: leptos::tachys::html::element::ElementType,
+    E::Output: JsCast + Clone + 'static,
+{
+    use_safe_event_listeners(target, vec![SafeEventListener::new(event_name, handler)]);
+}
+
+/// Attaches multiple event listeners with batched cleanup before registration.
+pub fn use_safe_event_listeners<E>(
+    target: NodeRef<E>,
+    listeners: Vec<SafeEventListener>,
+) where
+    E: leptos::tachys::html::element::ElementType,
+    E::Output: JsCast + Clone + 'static,
+{
+    let weak_listeners: Vec<(&'static str, SafeEventListenerOptions, Weak<dyn Fn(web_sys::Event)>)> = listeners
+        .iter()
+        .map(|listener| (listener.event_name, listener.options, Rc::downgrade(&listener.handler)))
+        .collect();
+    let handler_store: ListenerHandlerStore = StoredValue::new_local(Some(
+        listeners
+            .into_iter()
+            .map(|listener| listener.handler)
+            .collect(),
+    ));
 
     // Store the closure so we can remove it on cleanup.
     // `new_local` accepts `!Send` types — no wrapper needed.
-    let closure_handle: StoredValue<Option<Closure<dyn Fn(web_sys::Event)>>, LocalStorage> =
-        StoredValue::new_local(None);
+    let closure_handle: StoredValue<Vec<RegisteredListener>, LocalStorage> =
+        StoredValue::new_local(Vec::new());
     let cleaned_up: StoredValue<bool, LocalStorage> = StoredValue::new_local(false);
+    let active: StoredValue<bool, LocalStorage> = StoredValue::new_local(true);
 
     Effect::new(move |_| {
-        let Some(el) = target.get() else { return };
-        let el: web_sys::HtmlElement = el.into();
-
-        // Phase 1: Synchronous cleanup of previous listener.
-        // Closure is !Clone, so we cannot use read_value() (which requires T: Clone).
-        // Instead, use update_value + take to extract the Option without cloning.
-        let prev_closure = { let mut out = None; closure_handle.update_value(|v| out = v.take()); out };
-        if let Some(prev_closure) = prev_closure {
-            el.remove_event_listener_with_callback(
-                event_name,
-                prev_closure.as_ref().unchecked_ref(),
+        // Phase 1: Synchronous cleanup of previous listeners from their
+        // originally registered targets.
+        let previous = { let mut out = Vec::new(); closure_handle.update_value(|v| out.append(v)); out };
+        for previous in previous {
+            previous.active.set(false);
+            previous.target.remove_event_listener_with_callback_and_bool(
+                previous.event_name,
+                previous.closure.as_ref().unchecked_ref(),
+                previous.capture,
             )
             .ok();
         }
 
-        // Phase 2: Register new listener with weak reference guard.
-        let weak = weak_handler.clone();
-        let closure = Closure::new(move |event: web_sys::Event| {
-            // Note: TOCTOU window exists between alive check and handler execution
-            if let Some(strong) = weak.upgrade() {
-                (*strong)(event);
-            }
-            // If upgrade fails, the owning scope is gone — skip silently.
-        });
+        let Some(el) = target.get() else { return };
+        let el: web_sys::EventTarget = el.unchecked_into();
 
-        el.add_event_listener_with_callback(
-            event_name,
-            closure.as_ref().unchecked_ref(),
-        )
-        .expect("addEventListener");
+        // Phase 2: Register new listeners with weak and per-registration guards.
+        let mut registrations = Vec::with_capacity(weak_listeners.len());
+        for (event_name, options, weak_handler) in &weak_listeners {
+            let weak = weak_handler.clone();
+            let registration_active = Rc::new(Cell::new(true));
+            let registration_active_for_closure = registration_active.clone();
+            let closure = Closure::new(move |event: web_sys::Event| {
+                if registration_active_for_closure.get()
+                    && *active.read_value()
+                    && let Some(strong) = weak.upgrade()
+                {
+                    strong(event);
+                }
+                // If upgrade fails, the owning scope is gone — skip silently.
+            });
 
-        closure_handle.set_value(Some(closure));
+            let listener_options = web_sys::AddEventListenerOptions::new();
+            listener_options.set_capture(options.capture);
+            listener_options.set_passive(options.passive);
+            listener_options.set_once(options.once);
+
+            el.add_event_listener_with_callback_and_add_event_listener_options(
+                event_name,
+                closure.as_ref().unchecked_ref(),
+                &listener_options,
+            )
+            .expect("addEventListener");
+
+            registrations.push(RegisteredListener {
+                target: el.clone(),
+                event_name: *event_name,
+                capture: options.capture,
+                active: registration_active,
+                closure,
+            });
+        }
+
+        closure_handle.set_value(registrations);
         cleaned_up.set_value(false);
     });
 
@@ -1515,18 +1817,19 @@ fn use_safe_event_listener(
             return;
         }
         cleaned_up.set_value(true);
+        active.set_value(false);
 
-        if let Some(el) = target.get_untracked() {
-            let el: web_sys::HtmlElement = el.into();
-            let prev_closure = { let mut out = None; closure_handle.update_value(|v| out = v.take()); out };
-            if let Some(prev_closure) = prev_closure {
-                el.remove_event_listener_with_callback(
-                    event_name,
-                    prev_closure.as_ref().unchecked_ref(),
-                )
-                .ok();
-            }
+        let previous = { let mut out = Vec::new(); closure_handle.update_value(|v| out.append(v)); out };
+        for previous in previous {
+            previous.active.set(false);
+            previous.target.remove_event_listener_with_callback_and_bool(
+                previous.event_name,
+                previous.closure.as_ref().unchecked_ref(),
+                previous.capture,
+            )
+            .ok();
         }
+        handler_store.set_value(None);
     });
 }
 ```
@@ -1642,14 +1945,14 @@ All public callback props follow a consistent naming convention across `ars-lept
 /// ```rust
 /// emit(props.on_value_change.as_ref(), selected_value);
 /// ```
-pub fn emit<T: Clone>(callback: Option<&Callback<T>>, value: T) {
+pub fn emit<T>(callback: Option<&Callback<T>>, value: T) {
     if let Some(cb) = callback {
         cb.run(value);
     }
 }
 
 /// Map a value before emitting.
-pub fn emit_map<T, U: Clone>(callback: Option<&Callback<U>>, value: T, f: impl Fn(T) -> U) {
+pub fn emit_map<T, U>(callback: Option<&Callback<U>>, value: T, f: impl Fn(T) -> U) {
     if let Some(cb) = callback {
         cb.run(f(value));
     }
@@ -2002,7 +2305,8 @@ use ars_core::KeyboardKey;
 /// DOM-spec key string (e.g., "Enter", "ArrowUp", " " for Space).
 pub fn leptos_key_to_keyboard_key(ev: &web_sys::KeyboardEvent) -> (KeyboardKey, Option<char>) {
     let key_str = ev.key();
-    let ch = if key_str.len() == 1 { key_str.chars().next() } else { None };
+    let mut chars = key_str.chars();
+    let ch = chars.next().filter(|_| chars.next().is_none());
     (KeyboardKey::from_key_str(&key_str), ch)
 }
 ```

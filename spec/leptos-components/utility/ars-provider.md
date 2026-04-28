@@ -36,7 +36,7 @@ pub fn ArsProvider(
 ## 3. Mapping to Core Component Contract
 
 - Props parity: full parity with the core context props. Reactive props (`locale`, `direction`, `color_mode`, `disabled`, `read_only`) accept `Signal` for live updates. Non-reactive props (`id_prefix`, `portal_container_id`, `root_node_id`, `style_strategy`) are plain values set at mount time.
-- Context parity: publishes full `ArsContext` to descendants via `provide_context`.
+- Context parity: publishes full `ArsContext` and the adapter nonce CSS collector to descendants via `provide_context`.
 
 ## 4. Part Mapping
 
@@ -53,22 +53,23 @@ pub fn ArsProvider(
 
 ## 6. Composition / Context Contract
 
-The adapter publishes `ArsContext` with `provide_context`. Consumers use `use_context::<ArsContext>()`. The convenience hooks `use_locale()` and `use_direction()` read from this context with fallback defaults.
+The adapter publishes `ArsContext` with `provide_context`. It also publishes an `ArsNonceCssCtx` collector owned by the provider instance and automatically renders `ArsNonceStyle` when `style_strategy` is `StyleStrategy::Nonce(nonce)`. Consumers use `use_context::<ArsContext>()`. The convenience hooks `use_locale()` and `use_direction()` read from this context with fallback defaults.
 
 ## 7. Prop Sync and Event Mapping
 
 ArsProvider is context-driven rather than event-driven.
 
-| Adapter prop                                         | Mode       | Sync trigger            | Update path                  | Visible effect                            | Notes                                             |
-| ---------------------------------------------------- | ---------- | ----------------------- | ---------------------------- | ----------------------------------------- | ------------------------------------------------- |
-| `locale`                                             | controlled | signal change           | update ArsContext.locale     | descendants see updated locale            | direction auto-inferred when direction=None       |
-| `direction`                                          | controlled | signal change           | update ArsContext.direction  | `dir` attribute updates, layout reflows   | overrides locale-inferred direction               |
-| `color_mode`                                         | controlled | signal change           | update ArsContext.color_mode | theme-aware descendants re-render         |                                                   |
-| `disabled` / `read_only`                             | controlled | signal change           | update ArsContext fields     | descendant components enable/disable      |                                                   |
-| `id_prefix` / `portal_container_id` / `root_node_id` | controlled | prop change after mount | update provided context      | descendants resolve new ID prefix/targets | non-reactive; set once at mount                   |
-| `intl_backend`                                       | controlled | prop at mount           | stored in ArsContext         | date-time components use ICU data         | non-reactive; set once at mount                   |
-| `i18n_registries`                                    | controlled | prop at mount           | stored in ArsContext         | components resolve translated messages    | non-reactive; set once at mount                   |
-| `style_strategy`                                     | controlled | prop at mount           | stored in ArsContext         | components use strategy for CSS injection | non-reactive; defaults to `StyleStrategy::Inline` |
+| Adapter prop                                         | Mode       | Sync trigger            | Update path                  | Visible effect                            | Notes                                                                                   |
+| ---------------------------------------------------- | ---------- | ----------------------- | ---------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------- |
+| `locale`                                             | controlled | signal change           | update ArsContext.locale     | descendants see updated locale            | direction auto-inferred when direction=None                                             |
+| `direction`                                          | controlled | signal change           | update ArsContext.direction  | `dir` attribute updates, layout reflows   | overrides locale-inferred direction                                                     |
+| `color_mode`                                         | controlled | signal change           | update ArsContext.color_mode | theme-aware descendants re-render         |                                                                                         |
+| `disabled` / `read_only`                             | controlled | signal change           | update ArsContext fields     | descendant components enable/disable      |                                                                                         |
+| `id_prefix` / `portal_container_id` / `root_node_id` | controlled | prop change after mount | update provided context      | descendants resolve new ID prefix/targets | non-reactive; set once at mount                                                         |
+| `intl_backend`                                       | controlled | prop at mount           | stored in ArsContext         | date-time components use ICU data         | non-reactive; set once at mount                                                         |
+| `i18n_registries`                                    | controlled | prop at mount           | stored in ArsContext         | components resolve translated messages    | non-reactive; set once at mount                                                         |
+| `style_strategy`                                     | controlled | prop at mount           | stored in ArsContext         | components use strategy for CSS injection | non-reactive; defaults to `StyleStrategy::Inline`; `Nonce` auto-renders the nonce style |
+| nonce CSS collector                                  | internal   | provider mount          | provide `ArsNonceCssCtx`     | provider-owned style renders rules        | provider-owned                                                                          |
 
 ## 8. Registration and Cleanup Contract
 
@@ -76,9 +77,10 @@ ArsProvider is context-driven rather than event-driven.
 - Cleanup is the lifetime of the provided context value only.
 - Descendants must stop reading provider data after the provider unmounts.
 
-| Registered entity   | Registration trigger | Identity key      | Cleanup trigger  | Cleanup action     | Notes                                            |
-| ------------------- | -------------------- | ----------------- | ---------------- | ------------------ | ------------------------------------------------ |
-| provided ArsContext | provider mount       | provider instance | provider cleanup | drop context value | no DOM listener ownership in the provider itself |
+| Registered entity   | Registration trigger | Identity key      | Cleanup trigger  | Cleanup action     | Notes                                             |
+| ------------------- | -------------------- | ----------------- | ---------------- | ------------------ | ------------------------------------------------- |
+| provided ArsContext | provider mount       | provider instance | provider cleanup | drop context value | no DOM listener ownership in the provider itself  |
+| nonce CSS collector | provider mount       | provider instance | provider cleanup | drop context value | rendered automatically for `StyleStrategy::Nonce` |
 
 ## 9. Ref and Node Contract
 
@@ -135,9 +137,10 @@ ArsProvider is context-driven rather than event-driven.
 
 1. Resolve all props to signals (defaulting absent signals to stored defaults).
 2. Derive `direction` memo from locale when direction prop is `None`.
-3. Build and publish `ArsContext` via `provide_context`.
-4. Render `<div dir=dir_attr>{children()}</div>`.
-5. Verify descendant consumption and provider cleanup.
+3. Build and publish provider-owned `ArsNonceCssCtx`.
+4. Build and publish `ArsContext` via `provide_context`.
+5. Render `<div dir=dir_attr>{children()}</div>`.
+6. Verify descendant consumption and provider cleanup.
 
 ## 18. Anti-Patterns
 
@@ -210,6 +213,10 @@ pub fn ArsProvider(
     let i18n_registries = i18n_registries.unwrap_or_else(|| Rc::new(I18nRegistries::new()));
     let style_strategy = style_strategy.unwrap_or(StyleStrategy::Inline);
 
+    provide_context(ArsNonceCssCtx {
+        rules: RwSignal::new(Vec::<NonceCssRule>::new()),
+    });
+
     provide_context(ArsContext {
         locale,
         direction,
@@ -254,6 +261,7 @@ Intentional deviations: none.
 ## 28. Test Scenarios
 
 - context publication with all props
+- nonce collector publication for `ArsNonceStyle`
 - default fallback values when props are absent
 - `use_locale()` fallback without provider
 - `dir` attribute reactivity on locale change
@@ -269,10 +277,12 @@ Intentional deviations: none.
 | locale fallback        | context registration  | Assert `use_locale()` returns en-US without a provider.               |
 | dir attribute          | DOM assertion         | Assert `dir` attribute matches current direction.                     |
 | style strategy default | context registration  | Assert `use_style_strategy()` returns `Inline` without explicit prop. |
+| nonce collector        | context registration  | Assert `append_nonce_css()` collects rules from provider context.     |
 
 ## 30. Implementation Checklist
 
 - [ ] Provider context publishes all documented `ArsContext` fields.
+- [ ] Provider publishes an `ArsNonceCssCtx` collector for `ArsNonceStyle`.
 - [ ] `<div dir>` wrapper renders and reactively updates.
 - [ ] Default fallback values match documented defaults (en-US, Ltr, System, false, false, Inline).
 - [ ] `use_locale()` works with and without provider.

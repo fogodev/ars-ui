@@ -6,10 +6,12 @@
 
 use std::{
     collections::HashSet,
-    sync::{LazyLock, Mutex},
+    sync::{LazyLock, Mutex, MutexGuard},
 };
 
-use ars_core::{AttrMap, AttrMapParts, AttrValue, CssProperty, HtmlAttr, StyleStrategy};
+use ars_core::{
+    AttrMap, AttrMapParts, AttrValue, CssProperty, HtmlAttr, StyleStrategy, styles_to_nonce_css,
+};
 use dioxus::prelude::*;
 use dioxus_core::AttributeValue;
 
@@ -17,30 +19,73 @@ use crate::provider::{ArsContext, warn_missing_provider};
 
 // ── Attribute name interning ────────────────────────────────────────
 
-/// Intern pool for attribute name strings.
+/// Intern pool for attribute names not covered by static fast paths.
 ///
-/// Dioxus [`Attribute::new`] requires `&'static str`. Known HTML/ARIA attribute
-/// names are compile-time constants via [`HtmlAttr::static_name()`]. Dynamic
-/// `data-*` attribute names are interned on first use; the set is bounded by the
-/// number of component parts (~500 across all 111 components), so total leaked
-/// memory is negligible (~10 KB).
+/// Dioxus [`Attribute::new`] requires `&'static str`. Known HTML, ARIA, and
+/// ars-generated `data-*` names are compile-time constants. Unknown `data-*`
+/// names are interned on first use as a Dioxus compatibility fallback.
 static ATTR_NAMES: LazyLock<Mutex<HashSet<&'static str>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
-/// Convert an [`HtmlAttr`] to a `&'static str` suitable for [`Attribute::new`].
-///
-/// Static variants (Class, Id, Role, etc.) return compile-time string slices.
-/// [`HtmlAttr::Data`] variants intern `"data-{name}"` via a global pool.
-pub fn intern_attr_name(attr: &HtmlAttr) -> &'static str {
+fn attr_name_pool() -> MutexGuard<'static, HashSet<&'static str>> {
+    ATTR_NAMES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn static_data_attr_name(suffix: &str) -> Option<&'static str> {
+    match suffix {
+        "ars-animated" => Some("data-ars-animated"),
+        "ars-disable-outside-pointer-events" => Some("data-ars-disable-outside-pointer-events"),
+        "ars-disabled" => Some("data-ars-disabled"),
+        "ars-drag-over" => Some("data-ars-drag-over"),
+        "ars-dragging" => Some("data-ars-dragging"),
+        "ars-drop-operation" => Some("data-ars-drop-operation"),
+        "ars-drop-position" => Some("data-ars-drop-position"),
+        "ars-focus-visible" => Some("data-ars-focus-visible"),
+        "ars-focus-within" => Some("data-ars-focus-within"),
+        "ars-focus-within-visible" => Some("data-ars-focus-within-visible"),
+        "ars-focused" => Some("data-ars-focused"),
+        "ars-hovered" => Some("data-ars-hovered"),
+        "ars-index" => Some("data-ars-index"),
+        "ars-invalid" => Some("data-ars-invalid"),
+        "ars-loading" => Some("data-ars-loading"),
+        "ars-long-pressing" => Some("data-ars-long-pressing"),
+        "ars-moving" => Some("data-ars-moving"),
+        "ars-part" => Some("data-ars-part"),
+        "ars-placement" => Some("data-ars-placement"),
+        "ars-presence" => Some("data-ars-presence"),
+        "ars-pressed" => Some("data-ars-pressed"),
+        "ars-prevent-focus-on-press" => Some("data-ars-prevent-focus-on-press"),
+        "ars-readonly" => Some("data-ars-readonly"),
+        "ars-scope" => Some("data-ars-scope"),
+        "ars-segment" => Some("data-ars-segment"),
+        "ars-shape" => Some("data-ars-shape"),
+        "ars-size" => Some("data-ars-size"),
+        "ars-state" => Some("data-ars-state"),
+        "ars-variant" => Some("data-ars-variant"),
+        "ars-visually-hidden" => Some("data-ars-visually-hidden"),
+        "ars-visually-hidden-focusable" => Some("data-ars-visually-hidden-focusable"),
+        _ => None,
+    }
+}
+
+fn intern_attr_name(attr: &HtmlAttr) -> &'static str {
     // Fast path: if HtmlAttr has a known static name, return it directly.
     if let Some(name) = attr.static_name() {
         return name;
     }
 
-    // Slow path: Data(...) attributes — intern the formatted string.
+    if let HtmlAttr::Data(suffix) = attr
+        && let Some(name) = static_data_attr_name(suffix)
+    {
+        return name;
+    }
+
+    // Fallback: unknown Data(...) attributes need a process-lifetime name for Dioxus.
     let name = attr.to_string(); // e.g., "data-ars-state"
 
-    let mut pool = ATTR_NAMES.lock().expect("attr name pool");
+    let mut pool = attr_name_pool();
 
     if let Some(&existing) = pool.get(name.as_str()) {
         return existing;
@@ -64,6 +109,9 @@ pub struct DioxusAttrResult {
     /// Styles to apply via CSSOM (`element.style().set_property()`).
     /// Non-empty only when strategy is [`StyleStrategy::Cssom`].
     pub cssom_styles: Vec<(CssProperty, String)>,
+
+    /// Stable key for [`Self::nonce_css`] when [`StyleStrategy::Nonce`] is active.
+    pub nonce_css_key: Option<String>,
 
     /// CSS rule text to inject into a `<style nonce="...">` block.
     /// Non-empty only when strategy is [`StyleStrategy::Nonce`].
@@ -137,6 +185,9 @@ pub fn attr_map_to_dioxus(
         .collect::<Vec<_>>();
 
     let mut cssom_styles = Vec::new();
+
+    let mut nonce_css_key = None;
+
     let mut nonce_css = String::new();
 
     match strategy {
@@ -172,6 +223,8 @@ pub fn attr_map_to_dioxus(
                     false,
                 ));
 
+                nonce_css_key = Some(id.to_string());
+
                 nonce_css = styles_to_nonce_css(id, &styles);
             }
         }
@@ -180,6 +233,7 @@ pub fn attr_map_to_dioxus(
     DioxusAttrResult {
         attrs: result,
         cssom_styles,
+        nonce_css_key,
         nonce_css,
     }
 }
@@ -206,77 +260,143 @@ pub fn attr_map_to_dioxus_inline_attrs(map: AttrMap) -> Vec<Attribute> {
 
 // ── CSSOM helper ────────────────────────────────────────────────────
 
-/// Apply styles to a DOM element via the CSSOM API.
-///
-/// Used when [`StyleStrategy::Cssom`] is active. Iterates the style entries
-/// and calls `element.style().setProperty()` for each one.
+/// Tracks CSS properties applied through CSSOM so later syncs can remove stale entries.
 #[cfg(feature = "web")]
-pub fn apply_styles_cssom(el: &web_sys::HtmlElement, styles: &[(CssProperty, String)]) {
-    let style = el.style();
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CssomStyleHandle {
+    /// CSS properties applied during the previous sync.
+    applied: Vec<CssProperty>,
+}
 
-    for (prop, val) in styles {
-        if let Err(error) = style.set_property(&prop.to_string(), val) {
-            #[cfg(debug_assertions)]
-            web_sys::console::warn_1(&error);
+#[cfg(feature = "web")]
+impl CssomStyleHandle {
+    /// Creates an empty CSSOM style synchronization handle.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            applied: Vec::new(),
+        }
+    }
 
-            #[cfg(not(debug_assertions))]
-            drop(error);
+    /// Applies `styles` and removes properties that were applied by the previous sync.
+    pub fn sync(&mut self, el: &web_sys::HtmlElement, styles: &[(CssProperty, String)]) {
+        let style = el.style();
+
+        for property in self.applied.drain(..) {
+            if !styles
+                .iter()
+                .any(|(next_property, _)| *next_property == property)
+                && let Err(error) = style.remove_property(&property.to_string())
+            {
+                #[cfg(debug_assertions)]
+                web_sys::console::warn_1(&error);
+
+                #[cfg(not(debug_assertions))]
+                drop(error);
+            }
+        }
+
+        for (property, value) in styles {
+            if let Err(error) = style.set_property(&property.to_string(), value) {
+                #[cfg(debug_assertions)]
+                web_sys::console::warn_1(&error);
+
+                #[cfg(not(debug_assertions))]
+                drop(error);
+            }
+
+            self.applied.push(property.clone());
+        }
+    }
+
+    /// Removes every property currently owned by this handle.
+    pub fn clear(&mut self, el: &web_sys::HtmlElement) {
+        let style = el.style();
+
+        for property in self.applied.drain(..) {
+            if let Err(error) = style.remove_property(&property.to_string()) {
+                #[cfg(debug_assertions)]
+                web_sys::console::warn_1(&error);
+
+                #[cfg(not(debug_assertions))]
+                drop(error);
+            }
         }
     }
 }
 
-// ── Nonce CSS helpers ───────────────────────────────────────────────
-
-/// Convert styles to a CSS rule string for nonce-based injection.
-fn styles_to_nonce_css(id: &str, styles: &[(CssProperty, String)]) -> String {
-    let decls = styles
-        .iter()
-        .map(|(prop, val)| format!("  {prop}: {val};"))
-        .collect::<Vec<_>>();
-
-    format!("[data-ars-style-id=\"{id}\"] {{\n{}\n}}", decls.join("\n"))
-}
-
-/// Context for collecting nonce CSS rules during rendering.
-#[derive(Clone, Debug)]
-pub struct ArsNonceCssCtx {
-    /// Reactive signal holding accumulated CSS rule strings.
-    pub rules: Signal<Vec<String>>,
-}
-
-/// Collects nonce CSS from descendant components and renders a
-/// `<style nonce="...">` block.
+/// Apply styles to a DOM element via the CSSOM API.
 ///
-/// Place this component near the document `<head>`:
-/// ```rust,ignore
-/// rsx! {
-///     ArsProvider { style_strategy: StyleStrategy::Nonce(nonce.clone()),
-///         ArsNonceStyle { nonce: nonce.clone() }
-///         App {}
-///     }
-/// }
-/// ```
-#[component]
-pub fn ArsNonceStyle(nonce: String) -> Element {
-    let rules = use_signal(Vec::<String>::new);
-
-    use_context_provider(|| ArsNonceCssCtx { rules });
-
-    let css_text = use_memo(move || rules.read().join("\n"));
-
-    rsx! {
-        style { nonce, {css_text()} }
-    }
+/// Used when [`StyleStrategy::Cssom`] is active. Iterates the style entries
+/// and calls `element.style().setProperty()` for each one.
+///
+/// Prefer [`CssomStyleHandle`] when styles can change over time, so stale
+/// properties are removed on later renders.
+#[cfg(feature = "web")]
+pub fn apply_styles_cssom(el: &web_sys::HtmlElement, styles: &[(CssProperty, String)]) {
+    CssomStyleHandle::new().sync(el, styles);
 }
 
-/// Append a CSS rule to the nonce collector.
+/// Synchronizes CSSOM styles from an attribute conversion result to an event target.
 ///
-/// Called internally by components when [`StyleStrategy::Nonce`] is active.
-/// Does nothing if no [`ArsNonceCssCtx`] is present in the context tree.
-pub fn append_nonce_css(css: String) {
-    if let Some(mut ctx) = try_use_context::<ArsNonceCssCtx>() {
-        ctx.rules.write().push(css);
-    }
+/// The hook owns a persistent [`CssomStyleHandle`], so styles removed from later
+/// syncs are also removed from the DOM element. Cleanup clears every property
+/// owned by the handle. Use [`use_cssom_styles`] when the style list is reactive.
+#[cfg(feature = "web")]
+pub fn use_cssom_styles_from_attrs(
+    target: Signal<Option<web_sys::EventTarget>>,
+    result: &DioxusAttrResult,
+) {
+    let styles = result.cssom_styles.clone();
+
+    use_cssom_styles(target, move || styles.clone());
+}
+
+/// Synchronizes reactive CSSOM styles to an event target.
+///
+/// The `styles` closure runs inside a Dioxus effect. Signal reads inside it
+/// resubscribe the hook so changed styles are applied, stale properties are
+/// removed, and styles are cleared from the previous target when `target`
+/// points at a different element.
+#[cfg(feature = "web")]
+pub fn use_cssom_styles<F>(target: Signal<Option<web_sys::EventTarget>>, styles: F)
+where
+    F: Fn() -> Vec<(CssProperty, String)> + 'static,
+{
+    use web_sys::wasm_bindgen::JsCast as _;
+
+    let mut handle = use_hook(|| CopyValue::new(CssomStyleHandle::new()));
+    let mut applied_element = use_hook(|| CopyValue::new(None::<web_sys::HtmlElement>));
+
+    use_effect(move || {
+        let styles = styles();
+
+        let element = target
+            .read()
+            .as_ref()
+            .and_then(|target| target.clone().dyn_into::<web_sys::HtmlElement>().ok());
+
+        if let Some(previous) = applied_element.write().take() {
+            handle.write().clear(&previous);
+        }
+
+        let Some(element) = element else {
+            return;
+        };
+
+        handle.write().sync(&element, &styles);
+
+        applied_element.set(Some(element));
+    });
+
+    use_drop(move || {
+        if let Ok(mut applied_element) = applied_element.try_write()
+            && let Some(element) = applied_element.take()
+            && let Ok(mut handle) = handle.try_write()
+        {
+            handle.clear(&element);
+        }
+    });
 }
 
 // ── Style strategy hook ─────────────────────────────────────────────
@@ -343,13 +463,23 @@ mod tests {
     }
 
     #[test]
-    fn intern_attr_name_slow_path_interns_data_attributes() {
+    fn intern_attr_name_static_data_fast_path_returns_static_slices() {
         let first = intern_attr_name(&HtmlAttr::Data("ars-state"));
         let second = intern_attr_name(&HtmlAttr::Data("ars-state"));
 
         assert_eq!(first, "data-ars-state");
         assert_eq!(second, "data-ars-state");
-        // Same pointer — proves the pool returns the existing leaked reference.
+        assert!(std::ptr::eq(first.as_ptr(), second.as_ptr()));
+        assert_eq!(static_data_attr_name("ars-state"), Some("data-ars-state"));
+    }
+
+    #[test]
+    fn intern_attr_name_slow_path_interns_unknown_data_attributes() {
+        let first = intern_attr_name(&HtmlAttr::Data("ars-custom-test"));
+        let second = intern_attr_name(&HtmlAttr::Data("ars-custom-test"));
+
+        assert_eq!(first, "data-ars-custom-test");
+        assert_eq!(second, "data-ars-custom-test");
         assert!(std::ptr::eq(first.as_ptr(), second.as_ptr()));
     }
 
@@ -476,9 +606,47 @@ mod tests {
         assert_eq!(text_value(id_attr), Some("el-1"));
 
         // nonce CSS rule generated
+        assert_eq!(result.nonce_css_key, Some(String::from("el-1")));
         assert!(result.nonce_css.contains("[data-ars-style-id=\"el-1\"]"));
         assert!(result.nonce_css.contains("width: 100px;"));
         assert!(result.cssom_styles.is_empty());
+    }
+
+    #[test]
+    fn attr_map_to_dioxus_nonce_strategy_escapes_selector_attribute_value() {
+        let result = attr_map_to_dioxus(
+            build_test_map(),
+            &StyleStrategy::Nonce("n123".into()),
+            Some("root\"quoted\\path]"),
+        );
+
+        assert!(
+            result
+                .nonce_css
+                .contains("[data-ars-style-id=\"root\\\"quoted\\\\path]\"]")
+        );
+    }
+
+    #[test]
+    fn attr_map_to_dioxus_nonce_strategy_escapes_control_characters() {
+        for (raw, escaped) in [
+            ("root\nline", "root\\A line"),
+            ("root\rline", "root\\D line"),
+            ("root\tline", "root\\9 line"),
+            ("root\0line", "root\\FFFD line"),
+        ] {
+            let result = attr_map_to_dioxus(
+                build_test_map(),
+                &StyleStrategy::Nonce("n123".into()),
+                Some(raw),
+            );
+
+            assert!(
+                result
+                    .nonce_css
+                    .contains(&format!("[data-ars-style-id=\"{escaped}\"]"))
+            );
+        }
     }
 
     #[test]
@@ -518,6 +686,7 @@ mod tests {
         // No styles
 
         let result = attr_map_to_dioxus(map, &StyleStrategy::Inline, None);
+
         assert!(find_attr(&result.attrs, "style").is_none());
     }
 
@@ -562,6 +731,7 @@ mod tests {
 
         assert!(find_attr(&result.attrs, "class").is_some());
         assert!(find_attr(&result.attrs, "data-ars-style-id").is_none());
+        assert_eq!(result.nonce_css_key, None);
         assert!(result.nonce_css.is_empty());
         assert!(result.cssom_styles.is_empty());
     }
@@ -620,63 +790,6 @@ mod tests {
         assert!(find_attr(&result.attrs, "id").is_some());
         assert!(find_attr(&result.attrs, "title").is_none());
         assert_eq!(result.attrs.len(), 1);
-    }
-
-    // ── ArsNonceStyle + append_nonce_css ────────────────────────────
-
-    #[test]
-    fn ars_nonce_style_mounts_and_provides_context() {
-        fn app() -> Element {
-            rsx! {
-                ArsNonceStyle { nonce: "test-nonce".to_string() }
-            }
-        }
-
-        let mut dom = VirtualDom::new(app);
-
-        dom.rebuild_in_place();
-    }
-
-    #[test]
-    fn append_nonce_css_collects_rules_from_context() {
-        fn app() -> Element {
-            // Provide the context directly (same as ArsNonceStyle does internally).
-            let rules = use_signal(Vec::<String>::new);
-
-            use_context_provider(|| ArsNonceCssCtx { rules });
-
-            append_nonce_css(".rule-1 { color: red; }".into());
-            append_nonce_css(".rule-2 { color: blue; }".into());
-
-            let collected = rules.peek().clone();
-            assert_eq!(collected.len(), 2);
-            assert_eq!(collected[0], ".rule-1 { color: red; }");
-            assert_eq!(collected[1], ".rule-2 { color: blue; }");
-
-            rsx! {
-                div {}
-            }
-        }
-
-        let mut dom = VirtualDom::new(app);
-
-        dom.rebuild_in_place();
-    }
-
-    #[test]
-    fn append_nonce_css_is_noop_without_context() {
-        fn app() -> Element {
-            // No ArsNonceCssCtx provided — should silently do nothing.
-            append_nonce_css("orphan rule".into());
-
-            rsx! {
-                div {}
-            }
-        }
-
-        let mut dom = VirtualDom::new(app);
-
-        dom.rebuild_in_place();
     }
 
     // ── use_style_strategy ──────────────────────────────────────────
@@ -741,8 +854,12 @@ mod tests {
 }
 
 #[cfg(all(test, feature = "web", target_arch = "wasm32"))]
+#[expect(
+    unused_qualifications,
+    reason = "Dioxus rsx event attribute labels are parsed before macro expansion."
+)]
 mod wasm_tests {
-    use std::sync::Arc;
+    use std::{rc::Rc, sync::Arc};
 
     use ars_core::{
         AriaAttr, ColorMode, CssProperty, HtmlAttr, I18nRegistries, NullPlatformEffects,
@@ -760,6 +877,17 @@ mod wasm_tests {
         web_sys::window()
             .and_then(|window| window.document())
             .expect("browser document should exist")
+    }
+
+    async fn flush_browser_tasks() {
+        let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+            web_sys::window()
+                .expect("window should exist")
+                .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, 50)
+                .expect("setTimeout should succeed");
+        });
+
+        drop(wasm_bindgen_futures::JsFuture::from(promise).await);
     }
 
     fn find_attr<'a>(attrs: &'a [Attribute], name: &str) -> Option<&'a Attribute> {
@@ -786,6 +914,7 @@ mod wasm_tests {
         );
 
         let mut map = AttrMap::new();
+
         map.set(HtmlAttr::Class, "btn")
             .set(HtmlAttr::Title, AttrValue::None)
             .set_bool(HtmlAttr::Disabled, true)
@@ -836,21 +965,8 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
-    fn nonce_css_helpers_and_style_strategy_context_work_on_wasm() {
+    fn style_strategy_context_works_on_wasm() {
         fn app() -> Element {
-            let rules = use_signal(Vec::<String>::new);
-
-            use_context_provider(|| ArsNonceCssCtx { rules });
-
-            append_nonce_css(".rule-1 { color: red; }".into());
-            append_nonce_css(".rule-2 { color: blue; }".into());
-
-            let collected = rules.peek().clone();
-
-            assert_eq!(collected.len(), 2);
-            assert_eq!(collected[0], ".rule-1 { color: red; }");
-            assert_eq!(collected[1], ".rule-2 { color: blue; }");
-
             let ctx = ArsContext::new(
                 locales::en_us(),
                 Direction::Ltr,
@@ -910,6 +1026,338 @@ mod wasm_tests {
                 .get_property_value("display")
                 .expect("display should be readable"),
             "block"
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn cssom_style_handle_removes_stale_properties() {
+        let element = document()
+            .create_element("div")
+            .expect("create_element should succeed")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("element should cast to HtmlElement");
+
+        let mut handle = CssomStyleHandle::new();
+
+        handle.sync(
+            &element,
+            &[
+                (CssProperty::Width, String::from("120px")),
+                (CssProperty::Display, String::from("block")),
+            ],
+        );
+
+        handle.sync(&element, &[(CssProperty::Display, String::from("grid"))]);
+
+        let style = element.style();
+
+        assert_eq!(
+            style
+                .get_property_value("width")
+                .expect("width should be readable"),
+            ""
+        );
+        assert_eq!(
+            style
+                .get_property_value("display")
+                .expect("display should be readable"),
+            "grid"
+        );
+
+        handle.clear(&element);
+
+        assert_eq!(
+            style
+                .get_property_value("display")
+                .expect("display should be readable"),
+            ""
+        );
+    }
+
+    #[wasm_bindgen_test]
+    async fn use_cssom_styles_from_attrs_syncs_styles() {
+        #[derive(Clone)]
+        struct CssomHookProps {
+            target: Rc<web_sys::HtmlElement>,
+        }
+
+        impl PartialEq for CssomHookProps {
+            fn eq(&self, other: &Self) -> bool {
+                Rc::ptr_eq(&self.target, &other.target)
+            }
+        }
+
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "Dioxus root props are moved into the render function."
+        )]
+        fn fixture(props: CssomHookProps) -> Element {
+            let target: web_sys::EventTarget = (*props.target).clone().into();
+            let target = use_signal(move || Some(target.clone()));
+
+            let mut map = AttrMap::new();
+
+            map.set_style(CssProperty::Width, "120px")
+                .set_style(CssProperty::Display, "block");
+
+            let result = attr_map_to_dioxus(map, &StyleStrategy::Cssom, None);
+
+            use_cssom_styles_from_attrs(target, &result);
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let document = document();
+
+        let container = document
+            .create_element("div")
+            .expect("create_element should succeed");
+
+        let target = Rc::new(
+            document
+                .create_element("div")
+                .expect("create_element should succeed")
+                .dyn_into::<web_sys::HtmlElement>()
+                .expect("element should cast to HtmlElement"),
+        );
+
+        document
+            .body()
+            .expect("body should exist")
+            .append_child(&container)
+            .expect("append_child should succeed");
+
+        let dom = VirtualDom::new_with_props(
+            fixture,
+            CssomHookProps {
+                target: Rc::clone(&target),
+            },
+        );
+
+        dioxus_web::launch::launch_virtual_dom(
+            dom,
+            dioxus_web::Config::new().rootelement(container),
+        );
+
+        flush_browser_tasks().await;
+
+        let style = target.style();
+
+        assert_eq!(
+            style
+                .get_property_value("width")
+                .expect("width should be readable"),
+            "120px"
+        );
+        assert_eq!(
+            style
+                .get_property_value("display")
+                .expect("display should be readable"),
+            "block"
+        );
+    }
+
+    #[wasm_bindgen_test]
+    async fn use_cssom_styles_clears_previous_target_when_signal_changes() {
+        #[derive(Clone)]
+        struct CssomHookProps {
+            first: Rc<web_sys::HtmlElement>,
+            second: Rc<web_sys::HtmlElement>,
+        }
+
+        impl PartialEq for CssomHookProps {
+            fn eq(&self, other: &Self) -> bool {
+                Rc::ptr_eq(&self.first, &other.first) && Rc::ptr_eq(&self.second, &other.second)
+            }
+        }
+
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "Dioxus root props are moved into the render function."
+        )]
+        fn fixture(props: CssomHookProps) -> Element {
+            let first: web_sys::EventTarget = (*props.first).clone().into();
+            let second: web_sys::EventTarget = (*props.second).clone().into();
+
+            let mut target = use_signal(move || Some(first.clone()));
+
+            let swap_target = move |_| target.set(Some(second.clone()));
+
+            use_cssom_styles(target, || vec![(CssProperty::Width, String::from("120px"))]);
+
+            rsx! {
+                button { id: "swap-cssom-target", onclick: swap_target, "swap" }
+            }
+        }
+
+        let document = document();
+
+        let container = document
+            .create_element("div")
+            .expect("create_element should succeed");
+
+        let first = Rc::new(
+            document
+                .create_element("div")
+                .expect("create_element should succeed")
+                .dyn_into::<web_sys::HtmlElement>()
+                .expect("element should cast to HtmlElement"),
+        );
+
+        let second = Rc::new(
+            document
+                .create_element("div")
+                .expect("create_element should succeed")
+                .dyn_into::<web_sys::HtmlElement>()
+                .expect("element should cast to HtmlElement"),
+        );
+
+        document
+            .body()
+            .expect("body should exist")
+            .append_child(&container)
+            .expect("append_child should succeed");
+
+        let dom = VirtualDom::new_with_props(
+            fixture,
+            CssomHookProps {
+                first: Rc::clone(&first),
+                second: Rc::clone(&second),
+            },
+        );
+
+        dioxus_web::launch::launch_virtual_dom(
+            dom,
+            dioxus_web::Config::new().rootelement(container.clone()),
+        );
+
+        flush_browser_tasks().await;
+
+        assert_eq!(
+            first
+                .style()
+                .get_property_value("width")
+                .expect("width should be readable"),
+            "120px"
+        );
+
+        container
+            .query_selector("#swap-cssom-target")
+            .expect("query should succeed")
+            .expect("swap button should exist")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("swap button should be an HtmlElement")
+            .click();
+
+        flush_browser_tasks().await;
+
+        assert_eq!(
+            first
+                .style()
+                .get_property_value("width")
+                .expect("width should be readable"),
+            ""
+        );
+        assert_eq!(
+            second
+                .style()
+                .get_property_value("width")
+                .expect("width should be readable"),
+            "120px"
+        );
+    }
+
+    #[wasm_bindgen_test]
+    async fn use_cssom_styles_clears_previous_target_when_signal_becomes_none() {
+        #[derive(Clone)]
+        struct CssomHookProps {
+            target: Rc<web_sys::HtmlElement>,
+        }
+
+        impl PartialEq for CssomHookProps {
+            fn eq(&self, other: &Self) -> bool {
+                Rc::ptr_eq(&self.target, &other.target)
+            }
+        }
+
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "Dioxus root props are moved into the render function."
+        )]
+        fn fixture(props: CssomHookProps) -> Element {
+            let initial: web_sys::EventTarget = (*props.target).clone().into();
+
+            let mut target = use_signal(move || Some(initial.clone()));
+
+            let clear_target = move |_| target.set(None);
+
+            use_cssom_styles(target, || vec![(CssProperty::Width, String::from("120px"))]);
+
+            rsx! {
+                button { id: "clear-cssom-target", onclick: clear_target, "clear" }
+            }
+        }
+
+        let document = document();
+
+        let container = document
+            .create_element("div")
+            .expect("create_element should succeed");
+
+        let target = Rc::new(
+            document
+                .create_element("div")
+                .expect("create_element should succeed")
+                .dyn_into::<web_sys::HtmlElement>()
+                .expect("element should cast to HtmlElement"),
+        );
+
+        document
+            .body()
+            .expect("body should exist")
+            .append_child(&container)
+            .expect("append_child should succeed");
+
+        let dom = VirtualDom::new_with_props(
+            fixture,
+            CssomHookProps {
+                target: Rc::clone(&target),
+            },
+        );
+
+        dioxus_web::launch::launch_virtual_dom(
+            dom,
+            dioxus_web::Config::new().rootelement(container.clone()),
+        );
+
+        flush_browser_tasks().await;
+
+        assert_eq!(
+            target
+                .style()
+                .get_property_value("width")
+                .expect("width should be readable"),
+            "120px"
+        );
+
+        container
+            .query_selector("#clear-cssom-target")
+            .expect("query should succeed")
+            .expect("clear button should exist")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("clear button should be an HtmlElement")
+            .click();
+
+        flush_browser_tasks().await;
+
+        assert_eq!(
+            target
+                .style()
+                .get_property_value("width")
+                .expect("width should be readable"),
+            ""
         );
     }
 }

@@ -16,6 +16,8 @@ use ars_core::{
 use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend, Translate, locales, number};
 use leptos::{prelude::*, reactive::owner::LocalStorage};
 
+use crate::nonce::{ArsNonceStyle, use_nonce_css_context_provider};
+
 /// Reactive environment context published by the Leptos `ArsProvider`.
 #[derive(Clone)]
 pub struct ArsContext {
@@ -180,6 +182,15 @@ pub fn ArsProvider(
 
     let dir_attr = move || direction.get().as_html_attr();
 
+    let style_strategy = style_strategy.unwrap_or(StyleStrategy::Inline);
+
+    let nonce = match &style_strategy {
+        StyleStrategy::Nonce(nonce) => Some(nonce.clone()),
+        StyleStrategy::Inline | StyleStrategy::Cssom => None,
+    };
+
+    use_nonce_css_context_provider();
+
     provide_ars_context(ArsContext {
         locale,
         direction: Memo::new(move |_| direction.get()),
@@ -193,11 +204,14 @@ pub fn ArsProvider(
         modality: Arc::new(DefaultModalityContext::new()),
         intl_backend: intl_backend.unwrap_or_else(|| Arc::new(StubIntlBackend)),
         i18n_registries: i18n_registries.unwrap_or_else(|| Arc::new(I18nRegistries::new())),
-        style_strategy: style_strategy.unwrap_or(StyleStrategy::Inline),
+        style_strategy,
     });
 
     view! {
-        <div dir=dir_attr>{children()}</div>
+        <div dir=dir_attr>
+            {nonce.map(|nonce| view! { <ArsNonceStyle nonce=nonce /> })}
+            {children()}
+        </div>
     }
 }
 
@@ -816,10 +830,8 @@ mod wasm_tests {
     use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend, Translate, locales, number};
     use leptos::prelude::*;
     #[cfg(feature = "csr")]
-    use leptos::{mount::mount_to, wasm_bindgen::JsCast};
+    use leptos::{mount::mount_to, wasm_bindgen::JsCast, web_sys};
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
-    #[cfg(feature = "csr")]
-    use web_sys::{Document, HtmlElement};
 
     #[cfg(feature = "csr")]
     use super::ArsProvider;
@@ -828,6 +840,8 @@ mod wasm_tests {
         use_locale, use_messages, use_modality_context, use_number_formatter,
         use_resolved_number_formatter,
     };
+    #[cfg(feature = "csr")]
+    use crate::{ArsNonceCssCtx, append_nonce_css};
 
     wasm_bindgen_test_configure!(run_in_browser);
 
@@ -1248,7 +1262,7 @@ mod wasm_tests {
     }
 
     #[cfg(feature = "csr")]
-    fn document() -> Document {
+    fn document() -> web_sys::Document {
         web_sys::window()
             .expect("window should exist")
             .document()
@@ -1256,11 +1270,11 @@ mod wasm_tests {
     }
 
     #[cfg(feature = "csr")]
-    fn append_container() -> HtmlElement {
+    fn append_container() -> web_sys::HtmlElement {
         let container = document()
             .create_element("div")
             .expect("container creation should succeed")
-            .dyn_into::<HtmlElement>()
+            .dyn_into::<web_sys::HtmlElement>()
             .expect("container should be an HtmlElement");
 
         document()
@@ -1277,6 +1291,11 @@ mod wasm_tests {
     fn ProviderProbe() -> impl IntoView {
         let context = current_ars_context().expect("ArsProvider should publish context");
 
+        let nonce_context =
+            use_context::<ArsNonceCssCtx>().expect("ArsProvider should publish nonce context");
+
+        append_nonce_css(String::from(".probe { color: red; }"));
+
         let locale = use_locale();
 
         leptos::view! {
@@ -1284,6 +1303,9 @@ mod wasm_tests {
                 <span data-testid="locale">{move || locale.get().to_bcp47()}</span>
                 <span data-testid="direction">
                     {move || context.direction.get().as_html_attr()}
+                </span>
+                <span data-testid="nonce-rules">
+                    {move || nonce_context.rules.get().len().to_string()}
                 </span>
             </div>
         }
@@ -1350,6 +1372,15 @@ mod wasm_tests {
 
         assert_eq!(wrapper.get_attribute("dir").as_deref(), Some("ltr"));
         assert_eq!(locale.text_content().as_deref(), Some("en-US"));
+        assert_eq!(
+            container
+                .query_selector("[data-testid='nonce-rules']")
+                .expect("selector should be valid")
+                .expect("nonce rules node should exist")
+                .text_content()
+                .as_deref(),
+            Some("1")
+        );
 
         drop(mount_handle);
 

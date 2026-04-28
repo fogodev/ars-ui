@@ -66,7 +66,8 @@ pub use component_ids::ComponentIds;
 // ── DOM attribute / connect primitives ──────────────────────────────
 pub use connect::{
     AriaAttr, AttrMap, AttrMapParts, AttrValue, CssProperty, EventOptions, HtmlAttr, HtmlEvent,
-    ReactiveBoolFn, ReactiveStringFn, StyleStrategy, UserAttrs, data,
+    ReactiveBoolFn, ReactiveStringFn, StyleStrategy, UserAttrs, data, escape_css_attribute_value,
+    styles_to_nonce_css,
 };
 pub use error::ComponentError;
 pub use i18n_registry::{I18nRegistries, MessagesRegistry, resolve_messages};
