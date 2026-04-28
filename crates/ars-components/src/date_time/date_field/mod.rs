@@ -562,6 +562,8 @@ impl Context {
 
             segment.text.clear();
         }
+
+        self.refresh_segment_ranges();
     }
 
     fn increment_segment(&mut self, kind: DateSegmentKind) {
@@ -1116,14 +1118,14 @@ impl ars_core::Machine for Machine {
             })),
 
             Event::CompositionEnd(kind, text) => {
-                if ctx.readonly {
-                    return None;
-                }
-
                 let kind = *kind;
                 let text = text.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.is_composing = false;
+
+                    if ctx.readonly {
+                        return;
+                    }
 
                     ctx.type_buffer.clear();
 

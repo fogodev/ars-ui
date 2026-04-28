@@ -930,6 +930,36 @@ fn clear_segment_and_clear_all_reset_values_and_focus() {
 }
 
 #[test]
+fn clearing_month_refreshes_dependent_day_bounds() {
+    let mut service = Service::<Machine>::new(
+        props().default_value(Some(date(2024, 2, 29))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Month)));
+
+    let api = service.connect(&|_| {});
+
+    let day = api.segment_attrs(&DateSegmentKind::Day);
+
+    assert_eq!(attr(&day, HtmlAttr::Aria(AriaAttr::ValueMax)), Some("29"));
+
+    drop(service.send(Event::ClearSegment(DateSegmentKind::Month)));
+
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Month),
+        None
+    );
+
+    let api = service.connect(&|_| {});
+
+    let day = api.segment_attrs(&DateSegmentKind::Day);
+
+    assert_eq!(attr(&day, HtmlAttr::Aria(AriaAttr::ValueMax)), Some("31"));
+}
+
+#[test]
 fn non_editable_focus_and_prev_from_first_segment_are_ignored() {
     let mut service = service();
 
@@ -1011,6 +1041,37 @@ fn ime_composition_suppresses_character_typing_until_end() {
         DateSegmentKind::Month,
         String::from("12"),
     )));
+
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Month),
+        Some(12)
+    );
+}
+
+#[test]
+fn readonly_composition_end_clears_composing_flag() {
+    let mut service = Service::<Machine>::new(
+        props().readonly(true),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Month)));
+    drop(service.send(Event::CompositionStart));
+    drop(service.send(Event::CompositionEnd(
+        DateSegmentKind::Month,
+        String::from("12"),
+    )));
+
+    assert!(!service.context().is_composing);
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Month),
+        None
+    );
+
+    drop(service.set_props(props().readonly(false)));
+    drop(service.send(Event::TypeIntoSegment(DateSegmentKind::Month, '1')));
+    drop(service.send(Event::TypeIntoSegment(DateSegmentKind::Month, '2')));
 
     assert_eq!(
         service.context().get_segment_value(DateSegmentKind::Month),
@@ -1350,7 +1411,6 @@ fn readonly_blocks_all_editing_events() {
         Event::IncrementSegment(DateSegmentKind::Day),
         Event::DecrementSegment(DateSegmentKind::Day),
         Event::TypeBufferCommit(DateSegmentKind::Day),
-        Event::CompositionEnd(DateSegmentKind::Month, String::from("12")),
         Event::ClearSegment(DateSegmentKind::Day),
         Event::ClearAll,
     ] {
@@ -1360,6 +1420,24 @@ fn readonly_blocks_all_editing_events() {
         assert!(!result.context_changed);
         assert_eq!(service.context().value.get(), before.value.get());
     }
+
+    drop(service.send(Event::CompositionStart));
+
+    assert!(service.context().is_composing);
+
+    let result = service.send(Event::CompositionEnd(
+        DateSegmentKind::Month,
+        String::from("12"),
+    ));
+
+    assert!(!result.state_changed);
+    assert!(result.context_changed);
+    assert!(!service.context().is_composing);
+    assert_eq!(service.context().value.get(), before.value.get());
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Month),
+        Some(1)
+    );
 }
 
 #[test]
