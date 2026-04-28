@@ -1,0 +1,69 @@
+---
+source: crates/ars-components/src/input/checkbox/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).hidden_input_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "hidden-input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "checkbox",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+        (
+            Checked,
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Form,
+            String(
+                "signup",
+            ),
+        ),
+        (
+            Name,
+            String(
+                "accept_terms",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "checkbox",
+            ),
+        ),
+        (
+            Value,
+            String(
+                "yes",
+            ),
+        ),
+    ],
+    styles: [],
+}

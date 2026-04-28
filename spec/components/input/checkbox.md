@@ -13,8 +13,8 @@ references:
 
 # Checkbox
 
-A `Checkbox` lets the user select or deselect a boolean value. It supports an `Indeterminate`
-third state used when a parent checkbox represents a partially-selected group.
+A `Checkbox` lets the user select, deselect, or mark a value as indeterminate. The
+`Indeterminate` state is used when a parent checkbox represents a partially-selected group.
 
 ## 1. State Machine
 
@@ -45,8 +45,12 @@ pub enum Event {
     Check,
     /// Transition to Unchecked.
     Uncheck,
-    /// Enter or exit Indeterminate.
-    SetIndeterminate(bool),
+    /// Synchronize the externally controlled checked prop.
+    SetValue(Option<State>),
+    /// Synchronize output-affecting props stored in context.
+    SetProps,
+    /// Track whether a Description part is rendered.
+    SetHasDescription(bool),
     /// Focus received.
     Focus {
         /// True if the focus was initiated by a keyboard.
@@ -79,6 +83,8 @@ pub struct Context {
     pub focus_visible: bool,
     /// The name attribute for form submission.
     pub name: Option<String>,
+    /// The ID of the form element the hidden input is associated with.
+    pub form: Option<String>,
     /// Value submitted with form. Defaults to "on".
     pub value: String,
     /// Whether a Description part is rendered (gates aria-describedby).
@@ -113,6 +119,8 @@ pub struct Props {
     pub form: Option<String>,
     /// Value attribute for form submission. Defaults to "on".
     pub value: String,
+    /// Called after user intent requests a new checked state.
+    pub on_checked_change: Option<Callback<dyn Fn(State) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -128,6 +136,7 @@ impl Default for Props {
             name: None,
             form: None,
             value: "on".into(),
+            on_checked_change: None,
         }
     }
 }
@@ -189,6 +198,7 @@ impl ars_core::Machine for Machine {
             focused: false,
             focus_visible: false,
             name: props.name.clone(),
+            form: props.form.clone(),
             value: props.value.clone(),
             has_description: false,
             ids: ComponentIds::from_id(&props.id),
@@ -202,66 +212,74 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // Disabled guard: reject Toggle, Check, Uncheck
+        // Disabled/readonly guard: reject user value-changing events.
         if is_disabled(ctx) || is_readonly(ctx) {
             match event {
                 Event::Toggle
                 | Event::Check
-                | Event::Uncheck
-                | Event::SetIndeterminate(_) => return None,
+                | Event::Uncheck => return None,
                 _ => {}
             }
         }
 
         match (state, event) {
+            // ── Controlled/context sync ─────────────────────────────
+            (_, Event::SetValue(value)) => match value {
+                Some(value) => {
+                    let value = *value;
+                    Some(TransitionPlan::to(value).apply(move |ctx| {
+                        ctx.checked.set(value);
+                        ctx.checked.sync_controlled(Some(value));
+                    }))
+                }
+                None => {
+                    Some(TransitionPlan::context_only(|ctx| {
+                        ctx.checked.sync_controlled(None);
+                    }))
+                }
+            },
+            (_, Event::SetProps) => {
+                let disabled = props.disabled;
+                let required = props.required;
+                let invalid = props.invalid;
+                let readonly = props.readonly;
+                let name = props.name.clone();
+                let form = props.form.clone();
+                let value = props.value.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.disabled = disabled;
+                    ctx.required = required;
+                    ctx.invalid = invalid;
+                    ctx.readonly = readonly;
+                    ctx.name = name;
+                    ctx.form = form;
+                    ctx.value = value;
+                }))
+            }
+            (_, Event::SetHasDescription(has_description)) => {
+                let has_description = *has_description;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.has_description = has_description;
+                }))
+            }
+
             // ── Toggle ──────────────────────────────────────────────
             (State::Unchecked, Event::Toggle) => {
-                Some(TransitionPlan::to(State::Checked).apply(|ctx| {
-                    ctx.checked.set(State::Checked);
-                }))
+                Some(value_change_plan(ctx, State::Checked))
             }
             (State::Checked, Event::Toggle) => {
-                Some(TransitionPlan::to(State::Unchecked).apply(|ctx| {
-                    ctx.checked.set(State::Unchecked);
-                }))
+                Some(value_change_plan(ctx, State::Unchecked))
             }
             (State::Indeterminate, Event::Toggle) => {
-                Some(TransitionPlan::to(State::Checked).apply(|ctx| {
-                    ctx.checked.set(State::Checked);
-                }))
+                Some(value_change_plan(ctx, State::Checked))
             }
 
             // ── Check / Uncheck ─────────────────────────────────────
             (_, Event::Check) => {
-                Some(TransitionPlan::to(State::Checked).apply(|ctx| {
-                    ctx.checked.set(State::Checked);
-                }))
+                Some(value_change_plan(ctx, State::Checked))
             }
             (_, Event::Uncheck) => {
-                Some(TransitionPlan::to(State::Unchecked).apply(|ctx| {
-                    ctx.checked.set(State::Unchecked);
-                }))
-            }
-
-            // ── SetIndeterminate ────────────────────────────────────
-            (_, Event::SetIndeterminate(true)) => {
-                Some(TransitionPlan::to(State::Indeterminate).apply(|ctx| {
-                    ctx.checked.set(State::Indeterminate);
-                }))
-            }
-            (_, Event::SetIndeterminate(false)) => {
-                // Exit indeterminate → go to Checked
-                if *ctx.checked.get() == State::Indeterminate {
-                    Some(TransitionPlan::to(State::Checked).apply(|ctx| {
-                        ctx.checked.set(State::Checked);
-                    }))
-                } else {
-                    // Already not indeterminate — return a successful no-op
-                    // (idempotent) rather than None (unhandled). This ensures
-                    // callers can distinguish "event was valid but no change
-                    // needed" from "event was rejected".
-                    Some(TransitionPlan::context_only(|_| {}))
-                }
+                Some(value_change_plan(ctx, State::Unchecked))
             }
 
             // ── Focus / Blur ────────────────────────────────────────
@@ -281,6 +299,32 @@ impl ars_core::Machine for Machine {
         }
     }
 
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(
+            old.id, new.id,
+            "checkbox::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.checked != new.checked {
+            events.push(Event::SetValue(new.checked));
+        }
+
+        if old.disabled != new.disabled
+            || old.required != new.required
+            || old.invalid != new.invalid
+            || old.readonly != new.readonly
+            || old.name != new.name
+            || old.form != new.form
+            || old.value != new.value
+        {
+            events.push(Event::SetProps);
+        }
+
+        events
+    }
+
     fn connect<'a>(
         state: &'a Self::State,
         ctx: &'a Self::Context,
@@ -290,28 +334,50 @@ impl ars_core::Machine for Machine {
         Api { state, ctx, props, send }
     }
 }
+
+fn value_change_plan(ctx: &Context, next: State) -> TransitionPlan<Machine> {
+    if *ctx.checked.get() == next {
+        return TransitionPlan::context_only(|_| {});
+    }
+
+    if ctx.checked.is_controlled() {
+        return TransitionPlan::new().with_effect(checked_change_effect(next));
+    }
+
+    TransitionPlan::to(next)
+        .apply(move |ctx| {
+            ctx.checked.set(next);
+        })
+        .with_effect(checked_change_effect(next))
+}
+
+fn checked_change_effect(next: State) -> PendingEffect<Machine> {
+    PendingEffect::new("checked-change", move |_ctx, props, _send| {
+        if let Some(callback) = &props.on_checked_change {
+            callback(next);
+        }
+
+        no_cleanup()
+    })
+}
 ```
 
 > **Controlled value sync obligation:** For controlled components (e.g.,
-> `checked: Some(Unchecked)`), the machine state transitions to the "desired"
-> state optimistically (e.g., `State::Checked` on Toggle). The `ctx.checked.set()`
-> call is a no-op for controlled `Bindable` — the actual value only changes when the
-> adapter's `on_change` callback propagates the new value back through props. The
-> adapter MUST sync machine context on every prop change via `Event::SetValue`.
-> Until the adapter confirms, the machine state represents intent, not the committed
-> value. Adapters that do not call back with the updated prop will see a
-> state/value mismatch (e.g., `State=Checked` but `aria-checked="false"`). This
-> is the expected controlled-component contract — see `01-architecture.md` §Bindable.
+> `checked: Some(Unchecked)`), user value-changing events do not optimistically
+> mutate machine state or the rendered `aria-checked` value. They emit the
+> `checked-change` effect with the requested next `State`; the parent confirms by
+> propagating the new value through props. The adapter MUST sync machine context
+> on every prop change via `Event::SetValue`.
+> Until the adapter confirms, machine state and DOM attributes continue to
+> represent the committed value. This avoids state/value mismatches.
 > **Controlled Bindable Sync — Timing Requirements:** Adapters MUST call
 > `Event::SetValue()` synchronously on prop change within the same render cycle.
-> The state machine SHOULD ignore user input events for controlled values until
-> the latest prop is reflected. This prevents race conditions where a user
-> interaction (e.g., Toggle) is processed against stale context. The sequence is:
+> The sequence is:
 >
-> 1. Parent updates controlled prop (e.g., `checked` signal changes).
-> 2. Adapter detects prop change and sends `Event::SetValue(new_value)` synchronously.
-> 3. Machine updates context to reflect the new controlled value.
-> 4. Only then are subsequent user input events (Toggle, Check, etc.) processed.
+> 1. User interaction emits `checked-change(next_state)`.
+> 2. Parent updates controlled prop (e.g., `checked` signal changes).
+> 3. Adapter detects prop change and sends `Event::SetValue(Some(new_value))` synchronously.
+> 4. Machine updates state and context to reflect the committed controlled value.
 >
 > If the adapter uses a reactive effect to sync props, the effect MUST have higher
 > priority than event handlers to guarantee ordering.
@@ -346,6 +412,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.id());
         attrs.set(HtmlAttr::Data("ars-state"), match self.ctx.checked.get() {
             State::Unchecked => "unchecked",
             State::Checked => "checked",
@@ -425,7 +492,7 @@ impl<'a> Api<'a> {
         if let Some(ref name) = self.ctx.name {
             attrs.set(HtmlAttr::Name, name);
         }
-        if let Some(ref form) = self.props.form {
+        if let Some(ref form) = self.ctx.form {
             attrs.set(HtmlAttr::Form, form);
         }
         if *self.ctx.checked.get() == State::Checked {
@@ -540,11 +607,17 @@ Checkbox
 
 ### 3.3 Indeterminate State Preservation in Controlled Mode
 
-When a `Checkbox` is in controlled mode with `indeterminate: Bindable<bool>` set to `true`:
+`Indeterminate` is part of the same tri-state [`State`] value as `Unchecked` and `Checked`.
+When a controlled checkbox is indeterminate, user activation requests `State::Checked`
+through `on_checked_change`; the component does not render that new value until the
+parent confirms it by passing `checked: Some(State::Checked)`.
 
-1. **Click toggles checked, not indeterminate**: A user click on an indeterminate checkbox should transition to `checked = true` (or follow the consumer's `on_change` handler). The `indeterminate` state is NOT automatically cleared by the component — it is controlled exclusively by the parent.
-2. **`on_change` fires with the new checked value**: The callback receives the next `checked` boolean. The parent decides whether to also update `indeterminate` based on child selection state.
-3. **Re-render timing**: If the parent updates both `checked` and `indeterminate` in the same microtask (e.g., in the `on_change` handler), the adapter must apply both updates in a single render pass to avoid a flash of intermediate state.
+1. **Click requests checked**: A user click on an indeterminate checkbox emits
+   `on_checked_change(State::Checked)`.
+2. **The callback receives the next tri-state value**: The parent decides whether to
+   accept `State::Checked`, keep `State::Indeterminate`, or choose another state.
+3. **Re-render timing**: The adapter applies the confirmed `checked` prop through
+   `Event::SetValue(Some(state))` in the same render cycle.
 
 ## 4. Internationalization
 
@@ -561,7 +634,7 @@ When a `Checkbox` is in controlled mode with `indeterminate: Bindable<bool>` set
 - **Validation states**: `aria-invalid="true"` is set on the Control part when `invalid=true`. The `ErrorMessage` part is linked via `aria-describedby`.
 - **Error message association**: `aria-describedby` on Control points to `Description` (when present) and `ErrorMessage` (when invalid). See `control_attrs()` for the wiring logic.
 - **Required**: `aria-required="true"` on Control; `required` attribute on the hidden input.
-- **Reset behavior**: On form reset, the adapter sends the appropriate event to restore `checked` to `default_checked`.
+- **Reset behavior**: On form reset, the adapter sends `Event::SetValue(Some(default_checked))` to restore `checked` to `default_checked`.
 - **Disabled/readonly propagation**: When inside a `Field` or `Fieldset`, the adapter merges `disabled`/`readonly` from `FieldCtx` per `07-forms.md` §12.6.
 
 ## 6. Library Parity
@@ -582,6 +655,7 @@ When a `Checkbox` is in controlled mode with `indeterminate: Bindable<bool>` set
 | Form value       | `value: String`          | `value` (default `"on"`) | `value` (default `"on"`) | `value`           | Full parity                |
 | Form ID          | `form: Option<String>`   | `form`                   | --                       | `form`            | Ark+RA parity              |
 | Indeterminate    | `State::Indeterminate`   | `CheckedState`           | `'indeterminate'`        | `isIndeterminate` | Full parity                |
+| Change callback  | `on_checked_change`      | `onCheckedChange`        | `onCheckedChange`        | `onChange`        | Full parity                |
 
 **Gaps:** None.
 
@@ -601,10 +675,10 @@ When a `Checkbox` is in controlled mode with `indeterminate: Bindable<bool>` set
 
 ### 6.3 Events
 
-| Callback      | ars-ui   | Ark UI            | Radix UI          | React Aria         | Notes       |
-| ------------- | -------- | ----------------- | ----------------- | ------------------ | ----------- |
-| Value changed | `Toggle` | `onCheckedChange` | `onCheckedChange` | `onChange`         | Full parity |
-| Focus         | `Focus`  | --                | --                | `onFocus`/`onBlur` | Full parity |
+| Callback      | ars-ui              | Ark UI            | Radix UI          | React Aria         | Notes       |
+| ------------- | ------------------- | ----------------- | ----------------- | ------------------ | ----------- |
+| Value changed | `on_checked_change` | `onCheckedChange` | `onCheckedChange` | `onChange`         | Full parity |
+| Focus         | `Focus`             | --                | --                | `onFocus`/`onBlur` | Full parity |
 
 **Gaps:** None.
 
