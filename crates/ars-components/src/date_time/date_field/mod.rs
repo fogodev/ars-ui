@@ -1947,12 +1947,16 @@ fn sync_props(ctx: &mut Context, props: &Props) {
     ctx.force_leading_zeros = props.force_leading_zeros;
     ctx.segment_order = props.segment_order.clone();
 
-    let controlled_value_deferred = if let Some(value) = &props.value {
+    let value_application_deferred = if let Some(value) = &props.value {
         !apply_controlled_value_update(ctx, value.clone())
     } else {
+        let preserve_buffered_handoff =
+            ctx.focused_segment.is_some() && !ctx.type_buffer.is_empty();
+
+        ctx.pending_controlled_value = None;
         ctx.value.sync_controlled(None);
 
-        false
+        preserve_buffered_handoff
     };
 
     let must_rebuild = previous_calendar != ctx.calendar
@@ -1966,7 +1970,7 @@ fn sync_props(ctx: &mut Context, props: &Props) {
         ctx.refresh_segment_ranges();
     }
 
-    if controlled_value_deferred {
+    if value_application_deferred {
         restore_buffered_segment(ctx, buffered_segment);
 
         return;

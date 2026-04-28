@@ -668,6 +668,39 @@ fn controlled_to_uncontrolled_handoff_keeps_latest_controlled_value() {
 }
 
 #[test]
+fn controlled_to_uncontrolled_handoff_clears_stale_deferred_value() {
+    let mut service = Service::<Machine>::new(
+        props().value(Some(date(2024, 1, 1))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Day)));
+    drop(service.send(Event::TypeIntoSegment(DateSegmentKind::Day, '2')));
+    drop(service.set_props(props().value(Some(date(2024, 12, 25)))));
+
+    assert_eq!(
+        service.context().pending_controlled_value,
+        Some(Some(date(2024, 12, 25)))
+    );
+
+    drop(service.set_props(props()));
+
+    assert!(!service.context().value.is_controlled());
+    assert!(service.context().pending_controlled_value.is_none());
+    assert_eq!(service.context().type_buffer, "2");
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Day),
+        Some(2)
+    );
+
+    drop(service.send(Event::BlurAll));
+
+    assert_eq!(service.context().value.get(), &Some(date(2024, 1, 2)));
+    assert!(service.context().pending_controlled_value.is_none());
+}
+
+#[test]
 fn sync_props_refocuses_when_segment_set_removes_focused_segment() {
     let mut service = Service::<Machine>::new(
         props().calendar(CalendarSystem::Japanese),
