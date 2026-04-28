@@ -207,6 +207,8 @@ const fn tooltip_event_bypasses_disabled(event: tooltip::Event) -> bool {
         event,
         tooltip::Event::SetControlledOpen(_)
             | tooltip::Event::SyncProps
+            | tooltip::Event::CloseTimerFired
+            | tooltip::Event::Close
             | tooltip::Event::SetZIndex(_)
     )
 }

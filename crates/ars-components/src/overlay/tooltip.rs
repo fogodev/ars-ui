@@ -395,12 +395,7 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        if ctx.disabled
-            && !matches!(
-                event,
-                Event::SetControlledOpen(_) | Event::SyncProps | Event::SetZIndex(_)
-            )
-        {
+        if ctx.disabled && disabled_blocks_event(*event) {
             return None;
         }
 
@@ -973,21 +968,45 @@ fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
 }
 
 fn sync_props_context(ctx: &mut Context, props: &Props) {
+    let ids = ComponentIds::from_id(&props.id);
+    let content_id = ids.part("content");
+
     ctx.open_delay = props.open_delay;
     ctx.close_delay = close_delay(props);
     ctx.disabled = props.disabled;
     ctx.dir = props.dir;
     ctx.positioning = props.positioning.clone();
+    ctx.trigger_id = ids.part("trigger");
+    ctx.hidden_description_id = format_description_id(&content_id);
+    ctx.content_id = content_id;
     ctx.touch_auto_hide = props.touch_auto_hide.max(MIN_TOUCH_AUTO_HIDE);
 }
 
 fn props_context_changed(old: &Props, new: &Props) -> bool {
-    old.open_delay != new.open_delay
+    old.id != new.id
+        || old.open_delay != new.open_delay
         || old.close_delay != new.close_delay
         || old.disabled != new.disabled
         || old.dir != new.dir
         || old.positioning != new.positioning
         || old.touch_auto_hide != new.touch_auto_hide
+}
+
+const fn disabled_blocks_event(event: Event) -> bool {
+    matches!(
+        event,
+        Event::PointerEnter
+            | Event::PointerLeave
+            | Event::Focus
+            | Event::Blur
+            | Event::ContentPointerEnter
+            | Event::ContentPointerLeave
+            | Event::OpenTimerFired
+            | Event::Open
+            | Event::CloseOnEscape
+            | Event::CloseOnClick
+            | Event::CloseOnScroll
+    )
 }
 
 #[cfg(test)]
@@ -1628,6 +1647,67 @@ mod tests {
     }
 
     #[test]
+    fn tooltip_disabled_allows_pending_close_timer_to_finish() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        drop(service.send(Event::PointerLeave));
+        drop(service.set_props(Props {
+            disabled: true,
+            ..test_props()
+        }));
+
+        let result = service.send(Event::CloseTimerFired);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+        assert_eq!(result.cancel_effects, vec![CLOSE_DELAY_EFFECT]);
+    }
+
+    #[test]
+    fn tooltip_disabled_allows_programmatic_close() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                disabled: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        let result = service.send(Event::Close);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+        assert_eq!(effect_names(&result), vec![OPEN_CHANGE_EFFECT]);
+    }
+
+    #[test]
+    fn tooltip_disabled_rejects_programmatic_open_event() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                disabled: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        let result = service.send(Event::Open);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+        assert!(result.pending_effects.is_empty());
+    }
+
+    #[test]
     fn tooltip_close_delay_does_not_clamp_for_hoverable_content() {
         let service = Service::<Machine>::new(
             Props {
@@ -1812,6 +1892,7 @@ mod tests {
         let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
 
         let result = service.set_props(Props {
+            id: "renamed-tooltip".to_string(),
             open_delay: Duration::from_millis(12),
             close_delay: Duration::ZERO,
             disabled: true,
@@ -1824,19 +1905,61 @@ mod tests {
             ..test_props()
         });
 
+        let ids = ComponentIds::from_id("renamed-tooltip");
+        let content_id = ids.part("content");
+
         assert_eq!(service.context().open_delay, Duration::from_millis(12));
         assert_eq!(service.context().close_delay, Duration::ZERO);
         assert!(service.context().disabled);
         assert_eq!(service.context().dir, Direction::Rtl);
         assert_eq!(service.context().positioning.placement, Placement::LeftEnd);
+        assert_eq!(service.context().trigger_id, ids.part("trigger"));
+        assert_eq!(service.context().content_id, content_id);
+        assert_eq!(
+            service.context().hidden_description_id,
+            format_description_id(&service.context().content_id)
+        );
         assert_eq!(service.context().touch_auto_hide, MIN_TOUCH_AUTO_HIDE);
         assert!(result.pending_effects.is_empty());
+    }
+
+    #[test]
+    fn tooltip_id_prop_change_updates_connected_aria_ids() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
+
+        drop(service.set_props(Props {
+            id: "renamed-tooltip".to_string(),
+            ..test_props()
+        }));
+
+        let api = service.connect(&|_| {});
+        let ids = ComponentIds::from_id("renamed-tooltip");
+        let content_id = ids.part("content");
+        let hidden_id = format_description_id(&content_id);
+
+        assert_eq!(
+            api.trigger_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
+            Some(hidden_id.as_str())
+        );
+        assert_eq!(
+            api.hidden_description_attrs().get(&HtmlAttr::Id),
+            Some(hidden_id.as_str())
+        );
+        assert_eq!(
+            api.content_attrs().get(&HtmlAttr::Id),
+            Some(content_id.as_str())
+        );
     }
 
     #[test]
     fn tooltip_on_props_changed_reports_each_context_backed_prop() {
         let old = test_props();
         let cases = [
+            Props {
+                id: "renamed-tooltip".to_string(),
+                ..test_props()
+            },
             Props {
                 open_delay: Duration::from_millis(12),
                 ..test_props()

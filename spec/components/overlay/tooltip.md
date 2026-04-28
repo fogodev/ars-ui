@@ -308,12 +308,7 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        if ctx.disabled
-            && !matches!(
-                event,
-                Event::SetControlledOpen(_) | Event::SyncProps | Event::SetZIndex(_)
-            )
-        {
+        if ctx.disabled && disabled_blocks_event(*event) {
             return None;
         }
 
@@ -519,7 +514,12 @@ impl ars_core::Machine for Machine {
 // - `sync_controlled_plan` updates visible state from `props.open` without firing
 //   `on_open_change`.
 // - `sync_props_plan` keeps resolved context fields (`disabled`, delays, `dir`,
-//   `positioning`, and `touch_auto_hide`) current when props change.
+//   `positioning`, derived part IDs, and `touch_auto_hide`) current when props
+//   change.
+// - `disabled_blocks_event` blocks user-originated interaction, user dismissal,
+//   and explicit `Open` requests while disabled. Internal and programmatic close
+//   paths such as `CloseTimerFired` and `Close` must still complete so a
+//   disabled tooltip cannot remain stuck open.
 ```
 
 ### 1.7 Connect / API
