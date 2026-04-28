@@ -41,6 +41,7 @@ use {
         overlay_stack::{OverlayEntry, push_overlay, remove_overlay},
     },
     ars_interactions::InteractOutsideEvent,
+    leptos::web_sys,
     std::{cell::RefCell, rc::Rc},
 };
 
@@ -200,13 +201,6 @@ struct DismissableState {
 }
 
 #[cfg(not(feature = "ssr"))]
-#[cfg_attr(
-    all(test, target_arch = "wasm32"),
-    expect(
-        unused_qualifications,
-        reason = "production code uses the Leptos web_sys re-export; web-sys is only a direct wasm test dependency"
-    )
-)]
 fn attach(
     state: &Rc<DismissableState>,
     root_ref: NodeRef<html::Div>,
@@ -216,12 +210,12 @@ fn attach(
         return;
     }
 
-    let Some(root_element) = root_ref.get_untracked() else {
+    let Some(root_element) = root_ref.get() else {
         return;
     };
 
-    let root_element: leptos::web_sys::HtmlElement = (*root_element).clone();
-    let root_element: leptos::web_sys::Element = root_element.into();
+    let root_element: web_sys::HtmlElement = (*root_element).clone();
+    let root_element: web_sys::Element = root_element.into();
 
     push_overlay(OverlayEntry {
         id: state.overlay_id.clone(),

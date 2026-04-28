@@ -332,9 +332,9 @@ where
     // derive() memos re-run even when state itself hasn't changed.
     let (context_version_read, context_version_write) = signal(0u64);
 
-    let effect_cleanups: EffectCleanupStore = StoredValue::new_local(HashMap::new());
+    let effect_cleanups = StoredValue::new_local(HashMap::new());
 
-    let send_ref: SendCallbackRef<M> = StoredValue::new(None);
+    let send_ref = StoredValue::new(None);
 
     // Build the send callback. When an event is sent:
     // 1. Snapshot the old state for comparison
@@ -480,6 +480,7 @@ fn handle_effects<M: Machine + 'static>(
 mod test_support;
 
 #[cfg(test)]
+#[path = "../../tests/unit/use_machine.rs"]
 mod tests;
 
 #[cfg(all(test, target_arch = "wasm32"))]

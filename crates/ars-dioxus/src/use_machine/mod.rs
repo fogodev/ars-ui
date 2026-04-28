@@ -535,6 +535,7 @@ fn handle_effects<M: Machine + 'static>(
 mod test_support;
 
 #[cfg(test)]
+#[path = "../../tests/unit/use_machine.rs"]
 mod tests;
 
 #[cfg(all(test, feature = "web", target_arch = "wasm32"))]

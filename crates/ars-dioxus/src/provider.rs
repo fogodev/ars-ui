@@ -15,6 +15,8 @@ use ars_forms::field::FileRef;
 use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend, Translate, locales, number};
 use dioxus::prelude::*;
 
+use crate::nonce::{ArsNonceStyle, use_nonce_css_context_provider};
+
 /// Options for opening a platform file picker.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FilePickerOptions;
@@ -371,6 +373,14 @@ pub fn ArsProvider(props: ArsProviderProps) -> Element {
 
     let direction_for_render = direction;
 
+    use_nonce_css_context_provider();
+
+    let style_strategy = style_strategy.unwrap_or(StyleStrategy::Inline);
+    let nonce = match &style_strategy {
+        StyleStrategy::Nonce(nonce) => Some(nonce.clone()),
+        StyleStrategy::Inline | StyleStrategy::Cssom => None,
+    };
+
     use_context_provider(move || ArsContext {
         locale,
         direction: direction_for_context,
@@ -385,13 +395,18 @@ pub fn ArsProvider(props: ArsProviderProps) -> Element {
         intl_backend: intl_backend.unwrap_or_else(|| Arc::new(StubIntlBackend)),
         i18n_registries: i18n_registries.unwrap_or_else(|| Arc::new(I18nRegistries::new())),
         dioxus_platform: dioxus_platform.unwrap_or_else(default_dioxus_platform),
-        style_strategy: style_strategy.unwrap_or(StyleStrategy::Inline),
+        style_strategy,
     });
 
     let dir = direction_for_render.read().as_html_attr();
 
     rsx! {
-        div { dir, {children} }
+        div { dir,
+            if let Some(nonce) = nonce {
+                ArsNonceStyle { nonce }
+            }
+            {children}
+        }
     }
 }
 
@@ -1519,6 +1534,7 @@ mod wasm_tests {
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
     use super::*;
+    use crate::{ArsNonceCssCtx, append_nonce_css};
 
     wasm_bindgen_test_configure!(run_in_browser);
 
@@ -2405,6 +2421,7 @@ mod wasm_tests {
         portal_container_id: Option<String>,
         root_node_id: Option<String>,
         style_strategy: String,
+        nonce_rules: Vec<String>,
     }
 
     #[derive(Clone, Props)]
@@ -2426,6 +2443,10 @@ mod wasm_tests {
     fn ConfiguredProviderProbe(props: ConfiguredProviderProbeProps) -> Element {
         let context = try_use_context::<ArsContext>().expect("ArsProvider should publish context");
 
+        let nonce_context =
+            try_use_context::<ArsNonceCssCtx>().expect("ArsProvider should publish nonce context");
+        append_nonce_css(String::from(".probe { color: red; }"));
+
         let locale = use_locale();
 
         props.outputs.borrow_mut().push(ObservedProviderConfig {
@@ -2438,6 +2459,12 @@ mod wasm_tests {
             portal_container_id: context.portal_container_id.read().clone(),
             root_node_id: context.root_node_id.read().clone(),
             style_strategy: format!("{:?}", context.style_strategy()),
+            nonce_rules: nonce_context
+                .rules
+                .peek()
+                .iter()
+                .map(|rule| rule.css.clone())
+                .collect(),
         });
 
         rsx! {
@@ -2587,6 +2614,7 @@ mod wasm_tests {
                 portal_container_id: Some(String::from("portal-root")),
                 root_node_id: Some(String::from("focus-root")),
                 style_strategy: String::from("Cssom"),
+                nonce_rules: vec![String::from(".probe { color: red; }")],
             }]
         );
     }

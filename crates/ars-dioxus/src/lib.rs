@@ -11,23 +11,35 @@
 //! - [`use_id`] — hydration-safe deterministic ID generation
 
 mod attrs;
+mod callbacks;
 pub mod dismissable;
 mod ephemeral;
+mod event_mapping;
 mod id;
+mod nonce;
 pub mod prelude;
 mod provider;
+mod safe_listener;
 mod use_machine;
 
 #[cfg(feature = "web")]
-pub use attrs::apply_styles_cssom;
 pub use attrs::{
-    ArsNonceCssCtx, ArsNonceStyle, DioxusAttrResult, append_nonce_css, attr_map_to_dioxus,
-    attr_map_to_dioxus_inline_attrs, intern_attr_name, use_style_strategy,
+    CssomStyleHandle, apply_styles_cssom, use_cssom_styles, use_cssom_styles_from_attrs,
 };
+pub use attrs::{
+    DioxusAttrResult, attr_map_to_dioxus, attr_map_to_dioxus_inline_attrs, use_style_strategy,
+};
+pub use callbacks::{emit, emit_map};
 pub use ephemeral::EphemeralRef;
+pub use event_mapping::dioxus_key_to_keyboard_key;
 #[cfg(feature = "ssr")]
 pub use id::reset_id_counter;
 pub use id::use_id;
+pub use nonce::{
+    ArsNonceCssCtx, ArsNonceCssProvider, ArsNonceStyle, NonceCssRule, append_nonce_css,
+    collect_nonce_css_from_attrs, remove_nonce_css, upsert_nonce_css,
+    use_nonce_css_context_provider, use_nonce_css_from_attrs, use_nonce_css_rule,
+};
 #[cfg(feature = "desktop")]
 pub use provider::DesktopPlatform;
 #[cfg(feature = "web")]
@@ -36,6 +48,10 @@ pub use provider::{
     ArsContext, ArsProvider, ArsProviderProps, DioxusPlatform, DragData, FilePickerOptions,
     NullPlatform, resolve_locale, t, use_intl_backend, use_locale, use_messages,
     use_modality_context, use_number_formatter, use_platform, warn_missing_provider,
+};
+#[cfg(feature = "web")]
+pub use safe_listener::{
+    SafeEventListener, SafeEventListenerOptions, use_safe_event_listener, use_safe_event_listeners,
 };
 pub use use_machine::{UseMachineReturn, use_machine, use_machine_with_reactive_props};
 

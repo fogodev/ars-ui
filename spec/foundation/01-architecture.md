@@ -4291,6 +4291,22 @@ pub enum StyleStrategy {
 | `Cssom`  | Any `style-src`           | No (styles apply after hydration) | Flash of unstyled dynamic positioning until JS runs         |
 | `Nonce`  | `'nonce-xxx'`             | Full                              | Requires per-request nonce generation; slightly larger HTML |
 
+`ars-core` owns the nonce rule formatting helpers because they operate only on
+framework-agnostic `CssProperty` entries and stable `data-ars-style-id`
+selectors. Adapters must reuse these helpers instead of duplicating CSS escaping
+logic.
+
+```rust
+/// Escape a string for use as a quoted CSS attribute selector value.
+///
+/// Used for selectors such as `[data-ars-style-id="..."]`.
+pub fn escape_css_attribute_value(value: &str) -> String;
+
+/// Convert inline style entries into a nonce-compatible CSS rule targeting
+/// `data-ars-style-id`.
+pub fn styles_to_nonce_css(id: &str, styles: &[(CssProperty, String)]) -> String;
+```
+
 Companion stylesheet classes (e.g., `ars-visually-hidden`, `ars-touch-none`) are stored as `HtmlAttr::Class` in the `attrs` vec via `set(HtmlAttr::Class, "ars-...")`. Because `class` is a space-separated token list, `set()` automatically appends new class names with deduplication. The `class` attribute is always rendered regardless of the active `StyleStrategy`.
 
 #### 3.2.2 Companion Stylesheet: `ars-base.css`
