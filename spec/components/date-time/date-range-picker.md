@@ -465,7 +465,7 @@ impl<'a> Api<'a> {
     pub fn start_field_props(&self) -> date_field::Props {
         date_field::Props {
             id: self.ctx.ids.part("start-input"),
-            value: self.ctx.parsed_start.clone(),
+            value: Some(self.ctx.parsed_start.clone()),
             format: self.ctx.format.clone(),
             min: self.ctx.min.clone(),
             max: self.ctx.parsed_end.clone(), // start can't exceed end
@@ -480,7 +480,7 @@ impl<'a> Api<'a> {
     pub fn end_field_props(&self) -> date_field::Props {
         date_field::Props {
             id: self.ctx.ids.part("end-input"),
-            value: self.ctx.parsed_end.clone(),
+            value: Some(self.ctx.parsed_end.clone()),
             format: self.ctx.format.clone(),
             min: self.ctx.parsed_start.clone(), // end can't precede start
             max: self.ctx.max.clone(),

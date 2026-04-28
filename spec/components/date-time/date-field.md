@@ -61,6 +61,8 @@ pub enum Event {
     ClearAll,
     /// Programmatic value update.
     SetValue(Option<CalendarDate>),
+    /// New props snapshot from `Service::set_props`.
+    SyncProps(Box<Props>),
     /// Tab or ArrowRight: advance focus to next editable segment.
     FocusNextSegment,
     /// Shift+Tab or ArrowLeft: move focus to previous editable segment.
@@ -252,8 +254,11 @@ impl Context {
 pub struct Props {
     /// The ID of the field.
     pub id: String,
-    /// The value of the field.
-    pub value: Option<CalendarDate>,
+    /// The controlled value of the field.
+    ///
+    /// `None` means uncontrolled. `Some(None)` means controlled and empty.
+    /// `Some(Some(date))` means controlled with a concrete date.
+    pub value: Option<Option<CalendarDate>>,
     /// The default value of the field.
     pub default_value: Option<CalendarDate>,
     /// The calendar system of the field.
@@ -1172,7 +1177,7 @@ impl ars_core::Machine for Machine {
             locale,
             intl_backend: env.intl_backend.clone(),
             messages,
-            calendar: props.calendar,
+            calendar: resolve_calendar(&env.locale, props.calendar),
             granularity: props.granularity,
             disabled: props.disabled,
             readonly: props.readonly,
@@ -1185,6 +1190,12 @@ impl ars_core::Machine for Machine {
             force_leading_zeros: props.force_leading_zeros,
         };
         ctx.rebuild_segments();
+        if props.auto_focus {
+            if let Some(first) = ctx.first_editable() {
+                ctx.focused_segment = Some(first);
+                return (State::Focused(first), ctx);
+            }
+        }
         (State::Idle, ctx)
     }
 
@@ -1385,16 +1396,11 @@ impl ars_core::Machine for Machine {
                         // approach with a PendingEffect that the adapter converts
                         // into a setTimeout / spawn_local timer.
                         if !should_advance {
-                            plan = plan.with_effect(PendingEffect::new(
-                                "type-buffer-commit",
-                                move |_ctx, _props, send| {
-                                    let send = send.clone();
-                                    // Adapter schedules ~1s timeout, then sends commit.
-                                    Box::new(move || {
-                                        send(Event::TypeBufferCommit(k));
-                                    })
-                                },
-                            ));
+                            plan = plan
+                                .cancel_effect("type-buffer-commit")
+                                .with_effect(PendingEffect::named("type-buffer-commit"));
+                        } else {
+                            plan = plan.cancel_effect("type-buffer-commit");
                         }
                         Some(plan)
                     }
@@ -1554,7 +1560,6 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("label"));
-        attrs.set(HtmlAttr::For, self.ctx.ids.part("field-group"));
         attrs
     }
 
@@ -1800,7 +1805,7 @@ impl ConnectApi for Api<'_> {
 | Part           | HTML Element                | Purpose                                                                     |
 | -------------- | --------------------------- | --------------------------------------------------------------------------- |
 | `Root`         | `<div>`                     | Outermost container; `data-ars-scope="date-field"`                          |
-| `Label`        | `<label>`                   | Visible label; `for` points to the first focusable segment                  |
+| `Label`        | `<label>`                   | Visible label; referenced by `aria-labelledby`                              |
 | `FieldGroup`   | `<div role="group">`        | Groups all segments + receives the accessible name                          |
 | `Segment`      | `<div role="spinbutton">`   | One per editable segment (Year, Month, Day, Era)                            |
 | `Literal`      | `<span aria-hidden="true">` | Non-interactive separator characters                                        |

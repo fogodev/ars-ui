@@ -14,6 +14,9 @@ pub mod overlay;
 /// Input component machines.
 pub mod input;
 
+/// Date and time component machines.
+pub mod date_time;
+
 /// Utility component machines.
 pub mod utility;
 
