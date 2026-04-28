@@ -600,6 +600,35 @@ fn set_props_drops_stale_deferred_value_after_fresh_controlled_value() {
 }
 
 #[test]
+fn focus_segment_flushes_deferred_controlled_value_after_active_buffer() {
+    let mut service = Service::<Machine>::new(
+        props().value(Some(date(2024, 1, 1))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Month)));
+    drop(service.send(Event::TypeIntoSegment(DateSegmentKind::Month, '1')));
+    drop(service.set_props(props().value(Some(date(2024, 12, 25)))));
+
+    assert_eq!(
+        service.context().pending_controlled_value,
+        Some(Some(date(2024, 12, 25)))
+    );
+
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Day)));
+
+    assert_eq!(service.state(), &State::Focused(DateSegmentKind::Day));
+    assert_eq!(
+        service.context().focused_segment,
+        Some(DateSegmentKind::Day)
+    );
+    assert_eq!(service.context().value.get(), &Some(date(2024, 12, 25)));
+    assert!(service.context().pending_controlled_value.is_none());
+    assert!(service.context().type_buffer.is_empty());
+}
+
+#[test]
 fn controlled_to_uncontrolled_handoff_keeps_latest_controlled_value() {
     let mut service = Service::<Machine>::new(
         props()

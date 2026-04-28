@@ -998,6 +998,9 @@ impl ars_core::Machine for Machine {
                 let kind = *kind;
                 Some(
                     TransitionPlan::to(State::Focused(kind)).apply(move |ctx: &mut Context| {
+                        commit_type_buffer(ctx);
+                        flush_pending_controlled_value(ctx);
+
                         ctx.focused_segment = Some(kind);
                         ctx.type_buffer.clear();
                     }),
