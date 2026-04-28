@@ -653,7 +653,7 @@ impl Api<'_> {
             attrs.set_bool(HtmlAttr::Checked, true);
         }
 
-        if self.ctx.disabled {
+        if self.ctx.disabled || self.ctx.readonly {
             attrs.set_bool(HtmlAttr::Disabled, true);
         }
 
@@ -700,7 +700,7 @@ impl Api<'_> {
 
     /// Sends [`Event::Toggle`] for the Space key.
     pub fn on_control_keydown(&self, data: &KeyboardEventData, _shift: bool) {
-        if data.key == KeyboardKey::Space {
+        if data.key == KeyboardKey::Space && !data.repeat {
             (self.send)(Event::Toggle);
         }
     }
@@ -812,6 +812,13 @@ mod tests {
             meta_key: false,
             repeat: false,
             is_composing: false,
+        }
+    }
+
+    fn repeated_keyboard_data(key: KeyboardKey) -> KeyboardEventData {
+        KeyboardEventData {
+            repeat: true,
+            ..keyboard_data(key)
         }
     }
 
@@ -1294,6 +1301,22 @@ mod tests {
     }
 
     #[test]
+    fn checkbox_hidden_input_is_disabled_when_readonly() {
+        let service = Service::<Machine>::new(
+            Props {
+                readonly: true,
+                ..form_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        let attrs = service.connect(&|_| {}).hidden_input_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Disabled), Some("true"));
+    }
+
+    #[test]
     fn checkbox_label_targets_hidden_native_input() {
         let service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
 
@@ -1331,6 +1354,7 @@ mod tests {
 
         api.on_control_click();
         api.on_control_keydown(&keyboard_data(KeyboardKey::Space), false);
+        api.on_control_keydown(&repeated_keyboard_data(KeyboardKey::Space), false);
         api.on_control_keydown(&keyboard_data(KeyboardKey::Enter), false);
         api.on_control_focus(true);
         api.on_control_blur();

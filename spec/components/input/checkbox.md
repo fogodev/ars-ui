@@ -504,7 +504,7 @@ impl<'a> Api<'a> {
         if *self.ctx.checked.get() == State::Checked {
             attrs.set_bool(HtmlAttr::Checked, true);
         }
-        if self.ctx.disabled {
+        if self.ctx.disabled || self.ctx.readonly {
             attrs.set_bool(HtmlAttr::Disabled, true);
         }
         if self.ctx.required {
@@ -539,7 +539,7 @@ impl<'a> Api<'a> {
 
     /// Keydown handler for the control element.
     pub fn on_control_keydown(&self, data: &KeyboardEventData, _shift: bool) {
-        if data.key == KeyboardKey::Space { (self.send)(Event::Toggle); }
+        if data.key == KeyboardKey::Space && !data.repeat { (self.send)(Event::Toggle); }
     }
 
     /// Focus handler for the control element.
@@ -644,7 +644,7 @@ parent confirms it by passing `checked: Some(State::Checked)`.
 
 ## 5. Form Integration
 
-- **Hidden input**: A hidden `<input type="checkbox">` is rendered via `HiddenInput` part. It carries `id`, `name`, and `value` from context, and the `checked` attribute when state is `Checked`. The indeterminate state does not set `checked` — only `Checked` does.
+- **Hidden input**: A hidden `<input type="checkbox">` is rendered via `HiddenInput` part. It carries `id`, `name`, and `value` from context, and the `checked` attribute when state is `Checked`. The indeterminate state does not set `checked` — only `Checked` does. The native input is disabled when the component is disabled or readonly because checkboxes have no native readonly behavior.
 - **Label activation**: `Label` points `for` at `HiddenInput` so native label activation targets a labelable form control. Adapters must wire hidden input changes to `Api::on_hidden_input_change(checked)`.
 - **Validation states**: `aria-invalid="true"` is set on the Control part when `invalid=true`. The `ErrorMessage` part is linked via `aria-describedby`.
 - **Error message association**: `aria-describedby` on Control points to `Description` (when present) and `ErrorMessage` (when invalid). See `control_attrs()` for the wiring logic.
