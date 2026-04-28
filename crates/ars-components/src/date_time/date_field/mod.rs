@@ -927,7 +927,7 @@ impl ars_core::Machine for Machine {
 
         ctx.rebuild_segments();
 
-        let state = if props.auto_focus {
+        let state = if props.auto_focus && !props.disabled {
             if let Some(first) = ctx.first_editable() {
                 ctx.focused_segment = Some(first);
                 State::Focused(first)
@@ -1419,9 +1419,10 @@ impl<'a> Api<'a> {
 
         let is_focused = self.ctx.focused_segment == Some(segment.kind);
 
-        let is_tab_stop = is_focused
-            || (self.ctx.focused_segment.is_none()
-                && self.ctx.first_editable() == Some(segment.kind));
+        let is_tab_stop = !self.ctx.disabled
+            && (is_focused
+                || (self.ctx.focused_segment.is_none()
+                    && self.ctx.first_editable() == Some(segment.kind)));
 
         attrs
             .set(scope_attr, scope_val)
@@ -2090,6 +2091,15 @@ fn build_segments(ctx: &Context) -> Vec<DateSegment> {
             _ => (0, 0, ""),
         };
 
+        if !kind.is_editable() {
+            segments.push(DateSegment::new_non_editable(
+                kind,
+                &non_editable_segment_text(ctx, kind, value.as_ref()),
+            ));
+
+            continue;
+        }
+
         let mut segment = DateSegment::new_numeric(kind, min, max, placeholder);
 
         if let Some(date) = &value {
@@ -2115,6 +2125,22 @@ fn build_segments(ctx: &Context) -> Vec<DateSegment> {
     }
 
     segments
+}
+
+fn non_editable_segment_text(
+    ctx: &Context,
+    kind: DateSegmentKind,
+    value: Option<&CalendarDate>,
+) -> String {
+    match (kind, value) {
+        (DateSegmentKind::Weekday, Some(date)) => ctx
+            .intl_backend
+            .weekday_short_label(date.weekday(), &ctx.locale),
+
+        (DateSegmentKind::Literal, _) => literal_for_locale(&ctx.locale).to_string(),
+
+        _ => kind.aria_label(&ctx.messages, &ctx.locale),
+    }
 }
 
 #[derive(Clone, Copy)]

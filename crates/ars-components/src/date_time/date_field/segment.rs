@@ -161,6 +161,21 @@ impl DateSegment {
         }
     }
 
+    /// Creates a new non-editable semantic segment.
+    #[must_use]
+    pub fn new_non_editable(kind: DateSegmentKind, text: &str) -> Self {
+        Self {
+            kind,
+            value: None,
+            min: 0,
+            max: 0,
+            text: text.to_string(),
+            placeholder: text.to_string(),
+            literal: Some(text.to_string()),
+            is_editable: false,
+        }
+    }
+
     /// Returns the text adapters should render for this segment.
     #[must_use]
     pub fn display_text(&self) -> &str {

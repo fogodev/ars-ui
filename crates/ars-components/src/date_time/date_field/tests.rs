@@ -852,6 +852,24 @@ fn auto_focus_initializes_first_editable_segment_as_focused() {
 }
 
 #[test]
+fn auto_focus_is_ignored_when_disabled() {
+    let service = Service::<Machine>::new(
+        props().auto_focus(true).disabled(true),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    assert_eq!(service.state(), &State::Idle);
+    assert_eq!(service.context().focused_segment, None);
+
+    let month = service
+        .connect(&|_| {})
+        .segment_attrs(&DateSegmentKind::Month);
+
+    assert_eq!(attr(&month, HtmlAttr::TabIndex), Some("-1"));
+}
+
+#[test]
 fn numeric_typeahead_returns_timer_marker_effect_until_value_is_complete() {
     let mut service = service();
 
@@ -1302,6 +1320,56 @@ fn locale_order_can_be_overridden() {
             DateSegmentKind::Day
         ]
     );
+}
+
+#[test]
+fn segment_order_non_editable_kinds_stay_non_editable() {
+    let service = Service::<Machine>::new(
+        props()
+            .default_value(Some(date(2024, 3, 15)))
+            .segment_order(Some(vec![
+                DateSegmentKind::Weekday,
+                DateSegmentKind::Month,
+                DateSegmentKind::TimeZoneName,
+            ])),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    let weekday = service
+        .context()
+        .segments
+        .iter()
+        .find(|segment| segment.kind == DateSegmentKind::Weekday)
+        .expect("weekday override should be represented");
+
+    let timezone = service
+        .context()
+        .segments
+        .iter()
+        .find(|segment| segment.kind == DateSegmentKind::TimeZoneName)
+        .expect("time-zone override should be represented");
+
+    assert!(!weekday.is_editable);
+    assert_eq!(weekday.display_text(), "Fr");
+    assert!(!timezone.is_editable);
+    assert_eq!(timezone.display_text(), "Time zone");
+
+    let api = service.connect(&|_| {});
+
+    let weekday_attrs = api.segment_attrs(&DateSegmentKind::Weekday);
+    let timezone_attrs = api.segment_attrs(&DateSegmentKind::TimeZoneName);
+    let month_attrs = api.segment_attrs(&DateSegmentKind::Month);
+
+    assert_eq!(attr(&weekday_attrs, HtmlAttr::Role), None);
+    assert_eq!(attr(&weekday_attrs, HtmlAttr::TabIndex), Some("-1"));
+    assert_eq!(
+        attr(&weekday_attrs, HtmlAttr::Aria(AriaAttr::Hidden)),
+        Some("true")
+    );
+    assert_eq!(attr(&timezone_attrs, HtmlAttr::Role), None);
+    assert_eq!(attr(&timezone_attrs, HtmlAttr::TabIndex), Some("-1"));
+    assert_eq!(attr(&month_attrs, HtmlAttr::Role), Some("spinbutton"));
 }
 
 #[test]
