@@ -549,8 +549,11 @@ impl Api<'_> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
-            .set(HtmlAttr::Id, self.ctx.ids.part("label"))
-            .set(HtmlAttr::For, self.ctx.ids.part("hidden-input"));
+            .set(HtmlAttr::Id, self.ctx.ids.part("label"));
+
+        if !self.ctx.readonly {
+            attrs.set(HtmlAttr::For, self.ctx.ids.part("hidden-input"));
+        }
 
         attrs
     }
@@ -653,7 +656,7 @@ impl Api<'_> {
             attrs.set_bool(HtmlAttr::Checked, true);
         }
 
-        if self.ctx.disabled || self.ctx.readonly {
+        if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);
         }
 
@@ -731,7 +734,9 @@ fn value_change_plan(ctx: &Context, next: State) -> TransitionPlan<Machine> {
     }
 
     if ctx.checked.is_controlled() {
-        return TransitionPlan::new().with_effect(checked_change_effect(next));
+        return TransitionPlan::new()
+            .apply(|_: &mut Context| {})
+            .with_effect(checked_change_effect(next));
     }
 
     TransitionPlan::to(next)
@@ -985,9 +990,34 @@ mod tests {
         let result = service.send(Event::Toggle);
 
         assert!(!result.state_changed);
-        assert!(!result.context_changed);
+        assert!(result.context_changed);
         assert_eq!(service.state(), &State::Unchecked);
         assert_eq!(service.context().checked.get(), &State::Unchecked);
+        assert_eq!(result.pending_effects.len(), 1);
+        assert_eq!(result.pending_effects[0].name, "checked-change");
+    }
+
+    #[test]
+    fn checkbox_controlled_hidden_input_change_forces_rerender_without_committing_state() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                checked: Some(State::Unchecked),
+                ..form_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        let result = service.send(Event::Check);
+
+        assert!(!result.state_changed);
+        assert!(result.context_changed);
+        assert_eq!(service.state(), &State::Unchecked);
+        assert_eq!(service.context().checked.get(), &State::Unchecked);
+
+        let attrs = service.connect(&|_| {}).hidden_input_attrs();
+
+        assert!(!attrs.contains(&HtmlAttr::Checked));
         assert_eq!(result.pending_effects.len(), 1);
         assert_eq!(result.pending_effects[0].name, "checked-change");
     }
@@ -1301,7 +1331,7 @@ mod tests {
     }
 
     #[test]
-    fn checkbox_hidden_input_is_disabled_when_readonly() {
+    fn checkbox_hidden_input_stays_enabled_when_readonly() {
         let service = Service::<Machine>::new(
             Props {
                 readonly: true,
@@ -1313,7 +1343,7 @@ mod tests {
 
         let attrs = service.connect(&|_| {}).hidden_input_attrs();
 
-        assert_eq!(attrs.get(&HtmlAttr::Disabled), Some("true"));
+        assert!(!attrs.contains(&HtmlAttr::Disabled));
     }
 
     #[test]
@@ -1323,6 +1353,22 @@ mod tests {
         let attrs = service.connect(&|_| {}).label_attrs();
 
         assert_eq!(attrs.get(&HtmlAttr::For), Some("terms-hidden-input"));
+    }
+
+    #[test]
+    fn checkbox_label_omits_for_when_readonly() {
+        let service = Service::<Machine>::new(
+            Props {
+                readonly: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        let attrs = service.connect(&|_| {}).label_attrs();
+
+        assert!(!attrs.contains(&HtmlAttr::For));
     }
 
     #[test]

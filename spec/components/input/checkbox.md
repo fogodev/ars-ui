@@ -346,7 +346,9 @@ fn value_change_plan(ctx: &Context, next: State) -> TransitionPlan<Machine> {
     }
 
     if ctx.checked.is_controlled() {
-        return TransitionPlan::new().with_effect(checked_change_effect(next));
+        return TransitionPlan::new()
+            .apply(|_| {})
+            .with_effect(checked_change_effect(next));
     }
 
     TransitionPlan::to(next)
@@ -437,7 +439,9 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("label"));
-        attrs.set(HtmlAttr::For, self.ctx.ids.part("hidden-input"));
+        if !self.ctx.readonly {
+            attrs.set(HtmlAttr::For, self.ctx.ids.part("hidden-input"));
+        }
         attrs
     }
 
@@ -504,7 +508,7 @@ impl<'a> Api<'a> {
         if *self.ctx.checked.get() == State::Checked {
             attrs.set_bool(HtmlAttr::Checked, true);
         }
-        if self.ctx.disabled || self.ctx.readonly {
+        if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);
         }
         if self.ctx.required {
@@ -644,8 +648,8 @@ parent confirms it by passing `checked: Some(State::Checked)`.
 
 ## 5. Form Integration
 
-- **Hidden input**: A hidden `<input type="checkbox">` is rendered via `HiddenInput` part. It carries `id`, `name`, and `value` from context, and the `checked` attribute when state is `Checked`. The indeterminate state does not set `checked` — only `Checked` does. The native input is disabled when the component is disabled or readonly because checkboxes have no native readonly behavior.
-- **Label activation**: `Label` points `for` at `HiddenInput` so native label activation targets a labelable form control. Adapters must wire hidden input changes to `Api::on_hidden_input_change(checked)`.
+- **Hidden input**: A hidden `<input type="checkbox">` is rendered via `HiddenInput` part. It carries `id`, `name`, and `value` from context, and the `checked` attribute when state is `Checked`. The indeterminate state does not set `checked` — only `Checked` does. The native input is disabled only when the component is disabled; readonly values remain enabled so they can be submitted with native forms.
+- **Label activation**: `Label` points `for` at `HiddenInput` so native label activation targets a labelable form control. When readonly, `Label` omits `for` because checkboxes have no native readonly behavior and label activation would otherwise mutate the hidden input. Adapters must wire hidden input changes to `Api::on_hidden_input_change(checked)`.
 - **Validation states**: `aria-invalid="true"` is set on the Control part when `invalid=true`. The `ErrorMessage` part is linked via `aria-describedby`.
 - **Error message association**: `aria-describedby` on Control points to `Description` (when present) and `ErrorMessage` (when invalid). See `control_attrs()` for the wiring logic.
 - **Required**: `aria-required="true"` on Control; `required` attribute on the hidden input.
