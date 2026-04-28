@@ -217,6 +217,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
       - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Reclaim runner disk space
+        run: |
+          df -h
+          sudo rm -rf \
+            /opt/az \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/.ghcup \
+            /usr/local/lib/android \
+            /usr/share/dotnet
+          docker system prune -af || true
+          sudo apt-get clean
+          df -h
       - name: Install LLVM 22 for wasm coverage
         run: |
           wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh
