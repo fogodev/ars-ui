@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/data_display/skeleton.rs
+expression: "snapshot_attrs(&api(Props::new()).circle_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "circle",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "skeleton",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}

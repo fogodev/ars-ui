@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/data_display/skeleton.rs
+expression: "snapshot_attrs(&api(Props::new()).item_attrs(2))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-index",
+            ),
+            String(
+                "2",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "skeleton",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}
