@@ -965,9 +965,22 @@ impl ars_core::Machine for Machine {
         match event {
             Event::SyncProps(props) => {
                 let props = props.as_ref().clone();
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    sync_props(ctx, &props);
-                }))
+                let mut next_ctx = ctx.clone();
+
+                sync_props(&mut next_ctx, &props);
+
+                if let Some(next_state) = reconcile_state_after_sync(state, &next_ctx) {
+                    Some(
+                        TransitionPlan::to(next_state.clone()).apply(move |ctx: &mut Context| {
+                            sync_props(ctx, &props);
+                            apply_state_focus(ctx, &next_state);
+                        }),
+                    )
+                } else {
+                    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                        sync_props(ctx, &props);
+                    }))
+                }
             }
 
             Event::FocusSegment(kind) => {
@@ -1843,14 +1856,16 @@ fn clamp_date(
     date
 }
 
-fn apply_controlled_value_update(ctx: &mut Context, value: Option<CalendarDate>) {
+fn apply_controlled_value_update(ctx: &mut Context, value: Option<CalendarDate>) -> bool {
     if ctx.focused_segment.is_some() && !ctx.type_buffer.is_empty() {
         ctx.pending_controlled_value = Some(value);
 
-        return;
+        return false;
     }
 
     apply_value(ctx, value);
+
+    true
 }
 
 fn flush_pending_controlled_value(ctx: &mut Context) {
@@ -1871,6 +1886,11 @@ fn sync_props(ctx: &mut Context, props: &Props) {
     let previous_segment_order = ctx.segment_order.clone();
     let previous_force_leading_zeros = ctx.force_leading_zeros;
 
+    let buffered_segment = ctx
+        .focused_segment
+        .filter(|_| !ctx.type_buffer.is_empty())
+        .map(|kind| (kind, ctx.get_segment_value(kind)));
+
     ctx.calendar = resolve_calendar(&ctx.locale, props.calendar);
     ctx.granularity = props.granularity;
     ctx.disabled = props.disabled;
@@ -1881,11 +1901,13 @@ fn sync_props(ctx: &mut Context, props: &Props) {
     ctx.force_leading_zeros = props.force_leading_zeros;
     ctx.segment_order = props.segment_order.clone();
 
-    if let Some(value) = &props.value {
-        apply_controlled_value_update(ctx, value.clone());
+    let controlled_value_deferred = if let Some(value) = &props.value {
+        !apply_controlled_value_update(ctx, value.clone())
     } else {
         ctx.value.sync_controlled(None);
-    }
+
+        false
+    };
 
     let must_rebuild = previous_calendar != ctx.calendar
         || previous_granularity != ctx.granularity
@@ -1898,12 +1920,80 @@ fn sync_props(ctx: &mut Context, props: &Props) {
         ctx.refresh_segment_ranges();
     }
 
+    if controlled_value_deferred {
+        restore_buffered_segment(ctx, buffered_segment);
+
+        return;
+    }
+
     if let Some(value) = ctx.value.get().clone() {
         let clamped = clamp_date(value, ctx.min_value.as_ref(), ctx.max_value.as_ref());
 
         ctx.apply_date_to_segments(&clamped);
 
         ctx.value.set(Some(clamped));
+    }
+}
+
+fn restore_buffered_segment(
+    ctx: &mut Context,
+    buffered_segment: Option<(DateSegmentKind, Option<i32>)>,
+) {
+    let Some((kind, value)) = buffered_segment else {
+        return;
+    };
+
+    if !ctx
+        .segments
+        .iter()
+        .any(|segment| segment.kind == kind && segment.is_editable)
+    {
+        return;
+    }
+
+    if let Some(value) = value {
+        ctx.set_segment_value(kind, value);
+    } else {
+        ctx.clear_segment_value(kind);
+    }
+}
+
+fn reconcile_state_after_sync(state: &State, ctx: &Context) -> Option<State> {
+    let State::Focused(kind) = state else {
+        return None;
+    };
+
+    let still_focusable = !ctx.disabled
+        && ctx
+            .segments
+            .iter()
+            .any(|segment| segment.kind == *kind && segment.is_editable);
+
+    if still_focusable {
+        return None;
+    }
+
+    Some(
+        (!ctx.disabled)
+            .then(|| ctx.first_editable())
+            .flatten()
+            .map_or(State::Idle, State::Focused),
+    )
+}
+
+fn apply_state_focus(ctx: &mut Context, state: &State) {
+    match state {
+        State::Idle => {
+            ctx.focused_segment = None;
+
+            ctx.type_buffer.clear();
+        }
+
+        State::Focused(kind) => {
+            ctx.focused_segment = Some(*kind);
+
+            ctx.type_buffer.clear();
+        }
     }
 }
 

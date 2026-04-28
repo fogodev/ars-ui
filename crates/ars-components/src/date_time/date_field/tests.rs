@@ -545,7 +545,7 @@ fn set_props_syncs_all_context_backed_props() {
 #[test]
 fn set_props_defers_controlled_value_while_type_buffer_is_active() {
     let mut service = Service::<Machine>::new(
-        props().value(Some(date(2024, 1, 1))),
+        props().value(Some(date(2024, 5, 1))),
         &Env::default(),
         &Messages::default(),
     );
@@ -554,7 +554,12 @@ fn set_props_defers_controlled_value_while_type_buffer_is_active() {
     drop(service.send(Event::TypeIntoSegment(DateSegmentKind::Month, '1')));
     drop(service.set_props(props().value(Some(date(2024, 12, 25)))));
 
-    assert_eq!(service.context().value.get(), &Some(date(2024, 1, 1)));
+    assert_eq!(service.context().value.get(), &Some(date(2024, 5, 1)));
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Month),
+        Some(1)
+    );
+    assert_eq!(service.context().type_buffer, "1");
     assert_eq!(
         service.context().pending_controlled_value,
         Some(Some(date(2024, 12, 25)))
@@ -564,6 +569,31 @@ fn set_props_defers_controlled_value_while_type_buffer_is_active() {
 
     assert_eq!(service.context().value.get(), &Some(date(2024, 12, 25)));
     assert!(service.context().pending_controlled_value.is_none());
+}
+
+#[test]
+fn sync_props_refocuses_when_segment_set_removes_focused_segment() {
+    let mut service = Service::<Machine>::new(
+        props().calendar(CalendarSystem::Japanese),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Era)));
+    drop(service.set_props(props().calendar(CalendarSystem::Gregorian)));
+
+    assert_eq!(service.state(), &State::Focused(DateSegmentKind::Month));
+    assert_eq!(
+        service.context().focused_segment,
+        Some(DateSegmentKind::Month)
+    );
+    assert!(
+        service
+            .context()
+            .segments
+            .iter()
+            .all(|segment| segment.kind != DateSegmentKind::Era)
+    );
 }
 
 #[test]
