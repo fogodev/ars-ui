@@ -1,0 +1,59 @@
+---
+source: crates/ars-components/src/utility/dismissable.rs
+expression: "snapshot_attrs(&Api::new(Props::new(), \"Close dialog\").dismiss_button_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "dismiss-button",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "dismissable",
+            ),
+        ),
+        (
+            Data(
+                "ars-visually-hidden",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Close dialog",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "button",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

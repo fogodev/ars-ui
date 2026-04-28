@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/utility/dismissable.rs
+expression: "snapshot_attrs(&api(Props::new()).part_attrs(Part::Root))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "dismissable",
+            ),
+        ),
+    ],
+    styles: [],
+}

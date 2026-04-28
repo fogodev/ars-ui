@@ -181,6 +181,13 @@ pub fn attr_map_to_leptos_inline_attrs(
 
 /// Applies CSS properties directly to an element via CSSOM.
 #[cfg(not(feature = "ssr"))]
+#[cfg_attr(
+    all(test, target_arch = "wasm32"),
+    expect(
+        unused_qualifications,
+        reason = "production code uses the Leptos web_sys re-export; web-sys is only a direct wasm test dependency"
+    )
+)]
 pub fn apply_styles_cssom(el: &leptos::web_sys::HtmlElement, styles: &[(CssProperty, String)]) {
     let style = el.style();
 
@@ -455,8 +462,8 @@ mod wasm_tests {
 
     wasm_bindgen_test_configure!(run_in_browser);
 
-    fn document() -> leptos::web_sys::Document {
-        leptos::web_sys::window()
+    fn document() -> web_sys::Document {
+        web_sys::window()
             .and_then(|window| window.document())
             .expect("browser document should exist")
     }
@@ -591,7 +598,7 @@ mod wasm_tests {
         let element = document()
             .create_element("div")
             .expect("create_element should succeed")
-            .dyn_into::<leptos::web_sys::HtmlElement>()
+            .dyn_into::<web_sys::HtmlElement>()
             .expect("element should cast to HtmlElement");
 
         let styles = vec![

@@ -20,8 +20,10 @@ Dismissable is intentionally split into:
 - **behavior**: outside-interaction and Escape dismissal configuration
 - **structure**: a shared dismiss-button attribute helper
 
-Dismissable does **not** own user-facing wording. Callers resolve an appropriate localized label and
-pass the final string to `dismiss_button_attrs`.
+Dismissable owns the shared generic `Messages` bundle for dismiss-button fallback wording, but it
+does **not** resolve user-facing wording inside `Props` or the connect API. Callers resolve an
+appropriate localized label and pass the final string to the connect API or to
+`dismiss_button_attrs`.
 
 ## 1. API
 
@@ -63,6 +65,23 @@ impl<E> DismissAttempt<E> {
     pub fn prevent_dismiss(&self) { /* … */ }
     pub fn is_prevented(&self) -> bool { /* … */ }
 }
+
+/// Localizable strings for the Dismissable structural helper.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Messages {
+    /// Accessible label for the visually-hidden dismiss buttons.
+    pub dismiss_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+}
+
+impl Default for Messages {
+    fn default() -> Self {
+        Self {
+            dismiss_label: MessageFn::static_str("Dismiss"),
+        }
+    }
+}
+
+impl ComponentMessages for Messages {}
 
 /// Props for the `Dismissable` component.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -143,7 +162,57 @@ pub enum Part {
     DismissButton,
 }
 
-pub fn dismiss_button_attrs(label: &str) -> AttrMap {
+/// Stateless connect API for deriving Dismissable DOM attributes.
+pub struct Api {
+    props: Props,
+    dismiss_button_label: AttrValue,
+}
+
+impl Api {
+    /// Creates a new Dismissable attribute API.
+    ///
+    /// `dismiss_button_label` is the final accessible label for both visually-hidden
+    /// dismiss buttons. It accepts static strings and reactive `AttrValue` inputs so
+    /// adapters can pass provider-resolved localized labels without adding wording
+    /// to `Props`.
+    pub fn new(props: Props, dismiss_button_label: impl Into<AttrValue>) -> Self;
+
+    /// Returns root container attributes for the dismissable boundary.
+    ///
+    /// The root is structural only. Document listeners, containment checks, and
+    /// platform fallbacks remain adapter-owned.
+    pub fn root_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
+        attrs.set(scope_attr, scope_val);
+        attrs.set(part_attr, part_val);
+        if self.props.disable_outside_pointer_events {
+            attrs.set_bool(HtmlAttr::Data("ars-disable-outside-pointer-events"), true);
+        }
+        attrs
+    }
+
+    /// Returns attributes for either visually-hidden dismiss button.
+    pub fn dismiss_button_attrs(&self) -> AttrMap {
+        dismiss_button_attrs(self.dismiss_button_label.clone())
+    }
+
+    pub fn disable_outside_pointer_events(&self) -> bool;
+    pub fn exclude_ids(&self) -> &[String];
+}
+
+impl ConnectApi for Api {
+    type Part = Part;
+
+    fn part_attrs(&self, part: Self::Part) -> AttrMap {
+        match part {
+            Part::Root => self.root_attrs(),
+            Part::DismissButton => self.dismiss_button_attrs(),
+        }
+    }
+}
+
+pub fn dismiss_button_attrs(label: impl Into<AttrValue>) -> AttrMap {
     let mut attrs = AttrMap::new();
     let [(scope_attr, scope_val), (part_attr, part_val)] = Part::DismissButton.data_attrs();
     attrs.set(scope_attr, scope_val);
@@ -159,8 +228,10 @@ pub fn dismiss_button_attrs(label: &str) -> AttrMap {
 }
 ```
 
-The helper is shared structure only. Overlay-specific message bundles own phrases such as
-`"Dismiss popover"` or `"Close dialog"`.
+The helper and connect API are shared structure only. The shared `Messages` bundle provides the
+generic `"Dismiss"` fallback for adapter-level regions. Overlay-specific message bundles may own
+more precise phrases such as `"Dismiss popover"` or `"Close dialog"`, resolve them before
+constructing the API, and pass the final string or reactive `AttrValue` into Dismissable.
 
 ## 2. Anatomy
 
@@ -173,6 +244,7 @@ Dismissable
 
 | Part            | Element    | Key attributes                                                                                  |
 | --------------- | ---------- | ----------------------------------------------------------------------------------------------- |
+| `Root`          | container  | `data-ars-scope="dismissable"`, `data-ars-part="root"`                                          |
 | `DismissButton` | `<button>` | `data-ars-scope="dismissable"`, `data-ars-part="dismiss-button"`, `aria-label`, `type="button"` |
 
 Adapters should render the element as a native `<button>` whenever possible. The helper still sets
@@ -207,6 +279,7 @@ When `disable_outside_pointer_events` is true:
 - only pointer interaction is blocked
 - keyboard navigation must remain available
 - Escape and DismissButton must continue to work
+- `Api::root_attrs()` emits `data-ars-disable-outside-pointer-events`
 
 ## 4. Behavior
 
@@ -238,8 +311,10 @@ let dismissable = dismissable::Props::new()
     .disable_outside_pointer_events(props.modal)
     .exclude_ids([trigger_id.clone()]);
 
-let dismiss_label = (messages.dismiss_label)(locale);
-let dismiss_button = dismissable::dismiss_button_attrs(&dismiss_label);
+let dismiss_label = overlay_messages.dismiss_label(locale);
+let dismissable_api = dismissable::Api::new(dismissable, &dismiss_label);
+let root = dismissable_api.root_attrs();
+let dismiss_button = dismissable_api.dismiss_button_attrs();
 ```
 
 ## 6. Library Parity
@@ -249,4 +324,4 @@ Compared against React Aria:
 - ars-ui keeps the DismissButton concept.
 - ars-ui also centralizes outside-interaction and Escape configuration in one utility surface.
 - ars-ui intentionally does not define a shared message bundle here; wording belongs to the
-  consuming overlay or application.
+  consuming overlay or application, while the final resolved label is passed into the agnostic API.
