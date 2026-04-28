@@ -217,13 +217,32 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
       - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Reclaim runner disk space
+        run: |
+          df -h
+          sudo rm -rf \
+            /opt/az \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/.ghcup \
+            /usr/local/lib/android \
+            /usr/share/dotnet
+          docker system prune -af || true
+          sudo apt-get clean
+          df -h
       - name: Install LLVM 22 for wasm coverage
         run: |
           wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh 22
           sudo apt-get install -y clang-22 lld-22
-      - run: cargo install wasm-bindgen-cli --locked --version 0.2.120
+      - name: Install matching wasm-bindgen CLI
+        run: |
+          version="$(
+            cargo metadata --format-version 1 |
+              python3 -c 'import json, sys; print(next(pkg["version"] for pkg in json.load(sys.stdin)["packages"] if pkg["name"] == "wasm-bindgen"))'
+          )"
+          cargo install wasm-bindgen-cli --locked --version "$version"
       - name: Configure wasm coverage clang
         run: echo "WASM_COVERAGE_CLANG=/usr/bin/clang-22" >> "$GITHUB_ENV"
       - uses: ./.github/actions/install-dioxus-desktop-deps

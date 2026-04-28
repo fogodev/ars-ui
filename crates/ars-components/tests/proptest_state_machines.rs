@@ -3,6 +3,9 @@
 #[path = "proptest_state_machines/input.rs"]
 mod input;
 
+#[path = "proptest_state_machines/date_time.rs"]
+mod date_time;
+
 #[path = "proptest_state_machines/overlay.rs"]
 mod overlay;
 

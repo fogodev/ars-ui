@@ -1,0 +1,53 @@
+---
+source: crates/ars-components/src/date_time/date_field/tests.rs
+expression: snapshot_attrs(&api.field_group_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "field-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "date-field",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Birth date",
+            ),
+        ),
+        (
+            Aria(
+                DescribedBy,
+            ),
+            String(
+                "birthday-description external-help",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "birthday-field-group",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "group",
+            ),
+        ),
+    ],
+    styles: [],
+}
