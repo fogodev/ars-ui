@@ -749,6 +749,7 @@ impl<'a> Api<'a> {
     #[must_use]
     pub fn on_trigger_keydown(&self, data: &KeyboardEventData) -> bool {
         if data.key == KeyboardKey::Escape
+            && !self.ctx.disabled
             && self.props.close_on_escape
             && matches!(
                 self.state,
@@ -2303,6 +2304,28 @@ mod tests {
         let api = service.connect(&|_| {});
 
         assert!(!api.on_trigger_keydown(&keyboard_data(KeyboardKey::Escape)));
+    }
+
+    #[test]
+    fn tooltip_keydown_ignores_escape_when_disabled() {
+        let service = Service::<Machine>::new(
+            Props {
+                open: Some(true),
+                disabled: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let sent_clone = Rc::clone(&sent);
+        let send = move |event| sent_clone.borrow_mut().push(event);
+
+        let api = service.connect(&send);
+
+        assert!(!api.on_trigger_keydown(&keyboard_data(KeyboardKey::Escape)));
+        assert!(sent.borrow().is_empty());
     }
 
     #[test]

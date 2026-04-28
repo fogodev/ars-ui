@@ -651,6 +651,7 @@ impl<'a> Api<'a> {
     /// when the tooltip is open inside a dialog.
     pub fn on_trigger_keydown(&self, data: &KeyboardEventData) -> bool {
         if data.key == KeyboardKey::Escape
+            && !self.ctx.disabled
             && self.props.close_on_escape
             && matches!(self.state, State::OpenPending | State::Open | State::ClosePending)
         {
