@@ -223,7 +223,7 @@ jobs:
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh 22
           sudo apt-get install -y clang-22 lld-22
-      - run: cargo install wasm-bindgen-cli --locked --version 0.2.118
+      - run: cargo install wasm-bindgen-cli --locked --version 0.2.120
       - name: Configure wasm coverage clang
         run: echo "WASM_COVERAGE_CLANG=/usr/bin/clang-22" >> "$GITHUB_ENV"
       - uses: ./.github/actions/install-dioxus-desktop-deps
