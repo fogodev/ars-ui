@@ -572,6 +572,73 @@ fn set_props_defers_controlled_value_while_type_buffer_is_active() {
 }
 
 #[test]
+fn set_props_drops_stale_deferred_value_after_fresh_controlled_value() {
+    let mut service = Service::<Machine>::new(
+        props().value(Some(date(2024, 1, 1))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Month)));
+    drop(service.send(Event::TypeIntoSegment(DateSegmentKind::Month, '1')));
+    drop(service.set_props(props().value(Some(date(2024, 12, 25)))));
+
+    assert_eq!(
+        service.context().pending_controlled_value,
+        Some(Some(date(2024, 12, 25)))
+    );
+
+    drop(service.send(Event::TypeBufferCommit(DateSegmentKind::Month)));
+    drop(service.set_props(props().value(Some(date(2024, 7, 20)))));
+
+    assert_eq!(service.context().value.get(), &Some(date(2024, 7, 20)));
+    assert!(service.context().pending_controlled_value.is_none());
+
+    drop(service.send(Event::BlurAll));
+
+    assert_eq!(service.context().value.get(), &Some(date(2024, 7, 20)));
+}
+
+#[test]
+fn controlled_to_uncontrolled_handoff_keeps_latest_controlled_value() {
+    let mut service = Service::<Machine>::new(
+        props()
+            .value(Some(date(2024, 1, 1)))
+            .name(Some(String::from("birthday"))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(
+        service.set_props(
+            props()
+                .value(Some(date(2024, 7, 20)))
+                .name(Some(String::from("birthday"))),
+        ),
+    );
+
+    assert!(service.context().value.is_controlled());
+    assert_eq!(service.context().value.get(), &Some(date(2024, 7, 20)));
+
+    drop(service.set_props(props().name(Some(String::from("birthday")))));
+
+    assert!(!service.context().value.is_controlled());
+    assert_eq!(service.context().value.get(), &Some(date(2024, 7, 20)));
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Month),
+        Some(7)
+    );
+
+    let api = service.connect(&|_| {});
+
+    let attrs = api.hidden_input_attrs();
+
+    assert_eq!(api.value(), Some(&date(2024, 7, 20)));
+    assert_eq!(attr(&attrs, HtmlAttr::Name), Some("birthday"));
+    assert_eq!(attr(&attrs, HtmlAttr::Value), Some("2024-07-20"));
+}
+
+#[test]
 fn sync_props_refocuses_when_segment_set_removes_focused_segment() {
     let mut service = Service::<Machine>::new(
         props().calendar(CalendarSystem::Japanese),
@@ -858,6 +925,39 @@ fn connect_api_sets_group_and_segment_aria() {
 }
 
 #[test]
+fn invalid_segments_describe_error_message_only_when_rendered() {
+    let service = Service::<Machine>::new(
+        props().default_value(Some(date(2024, 3, 15))).invalid(true),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    let api = service.connect(&|_| {});
+
+    let month = api.segment_attrs(&DateSegmentKind::Month);
+
+    assert_eq!(attr(&month, HtmlAttr::Aria(AriaAttr::DescribedBy)), None);
+
+    let service = Service::<Machine>::new(
+        props()
+            .default_value(Some(date(2024, 3, 15)))
+            .invalid(true)
+            .error_message(Some(String::from("Invalid date"))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    let api = service.connect(&|_| {});
+
+    let month = api.segment_attrs(&DateSegmentKind::Month);
+
+    assert_eq!(
+        attr(&month, HtmlAttr::Aria(AriaAttr::DescribedBy)),
+        Some("birthday-error-message")
+    );
+}
+
+#[test]
 fn placeholder_segments_use_placeholder_aria_value_text() {
     let service = service();
 
@@ -1070,6 +1170,39 @@ fn readonly_composition_end_clears_composing_flag() {
     );
 
     drop(service.set_props(props().readonly(false)));
+    drop(service.send(Event::TypeIntoSegment(DateSegmentKind::Month, '1')));
+    drop(service.send(Event::TypeIntoSegment(DateSegmentKind::Month, '2')));
+
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Month),
+        Some(12)
+    );
+}
+
+#[test]
+fn disabled_composition_end_clears_composing_flag() {
+    let mut service = service();
+
+    drop(service.send(Event::CompositionStart));
+    drop(service.set_props(props().disabled(true)));
+
+    assert!(service.context().is_composing);
+
+    let result = service.send(Event::CompositionEnd(
+        DateSegmentKind::Month,
+        String::from("12"),
+    ));
+
+    assert!(!result.state_changed);
+    assert!(result.context_changed);
+    assert!(!service.context().is_composing);
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Month),
+        None
+    );
+
+    drop(service.set_props(props().disabled(false)));
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Month)));
     drop(service.send(Event::TypeIntoSegment(DateSegmentKind::Month, '1')));
     drop(service.send(Event::TypeIntoSegment(DateSegmentKind::Month, '2')));
 

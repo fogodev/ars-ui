@@ -960,7 +960,12 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        if ctx.disabled && !matches!(event, Event::SetValue(_) | Event::SyncProps(_)) {
+        if ctx.disabled
+            && !matches!(
+                event,
+                Event::SetValue(_) | Event::SyncProps(_) | Event::CompositionEnd(_, _)
+            )
+        {
             return None;
         }
 
@@ -1123,7 +1128,7 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.is_composing = false;
 
-                    if ctx.readonly {
+                    if ctx.readonly || ctx.disabled {
                         return;
                     }
 
@@ -1454,7 +1459,7 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true");
         }
 
-        if self.ctx.invalid {
+        if self.ctx.invalid && self.props.error_message.is_some() {
             attrs.set(
                 HtmlAttr::Aria(AriaAttr::DescribedBy),
                 &self.ctx.error_message_id,
@@ -1867,6 +1872,8 @@ fn apply_controlled_value_update(ctx: &mut Context, value: Option<CalendarDate>)
         return false;
     }
 
+    ctx.pending_controlled_value = None;
+
     apply_controlled_value(ctx, value);
 
     true
@@ -1896,6 +1903,7 @@ fn apply_value(ctx: &mut Context, value: Option<CalendarDate>) {
     let value = clamp_optional_date(ctx, value);
 
     if ctx.value.is_controlled() {
+        ctx.value.set(value.clone());
         ctx.value.sync_controlled(Some(value));
     } else {
         ctx.value.set(value);
@@ -1905,6 +1913,7 @@ fn apply_value(ctx: &mut Context, value: Option<CalendarDate>) {
 }
 
 fn apply_controlled_value(ctx: &mut Context, value: Option<CalendarDate>) {
+    ctx.value.set(value.clone());
     ctx.value.sync_controlled(Some(value));
 
     ctx.rebuild_segments();
@@ -1971,6 +1980,7 @@ fn sync_props(ctx: &mut Context, props: &Props) {
 
 fn apply_current_value(ctx: &mut Context, value: Option<CalendarDate>) {
     if ctx.value.is_controlled() {
+        ctx.value.set(value.clone());
         ctx.value.sync_controlled(Some(value));
     } else {
         ctx.value.set(value);
