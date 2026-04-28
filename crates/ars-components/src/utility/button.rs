@@ -900,7 +900,7 @@ impl<'a> Api<'a> {
             attrs.set_bool(HtmlAttr::Data("ars-pressed"), true);
         }
 
-        if self.props.exclude_from_tab_order {
+        if self.props.exclude_from_tab_order || (self.props.as_child && self.ctx.disabled) {
             attrs.set(HtmlAttr::TabIndex, "-1");
         } else if self.props.as_child && !self.ctx.disabled {
             attrs.set(HtmlAttr::TabIndex, "0");
@@ -1564,12 +1564,12 @@ mod tests {
     }
 
     #[test]
-    fn root_attrs_disabled_as_child_does_not_force_tabindex() {
+    fn root_attrs_disabled_as_child_removes_from_tab_order() {
         let attrs = service(test_props().as_child(true).disabled(true))
             .connect(&|_| {})
             .root_attrs();
 
-        assert_eq!(attrs.get(&HtmlAttr::TabIndex), None);
+        assert_eq!(attrs.get(&HtmlAttr::TabIndex), Some("-1"));
         assert_eq!(
             attrs.get_value(&HtmlAttr::Disabled),
             Some(&AttrValue::Bool(true))
