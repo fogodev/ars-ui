@@ -1,0 +1,224 @@
+---
+source: crates/ars-components/src/overlay/tooltip.rs
+expression: "snapshot_api(&service.connect(&|_| {}))"
+---
+root:
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tooltip",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "open",
+            ),
+        ),
+    ],
+    styles: [],
+}
+trigger:
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tooltip",
+            ),
+        ),
+        (
+            Aria(
+                DescribedBy,
+            ),
+            String(
+                "tooltip-content-description",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "tooltip-trigger",
+            ),
+        ),
+    ],
+    styles: [],
+}
+hidden_description:
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "hidden-description",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tooltip",
+            ),
+        ),
+        (
+            Data(
+                "ars-visually-hidden",
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "tooltip-content-description",
+            ),
+        ),
+    ],
+    styles: [],
+}
+positioner:
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "positioner",
+            ),
+        ),
+        (
+            Data(
+                "ars-placement",
+            ),
+            String(
+                "bottom",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tooltip",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "open",
+            ),
+        ),
+    ],
+    styles: [],
+}
+content:
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "content",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tooltip",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "open",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Dir,
+            String(
+                "ltr",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "tooltip-content",
+            ),
+        ),
+    ],
+    styles: [],
+}
+arrow:
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "arrow",
+            ),
+        ),
+        (
+            Data(
+                "ars-placement",
+            ),
+            String(
+                "bottom",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tooltip",
+            ),
+        ),
+    ],
+    styles: [],
+}
