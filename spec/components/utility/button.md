@@ -707,7 +707,7 @@ impl<'a> Api<'a> {
         }
         if self.props.exclude_from_tab_order {
             p.set(HtmlAttr::TabIndex, "-1");
-        } else if self.props.as_child {
+        } else if self.props.as_child && !self.ctx.disabled {
             p.set(HtmlAttr::TabIndex, "0");
         }
         if let Some(ref form_action) = self.props.form_action {
@@ -816,7 +816,7 @@ Button
 - **Keyboard**: Native `<button>` activates on both Enter and Space. The machine mirrors this — Space fires Press/Release events; Enter fires Click directly.
 - **Icon-only buttons**: Must have an `aria-label` providing a descriptive accessible name (e.g., "Close dialog", "Delete item").
 - Buttons MUST meet the minimum 44x44 CSS pixel touch target size (see foundation/03-accessibility.md §7.1.1).
-- **Disabled and tab order**: The `disabled` HTML attribute removes the button from the tab order. For screen reader discoverability, the loading state uses `aria-disabled="true"` with manual event prevention.
+- **Disabled and tab order**: The `disabled` HTML attribute removes native buttons from the tab order. For `as_child` composition, the agnostic core does not force `tabindex="0"` while disabled, so non-button children do not stay keyboard-focusable after adapters filter native-only attributes. For screen reader discoverability, the loading state uses `aria-disabled="true"` with manual event prevention and remains tabbable unless explicitly excluded.
 
 ### 3.2 Accessible Name Diagnostics
 

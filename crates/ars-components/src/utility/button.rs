@@ -902,7 +902,7 @@ impl<'a> Api<'a> {
 
         if self.props.exclude_from_tab_order {
             attrs.set(HtmlAttr::TabIndex, "-1");
-        } else if self.props.as_child {
+        } else if self.props.as_child && !self.ctx.disabled {
             attrs.set(HtmlAttr::TabIndex, "0");
         }
 
@@ -1561,6 +1561,20 @@ mod tests {
             .root_attrs();
 
         assert_eq!(attrs.get(&HtmlAttr::TabIndex), Some("-1"));
+    }
+
+    #[test]
+    fn root_attrs_disabled_as_child_does_not_force_tabindex() {
+        let attrs = service(test_props().as_child(true).disabled(true))
+            .connect(&|_| {})
+            .root_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::TabIndex), None);
+        assert_eq!(
+            attrs.get_value(&HtmlAttr::Disabled),
+            Some(&AttrValue::Bool(true))
+        );
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
     }
 
     #[test]
