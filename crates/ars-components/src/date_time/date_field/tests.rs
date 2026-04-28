@@ -597,6 +597,68 @@ fn sync_props_refocuses_when_segment_set_removes_focused_segment() {
 }
 
 #[test]
+fn set_value_preserves_uncontrolled_mode_for_later_edits() {
+    let mut service = service();
+
+    drop(service.send(Event::SetValue(Some(date(2024, 4, 5)))));
+
+    assert!(!service.context().value.is_controlled());
+    assert_eq!(service.context().value.get(), &Some(date(2024, 4, 5)));
+
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Month)));
+    drop(service.send(Event::TypeIntoSegment(DateSegmentKind::Month, '1')));
+    drop(service.send(Event::TypeIntoSegment(DateSegmentKind::Month, '2')));
+
+    assert!(!service.context().value.is_controlled());
+    assert_eq!(service.context().value.get(), &Some(date(2024, 12, 5)));
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Month),
+        Some(12)
+    );
+
+    let api = service.connect(&|_| {});
+
+    let attrs = api.hidden_input_attrs();
+
+    assert_eq!(attr(&attrs, HtmlAttr::Value), Some("2024-12-05"));
+}
+
+#[test]
+fn sync_props_clamps_controlled_value_for_api_and_hidden_input() {
+    let mut service = Service::<Machine>::new(
+        props()
+            .value(Some(date(2024, 1, 5)))
+            .name(Some(String::from("birthday"))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(
+        service.set_props(
+            props()
+                .value(Some(date(2024, 1, 5)))
+                .min_value(Some(date(2024, 1, 10)))
+                .name(Some(String::from("birthday"))),
+        ),
+    );
+
+    assert!(service.context().value.is_controlled());
+    assert_eq!(service.context().value.get(), &Some(date(2024, 1, 10)));
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Day),
+        Some(10)
+    );
+
+    let api = service.connect(&|_| {});
+
+    let attrs = api.hidden_input_attrs();
+
+    assert_eq!(api.value(), Some(&date(2024, 1, 10)));
+    assert_eq!(attr(&attrs, HtmlAttr::Name), Some("birthday"));
+    assert_eq!(attr(&attrs, HtmlAttr::Value), Some("2024-01-10"));
+}
+
+#[test]
 fn disabled_state_allows_props_to_resync_context() {
     let mut service = Service::<Machine>::new(
         props().default_value(Some(date(2024, 1, 1))).disabled(true),

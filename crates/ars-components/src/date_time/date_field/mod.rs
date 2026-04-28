@@ -1185,7 +1185,7 @@ impl ars_core::Machine for Machine {
             Event::SetValue(value) => {
                 let value = value.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    apply_controlled_value_update(ctx, value);
+                    apply_value_update(ctx, value);
                 }))
             }
         }
@@ -1857,6 +1857,22 @@ fn clamp_date(
 }
 
 fn apply_controlled_value_update(ctx: &mut Context, value: Option<CalendarDate>) -> bool {
+    let value = clamp_optional_date(ctx, value);
+
+    if ctx.focused_segment.is_some() && !ctx.type_buffer.is_empty() {
+        ctx.pending_controlled_value = Some(value);
+
+        return false;
+    }
+
+    apply_controlled_value(ctx, value);
+
+    true
+}
+
+fn apply_value_update(ctx: &mut Context, value: Option<CalendarDate>) -> bool {
+    let value = clamp_optional_date(ctx, value);
+
     if ctx.focused_segment.is_some() && !ctx.type_buffer.is_empty() {
         ctx.pending_controlled_value = Some(value);
 
@@ -1875,9 +1891,25 @@ fn flush_pending_controlled_value(ctx: &mut Context) {
 }
 
 fn apply_value(ctx: &mut Context, value: Option<CalendarDate>) {
+    let value = clamp_optional_date(ctx, value);
+
+    if ctx.value.is_controlled() {
+        ctx.value.sync_controlled(Some(value));
+    } else {
+        ctx.value.set(value);
+    }
+
+    ctx.rebuild_segments();
+}
+
+fn apply_controlled_value(ctx: &mut Context, value: Option<CalendarDate>) {
     ctx.value.sync_controlled(Some(value));
 
     ctx.rebuild_segments();
+}
+
+fn clamp_optional_date(ctx: &Context, value: Option<CalendarDate>) -> Option<CalendarDate> {
+    value.map(|date| clamp_date(date, ctx.min_value.as_ref(), ctx.max_value.as_ref()))
 }
 
 fn sync_props(ctx: &mut Context, props: &Props) {
@@ -1931,7 +1963,15 @@ fn sync_props(ctx: &mut Context, props: &Props) {
 
         ctx.apply_date_to_segments(&clamped);
 
-        ctx.value.set(Some(clamped));
+        apply_current_value(ctx, Some(clamped));
+    }
+}
+
+fn apply_current_value(ctx: &mut Context, value: Option<CalendarDate>) {
+    if ctx.value.is_controlled() {
+        ctx.value.sync_controlled(Some(value));
+    } else {
+        ctx.value.set(value);
     }
 }
 
