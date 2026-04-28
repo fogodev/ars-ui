@@ -29,6 +29,12 @@ AttrMap {
             ),
         ),
         (
+            Id,
+            String(
+                "terms-hidden-input",
+            ),
+        ),
+        (
             TabIndex,
             String(
                 "-1",

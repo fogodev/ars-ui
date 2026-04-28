@@ -227,9 +227,14 @@ impl ars_core::Machine for Machine {
             (_, Event::SetValue(value)) => match value {
                 Some(value) => {
                     let value = *value;
+                    let is_controlled = props.checked.is_some();
                     Some(TransitionPlan::to(value).apply(move |ctx| {
                         ctx.checked.set(value);
-                        ctx.checked.sync_controlled(Some(value));
+                        if is_controlled {
+                            ctx.checked.sync_controlled(Some(value));
+                        } else {
+                            ctx.checked.sync_controlled(None);
+                        }
                     }))
                 }
                 None => {
@@ -432,7 +437,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("label"));
-        attrs.set(HtmlAttr::For, self.ctx.ids.part("control"));
+        attrs.set(HtmlAttr::For, self.ctx.ids.part("hidden-input"));
         attrs
     }
 
@@ -485,6 +490,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::HiddenInput.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("hidden-input"));
         attrs.set(HtmlAttr::Type, "checkbox");
         attrs.set(HtmlAttr::TabIndex, "-1");
         attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
@@ -541,6 +547,11 @@ impl<'a> Api<'a> {
 
     /// Blur handler for the control element.
     pub fn on_control_blur(&self) { (self.send)(Event::Blur); }
+
+    /// Change handler for the hidden native input.
+    pub fn on_hidden_input_change(&self, checked: bool) {
+        (self.send)(if checked { Event::Check } else { Event::Uncheck });
+    }
 }
 
 impl ConnectApi for Api<'_> {
@@ -576,7 +587,7 @@ Checkbox
 | Part         | Element   | Key Attributes                                                   |
 | ------------ | --------- | ---------------------------------------------------------------- |
 | Root         | `<div>`   | `data-ars-scope="checkbox"`, `data-ars-state`                    |
-| Label        | `<label>` | `for` points to Control                                          |
+| Label        | `<label>` | `for` points to HiddenInput                                      |
 | Control      | `<div>`   | `role="checkbox"`, `aria-checked`, `tabindex="0"`                |
 | Indicator    | `<div>`   | `aria-hidden="true"` — visual check/dash icon                    |
 | HiddenInput  | `<input>` | `type="checkbox"`, `aria-hidden="true"` — native form submission |
@@ -618,6 +629,9 @@ parent confirms it by passing `checked: Some(State::Checked)`.
    accept `State::Checked`, keep `State::Indeterminate`, or choose another state.
 3. **Re-render timing**: The adapter applies the confirmed `checked` prop through
    `Event::SetValue(Some(state))` in the same render cycle.
+4. **Uncontrolled reset preservation**: `Event::SetValue(Some(state))` only syncs the
+   controlled slot while `Props.checked` is `Some`; uncontrolled reset flows update the
+   internal value and remain uncontrolled.
 
 ## 4. Internationalization
 
@@ -630,7 +644,8 @@ parent confirms it by passing `checked: Some(State::Checked)`.
 
 ## 5. Form Integration
 
-- **Hidden input**: A hidden `<input type="checkbox">` is rendered via `HiddenInput` part. It carries `name` and `value` from context, and the `checked` attribute when state is `Checked`. The indeterminate state does not set `checked` — only `Checked` does.
+- **Hidden input**: A hidden `<input type="checkbox">` is rendered via `HiddenInput` part. It carries `id`, `name`, and `value` from context, and the `checked` attribute when state is `Checked`. The indeterminate state does not set `checked` — only `Checked` does.
+- **Label activation**: `Label` points `for` at `HiddenInput` so native label activation targets a labelable form control. Adapters must wire hidden input changes to `Api::on_hidden_input_change(checked)`.
 - **Validation states**: `aria-invalid="true"` is set on the Control part when `invalid=true`. The `ErrorMessage` part is linked via `aria-describedby`.
 - **Error message association**: `aria-describedby` on Control points to `Description` (when present) and `ErrorMessage` (when invalid). See `control_attrs()` for the wiring logic.
 - **Required**: `aria-required="true"` on Control; `required` attribute on the hidden input.

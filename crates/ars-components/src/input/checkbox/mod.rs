@@ -335,9 +335,14 @@ impl ars_core::Machine for Machine {
             (_, Event::SetValue(value)) => {
                 if let Some(value) = value {
                     let value = *value;
+                    let is_controlled = props.checked.is_some();
                     Some(TransitionPlan::to(value).apply(move |ctx: &mut Context| {
                         ctx.checked.set(value);
-                        ctx.checked.sync_controlled(Some(value));
+                        if is_controlled {
+                            ctx.checked.sync_controlled(Some(value));
+                        } else {
+                            ctx.checked.sync_controlled(None);
+                        }
                     }))
                 } else {
                     Some(TransitionPlan::context_only(|ctx: &mut Context| {
@@ -545,7 +550,7 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Id, self.ctx.ids.part("label"))
-            .set(HtmlAttr::For, self.ctx.ids.part("control"));
+            .set(HtmlAttr::For, self.ctx.ids.part("hidden-input"));
 
         attrs
     }
@@ -630,6 +635,7 @@ impl Api<'_> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
+            .set(HtmlAttr::Id, self.ctx.ids.part("hidden-input"))
             .set(HtmlAttr::Type, "checkbox")
             .set(HtmlAttr::TabIndex, "-1")
             .set(HtmlAttr::Aria(AriaAttr::Hidden), "true")
@@ -707,6 +713,15 @@ impl Api<'_> {
     /// Sends [`Event::Blur`] for control blur.
     pub fn on_control_blur(&self) {
         (self.send)(Event::Blur);
+    }
+
+    /// Sends [`Event::Check`] or [`Event::Uncheck`] for hidden input changes.
+    pub fn on_hidden_input_change(&self, checked: bool) {
+        (self.send)(if checked {
+            Event::Check
+        } else {
+            Event::Uncheck
+        });
     }
 }
 
@@ -907,6 +922,23 @@ mod tests {
         assert_eq!(service.state(), &State::Checked);
         assert_eq!(service.context().checked.get(), &State::Checked);
         assert!(service.context().checked.is_controlled());
+    }
+
+    #[test]
+    fn checkbox_set_value_some_preserves_uncontrolled_mode() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
+
+        drop(service.send(Event::SetValue(Some(State::Checked))));
+
+        assert_eq!(service.state(), &State::Checked);
+        assert_eq!(service.context().checked.get(), &State::Checked);
+        assert!(!service.context().checked.is_controlled());
+
+        let result = service.send(Event::Toggle);
+
+        assert!(result.state_changed);
+        assert_eq!(service.state(), &State::Unchecked);
+        assert_eq!(service.context().checked.get(), &State::Unchecked);
     }
 
     #[test]
@@ -1223,6 +1255,7 @@ mod tests {
 
         let attrs = service.connect(&|_| {}).hidden_input_attrs();
 
+        assert_eq!(attrs.get(&HtmlAttr::Id), Some("terms-hidden-input"));
         assert_eq!(attrs.get(&HtmlAttr::Type), Some("checkbox"));
         assert_eq!(attrs.get(&HtmlAttr::Name), Some("accept_terms"));
         assert_eq!(attrs.get(&HtmlAttr::Form), Some("signup"));
@@ -1261,6 +1294,15 @@ mod tests {
     }
 
     #[test]
+    fn checkbox_label_targets_hidden_native_input() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
+
+        let attrs = service.connect(&|_| {}).label_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::For), Some("terms-hidden-input"));
+    }
+
+    #[test]
     fn checkbox_part_attrs_delegate_for_all_parts() {
         let service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
 
@@ -1292,6 +1334,8 @@ mod tests {
         api.on_control_keydown(&keyboard_data(KeyboardKey::Enter), false);
         api.on_control_focus(true);
         api.on_control_blur();
+        api.on_hidden_input_change(true);
+        api.on_hidden_input_change(false);
 
         assert_eq!(
             events.borrow().as_slice(),
@@ -1300,6 +1344,8 @@ mod tests {
                 Event::Toggle,
                 Event::Focus { is_keyboard: true },
                 Event::Blur,
+                Event::Check,
+                Event::Uncheck,
             ]
         );
     }

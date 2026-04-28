@@ -29,7 +29,7 @@ AttrMap {
         (
             For,
             String(
-                "terms-control",
+                "terms-hidden-input",
             ),
         ),
     ],
