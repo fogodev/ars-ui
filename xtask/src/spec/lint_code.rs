@@ -409,7 +409,7 @@ fn preceded_by_doc(lines: &[&str], idx: usize) -> bool {
 /// Matches both lifetime-parameterized (`impl Debug for Api<'_>`,
 /// `impl<'a> Debug for Api<'a>`) and plain (`impl Debug for Api`) forms.
 fn has_manual_impl(lines: &[&str], trait_name: &str, type_name: &str) -> bool {
-    code_lines_without_comments(lines)
+    code_lines_without_comments_and_strings(lines)
         .into_iter()
         .any(|line| manual_impl_line_matches(&line, trait_name, type_name))
 }
@@ -615,16 +615,38 @@ fn attr_brackets_are_balanced(attr: &str) -> bool {
     depth == 0
 }
 
-/// Removes Rust comments from code lines before doing string-based lint probes.
-fn code_lines_without_comments(lines: &[&str]) -> Vec<String> {
+/// Removes Rust comments and string literal contents before doing string-based
+/// lint probes.
+fn code_lines_without_comments_and_strings(lines: &[&str]) -> Vec<String> {
     let mut out = Vec::with_capacity(lines.len());
     let mut in_block_comment = false;
+    let mut in_raw_string: Option<usize> = None;
 
     for line in lines {
         let mut code = String::new();
         let mut chars = line.chars().peekable();
 
         while let Some(ch) = chars.next() {
+            if let Some(hash_count) = in_raw_string {
+                if ch == '"' {
+                    let mut matched = true;
+                    for _ in 0..hash_count {
+                        if chars.peek() != Some(&'#') {
+                            matched = false;
+                            break;
+                        }
+
+                        chars.next();
+                    }
+
+                    if matched {
+                        in_raw_string = None;
+                    }
+                }
+
+                continue;
+            }
+
             if in_block_comment {
                 if ch == '*' && chars.peek() == Some(&'/') {
                     chars.next();
@@ -643,6 +665,43 @@ fn code_lines_without_comments(lines: &[&str]) -> Vec<String> {
                         continue;
                     }
                     _ => {}
+                }
+            }
+
+            if ch == '"' {
+                let mut escaped = false;
+
+                for inner in chars.by_ref() {
+                    if escaped {
+                        escaped = false;
+                    } else if inner == '\\' {
+                        escaped = true;
+                    } else if inner == '"' {
+                        break;
+                    }
+                }
+
+                continue;
+            }
+
+            if ch == 'r' {
+                let mut clone = chars.clone();
+                let mut hash_count = 0usize;
+
+                while clone.peek() == Some(&'#') {
+                    hash_count += 1;
+                    clone.next();
+                }
+
+                if clone.peek() == Some(&'"') {
+                    for _ in 0..hash_count {
+                        chars.next();
+                    }
+
+                    chars.next();
+                    in_raw_string = Some(hash_count);
+
+                    continue;
                 }
             }
 
@@ -685,10 +744,13 @@ fn check_enum_variants(lines: &[&str]) -> Vec<(usize, String)> {
             }
         }
 
+        let mut tuple_payload_depth = 0usize;
+
         while depth > 0 && cursor < lines.len() {
             let body = lines[cursor];
 
             let body_trimmed = body.trim();
+            let inside_tuple_payload = tuple_payload_depth > 0;
 
             for ch in body.chars() {
                 match ch {
@@ -705,10 +767,21 @@ fn check_enum_variants(lines: &[&str]) -> Vec<(usize, String)> {
                 }
             }
 
+            for ch in body.chars() {
+                match ch {
+                    '(' => tuple_payload_depth += 1,
+                    ')' => {
+                        tuple_payload_depth = tuple_payload_depth.saturating_sub(1);
+                    }
+                    _ => {}
+                }
+            }
+
             // Variant detection: an identifier line that does NOT start with
             // `#[`, `///`, `//`, `}`, or `{`. Allow trailing `,`, `(...)`,
             // or `{ ... }` (struct-style variant).
             let is_variant_line = !body_trimmed.is_empty()
+                && !inside_tuple_payload
                 && !body_trimmed.starts_with("///")
                 && !body_trimmed.starts_with("//")
                 && !body_trimmed.starts_with("#[")
@@ -991,6 +1064,32 @@ where
     }
 
     #[test]
+    fn ignores_tuple_variant_payload_lines() {
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// Parts.
+pub enum Part {
+    /// Root part.
+    Root(
+        String,
+    ),
+}
+```
+";
+
+        let messages = run(md);
+
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.contains("enum variant is missing")),
+            "expected no enum variant findings, got {messages:?}"
+        );
+    }
+
+    #[test]
     fn ignores_blocks_outside_target_sections() {
         let md = "\
 ### 6.1 Examples
@@ -1111,6 +1210,37 @@ pub struct Api {
 /*
 impl Clone for Api {}
 */
+```
+";
+
+        let findings = run(md);
+
+        assert!(
+            findings
+                .iter()
+                .any(|m| m.contains("`Api` must implement `Debug`"))
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|m| m.contains("`Api` must implement `Clone`"))
+        );
+    }
+
+    #[test]
+    fn ignores_manual_impls_inside_string_literals() {
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// Api for the component.
+pub struct Api {
+}
+
+const NORMAL: &str = \"impl Clone for Api {}\";
+const RAW: &str = r#\"
+impl Debug for Api {}
+\"#;
 ```
 ";
 
