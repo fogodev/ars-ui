@@ -9,6 +9,7 @@ mod segment;
 mod tests;
 
 use alloc::{
+    boxed::Box,
     format,
     string::{String, ToString},
     sync::Arc,

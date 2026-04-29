@@ -95,7 +95,10 @@ pub use scroll_lock::{
 };
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub use scroll_lock::{needs_ios_workaround, scrollbar_width};
-pub use z_index::{ZIndexAllocator, next_z_index, reset_z_index, supports_top_layer};
+pub use z_index::{
+    Z_INDEX_BASE, Z_INDEX_CEILING, ZIndexAllocator, ZIndexClaim, next_z_index, reset_z_index,
+    supports_top_layer,
+};
 
 #[cfg(all(test, feature = "ssr"))]
 mod ssr_smoke_tests {

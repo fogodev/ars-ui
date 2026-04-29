@@ -45,6 +45,7 @@ mod shared_flag;
 mod shared_state;
 mod url;
 mod weak_send;
+pub mod z_index;
 
 /// Hidden re-exports used by proc macros to stay hygienic without forcing
 /// downstream crates to import `alloc`.
@@ -89,6 +90,9 @@ pub use shared_flag::SharedFlag;
 pub use shared_state::SharedState;
 pub use url::{SafeUrl, UnsafeUrlError, is_safe_url, sanitize_url};
 pub use weak_send::{StrongSend, WeakSend};
+pub use z_index::{
+    Z_INDEX_BASE, Z_INDEX_CEILING, ZIndexAllocator, ZIndexClaim, next_z_index, reset_z_index,
+};
 
 // ════════════════════════════════════════════════════════════════════
 // Inline types — kept in lib.rs because the derive macros expand to

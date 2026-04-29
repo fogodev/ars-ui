@@ -19,17 +19,32 @@ references:
 
 ```rust
 /// Props for the `ClientOnly` component.
-#[derive(Clone, Debug)]
-pub struct Props {
+#[derive(Clone, Debug, Default)]
+pub struct Props<Fallback = ()> {
     /// Optional fallback content rendered during SSR.
     /// When None, nothing is rendered on the server.
-    pub fallback: Option</* framework-specific view/element type */>,
+    pub fallback: Option<Fallback>,
+}
+
+impl<Fallback> Props<Fallback> {
+    /// Create `ClientOnly` props with no fallback content.
+    pub const fn new() -> Self {
+        Self { fallback: None }
+    }
+
+    /// Set the fallback content rendered during SSR and initial hydration.
+    pub fn fallback(mut self, fallback: Fallback) -> Self {
+        self.fallback = Some(fallback);
+        self
+    }
 }
 ```
 
+`Fallback` is the framework-specific view or element type. The agnostic core does not name Leptos or Dioxus view types directly, and it does not require `Fallback: PartialEq + Eq`; adapter view types are often closure-backed or virtual-node-backed values where equality is not meaningful.
+
 ### 1.2 Connect / API
 
-`ClientOnly` is a logical wrapper — it has no `Part` enum, no `ConnectApi`, and no `AttrMap` output. The adapter implements the SSR/hydration gating logic directly (see §5).
+`ClientOnly` is a logical wrapper — it has no `Part` enum, no `ConnectApi`, and no `AttrMap` output. The adapter implements the SSR/hydration gating logic directly (see §5). Snapshot tests for `connect()` / `Api` `AttrMap` output are not applicable because this utility has no agnostic connect API.
 
 ## 2. Anatomy
 
@@ -107,7 +122,7 @@ fn ClientOnly(fallback: Option<Element>, children: Element) -> Element {
 - **Client-side**: Renders children on the first client-side render cycle (after hydration completes). The `mounted` signal flips to `true` inside a `Effect::new` / `use_effect`, which runs after the initial hydration pass.
 - **No waterfall**: `ClientOnly` does NOT delay rendering of surrounding content. Sibling and parent components render normally on the server and hydrate normally on the client. Only the ClientOnly subtree itself is deferred to the client — the rest of the page is unaffected.
 - **Hydration mismatch avoidance**: Because the server renders nothing (or the fallback) and the client initially renders the same thing before the effect flips `mounted`, there is no mismatch between server HTML and initial client HTML.
-- **`fallback` prop**: `fallback: Option<ChildrenFn>` provides optional server-side placeholder content. Use this for skeleton loaders, placeholder text, or `aria-busy="true"` containers that give users visual feedback while the client-only content loads. When `None`, the server output is empty.
+- **`fallback` prop**: agnostic `Props<Fallback>` stores `fallback: Option<Fallback>`. Leptos maps `Fallback` to `ChildrenFn`; Dioxus maps it to `Element`. Use this for skeleton loaders, placeholder text, or `aria-busy="true"` containers that give users visual feedback while the client-only content loads. When `None`, the server output is empty.
 - **Use cases**: `localStorage`, `window.matchMedia`, `navigator`, Canvas/WebGL, third-party browser scripts — any API that does not exist during SSR.
 
 ## 8. Library Parity

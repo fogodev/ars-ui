@@ -2,18 +2,16 @@
 
 Shared z-index allocation strategy for overlay components.
 
-All overlay components render into `ars-portal-root` and MUST use a coordinated z-index allocation strategy to prevent stacking context collisions. The canonical allocator is the `next_z_index()` free function from the `ars-dom` crate (see `11-dom-utilities.md` §6 Z-Index Management for the full specification), which returns monotonically increasing values starting at 1000. Separately, the `ZIndexAllocator` component (see `components/utility/z-index-allocator.md`) is a framework-level wrapper that injects the allocator into the adapter context, making `next_z_index()` available to adapter hooks via context propagation:
+All overlay components render into `ars-portal-root` and MUST use a coordinated z-index allocation strategy to prevent stacking context collisions. The canonical runtime allocator is `z_index_allocator::Context`, provided by the `ZIndexAllocator` component (see `components/utility/z-index-allocator.md`) and backed by `ars_core::ZIndexAllocator`. The compatibility `next_z_index()` free function remains available from `ars-core` and `ars-dom`, but provider-backed overlays should allocate through context so the allocation scope is explicit:
 
 ```rust
-/// Canonical z-index allocator: returns the next sequential z-index.
-/// Each call returns a value one higher than the previous (1000, 1001, 1002, ...).
-/// This ensures overlays opened later always stack above earlier ones.
-/// See `11-dom-utilities.md` §6 Z-Index Management for the full specification.
-/// Implementation uses `thread_local! { static NEXT_Z_INDEX: Cell<u32> = Cell::new(1000); }`
-/// Free function — no `&self`.
-/// Overflow protection: values are clamped at `Z_INDEX_CEILING` (see `11-dom-utilities.md` §6.2).
-pub fn next_z_index() -> u32 { /* monotonic counter starting at 1000 */ }
+let claim = z_index_context.allocate_claim();
+let z = claim.value();
 ```
+
+Provider scope is the runtime stacking contract for browser and adapter builds: overlays under the same provider observe one ordered sequence. The compatibility free function uses a `std` thread-local counter in ordinary builds and a `no_std` atomic fallback so `ars-core --no-default-features` keeps compiling and testing pure code; that fallback preserves monotonic allocation for the compatibility API but is not a browser context boundary.
+
+Adapters SHOULD allocate `ZIndexClaim` handles through `z_index_allocator::Context::allocate_claim()` and release them through `release_claim()` during cleanup. Value-only `allocate()` / `release(u32)` remain available for compatibility, but claim handles avoid accidental cleanup of a different allocation when values repeat after test resets or overflow wrapping.
 
 **Stacking context warning**: If an overlay's content element has CSS properties that create a new stacking context (`opacity < 1`, `transform`, `filter`, `will-change`), nested overlays may be trapped in the parent's stacking context regardless of z-index. The adapter SHOULD emit a console warning at development time when these properties are detected on overlay content elements.
 
@@ -21,10 +19,10 @@ pub fn next_z_index() -> u32 { /* monotonic counter starting at 1000 */ }
 
 ```text
 ars-portal-root
-├── DialogBackdrop   (z-index: next_z_index() → 1000)   ← sibling, not parent
-├── DialogContent    (z-index: next_z_index() → 1001)
-├── NestedBackdrop   (z-index: next_z_index() → 1002)
-└── NestedContent    (z-index: next_z_index() → 1003)
+├── DialogBackdrop   (z-index: context.allocate_claim() → 1000)   ← sibling, not parent
+├── DialogContent    (z-index: context.allocate_claim() → 1001)
+├── NestedBackdrop   (z-index: context.allocate_claim() → 1002)
+└── NestedContent    (z-index: context.allocate_claim() → 1003)
 ```
 
 ## 1. Overlay Positioning Considerations

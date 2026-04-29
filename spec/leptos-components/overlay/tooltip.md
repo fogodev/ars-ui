@@ -118,7 +118,7 @@ struct Context {
 
 `Group` coordination: `Tooltip` reads `use_context::<GroupContext>()` when present. If warm, it skips `OpenPending` and transitions directly to `Open`. On open, it records itself as active and closes any previously active tooltip. On close, it records `last_close_at` for warmup tracking.
 
-Portal rendering: Positioner, Content, and Arrow render into the portal root obtained from `use_context::<ArsContext>()`. Z-index is allocated from `use_context::<ZIndexAllocator>()`.
+Portal rendering: Positioner, Content, and Arrow render into the portal root obtained from `use_context::<ArsContext>()`. Z-index is allocated from `use_context::<z_index_allocator::Context>()`.
 
 ## 7. Prop Sync and Event Mapping
 

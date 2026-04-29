@@ -44,7 +44,7 @@ pub fn ZIndexAllocatorProvider(props: ZIndexAllocatorProviderProps) -> Element
 
 ## 6. Composition / Context Contract
 
-Publish allocator context with `use_context_provider`. Optional consumers use `try_use_context::<ZIndexAllocator>()`.
+Publish allocator context with `use_context_provider`. Optional consumers use `try_use_context::<z_index_allocator::Context>()`.
 
 ## 7. Prop Sync and Event Mapping
 
@@ -86,10 +86,10 @@ Allocator behavior is mostly provider-internal. If allocator options are configu
 
 ## 12. Failure and Degradation Rules
 
-| Condition                                                   | Policy          | Notes                                                           |
-| ----------------------------------------------------------- | --------------- | --------------------------------------------------------------- |
-| claimant releases an unknown or already-released allocation | warn and ignore | Preserve allocator integrity while surfacing the misuse.        |
-| provider absent where a claimant expects allocation context | fail fast       | Claimants require the allocator contract to allocate correctly. |
+| Condition                                                   | Policy                                  | Notes                                                                                                  |
+| ----------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| claimant releases an unknown or already-released allocation | ignore in core; adapters may debug-warn | Core release is idempotent; adapter diagnostics may surface misuse when provider context is available. |
+| provider absent where a claimant expects allocation context | fail fast                               | Claimants require the allocator contract to allocate correctly.                                        |
 
 ## 13. Identity and Key Policy
 
@@ -167,7 +167,7 @@ pub struct ZIndexAllocatorProviderSketchProps {
 
 #[component]
 pub fn ZIndexAllocatorProvider(props: ZIndexAllocatorProviderSketchProps) -> Element {
-    use_context_provider(|| z_index_allocator::ZIndexAllocator::new());
+    use_context_provider(|| z_index_allocator::Context::new());
     rsx! { {props.children} }
 }
 ```
