@@ -1,203 +1,21 @@
 //! Reactive `ArsProvider` context helpers for the Dioxus adapter.
 
 use std::{
-    any::Any,
     fmt::{self, Debug},
-    pin::Pin,
     sync::Arc,
 };
 
 use ars_core::{
     ColorMode, DefaultModalityContext, I18nRegistries, ModalityContext, NullPlatformEffects,
-    PlatformEffects, Rect, StyleStrategy, resolve_messages as core_resolve_messages,
+    PlatformEffects, StyleStrategy, resolve_messages as core_resolve_messages,
 };
-use ars_forms::field::FileRef;
 use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend, Translate, locales, number};
 use dioxus::prelude::*;
 
-use crate::nonce::{ArsNonceStyle, use_nonce_css_context_provider};
-
-/// Options for opening a platform file picker.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct FilePickerOptions;
-
-/// Adapter-local drag payload wrapper.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct DragData;
-
-/// Dioxus-specific platform services not covered by core [`PlatformEffects`].
-pub trait DioxusPlatform: Send + Sync + 'static {
-    /// Focus an element by its ID.
-    fn focus_element(&self, id: &str);
-
-    /// Returns the current bounding rect for an element, if available.
-    fn get_bounding_rect(&self, id: &str) -> Option<Rect>;
-
-    /// Scrolls an element into view.
-    fn scroll_into_view(&self, id: &str);
-
-    /// Writes text to the clipboard.
-    fn set_clipboard(&self, text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>>;
-
-    /// Opens a native file picker.
-    fn open_file_picker(
-        &self,
-        options: FilePickerOptions,
-    ) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>>;
-
-    /// Returns the current timestamp in milliseconds.
-    fn now_ms(&self) -> f64;
-
-    /// Generates a platform-scoped unique ID.
-    fn new_id(&self) -> String;
-
-    /// Creates drag data from a platform event, if supported.
-    fn create_drag_data(&self, event: &dyn Any) -> Option<DragData>;
-}
-
-/// Web platform implementation placeholder.
-#[cfg(feature = "web")]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct WebPlatform;
-
-/// Desktop platform implementation placeholder.
-#[cfg(feature = "desktop")]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct DesktopPlatform;
-
-/// No-op platform for tests and non-interactive environments.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NullPlatform;
-
-#[cfg(feature = "web")]
-impl DioxusPlatform for WebPlatform {
-    fn focus_element(&self, id: &str) {
-        NullPlatform.focus_element(id);
-    }
-
-    fn get_bounding_rect(&self, id: &str) -> Option<Rect> {
-        NullPlatform.get_bounding_rect(id)
-    }
-
-    fn scroll_into_view(&self, id: &str) {
-        NullPlatform.scroll_into_view(id);
-    }
-
-    fn set_clipboard(&self, text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
-        NullPlatform.set_clipboard(text)
-    }
-
-    fn open_file_picker(
-        &self,
-        options: FilePickerOptions,
-    ) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>> {
-        NullPlatform.open_file_picker(options)
-    }
-
-    fn now_ms(&self) -> f64 {
-        NullPlatform.now_ms()
-    }
-
-    fn new_id(&self) -> String {
-        NullPlatform.new_id()
-    }
-
-    fn create_drag_data(&self, event: &dyn Any) -> Option<DragData> {
-        NullPlatform.create_drag_data(event)
-    }
-}
-
-#[cfg(feature = "desktop")]
-impl DioxusPlatform for DesktopPlatform {
-    fn focus_element(&self, id: &str) {
-        NullPlatform.focus_element(id);
-    }
-
-    fn get_bounding_rect(&self, id: &str) -> Option<Rect> {
-        NullPlatform.get_bounding_rect(id)
-    }
-
-    fn scroll_into_view(&self, id: &str) {
-        NullPlatform.scroll_into_view(id);
-    }
-
-    fn set_clipboard(&self, text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
-        NullPlatform.set_clipboard(text)
-    }
-
-    fn open_file_picker(
-        &self,
-        options: FilePickerOptions,
-    ) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>> {
-        NullPlatform.open_file_picker(options)
-    }
-
-    fn now_ms(&self) -> f64 {
-        NullPlatform.now_ms()
-    }
-
-    fn new_id(&self) -> String {
-        NullPlatform.new_id()
-    }
-
-    fn create_drag_data(&self, event: &dyn Any) -> Option<DragData> {
-        NullPlatform.create_drag_data(event)
-    }
-}
-
-impl DioxusPlatform for NullPlatform {
-    fn focus_element(&self, _id: &str) {}
-
-    fn get_bounding_rect(&self, _id: &str) -> Option<Rect> {
-        None
-    }
-
-    fn scroll_into_view(&self, _id: &str) {}
-
-    fn set_clipboard(&self, _text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
-        Box::pin(async { Ok(()) })
-    }
-
-    fn open_file_picker(
-        &self,
-        _options: FilePickerOptions,
-    ) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>> {
-        Box::pin(async { Vec::new() })
-    }
-
-    fn now_ms(&self) -> f64 {
-        0.0
-    }
-
-    fn new_id(&self) -> String {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        static COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-        format!("null-id-{}", COUNTER.fetch_add(1, Ordering::Relaxed))
-    }
-
-    fn create_drag_data(&self, _event: &dyn Any) -> Option<DragData> {
-        None
-    }
-}
-
-fn default_dioxus_platform() -> Arc<dyn DioxusPlatform> {
-    #[cfg(feature = "web")]
-    {
-        Arc::new(WebPlatform)
-    }
-
-    #[cfg(all(feature = "desktop", not(feature = "web")))]
-    {
-        Arc::new(DesktopPlatform)
-    }
-
-    #[cfg(not(any(feature = "web", feature = "desktop")))]
-    {
-        Arc::new(NullPlatform)
-    }
-}
+use crate::{
+    nonce::{ArsNonceStyle, use_nonce_css_context_provider},
+    platform::{DioxusPlatform, default_dioxus_platform},
+};
 
 fn direction_from_locale(locale: &Locale) -> Direction {
     if locale.direction().is_rtl() {
@@ -645,19 +463,6 @@ pub fn use_messages<M: ars_core::ComponentMessages + Send + Sync + 'static>(
     core_resolve_messages(adapter_props_messages, registries.as_ref(), &locale)
 }
 
-/// Resolves the Dioxus-specific platform handle from provider context.
-#[must_use]
-pub fn use_platform() -> Arc<dyn DioxusPlatform> {
-    try_use_context::<ArsContext>().map_or_else(
-        || {
-            warn_missing_provider("use_platform");
-
-            default_dioxus_platform()
-        },
-        |ctx| Arc::clone(&ctx.dioxus_platform),
-    )
-}
-
 /// Resolves application-owned translatable text into a Dioxus string.
 #[must_use]
 #[expect(
@@ -692,10 +497,14 @@ mod tests {
         ColorMode, DefaultModalityContext, I18nRegistries, ModalityContext, NullPlatformEffects,
         StyleStrategy,
     };
+    use ars_forms::field::FileRef;
     use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend, Translate, locales, number};
     use dioxus::dioxus_core::{NoOpMutations, ScopeId};
 
     use super::*;
+    use crate::platform::{
+        DragData, FilePickerOptions, NullPlatform, PlatformDragEvent, use_platform,
+    };
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     enum AppText {
@@ -771,14 +580,6 @@ mod tests {
     struct TestPlatform;
 
     impl DioxusPlatform for TestPlatform {
-        fn focus_element(&self, _id: &str) {}
-
-        fn get_bounding_rect(&self, _id: &str) -> Option<Rect> {
-            None
-        }
-
-        fn scroll_into_view(&self, _id: &str) {}
-
         fn set_clipboard(&self, _text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
             Box::pin(async { Ok(()) })
         }
@@ -790,15 +591,15 @@ mod tests {
             Box::pin(async { Vec::new() })
         }
 
-        fn now_ms(&self) -> f64 {
-            1.0
+        fn monotonic_now(&self) -> std::time::Duration {
+            std::time::Duration::from_millis(1)
         }
 
         fn new_id(&self) -> String {
             String::from("test-platform-id")
         }
 
-        fn create_drag_data(&self, _event: &dyn Any) -> Option<DragData> {
+        fn create_drag_data(&self, _event: PlatformDragEvent<'_>) -> Option<DragData> {
             None
         }
     }
@@ -1368,16 +1169,16 @@ mod tests {
 
             assert!(Arc::ptr_eq(&platform, &expected));
 
-            platform.focus_element("target");
-
-            assert!(platform.get_bounding_rect("target").is_none());
-
-            platform.scroll_into_view("target");
-
             assert_eq!(block_on_ready(platform.set_clipboard("hello")), Ok(()));
-            assert!(block_on_ready(platform.open_file_picker(FilePickerOptions)).is_empty());
+            assert!(
+                block_on_ready(platform.open_file_picker(FilePickerOptions::default())).is_empty()
+            );
             assert_eq!(platform.new_id(), "test-platform-id");
-            assert!(platform.create_drag_data(&()).is_none());
+            assert!(
+                platform
+                    .create_drag_data(PlatformDragEvent::empty())
+                    .is_none()
+            );
 
             rsx! {
                 div {}
@@ -1416,17 +1217,15 @@ mod tests {
     fn null_platform_is_noop_and_returns_default_values() {
         let platform = NullPlatform;
 
-        platform.focus_element("missing");
-
-        assert!(platform.get_bounding_rect("missing").is_none());
-
-        platform.scroll_into_view("missing");
-
         assert_eq!(block_on_ready(platform.set_clipboard("text")), Ok(()));
-        assert!(block_on_ready(platform.open_file_picker(FilePickerOptions)).is_empty());
-        assert_eq!(platform.now_ms(), 0.0);
+        assert!(block_on_ready(platform.open_file_picker(FilePickerOptions::default())).is_empty());
+        assert_eq!(platform.monotonic_now(), std::time::Duration::ZERO);
         assert!(platform.new_id().starts_with("null-id-"));
-        assert!(platform.create_drag_data(&()).is_none());
+        assert!(
+            platform
+                .create_drag_data(PlatformDragEvent::empty())
+                .is_none()
+        );
     }
 
     #[test]
@@ -1512,9 +1311,7 @@ mod tests {
 #[cfg(all(test, feature = "web", target_arch = "wasm32"))]
 mod wasm_tests {
     use std::{
-        any::Any,
         cell::RefCell,
-        future::Future,
         pin::Pin,
         rc::Rc,
         sync::Arc,
@@ -1522,7 +1319,7 @@ mod wasm_tests {
     };
 
     use ars_core::{
-        ColorMode, I18nRegistries, ModalityContext, NullPlatformEffects, PlatformEffects, Rect,
+        ColorMode, I18nRegistries, ModalityContext, NullPlatformEffects, PlatformEffects,
         StyleStrategy,
     };
     use ars_forms::field::FileRef;
@@ -1534,7 +1331,13 @@ mod wasm_tests {
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
     use super::*;
-    use crate::{ArsNonceCssCtx, append_nonce_css};
+    use crate::{
+        ArsNonceCssCtx, append_nonce_css,
+        platform::{
+            DioxusPlatform, DragData, FilePickerOptions, NullPlatform, PlatformDragEvent,
+            default_dioxus_platform, use_platform,
+        },
+    };
 
     wasm_bindgen_test_configure!(run_in_browser);
 
@@ -1663,14 +1466,6 @@ mod wasm_tests {
     struct TestPlatform;
 
     impl DioxusPlatform for TestPlatform {
-        fn focus_element(&self, _id: &str) {}
-
-        fn get_bounding_rect(&self, _id: &str) -> Option<Rect> {
-            None
-        }
-
-        fn scroll_into_view(&self, _id: &str) {}
-
         fn set_clipboard(&self, _text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
             Box::pin(async { Ok(()) })
         }
@@ -1682,15 +1477,15 @@ mod wasm_tests {
             Box::pin(async { Vec::new() })
         }
 
-        fn now_ms(&self) -> f64 {
-            1.0
+        fn monotonic_now(&self) -> std::time::Duration {
+            std::time::Duration::from_millis(1)
         }
 
         fn new_id(&self) -> String {
             String::from("test-platform-id")
         }
 
-        fn create_drag_data(&self, _event: &dyn Any) -> Option<super::DragData> {
+        fn create_drag_data(&self, _event: PlatformDragEvent<'_>) -> Option<DragData> {
             None
         }
     }
@@ -1915,13 +1710,15 @@ mod wasm_tests {
     #[wasm_bindgen_test]
     fn default_dioxus_platform_uses_web_feature_path() {
         let platform = default_dioxus_platform();
+        let id = platform.new_id();
 
-        platform.focus_element("missing");
-        platform.scroll_into_view("missing");
-
-        assert!(platform.get_bounding_rect("missing").is_none());
-        assert!(platform.new_id().starts_with("null-id-"));
-        assert!(platform.create_drag_data(&()).is_none());
+        assert_eq!(id.len(), 36, "expected UUIDv4 length, got {id:?}");
+        assert!(!id.starts_with("null-id-"));
+        assert!(
+            platform
+                .create_drag_data(PlatformDragEvent::empty())
+                .is_none()
+        );
     }
 
     #[wasm_bindgen_test]
@@ -2019,9 +1816,17 @@ mod wasm_tests {
 
             let generated_id = platform.new_id();
 
-            assert!(generated_id.starts_with("null-id-"));
-            assert!(platform.get_bounding_rect("missing").is_none());
-            assert!(platform.create_drag_data(&()).is_none());
+            assert_eq!(
+                generated_id.len(),
+                36,
+                "expected UUIDv4 length, got {generated_id:?}",
+            );
+            assert!(!generated_id.starts_with("null-id-"));
+            assert!(
+                platform
+                    .create_drag_data(PlatformDragEvent::empty())
+                    .is_none()
+            );
 
             rsx! {
                 div {}
@@ -2193,14 +1998,16 @@ mod wasm_tests {
 
             assert!(Arc::ptr_eq(&platform, &expected));
 
-            platform.focus_element("target");
-            platform.scroll_into_view("target");
-
-            assert!(platform.get_bounding_rect("target").is_none());
             assert_eq!(block_on_ready(platform.set_clipboard("hello")), Ok(()));
-            assert!(block_on_ready(platform.open_file_picker(FilePickerOptions)).is_empty());
+            assert!(
+                block_on_ready(platform.open_file_picker(FilePickerOptions::default())).is_empty()
+            );
             assert_eq!(platform.new_id(), "test-platform-id");
-            assert!(platform.create_drag_data(&()).is_none());
+            assert!(
+                platform
+                    .create_drag_data(PlatformDragEvent::empty())
+                    .is_none()
+            );
 
             rsx! {
                 div {}

@@ -7,7 +7,7 @@ use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend};
 use dioxus::dioxus_core::{NoOpMutations, ScopeId};
 
 use super::{test_support, test_support::*, *};
-use crate::provider::{ArsContext, NullPlatform};
+use crate::{platform::NullPlatform, provider::ArsContext};
 
 type PropIdSnapshot = (String, PropState, u64, u32);
 

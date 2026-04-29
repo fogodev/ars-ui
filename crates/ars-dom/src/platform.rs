@@ -1662,7 +1662,6 @@ mod tests {
 mod wasm_tests {
     use std::{
         cell::{Cell, RefCell},
-        future::Future,
         pin::Pin,
         rc::Rc,
         task::{Context, Poll, Waker},

@@ -832,7 +832,7 @@ mod tests {
                 Arc::new(ars_core::DefaultModalityContext::new()),
                 Arc::new(ars_i18n::StubIntlBackend),
                 Arc::new(I18nRegistries::new()),
-                Arc::new(crate::provider::NullPlatform),
+                Arc::new(crate::platform::NullPlatform),
                 StyleStrategy::Cssom,
             );
 
@@ -980,7 +980,7 @@ mod wasm_tests {
                 Arc::new(ars_core::DefaultModalityContext::new()),
                 Arc::new(ars_i18n::StubIntlBackend),
                 Arc::new(I18nRegistries::new()),
-                Arc::new(crate::provider::NullPlatform),
+                Arc::new(crate::platform::NullPlatform),
                 StyleStrategy::Cssom,
             );
 
