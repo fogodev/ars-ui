@@ -488,6 +488,94 @@ fn use_machine_injects_generated_id_when_props_id_is_empty() {
     });
 }
 
+#[cfg(feature = "ssr")]
+#[test]
+fn use_machine_hydrated_preserves_snapshot_state_and_id() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let machine = use_machine_hydrated::<ToggleMachine>(
+            ToggleProps { id: String::new() },
+            HydrationSnapshot::<ToggleMachine> {
+                state: ToggleState::On,
+                id: String::from("toggle-hydrated"),
+            },
+        );
+
+        assert_eq!(machine.state.get_untracked(), ToggleState::On);
+        machine.service.with_value(|service| {
+            assert_eq!(service.state(), &ToggleState::On);
+            assert_eq!(service.props().id(), "toggle-hydrated");
+        });
+    });
+}
+
+#[cfg(feature = "ssr")]
+#[test]
+#[should_panic(expected = "HydrationSnapshot id must match Props::id")]
+fn use_machine_hydrated_rejects_mismatched_explicit_props_id() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let _machine = use_machine_hydrated::<ToggleMachine>(
+            ToggleProps {
+                id: String::from("client-id"),
+            },
+            HydrationSnapshot::<ToggleMachine> {
+                state: ToggleState::On,
+                id: String::from("server-id"),
+            },
+        );
+    });
+}
+
+#[cfg(feature = "ssr")]
+#[test]
+fn use_machine_with_reactive_props_hydrated_keeps_syncing_props() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let (props, set_props) = signal(PropProps {
+            id: String::new(),
+            checked: false,
+            label: "a",
+        });
+
+        let machine = use_machine_with_reactive_props_hydrated::<PropMachine>(
+            props.into(),
+            HydrationSnapshot::<PropMachine> {
+                state: PropState::On,
+                id: String::from("prop-hydrated"),
+            },
+        );
+
+        assert_eq!(machine.state.get_untracked(), PropState::On);
+        machine.service.with_value(|service| {
+            assert_eq!(service.props().id(), "prop-hydrated");
+        });
+
+        set_props.set(PropProps {
+            id: String::new(),
+            checked: true,
+            label: "b",
+        });
+
+        assert_eq!(machine.state.get_untracked(), PropState::On);
+        assert_eq!(machine.context_version.get_untracked(), 1);
+
+        set_props.set(PropProps {
+            id: String::new(),
+            checked: false,
+            label: "b",
+        });
+
+        assert_eq!(machine.state.get_untracked(), PropState::Off);
+        assert_eq!(machine.context_version.get_untracked(), 1);
+
+        machine.service.with_value(|service| {
+            assert_eq!(service.props().id(), "prop-hydrated");
+            assert_eq!(service.context().sync_count, 1);
+        });
+    });
+}
+
 #[test]
 fn use_machine_with_reactive_props_syncs_state_and_context_changes() {
     let owner = Owner::new();

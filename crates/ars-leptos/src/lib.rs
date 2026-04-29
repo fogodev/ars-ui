@@ -16,6 +16,7 @@ mod controlled;
 pub mod dismissable;
 mod ephemeral;
 mod event_mapping;
+mod hydration;
 mod id;
 mod nonce;
 pub mod prelude;
@@ -36,6 +37,12 @@ pub use controlled::use_controlled_prop;
 pub use ephemeral::EphemeralRef;
 pub use event_mapping::leptos_key_to_keyboard_key;
 #[cfg(feature = "ssr")]
+pub use hydration::{HydrationSnapshot, serialize_snapshot};
+#[cfg(all(feature = "hydrate", target_arch = "wasm32"))]
+pub use hydration::{
+    mark_body_hydrated, setup_focus_scope_hydration_safe, warn_if_mounted_id_mismatch,
+};
+#[cfg(feature = "ssr")]
 pub use id::reset_id_counter;
 pub use id::use_id;
 pub use nonce::{
@@ -51,6 +58,8 @@ pub use safe_listener::{
     SafeEventListener, SafeEventListenerOptions, use_safe_event_listener, use_safe_event_listeners,
 };
 pub use use_machine::{UseMachineReturn, use_machine, use_machine_with_reactive_props};
+#[cfg(feature = "ssr")]
+pub use use_machine::{use_machine_hydrated, use_machine_with_reactive_props_hydrated};
 
 /// The name of this framework adapter, used in diagnostic messages and feature gating.
 pub const ADAPTER_NAME: &str = "leptos";

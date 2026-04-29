@@ -189,6 +189,9 @@ pub fn ArsProvider(
         StyleStrategy::Inline | StyleStrategy::Cssom => None,
     };
 
+    #[cfg(all(feature = "hydrate", target_arch = "wasm32"))]
+    Effect::new(|_| crate::hydration::mark_body_hydrated());
+
     use_nonce_css_context_provider();
 
     provide_ars_context(ArsContext {

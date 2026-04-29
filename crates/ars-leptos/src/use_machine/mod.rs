@@ -9,6 +9,8 @@ use std::{
     fmt::{self, Debug},
 };
 
+#[cfg(feature = "ssr")]
+use ars_core::HydrationSnapshot;
 use ars_core::{CleanupFn, Env, HasId, Machine, RenderMode, Service};
 use leptos::{prelude::*, reactive::owner::LocalStorage};
 #[cfg(any(all(test, target_arch = "wasm32"), not(feature = "ssr")))]
@@ -225,7 +227,32 @@ where
     M::Event: Send + Sync + 'static,
     M::Messages: Send + Sync + 'static,
 {
-    let (result, ..) = use_machine_inner::<M>(props);
+    let (result, ..) = use_machine_inner::<M>(props, None);
+
+    result
+}
+
+/// Creates and manages a machine service from an SSR hydration snapshot.
+///
+/// The snapshot state is installed with [`Service::new_hydrated`] so the
+/// client preserves server-rendered machine state while recomputing context
+/// from the current adapter environment.
+#[cfg(feature = "ssr")]
+pub fn use_machine_hydrated<M: Machine + 'static>(
+    props: M::Props,
+    snapshot: HydrationSnapshot<M>,
+) -> UseMachineReturn<M>
+where
+    M::State: Clone + PartialEq + Send + Sync + 'static,
+    M::Context: Clone + Send + Sync + 'static,
+    M::Props: Clone + PartialEq + Send + Sync + 'static,
+    M::Event: Send + Sync + 'static,
+    M::Messages: Send + Sync + 'static,
+{
+    let (result, ..) = use_machine_inner::<M>(
+        props_with_snapshot_id::<M>(props, &snapshot),
+        Some(snapshot.state),
+    );
 
     result
 }
@@ -247,8 +274,41 @@ where
 {
     let initial_props = props_signal.get();
 
+    use_machine_with_reactive_props_inner::<M>(props_signal, initial_props, None)
+}
+
+/// Creates a reactive-props machine service from an SSR hydration snapshot.
+#[cfg(feature = "ssr")]
+pub fn use_machine_with_reactive_props_hydrated<M: Machine + 'static>(
+    props_signal: Signal<M::Props>,
+    snapshot: HydrationSnapshot<M>,
+) -> UseMachineReturn<M>
+where
+    M::State: Clone + PartialEq + Send + Sync + 'static,
+    M::Context: Clone + Send + Sync + 'static,
+    M::Props: Clone + PartialEq + Send + Sync + 'static,
+    M::Event: Send + Sync + 'static,
+    M::Messages: Send + Sync + 'static,
+{
+    let initial_props = props_with_snapshot_id::<M>(props_signal.get(), &snapshot);
+
+    use_machine_with_reactive_props_inner::<M>(props_signal, initial_props, Some(snapshot.state))
+}
+
+fn use_machine_with_reactive_props_inner<M: Machine + 'static>(
+    props_signal: Signal<M::Props>,
+    initial_props: M::Props,
+    hydrated_state: Option<M::State>,
+) -> UseMachineReturn<M>
+where
+    M::State: Clone + PartialEq + Send + Sync + 'static,
+    M::Context: Clone + Send + Sync + 'static,
+    M::Props: Clone + PartialEq + Send + Sync + 'static,
+    M::Event: Send + Sync + 'static,
+    M::Messages: Send + Sync + 'static,
+{
     let (result, context_version_write, state_write, send_ref, effect_cleanups) =
-        use_machine_inner::<M>(initial_props);
+        use_machine_inner::<M>(initial_props, hydrated_state);
 
     let service = result.service;
 
@@ -314,6 +374,24 @@ fn props_with_service_id<M: Machine>(mut props: M::Props, service_id: &str) -> M
     props
 }
 
+#[cfg(feature = "ssr")]
+fn props_with_snapshot_id<M: Machine>(
+    mut props: M::Props,
+    snapshot: &HydrationSnapshot<M>,
+) -> M::Props {
+    if props.id().is_empty() {
+        props.set_id(snapshot.id.clone());
+    } else {
+        assert_eq!(
+            props.id(),
+            snapshot.id,
+            "HydrationSnapshot id must match Props::id"
+        );
+    }
+
+    props
+}
+
 type EffectCleanupStore = StoredValue<HashMap<&'static str, CleanupFn>, LocalStorage>;
 type SendCallbackRef<M> = StoredValue<Option<Callback<<M as Machine>::Event>>>;
 type UseMachineInnerParts<M> = (
@@ -328,7 +406,10 @@ type UseMachineInnerParts<M> = (
 ///
 /// Returns the public `UseMachineReturn` plus internal write handles needed by
 /// `use_machine_with_reactive_props` for syncing external prop changes.
-fn use_machine_inner<M: Machine + 'static>(props: M::Props) -> UseMachineInnerParts<M>
+fn use_machine_inner<M: Machine + 'static>(
+    props: M::Props,
+    hydrated_state: Option<M::State>,
+) -> UseMachineInnerParts<M>
 where
     M::State: Clone + PartialEq + Send + Sync + 'static,
     M::Context: Clone + Send + Sync + 'static,
@@ -355,7 +436,20 @@ where
     let env = Env::new(locale, intl_backend).with_render_mode(current_render_mode());
 
     // Create the service once — runs only on component initialization.
-    let service = StoredValue::new(Service::<M>::new(props, &env, &messages));
+    let service = StoredValue::new(if let Some(state) = hydrated_state {
+        #[cfg(feature = "ssr")]
+        {
+            Service::<M>::new_hydrated(props, state, &env, &messages)
+        }
+
+        #[cfg(not(feature = "ssr"))]
+        {
+            drop(state);
+            Service::<M>::new(props, &env, &messages)
+        }
+    } else {
+        Service::<M>::new(props, &env, &messages)
+    });
 
     // Create a signal tracking the current state.
     let initial_state = service.with_value(|s| s.state().clone());
