@@ -4320,7 +4320,7 @@ Static, unchanging styles (visually-hidden, screen-reader-only input, touch-acti
  */
 
 /* Visually hidden but accessible to screen readers.
- * Used by: VisuallyHidden, LiveAnnouncer, visually_hidden_attrs(). */
+ * Used by: VisuallyHidden (non-focusable variant), LiveAnnouncer. */
 .ars-visually-hidden {
     position: absolute !important;
     border: 0 !important;

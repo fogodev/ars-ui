@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/utility/separator.rs
+expression: "snapshot_attrs(&Api::new(decorative_horizontal()).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "separator",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "none",
+            ),
+        ),
+    ],
+    styles: [],
+}

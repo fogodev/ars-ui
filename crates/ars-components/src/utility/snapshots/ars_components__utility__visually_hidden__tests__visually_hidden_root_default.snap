@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/utility/visually_hidden.rs
+expression: "snapshot_attrs(&Api::new(default_props()).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "visually-hidden",
+            ),
+        ),
+        (
+            Class,
+            String(
+                "ars-visually-hidden",
+            ),
+        ),
+    ],
+    styles: [],
+}

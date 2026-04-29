@@ -3,7 +3,7 @@
  */
 
 /* Visually hidden but accessible to screen readers.
- * Used by: VisuallyHidden, LiveAnnouncer, visually_hidden_attrs(). */
+ * Used by: VisuallyHidden (non-focusable variant), LiveAnnouncer. */
 .ars-visually-hidden {
   position: absolute !important;
   border: 0 !important;
@@ -18,7 +18,7 @@
 }
 
 /* Visually hidden until focus, for skip-link style affordances.
- * Used by: visually_hidden_focusable_attrs(). */
+ * Used by: VisuallyHidden (focusable variant, when `is_focusable=true`). */
 [data-ars-visually-hidden-focusable]:not(:focus):not(:focus-within) {
   position: absolute !important;
   border: 0 !important;

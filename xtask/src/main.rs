@@ -263,6 +263,11 @@ enum SpecCommand {
     /// Validate frontmatter against manifest.
     Validate,
 
+    /// Lint Rust code blocks under §1.1 / §1.2 of every component spec
+    /// for missing `///` doc comments and missing `Debug`/`Clone` derives
+    /// on `Props`/`Api`.
+    LintCode,
+
     /// List adapter files for a framework.
     Adapters {
         /// Framework: "leptos" or "dioxus".
@@ -486,6 +491,20 @@ fn main() {
                         && text.contains("error(s) found:")
                     {
                         print!("{text}");
+                        process::exit(1);
+                    }
+
+                    report
+                }
+
+                SpecCommand::LintCode => {
+                    let report = spec::lint_code::execute(&root);
+
+                    if let Ok(text) = &report
+                        && text.contains("finding(s) across")
+                    {
+                        print!("{text}");
+
                         process::exit(1);
                     }
 

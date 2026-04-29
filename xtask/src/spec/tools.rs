@@ -23,6 +23,7 @@ pub fn register_all(registry: &mut ToolRegistry, root: &Arc<SpecRoot>) {
     registry.register(Box::new(SearchTool(Arc::clone(root))));
     registry.register(Box::new(DigestTool(Arc::clone(root))));
     registry.register(Box::new(ContextTool(Arc::clone(root))));
+    registry.register(Box::new(LintCodeTool(Arc::clone(root))));
 }
 
 /// Extract a required string parameter from JSON input.
@@ -452,5 +453,26 @@ impl Tool for ContextTool {
             framework,
             include_testing,
         )?)
+    }
+}
+
+#[derive(Debug)]
+struct LintCodeTool(Arc<SpecRoot>);
+
+impl Tool for LintCodeTool {
+    fn name(&self) -> &str {
+        "spec_lint_code"
+    }
+
+    fn description(&self) -> &str {
+        "Lint Rust code blocks under §1.1 / §1.2 of every component spec for missing `///` doc comments and missing `Debug`/`Clone` derives on `Props`/`Api`."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({ "type": "object" })
+    }
+
+    fn execute(&self, _input: Value) -> Result<String, ToolError> {
+        Ok(super::lint_code::execute(&self.0)?)
     }
 }

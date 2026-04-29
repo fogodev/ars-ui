@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/utility/visually_hidden.rs
+expression: "snapshot_attrs(&Api::new(focusable_props()).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "visually-hidden",
+            ),
+        ),
+        (
+            Data(
+                "ars-visually-hidden-focusable",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+    ],
+    styles: [],
+}

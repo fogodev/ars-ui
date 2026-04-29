@@ -220,7 +220,18 @@ impl ConnectApi for Api<'_> {
 
 **§1.1 Props** — Same requirements as stateful §1.4 Props.
 
-**§1.2 Connect / API** — A Part enum and stateless `Api` struct created directly from Props (no state/context). Returns `AttrMap` for each part via `ConnectApi`.
+**§1.2 Connect / API** — A Part enum and stateless `Api` struct created
+directly from Props (no state/context). Returns `AttrMap` for each part via
+`ConnectApi`.
+
+The `Api` struct stores the full `Props` (`pub struct Api { props: Props }`),
+not a hand-picked subset of fields. This keeps every stateless component on
+the same shape, lets `Api::new` be a `const fn` (which extraction-style
+storage typically cannot when fields like `String id` need to be dropped at
+end-of-fn), and makes `Api` self-sufficient — adapters can read every Props
+field through `Api` accessors without retaining `Props` separately. Provide
+one accessor method per Props field (`id()`, plus one per component-specific
+field) so the `Api` is a complete adapter-facing view of the component.
 
 ### 4.2 Anatomy
 
@@ -333,6 +344,20 @@ Use this checklist when reviewing or writing a component spec.
 - [ ] `ConnectApi` is implemented with `type Part` and `part_attrs()` dispatching to all variants
 - [ ] Data-carrying variants are destructured in `part_attrs()` and forwarded to concrete methods
 
+### Code-Block Hygiene (all tiers)
+
+The Rust code blocks under §1 (and elsewhere in the spec) must compile under
+the workspace lint policy without ad-hoc suppressions. Specifically:
+
+- [ ] Every public item (struct, enum, trait, fn, const, type alias, method, field, variant) has a `///` doc comment (workspace `missing_docs = "warn"`)
+- [ ] Every public type that can derive `Debug` has `#[derive(Debug)]` (workspace `missing_debug_implementations = "warn"`)
+- [ ] `Props` derives `Default` where every field is `Default::default()` — use `#[derive(Default)]`, not a manual impl, unless a non-trivial default is required (clippy `derivable_impls`)
+- [ ] `Api::new` is a `const fn` when its body is const-feasible (clippy `missing_const_for_fn`)
+- [ ] `Api::new` and `Api::*_attrs` carry `#[must_use]` (calls without consumption are bugs)
+- [ ] `Api` derives `Clone` and `Debug` so adapters can compose it freely
+- [ ] `Api` exposes accessors (`id()`, plus one per Props field) so adapters do not need to retain `Props` separately
+- [ ] Trait derive macros (`HasId`, `ComponentPart`) are used unqualified, with a single `use ars_core::{ComponentPart, HasId};` per file
+
 ### Stateful / Complex
 
 - [ ] §1 is titled "State Machine"
@@ -379,33 +404,58 @@ Brief description of the component's purpose.
 
 ### 1.1 Props
 
-\```rust #[derive(Clone, Debug, PartialEq, HasId)]
+\```rust
+/// Props for the `ExampleStateless` component. #[derive(Clone, Debug, Default, PartialEq, HasId)]
 pub struct Props {
+/// Component instance ID.
 pub id: String,
 // component-specific fields...
 }
 
-impl Default for Props {
-fn default() -> Self {
-Self { id: String::new() }
+impl Props {
+/// Returns fresh props with the documented defaults. #[must_use]
+pub fn new() -> Self {
+Self::default()
 }
+
+    /// Sets the component instance ID.
+    #[must_use]
+    pub fn id(mut self, id: impl Into<String>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    // Add one `#[must_use] pub const fn <field>(mut self, value: T) -> Self`
+    // builder per non-`String` Props field, and a non-const `pub fn` builder
+    // for any field whose value is built from `impl Into<...>`.
+
 }
 \```
 
 ### 1.2 Connect / API
 
-\```rust #[derive(ComponentPart)] #[scope = "example-stateless"]
+\```rust
+/// DOM parts of the `ExampleStateless` component. #[derive(ComponentPart)] #[scope = "example-stateless"]
 pub enum Part {
+/// The root element.
 Root,
 }
 
+/// The API for the `ExampleStateless` component. #[derive(Clone, Debug)]
 pub struct Api {
 props: Props,
 }
 
 impl Api {
-pub fn new(props: Props) -> Self { Self { props } }
+/// Creates a new `Api` instance from the given props. #[must_use]
+pub const fn new(props: Props) -> Self { Self { props } }
 
+    /// Returns the component's instance ID.
+    #[must_use]
+    pub fn id(&self) -> &str { &self.props.id }
+
+    /// Returns the attributes for the root element.
+    #[must_use]
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
@@ -487,28 +537,45 @@ Blur,
 
 ### 1.3 Context
 
-\```rust #[derive(Clone, Debug, PartialEq)]
+\```rust
+/// Mutable context the machine threads through transitions.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Context {
-pub value: Bindable<State>,
-pub disabled: bool,
-pub focused: bool,
-pub focus_visible: bool,
+    /// Current value, controlled or uncontrolled per `Props::value`.
+    pub value: Bindable<State>,
+    /// Whether interactive transitions are blocked.
+    pub disabled: bool,
+    /// Whether the control currently has focus.
+    pub focused: bool,
+    /// Whether the focus came from keyboard input (drives `:focus-visible`).
+    pub focus_visible: bool,
+    /// Component-instance ID set, derived from `Props::id`.
 pub ids: ComponentIds,
 }
 \```
 
 ### 1.4 Props
 
-\```rust #[derive(Clone, Debug, PartialEq, HasId)]
+\```rust
+/// Props for the `ExampleStateful`component.
+#[derive(Clone, Debug, PartialEq, HasId)]
 pub struct Props {
-pub id: String,
+    /// Component instance ID.
+    pub id: String,
+    /// Controlled value. When`Some`, the component is controlled and
+/// reflects the parent-supplied state.
 pub value: Option<State>,
+/// Initial state for the uncontrolled mode.
 pub default_value: State,
+/// Whether the component starts disabled.
 pub disabled: bool,
 }
 
 impl Default for Props {
 fn default() -> Self {
+// Manual impl required because `default_value: State::Inactive` is
+// not `State::default()` (the type has no derived Default), so
+// `#[derive(Default)]` is not feasible here.
 Self {
 id: String::new(),
 value: None,
@@ -608,13 +675,23 @@ type Api<'a> = Api<'a>;
 
 ### 1.7 Connect / API
 
-\```rust #[derive(ComponentPart)] #[scope = "example-stateful"]
+\```rust
+/// DOM parts of the `ExampleStateful` component. #[derive(ComponentPart)] #[scope = "example-stateful"]
 pub enum Part {
+/// The root container element.
 Root,
+/// The label text element.
 Label,
+/// The interactive control element (the focusable, ARIA-roled node).
 Control,
 }
 
+/// The API for the `ExampleStateful` component.
+///
+/// Borrows from a `Service` snapshot. Carries the `send` closure so handler
+/// methods can dispatch events without re-acquiring the service. `Debug` is
+/// provided via a manual impl below because the `send: &'a dyn Fn(Event)`
+/// field is not `Debug`-derivable.
 pub struct Api<'a> {
 state: &'a State,
 ctx: &'a Context,
@@ -622,7 +699,24 @@ props: &'a Props,
 send: &'a dyn Fn(Event),
 }
 
+impl<'a> fmt::Debug for Api<'a> {
+fn fmt(&self, f: &mut fmt::Formatter<'\_>) -> fmt::Result {
+f.debug_struct("example_stateful::Api")
+.field("state", self.state)
+.field("ctx", self.ctx)
+.field("props", self.props)
+.finish_non_exhaustive()
+}
+}
+
+impl<'a> Clone for Api<'a> {
+fn clone(&self) -> Self {
+Self { state: self.state, ctx: self.ctx, props: self.props, send: self.send }
+}
+}
+
 impl<'a> Api<'a> {
+/// Returns the attributes for the root element. #[must_use]
 pub fn root_attrs(&self) -> AttrMap {
 let mut attrs = AttrMap::new();
 let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
@@ -641,6 +735,8 @@ attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
 attrs
 }
 
+    /// Returns the attributes for the label element.
+    #[must_use]
     pub fn label_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Label.data_attrs();
@@ -649,20 +745,24 @@ attrs
         attrs
     }
 
+    /// Returns the attributes for the focusable control element (per §3.1).
+    #[must_use]
     pub fn control_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Control.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        // ARIA attributes per §3.1
         attrs.set(HtmlAttr::TabIndex, "0");
         attrs
     }
 
+    /// Dispatches a `Toggle` event in response to a control activation.
     pub fn on_control_click(&self) { (self.send)(Event::Toggle); }
+    /// Dispatches a `Focus` event with the input modality.
     pub fn on_control_focus(&self, is_keyboard: bool) {
         (self.send)(Event::Focus { is_keyboard });
     }
+    /// Dispatches a `Blur` event when focus leaves the control.
     pub fn on_control_blur(&self) { (self.send)(Event::Blur); }
 
 }
@@ -761,13 +861,21 @@ Brief description of the component's purpose.
 
 ### 1.3 Context
 
-\```rust #[derive(Clone, Debug, PartialEq)]
+\```rust
+/// Mutable context the machine threads through transitions.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Context {
-pub value: Bindable<Key>,
-pub focused_item: Option<Key>,
+    /// Current selected item, controlled or uncontrolled per `Props::value`.
+    pub value: Bindable<Key>,
+    /// Item currently holding focus, if any.
+    pub focused_item: Option<Key>,
+    /// Whether focus came from keyboard input (drives `:focus-visible`).
 pub focus_visible: bool,
+/// Layout orientation; affects arrow-key navigation semantics.
 pub orientation: Orientation,
+/// Document text direction; affects logical arrow-key mapping.
 pub dir: Direction,
+/// Ordered item set the component navigates over.
 pub items: Vec<Key>,
 // ...
 }
@@ -775,13 +883,22 @@ pub items: Vec<Key>,
 
 ### 1.4 Props
 
-\```rust #[derive(Clone, Debug, PartialEq, HasId)]
+\```rust
+/// Props for the `ExampleComplex`component.
+#[derive(Clone, Debug, PartialEq, HasId)]
 pub struct Props {
-pub id: String,
+    /// Component instance ID.
+    pub id: String,
+    /// Controlled value. When`Some`, the component is controlled and
+/// reflects the parent-supplied selection.
 pub value: Option<Key>,
+/// Initial selected item for the uncontrolled mode.
 pub default_value: Key,
+/// Layout orientation; affects arrow-key navigation semantics.
 pub orientation: Orientation,
+/// Document text direction; affects logical arrow-key mapping.
 pub dir: Direction,
+/// Item keys for which interactive transitions are blocked.
 pub disabled_keys: BTreeSet<Key>,
 // ...
 }

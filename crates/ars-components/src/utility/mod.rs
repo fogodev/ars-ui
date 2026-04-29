@@ -20,3 +20,9 @@ pub mod form;
 
 /// Form submit machine.
 pub mod form_submit;
+
+/// Separator component (stateless attribute mapper).
+pub mod separator;
+
+/// `VisuallyHidden` component (stateless attribute mapper).
+pub mod visually_hidden;

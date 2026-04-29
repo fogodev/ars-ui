@@ -6,6 +6,7 @@ pub mod context;
 pub mod deps;
 pub mod digest;
 pub mod info;
+pub mod lint_code;
 pub mod profile;
 pub mod related;
 pub mod reverse;
