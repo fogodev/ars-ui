@@ -66,7 +66,7 @@ The central primitive. Creates a `Service<M>`, wraps it in a reactive signal, an
 ````rust
 use std::rc::Rc;
 use leptos::prelude::*;
-use ars_core::{Machine, Service, Env, Arc};
+use ars_core::{Machine, Service, Env, RenderMode, Arc};
 use ars_i18n::IntlBackend;
 
 /// Return type from `use_machine`.
@@ -253,9 +253,34 @@ let props = {
 };
 ```
 
-**Invariant:** Once assigned at Service creation, the component ID MUST NOT change for the lifetime of the component instance. Re-renders do not regenerate IDs.
+**Invariant:** Once assigned at Service creation, the component ID MUST NOT change for the lifetime of the component instance. Re-renders do not regenerate IDs, and reactive prop synchronization must resolve later omitted `id` values to the service's current ID before calling `Service::set_props()`.
 
 ```rust
+#[cfg(feature = "hydrate")]
+fn current_render_mode() -> RenderMode {
+    if cfg!(feature = "ssr") {
+        RenderMode::Server
+    } else if is_currently_hydrating() {
+        RenderMode::Hydrating
+    } else {
+        RenderMode::Client
+    }
+}
+
+#[cfg(not(feature = "hydrate"))]
+const fn current_render_mode() -> RenderMode {
+    if cfg!(feature = "ssr") {
+        RenderMode::Server
+    } else {
+        RenderMode::Client
+    }
+}
+
+#[cfg(feature = "hydrate")]
+fn is_currently_hydrating() -> bool {
+    use_context::<IsHydrating>().is_some_and(|hydrating| hydrating.0)
+}
+
 /// Internal — creates a single Service and returns the public return type plus
 /// internal handles needed by `use_machine_with_reactive_props` to process
 /// SendResult from set_props (state_write, send_ref, effect_cleanups,
@@ -292,7 +317,7 @@ where
     let locale = resolve_locale(None);
     let intl_backend = use_intl_backend();
     let messages = use_messages::<M::Messages>(None, Some(&locale));
-    let env = Env { locale, intl_backend };
+    let env = Env::new(locale, intl_backend).with_render_mode(current_render_mode());
 
     // Create the service once — runs only on component initialization.
     // **Safety**: The `init()` function must not call `api.send()` or otherwise
@@ -496,7 +521,9 @@ where
     // into `prev_props`, but skips calling `set_props()` because the machine was
     // already initialized with `initial_props`.
     let sync_effect = ImmediateEffect::new_isomorphic(move || {
-        let new_props = props_signal.get();
+        let raw_props = props_signal.get();
+        let service_id = service.with_value(|svc| svc.props().id().to_owned());
+        let new_props = props_with_service_id::<M>(raw_props, &service_id);
         let should_sync = prev_props.with_value(|prev| {
             prev.as_ref() != Some(&new_props)
         });
@@ -537,6 +564,14 @@ where
     on_cleanup(move || drop(sync_effect));
 
     result
+}
+
+fn props_with_service_id<M: Machine>(mut props: M::Props, service_id: &str) -> M::Props {
+    if props.id().is_empty() {
+        props.set_id(service_id.to_owned());
+    }
+
+    props
 }
 ```
 

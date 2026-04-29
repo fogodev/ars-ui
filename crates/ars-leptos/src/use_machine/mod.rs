@@ -9,7 +9,7 @@ use std::{
     fmt::{self, Debug},
 };
 
-use ars_core::{CleanupFn, Env, HasId, Machine, Service};
+use ars_core::{CleanupFn, Env, HasId, Machine, RenderMode, Service};
 use leptos::{prelude::*, reactive::owner::LocalStorage};
 #[cfg(any(all(test, target_arch = "wasm32"), not(feature = "ssr")))]
 use {ars_core::StrongSend, std::sync::Arc};
@@ -54,6 +54,31 @@ where
     /// Used by [`derive()`](Self::derive) to track context mutations even when
     /// state remains the same.
     pub context_version: ReadSignal<u64>,
+}
+
+#[cfg(feature = "hydrate")]
+fn current_render_mode() -> RenderMode {
+    if cfg!(feature = "ssr") {
+        RenderMode::Server
+    } else if is_currently_hydrating() {
+        RenderMode::Hydrating
+    } else {
+        RenderMode::Client
+    }
+}
+
+#[cfg(not(feature = "hydrate"))]
+const fn current_render_mode() -> RenderMode {
+    if cfg!(feature = "ssr") {
+        RenderMode::Server
+    } else {
+        RenderMode::Client
+    }
+}
+
+#[cfg(feature = "hydrate")]
+fn is_currently_hydrating() -> bool {
+    use_context::<IsHydrating>().is_some_and(|hydrating| hydrating.0)
 }
 
 // Manual Clone/Copy impls to avoid requiring M: Clone/Copy — all fields are
@@ -230,7 +255,11 @@ where
     let prev_props = StoredValue::<Option<M::Props>>::new(None);
 
     let sync_effect = ImmediateEffect::new_isomorphic(move || {
-        let new_props = props_signal.get();
+        let raw_props = props_signal.get();
+
+        let service_id = service.with_value(|svc| svc.props().id().to_owned());
+
+        let new_props = props_with_service_id::<M>(raw_props, &service_id);
 
         let should_sync = prev_props.with_value(|prev| prev.as_ref() != Some(&new_props));
 
@@ -277,6 +306,14 @@ where
     result
 }
 
+fn props_with_service_id<M: Machine>(mut props: M::Props, service_id: &str) -> M::Props {
+    if props.id().is_empty() {
+        props.set_id(service_id.to_owned());
+    }
+
+    props
+}
+
 type EffectCleanupStore = StoredValue<HashMap<&'static str, CleanupFn>, LocalStorage>;
 type SendCallbackRef<M> = StoredValue<Option<Callback<<M as Machine>::Event>>>;
 type UseMachineInnerParts<M> = (
@@ -315,10 +352,7 @@ where
 
     let messages = use_messages::<M::Messages>(None, Some(&locale));
 
-    let env = Env {
-        locale,
-        intl_backend,
-    };
+    let env = Env::new(locale, intl_backend).with_render_mode(current_render_mode());
 
     // Create the service once — runs only on component initialization.
     let service = StoredValue::new(Service::<M>::new(props, &env, &messages));

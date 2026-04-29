@@ -10,7 +10,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use ars_core::{CleanupFn, Env, HasId, Machine, Service};
+use ars_core::{CleanupFn, Env, HasId, Machine, RenderMode, Service};
 use dioxus::prelude::*;
 
 use crate::{
@@ -53,6 +53,14 @@ where
     /// Used by [`derive()`](Self::derive) to track context mutations even when
     /// state remains the same.
     pub context_version: ReadSignal<u64>,
+}
+
+const fn current_render_mode() -> RenderMode {
+    if cfg!(feature = "ssr") {
+        RenderMode::Server
+    } else {
+        RenderMode::Client
+    }
 }
 
 struct MachineRuntime<M: Machine + 'static>
@@ -266,6 +274,8 @@ where
 {
     let generated_id = use_hook(|| use_id("component"));
 
+    let props_for_sync = props.clone();
+
     let props = {
         let mut props = props;
 
@@ -280,14 +290,9 @@ where
 
     let intl_backend = use_intl_backend();
 
-    let env = Env {
-        locale,
-        intl_backend,
-    };
+    let env = Env::new(locale, intl_backend).with_render_mode(current_render_mode());
 
     let messages = use_messages::<M::Messages>(None, Some(&env.locale));
-
-    let props_for_sync = props.clone();
 
     // Create the service once — use_signal runs its closure only on first mount.
     let service_signal = use_signal(move || Service::<M>::new(props, &env, &messages));
@@ -362,6 +367,10 @@ where
 {
     let mut prev_props = use_signal(|| None::<M::Props>);
 
+    let service_id = runtime.service.peek().props().id().to_owned();
+
+    let current_props = props_with_service_id::<M>(current_props, &service_id);
+
     let previous = prev_props.peek().clone();
 
     if previous.as_ref() != Some(&current_props) {
@@ -395,6 +404,14 @@ where
 
         prev_props.set(Some(current_props));
     }
+}
+
+fn props_with_service_id<M: Machine>(mut props: M::Props, service_id: &str) -> M::Props {
+    if props.id().is_empty() {
+        props.set_id(service_id.to_owned());
+    }
+
+    props
 }
 
 fn dispatch_event<M: Machine + 'static>(event: M::Event, mut runtime: MachineRuntime<M>)

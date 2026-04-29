@@ -242,6 +242,11 @@ impl Machine for PropMachine {
     }
 
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(
+            old.id, new.id,
+            "PropMachine id cannot change after initialization"
+        );
+
         let mut events = Vec::new();
 
         if old.checked != new.checked {

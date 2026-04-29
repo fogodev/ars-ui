@@ -38,8 +38,12 @@ pub enum Event {
     /// Unmount the portal before the host component unmounts.
     Unmount,
     /// The target container became available (for `Id` targets that
-    /// may not exist at `Mount` time). Carries the element ID.
+    /// may not exist at `Mount` time). Carries the element ID and is honored
+    /// only when it matches the current `PortalTarget::Id`, whether the
+    /// portal is still unmounted or already mounted.
     ContainerReady(String),
+    /// Synchronize the target container after props change.
+    SetContainer(PortalTarget),
 }
 ```
 
@@ -52,8 +56,8 @@ pub struct Context {
     pub container: PortalTarget,
     /// Whether the portal is mounted.
     pub mounted: bool,
-    /// Whether the runtime is in SSR mode.
-    pub ssr: bool,
+    /// Runtime render mode resolved by the adapter.
+    pub render_mode: RenderMode,
     /// Component IDs.
     pub ids: ComponentIds,
 }
@@ -70,10 +74,13 @@ pub enum PortalTarget {
     PortalRoot,
     /// The document body.
     Body,
-    /// An element with the given ID.
+    /// A declarative element ID target that the adapter must resolve.
     Id(String),
-    /// A direct element ID reference.
-    Ref(String),
+    /// An element ID target that the adapter has confirmed exists.
+    ///
+    /// This is still stable string identity, not a live DOM element or
+    /// framework handle. Adapters own native refs separately.
+    ResolvedId(String),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, HasId)]
@@ -107,11 +114,11 @@ impl ars_core::Machine for Machine {
     type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props, _env: &Env, _messages: &Messages) -> (State, Context) {
+    fn init(props: &Props, env: &Env, _messages: &Messages) -> (State, Context) {
         let ctx = Context {
             container: props.container.clone(),
             mounted: false,
-            ssr: cfg!(feature = "ssr"),
+            render_mode: env.render_mode,
             ids: ComponentIds::from_id(&props.id),
         };
         (State::Unmounted, ctx)
@@ -134,11 +141,27 @@ impl ars_core::Machine for Machine {
                     ctx.mounted = false;
                 }))
             }
-            (State::Unmounted, Event::ContainerReady(id)) => {
+            (State::Unmounted, Event::ContainerReady(id))
+                if matches!(&ctx.container, PortalTarget::Id(target_id) if target_id == id) =>
+            {
                 let id = id.clone();
                 Some(TransitionPlan::to(State::Mounted).apply(move |ctx| {
-                    ctx.container = PortalTarget::Ref(id);
+                    ctx.container = PortalTarget::ResolvedId(id);
                     ctx.mounted = true;
+                }))
+            }
+            (State::Mounted, Event::ContainerReady(id))
+                if matches!(&ctx.container, PortalTarget::Id(target_id) if target_id == id) =>
+            {
+                let id = id.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.container = PortalTarget::ResolvedId(id);
+                }))
+            }
+            (_, Event::SetContainer(target)) => {
+                let target = target.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.container = target;
                 }))
             }
             _ => None,
@@ -152,6 +175,19 @@ impl ars_core::Machine for Machine {
         send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(
+            old.id, new.id,
+            "Portal id cannot change after initialization"
+        );
+
+        if old.container == new.container {
+            Vec::new()
+        } else {
+            vec![Event::SetContainer(new.container.clone())]
+        }
     }
 }
 ```
@@ -178,20 +214,50 @@ impl<'a> Api<'a> {
         *self.state == State::Mounted
     }
 
+    /// Returns the currently resolved portal target.
+    pub const fn target(&self) -> &PortalTarget {
+        &self.ctx.container
+    }
+
+    /// Returns the runtime render mode resolved by the adapter.
+    pub const fn render_mode(&self) -> RenderMode {
+        self.ctx.render_mode
+    }
+
+    /// Returns whether SSR should render portal content inline.
+    pub const fn ssr_inline(&self) -> bool {
+        self.props.ssr_inline
+    }
+
+    /// Returns the stable portal owner ID used by outside-interaction helpers.
+    pub fn owner_id(&self) -> &str {
+        self.ctx.ids.id()
+    }
+
+    /// Returns whether portal content should render inline at the declaration
+    /// site for the current runtime mode.
+    pub const fn should_render_inline(&self) -> bool {
+        self.props.ssr_inline && self.ctx.render_mode.is_server()
+    }
+
     /// The generated portal root element ID, usable for `aria-owns` on triggers.
     pub fn portal_root_id(&self) -> String {
-        format!("ars-portal-{}", self.props.id)
+        format!("ars-portal-{}", self.ctx.ids.id())
     }
 
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Data("ars-portal-id"), &self.props.id);
-        attrs.set(HtmlAttr::Data("ars-state"),
-            if self.is_mounted() { "mounted" } else { "unmounted" },
-        );
+        attrs
+            .set(scope_attr, scope_val)
+            .set(part_attr, part_val)
+            .set(HtmlAttr::Id, self.portal_root_id())
+            .set(HtmlAttr::Data("ars-portal-id"), self.ctx.ids.id())
+            .set(HtmlAttr::Data("ars-portal-owner"), self.ctx.ids.id())
+            .set(
+                HtmlAttr::Data("ars-state"),
+                if self.is_mounted() { "mounted" } else { "unmounted" },
+            );
         attrs
     }
 
@@ -214,20 +280,26 @@ impl ConnectApi for Api<'_> {
 
 ```text
 Portal
-└── Root  <div>  data-ars-scope="portal" data-ars-part="root"
-                 data-ars-portal-id="<id>" data-ars-state="unmounted|mounted"
+└── Root  <div>  id="ars-portal-<id>" data-ars-scope="portal"
+                 data-ars-part="root" data-ars-portal-id="<id>"
+                 data-ars-portal-owner="<id>" data-ars-state="unmounted|mounted"
 ```
 
-| Part | Element | Key Attributes                                              |
-| ---- | ------- | ----------------------------------------------------------- |
-| Root | `<div>` | `data-ars-portal-id`, `data-ars-state="unmounted\|mounted"` |
+| Part | Element | Key Attributes                                                                                               |
+| ---- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| Root | `<div>` | `id="ars-portal-<id>"`, `data-ars-portal-id`, `data-ars-portal-owner`, `data-ars-state="unmounted\|mounted"` |
 
-Root is the mount point inserted at the portal target container.
+Root is the per-instance mount node inserted at the portal target container.
+Adapters MUST apply `Api::root_attrs()` to this owned mount node itself. They
+MUST NOT create a separate child wrapper with the same root attrs, because that
+would duplicate `id="ars-portal-<id>"`.
 
 When `PortalTarget::PortalRoot` is used, the web adapter MUST create or reuse
-the mount node through `ars_dom::ensure_portal_mount_root(props.id)`. This
-ensures the mount node ID stays stable as `ars-portal-<id>` and carries
-`data-ars-portal-owner="<id>"` for outside-interaction boundary detection.
+the per-instance mount node through
+`ars_dom::ensure_portal_mount_root(api.owner_id())`, then merge
+`Api::root_attrs()` onto that same node. The component root ID stays stable as
+`ars-portal-<id>` and carries `data-ars-portal-owner="<id>"` for
+outside-interaction boundary detection.
 
 ## 3. Accessibility
 
@@ -256,10 +328,10 @@ Focus management is the responsibility of the overlay component rendered inside 
 
 ### 5.1 Props
 
-| Feature              | ars-ui                          | Radix UI                  | Notes                                                       |
-| -------------------- | ------------------------------- | ------------------------- | ----------------------------------------------------------- |
-| Target container     | `container` (PortalTarget enum) | `container` (HTMLElement) | ars-ui has richer target system (PortalRoot, Body, Id, Ref) |
-| SSR inline rendering | `ssr_inline`                    | --                        | ars-ui addition                                             |
+| Feature              | ars-ui                          | Radix UI                  | Notes                                                              |
+| -------------------- | ------------------------------- | ------------------------- | ------------------------------------------------------------------ |
+| Target container     | `container` (PortalTarget enum) | `container` (HTMLElement) | ars-ui has richer target system (PortalRoot, Body, Id, ResolvedId) |
+| SSR inline rendering | `ssr_inline`                    | --                        | ars-ui addition                                                    |
 
 **Gaps:** None.
 
@@ -281,147 +353,103 @@ Focus management is the responsibility of the overlay component rendered inside 
 
 ### 5.4 Features
 
-| Feature                             | ars-ui | Radix UI |
-| ----------------------------------- | ------ | -------- |
-| Render to different DOM node        | Yes    | Yes      |
-| Custom target container             | Yes    | Yes      |
-| SSR support                         | Yes    | --       |
-| Hydration reattachment              | Yes    | --       |
-| Z-index layer management            | Yes    | --       |
-| MutationObserver for root stability | Yes    | --       |
+| Feature                              | ars-ui core contract                                               | Adapter / DOM responsibility                                     | Radix UI |
+| ------------------------------------ | ------------------------------------------------------------------ | ---------------------------------------------------------------- | -------- |
+| Render to different DOM node         | `PortalTarget` and mount state                                     | Resolve target and move/render content                           | Yes      |
+| Custom target container              | `PortalTarget::Body`, `Id`, `ResolvedId`, guarded `ContainerReady` | Locate target and report late matching IDs                       | Yes      |
+| SSR inline decision                  | `RenderMode`, `ssr_inline`, `Api::should_render_inline()`          | Set `Env::render_mode` from the framework runtime                | --       |
+| Hydration reattachment               | Stable `id`, owner marker, and render-mode introspection           | Reattach/move DOM nodes during hydration                         | --       |
+| Outside-interaction portal ownership | `data-ars-portal-owner` on `Api::root_attrs()`                     | Preserve owner markers on any intermediate mount nodes           | --       |
+| Root stability                       | Stable target identity and prop-change events                      | Cache invalidation, root creation, MutationObserver, and cleanup | --       |
+| Z-index layer management             | No z-index state in Portal                                         | Overlay/positioning layer owns stacking                          | --       |
 
-**Gaps:** None.
+**Gaps:** None against Radix's portable portal surface. ars-ui intentionally
+splits the contract: `ars-components` owns state and adapter-facing metadata;
+framework adapters and `ars-dom` own all DOM mutation and platform observation.
 
 ### 5.5 Summary
 
-- **Overall:** Full parity. ars-ui significantly exceeds Radix UI's Portal with SSR support, hydration reattachment, z-index management, and MutationObserver-based root stability.
-- **Divergences:** ars-ui uses an enum-based `PortalTarget` instead of a raw DOM element reference, making the API portable across frameworks.
+- **Overall:** Full parity for the portal primitive while preserving framework-agnostic layering.
+- **Divergences:** ars-ui uses an enum-based `PortalTarget` instead of a raw DOM element reference, making the API portable across frameworks. Native element references stay in adapter APIs and are never stored in `ars-components`.
 - **Recommended additions:** None.
 
-## Appendix A: SSR Considerations
+## Appendix A: SSR and Hydration Contract
 
-| Scenario                | Behaviour                                                            |
-| ----------------------- | -------------------------------------------------------------------- |
-| SSR, `ssr_inline=true`  | Content rendered at declaration site; no portal in HTML.             |
-| SSR, `ssr_inline=false` | Nothing rendered; client-side JS mounts the content after hydration. |
-| Hydration               | Framework reattaches portal to the correct container.                |
-| No-JS / progressive     | Inline content is functional; portals degrade gracefully.            |
+`ars-components::layout::portal` does not inspect crate features directly.
+Framework adapters set `Env::render_mode`; Portal exposes
+`Api::should_render_inline()` as the portable decision point.
 
-### A.1 Hydration Reattachment
+| Scenario                                 | Core decision                     | Adapter behavior                                                        |
+| ---------------------------------------- | --------------------------------- | ----------------------------------------------------------------------- |
+| `RenderMode::Server`, `ssr_inline=true`  | `should_render_inline() == true`  | Render content at the declaration site with `Api::root_attrs()`.        |
+| `RenderMode::Server`, `ssr_inline=false` | `should_render_inline() == false` | Omit portal content from server HTML.                                   |
+| `RenderMode::Hydrating`                  | `should_render_inline() == false` | Reattach or move existing server-rendered nodes to the resolved target. |
+| `RenderMode::Client`                     | `should_render_inline() == false` | Mount content into the resolved target after receiving `Event::Mount`.  |
 
-```rust
-/// Called by the framework hydration layer to reattach a portal node
-/// from its inline SSR position to its runtime target.
-pub fn hydrate_portal(portal_id: &str, target: &PortalTarget) {
-    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
-        log::warn!("hydrate_portal: no document available, skipping");
-        return;
-    };
+Hydration reattachment invariants:
 
-    // Escape special characters to prevent CSS selector injection.
-    let escaped_id = portal_id.replace('\\', "\\\\").replace('\'', "\\'").replace(']', "\\]");
-    let selector = format!("[data-ars-portal-id='{}']", escaped_id);
-    let node = document.query_selector(&selector).ok().flatten();
-
-    let container: Option<web_sys::Element> = match target {
-        PortalTarget::PortalRoot => get_or_create_portal_root(),
-        PortalTarget::Body => document.body().map(|b| b.into()),
-        PortalTarget::Id(id) => document.get_element_by_id(id),
-        PortalTarget::Ref(id) => document.get_element_by_id(id),
-    };
-
-    if let (Some(node), Some(container)) = (node, container) {
-        if let Some(old_parent) = node.parent_node() {
-            let _ = old_parent.remove_child(&node);
-        }
-        if let Err(e) = container.append_child(&node) {
-            log::warn!("hydrate_portal: failed to reattach portal: {:?}", e);
-        }
-    }
-}
-```
-
-Reattachment invariants:
-
-1. Remove from old location before appending to new — adapter references to the old parent are invalid after move.
-2. If duplicate `portal_id` is found, log an error and abort.
-3. Adapters MUST re-attach event listeners after hydration reattachment completes.
+1. Select the portal node by its stable `id="ars-portal-<id>"` or matching `data-ars-portal-id`.
+2. If duplicate portal nodes for the same ID are found, log an error and abort reattachment for that instance.
+3. Remove from the old location before appending to the target container.
+4. Preserve `data-ars-portal-owner="<id>"` on any moved root or intermediate mount node.
+5. Reattach framework event listeners according to the adapter runtime's hydration rules.
 
 ## Appendix B: Portal Root Stability
 
-The portal root element (`#ars-portal-root` or a custom `PortalTarget`) may be removed or relocated by application code, third-party scripts, or framework reconciliation. The adapter MUST observe the portal root for unexpected mutations.
+Portal core stores target identity and emits `SetContainer` when the container
+prop changes. DOM root creation, cache invalidation, and cleanup live in
+`ars-dom` and framework adapters.
 
-**MutationObserver Setup:**
+Adapter and DOM invariants:
 
-- Observe the portal root's **parent** with `{ childList: true, subtree: true }` to detect when the portal root itself is removed.
-- On detecting removal (the portal root is no longer in `document.body`'s subtree), **clear the cached reference** and log a warning: `"Portal root was removed from DOM; cached reference invalidated."`.
-
-**Debouncing:**
-
-- Limit to **one invalidation check per microtask** using `queueMicrotask()`. Rapid DOM mutations (e.g., framework reconciliation batches) should not trigger multiple cache clears.
-
-**SSR Hydration Edge Cases:**
-
-- During hydration, the portal root may not exist in the SSR-rendered HTML. The `get_or_create_portal_root()` function handles lazy creation, but the MutationObserver MUST NOT be attached until after hydration completes (i.e., after `hydrate_portal()` runs).
-- If the portal root is relocated (moved to a different parent) rather than removed, treat this as a removal + re-creation: clear the cache and let the next `resolve_portal_target()` call find the element in its new location.
+1. `PortalTarget::PortalRoot` resolves to the shared host root managed by `ars-dom`.
+2. `PortalTarget::Body` resolves to the current document body.
+3. `PortalTarget::Id(id)` resolves by element ID. If the element is unavailable, the adapter may wait and dispatch `ContainerReady(id)` only when that exact ID appears.
+4. `PortalTarget::ResolvedId(id)` records that the adapter has confirmed the element ID exists. It is not a native element reference and must not be replaced by a different ID.
+5. If a cached target is removed or relocated, clear the cache and resolve the target again before the next mount or move.
 
 ## Appendix C: Positioning and Stacking
 
-**Default target:** `PortalTarget::PortalRoot` renders into `#ars-portal-root`, a dedicated container appended to `document.body`.
+Portal does not own z-index, placement, or layout measurement. Overlay
+components rendered inside Portal own positioning policy and use shared
+positioning utilities for measurement and auto-update.
 
-**Custom target:** `PortalTarget::Id(String)` or `PortalTarget::Ref(String)` for rendering into a specific application-managed container (both use element IDs).
+Positioning invariants for overlays that use Portal:
 
-**Z-index layer scale:**
-
-| Layer      | Z-index range | Usage                          |
-| ---------- | ------------- | ------------------------------ |
-| `base`     | 0-99          | Normal document flow           |
-| `dropdown` | 1000-1099     | Dropdowns, select menus        |
-| `sticky`   | 1100-1199     | Sticky headers, footers        |
-| `overlay`  | 1300-1399     | Modals, dialogs                |
-| `popover`  | 1400-1499     | Popovers, tooltips             |
-| `toast`    | 1500-1599     | Toast notifications            |
-| `maximum`  | 1600+         | Topmost elements (debug tools) |
-
-- Adapters MAY expose a `z_index_base: Option<u32>` prop to override the default layer for a given portal instance.
-- **Multiple portals:** When multiple portals are mounted simultaneously, they stack in creation order with the newest on top (highest z-index within its layer). Portals created later receive a monotonically increasing z-index offset within their layer.
-- **Scroll containment:** Portal content MUST NOT cause `document.body` to scroll. Portaled overlays should use `position: fixed` (relative to viewport) or `position: absolute` (relative to the portal root) to avoid influencing body scroll dimensions.
-- **Cleanup:** The portal container element is removed from the DOM when the owning component unmounts. If the portal root has no remaining children, it MAY be left in place (to avoid re-creation cost) but MUST NOT interfere with layout.
+1. Use the resolved portal target only as the render container.
+2. Compute overlay placement relative to the trigger/anchor and viewport, not relative to the logical component tree.
+3. Preserve scroll containment by using positioning strategies that do not expand `document.body`.
+4. Keep z-index policy in overlay or layer-management components, not in Portal state.
 
 ## Appendix D: Font Loading Race Conditions
 
-Font loading can cause layout shifts that invalidate overlay positioning calculations (popovers, tooltips, dropdowns rendered via Portal). Adapters MUST account for font loading timing.
+Font loading invalidates overlay measurements, but it does not affect the
+Portal state machine. Adapters or overlay positioning utilities must trigger
+recalculation when font metrics change.
 
-**Detection:**
+Platform invariants:
 
-- Listen to `document.fonts.status` via `FontFaceSet` API. If `document.fonts.status === "loading"`, defer initial positioning calculations until `document.fonts.ready` resolves.
-- After `document.fonts.ready`, trigger a single recalculation of all active overlay positions.
-
-**Ongoing Font Loads:**
-
-- Register a `loadingdone` event listener on `document.fonts` to recalculate overlay positions when new fonts finish loading (e.g., lazy-loaded font faces triggered by newly rendered content in a portal).
-
-**CSS `font-display` Guidance:**
-
-- Recommend `font-display: swap` in documentation. With `swap`, text renders immediately in a fallback font and reflows on font load — the recalculation listener above handles the resulting layout shift.
-- `font-display: block` (invisible text until font loads) may cause overlays to position against zero-height content. The `document.fonts.ready` deferral mitigates this.
-
-**SSR Context:**
-
-- `document.fonts` is unavailable during SSR. Guard all `FontFaceSet` access with the appropriate Rust/WASM feature gate (`#[cfg(target_arch = "wasm32")]`). SSR-rendered overlays will be repositioned on hydration.
+1. On web targets with `FontFaceSet`, defer initial overlay positioning when `document.fonts.status == "loading"`.
+2. Recalculate active overlay positions once `document.fonts.ready` resolves.
+3. Recalculate on later `loadingdone` events for lazy-loaded fonts.
+4. Guard all font API access behind the appropriate web-target checks.
 
 ## Appendix E: Automatic Repositioning on Resize
 
-Popover and tooltip overlays must reposition automatically when their anchor or viewport changes size:
+Resize handling belongs to overlay positioning utilities, not Portal. For
+portaled popovers, tooltips, menus, and similar overlays:
 
-1. **`ResizeObserver` on Anchor**: Attach a `ResizeObserver` to the anchor element. On resize callback, invoke `compute_position()` to recalculate overlay placement.
-2. **`window.resize` Event**: Listen for `window` `resize` events, debounced at 100ms, to trigger repositioning. This handles browser window resizing and desktop display changes.
-3. **`visualViewport.resize` for Mobile**: On mobile devices, listen for `window.visualViewport` `resize` events to handle virtual keyboard appearance/disappearance. This event is not debounced (keyboard animations are already brief).
-4. **Adapter Contract**: The adapter must call `compute_position()` on each resize event. The core library provides the positioning algorithm; the adapter is responsible for wiring up the platform-specific resize observers and invoking the recomputation.
+1. Observe anchor size changes.
+2. Observe viewport size changes.
+3. Observe mobile visual viewport changes where available.
+4. Recompute placement through the shared positioning engine.
+5. Clean up observers when the owning overlay unmounts.
 
 ## Appendix F: iframe Boundary Handling
 
-1. Portal must detect if the target container is inside an iframe. If so, and the iframe is cross-origin, the portal falls back to rendering within the current document (logs a warning).
-2. Content portaled near iframe boundaries may be clipped — the positioning engine must account for iframe viewport bounds.
-3. Z-index stacking: portaled content inside an iframe inherits the iframe's stacking context; it cannot escape the iframe's z-index layer.
-4. Portal to `document.body` is always same-origin and safe.
+iframe behavior is a DOM target-resolution concern:
+
+1. Same-document targets are safe to resolve normally.
+2. Same-origin iframe targets may be resolved by adapter/DOM utilities that have access to that frame's document.
+3. Cross-origin iframe targets cannot be inspected or moved into; adapters must keep content in the current document and log a warning.
+4. Portaled content inside an iframe inherits that iframe's stacking and clipping boundaries.

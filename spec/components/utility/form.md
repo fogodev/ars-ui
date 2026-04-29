@@ -54,7 +54,7 @@ The machine context stores:
 - `server_errors`
 - `status_message`
 - `last_submit_succeeded`
-- `ids`
+- `ids: ComponentIds`
 
 ### 1.5 Props
 

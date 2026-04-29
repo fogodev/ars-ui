@@ -59,7 +59,7 @@ ssr = ["dioxus/server", "dep:ars-dom", "ars-dom/ssr"]
 ````rust
 use std::sync::Arc;
 use dioxus::prelude::*;
-use ars_core::{Machine, Service, Env};
+use ars_core::{Machine, Service, Env, RenderMode};
 use ars_i18n::{Locale, IntlBackend, ComponentMessages, I18nRegistries};
 
 /// Return type from `use_machine`.
@@ -247,6 +247,14 @@ pub fn related_id(base: &str, suffix: &str) -> String {
 /// Resolves environment values (locale, ICU provider) and messages from
 /// `ArsProvider` context before constructing the `Service`. Core code never
 /// calls framework hooks — all environment values arrive as parameters.
+const fn current_render_mode() -> RenderMode {
+    if cfg!(feature = "ssr") {
+        RenderMode::Server
+    } else {
+        RenderMode::Client
+    }
+}
+
 fn use_machine_inner<M: Machine + 'static>(
     props: M::Props,
 ) -> (UseMachineReturn<M>, Signal<u64>)
@@ -256,6 +264,7 @@ where
     M::Props: Clone + PartialEq + 'static,
 {
     let generated_id = use_hook(|| format!("ars-{}", dioxus_id_counter()));
+    let props_for_sync = props.clone();
 
     // Auto-inject ID if not provided by the user.
     // Convention: all Props structs have an `id: String` field.
@@ -273,7 +282,7 @@ where
     // These are adapter-only hooks — core code receives Env and Messages as parameters.
     let locale = resolve_locale(None);
     let intl_backend = use_intl_backend();
-    let env = Env { locale, intl_backend };
+    let env = Env::new(locale, intl_backend).with_render_mode(current_render_mode());
 
     // Resolve messages from adapter-level i18n hooks.
     let messages = use_messages::<M::Messages>(None, Some(&env.locale));
@@ -281,9 +290,8 @@ where
     // **Safety**: The `init()` function must not call `api.send()` or otherwise
     // produce events. It runs during component initialization and event
     // processing is not yet set up.
-    // Clone props for use_sync_props before moving into use_signal.
+    // Move normalized props into Service creation.
     // use_signal's closure runs exactly once (first mount), consuming `props`.
-    let props_for_sync = props.clone();
     let service_signal = use_signal(|| Service::<M>::new(props, env, messages));
     let context_version: Signal<u64> = use_signal(|| 0u64);
 
@@ -434,6 +442,8 @@ pub fn use_sync_props<M: Machine + 'static>(
     M::Event: Send + 'static,
 {
     let mut prev_props: Signal<Option<M::Props>> = use_signal(|| None);
+    let service_id = runtime.service.peek().props().id().to_owned();
+    let current_props = props_with_service_id::<M>(current_props, &service_id);
 
     // Run synchronously during component body — NOT in use_effect
     // Use .peek() to avoid subscribing the component to prev_props changes.
@@ -504,6 +514,14 @@ pub fn use_sync_props<M: Machine + 'static>(
         }
         *prev_props.write() = Some(current_props);
     }
+}
+
+fn props_with_service_id<M: Machine>(mut props: M::Props, service_id: &str) -> M::Props {
+    if props.id().is_empty() {
+        props.set_id(service_id.to_owned());
+    }
+
+    props
 }
 ```
 

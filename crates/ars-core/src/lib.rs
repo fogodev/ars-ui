@@ -568,6 +568,34 @@ pub trait ConnectApi {
 // Env — adapter-resolved environment context
 // ────────────────────────────────────────────────────────────────────
 
+/// Runtime render mode resolved by the adapter before initializing a machine.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum RenderMode {
+    /// The component is rendering in a normal client runtime.
+    #[default]
+    Client,
+
+    /// The component is rendering HTML on the server.
+    Server,
+
+    /// The component is hydrating server-rendered HTML on the client.
+    Hydrating,
+}
+
+impl RenderMode {
+    /// Returns whether this mode is server-side rendering.
+    #[must_use]
+    pub const fn is_server(self) -> bool {
+        matches!(self, Self::Server)
+    }
+
+    /// Returns whether this mode is client hydration.
+    #[must_use]
+    pub const fn is_hydrating(self) -> bool {
+        matches!(self, Self::Hydrating)
+    }
+}
+
 /// Adapter-resolved environment context passed to [`Machine::init`].
 ///
 /// The adapter reads these values from `ArsProvider` / `ArsContext` and passes
@@ -583,6 +611,29 @@ pub struct Env {
     /// Calendar/locale data provider for date-time formatting.
     /// Defaults to [`StubIntlBackend`] (English-only, zero dependencies).
     pub intl_backend: Arc<dyn IntlBackend>,
+
+    /// Runtime render mode for server, hydration, or normal client rendering.
+    pub render_mode: RenderMode,
+}
+
+impl Env {
+    /// Creates an environment with the supplied locale and internationalization
+    /// backend in normal client render mode.
+    #[must_use]
+    pub fn new(locale: Locale, intl_backend: Arc<dyn IntlBackend>) -> Self {
+        Self {
+            locale,
+            intl_backend,
+            render_mode: RenderMode::Client,
+        }
+    }
+
+    /// Returns this environment with a different runtime render mode.
+    #[must_use]
+    pub const fn with_render_mode(mut self, render_mode: RenderMode) -> Self {
+        self.render_mode = render_mode;
+        self
+    }
 }
 
 impl Debug for Env {
@@ -590,6 +641,7 @@ impl Debug for Env {
         f.debug_struct("Env")
             .field("locale", &self.locale)
             .field("intl_backend", &"Arc(..)")
+            .field("render_mode", &self.render_mode)
             .finish()
     }
 }
@@ -599,6 +651,7 @@ impl Default for Env {
         Self {
             locale: ars_i18n::locales::en_us(),
             intl_backend: Arc::new(StubIntlBackend),
+            render_mode: RenderMode::Client,
         }
     }
 }
@@ -3040,6 +3093,21 @@ mod tests {
         assert!(debug.contains("Env"));
         assert!(debug.contains("en-US"));
         assert!(debug.contains("Arc(..)"));
+        assert!(debug.contains("Client"));
+    }
+
+    #[test]
+    fn env_render_mode_helpers_report_runtime_mode() {
+        assert!(!RenderMode::Client.is_server());
+        assert!(!RenderMode::Client.is_hydrating());
+        assert!(RenderMode::Server.is_server());
+        assert!(!RenderMode::Server.is_hydrating());
+        assert!(!RenderMode::Hydrating.is_server());
+        assert!(RenderMode::Hydrating.is_hydrating());
+
+        let env = Env::default().with_render_mode(RenderMode::Hydrating);
+
+        assert_eq!(env.render_mode, RenderMode::Hydrating);
     }
 
     #[test]

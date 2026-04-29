@@ -2154,7 +2154,8 @@ mod tests {
 
     #[test]
     fn de_de_segment_order_is_day_month_year() {
-        let env = Env { locale: Locale::parse("de-DE").expect("valid locale"), ..Env::default() };
+        let mut env = Env::default();
+        env.locale = Locale::parse("de-DE").expect("valid locale");
         let svc = Service::new(Props { granularity: DateGranularity::Day, ..Props::default() }, env, Default::default());
         let kinds = svc.context().segments.iter().map(|s| s.kind).collect::<Vec<_>>();
         assert_eq!(kinds, vec![

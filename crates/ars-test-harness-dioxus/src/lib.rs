@@ -782,10 +782,10 @@ mod tests {
                 container: web_sys::HtmlElement,
                 locale: Option<Locale>,
             ) -> MountedDioxusHarness<MockMachine> {
-                let env = Env {
-                    locale: locale.clone().unwrap_or_else(locales::en_us),
-                    intl_backend: Arc::new(StubIntlBackend) as Arc<dyn IntlBackend>,
-                };
+                let env = Env::new(
+                    locale.clone().unwrap_or_else(locales::en_us),
+                    Arc::new(StubIntlBackend) as Arc<dyn IntlBackend>,
+                );
 
                 let service = Rc::new(RefCell::new(Service::new(MockProps::default(), &env, &())));
 
@@ -826,10 +826,10 @@ mod tests {
                 container: web_sys::HtmlElement,
                 locale: Option<Locale>,
             ) -> MountedDioxusHarness<MockMachine> {
-                let env = Env {
-                    locale: locale.clone().unwrap_or_else(locales::en_us),
-                    intl_backend: Arc::new(StubIntlBackend) as Arc<dyn IntlBackend>,
-                };
+                let env = Env::new(
+                    locale.clone().unwrap_or_else(locales::en_us),
+                    Arc::new(StubIntlBackend) as Arc<dyn IntlBackend>,
+                );
 
                 let service = Rc::new(RefCell::new(Service::new(MockProps::default(), &env, &())));
 

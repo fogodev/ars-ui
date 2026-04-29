@@ -40,18 +40,20 @@ The adapter surface matches the core props. It does not add a separate adapter-o
 
 ## 4. Part Mapping
 
-| Core part / structure | Required?             | Adapter rendering target                                                                              | Ownership     | Attr source        | Notes                                                                              |
-| --------------------- | --------------------- | ----------------------------------------------------------------------------------------------------- | ------------- | ------------------ | ---------------------------------------------------------------------------------- |
-| `Root`                | required when mounted | detached `<div>` appended to the resolved host container on web, or host fallback container elsewhere | adapter-owned | `api.root_attrs()` | The root is the logical mount point, not a visual wrapper at the declaration site. |
+| Core part / structure | Required?             | Adapter rendering target                                                                              | Ownership     | Attr source        | Notes                                                                                      |
+| --------------------- | --------------------- | ----------------------------------------------------------------------------------------------------- | ------------- | ------------------ | ------------------------------------------------------------------------------------------ |
+| `Root`                | required when mounted | detached `<div>` appended to the resolved host container on web, or host fallback container elsewhere | adapter-owned | `api.root_attrs()` | The owned mount node is the Root; do not create a child wrapper with duplicate root attrs. |
 
 ## 5. Attr Merge and Ownership Rules
 
-| Target node       | Core attrs                                                        | Adapter-owned attrs                                                           | Consumer attrs                                      | Merge order                                              | Ownership notes                  |
-| ----------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------- | -------------------------------- |
-| portal mount root | `api.root_attrs()` including `data-ars-portal-id` and mount state | target ownership markers, cleanup bookkeeping, and optional boundary metadata | no direct consumer attr ownership at the mount node | core `data-ars-*` attrs and portal ownership markers win | mount root remains adapter-owned |
+| Target node       | Core attrs                                                                      | Adapter-owned attrs                                | Consumer attrs                                      | Merge order                          | Ownership notes                  |
+| ----------------- | ------------------------------------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------- | ------------------------------------ | -------------------------------- |
+| portal mount root | `api.root_attrs()` including `id`, `data-ars-portal-id`, owner, and mount state | cleanup bookkeeping and optional boundary metadata | no direct consumer attr ownership at the mount node | core `id` and `data-ars-*` attrs win | mount root remains adapter-owned |
 
 - Consumer children own only the content rendered inside the portal root.
 - The adapter must not let consumer content replace or delete the documented mount node.
+- `api.root_attrs()` is applied to the owned mount node itself. It is not applied
+  to a nested wrapper under `ars_dom::ensure_portal_mount_root(api.owner_id())`.
 
 ## 6. Composition / Context Contract
 
@@ -59,16 +61,16 @@ The adapter surface matches the core props. It does not add a separate adapter-o
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop | Mode       | Sync trigger            | Machine event / update path                                            | Visible effect                                                                      | Notes                                             |
-| ------------ | ---------- | ----------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `container`  | controlled | prop change after mount | adapter resolves target then dispatches `Mount` into the new container | moves or recreates the portal root under the new target                             | target switching must clean up the old root first |
-| `ssr_inline` | controlled | render-time only        | adapter SSR branch only                                                | renders children inline during SSR instead of an empty declaration-site placeholder | not a post-mount reactive behavior                |
+| Adapter prop | Mode       | Sync trigger            | Machine event / update path                                                   | Visible effect                                                                      | Notes                                             |
+| ------------ | ---------- | ----------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `container`  | controlled | prop change after mount | core `on_props_changed` emits `SetContainer`; adapter resolves the new target | moves or recreates the portal root under the new target                             | target switching must clean up the old root first |
+| `ssr_inline` | controlled | render-time only        | `Api::should_render_inline()`                                                 | renders children inline during SSR instead of an empty declaration-site placeholder | not a post-mount reactive behavior                |
 
 | UI or lifecycle event | Preconditions                              | Machine event / callback path | Ordering notes                                       | Notes                                                                                         |
 | --------------------- | ------------------------------------------ | ----------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | component mount       | platform can supply a target container     | `Mount`                       | create root before child content is rendered into it | web uses a detached DOM root; other platforms may fall back to inline or host-native mounting |
 | component cleanup     | root currently mounted                     | `Unmount`                     | remove root after child teardown                     | cleanup is adapter-owned                                                                      |
-| late target discovery | `PortalTarget::Id` not initially available | `ContainerReady` then `Mount` | late resolution must not leak orphan roots           | web-first behavior for late DOM availability                                                  |
+| late target discovery | `PortalTarget::Id` not initially available | `ContainerReady`              | late resolution must not leak orphan roots           | core accepts only the matching ID and marks the portal mounted                                |
 
 ## 8. Registration and Cleanup Contract
 
@@ -136,7 +138,7 @@ The adapter surface matches the core props. It does not add a separate adapter-o
 ## 17. Recommended Implementation Sequence
 
 1. Initialize the core portal machine and derive the portal id.
-2. Branch SSR behavior from runtime behavior using `ssr_inline`.
+2. Branch SSR behavior from runtime behavior using `Api::should_render_inline()`.
 3. Resolve the target container and create the mount root when the host can support it.
 4. Render children into the mount root or documented fallback path.
 5. Handle target switches and cleanup without leaking roots or watchers.
@@ -196,7 +198,13 @@ pub fn Portal(props: PortalProps) -> Element {
         ssr_inline: props.ssr_inline,
         ..Default::default()
     });
-    rsx! { {props.children} }
+    let render_inline = machine.derive(|api| api.should_render_inline());
+
+    if render_inline() {
+        rsx! { {props.children} }
+    } else {
+        rsx! {}
+    }
 }
 ```
 
@@ -219,16 +227,26 @@ pub fn Portal(props: PortalProps) -> Element {
         ..Default::default()
     });
     let mut mount_root = use_signal(|| None::<HostNode>);
+    let render_inline = machine.derive(|api| api.should_render_inline());
 
     use_effect(move || {
+        if render_inline() {
+            return;
+        }
+
         if let Some(target) = resolve_portal_target(&props.container) {
-            mount_root.set(Some(ensure_portal_root(&machine, target)));
+            let owner_id = machine.with_api_snapshot(|api| api.owner_id().to_string());
+            let mount = ars_dom::ensure_portal_mount_root(&owner_id);
+            apply_attrs(&mount, machine.derive(|api| api.root_attrs()));
+            move_mount_to_target(&mount, target);
+            render_children_into_mount(&mount);
+            mount_root.set(Some(mount));
         }
     });
 
     use_drop(move || remove_portal_root(mount_root.read().clone()));
 
-    if props.ssr_inline {
+    if render_inline() {
         rsx! { {props.children} }
     } else {
         rsx! {}

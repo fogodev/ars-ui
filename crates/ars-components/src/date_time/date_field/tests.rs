@@ -913,10 +913,10 @@ fn month_name_typeahead_matches_locale_month_prefixes() {
 
 #[test]
 fn locale_calendar_extension_selects_calendar_when_prop_is_default() {
-    let env = Env {
-        locale: Locale::parse("th-TH-u-ca-buddhist").expect("valid locale"),
-        intl_backend: Arc::new(StubIntlBackend),
-    };
+    let env = Env::new(
+        Locale::parse("th-TH-u-ca-buddhist").expect("valid locale"),
+        Arc::new(StubIntlBackend),
+    );
 
     let service = Service::<Machine>::new(props(), &env, &Messages::default());
 
@@ -927,10 +927,10 @@ fn locale_calendar_extension_selects_calendar_when_prop_is_default() {
 fn japanese_calendar_uses_era_segment_and_ideographic_literals() {
     let service = Service::<Machine>::new(
         props().calendar(CalendarSystem::Japanese),
-        &Env {
-            locale: Locale::parse("ja-JP").expect("valid locale"),
-            intl_backend: Arc::new(StubIntlBackend),
-        },
+        &Env::new(
+            Locale::parse("ja-JP").expect("valid locale"),
+            Arc::new(StubIntlBackend),
+        ),
         &Messages::default(),
     );
 
@@ -1374,10 +1374,10 @@ fn segment_order_non_editable_kinds_stay_non_editable() {
 
 #[test]
 fn locale_order_uses_environment_locale() {
-    let env = Env {
-        locale: Locale::parse("de-DE").expect("valid locale"),
-        intl_backend: Arc::new(StubIntlBackend),
-    };
+    let env = Env::new(
+        Locale::parse("de-DE").expect("valid locale"),
+        Arc::new(StubIntlBackend),
+    );
 
     let service = Service::<Machine>::new(props(), &env, &Messages::default());
 
@@ -1421,10 +1421,10 @@ fn locale_specific_orders_and_literals_are_resolved() {
             ". ",
         ),
     ] {
-        let env = Env {
-            locale: Locale::parse(locale).expect("valid locale"),
-            intl_backend: Arc::new(StubIntlBackend),
-        };
+        let env = Env::new(
+            Locale::parse(locale).expect("valid locale"),
+            Arc::new(StubIntlBackend),
+        );
 
         let service = Service::<Machine>::new(props(), &env, &Messages::default());
 
@@ -1450,10 +1450,10 @@ fn locale_specific_orders_and_literals_are_resolved() {
 
 #[test]
 fn explicit_calendar_prop_overrides_locale_calendar_extension() {
-    let env = Env {
-        locale: Locale::parse("th-TH-u-ca-buddhist").expect("valid locale"),
-        intl_backend: Arc::new(StubIntlBackend),
-    };
+    let env = Env::new(
+        Locale::parse("th-TH-u-ca-buddhist").expect("valid locale"),
+        Arc::new(StubIntlBackend),
+    );
 
     let service = Service::<Machine>::new(
         props().calendar(CalendarSystem::Iso8601),
@@ -1801,10 +1801,10 @@ fn shared_time_segment_ranges_and_day_period_typeahead_are_supported() {
 fn japanese_era_value_text_uses_localized_era_names() {
     let mut service = Service::<Machine>::new(
         props().calendar(CalendarSystem::Japanese),
-        &Env {
-            locale: Locale::parse("ja-JP").expect("valid locale"),
-            intl_backend: Arc::new(StubIntlBackend),
-        },
+        &Env::new(
+            Locale::parse("ja-JP").expect("valid locale"),
+            Arc::new(StubIntlBackend),
+        ),
         &Messages::default(),
     );
 
@@ -1927,10 +1927,10 @@ fn date_field_explicit_aria_label_snapshots() {
 fn date_field_japanese_calendar_snapshots() {
     let service = Service::<Machine>::new(
         props().calendar(CalendarSystem::Japanese),
-        &Env {
-            locale: Locale::parse("ja-JP").expect("valid locale"),
-            intl_backend: Arc::new(StubIntlBackend),
-        },
+        &Env::new(
+            Locale::parse("ja-JP").expect("valid locale"),
+            Arc::new(StubIntlBackend),
+        ),
         &Messages::default(),
     );
 
