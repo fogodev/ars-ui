@@ -538,7 +538,7 @@ fn file_picker_filter_extensions(accept: &[String]) -> Vec<String> {
 #[cfg(feature = "desktop")]
 fn accept_token_extensions(token: &str) -> Vec<String> {
     match token.strip_prefix('.').unwrap_or(token) {
-        "txt" => vec![String::from("txt")],
+        "txt" | "text/plain" => vec![String::from("txt")],
 
         "html" | "text/html" => vec![String::from("html"), String::from("htm")],
 
@@ -1321,6 +1321,14 @@ mod tests {
             file_picker_filter_name(&extensions[..3]),
             String::from("*.txt, *.png, *.jpg")
         );
+    }
+
+    #[cfg(feature = "desktop")]
+    #[test]
+    fn desktop_file_picker_filter_extensions_maps_text_plain_mime_type() {
+        let extensions = file_picker_filter_extensions(&[String::from("text/plain")]);
+
+        assert_eq!(extensions, vec![String::from("txt")]);
     }
 
     #[cfg(feature = "desktop")]
