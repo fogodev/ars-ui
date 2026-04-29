@@ -4,14 +4,15 @@
 //! contract for stateful machine hydration and provides browser-only helpers
 //! for `FocusScope` cleanup once client hydration has completed.
 
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+use std::{cell::Cell, rc::Rc};
+
 #[cfg(feature = "ssr")]
 pub use ars_core::HydrationSnapshot;
 #[cfg(feature = "ssr")]
 use ars_core::{HasId, Machine, Service};
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use dioxus::prelude::{ReadableExt, WritableExt};
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-use std::{cell::Cell, rc::Rc};
 
 /// Serializes a machine service snapshot for embedding in SSR HTML.
 ///
