@@ -203,7 +203,7 @@ fn extract_api_rust_blocks(source: &str) -> Vec<CodeBlock> {
         let trimmed = line.trim_start();
 
         if in_block {
-            if trimmed == "```" {
+            if trimmed.trim_end() == "```" {
                 blocks.push(CodeBlock {
                     start_line: current_start,
                     content: core::mem::take(&mut current),
@@ -1150,6 +1150,20 @@ impl Api {
             run(md)
                 .iter()
                 .any(|m| m.contains("public fn declaration is missing"))
+        );
+    }
+
+    #[test]
+    fn accepts_closing_rust_fence_with_trailing_whitespace() {
+        let md = "### 1.2 Connect / API\n\n```rust\npub fn missing_doc() {}\n```   \n";
+
+        let messages = run(md);
+
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("public fn declaration is missing")),
+            "expected lint findings from block closed with trailing whitespace, got {messages:?}"
         );
     }
 
