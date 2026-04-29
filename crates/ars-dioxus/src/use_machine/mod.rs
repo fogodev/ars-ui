@@ -482,7 +482,7 @@ fn props_with_snapshot_id<M: Machine>(
     if props.id().is_empty() {
         props.set_id(snapshot.id.clone());
     } else {
-        debug_assert_eq!(
+        assert_eq!(
             props.id(),
             snapshot.id,
             "HydrationSnapshot id must match Props::id"

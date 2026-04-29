@@ -10,6 +10,8 @@ pub use ars_core::HydrationSnapshot;
 use ars_core::{HasId, Machine, Service};
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use dioxus::prelude::{ReadableExt, WritableExt};
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+use std::{cell::Cell, rc::Rc};
 
 /// Serializes a machine service snapshot for embedding in SSR HTML.
 ///
@@ -74,8 +76,11 @@ pub fn setup_focus_scope_hydration_safe(
     use dioxus::prelude::{use_drop, use_effect};
 
     let cleanup_scope_id = scope_id.clone();
+    let activation_active = Rc::new(Cell::new(true));
 
     use_effect({
+        let activation_active = Rc::clone(&activation_active);
+
         move || {
             let Some(document) = browser_document() else {
                 return;
@@ -84,12 +89,18 @@ pub fn setup_focus_scope_hydration_safe(
             if body_is_hydrated(&document) {
                 activate_focus_scope(&document, &scope_id, restore_target);
             } else {
-                request_hydration_activation_after_frame(scope_id.clone(), restore_target);
+                request_hydration_activation_after_frame(
+                    scope_id.clone(),
+                    restore_target,
+                    Rc::clone(&activation_active),
+                );
             }
         }
     });
 
     use_drop(move || {
+        activation_active.set(false);
+
         if let Some(document) = browser_document()
             && let Some(scope) = document.get_element_by_id(&cleanup_scope_id)
         {
@@ -140,6 +151,7 @@ fn activate_focus_scope(
 fn request_hydration_activation_after_frame(
     scope_id: String,
     restore_target: dioxus::prelude::Signal<Option<web_sys::HtmlElement>>,
+    activation_active: Rc<Cell<bool>>,
 ) {
     use wasm_bindgen::JsCast;
 
@@ -148,12 +160,18 @@ fn request_hydration_activation_after_frame(
     };
 
     let callback = wasm_bindgen::closure::Closure::once_into_js(move || {
+        if !activation_active.get() {
+            return;
+        }
+
         let Some(document) = browser_document() else {
             return;
         };
 
         if body_is_hydrated(&document) {
             activate_focus_scope(&document, &scope_id, restore_target);
+        } else {
+            request_hydration_activation_after_frame(scope_id, restore_target, activation_active);
         }
     });
 
@@ -548,7 +566,7 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test(async)]
-    async fn setup_focus_scope_stays_inactive_when_body_remains_unhydrated_after_frame() {
+    async fn setup_focus_scope_retries_until_body_is_marked_hydrated() {
         reset_body();
 
         let container = append_html(
@@ -599,6 +617,26 @@ mod wasm_tests {
                 .and_then(|element| element.get_attribute("id"))
                 .as_deref(),
             Some("before")
+        );
+
+        document()
+            .body()
+            .expect("body should exist")
+            .set_attribute("data-ars-hydrated", "")
+            .expect("mark hydrated");
+
+        animation_frame_turn().await;
+
+        assert!(scope.has_attribute("data-ars-modal-open"));
+
+        animation_frame_turn().await;
+
+        assert_eq!(
+            document()
+                .active_element()
+                .and_then(|element| element.get_attribute("id"))
+                .as_deref(),
+            Some("target")
         );
     }
 

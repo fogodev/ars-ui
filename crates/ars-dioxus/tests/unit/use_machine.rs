@@ -290,10 +290,10 @@ fn use_machine_hydrated_accepts_matching_explicit_props_id() {
     dom.rebuild_in_place();
 }
 
-#[cfg(all(feature = "ssr", debug_assertions))]
+#[cfg(feature = "ssr")]
 #[test]
 #[should_panic(expected = "HydrationSnapshot id must match Props::id")]
-fn props_with_snapshot_id_rejects_mismatched_explicit_props_id_in_debug() {
+fn props_with_snapshot_id_rejects_mismatched_explicit_props_id() {
     let _props = props_with_snapshot_id::<ToggleMachine>(
         ToggleProps {
             id: String::from("toggle-client"),
