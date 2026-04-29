@@ -314,11 +314,11 @@ fn lint_block(content: &str) -> Vec<(usize, String)> {
                 "Api"
             };
 
-            let has_debug =
-                derives.contains(&"Debug") || has_manual_impl(&lines, "Debug", type_name);
+            let has_debug = derives.iter().any(|derive| derive == "Debug")
+                || has_manual_impl(&lines, "Debug", type_name);
 
-            let has_clone =
-                derives.contains(&"Clone") || has_manual_impl(&lines, "Clone", type_name);
+            let has_clone = derives.iter().any(|derive| derive == "Clone")
+                || has_manual_impl(&lines, "Clone", type_name);
 
             if !has_debug {
                 findings.push((
@@ -388,16 +388,15 @@ fn preceded_by_doc(lines: &[&str], idx: usize) -> bool {
     let mut cursor = idx;
 
     while cursor > 0 {
-        cursor -= 1;
+        if let Some((start, ..)) = attribute_span_before(lines, cursor) {
+            cursor = start;
+            continue;
+        }
 
-        let prev = lines[cursor].trim();
+        let prev = lines[cursor - 1].trim();
 
         if prev.is_empty() {
             return false;
-        }
-
-        if prev.starts_with("#[") || prev.starts_with("#![") {
-            continue;
         }
 
         return prev.starts_with("///") || prev.starts_with("//!");
@@ -420,41 +419,162 @@ fn has_manual_impl(lines: &[&str], trait_name: &str, type_name: &str) -> bool {
         format!("> {trait_name} for {type_name}"),
     ];
 
-    lines
-        .iter()
+    code_lines_without_comments(lines)
+        .into_iter()
         .any(|line| needles.iter().any(|n| line.contains(n.as_str())))
 }
 
 /// Collects derive identifiers from any `#[derive(...)]` attribute lines in
 /// the contiguous attribute block immediately above `idx` (interleaved with
 /// other `#[...]` attributes is allowed).
-fn collect_derives<'a>(lines: &'a [&str], idx: usize) -> Vec<&'a str> {
+fn collect_derives(lines: &[&str], idx: usize) -> Vec<String> {
     let mut out = Vec::new();
 
     let mut cursor = idx;
 
     while cursor > 0 {
-        cursor -= 1;
-
-        let prev = lines[cursor].trim();
+        let prev = lines[cursor - 1].trim();
 
         if prev.is_empty() || prev.starts_with("///") || prev.starts_with("//!") {
             break;
         }
 
-        if let Some(rest) = prev.strip_prefix("#[derive(")
+        let Some((start, _, attr)) = attribute_span_before(lines, cursor) else {
+            break;
+        };
+
+        if let Some(rest) = attr.trim().strip_prefix("#[derive(")
             && let Some(inner) = rest.strip_suffix(")]")
         {
-            for tok in inner.split(',') {
-                let tok = tok.trim();
+            out.extend(
+                inner
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|tok| !tok.is_empty())
+                    .map(str::to_string),
+            );
+        }
 
-                if !tok.is_empty() {
-                    out.push(tok);
+        cursor = start;
+    }
+
+    out
+}
+
+/// Returns the contiguous attribute span immediately before `idx`, including
+/// multiline attributes formatted by rustfmt.
+fn attribute_span_before<'a>(lines: &'a [&'a str], idx: usize) -> Option<(usize, usize, String)> {
+    if idx == 0 {
+        return None;
+    }
+
+    let end = idx - 1;
+    let end_line = lines[end].trim();
+
+    if end_line.is_empty() || end_line.starts_with("///") || end_line.starts_with("//!") {
+        return None;
+    }
+
+    if !end_line.contains(']') && !end_line.starts_with("#[") && !end_line.starts_with("#![") {
+        return None;
+    }
+
+    for start in (0..=end).rev() {
+        let line = lines[start].trim();
+
+        if line.is_empty() || line.starts_with("///") || line.starts_with("//!") {
+            return None;
+        }
+
+        if line.starts_with("#[") || line.starts_with("#![") {
+            let span_lines = &lines[start..=end];
+
+            if span_lines[1..]
+                .iter()
+                .any(|line| is_rust_item_line(line.trim()))
+            {
+                return None;
+            }
+
+            let attr = span_lines.join("\n");
+
+            return attr_brackets_are_balanced(&attr).then_some((start, end, attr));
+        }
+    }
+
+    None
+}
+
+/// Returns whether a line is clearly Rust item code rather than an attribute
+/// continuation.
+fn is_rust_item_line(line: &str) -> bool {
+    line.starts_with("pub ")
+        || line.starts_with("impl ")
+        || line.starts_with("struct ")
+        || line.starts_with("enum ")
+        || line.starts_with("fn ")
+        || line.starts_with("const ")
+        || line.starts_with("mod ")
+        || line.starts_with("use ")
+        || line.ends_with(';')
+}
+
+/// Returns whether `#[...]` delimiters are balanced in an attribute span.
+fn attr_brackets_are_balanced(attr: &str) -> bool {
+    let mut depth = 0usize;
+
+    for ch in attr.chars() {
+        match ch {
+            '[' => depth += 1,
+            ']' => {
+                depth = depth.checked_sub(1).unwrap_or(usize::MAX);
+
+                if depth == usize::MAX {
+                    return false;
                 }
             }
-        } else if !prev.starts_with("#[") && !prev.starts_with("#![") {
-            break;
+            _ => {}
         }
+    }
+
+    depth == 0
+}
+
+/// Removes Rust comments from code lines before doing string-based lint probes.
+fn code_lines_without_comments(lines: &[&str]) -> Vec<String> {
+    let mut out = Vec::with_capacity(lines.len());
+    let mut in_block_comment = false;
+
+    for line in lines {
+        let mut code = String::new();
+        let mut chars = line.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+            if in_block_comment {
+                if ch == '*' && chars.peek() == Some(&'/') {
+                    chars.next();
+                    in_block_comment = false;
+                }
+
+                continue;
+            }
+
+            if ch == '/' {
+                match chars.peek() {
+                    Some('/') => break,
+                    Some('*') => {
+                        chars.next();
+                        in_block_comment = true;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+
+            code.push(ch);
+        }
+
+        out.push(code);
     }
 
     out
@@ -804,6 +924,56 @@ pub struct Props {
             run(md)
                 .iter()
                 .any(|m| m.contains("`Props` must implement `Debug`"))
+        );
+    }
+
+    #[test]
+    fn accepts_multiline_derive_attributes() {
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// Api for the component.
+#[derive(
+    Clone,
+    Debug,
+)]
+pub struct Api {
+}
+```
+";
+
+        assert!(run(md).is_empty());
+    }
+
+    #[test]
+    fn ignores_commented_manual_impls() {
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// Api for the component.
+pub struct Api {
+}
+
+// impl Debug for Api {}
+/*
+impl Clone for Api {}
+*/
+```
+";
+
+        let findings = run(md);
+
+        assert!(
+            findings
+                .iter()
+                .any(|m| m.contains("`Api` must implement `Debug`"))
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|m| m.contains("`Api` must implement `Clone`"))
         );
     }
 
