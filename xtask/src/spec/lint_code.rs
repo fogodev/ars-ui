@@ -409,9 +409,32 @@ fn preceded_by_doc(lines: &[&str], idx: usize) -> bool {
 /// Matches both lifetime-parameterized (`impl Debug for Api<'_>`,
 /// `impl<'a> Debug for Api<'a>`) and plain (`impl Debug for Api`) forms.
 fn has_manual_impl(lines: &[&str], trait_name: &str, type_name: &str) -> bool {
-    code_lines_without_comments_and_strings(lines)
-        .into_iter()
-        .any(|line| manual_impl_line_matches(&line, trait_name, type_name))
+    let mut current_impl_header = None::<String>;
+
+    for line in code_lines_without_comments_and_strings(lines) {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("impl") {
+            current_impl_header = Some(trimmed.to_string());
+        } else if let Some(header) = &mut current_impl_header {
+            header.push(' ');
+            header.push_str(trimmed);
+        }
+
+        let Some(header) = &current_impl_header else {
+            continue;
+        };
+
+        if manual_impl_line_matches(header, trait_name, type_name) {
+            return true;
+        }
+
+        if trimmed.contains('{') || trimmed.ends_with(';') {
+            current_impl_header = None;
+        }
+    }
+
+    false
 }
 
 /// Returns whether a comment-free line contains `impl <trait_name> for
@@ -971,6 +994,55 @@ impl<'a> Clone for Api<'a> {
                 .iter()
                 .any(|m| m.contains("`Api` must implement `Clone`")),
             "expected no Clone finding (manual impl with lifetime present), got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn accepts_multiline_manual_impl_header() {
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// API for the component.
+pub struct Api<T> {
+    state: T,
+}
+
+impl<T>
+    Debug
+    for Api<T>
+where
+    T: Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct(\"Api\").finish_non_exhaustive()
+    }
+}
+
+impl<T>
+    Clone
+    for Api<T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self { Self { state: self.state.clone() } }
+}
+```
+";
+
+        let messages = run(md);
+
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.contains("`Api` must implement `Debug`")),
+            "expected no Debug finding for multiline manual impl, got {messages:?}"
+        );
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.contains("`Api` must implement `Clone`")),
+            "expected no Clone finding for multiline manual impl, got {messages:?}"
         );
     }
 
