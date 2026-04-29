@@ -413,15 +413,57 @@ fn preceded_by_doc(lines: &[&str], idx: usize) -> bool {
 /// Matches both lifetime-parameterized (`impl Debug for Api<'_>`,
 /// `impl<'a> Debug for Api<'a>`) and plain (`impl Debug for Api`) forms.
 fn has_manual_impl(lines: &[&str], trait_name: &str, type_name: &str) -> bool {
-    let needles = [
-        format!("impl {trait_name} for {type_name}"),
-        format!("impl {trait_name} for {type_name}<"),
-        format!("> {trait_name} for {type_name}"),
-    ];
-
     code_lines_without_comments(lines)
         .into_iter()
-        .any(|line| needles.iter().any(|n| line.contains(n.as_str())))
+        .any(|line| manual_impl_line_matches(&line, trait_name, type_name))
+}
+
+/// Returns whether a comment-free line contains `impl <trait_name> for
+/// <type_name>` with identifier boundaries around both names.
+fn manual_impl_line_matches(line: &str, trait_name: &str, type_name: &str) -> bool {
+    let Some(for_idx) = line.find(" for ") else {
+        return false;
+    };
+
+    let impl_prefix = &line[..for_idx];
+    let implemented_type = line[for_idx + " for ".len()..].trim_start();
+
+    contains_identifier_token(impl_prefix, trait_name)
+        && implemented_type.starts_with(type_name)
+        && implemented_type[type_name.len()..]
+            .chars()
+            .next()
+            .is_none_or(|ch| !is_rust_identifier_continue(ch))
+}
+
+/// Returns whether `needle` appears in `haystack` as a full Rust identifier
+/// token, not as a prefix or suffix of another identifier.
+fn contains_identifier_token(haystack: &str, needle: &str) -> bool {
+    let mut search_from = 0;
+
+    while let Some(offset) = haystack[search_from..].find(needle) {
+        let start = search_from + offset;
+        let end = start + needle.len();
+
+        let before = haystack[..start].chars().next_back();
+        let after = haystack[end..].chars().next();
+
+        let starts_at_boundary = before.is_none_or(|ch| !is_rust_identifier_continue(ch));
+        let ends_at_boundary = after.is_none_or(|ch| !is_rust_identifier_continue(ch));
+
+        if starts_at_boundary && ends_at_boundary {
+            return true;
+        }
+
+        search_from = end;
+    }
+
+    false
+}
+
+/// Returns whether a character can continue a Rust identifier.
+fn is_rust_identifier_continue(ch: char) -> bool {
+    ch == '_' || ch.is_alphanumeric()
 }
 
 /// Collects derive identifiers from any `#[derive(...)]` attribute lines in
@@ -960,6 +1002,35 @@ pub struct Api {
 /*
 impl Clone for Api {}
 */
+```
+";
+
+        let findings = run(md);
+
+        assert!(
+            findings
+                .iter()
+                .any(|m| m.contains("`Api` must implement `Debug`"))
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|m| m.contains("`Api` must implement `Clone`"))
+        );
+    }
+
+    #[test]
+    fn ignores_manual_impls_for_prefixed_type_names() {
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// Api for the component.
+pub struct Api {
+}
+
+impl Debug for ApiWrapper {}
+impl Clone for Api2 {}
 ```
 ";
 
