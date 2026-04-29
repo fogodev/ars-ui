@@ -9,6 +9,8 @@ use core::{
     cell::RefCell,
     fmt::{self, Debug},
 };
+#[cfg(feature = "std")]
+use std::path::{Path, PathBuf};
 
 use ars_a11y::{AnnouncementPriority, LiveAnnouncer};
 use ars_core::{AttrMap, Callback, HtmlAttr, MessageFn};
@@ -192,7 +194,7 @@ impl KeyboardDragRegistry {
 ///
 /// Multiple representations may be present for cross-application
 /// interoperability, such as exposing both plain text and HTML.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DragItem {
     /// Plain text content.
     Text(String),
@@ -237,13 +239,112 @@ pub enum DragItem {
     },
 }
 
-/// Opaque file-system handle resolved by `ars-dom` against browser APIs.
-#[derive(Clone, Debug)]
-pub struct FileHandle(());
+/// File-system handle attached to a [`DragItem::File`].
+///
+/// Carries either an opaque tag (web/SSR/null targets where files are
+/// resolved through a separate adapter abstraction) or a concrete native
+/// `PathBuf` (desktop / native file pickers). Equality is structural:
+/// two opaque handles are equal, and two `Path` handles are equal iff
+/// their paths match.
+///
+/// On `no_std` builds the `Path` variant is unavailable and every
+/// instance is opaque; the type still derives `PartialEq + Eq` so
+/// downstream `Vec<DragItem>` equality keeps working.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct FileHandle {
+    inner: FileHandleInner,
+}
 
-/// Opaque directory handle resolved by `ars-dom` against browser APIs.
-#[derive(Clone, Debug)]
-pub struct DirectoryHandle(());
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+enum FileHandleInner {
+    /// Default representation for browser/SSR file references that have
+    /// no native path and are resolved via separate APIs.
+    #[default]
+    Opaque,
+
+    /// Native filesystem path captured from a desktop file picker or
+    /// drop event. Available only when the `std` feature is enabled.
+    #[cfg(feature = "std")]
+    Path(PathBuf),
+}
+
+impl FileHandle {
+    /// Returns an opaque handle. Available on every target.
+    #[must_use]
+    pub const fn opaque() -> Self {
+        Self {
+            inner: FileHandleInner::Opaque,
+        }
+    }
+
+    /// Wraps a native filesystem path (desktop / native file picker).
+    #[cfg(feature = "std")]
+    #[must_use]
+    pub const fn from_path(path: PathBuf) -> Self {
+        Self {
+            inner: FileHandleInner::Path(path),
+        }
+    }
+
+    /// Returns the native path if the handle was constructed from one,
+    /// otherwise `None`. Always returns `None` on `no_std` builds.
+    #[cfg(feature = "std")]
+    #[must_use]
+    pub fn as_path(&self) -> Option<&Path> {
+        match &self.inner {
+            FileHandleInner::Path(path) => Some(path.as_path()),
+            FileHandleInner::Opaque => None,
+        }
+    }
+}
+
+/// Directory handle attached to a [`DragItem::Directory`].
+///
+/// Mirrors [`FileHandle`] — opaque on web/SSR, native `PathBuf` on
+/// desktop. See `FileHandle` for the equality semantics.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct DirectoryHandle {
+    inner: DirectoryHandleInner,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+enum DirectoryHandleInner {
+    #[default]
+    Opaque,
+
+    #[cfg(feature = "std")]
+    Path(PathBuf),
+}
+
+impl DirectoryHandle {
+    /// Returns an opaque directory handle.
+    #[must_use]
+    pub const fn opaque() -> Self {
+        Self {
+            inner: DirectoryHandleInner::Opaque,
+        }
+    }
+
+    /// Wraps a native filesystem path.
+    #[cfg(feature = "std")]
+    #[must_use]
+    pub const fn from_path(path: PathBuf) -> Self {
+        Self {
+            inner: DirectoryHandleInner::Path(path),
+        }
+    }
+
+    /// Returns the native path if the handle was constructed from one,
+    /// otherwise `None`. Always returns `None` on `no_std` builds.
+    #[cfg(feature = "std")]
+    #[must_use]
+    pub fn as_path(&self) -> Option<&Path> {
+        match &self.inner {
+            DirectoryHandleInner::Path(path) => Some(path.as_path()),
+            DirectoryHandleInner::Opaque => None,
+        }
+    }
+}
 
 /// Test-only helpers for constructing opaque drag payloads in downstream crates.
 #[cfg(feature = "test-support")]
@@ -263,7 +364,7 @@ pub mod test_support {
             name: name.into(),
             mime_type: mime_type.into(),
             size,
-            handle: FileHandle(()),
+            handle: FileHandle::opaque(),
         }
     }
 
@@ -272,7 +373,7 @@ pub mod test_support {
     pub fn directory_drag_item(name: impl Into<String>) -> DragItem {
         DragItem::Directory {
             name: name.into(),
-            handle: DirectoryHandle(()),
+            handle: DirectoryHandle::opaque(),
         }
     }
 }
@@ -1964,14 +2065,14 @@ mod tests {
                     name: "photo.jpg".into(),
                     mime_type: "image/jpeg".into(),
                     size: 42,
-                    handle: FileHandle(()),
+                    handle: FileHandle::opaque(),
                 },
                 DragItemKind::File,
             ),
             (
                 DragItem::Directory {
                     name: "assets".into(),
-                    handle: DirectoryHandle(()),
+                    handle: DirectoryHandle::opaque(),
                 },
                 DragItemKind::Directory,
             ),
@@ -1999,11 +2100,11 @@ mod tests {
                 name: "photo.jpg".into(),
                 mime_type: "image/jpeg".into(),
                 size: 42,
-                handle: FileHandle(()),
+                handle: FileHandle::opaque(),
             },
             DragItem::Directory {
                 name: "assets".into(),
-                handle: DirectoryHandle(()),
+                handle: DirectoryHandle::opaque(),
             },
             DragItem::Custom {
                 mime_type: "application/x-ars-demo".into(),
@@ -2966,6 +3067,50 @@ mod tests {
     }
 
     #[test]
+    fn build_drop_attrs_serializes_operation_and_indicator_variants() {
+        let cases = [
+            (
+                DropOperation::Copy,
+                DropIndicatorPosition::Before,
+                "copy",
+                "before",
+            ),
+            (
+                DropOperation::Move,
+                DropIndicatorPosition::After,
+                "move",
+                "after",
+            ),
+            (
+                DropOperation::Link,
+                DropIndicatorPosition::OnTarget,
+                "link",
+                "on",
+            ),
+            (
+                DropOperation::Cancel,
+                DropIndicatorPosition::OnTarget,
+                "none",
+                "on",
+            ),
+        ];
+
+        for (operation, position, expected_operation, expected_position) in cases {
+            let attrs = build_drop_attrs(true, Some(operation), Some(position));
+
+            assert!(attrs.contains(&HtmlAttr::Data("ars-drag-over")));
+            assert_eq!(
+                attrs.get(&HtmlAttr::Data("ars-drop-operation")),
+                Some(expected_operation)
+            );
+            assert_eq!(
+                attrs.get(&HtmlAttr::Data("ars-drop-position")),
+                Some(expected_position)
+            );
+        }
+    }
+
+    #[test]
     fn drop_result_rejects_operations_outside_accepted_list() {
         let mut result = use_drop(DropConfig {
             accepted_operations: Some(vec![DropOperation::Copy]),
@@ -3141,7 +3286,7 @@ mod tests {
                     name: "image.png".into(),
                     mime_type: "image/png".into(),
                     size: 12,
-                    handle: FileHandle(()),
+                    handle: FileHandle::opaque(),
                 }],
                 PointerType::Pen,
             )
@@ -3711,5 +3856,228 @@ mod tests {
         assert!(!result.drag_over);
         assert!(result.drop_operation.is_none());
         assert!(!result.attrs.contains(&HtmlAttr::Data("ars-drag-over")));
+    }
+
+    // -- Equality tests for the `PartialEq` / `Eq` derives ---------------
+    //
+    // `DragItem`, `FileHandle`, and `DirectoryHandle` gained `PartialEq`
+    // and `Eq` to satisfy `DragData: PartialEq + Eq` in the Dioxus
+    // adapter (`spec/components/utility/drop-zone.md` §1.3). The handles
+    // wrap either an opaque tag or a native `PathBuf`. Equality is
+    // purely structural: two opaque handles are equal, two `Path`
+    // handles compare path-by-path, and `Opaque` ≠ `Path(_)`.
+    // These tests pin the contract: same payload → equal; different
+    // variants or different payloads → not equal.
+
+    #[test]
+    fn file_handle_opaque_instances_compare_equal() {
+        // `FileHandle::opaque()` is the default constructor on every
+        // target; two opaque handles are always equal regardless of
+        // the underlying browser/SSR file each tag is paired with.
+        assert_eq!(FileHandle::opaque(), FileHandle::opaque());
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn file_handle_path_instances_compare_by_path() {
+        use std::path::PathBuf;
+
+        let a = FileHandle::from_path(PathBuf::from("/tmp/a"));
+        let same = FileHandle::from_path(PathBuf::from("/tmp/a"));
+        let other = FileHandle::from_path(PathBuf::from("/tmp/b"));
+        let opaque = FileHandle::opaque();
+
+        assert_eq!(a, same);
+        assert_ne!(a, other);
+        assert_ne!(a, opaque);
+        assert_eq!(a.as_path(), Some(std::path::Path::new("/tmp/a")));
+        assert_eq!(opaque.as_path(), None);
+    }
+
+    #[test]
+    fn directory_handle_opaque_instances_compare_equal() {
+        assert_eq!(DirectoryHandle::opaque(), DirectoryHandle::opaque());
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn directory_handle_path_instances_compare_by_path() {
+        use std::path::PathBuf;
+
+        let a = DirectoryHandle::from_path(PathBuf::from("/tmp/photos"));
+        let same = DirectoryHandle::from_path(PathBuf::from("/tmp/photos"));
+        let other = DirectoryHandle::from_path(PathBuf::from("/tmp/videos"));
+
+        assert_eq!(a, same);
+        assert_ne!(a, other);
+        assert_ne!(a, DirectoryHandle::opaque());
+        assert_eq!(a.as_path(), Some(std::path::Path::new("/tmp/photos")));
+    }
+
+    #[test]
+    fn drag_item_text_equality_compares_payload() {
+        assert_eq!(
+            DragItem::Text(String::from("hello")),
+            DragItem::Text(String::from("hello"))
+        );
+        assert_ne!(
+            DragItem::Text(String::from("hello")),
+            DragItem::Text(String::from("hello world"))
+        );
+    }
+
+    #[test]
+    fn drag_item_uri_equality_compares_payload() {
+        assert_eq!(
+            DragItem::Uri(String::from("https://example.com")),
+            DragItem::Uri(String::from("https://example.com"))
+        );
+        assert_ne!(
+            DragItem::Uri(String::from("https://example.com")),
+            DragItem::Uri(String::from("https://other.example"))
+        );
+    }
+
+    #[test]
+    fn drag_item_html_equality_compares_payload() {
+        assert_eq!(
+            DragItem::Html(String::from("<p>hi</p>")),
+            DragItem::Html(String::from("<p>hi</p>"))
+        );
+        assert_ne!(
+            DragItem::Html(String::from("<p>hi</p>")),
+            DragItem::Html(String::from("<p>bye</p>"))
+        );
+    }
+
+    #[test]
+    fn drag_item_file_equality_compares_name_mime_size() {
+        let a = DragItem::File {
+            name: String::from("photo.png"),
+            mime_type: String::from("image/png"),
+            size: 1024,
+            handle: FileHandle::opaque(),
+        };
+
+        let same = DragItem::File {
+            name: String::from("photo.png"),
+            mime_type: String::from("image/png"),
+            size: 1024,
+            handle: FileHandle::opaque(),
+        };
+
+        let other_name = DragItem::File {
+            name: String::from("other.png"),
+            mime_type: String::from("image/png"),
+            size: 1024,
+            handle: FileHandle::opaque(),
+        };
+
+        let other_mime = DragItem::File {
+            name: String::from("photo.png"),
+            mime_type: String::from("image/jpeg"),
+            size: 1024,
+            handle: FileHandle::opaque(),
+        };
+
+        let other_size = DragItem::File {
+            name: String::from("photo.png"),
+            mime_type: String::from("image/png"),
+            size: 2048,
+            handle: FileHandle::opaque(),
+        };
+
+        assert_eq!(a, same);
+        assert_ne!(a, other_name);
+        assert_ne!(a, other_mime);
+        assert_ne!(a, other_size);
+    }
+
+    #[test]
+    fn drag_item_directory_equality_compares_name() {
+        let a = DragItem::Directory {
+            name: String::from("photos"),
+            handle: DirectoryHandle::opaque(),
+        };
+
+        let same = DragItem::Directory {
+            name: String::from("photos"),
+            handle: DirectoryHandle::opaque(),
+        };
+
+        let other = DragItem::Directory {
+            name: String::from("videos"),
+            handle: DirectoryHandle::opaque(),
+        };
+
+        assert_eq!(a, same);
+        assert_ne!(a, other);
+    }
+
+    #[test]
+    fn drag_item_custom_equality_compares_mime_and_data() {
+        let a = DragItem::Custom {
+            mime_type: String::from("application/x-ars-card"),
+            data: String::from("{\"id\":1}"),
+        };
+
+        let same = DragItem::Custom {
+            mime_type: String::from("application/x-ars-card"),
+            data: String::from("{\"id\":1}"),
+        };
+
+        let other_mime = DragItem::Custom {
+            mime_type: String::from("application/x-ars-board"),
+            data: String::from("{\"id\":1}"),
+        };
+
+        let other_data = DragItem::Custom {
+            mime_type: String::from("application/x-ars-card"),
+            data: String::from("{\"id\":2}"),
+        };
+
+        assert_eq!(a, same);
+        assert_ne!(a, other_mime);
+        assert_ne!(a, other_data);
+    }
+
+    #[test]
+    fn drag_item_variants_are_distinct_even_with_identical_payload() {
+        // Text("foo") vs Uri("foo") vs Html("foo") must all be unequal
+        // — the variant tag is part of the equality, not just the
+        // payload. This is the most likely consumer pitfall.
+        let payload = String::from("foo");
+
+        let text = DragItem::Text(payload.clone());
+        let uri = DragItem::Uri(payload.clone());
+        let html = DragItem::Html(payload);
+
+        assert_ne!(text, uri);
+        assert_ne!(uri, html);
+        assert_ne!(text, html);
+    }
+
+    #[test]
+    fn drag_item_vec_equality_propagates() {
+        // `Vec<DragItem>` PartialEq is what `DragData` ultimately
+        // depends on. Pin the propagation in case the derives ever
+        // get cherry-picked by a refactor.
+        let a = vec![
+            DragItem::Text(String::from("a")),
+            DragItem::Text(String::from("b")),
+        ];
+
+        let b = vec![
+            DragItem::Text(String::from("a")),
+            DragItem::Text(String::from("b")),
+        ];
+
+        let c = vec![
+            DragItem::Text(String::from("a")),
+            DragItem::Text(String::from("z")),
+        ];
+
+        assert_eq!(a, b);
+        assert_ne!(a, c);
     }
 }

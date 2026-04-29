@@ -17,6 +17,7 @@ mod ephemeral;
 mod event_mapping;
 mod id;
 mod nonce;
+mod platform;
 pub mod prelude;
 mod provider;
 mod safe_listener;
@@ -41,13 +42,16 @@ pub use nonce::{
     use_nonce_css_context_provider, use_nonce_css_from_attrs, use_nonce_css_rule,
 };
 #[cfg(feature = "desktop")]
-pub use provider::DesktopPlatform;
-#[cfg(feature = "web")]
-pub use provider::WebPlatform;
+pub use platform::DesktopPlatform;
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+pub use platform::WebPlatform;
+pub use platform::{
+    DioxusPlatform, DragData, FilePickerOptions, NullPlatform, PlatformDragEvent,
+    default_dioxus_platform, use_platform,
+};
 pub use provider::{
-    ArsContext, ArsProvider, ArsProviderProps, DioxusPlatform, DragData, FilePickerOptions,
-    NullPlatform, resolve_locale, t, use_intl_backend, use_locale, use_messages,
-    use_modality_context, use_number_formatter, use_platform, warn_missing_provider,
+    ArsContext, ArsProvider, ArsProviderProps, resolve_locale, t, use_intl_backend, use_locale,
+    use_messages, use_modality_context, use_number_formatter, warn_missing_provider,
 };
 #[cfg(feature = "web")]
 pub use safe_listener::{

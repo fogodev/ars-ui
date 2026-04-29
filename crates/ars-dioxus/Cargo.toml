@@ -8,28 +8,42 @@ repository.workspace   = true
 rust-version.workspace = true
 
 [features]
-default     = ["icu4x"]
-debug       = ["dep:log", "ars-core/debug", "ars-interactions/debug", "ars-dom?/debug"]
-web         = ["dioxus/web", "dep:ars-dom", "ars-dom/web", "dep:web-sys"]
-desktop     = ["dioxus/desktop"]
+default = ["icu4x"]
+debug = ["dep:log", "ars-core/debug", "ars-interactions/debug", "ars-dom?/debug"]
+web = [
+  "dioxus/web",
+  "dep:ars-dom",
+  "ars-dom/web",
+  "dep:web-sys",
+  "dep:wasm-bindgen",
+  "dep:wasm-bindgen-futures",
+  "dep:js-sys"
+]
+desktop = ["dioxus/desktop", "dep:arboard", "dep:uuid", "dep:rfd", "dep:log"]
 desktop-dom = ["desktop", "dep:ars-dom"]
-mobile      = ["dioxus/mobile"]
-ssr         = ["dioxus/server", "dep:ars-dom", "ars-dom/ssr"]
+mobile = ["dioxus/mobile"]
+ssr = ["dioxus/server", "dep:ars-dom", "ars-dom/ssr"]
 # Pre-compiled CLDR data via ICU4X. Default backend on native targets and the
 # server-side rendering path. Use `--no-default-features --features web,ars-i18n/web-intl`
 # to swap icu4x for the browser-native Intl API on wasm32 builds.
 icu4x = ["ars-i18n/std", "ars-i18n/icu4x"]
 
 [dependencies]
-ars-a11y         = { path = "../ars-a11y" }
-ars-collections  = { path = "../ars-collections" }
-ars-components   = { path = "../ars-components" }
-ars-core         = { path = "../ars-core" }
-ars-dom          = { path = "../ars-dom", optional = true, default-features = false }
-ars-forms        = { path = "../ars-forms" }
-ars-i18n         = { path = "../ars-i18n", default-features = false }
-ars-interactions = { path = "../ars-interactions" }
-log              = { version = "0.4", default-features = false, optional = true }
+ars-a11y             = { path = "../ars-a11y" }
+ars-collections      = { path = "../ars-collections" }
+ars-components       = { path = "../ars-components" }
+ars-core             = { path = "../ars-core" }
+ars-dom              = { path = "../ars-dom", optional = true, default-features = false }
+ars-forms            = { path = "../ars-forms" }
+ars-i18n             = { path = "../ars-i18n", default-features = false }
+ars-interactions     = { path = "../ars-interactions" }
+log                  = { version = "0.4", default-features = false, optional = true }
+arboard              = { version = "3", optional = true }
+uuid                 = { version = "1", default-features = false, features = ["v4"], optional = true }
+rfd                  = { version = "0.17", optional = true }
+js-sys               = { version = "0.3", optional = true }
+wasm-bindgen         = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
 
 [dependencies.dioxus]
 version          = "0.7"
@@ -41,18 +55,25 @@ features         = ["macro", "signals", "hooks", "html"]
 version = "0.3"
 optional = true
 features = [
-    "console",
-    "CssStyleDeclaration",
-    "Document",
-    "Element",
-    "Event",
-    "EventTarget",
-    "FocusEvent",
-    "HtmlElement",
-    "KeyboardEvent",
-    "MouseEvent",
-    "PointerEvent",
-    "Window"
+  "Clipboard",
+  "console",
+  "Crypto",
+  "CssStyleDeclaration",
+  "DataTransfer",
+  "Document",
+  "DomRect",
+  "DragEvent",
+  "Element",
+  "Event",
+  "EventTarget",
+  "FocusEvent",
+  "HtmlElement",
+  "KeyboardEvent",
+  "MouseEvent",
+  "Navigator",
+  "Performance",
+  "PointerEvent",
+  "Window"
 ]
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

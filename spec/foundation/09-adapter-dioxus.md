@@ -1464,254 +1464,473 @@ pub mod select {
 
 ### 6.1 Platform Abstraction Trait
 
+#### 6.1.1 Supporting Types
+
+`Rect` comes from `ars_core::Rect` (foundation §1, geometry primitive
+shared across adapters). `FileRef` comes from `ars_forms::field::FileRef`.
+`DragItem` and `FileHandle` come from `ars_interactions` (foundation §5,
+drag-and-drop shared payloads). The adapter does **not** redefine any of
+these — re-using them keeps domain types consistent across components.
+
 ```rust
-/// Operations that differ between web and native platforms.
+/// Options for opening a platform file picker.
 ///
-/// **Note on `Send` bounds:** The futures returned by async methods (e.g.
-/// `set_clipboard`, `open_file_picker`) are `!Send` on WASM targets. On
-/// desktop, Dioxus uses a multi-threaded runtime where futures must be `Send`.
-/// When calling these methods on desktop, use `spawn` (Dioxus `spawn` runs
-/// on the current thread for `!Send` futures) to avoid `Send` bound errors.
-pub trait DioxusPlatform: Send + Sync + 'static {
-    /// Focus an element by its ID.
-    fn focus_element(&self, id: &str);
+/// Mirrors the subset of HTML `<input type="file">` configuration the
+/// adapter exposes. Web targets ignore these options because the real
+/// picker is hosted by the FileUpload component's hidden `<input>`;
+/// desktop targets translate them into an `rfd`-style native dialog
+/// when that implementation lands.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FilePickerOptions {
+    /// Accepted MIME types or extensions. Empty means accept any.
+    pub accept: Vec<String>,
 
-    /// Get the bounding rect of an element.
-    fn get_bounding_rect(&self, id: &str) -> Option<Rect>;
-
-    /// Scroll an element into view.
-    fn scroll_into_view(&self, id: &str);
-
-    /// Write text to the clipboard.
-    fn set_clipboard(&self, text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>>;
-
-    /// Open a native file picker.
-    fn open_file_picker(&self, options: FilePickerOptions) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>>;
-
-    /// Current timestamp in milliseconds.
-    fn now_ms(&self) -> f64;
-
-    /// Generate a UUID.
-    fn new_id(&self) -> String;
-
-    /// Create drag data from a platform-specific drag event.
-    ///
-    /// **Web:** Casts the event to `web_sys::DragEvent` and extracts
-    /// `DataTransfer` contents (files, items, types).
-    ///
-    /// **Desktop:** Extracts native file drop data from the OS event.
-    ///
-    /// Returns `None` if the event does not contain drag data.
-    fn create_drag_data(&self, event: &dyn Any) -> Option<DragData>;
+    /// Whether the user may select more than one file at once.
+    pub multiple: bool,
 }
 
-/// Web implementation using web-sys.
-#[cfg(feature = "web")]
-pub struct WebPlatform;
+/// Adapter-local drag payload extracted from a platform drag event.
+///
+/// `items` may be empty on `DragEnter`/`DragOver` if the browser
+/// restricts access to item content until drop (security restriction).
+/// `types` is always available and carries the MIME types advertised by
+/// the drag source.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DragData {
+    pub items: Vec<DragItem>,
+    pub types: Vec<String>,
+}
 
-#[cfg(feature = "web")]
-impl DioxusPlatform for WebPlatform {
-    fn focus_element(&self, id: &str) {
-        if let Some(window) = web_sys::window() {
-            if let Some(doc) = window.document() {
-                if let Some(el) = doc.get_element_by_id(id) {
-                    let _ = el.dyn_ref::<web_sys::HtmlElement>().map(|el| el.focus().ok());
-                }
+const DEFAULT_DRAG_TYPE_PROBES: &[&str] = &[
+    "text/plain",
+    "text/html",
+    "text/uri-list",
+    "application/json",
+];
+
+impl DragData {
+    /// Builds a `DragData` from Dioxus's unified drag event payload.
+    ///
+    /// Works on every target Dioxus supports: web, desktop, and SSR.
+    /// `types` is populated by probing the known public
+    /// `DataTransfer::get_data(format)` formats; `items` is populated
+    /// from `DataTransfer::files()`.
+    pub fn from_drag_data(event: &dioxus::events::DragData) -> Self {
+        let data_transfer = event.data_transfer();
+
+        let mut types = Vec::new();
+        for format in DEFAULT_DRAG_TYPE_PROBES {
+            if data_transfer.get_data(format).is_some() {
+                types.push(String::from(*format));
             }
         }
+
+        let mut items = Vec::new();
+        for file in data_transfer.files() {
+            let mime_type = file
+                .content_type()
+                .unwrap_or_else(|| String::from("application/octet-stream"));
+            let raw_path = file.path();
+            let handle = if raw_path.as_os_str().is_empty() {
+                FileHandle::opaque()
+            } else {
+                FileHandle::from_path(raw_path)
+            };
+
+            items.push(DragItem::File {
+                name: file.name(),
+                mime_type,
+                size: file.size(),
+                handle,
+            });
+        }
+
+        if !items.is_empty() {
+            types.push(String::from("Files"));
+        }
+
+        Self { items, types }
+    }
+}
+
+/// Platform-agnostic handle to a drag event.
+///
+/// Adapter glue wraps the framework's drag event in a
+/// `PlatformDragEvent` before passing it to
+/// `DioxusPlatform::create_drag_data`. The wrapper carries a borrowed
+/// `&dioxus::events::DragData` (via `from_dioxus`), the unified event
+/// payload Dioxus exposes across web and desktop. On every target an
+/// "empty" wrapper is constructible (via `empty`) for tests and for
+/// components that compile against the trait but never produce real
+/// drag data. The typed wrapper replaces the earlier `&dyn Any`
+/// parameter so a type mismatch becomes a compile error instead of a
+/// silent `None`. `Copy` lets callers pass the same wrapper to multiple
+/// platforms or helpers without clones.
+#[derive(Clone, Copy, Debug)]
+pub struct PlatformDragEvent<'a> {
+    inner: Option<&'a dioxus::events::DragData>,
+}
+
+impl<'a> PlatformDragEvent<'a> {
+    /// Constructs a payload-less drag event. Available on every target.
+    pub const fn empty() -> Self {
+        Self { inner: None }
     }
 
-    fn get_bounding_rect(&self, id: &str) -> Option<Rect> {
-        let el = web_sys::window()?
-            .document()?
-            .get_element_by_id(id)?;
-        let rect = el.get_bounding_client_rect();
-        Some(Rect {
-            x: rect.x(),
-            y: rect.y(),
-            width: rect.width(),
-            height: rect.height(),
+    /// Wraps a Dioxus drag event for `create_drag_data`.
+    pub const fn from_dioxus(event: &'a dioxus::events::DragData) -> Self {
+        Self { inner: Some(event) }
+    }
+
+    /// Returns the underlying Dioxus drag event if the wrapper was
+    /// built from one, otherwise `None`.
+    pub const fn as_dioxus(&self) -> Option<&'a dioxus::events::DragData> {
+        self.inner
+    }
+}
+```
+
+#### 6.1.2 Trait Definition
+
+```rust
+use std::rc::Rc;
+
+use dioxus::events::{MountedData, ScrollBehavior};
+
+/// Operations that differ between web and native platforms.
+///
+/// **Note on `Send` bounds.** The futures returned by async methods
+/// (`set_clipboard`, `open_file_picker`) are `!Send` on WASM. On desktop,
+/// Dioxus's runtime can run `!Send` futures on the current thread via
+/// `dioxus::spawn`, so the trait keeps a single uniform return type
+/// across platforms. Callers on desktop runtimes that require `Send`
+/// must route the future through `dioxus::spawn` or convert it
+/// themselves.
+pub trait DioxusPlatform: Send + Sync + 'static {
+    /// Focuses a mounted element through Dioxus's renderer-backed
+    /// element handle.
+    fn focus_mounted_element(
+        &self,
+        element: Rc<MountedData>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
+        Box::pin(async move {
+            element
+                .set_focus(true)
+                .await
+                .map_err(|err| err.to_string())
         })
     }
 
-    fn scroll_into_view(&self, id: &str) {
-        if let Some(window) = web_sys::window() {
-            if let Some(doc) = window.document() {
-                if let Some(el) = doc.get_element_by_id(id) {
-                    el.scroll_into_view();
-                }
-            }
-        }
+    /// Returns the viewport-relative bounding rectangle for a mounted
+    /// element through Dioxus's renderer-backed element handle.
+    fn get_mounted_bounding_rect(
+        &self,
+        element: Rc<MountedData>,
+    ) -> Pin<Box<dyn Future<Output = Option<Rect>>>> {
+        Box::pin(async move { element.get_client_rect().await.ok().map(rect_from_pixels) })
     }
 
+    /// Scrolls a mounted element into view through Dioxus's
+    /// renderer-backed element handle.
+    fn scroll_mounted_into_view(
+        &self,
+        element: Rc<MountedData>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
+        Box::pin(async move {
+            element
+                .scroll_to(ScrollBehavior::Instant)
+                .await
+                .map_err(|err| err.to_string())
+        })
+    }
+
+    /// Writes text to the system clipboard.
+    fn set_clipboard(&self, text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>>;
+
+    /// Opens a native file picker.
+    fn open_file_picker(
+        &self,
+        options: FilePickerOptions,
+    ) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>>;
+
+    /// Returns a monotonically non-decreasing duration since a
+    /// platform-defined start point.
+    ///
+    /// The start point is implementation-defined and intentionally
+    /// opaque (web: page-load via `performance.now()`; desktop:
+    /// process-local `Instant` start; null: always zero). Callers MUST
+    /// use this only for relative measurements — subtract two values
+    /// from the same platform instance to get an elapsed `Duration`.
+    /// Comparing values across platforms or processes is undefined.
+    fn monotonic_now(&self) -> Duration;
+
+    /// Generates a platform-scoped unique ID.
+    ///
+    /// Web returns a UUIDv4 from `crypto.randomUUID()`; desktop returns
+    /// `uuid::Uuid::new_v4()`; the null implementation returns a
+    /// sequential counter prefixed with `null-id-`.
+    fn new_id(&self) -> String;
+
+    /// Extracts adapter drag data from a platform-specific drag event.
+    ///
+    /// Returns `None` when the wrapper does not carry a Dioxus drag
+    /// event. The typed `PlatformDragEvent` wrapper enforces the
+    /// underlying event type at compile time.
+    fn create_drag_data(&self, event: PlatformDragEvent<'_>) -> Option<DragData>;
+}
+
+const fn rect_from_pixels(rect: dioxus::html::geometry::PixelsRect) -> Rect {
+    Rect {
+        x: rect.origin.x,
+        y: rect.origin.y,
+        width: rect.size.width,
+        height: rect.size.height,
+    }
+}
+```
+
+#### 6.1.3 NullPlatform
+
+`NullPlatform` is the no-op implementation used by tests, SSR, and the
+`mobile` feature until a dedicated mobile platform lands. It is always
+in scope regardless of feature gating.
+
+```rust
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NullPlatform;
+
+impl DioxusPlatform for NullPlatform {
+    fn focus_mounted_element(
+        &self,
+        _element: Rc<MountedData>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn get_mounted_bounding_rect(
+        &self,
+        _element: Rc<MountedData>,
+    ) -> Pin<Box<dyn Future<Output = Option<Rect>>>> {
+        Box::pin(async { None })
+    }
+
+    fn scroll_mounted_into_view(
+        &self,
+        _element: Rc<MountedData>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn set_clipboard(&self, _text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn open_file_picker(
+        &self,
+        _options: FilePickerOptions,
+    ) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>> {
+        Box::pin(async { Vec::new() })
+    }
+
+    fn monotonic_now(&self) -> Duration { Duration::ZERO }
+
+    fn new_id(&self) -> String {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        format!("null-id-{}", COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+
+    fn create_drag_data(&self, _event: PlatformDragEvent<'_>) -> Option<DragData> { None }
+}
+```
+
+#### 6.1.4 WebPlatform (wasm32-only)
+
+`WebPlatform` exists only when both `feature = "web"` and
+`target_arch = "wasm32"` are true — every method invokes browser APIs
+that have no meaningful native fallback. On non-wasm hosts (e.g.,
+`cargo check --features web` on a developer's Linux box) the type is
+not in scope and `default_dioxus_platform()` (§6.1.6) falls through to
+`NullPlatform`. This keeps build tooling green without silently
+shipping "clipboard writes succeed but do nothing" semantics into a
+misconfigured production build.
+
+```rust
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WebPlatform;
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+impl DioxusPlatform for WebPlatform {
     fn set_clipboard(&self, text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
         let text = text.to_string();
         Box::pin(async move {
-            let window = web_sys::window().ok_or("No window")?;
-            let clipboard = window.navigator().clipboard();
-            let promise = clipboard.write_text(&text);
+            let window = web_sys::window().ok_or_else(|| String::from("no window available"))?;
+            let promise = window.navigator().clipboard().write_text(&text);
             wasm_bindgen_futures::JsFuture::from(promise)
                 .await
                 .map(|_| ())
-                .map_err(|e| format!("{:?}", e))
+                .map_err(|err| format!("{err:?}"))
         })
     }
 
-    fn open_file_picker(&self, _options: FilePickerOptions) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>> {
-        Box::pin(async { vec![] }) // Uses hidden <input type="file"> in FileUpload component
+    fn open_file_picker(
+        &self,
+        _options: FilePickerOptions,
+    ) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>> {
+        // Web defers to the FileUpload component's hidden <input type="file">.
+        Box::pin(async { Vec::new() })
     }
 
-    /// Returns a monotonically increasing timestamp in milliseconds.
-    /// On web: relative to page load (via `performance.now()`).
-    /// Callers MUST use this only for relative duration measurements (end - start),
-    /// NOT for absolute timestamps or cross-platform timestamp comparison.
-    fn now_ms(&self) -> f64 {
-        web_sys::window()
-            .and_then(|w| w.performance())
-            .map(|p| p.now())
-            .expect("window.performance must be available on web targets")
+    fn monotonic_now(&self) -> Duration {
+        let millis = web_sys::window()
+            .and_then(|window| window.performance())
+            .map(|performance| performance.now())
+            .expect("window.performance must be available on web targets");
+        // Convert via `from_secs_f64(millis / 1000.0)` to preserve the
+        // sub-millisecond precision `performance.now()` exposes.
+        Duration::from_secs_f64(millis / 1000.0)
     }
 
     fn new_id(&self) -> String {
-        // Use crypto.randomUUID() on web
         web_sys::window()
-            .and_then(|w| w.crypto().ok())
-            .map(|c| c.random_uuid())
-            .expect("window.crypto must be available on web targets")
+            .map(|window| {
+                window
+                    .crypto()
+                    .expect("window.crypto must be available on web targets")
+                    .random_uuid()
+            })
+            .expect("window must be available on web targets")
     }
 
-    fn create_drag_data(&self, event: &dyn Any) -> Option<DragData> {
-        use wasm_bindgen::JsCast;
-        let drag_event = event.downcast_ref::<web_sys::DragEvent>()?;
-        let data_transfer = drag_event.data_transfer()?;
-        Some(DragData::from_web_data_transfer(&data_transfer))
+    fn create_drag_data(&self, event: PlatformDragEvent<'_>) -> Option<DragData> {
+        event.as_dioxus().map(DragData::from_drag_data)
     }
 }
+```
 
-/// Desktop implementation using native OS APIs.
+#### 6.1.5 DesktopPlatform
+
+```rust
 #[cfg(feature = "desktop")]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct DesktopPlatform;
 
 #[cfg(feature = "desktop")]
 impl DioxusPlatform for DesktopPlatform {
-    fn focus_element(&self, _id: &str) {
-        // Desktop: focus is managed by the native window system
-        // For Dioxus desktop, accessibility requires different approach
-    }
-
-    fn get_bounding_rect(&self, _id: &str) -> Option<Rect> {
-        // Web-only for v1. Desktop implementation requires AccessKit layout
-        // integration to obtain element geometry from the native accessibility
-        // tree. Dioxus desktop does not yet expose layout metrics through
-        // AccessKit's node bounds. Returns None — callers must handle gracefully.
-        log::warn!("get_bounding_rect not yet implemented for desktop platform");
-        None
-    }
-
-    fn scroll_into_view(&self, _id: &str) {
-        // Web-only for v1. Desktop implementation requires AccessKit's
-        // scroll-to-visible action or a native platform equivalent.
-        // Dioxus desktop accessibility integration is evolving.
-        log::warn!("scroll_into_view not yet implemented for desktop platform");
-    }
-
     fn set_clipboard(&self, text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
         let text = text.to_string();
         Box::pin(async move {
-            // Use arboard or copypasta crate
-            use arboard::Clipboard;
-            let mut cb = Clipboard::new().map_err(|e| e.to_string())?;
-            cb.set_text(&text).map_err(|e| e.to_string())
+            let mut clipboard = arboard::Clipboard::new().map_err(|err| err.to_string())?;
+            clipboard.set_text(&text).map_err(|err| err.to_string())
         })
     }
 
-    fn open_file_picker(&self, options: FilePickerOptions) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>> {
+    fn open_file_picker(
+        &self,
+        options: FilePickerOptions,
+    ) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>> {
         Box::pin(async move {
-            // Web-only for v1. Desktop implementation should use the `rfd`
-            // (Rust File Dialog) crate to open native OS file picker dialogs.
-            // Mapping: options.accept → rfd file filters, options.multiple →
-            // rfd::AsyncFileDialog::pick_files vs pick_file.
-            log::warn!("open_file_picker not yet implemented for desktop platform");
-            Vec::new()
+            let mut dialog = rfd::AsyncFileDialog::new();
+            let extensions = file_picker_filter_extensions(&options.accept);
+
+            if !extensions.is_empty() {
+                dialog = dialog.add_filter(file_picker_filter_name(&extensions), &extensions);
+            }
+
+            let handles = if options.multiple {
+                dialog.pick_files().await.unwrap_or_default()
+            } else {
+                dialog.pick_file().await.into_iter().collect()
+            };
+
+            handles
+                .into_iter()
+                .map(|file| file_ref_from_path(file.path()))
+                .collect()
         })
     }
 
-    /// Returns a monotonically increasing timestamp in milliseconds.
-    /// On desktop: milliseconds since UNIX epoch (via `SystemTime::now()`).
-    /// Callers MUST use this only for relative duration measurements (end - start),
-    /// NOT for absolute timestamps or cross-platform timestamp comparison.
-    fn now_ms(&self) -> f64 {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock must be after UNIX_EPOCH")
-            .as_millis() as f64
+    fn monotonic_now(&self) -> Duration {
+        static START: std::sync::LazyLock<std::time::Instant> =
+            std::sync::LazyLock::new(std::time::Instant::now);
+        START.elapsed()
     }
 
     fn new_id(&self) -> String {
         uuid::Uuid::new_v4().to_string()
     }
 
-    fn create_drag_data(&self, event: &dyn Any) -> Option<DragData> {
-        // Web-only for v1. Desktop implementation requires extracting drag
-        // payload from native OS drag events (NSPasteboard on macOS,
-        // IDataObject on Windows, X11 selections on Linux). Dioxus desktop
-        // does not yet expose native drag event data to Rust components.
-        log::warn!("create_drag_data not yet implemented for desktop platform");
-        None
+    fn create_drag_data(&self, event: PlatformDragEvent<'_>) -> Option<DragData> {
+        event.as_dioxus().map(DragData::from_drag_data)
     }
 }
+```
 
-/// No-op platform for testing and non-interactive environments.
-pub struct NullPlatform;
+#### 6.1.6 default_dioxus_platform
 
-impl DioxusPlatform for NullPlatform {
-    fn focus_element(&self, _id: &str) {}
-    fn get_bounding_rect(&self, _id: &str) -> Option<Rect> { None }
-    fn scroll_into_view(&self, _id: &str) {}
-    fn set_clipboard(&self, _text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
-        Box::pin(async { Ok(()) })
-    }
-    fn open_file_picker(&self, _options: FilePickerOptions) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>> {
-        Box::pin(async { vec![] })
-    }
-    fn now_ms(&self) -> f64 { 0.0 }
-    fn new_id(&self) -> String {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        static COUNTER: AtomicUsize = AtomicUsize::new(0);
-        format!("null-id-{}", COUNTER.fetch_add(1, Ordering::Relaxed))
-    }
-    fn create_drag_data(&self, _event: &dyn Any) -> Option<DragData> { None }
+`default_dioxus_platform()` returns the `DioxusPlatform` chosen by
+feature gating. It is the canonical out-of-component constructor,
+intended for test harnesses, SSR bootstrap, and benchmarks that need a
+platform handle outside a Dioxus render scope. Inside components,
+prefer `use_platform()` (§6.2).
+
+```rust
+/// Resolution order:
+///
+/// 1. `WebPlatform` when `web` is on **and** the build target is wasm32.
+/// 2. `DesktopPlatform` when `desktop` is on (and we did not match step 1).
+/// 3. `NullPlatform` otherwise.
+///
+/// `web` on a non-wasm host falls through to step 2 or 3 — `WebPlatform`
+/// only exists on wasm32. The `mobile` feature also currently lands at
+/// step 3 until a dedicated mobile platform is added.
+#[must_use]
+pub fn default_dioxus_platform() -> Arc<dyn DioxusPlatform> {
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    { Arc::new(WebPlatform) }
+
+    #[cfg(all(
+        feature = "desktop",
+        not(all(feature = "web", target_arch = "wasm32"))
+    ))]
+    { Arc::new(DesktopPlatform) }
+
+    #[cfg(all(
+        not(all(feature = "web", target_arch = "wasm32")),
+        not(feature = "desktop")
+    ))]
+    { Arc::new(NullPlatform) }
 }
 ```
 
 ### 6.2 Platform Hook (Dioxus-Specific)
 
-> **Note:** The `DioxusPlatform` trait object is
-> provided by `ArsProvider` (§16) via the `dioxus_platform` field on `ArsContext`.
-> The `DioxusPlatform` trait, `WebPlatform`, `DesktopPlatform`, and `NullPlatform`
-> implementations remain defined in §6.1 above. The core `PlatformEffects` trait
-> (focus, timers, scroll-lock, positioning) is also bundled into `ArsProvider`.
-> `DioxusPlatform` is a separate, Dioxus-specific abstraction for platform capabilities
-> not covered by `PlatformEffects` (file pickers, clipboard, drag data).
+> **Note:** The `DioxusPlatform` trait object is provided by `ArsProvider`
+> (§16) via the `dioxus_platform` field on `ArsContext`. The `DioxusPlatform`
+> trait, `WebPlatform`, `DesktopPlatform`, and `NullPlatform` implementations
+> remain defined in §6.1 above. The core `PlatformEffects` trait (focus,
+> timers, scroll-lock, positioning) is also bundled into `ArsProvider`.
+> `DioxusPlatform` is a separate, Dioxus-specific abstraction for platform
+> capabilities not covered by `PlatformEffects` (file pickers, clipboard,
+> drag data).
 
 ```rust
-/// Access Dioxus-specific platform services from `ArsContext`.
-/// Fallback: Web > Desktop > NullPlatform (when no `ArsProvider` is present).
-/// Note: The `mobile` feature currently falls through to `NullPlatform`.
-/// When a dedicated `MobilePlatform` is added, update this function
-/// with a `#[cfg(feature = "mobile")]` arm.
+/// Resolves the active `DioxusPlatform` from the surrounding `ArsProvider`
+/// context.
+///
+/// When no `ArsProvider` is mounted, falls back to
+/// [`default_dioxus_platform`] using the resolution order
+/// **`web` → `desktop` → `NullPlatform`**. The `mobile` feature currently
+/// falls through to `NullPlatform`; when a dedicated mobile platform is
+/// added, update [`default_dioxus_platform`] with a
+/// `#[cfg(feature = "mobile")]` arm.
 pub fn use_platform() -> Arc<dyn DioxusPlatform> {
     try_use_context::<ArsContext>()
         .map(|ctx| Arc::clone(&ctx.dioxus_platform))
         .unwrap_or_else(|| {
             warn_missing_provider("use_platform");
-            #[cfg(feature = "web")]
-            { Arc::new(WebPlatform) }
-            #[cfg(all(feature = "desktop", not(feature = "web")))]
-            { Arc::new(DesktopPlatform) }
-            #[cfg(not(any(feature = "web", feature = "desktop")))]
-            { Arc::new(NullPlatform) }
+            default_dioxus_platform()
         })
 }
 ```

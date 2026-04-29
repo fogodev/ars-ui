@@ -266,10 +266,7 @@ mod wasm_tests {
     use super::{
         SafeEventListener, SafeEventListenerOptions, use_safe_event_listener,
         use_safe_event_listeners,
-        web::{
-            ListenerClosureHandle, RegisteredListener, guarded_listener_closure,
-            remove_previous_listeners,
-        },
+        web::{RegisteredListener, guarded_listener_closure, remove_previous_listeners},
     };
 
     wasm_bindgen_test_configure!(run_in_browser);

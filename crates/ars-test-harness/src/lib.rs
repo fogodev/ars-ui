@@ -2793,7 +2793,7 @@ fn is_tabbable_element(element: &web_sys::Element) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::{any::Any, future::Future, panic::AssertUnwindSafe, pin::Pin, str::FromStr};
+    use std::{any::Any, panic::AssertUnwindSafe, pin::Pin, str::FromStr};
     #[cfg(not(target_arch = "wasm32"))]
     use std::{
         cell::Cell,
