@@ -340,11 +340,11 @@ fn lint_block(content: &str) -> Vec<(usize, String)> {
             }
         }
 
-        // Rule R3: `pub fn` and `pub const fn` need a `///` above. Skip
-        // function bodies — only declaration lines are checked.
-        if (line.starts_with("pub fn ") || line.starts_with("pub const fn "))
-            && !preceded_by_doc(&lines, idx)
-        {
+        // Rule R3: any public fn declaration needs a `///` above. Covers
+        // every combination of `const`, `async`, `unsafe`, and
+        // `extern "ABI"` modifiers between `pub` and `fn`. Only declaration
+        // lines are checked, not function bodies.
+        if is_pub_fn_decl(line) && !preceded_by_doc(&lines, idx) {
             findings.push((
                 idx,
                 "public fn declaration is missing a `///` doc comment".to_string(),
@@ -352,11 +352,10 @@ fn lint_block(content: &str) -> Vec<(usize, String)> {
         }
 
         // Rule R4: public fields (lines like `pub name: Type`) inside a
-        // struct body must have a `///` above. Skip lines inside fn bodies
-        // by requiring `pub field: Type` form (not `pub fn ...`).
+        // struct body must have a `///` above. Skip every public fn shape
+        // (covered by R3) and other top-level public items.
         if line.starts_with("pub ")
-            && !line.starts_with("pub fn ")
-            && !line.starts_with("pub const fn ")
+            && !is_pub_fn_decl(line)
             && !line.starts_with("pub struct ")
             && !line.starts_with("pub enum ")
             && !line.starts_with("pub mod ")
@@ -376,6 +375,47 @@ fn lint_block(content: &str) -> Vec<(usize, String)> {
     findings.extend(check_enum_variants(&lines));
 
     findings
+}
+
+/// Returns `true` if `line` is a public fn declaration in any of its
+/// permitted shapes:
+///
+/// - `pub fn name(...)`
+/// - `pub const fn name(...)`
+/// - `pub async fn name(...)`
+/// - `pub unsafe fn name(...)`
+/// - `pub extern "ABI" fn name(...)` (or `pub extern fn ...`)
+/// - any combination of `const`, `async`, `unsafe`, `extern "ABI"` modifiers
+///   between `pub` and `fn` (in source-legal orderings)
+///
+/// Used by Rule R3 (mandatory `///` doc comment on public fn) and by
+/// Rule R4 (exclude every public fn shape from the field-doc check).
+///
+/// The check tokenises the line on whitespace and walks the modifier
+/// sequence between `pub` and `fn`. An unrecognised modifier
+/// short-circuits to `false`, which keeps R4 from over-broadly excluding
+/// declarations that aren't actually fn lines.
+fn is_pub_fn_decl(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix("pub ") else {
+        return false;
+    };
+
+    let mut tokens = rest.split_whitespace();
+
+    while let Some(tok) = tokens.next() {
+        match tok {
+            "fn" => return true,
+            "const" | "async" | "unsafe" => {}
+            "extern" => match tokens.next() {
+                Some("fn") => return true,
+                Some(next) if next.starts_with('"') => {}
+                _ => return false,
+            },
+            _ => return false,
+        }
+    }
+
+    false
 }
 
 /// Returns `true` if `lines[idx]` is preceded (after skipping blank lines and
@@ -1422,6 +1462,171 @@ impl Api {
             run(md)
                 .iter()
                 .any(|m| m.contains("public fn declaration is missing"))
+        );
+    }
+
+    #[test]
+    fn flags_missing_async_fn_doc() {
+        // Regression for the P2 review on PR #621: Rule R3 originally only
+        // checked `pub fn` and `pub const fn`, missing every other modifier
+        // shape. An undocumented `pub async fn` must now be flagged just
+        // like a plain `pub fn`.
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// Api.
+#[derive(Clone, Debug)]
+pub struct Api { }
+
+impl Api {
+    pub async fn fetch(&self) -> u32 { 0 }
+}
+```
+";
+
+        assert!(
+            run(md)
+                .iter()
+                .any(|m| m.contains("public fn declaration is missing")),
+            "expected `pub async fn fetch` to be flagged"
+        );
+    }
+
+    #[test]
+    fn accepts_documented_async_fn() {
+        // Companion to `flags_missing_async_fn_doc`: a documented
+        // `pub async fn` must NOT trigger the missing-doc rule, and must
+        // not be misinterpreted as a public field by Rule R4.
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// Api.
+#[derive(Clone, Debug)]
+pub struct Api { }
+
+impl Api {
+    /// Fetches the value asynchronously.
+    pub async fn fetch(&self) -> u32 { 0 }
+}
+```
+";
+
+        let messages = run(md);
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.contains("public fn declaration is missing")),
+            "documented async fn must not be flagged, got {messages:?}"
+        );
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.contains("public field is missing")),
+            "documented async fn must not be misclassified as a field, got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn flags_missing_unsafe_fn_doc() {
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// Api.
+#[derive(Clone, Debug)]
+pub struct Api { }
+
+impl Api {
+    pub unsafe fn raw(&self) {}
+}
+```
+";
+
+        assert!(
+            run(md)
+                .iter()
+                .any(|m| m.contains("public fn declaration is missing")),
+            "expected `pub unsafe fn raw` to be flagged"
+        );
+    }
+
+    #[test]
+    fn flags_missing_extern_fn_doc() {
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// Api.
+#[derive(Clone, Debug)]
+pub struct Api { }
+
+impl Api {
+    pub extern \"C\" fn callback() {}
+}
+```
+";
+
+        assert!(
+            run(md)
+                .iter()
+                .any(|m| m.contains("public fn declaration is missing")),
+            "expected `pub extern \"C\" fn callback` to be flagged"
+        );
+    }
+
+    #[test]
+    fn flags_missing_extern_fn_without_abi_doc() {
+        // `pub extern fn` (without an ABI string literal) defaults to
+        // `extern "C"`. Covers the branch in `is_pub_fn_decl` where the
+        // token after `extern` is `fn`, not a string literal.
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// Api.
+#[derive(Clone, Debug)]
+pub struct Api { }
+
+impl Api {
+    pub extern fn callback() {}
+}
+```
+";
+
+        assert!(
+            run(md)
+                .iter()
+                .any(|m| m.contains("public fn declaration is missing")),
+            "expected `pub extern fn callback` (no ABI) to be flagged"
+        );
+    }
+
+    #[test]
+    fn flags_missing_combined_modifier_fn_doc() {
+        // Rule R3 must accept any source-legal combination of fn modifiers
+        // (here `unsafe extern "C"`), not just plain `pub fn` /
+        // `pub const fn`.
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// Api.
+#[derive(Clone, Debug)]
+pub struct Api { }
+
+impl Api {
+    pub unsafe extern \"C\" fn trampoline() {}
+}
+```
+";
+
+        assert!(
+            run(md)
+                .iter()
+                .any(|m| m.contains("public fn declaration is missing")),
+            "expected `pub unsafe extern \"C\" fn trampoline` to be flagged"
         );
     }
 }
