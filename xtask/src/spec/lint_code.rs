@@ -184,9 +184,8 @@ struct CodeBlock {
     content: String,
 }
 
-/// Extracts all fenced Rust code blocks under `### 1.1 Props` and
-/// `### 1.2 Connect / API` headings (level-3 ATX headings starting with
-/// `1.1 ` or `1.2 `).
+/// Extracts all fenced Rust code blocks under the explicit `### 1.1 Props`
+/// and `### 1.2 Connect / API` headings.
 fn extract_api_rust_blocks(source: &str) -> Vec<CodeBlock> {
     let mut blocks = Vec::new();
 
@@ -203,14 +202,13 @@ fn extract_api_rust_blocks(source: &str) -> Vec<CodeBlock> {
 
         let trimmed = line.trim_start();
 
-        if trimmed.starts_with("###") {
+        if let Some((level, body)) = parse_atx_heading(trimmed) {
             // Section heading — re-evaluate target-section state.
-            let body = trimmed.trim_start_matches('#').trim();
-
-            in_target_section = body.starts_with("1.1 ")
-                || body.starts_with("1.2 ")
-                || body == "1.1 Props"
-                || body == "1.2 Connect / API";
+            if level == 3 {
+                in_target_section = is_target_api_heading(body);
+            } else if level < 3 {
+                in_target_section = false;
+            }
         } else if trimmed.starts_with("##") {
             // Higher-or-equal heading (level 1 or 2) ends any target section.
             in_target_section = false;
@@ -247,6 +245,33 @@ fn extract_api_rust_blocks(source: &str) -> Vec<CodeBlock> {
     }
 
     blocks
+}
+
+/// Parses an ATX heading into `(level, body)`.
+fn parse_atx_heading(line: &str) -> Option<(usize, &str)> {
+    let level = line.chars().take_while(|&c| c == '#').count();
+
+    if level == 0 || level > 6 {
+        return None;
+    }
+
+    if !line[level..].starts_with(char::is_whitespace) {
+        return None;
+    }
+
+    let body = line[level..].trim();
+
+    if body.is_empty() {
+        return None;
+    }
+
+    Some((level, body.trim_end_matches('#').trim_end()))
+}
+
+/// Returns whether a level-3 heading is one of the spec sections linted for
+/// component public API hygiene.
+fn is_target_api_heading(body: &str) -> bool {
+    body == "1.1 Props" || body == "1.2 Connect / API"
 }
 
 /// Returns `(line_offset_within_block, message)` pairs for any rule violations.
@@ -400,9 +425,9 @@ fn has_manual_impl(lines: &[&str], trait_name: &str, type_name: &str) -> bool {
         .any(|line| needles.iter().any(|n| line.contains(n.as_str())))
 }
 
-/// Collects derive identifiers from any `#[derive(...)]` attribute lines
-/// appearing immediately above `idx` (interleaved with other `#[...]`
-/// attributes is allowed).
+/// Collects derive identifiers from any `#[derive(...)]` attribute lines in
+/// the contiguous attribute block immediately above `idx` (interleaved with
+/// other `#[...]` attributes is allowed).
 fn collect_derives<'a>(lines: &'a [&str], idx: usize) -> Vec<&'a str> {
     let mut out = Vec::new();
 
@@ -427,6 +452,8 @@ fn collect_derives<'a>(lines: &'a [&str], idx: usize) -> Vec<&'a str> {
                     out.push(tok);
                 }
             }
+        } else if !prev.starts_with("#[") && !prev.starts_with("#![") {
+            break;
         }
     }
 
@@ -520,6 +547,25 @@ mod tests {
             .into_iter()
             .map(|f| f.message)
             .collect()
+    }
+
+    #[test]
+    fn extracts_explicit_props_and_api_sections() {
+        let md = "\
+### 1.1 Props
+
+```rust
+pub struct Props {}
+```
+
+### 1.2 Connect / API
+
+```rust
+pub struct Api {}
+```
+";
+
+        assert_eq!(extract_api_rust_blocks(md).len(), 2);
     }
 
     #[test]
@@ -712,6 +758,53 @@ pub struct Demo {}
 ";
 
         assert!(run(md).is_empty());
+    }
+
+    #[test]
+    fn ignores_state_machine_sections_that_share_numbering_prefix() {
+        let md = "\
+### 1.1 States
+
+```rust
+pub struct InternalState {
+    pub selected: bool,
+}
+```
+
+### 1.2 Events
+
+```rust
+pub enum InternalEvent {
+    Open,
+}
+```
+";
+
+        assert!(run(md).is_empty());
+    }
+
+    #[test]
+    fn does_not_inherit_derives_from_previous_item() {
+        let md = "\
+### 1.1 Props
+
+```rust
+/// Prior helper.
+#[derive(Clone, Debug)]
+pub struct Helper;
+
+/// Props for the component.
+#[cfg(feature = \"std\")]
+pub struct Props {
+}
+```
+";
+
+        assert!(
+            run(md)
+                .iter()
+                .any(|m| m.contains("`Props` must implement `Debug`"))
+        );
     }
 
     #[test]
