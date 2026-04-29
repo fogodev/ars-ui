@@ -21,9 +21,10 @@ A modal or non-modal overlay that requires user interaction before returning to 
 
 ```rust
 /// States for the `Dialog` component.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum State {
     /// The dialog is closed.
+    #[default]
     Closed,
     /// The dialog is open.
     Open,
@@ -32,9 +33,15 @@ pub enum State {
 
 ### 1.2 Events
 
+The event enum contains only state-control events. Animation lifecycle
+(mount, unmount, animation start/end) is owned entirely by the
+[`Presence`](./presence.md) machine and composed at the adapter layer (see
+[§5](#5-animation-lifecycle-presence-composition)); Dialog never reacts to
+Presence events directly.
+
 ```rust
 /// Events for the `Dialog` component.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event {
     /// Open the dialog.
     Open,
@@ -46,13 +53,18 @@ pub enum Event {
     CloseOnBackdropClick,
     /// Close the dialog on escape key.
     CloseOnEscape,
-    // NOTE: AnimationStart and AnimationEnd are NOT part of the Dialog event enum.
-    // The Presence machine (presence.md) handles animation lifecycle
-    // independently. Dialog only reacts to Presence completion via PresenceComplete.
     /// Register the title of the dialog.
     RegisterTitle,
     /// Register the description of the dialog.
     RegisterDescription,
+    /// Re-apply context-backed `Props` fields after a prop change. Emitted
+    /// from [`on_props_changed`](#19-full-machine-implementation) when any
+    /// non-`open` field that drives `Context` differs between old and new
+    /// props (`modal`, `close_on_backdrop`, `close_on_escape`,
+    /// `prevent_scroll`, `restore_focus`, `initial_focus`, `final_focus`,
+    /// `role`). The transition is context-only — no state change, no
+    /// adapter intents emitted.
+    SyncProps,
 }
 ```
 
@@ -80,14 +92,14 @@ pub struct Context {
     pub final_focus: Option<FocusTarget>,
     /// The role of the dialog.
     pub role: Role,
-    /// The ID of the trigger element.
-    pub trigger_id: String,
-    /// The ID of the content element.
-    pub content_id: String,
-    /// The ID of the title element.
-    pub title_id: String,
-    /// The ID of the description element.
-    pub description_id: String,
+    /// Hydration-stable IDs derived from `Props::id`. Adapters render
+    /// each part's `id` attribute via `ids.part("trigger" | "content" |
+    /// "title" | "description")`; ARIA wiring (`aria-controls`,
+    /// `aria-labelledby`, `aria-describedby`) reads from the same
+    /// `part(...)` lookup. This matches the workspace convention shared
+    /// with `form`, `field`, `fieldset`, `checkbox`, `textarea`,
+    /// `text_field`, and `date_field`.
+    pub ids: ComponentIds,
     /// Whether the dialog has a title.
     pub has_title: bool,
     /// Whether the dialog has a description.
@@ -99,12 +111,26 @@ pub struct Context {
 }
 
 /// The role of the dialog.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Role {
     /// The dialog role.
+    #[default]
     Dialog,
     /// The alert dialog role.
     AlertDialog,
+}
+
+impl Role {
+    /// ARIA role token rendered on the content element. Single source of
+    /// truth for the `role="dialog"` / `role="alertdialog"` mapping; both
+    /// the agnostic `Api::content_attrs` and adapter-side test fixtures
+    /// must read the role string through this method.
+    pub const fn as_aria_role(self) -> &'static str {
+        match self {
+            Self::Dialog => "dialog",
+            Self::AlertDialog => "alertdialog",
+        }
+    }
 }
 
 // `FocusTarget` — defined in `03-accessibility.md`
@@ -118,18 +144,28 @@ pub enum Role {
 /// to let consumers intercept and cancel the default close behavior.
 ///
 /// Example: preventing close when there are unsaved changes.
-#[derive(Clone, Debug)]
+///
+/// The veto flag is shared through `Arc<AtomicBool>` so the value can be
+/// passed by-clone into [`Callback`], which requires `Args: 'static` and
+/// therefore cannot accept `&mut PreventableEvent`. The same shared-veto
+/// pattern is used by [`DismissAttempt`](../utility/dismissable.md).
+#[derive(Clone, Debug, Default)]
 pub struct PreventableEvent {
-    /// Whether the default behavior has been prevented.
-    prevented: bool,
+    veto: Arc<AtomicBool>,
 }
 
 impl PreventableEvent {
-    pub fn new() -> Self { Self { prevented: false } }
-    /// Prevent the default behavior (e.g., prevent dialog from closing).
-    pub fn prevent_default(&mut self) { self.prevented = true; }
-    /// Whether `prevent_default()` was called.
-    pub fn is_default_prevented(&self) -> bool { self.prevented }
+    pub fn new() -> Self {
+        Self { veto: Arc::new(AtomicBool::new(false)) }
+    }
+    /// Prevent the default behavior (e.g., prevent dialog from closing). Idempotent.
+    pub fn prevent_default(&self) {
+        self.veto.store(true, Ordering::SeqCst);
+    }
+    /// Whether `prevent_default()` was called on this event or any of its clones.
+    pub fn is_default_prevented(&self) -> bool {
+        self.veto.load(Ordering::SeqCst)
+    }
 }
 
 /// The props of the dialog.
@@ -170,13 +206,17 @@ pub struct Props {
     /// Fires after the transition with the new open state value.
     pub on_open_change: Option<Callback<bool>>,
     /// Callback invoked when Escape is pressed while the dialog is open.
-    /// Call `event.prevent_default()` to prevent the dialog from closing.
-    /// Fires before the close transition — if prevented, the transition is cancelled.
-    pub on_escape_key_down: Option<Callback<PreventableEvent>>,
+    /// The adapter passes a clone of the [`PreventableEvent`] it constructed;
+    /// the consumer may call `event.prevent_default()` to prevent the dialog
+    /// from closing (the veto flag is shared between clones). Fires before
+    /// the close transition — if prevented, the transition is cancelled.
+    pub on_escape_key_down: Option<Callback<dyn Fn(PreventableEvent) + Send + Sync>>,
     /// Callback invoked when a pointer down or focus event occurs outside the dialog content.
-    /// Call `event.prevent_default()` to prevent the dialog from closing.
-    /// Fires before the close transition — if prevented, the transition is cancelled.
-    pub on_interact_outside: Option<Callback<PreventableEvent>>,
+    /// The adapter passes a clone of the [`PreventableEvent`] it constructed;
+    /// the consumer may call `event.prevent_default()` to prevent the dialog
+    /// from closing (the veto flag is shared between clones). Fires before
+    /// the close transition — if prevented, the transition is cancelled.
+    pub on_interact_outside: Option<Callback<dyn Fn(PreventableEvent) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -203,6 +243,23 @@ impl Default for Props {
     }
 }
 ```
+
+`Props` also exposes a fluent builder following the workspace convention
+established by [`Presence`](./presence.md) and [`Tooltip`](./tooltip.md):
+`Props::new()` returns the default value, and a chained setter exists for
+each field (`.id(...)`, `.open(...)`, `.modal(...)`, `.on_open_change(...)`,
+…). The builder is purely ergonomic — it carries no semantics beyond
+mutating the returned `Props`.
+
+> **Adapter-only props.** `lazy_mount` and `unmount_on_exit` are _adapter
+> hints_: they configure how the framework adapter composes with
+> [`Presence`](./presence.md) (deferred content rendering and
+> unmount-after-exit-animation respectively) and **do not affect the
+> agnostic state machine**. `transition()` does not read either flag, and
+> they are not reflected in any [§1.11](#111-adapter-intent-contract)
+> intent. Adapters access them via `Api::lazy_mount()` /
+> `Api::unmount_on_exit()` (or directly via `props`) when wiring the
+> Presence composition described in [§5](#5-animation-lifecycle-presence-composition).
 
 ### 1.5 Scroll Lock Restoration Edge Cases
 
@@ -323,7 +380,12 @@ pub fn dialog_stack_pop(dialog_id: &str) {
 3. **Clean slate on empty**: When the last dialog closes and the stack is empty, ALL `inert` attributes set by the dialog system are cleared. No elements remain inert.
 4. **Stack ordering**: Dialogs are always pushed/popped in LIFO order. If a non-topmost dialog closes (unusual but possible via programmatic close), it is removed from its position and inert is recalculated for the current top.
 
-**Dialog Open/Close Integration**: The dialog state machine's `Open` and `Close` transitions MUST call `dialog_stack_push()` and `dialog_stack_pop()` respectively as part of their `PendingEffect` setup/cleanup.
+**Dialog Open/Close Integration**: The agnostic state machine emits the
+`dialog-set-background-inert` and `dialog-remove-background-inert` intents (see
+[§1.11](#111-adapter-intent-contract)). When the adapter receives those intents it MUST
+call `dialog_stack_push()` / `dialog_stack_pop()`, passing identifiers it owns
+internally — the dialog stack is an adapter-internal data structure. The agnostic core
+itself never references the stack.
 
 #### 1.7.2 Escape Key Behavior in Nested Overlays
 
@@ -345,7 +407,14 @@ When multiple dialogs are stacked, Escape key handling MUST route to the topmost
 
 **Rapid Escape deduplication**: No special deduplication logic is needed for rapid repeated Escape presses. This is naturally handled by the state machine: the first Escape transitions the topmost dialog from `Open → Closing` (or directly to `Closed` if animations are skipped). A second Escape arriving while the dialog is in `Closing` or `Closed` state is a no-op — the state machine has no valid transition for `Event::Escape` in those states, so it is silently ignored.
 
-**Pop timing guarantee**: `dialog_stack_pop()` is executed as a `PendingEffect` during the close transition. Because effects run synchronously before the next event is processed, the stack is updated (and the previously-second dialog becomes topmost) before any subsequent Escape `keydown` event can be handled. This ensures that the second Escape press — if it arrives after the first dialog's close effect runs — correctly targets the next dialog in the stack, not the already-closing one.
+**Pop timing guarantee**: The adapter calls `dialog_stack_pop()` while handling the
+`dialog-remove-background-inert` adapter intent (see
+[§1.11](#111-adapter-intent-contract)) during the close transition. Because adapter
+effect handlers run synchronously before the next event is processed, the stack is
+updated (and the previously-second dialog becomes topmost) before any subsequent
+Escape `keydown` event can be handled. This ensures that the second Escape press — if
+it arrives after the first dialog's close intent runs — correctly targets the next
+dialog in the stack, not the already-closing one.
 
 #### 1.7.4 Focus Restoration Safety for Nested Dialogs
 
@@ -394,7 +463,13 @@ When using lazy content loading, content MUST be fully rendered before the enter
 
 #### 1.8.2 Focus Escape During Animation
 
-`FocusScope` MUST NOT activate until the enter animation has started (after `animationstart` fires). During any animation delay, set `tabindex="-1"` on the container to prevent focus escape to background elements.
+`FocusScope` MUST NOT activate until the enter animation has started (after
+`animationstart` fires). The Content part already carries a static
+`tabindex="-1"` (see [§1.10 `content_attrs`](#110-connect--api)), so during
+the animation delay the adapter simply moves focus to the Content handle —
+no dynamic tabindex toggling is required. The `tabindex="-1"` makes Content
+programmatically focusable (`.focus()` works) without making it a Tab stop,
+which is the correct steady-state behaviour for a `<div role="dialog">`.
 
 #### 1.8.3 FocusScope Activation Lifecycle
 
@@ -407,13 +482,19 @@ The following sequence governs FocusScope activation for dialog overlays:
 
 ### 1.9 Full Machine Implementation
 
-````rust
-use ars_core::{TransitionPlan, PendingEffect, Bindable, AttrMap};
+The agnostic core emits **payload-free named effects** only. Adapters subscribe to these
+names and resolve element targets through their captured framework handles
+(`NodeRef<T>` in Leptos, `MountedData` / `Signal<Option<MountedData>>` in Dioxus) — never
+through ID lookup. See [§1.11 Adapter intent contract](#111-adapter-intent-contract) for
+the per-name contract.
+
+```rust
+use ars_core::{ComponentIds, Env, Machine as MachineTrait, PendingEffect, TransitionPlan};
 
 /// The machine for the `Dialog` component.
 pub struct Machine;
 
-impl ars_core::Machine for Machine {
+impl MachineTrait for Machine {
     type State = State;
     type Event = Event;
     type Context = Context;
@@ -421,31 +502,33 @@ impl ars_core::Machine for Machine {
     type Messages = Messages;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
+    fn init(
+        props: &Self::Props,
+        env: &Env,
+        messages: &Self::Messages,
+    ) -> (Self::State, Self::Context) {
         let open = props.open.unwrap_or(props.default_open);
         let state = if open { State::Open } else { State::Closed };
         let ids = ComponentIds::from_id(&props.id);
-        let locale = env.locale.clone();
-        let messages = messages.clone();
-        (state, Context {
-            open,
-            modal: props.modal,
-            close_on_backdrop: props.close_on_backdrop,
-            close_on_escape: props.close_on_escape,
-            prevent_scroll: props.prevent_scroll,
-            restore_focus: props.restore_focus,
-            initial_focus: props.initial_focus.clone(),
-            final_focus: props.final_focus.clone(),
-            role: props.role.clone(),
-            trigger_id: ids.part("trigger"),
-            content_id: ids.part("content"),
-            title_id: ids.part("title"),
-            description_id: ids.part("description"),
-            has_title: false,
-            has_description: false,
-            locale,
-            messages,
-        })
+        (
+            state,
+            Context {
+                open,
+                modal: props.modal,
+                close_on_backdrop: props.close_on_backdrop,
+                close_on_escape: props.close_on_escape,
+                prevent_scroll: props.prevent_scroll,
+                restore_focus: props.restore_focus,
+                initial_focus: props.initial_focus,
+                final_focus: props.final_focus,
+                role: props.role,
+                ids,
+                has_title: false,
+                has_description: false,
+                locale: env.locale.clone(),
+                messages: messages.clone(),
+            },
+        )
     }
 
     fn transition(
@@ -456,117 +539,86 @@ impl ars_core::Machine for Machine {
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
             (State::Closed, Event::Open | Event::Toggle) => {
-                Some(TransitionPlan::to(State::Open)
-                    .apply(|ctx| { ctx.open = true; })
-                    .with_effect(PendingEffect::new("prevent-scroll", |ctx, props, _send| {
-                        if props.prevent_scroll {
-                            // Scroll lock implementation:
-                            // 1. Set `overflow: hidden; position: fixed; width: 100vw` on document element.
-                            // 2. Measure `window.scrollY` before locking and restore after unlocking.
-                            // 3. Nested scrollable containers inside the dialog MUST remain scrollable.
-                            // 4. When multiple modals stack, only the topmost modal controls the scroll lock.
-                            let restore = prevent_body_scroll();
-                            Box::new(restore)
-                        } else {
-                            no_cleanup()
-                        }
-                    }))
-                    .with_effect(PendingEffect::new("focus-management", |ctx, props, _send| {
-                        let initial = props.initial_focus.clone();
-                        let content_id = ctx.content_id.clone();
-                        focus_initial(&content_id, initial.as_ref());
-                        let trigger_id = ctx.trigger_id.clone();
-                        let restore = props.restore_focus;
-                        let final_focus = props.final_focus.clone();
-                        Box::new(move || {
-                            if restore {
-                                focus_final(&trigger_id, final_focus.as_ref());
-                            }
-                        })
-                    }))
-                    .with_effect(PendingEffect::new("set_background_inert", |_ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        let cleanup = platform.set_background_inert("ars-portal-root");
-                        cleanup
-                    }))
-                    // The cleanup returned by `set_background_inert()` is stored by the
-                    // adapter's PendingEffect lifecycle and runs automatically when this
-                    // effect is replaced or the dialog leaves `Open`. That cleanup is the
-                    // authoritative teardown path for native inert and polyfill state.
-                    // ── Adapter-level static dialog stack specification ──
-                    //
-                    // Maintain a static `DIALOG_STACK: Vec<DialogId>` at the adapter level.
-                    //
-                    // On Open: push dialog ID onto stack. Apply `inert` attribute only to
-                    //          siblings of the current top dialog.
-                    //
-                    // On Close: pop dialog ID from stack. If stack is non-empty, re-apply
-                    //           `inert` to siblings of the new top. If stack is empty, remove
-                    //           all `inert` attributes.
-                    //
-                    // This ensures closing an inner dialog does not accidentally remove
-                    // `inert` from the outer dialog's background.
-                    //
-                    // ```rust
-                    // static DIALOG_STACK: Mutex<Vec<DialogId>> = Mutex::new(Vec::new());
-                    // ```
-                    .with_effect(PendingEffect::new("focus-first-tabbable", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        let content_id = ctx.ids.part("content");
-                        platform.focus_first_tabbable(&content_id);
-                        no_cleanup()
-                    })))
+                let mut plan = TransitionPlan::to(State::Open)
+                    .apply(|ctx| {
+                        ctx.open = true;
+                    })
+                    .with_effect(PendingEffect::named(EFFECT_OPEN_CHANGE))
+                    .with_effect(PendingEffect::named(EFFECT_FOCUS_INITIAL))
+                    .with_effect(PendingEffect::named(EFFECT_FOCUS_FIRST_TABBABLE));
+                if ctx.prevent_scroll {
+                    plan = plan.with_effect(PendingEffect::named(EFFECT_SCROLL_LOCK_ACQUIRE));
+                }
+                if ctx.modal {
+                    plan = plan.with_effect(PendingEffect::named(EFFECT_SET_BACKGROUND_INERT));
+                }
+                Some(plan)
             }
             (State::Open, Event::Close | Event::Toggle) => {
-                Some(TransitionPlan::to(State::Closed)
-                    .apply(|ctx| { ctx.open = false; })
-                    .with_effect(PendingEffect::new("release-scroll-lock", |_ctx, props, _send| {
-                        let platform = use_platform_effects();
-                        if props.prevent_scroll {
-                            platform.scroll_lock_release();
-                        }
-                        no_cleanup()
-                    }))
-                    .with_effect(PendingEffect::new("remove-background-inert", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        // Best-effort direct clearing used for stack recalculation and
-                        // defensive close flows. This does not replace the stored cleanup
-                        // from `set_background_inert()`.
-                        platform.remove_inert_from_siblings(&ctx.ids.part("portal"));
-                        no_cleanup()
-                    }))
-                    .with_effect(PendingEffect::new("restore-focus", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        if platform.document_contains_id(&ctx.trigger_id) {
-                            platform.focus_element_by_id(&ctx.trigger_id);
-                        } else {
-                            // Trigger removed from DOM — fall back to body
-                            platform.focus_body();
-                        }
-                        no_cleanup()
-                    })))
+                let mut plan = TransitionPlan::to(State::Closed)
+                    .apply(|ctx| {
+                        ctx.open = false;
+                    })
+                    .with_effect(PendingEffect::named(EFFECT_OPEN_CHANGE));
+                if ctx.prevent_scroll {
+                    plan = plan.with_effect(PendingEffect::named(EFFECT_SCROLL_LOCK_RELEASE));
+                }
+                if ctx.modal {
+                    plan = plan.with_effect(PendingEffect::named(EFFECT_REMOVE_BACKGROUND_INERT));
+                }
+                if ctx.restore_focus {
+                    plan = plan.with_effect(PendingEffect::named(EFFECT_RESTORE_FOCUS));
+                }
+                Some(plan)
             }
-            (State::Open, Event::CloseOnBackdropClick) => {
-                if ctx.close_on_backdrop {
-                    Some(TransitionPlan::to(State::Closed)
-                        .apply(|ctx| { ctx.open = false; }))
-                } else { None }
-            }
-            (State::Open, Event::CloseOnEscape) => {
-                if ctx.close_on_escape {
-                    Some(TransitionPlan::to(State::Closed)
-                        .apply(|ctx| { ctx.open = false; }))
-                } else { None }
-            }
-            // Register title/description for aria-labelledby/describedby wiring
-            (_, Event::RegisterTitle) => {
-                Some(TransitionPlan::context_only(|ctx| {
+            (State::Open, Event::CloseOnBackdropClick) if ctx.close_on_backdrop => Some(
+                TransitionPlan::to(State::Closed)
+                    .apply(|ctx| {
+                        ctx.open = false;
+                    })
+                    .with_effect(PendingEffect::named(EFFECT_OPEN_CHANGE)),
+            ),
+            (State::Open, Event::CloseOnEscape) if ctx.close_on_escape => Some(
+                TransitionPlan::to(State::Closed)
+                    .apply(|ctx| {
+                        ctx.open = false;
+                    })
+                    .with_effect(PendingEffect::named(EFFECT_OPEN_CHANGE)),
+            ),
+            // Register title/description for aria-labelledby/describedby wiring.
+            // Guarded — re-sending after the flag is set is a no-op so the
+            // Service does not signal `context_changed = true` spuriously.
+            (_, Event::RegisterTitle) if !ctx.has_title => Some(
+                TransitionPlan::context_only(|ctx| {
                     ctx.has_title = true;
-                }))
-            }
-            (_, Event::RegisterDescription) => {
-                Some(TransitionPlan::context_only(|ctx| {
+                }),
+            ),
+            (_, Event::RegisterDescription) if !ctx.has_description => Some(
+                TransitionPlan::context_only(|ctx| {
                     ctx.has_description = true;
+                }),
+            ),
+            // Replay context-backed prop fields after a runtime prop
+            // change. Captured by-copy/by-move so the agnostic core does
+            // not retain a reference to `props` past the apply closure.
+            (_, Event::SyncProps) => {
+                let modal = props.modal;
+                let close_on_backdrop = props.close_on_backdrop;
+                let close_on_escape = props.close_on_escape;
+                let prevent_scroll = props.prevent_scroll;
+                let restore_focus = props.restore_focus;
+                let initial_focus = props.initial_focus;
+                let final_focus = props.final_focus;
+                let role = props.role;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.modal = modal;
+                    ctx.close_on_backdrop = close_on_backdrop;
+                    ctx.close_on_escape = close_on_escape;
+                    ctx.prevent_scroll = prevent_scroll;
+                    ctx.restore_focus = restore_focus;
+                    ctx.initial_focus = initial_focus;
+                    ctx.final_focus = final_focus;
+                    ctx.role = role;
                 }))
             }
             _ => None,
@@ -581,8 +633,54 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        // Two independent sync axes:
+        //
+        // 1. **Controlled-mode `open` sync** — when a parent component
+        //    flips `props.open` between `Some(true)` ↔ `Some(false)` (or
+        //    transitions from uncontrolled to controlled), emit `Open` /
+        //    `Close` so the state machine reconciles. The dispatched event
+        //    runs `transition`, which emits `EFFECT_OPEN_CHANGE` (§1.11).
+        //    Because the consumer initiated the change, the adapter MUST
+        //    suppress the resulting `on_open_change` callback to avoid an
+        //    echo loop. Adapters typically track the source of the event
+        //    in their own dispatch layer.
+        //
+        // 2. **Context-backed prop sync** — when any non-`open` field that
+        //    drives `Context` changes (`modal`, `close_on_backdrop`,
+        //    `close_on_escape`, `prevent_scroll`, `restore_focus`,
+        //    `initial_focus`, `final_focus`, `role`), emit `SyncProps`.
+        //    The corresponding transition replays those props into
+        //    `Context` so subsequent state-flipping transitions emit
+        //    intents using the freshly-synced configuration.
+        //
+        // Both events may be emitted from a single `set_props` call; the
+        // Service queues them in order and drains them sequentially.
+        let mut events = Vec::new();
+        if let (was, Some(now)) = (old.open, new.open)
+            && was != Some(now)
+        {
+            events.push(if now { Event::Open } else { Event::Close });
+        }
+        if context_relevant_props_changed(old, new) {
+            events.push(Event::SyncProps);
+        }
+        events
+    }
 }
-````
+
+fn context_relevant_props_changed(old: &Props, new: &Props) -> bool {
+    old.modal != new.modal
+        || old.close_on_backdrop != new.close_on_backdrop
+        || old.close_on_escape != new.close_on_escape
+        || old.prevent_scroll != new.prevent_scroll
+        || old.restore_focus != new.restore_focus
+        || old.initial_focus != new.initial_focus
+        || old.final_focus != new.final_focus
+        || old.role != new.role
+}
+```
 
 > **Preventable event callbacks.** The `on_escape_key_down` and `on_interact_outside` callbacks are invoked by the adapter layer BEFORE sending the corresponding event to the state machine. If the consumer calls `prevent_default()`, the adapter MUST NOT send the event — the dialog stays open. This pattern keeps the state machine pure (no side-effect callbacks in `transition()`) while giving consumers veto power over dismissal.
 >
@@ -603,16 +701,43 @@ impl ars_core::Machine for Machine {
 > fn on_keydown(event: &KeyboardEvent, props: &Props, send: &dyn Fn(Event)) {
 >     if event.key() == "Escape" && props.close_on_escape {
 >         if let Some(ref callback) = props.on_escape_key_down {
->             let mut preventable = PreventableEvent::new();
->             callback.call(&mut preventable);
+>             let preventable = PreventableEvent::new();
+>             callback.call(preventable.clone());
 >             if preventable.is_default_prevented() { return; }
 >         }
 >         send(Event::CloseOnEscape);
 >     }
 > }
+>
+> // Adapter pseudocode for backdrop-click handling — symmetric flow:
+> fn on_backdrop_pointer_down(props: &Props, send: &dyn Fn(Event)) {
+>     if !props.close_on_backdrop { return; }
+>     if let Some(ref callback) = props.on_interact_outside {
+>         let preventable = PreventableEvent::new();
+>         callback.call(preventable.clone());
+>         if preventable.is_default_prevented() { return; }
+>     }
+>     send(Event::CloseOnBackdropClick);
+> }
 > ```
 
 ### 1.10 Connect / API
+
+> **Element handle contract.** IDs derived from `Context::ids` (via
+> `ids.part("trigger" | "content" | "title" | "description")`) are semantic strings used
+> solely for ARIA wiring (`aria-labelledby`, `aria-describedby`, `aria-controls`) and the
+> `id` attribute on each rendered part for hydration stability. They are **never** used
+> as element-lookup keys — the agnostic core never calls `getElementById` or any
+> equivalent platform helper. Adapters obtain live element references through framework
+> primitives:
+>
+> - **Leptos** — `NodeRef<T>` captured at the render site for each anatomy part.
+> - **Dioxus** — `MountedData` (typically held inside a `Signal<Option<MountedData>>`)
+>   captured via the `onmounted` event for each anatomy part.
+>
+> When an effect intent fires (see [§1.11](#111-adapter-intent-contract)), the adapter
+> resolves the target element through the captured handle for that part, never by
+> looking up the ID.
 
 ```rust
 #[derive(ComponentPart)]
@@ -629,6 +754,10 @@ pub enum Part {
 }
 
 /// The API for the `Dialog` component.
+///
+/// `Api` implements `Debug` (omitting the non-`Debug` `send` callback
+/// field) for ergonomic logging in tests and dev tools. The `Debug`
+/// impl renders the borrowed `state`, `ctx`, and `props` only.
 pub struct Api<'a> {
     /// The current state of the dialog.
     state: &'a State,
@@ -655,15 +784,21 @@ impl<'a> Api<'a> {
     }
 
     /// The attributes for the trigger element.
+    ///
+    /// `type="button"` is emitted unconditionally. HTML `<button>` defaults
+    /// to `type="submit"` inside a `<form>`, which would submit the form on
+    /// click; pinning the type to `"button"` is the correct defensive
+    /// default for a dialog trigger.
     pub fn trigger_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Trigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.ctx.trigger_id);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("trigger"));
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::HasPopup), "dialog");
         attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), if self.is_open() { "true" } else { "false" });
-        attrs.set(HtmlAttr::Aria(AriaAttr::Controls), &self.ctx.content_id);
+        attrs.set(HtmlAttr::Aria(AriaAttr::Controls), self.ctx.ids.part("content"));
         attrs
     }
 
@@ -675,7 +810,8 @@ impl<'a> Api<'a> {
     /// The attributes for the backdrop element.
     // NOTE: `aria-hidden="true"` and `inert` on the backdrop are always correct
     // (it is decorative). Feature detection for `inert` applies to the
-    // `set_background_inert` effect on sibling elements, not to this backdrop element.
+    // `dialog-set-background-inert` adapter intent on sibling elements, not to
+    // this backdrop element.
     pub fn backdrop_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Backdrop.data_attrs();
@@ -702,23 +838,30 @@ impl<'a> Api<'a> {
     }
 
     /// The attributes for the content element.
+    ///
+    /// `tabindex="-1"` is emitted statically: a `<div role="dialog">` is
+    /// otherwise not focusable, but the adapter must be able to call
+    /// `.focus()` on the content during the entry animation
+    /// ([§1.8.2](#182-focus-escape-during-animation)) and during the
+    /// focus-restoration fallback chain
+    /// ([§3.3.1](#331-focus-restoration-fallback-chain)). `tabindex="-1"`
+    /// makes the element programmatically focusable while keeping it out of
+    /// the Tab order.
     pub fn content_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Content.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.ctx.content_id);
-        attrs.set(HtmlAttr::Role, match self.ctx.role {
-            Role::Dialog => "dialog",
-            Role::AlertDialog => "alertdialog",
-        });
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("content"));
+        attrs.set(HtmlAttr::Role, self.ctx.role.as_aria_role());
         attrs.set(HtmlAttr::Data("ars-state"), if self.is_open() { "open" } else { "closed" });
+        attrs.set(HtmlAttr::TabIndex, "-1");
         if self.ctx.modal { attrs.set(HtmlAttr::Aria(AriaAttr::Modal), "true"); }
         if self.ctx.has_title {
-            attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), &self.ctx.title_id);
+            attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("title"));
         }
         if self.ctx.has_description {
-            attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), &self.ctx.description_id);
+            attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), self.ctx.ids.part("description"));
         }
         attrs
     }
@@ -736,7 +879,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Title.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.ctx.title_id);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("title"));
         // The adapter renders the Title as <h{level}> using this value.
         // Clamped to valid heading levels 1..=6.
         let level = self.props.title_level.clamp(1, 6);
@@ -750,16 +893,21 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Description.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.ctx.description_id);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("description"));
         attrs
     }
 
     /// The attributes for the close trigger element.
+    ///
+    /// `type="button"` is emitted for the same reason as
+    /// [`trigger_attrs`](#1-state-machine): close triggers rendered inside a
+    /// surrounding `<form>` must not submit it on click.
     pub fn close_trigger_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::CloseTrigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.close_label)(&self.ctx.locale));
         attrs
     }
@@ -788,6 +936,59 @@ impl ConnectApi for Api<'_> {
 }
 ```
 
+### 1.11 Adapter intent contract
+
+The agnostic [`Machine`](#19-full-machine-implementation) emits each named effect below
+without any payload. Adapters subscribe to these names via `SendResult::pending_effects`
+and resolve target elements through their captured framework handles (see
+[§1.10 Element handle contract](#110-connect--api)). Cross-references in this section
+to [§1.5](#15-scroll-lock-restoration-edge-cases), [§1.6](#16-inert-attribute-polyfill),
+[§1.7](#17-nested-dialogs), and [§3.3.1](#331-focus-restoration-fallback-chain) describe
+the adapter-side behaviour required for each intent — those sections are non-normative
+for the agnostic core.
+
+All emission predicates below read from `ctx` (the runtime context), not
+`props` directly. `ctx` is initialised from `props` at `init()` time and
+remains the authoritative configuration source visible to `transition`.
+
+All effect-name values are prefixed with `dialog-` for the same reason
+[`Tooltip`](./tooltip.md) prefixes its names with `tooltip-`: when the
+literal surfaces in adapter logs or devtools the component of origin is
+self-describing without consulting the `Service<M>` type parameter.
+
+| Effect name                      | When emitted                                           | Adapter obligation                                                                                                                                                                                                         |
+| -------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dialog-open-change`             | Every state-flipping transition (any `Closed ↔ Open`). | Read `api.is_open()` after the transition runs and invoke `props.on_open_change` with that value if it is `Some`. See the echo-loop note in [§1.9 `on_props_changed`](#19-full-machine-implementation).                    |
+| `dialog-scroll-lock-acquire`     | `Closed → Open` and `ctx.prevent_scroll == true`.      | Acquire body-scroll lock following [§1.5](#15-scroll-lock-restoration-edge-cases); only the outermost dialog in the stack actually applies the lock.                                                                       |
+| `dialog-scroll-lock-release`     | `Open → Closed` and `ctx.prevent_scroll == true`.      | Release the lock acquired above. Outermost-only ownership applies.                                                                                                                                                         |
+| `dialog-set-background-inert`    | `Closed → Open` and `ctx.modal == true`.               | Apply `inert` to portal-root siblings, falling back to the polyfill described in [§1.6](#16-inert-attribute-polyfill). Push the dialog onto the dialog stack ([§1.7.1](#171-dialogstack-global-nested-dialog-management)). |
+| `dialog-remove-background-inert` | `Open → Closed` and `ctx.modal == true`.               | Run the cleanup stored at acquire time and pop the dialog stack. Re-apply `inert` for the new top of the stack if non-empty.                                                                                               |
+| `dialog-focus-initial`           | `Closed → Open`.                                       | Resolve `props.initial_focus` against the captured content handle and move focus accordingly. If `initial_focus` is `None`, the adapter's default is to leave focus to the next intent (`dialog-focus-first-tabbable`).    |
+| `dialog-focus-first-tabbable`    | `Closed → Open`.                                       | If no element gained focus from `dialog-focus-initial`, focus the first tabbable descendant of the captured content handle. The adapter never resolves the content element by ID.                                          |
+| `dialog-restore-focus`           | `Open → Closed` and `ctx.restore_focus == true`.       | Use the captured trigger handle's connectedness check to focus it; otherwise walk the [§3.3.1](#331-focus-restoration-fallback-chain) fallback chain, ending at `<body>`.                                                  |
+
+The canonical resolution keys are exported by the implementation as
+`pub const &str` so adapters match by const, not by literal string.
+Literal-string matching is an anti-pattern: a typo silently produces a
+no-op handler.
+
+```rust
+// Re-exported from `ars_components::overlay::dialog`.
+pub const EFFECT_OPEN_CHANGE: &str             = "dialog-open-change";
+pub const EFFECT_SCROLL_LOCK_ACQUIRE: &str     = "dialog-scroll-lock-acquire";
+pub const EFFECT_SCROLL_LOCK_RELEASE: &str     = "dialog-scroll-lock-release";
+pub const EFFECT_SET_BACKGROUND_INERT: &str    = "dialog-set-background-inert";
+pub const EFFECT_REMOVE_BACKGROUND_INERT: &str = "dialog-remove-background-inert";
+pub const EFFECT_FOCUS_INITIAL: &str           = "dialog-focus-initial";
+pub const EFFECT_FOCUS_FIRST_TABBABLE: &str    = "dialog-focus-first-tabbable";
+pub const EFFECT_RESTORE_FOCUS: &str           = "dialog-restore-focus";
+```
+
+Adapters MAY subscribe to additional names of their own (e.g. animation
+coordination) but MUST NOT reinterpret the names above. The agnostic core
+never emits any effect that carries an ID payload, a closure body, or a
+`WeakSend` reference; effect names are the entire contract.
+
 ## 2. Anatomy
 
 ```text
@@ -802,36 +1003,40 @@ Dialog
 └── CloseTrigger     (optional — button inside dialog to close it)
 ```
 
-| Part         | Element    | Key Attributes                                                       |
-| ------------ | ---------- | -------------------------------------------------------------------- |
-| Root         | `<div>`    | `data-ars-scope="dialog"`, `data-ars-part="root"`, `data-ars-state`  |
-| Trigger      | `<button>` | `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`           |
-| Backdrop     | `<div>`    | `aria-hidden="true"`, `inert`, `data-ars-state`                      |
-| Positioner   | `<div>`    | `data-ars-scope="dialog"`, `data-ars-part="positioner"`              |
-| Content      | `<div>`    | `role="dialog"`, `aria-modal`, `aria-labelledby`, `aria-describedby` |
-| Title        | `<h2>`     | `data-ars-heading-level`                                             |
-| Description  | `<p>`      | `id` for `aria-describedby` wiring                                   |
-| CloseTrigger | `<button>` | `aria-label` from Messages                                           |
+| Part         | Element    | Key Attributes                                                                        |
+| ------------ | ---------- | ------------------------------------------------------------------------------------- |
+| Root         | `<div>`    | `data-ars-scope="dialog"`, `data-ars-part="root"`, `data-ars-state`                   |
+| Trigger      | `<button>` | `type="button"`, `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`           |
+| Backdrop     | `<div>`    | `aria-hidden="true"`, `inert`, `data-ars-state`                                       |
+| Positioner   | `<div>`    | `data-ars-scope="dialog"`, `data-ars-part="positioner"`                               |
+| Content      | `<div>`    | `role="dialog"`, `tabindex="-1"`, `aria-modal`, `aria-labelledby`, `aria-describedby` |
+| Title        | `<h2>`     | `data-ars-heading-level`                                                              |
+| Description  | `<p>`      | `id` for `aria-describedby` wiring                                                    |
+| CloseTrigger | `<button>` | `type="button"`, `aria-label` from Messages                                           |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Part     | Role / Property    | Value                                              |
-| -------- | ------------------ | -------------------------------------------------- |
-| Content  | `role`             | `"dialog"` or `"alertdialog"`                      |
-| Content  | `aria-modal`       | `"true"` when modal                                |
-| Content  | `aria-labelledby`  | Title part ID (when title is rendered)             |
-| Content  | `aria-describedby` | Description part ID (when description is rendered) |
-| Trigger  | `aria-haspopup`    | `"dialog"`                                         |
-| Trigger  | `aria-expanded`    | `"true"` / `"false"`                               |
-| Trigger  | `aria-controls`    | Content part ID                                    |
-| Backdrop | `aria-hidden`      | `"true"` (decorative)                              |
-| Backdrop | `inert`            | Always present (decorative, non-interactive)       |
+| Part         | Role / Property    | Value                                               |
+| ------------ | ------------------ | --------------------------------------------------- |
+| Content      | `role`             | `"dialog"` or `"alertdialog"`                       |
+| Content      | `tabindex`         | `"-1"` (programmatically focusable, not a Tab stop) |
+| Content      | `aria-modal`       | `"true"` when modal                                 |
+| Content      | `aria-labelledby`  | Title part ID (when title is rendered)              |
+| Content      | `aria-describedby` | Description part ID (when description is rendered)  |
+| Trigger      | `type`             | `"button"` (defensive default; see §1.10)           |
+| Trigger      | `aria-haspopup`    | `"dialog"`                                          |
+| Trigger      | `aria-expanded`    | `"true"` / `"false"`                                |
+| Trigger      | `aria-controls`    | Content part ID                                     |
+| Backdrop     | `aria-hidden`      | `"true"` (decorative)                               |
+| Backdrop     | `inert`            | Always present (decorative, non-interactive)        |
+| CloseTrigger | `type`             | `"button"` (defensive default; see §1.10)           |
+| CloseTrigger | `aria-label`       | from `Messages.close_label`                         |
 
-- `inert` on background content: When a modal dialog is open, all DOM siblings of the portal root MUST have the `inert` attribute set. The `inert` attribute prevents all keyboard, pointer, and assistive technology interaction with background content. This is the modern replacement for `aria-hidden="true"` on siblings. The `set_background_inert` effect handles this via `platform.set_background_inert("ars-portal-root")`.
+- `inert` on background content: When a modal dialog is open, all DOM siblings of the portal root MUST have the `inert` attribute set. The `inert` attribute prevents all keyboard, pointer, and assistive technology interaction with background content. This is the modern replacement for `aria-hidden="true"` on siblings. The agnostic core emits the `dialog-set-background-inert` intent (see [§1.11](#111-adapter-intent-contract)); the adapter applies `inert` to the captured portal-root handle's siblings.
 - `aria-hidden="true"` is set as fallback for older browsers that do not support `inert` (Safari < 15.5, Firefox < 112). The adapter should feature-detect `inert` support and use `aria-hidden="true"` only as a fallback.
-- Both attributes are removed when dialog closes (handled by the effect cleanup function).
+- Both attributes are removed when the dialog closes — the adapter runs the cleanup it stored when handling `dialog-set-background-inert`, triggered by the agnostic core's `dialog-remove-background-inert` intent.
 
 ### 3.2 Keyboard Interaction
 
@@ -850,36 +1055,51 @@ Dialog
 
 #### 3.3.1 Focus Restoration Fallback Chain
 
-When the dialog closes with `restore_focus: true`, the original trigger element may have been removed from the DOM, disabled, or moved to a different container while the dialog was open. The adapter MUST use the following fallback chain:
+When the dialog closes with `restore_focus: true`, the trigger element captured by the
+adapter at render time may have been disconnected, disabled, or relocated while the
+dialog was open. The adapter handles the agnostic core's `dialog-restore-focus` intent (see
+[§1.11](#111-adapter-intent-contract)) using the following fallback chain. **All steps
+operate on the framework handle the adapter captured for each part — `NodeRef<T>` in
+Leptos, `MountedData` in Dioxus — never via ID lookup.**
 
-1. **Original trigger** — if it still exists in the DOM and is focusable (`!disabled`, `offsetParent !== null`).
-2. **Nearest focusable ancestor** — walk up from the trigger's last known position (`parentElement`) until a focusable element is found.
+1. **Captured trigger handle** — if the handle's element is connected to the document
+   (`isConnected` / `parentElement.is_some()`) and is focusable (`!disabled`,
+   `offsetParent !== null`).
+2. **Nearest focusable ancestor** — walk from the trigger handle's last known parent
+   (held by the adapter through the captured node reference) until a focusable element
+   is found.
 3. **`<body>`** — last resort if no focusable element is found in the ancestor chain.
 
-If focus restoration falls through to step 2 or 3, the adapter emits a `focus_restored_failed` event on the dialog's root element with `detail: { intended_target: trigger_id, actual_target: focused_element_id }`. This allows application code to handle edge cases (e.g., re-rendering the trigger or announcing an explanation to screen readers).
+If focus restoration falls through to step 2 or 3, the adapter emits a
+`focus_restored_failed` event on the dialog's root handle with
+`detail: { intended_target: <trigger handle>, actual_target: <focused handle> }`. This
+allows application code to handle edge cases (e.g., re-rendering the trigger or
+announcing an explanation to screen readers). The detail values are framework handles
+or DOM `Element`s captured by the adapter — not `id` strings.
 
 ```rust
-// In the adapter's close effect:
-fn restore_focus_with_fallback(trigger_id: &str) {
-    let doc = document();
-    // Step 1: Try original trigger
-    if let Some(el) = doc.get_element_by_id(trigger_id) {
-        if is_focusable(&el) {
-            el.focus().ok();
+// In the Leptos adapter's `restore-focus` handler — illustrative only.
+// `trigger_ref: NodeRef<HtmlButtonElement>` is captured at trigger render time and
+// passed into the adapter's effect-handling layer. The agnostic core never sees it.
+fn restore_focus_with_fallback(trigger_ref: NodeRef<HtmlButtonElement>) {
+    // Step 1: Try the captured trigger handle.
+    if let Some(el) = trigger_ref.get() {
+        if el.is_connected() && is_focusable(&el) {
+            let _ = el.focus();
+            return;
+        }
+        // Step 2: Walk ancestors of the captured handle.
+        if let Some(focusable) = find_nearest_focusable_ancestor(&el) {
+            let _ = focusable.focus();
+            emit_focus_restored_failed(&el, &focusable);
             return;
         }
     }
-    // Step 2: Walk ancestors from trigger's last known parent
-    if let Some(parent) = last_known_parent_of(trigger_id) {
-        if let Some(focusable) = find_nearest_focusable_ancestor(&parent) {
-            focusable.focus();
-            emit_focus_restored_failed(trigger_id, &focusable);
-            return;
-        }
+    // Step 3: Body fallback.
+    if let Some(body) = document().body() {
+        let _ = body.focus();
+        emit_focus_restored_failed_body(&body);
     }
-    // Step 3: Body fallback
-    doc.body().focus();
-    emit_focus_restored_failed(trigger_id, &doc.body());
 }
 ```
 
@@ -916,10 +1136,11 @@ cursor escape — `inert` elements are excluded from the accessibility tree enti
 
 Implementation requirements:
 
-1. **Mandate `inert` on all siblings** of the modal dialog's portal root via
-   `set_background_inert()`. This MUST be applied before the dialog receives focus.
-   The `inert` attribute prevents ALL interaction (keyboard, pointer, and assistive
-   technology) with background content.
+1. **Mandate `inert` on all siblings** of the modal dialog's portal root via the
+   `dialog-set-background-inert` adapter intent (see
+   [§1.11](#111-adapter-intent-contract)). This MUST be applied before the dialog
+   receives focus. The `inert` attribute prevents ALL interaction (keyboard, pointer,
+   and assistive technology) with background content.
 2. **Consider native `<dialog>` element**: The native `<dialog>` element with `showModal()`
    provides browser-native focus trapping that includes virtual cursor containment on
    browsers that support it (Chrome 37+, Firefox 98+, Safari 15.4+). When the adapter
@@ -946,7 +1167,7 @@ Implementation requirements:
 
 ```rust
 /// The messages of the dialog.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     /// Close trigger label (default: "Close dialog")
     pub close_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
