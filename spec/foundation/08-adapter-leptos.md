@@ -256,14 +256,29 @@ let props = {
 **Invariant:** Once assigned at Service creation, the component ID MUST NOT change for the lifetime of the component instance. Re-renders do not regenerate IDs.
 
 ```rust
-const fn current_render_mode() -> RenderMode {
-    if cfg!(feature = "hydrate") {
+#[cfg(feature = "hydrate")]
+fn current_render_mode() -> RenderMode {
+    if cfg!(feature = "ssr") {
+        RenderMode::Server
+    } else if is_currently_hydrating() {
         RenderMode::Hydrating
-    } else if cfg!(feature = "ssr") {
+    } else {
+        RenderMode::Client
+    }
+}
+
+#[cfg(not(feature = "hydrate"))]
+const fn current_render_mode() -> RenderMode {
+    if cfg!(feature = "ssr") {
         RenderMode::Server
     } else {
         RenderMode::Client
     }
+}
+
+#[cfg(feature = "hydrate")]
+fn is_currently_hydrating() -> bool {
+    use_context::<IsHydrating>().is_some_and(|hydrating| hydrating.0)
 }
 
 /// Internal — creates a single Service and returns the public return type plus

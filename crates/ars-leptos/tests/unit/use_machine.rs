@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use ars_core::{
     AriaAttr, AttrMap, ComponentPart, ConnectApi, HasId, HtmlAttr, I18nRegistries, IntlBackend,
-    NullPlatformEffects, TransitionPlan,
+    NullPlatformEffects, RenderMode, TransitionPlan,
 };
 use ars_i18n::{Locale, StubIntlBackend};
 use leptos::reactive::traits::Get;
@@ -69,6 +69,44 @@ fn toggle_helper_types_and_test_backend_cover_contract_helpers() {
 }
 
 // --- Tests ---
+
+#[test]
+#[cfg(feature = "ssr")]
+fn current_render_mode_reports_server_for_ssr_builds() {
+    let owner = Owner::new();
+    owner.with(|| {
+        #[cfg(feature = "hydrate")]
+        provide_context(IsHydrating(true));
+
+        assert_eq!(current_render_mode(), RenderMode::Server);
+    });
+}
+
+#[test]
+#[cfg(not(feature = "ssr"))]
+fn current_render_mode_reports_client_without_active_hydration() {
+    let owner = Owner::new();
+    owner.with(|| {
+        assert_eq!(current_render_mode(), RenderMode::Client);
+    });
+}
+
+#[test]
+#[cfg(all(feature = "hydrate", not(feature = "ssr")))]
+fn current_render_mode_uses_hydration_context_at_runtime() {
+    let owner = Owner::new();
+    owner.with(|| {
+        provide_context(IsHydrating(true));
+
+        assert_eq!(current_render_mode(), RenderMode::Hydrating);
+    });
+
+    owner.with(|| {
+        provide_context(IsHydrating(false));
+
+        assert_eq!(current_render_mode(), RenderMode::Client);
+    });
+}
 
 #[test]
 fn use_machine_return_type_is_copy() {

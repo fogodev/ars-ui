@@ -17,7 +17,7 @@ fn arb_portal_target() -> impl Strategy<Value = portal::PortalTarget> {
         Just(portal::PortalTarget::PortalRoot),
         Just(portal::PortalTarget::Body),
         arb_target_id().prop_map(portal::PortalTarget::Id),
-        arb_target_id().prop_map(portal::PortalTarget::Ref),
+        arb_target_id().prop_map(portal::PortalTarget::ResolvedId),
     ]
 }
 
@@ -85,7 +85,7 @@ fn assert_portal_send_result_invariants(
             prop_assert_eq!(service.state(), &portal::State::Mounted);
             prop_assert_eq!(
                 service.context().container.clone(),
-                portal::PortalTarget::Ref(id.clone())
+                portal::PortalTarget::ResolvedId(id.clone())
             );
             prop_assert!(service.context().mounted);
         }

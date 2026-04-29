@@ -66,11 +66,14 @@ pub enum PortalTarget {
     /// The document body.
     Body,
 
-    /// An element with the given ID.
+    /// A declarative element ID target that the adapter must resolve.
     Id(String),
 
-    /// A direct element ID reference.
-    Ref(String),
+    /// An element ID target that the adapter has confirmed exists.
+    ///
+    /// This is still stable string identity, not a live DOM element or
+    /// framework handle. Adapters own native refs separately.
+    ResolvedId(String),
 }
 
 /// Immutable configuration for a Portal instance.
@@ -171,7 +174,7 @@ impl ars_core::Machine for Machine {
                 let id = id.clone();
                 Some(
                     TransitionPlan::to(State::Mounted).apply(move |ctx: &mut Context| {
-                        ctx.container = PortalTarget::Ref(id);
+                        ctx.container = PortalTarget::ResolvedId(id);
                         ctx.mounted = true;
                     }),
                 )
@@ -465,7 +468,7 @@ mod tests {
     }
 
     #[test]
-    fn container_ready_mounts_to_ref_target() {
+    fn container_ready_mounts_to_resolved_id_target() {
         let mut service = Service::<Machine>::new(
             test_props().container(PortalTarget::Id("late-root".to_string())),
             &Env::default(),
@@ -479,9 +482,27 @@ mod tests {
         assert_eq!(service.state(), &State::Mounted);
         assert_eq!(
             service.context().container,
-            PortalTarget::Ref("late-root".to_string())
+            PortalTarget::ResolvedId("late-root".to_string())
         );
         assert!(service.context().mounted);
+    }
+
+    #[test]
+    fn resolved_id_target_stays_string_identity_not_live_handle() {
+        let mut service = Service::<Machine>::new(
+            test_props().container(PortalTarget::ResolvedId("ready-root".to_string())),
+            &Env::default(),
+            &Messages,
+        );
+
+        let result = service.send(Event::ContainerReady("other-root".to_string()));
+
+        assert!(!result.state_changed);
+        assert!(!result.context_changed);
+        assert_eq!(
+            service.context().container,
+            PortalTarget::ResolvedId("ready-root".to_string())
+        );
     }
 
     #[test]
@@ -795,6 +816,40 @@ mod tests {
 
         assert_snapshot!(
             "portal_root_custom_target_mounted",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn portal_root_body_target_mounted() {
+        let mut service = Service::<Machine>::new(
+            Props::new().id("body-target").container(PortalTarget::Body),
+            &Env::default(),
+            &Messages,
+        );
+
+        drop(service.send(Event::Mount));
+
+        assert_snapshot!(
+            "portal_root_body_target_mounted",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn portal_root_resolved_id_target_mounted() {
+        let mut service = Service::<Machine>::new(
+            Props::new()
+                .id("resolved")
+                .container(PortalTarget::ResolvedId("ready-root".to_string())),
+            &Env::default(),
+            &Messages,
+        );
+
+        drop(service.send(Event::Mount));
+
+        assert_snapshot!(
+            "portal_root_resolved_id_target_mounted",
             snapshot_attrs(&service.connect(&|_| {}).root_attrs())
         );
     }

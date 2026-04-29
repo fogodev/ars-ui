@@ -73,10 +73,13 @@ pub enum PortalTarget {
     PortalRoot,
     /// The document body.
     Body,
-    /// An element with the given ID.
+    /// A declarative element ID target that the adapter must resolve.
     Id(String),
-    /// A direct element ID reference.
-    Ref(String),
+    /// An element ID target that the adapter has confirmed exists.
+    ///
+    /// This is still stable string identity, not a live DOM element or
+    /// framework handle. Adapters own native refs separately.
+    ResolvedId(String),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, HasId)]
@@ -142,7 +145,7 @@ impl ars_core::Machine for Machine {
             {
                 let id = id.clone();
                 Some(TransitionPlan::to(State::Mounted).apply(move |ctx| {
-                    ctx.container = PortalTarget::Ref(id);
+                    ctx.container = PortalTarget::ResolvedId(id);
                     ctx.mounted = true;
                 }))
             }
@@ -316,10 +319,10 @@ Focus management is the responsibility of the overlay component rendered inside 
 
 ### 5.1 Props
 
-| Feature              | ars-ui                          | Radix UI                  | Notes                                                       |
-| -------------------- | ------------------------------- | ------------------------- | ----------------------------------------------------------- |
-| Target container     | `container` (PortalTarget enum) | `container` (HTMLElement) | ars-ui has richer target system (PortalRoot, Body, Id, Ref) |
-| SSR inline rendering | `ssr_inline`                    | --                        | ars-ui addition                                             |
+| Feature              | ars-ui                          | Radix UI                  | Notes                                                              |
+| -------------------- | ------------------------------- | ------------------------- | ------------------------------------------------------------------ |
+| Target container     | `container` (PortalTarget enum) | `container` (HTMLElement) | ars-ui has richer target system (PortalRoot, Body, Id, ResolvedId) |
+| SSR inline rendering | `ssr_inline`                    | --                        | ars-ui addition                                                    |
 
 **Gaps:** None.
 
@@ -341,15 +344,15 @@ Focus management is the responsibility of the overlay component rendered inside 
 
 ### 5.4 Features
 
-| Feature                              | ars-ui core contract                                        | Adapter / DOM responsibility                                     | Radix UI |
-| ------------------------------------ | ----------------------------------------------------------- | ---------------------------------------------------------------- | -------- |
-| Render to different DOM node         | `PortalTarget` and mount state                              | Resolve target and move/render content                           | Yes      |
-| Custom target container              | `PortalTarget::Body`, `Id`, `Ref`, guarded `ContainerReady` | Locate target and report late matching IDs                       | Yes      |
-| SSR inline decision                  | `RenderMode`, `ssr_inline`, `Api::should_render_inline()`   | Set `Env::render_mode` from the framework runtime                | --       |
-| Hydration reattachment               | Stable `id`, owner marker, and render-mode introspection    | Reattach/move DOM nodes during hydration                         | --       |
-| Outside-interaction portal ownership | `data-ars-portal-owner` on `Api::root_attrs()`              | Preserve owner markers on any intermediate mount nodes           | --       |
-| Root stability                       | Stable target identity and prop-change events               | Cache invalidation, root creation, MutationObserver, and cleanup | --       |
-| Z-index layer management             | No z-index state in Portal                                  | Overlay/positioning layer owns stacking                          | --       |
+| Feature                              | ars-ui core contract                                               | Adapter / DOM responsibility                                     | Radix UI |
+| ------------------------------------ | ------------------------------------------------------------------ | ---------------------------------------------------------------- | -------- |
+| Render to different DOM node         | `PortalTarget` and mount state                                     | Resolve target and move/render content                           | Yes      |
+| Custom target container              | `PortalTarget::Body`, `Id`, `ResolvedId`, guarded `ContainerReady` | Locate target and report late matching IDs                       | Yes      |
+| SSR inline decision                  | `RenderMode`, `ssr_inline`, `Api::should_render_inline()`          | Set `Env::render_mode` from the framework runtime                | --       |
+| Hydration reattachment               | Stable `id`, owner marker, and render-mode introspection           | Reattach/move DOM nodes during hydration                         | --       |
+| Outside-interaction portal ownership | `data-ars-portal-owner` on `Api::root_attrs()`                     | Preserve owner markers on any intermediate mount nodes           | --       |
+| Root stability                       | Stable target identity and prop-change events                      | Cache invalidation, root creation, MutationObserver, and cleanup | --       |
+| Z-index layer management             | No z-index state in Portal                                         | Overlay/positioning layer owns stacking                          | --       |
 
 **Gaps:** None against Radix's portable portal surface. ars-ui intentionally
 splits the contract: `ars-components` owns state and adapter-facing metadata;
@@ -358,7 +361,7 @@ framework adapters and `ars-dom` own all DOM mutation and platform observation.
 ### 5.5 Summary
 
 - **Overall:** Full parity for the portal primitive while preserving framework-agnostic layering.
-- **Divergences:** ars-ui uses an enum-based `PortalTarget` instead of a raw DOM element reference, making the API portable across frameworks.
+- **Divergences:** ars-ui uses an enum-based `PortalTarget` instead of a raw DOM element reference, making the API portable across frameworks. Native element references stay in adapter APIs and are never stored in `ars-components`.
 - **Recommended additions:** None.
 
 ## Appendix A: SSR and Hydration Contract
@@ -393,7 +396,7 @@ Adapter and DOM invariants:
 1. `PortalTarget::PortalRoot` resolves to the shared host root managed by `ars-dom`.
 2. `PortalTarget::Body` resolves to the current document body.
 3. `PortalTarget::Id(id)` resolves by element ID. If the element is unavailable, the adapter may wait and dispatch `ContainerReady(id)` only when that exact ID appears.
-4. `PortalTarget::Ref(id)` is already resolved and must not be replaced by a different ID.
+4. `PortalTarget::ResolvedId(id)` records that the adapter has confirmed the element ID exists. It is not a native element reference and must not be replaced by a different ID.
 5. If a cached target is removed or relocated, clear the cache and resolve the target again before the next mount or move.
 
 ## Appendix C: Positioning and Stacking
