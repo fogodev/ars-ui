@@ -351,10 +351,9 @@ fn lint_block(content: &str) -> Vec<(usize, String)> {
             ));
         }
 
-        // Rule R4: public fields (lines like `pub name: Type,`) inside a
+        // Rule R4: public fields (lines like `pub name: Type`) inside a
         // struct body must have a `///` above. Skip lines inside fn bodies
-        // by requiring the line ends with `,` or is `pub field: Type` form
-        // (not `pub fn ...`).
+        // by requiring `pub field: Type` form (not `pub fn ...`).
         if line.starts_with("pub ")
             && !line.starts_with("pub fn ")
             && !line.starts_with("pub const fn ")
@@ -363,7 +362,6 @@ fn lint_block(content: &str) -> Vec<(usize, String)> {
             && !line.starts_with("pub mod ")
             && !line.starts_with("pub use ")
             && line.contains(": ")
-            && line.trim_end().ends_with(',')
             && !preceded_by_doc(&lines, idx)
         {
             findings.push((
@@ -673,19 +671,19 @@ fn check_enum_variants(lines: &[&str]) -> Vec<(usize, String)> {
 
         // Find the opening brace (may be on same or next non-blank line).
         let mut depth = if trimmed.contains('{') { 1usize } else { 0 };
+        let mut cursor = idx + 1;
 
         if depth == 0 {
             // Look ahead for `{` line.
-            for (_, peek) in iter.by_ref() {
+            for (peek_idx, peek) in iter.by_ref() {
                 if peek.contains('{') {
                     depth = 1;
+                    cursor = peek_idx + 1;
 
                     break;
                 }
             }
         }
-
-        let mut cursor = idx + 1;
 
         while depth > 0 && cursor < lines.len() {
             let body = lines[cursor];
@@ -925,6 +923,27 @@ pub struct Props {
     }
 
     #[test]
+    fn flags_missing_field_doc_without_trailing_comma() {
+        let md = "\
+### 1.1 Props
+
+```rust
+/// Props.
+#[derive(Debug)]
+pub struct Props {
+    pub id: String
+}
+```
+";
+
+        assert!(
+            run(md)
+                .iter()
+                .any(|m| m.contains("public field is missing"))
+        );
+    }
+
+    #[test]
     fn flags_missing_variant_doc() {
         let md = "\
 ### 1.2 Connect / API
@@ -941,6 +960,33 @@ pub enum Part {
             run(md)
                 .iter()
                 .any(|m| m.contains("enum variant is missing"))
+        );
+    }
+
+    #[test]
+    fn enum_body_scan_starts_after_late_opening_brace() {
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// Parts.
+pub enum Part
+where
+    Self: Sized,
+{
+    /// Root part.
+    Root,
+}
+```
+";
+
+        let messages = run(md);
+
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.contains("enum variant is missing")),
+            "expected no enum variant findings, got {messages:?}"
         );
     }
 
