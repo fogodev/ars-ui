@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/overlay/dialog.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).close_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "close-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "dialog",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Cerrar diálogo",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

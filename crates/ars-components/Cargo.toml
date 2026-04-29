@@ -13,6 +13,7 @@ std     = ["ars-core/std", "ars-forms/std", "ars-i18n/std", "ars-interactions/st
 debug   = ["dep:log", "ars-core/debug", "ars-interactions/debug"]
 
 [dependencies]
+ars-a11y         = { path = "../ars-a11y", default-features = false }
 ars-core         = { path = "../ars-core", default-features = false }
 ars-forms        = { path = "../ars-forms", default-features = false }
 ars-i18n         = { path = "../ars-i18n", default-features = false }

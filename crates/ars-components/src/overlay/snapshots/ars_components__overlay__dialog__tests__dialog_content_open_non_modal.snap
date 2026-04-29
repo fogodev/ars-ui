@@ -1,0 +1,51 @@
+---
+source: crates/ars-components/src/overlay/dialog.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).content_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "content",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "dialog",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "open",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "dialog-content",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "dialog",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}

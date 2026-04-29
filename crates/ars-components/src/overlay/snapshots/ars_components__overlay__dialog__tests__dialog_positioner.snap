@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/overlay/dialog.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).positioner_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "positioner",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "dialog",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/overlay/dialog.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).backdrop_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "backdrop",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "dialog",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "closed",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Inert,
+            String(
+                "",
+            ),
+        ),
+    ],
+    styles: [],
+}
