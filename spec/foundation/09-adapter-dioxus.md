@@ -3189,9 +3189,9 @@ fn warn_if_mounted_id_mismatch(element: &web_sys::Element, client_id: &str) {
 
 1. **Emit valid focus targets during SSR.** Server-rendered modal overlays MUST include at least one focusable element in the HTML output. A naturally focusable control such as a `button` or `input`, an element with `autofocus`, or a focusable scope root with `tabindex="-1"` gives the hydration effect a valid target.
 
-2. **Scan for orphaned `inert` on hydration.** A post-hydration `use_effect` queries all elements with `[inert]` and removes the attribute from any element that is not currently a sibling of an open modal. This prevents "frozen" regions left over from SSR. Cleanup of the modal-open marker uses `use_drop` (Dioxus equivalent of Leptos `on_cleanup`).
+2. **Scan for orphaned adapter-owned `inert` on hydration.** A post-hydration `use_effect` queries elements with both `[inert]` and `data-ars-modal-inert` and removes both attributes from any marked element that is not currently a sibling of an open modal. This prevents "frozen" regions left over from SSR without clearing author-owned inert regions used for unrelated loading or interaction locks. Cleanup of the modal-open marker uses `use_drop` (Dioxus equivalent of Leptos `on_cleanup`).
 
-3. **Validate focus target existence and visibility.** Before calling `.focus()`, the FocusScope checks the focusable scope root first, then scans descendants matching the hydration focus selector. It verifies `element.offset_parent().is_some()` before focusing. Elements that are `display: none` or detached return `None` and are skipped.
+3. **Validate focus target existence and visibility.** Before calling `.focus()`, the FocusScope checks the focusable scope root first, then scans all descendants matching the hydration focus selector until it finds a visible target. It verifies `element.offset_parent().is_some()` before focusing. Elements that are `display: none` or detached return `None` and are skipped rather than aborting the scan.
 
 4. **Gate focus trap activation on hydration completion.** The root `ArsProvider` sets a `data-ars-hydrated` attribute on the document body once hydration is complete. Nested providers MUST NOT repeatedly mark the body; the marker represents the root hydration boundary. FocusScope defers trap activation until this attribute is present, preventing premature focus movement during partial hydration. If the marker is absent when the effect first runs, FocusScope retries through `request_animation_frame` until the marker appears or the scope unmounts. In Dioxus, this check is wrapped in a `use_effect` (which only runs on the client), rather than a `#[cfg(not(feature = "ssr"))]` gated `Effect::new` as in the Leptos adapter.
 
@@ -3201,6 +3201,8 @@ fn warn_if_mounted_id_mismatch(element: &web_sys::Element, client_id: &str) {
 use dioxus::prelude::*;
 use std::{cell::Cell, rc::Rc};
 use wasm_bindgen::JsCast;
+
+const HYDRATION_MODAL_INERT_ATTR: &str = "data-ars-modal-inert";
 
 const HYDRATION_FOCUS_TARGET_SELECTOR: &str = concat!(
     "[autofocus]:not([disabled]):not([aria-hidden='true']),",
@@ -3229,7 +3231,7 @@ fn setup_focus_scope_hydration_safe(
     let cleanup_scope_id = scope_id.clone();
     let activation_active = Rc::new(Cell::new(true));
 
-    // Step 1: Clean up orphaned inert attributes left by SSR.
+    // Step 1: Clean up adapter-owned orphaned inert attributes left by SSR.
     // use_effect only runs on the client, so no #[cfg(not(feature = "ssr"))] needed.
     use_effect({
         let activation_active = Rc::clone(&activation_active);
@@ -3313,10 +3315,10 @@ fn activate_focus_scope(
         scope_el.set_attribute("data-ars-modal-open", "").ok();
     }
 
-    // Remove orphaned inert attributes. An inert element is retained while
-    // it remains a sibling of the hydrated modal scope.
+    // Remove adapter-owned orphaned inert attributes. An inert element is retained
+    // while it remains a sibling of the hydrated modal scope.
     let inert_elements = document
-        .query_selector_all("[inert]")
+        .query_selector_all("[inert][data-ars-modal-inert]")
         .expect("querySelectorAll");
     for i in 0..inert_elements.length() {
         if let Some(el) = inert_elements.item(i) {
@@ -3324,6 +3326,7 @@ fn activate_focus_scope(
             // Only remove if no open modal is a sibling.
             if !has_open_modal_sibling(&html_el) {
                 html_el.remove_attribute("inert").ok();
+                html_el.remove_attribute(HYDRATION_MODAL_INERT_ATTR).ok();
             }
         }
     }
@@ -3360,11 +3363,27 @@ fn visible_focus_target(scope: &web_sys::HtmlElement) -> Option<web_sys::HtmlEle
     }
 
     scope
-        .query_selector(HYDRATION_FOCUS_TARGET_SELECTOR)
+        .query_selector_all(HYDRATION_FOCUS_TARGET_SELECTOR)
         .ok()
-        .flatten()
-        .and_then(|element| element.dyn_into().ok())
-        .filter(is_visible_focus_target)
+        .and_then(|elements| first_visible_focus_target(&elements))
+}
+
+fn first_visible_focus_target(elements: &web_sys::NodeList) -> Option<web_sys::HtmlElement> {
+    for index in 0..elements.length() {
+        let Some(node) = elements.item(index) else {
+            continue;
+        };
+
+        let Ok(element) = node.dyn_into::<web_sys::HtmlElement>() else {
+            continue;
+        };
+
+        if is_visible_focus_target(&element) {
+            return Some(element);
+        }
+    }
+
+    None
 }
 
 fn is_focus_target_candidate(element: &web_sys::Element) -> bool {

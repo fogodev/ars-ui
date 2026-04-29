@@ -15,6 +15,9 @@ use ars_core::{HasId, Machine, Service};
 use dioxus::prelude::{ReadableExt, WritableExt};
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
+const HYDRATION_MODAL_INERT_ATTR: &str = "data-ars-modal-inert";
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
 const HYDRATION_FOCUS_TARGET_SELECTOR: &str = concat!(
     "[autofocus]:not([disabled]):not([aria-hidden='true']),",
     "button:not([disabled]):not([aria-hidden='true']),",
@@ -194,7 +197,7 @@ fn request_hydration_activation_after_frame(
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn remove_orphaned_inert(document: &web_sys::Document) {
-    let Ok(elements) = document.query_selector_all("[inert]") else {
+    let Ok(elements) = document.query_selector_all("[inert][data-ars-modal-inert]") else {
         return;
     };
 
@@ -209,6 +212,7 @@ fn remove_orphaned_inert(document: &web_sys::Document) {
 
         if !has_open_modal_sibling(&element) {
             drop(element.remove_attribute("inert"));
+            drop(element.remove_attribute(HYDRATION_MODAL_INERT_ATTR));
         }
     }
 }
@@ -245,11 +249,28 @@ fn visible_focus_target(scope: &web_sys::HtmlElement) -> Option<web_sys::HtmlEle
     }
 
     scope
-        .query_selector(HYDRATION_FOCUS_TARGET_SELECTOR)
+        .query_selector_all(HYDRATION_FOCUS_TARGET_SELECTOR)
         .ok()
-        .flatten()
-        .and_then(|element| wasm_bindgen::JsCast::dyn_into(element).ok())
-        .filter(is_visible_focus_target)
+        .and_then(|elements| first_visible_focus_target(&elements))
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn first_visible_focus_target(elements: &web_sys::NodeList) -> Option<web_sys::HtmlElement> {
+    for index in 0..elements.length() {
+        let Some(node) = elements.item(index) else {
+            continue;
+        };
+
+        let Ok(element) = wasm_bindgen::JsCast::dyn_into::<web_sys::HtmlElement>(node) else {
+            continue;
+        };
+
+        if is_visible_focus_target(&element) {
+            return Some(element);
+        }
+    }
+
+    None
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -268,7 +289,9 @@ fn is_focus_target_candidate(element: &web_sys::Element) -> bool {
 
     match element.tag_name().as_str() {
         "BUTTON" | "INPUT" | "SELECT" | "TEXTAREA" => true,
+
         "A" | "AREA" => element.has_attribute("href"),
+
         _ => element
             .get_attribute("contenteditable")
             .is_some_and(|value| value != "false"),
@@ -523,7 +546,7 @@ mod wasm_tests {
         reset_body();
 
         append_html(
-            r#"<main inert></main><section id="scope"><button tabindex="0">focus</button></section>"#,
+            r#"<main inert data-ars-modal-inert></main><section id="scope"><button tabindex="0">focus</button></section>"#,
         );
 
         let ran = Rc::new(Cell::new(false));
@@ -563,7 +586,7 @@ mod wasm_tests {
     async fn setup_focus_scope_activates_when_body_is_marked_hydrated_next_frame() {
         reset_body();
 
-        append_html(r#"<main inert></main><section id="scope"></section>"#);
+        append_html(r#"<main inert data-ars-modal-inert></main><section id="scope"></section>"#);
 
         fn app() -> Element {
             let restore_target = use_signal(|| None::<HtmlElement>);
@@ -616,7 +639,7 @@ mod wasm_tests {
         reset_body();
 
         let container = append_html(
-            r#"<button id="before">before</button><main inert></main><section id="scope"><button id="target" tabindex="0">target</button></section>"#,
+            r#"<button id="before">before</button><main inert data-ars-modal-inert></main><section id="scope"><button id="target" tabindex="0">target</button></section>"#,
         );
 
         let before: HtmlElement = container
@@ -696,7 +719,7 @@ mod wasm_tests {
             .set_attribute("data-ars-hydrated", "")
             .expect("mark hydrated");
 
-        append_html(r#"<main inert></main>"#);
+        append_html(r#"<main inert data-ars-modal-inert></main>"#);
 
         fn app() -> Element {
             let restore_target = use_signal(|| None::<HtmlElement>);
@@ -738,7 +761,7 @@ mod wasm_tests {
             .set_attribute("data-ars-hydrated", "")
             .expect("mark hydrated");
 
-        append_html(r#"<main inert></main><section id="scope"></section>"#);
+        append_html(r#"<main inert data-ars-modal-inert></main><section id="scope"></section>"#);
 
         super::remove_orphaned_inert(&document());
 
@@ -748,13 +771,44 @@ mod wasm_tests {
                 .expect("query should succeed")
                 .is_none()
         );
+        assert!(
+            document()
+                .query_selector("[data-ars-modal-inert]")
+                .expect("query should succeed")
+                .is_none()
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn unowned_inert_is_not_removed_without_open_modal_sibling() {
+        reset_body();
+
+        document()
+            .body()
+            .expect("body should exist")
+            .set_attribute("data-ars-hydrated", "")
+            .expect("mark hydrated");
+
+        append_html(r#"<main inert></main><section id="scope"></section>"#);
+
+        super::remove_orphaned_inert(&document());
+
+        assert!(
+            document()
+                .query_selector("[inert]")
+                .expect("query should succeed")
+                .is_some(),
+            "author-owned inert must not be cleared by modal hydration cleanup"
+        );
     }
 
     #[wasm_bindgen_test]
     fn inert_is_retained_with_open_modal_sibling() {
         reset_body();
 
-        append_html(r#"<main inert></main><section data-ars-modal-open></section>"#);
+        append_html(
+            r#"<main inert data-ars-modal-inert></main><section data-ars-modal-open></section>"#,
+        );
 
         super::remove_orphaned_inert(&document());
 
@@ -776,7 +830,7 @@ mod wasm_tests {
             .set_attribute("data-ars-hydrated", "")
             .expect("mark hydrated");
 
-        append_html(r#"<main inert></main><section id="scope"></section>"#);
+        append_html(r#"<main inert data-ars-modal-inert></main><section id="scope"></section>"#);
 
         fn app() -> Element {
             let restore_target = use_signal(|| None::<HtmlElement>);
@@ -839,6 +893,29 @@ mod wasm_tests {
 
         let container =
             append_html(r#"<section id="scope"><button id="target">target</button></section>"#);
+
+        let scope: HtmlElement = container
+            .query_selector("#scope")
+            .expect("query should succeed")
+            .expect("scope should exist")
+            .dyn_into()
+            .expect("scope should be HtmlElement");
+
+        assert_eq!(
+            super::visible_focus_target(&scope)
+                .and_then(|element| element.get_attribute("id"))
+                .as_deref(),
+            Some("target")
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn visible_focus_target_skips_hidden_matches_until_visible_target() {
+        reset_body();
+
+        let container = append_html(
+            r#"<section id="scope"><button id="hidden" style="display: none">hidden</button><input id="target"></section>"#,
+        );
 
         let scope: HtmlElement = container
             .query_selector("#scope")
