@@ -312,10 +312,14 @@ fn lint_block(content: &str) -> Vec<(usize, String)> {
                 "Api"
             };
 
-            let has_debug = derives.iter().any(|derive| derive == "Debug")
+            let has_debug = derives
+                .iter()
+                .any(|derive| last_path_segment(derive) == "Debug")
                 || has_manual_impl(&lines, "Debug", type_name);
 
-            let has_clone = derives.iter().any(|derive| derive == "Clone")
+            let has_clone = derives
+                .iter()
+                .any(|derive| last_path_segment(derive) == "Clone")
                 || has_manual_impl(&lines, "Clone", type_name);
 
             if !has_debug {
@@ -375,6 +379,18 @@ fn lint_block(content: &str) -> Vec<(usize, String)> {
     findings.extend(check_enum_variants(&lines));
 
     findings
+}
+
+/// Returns the last `::`-separated segment of a derive token, or the
+/// whole token if it has no `::`.
+///
+/// Derive macros take a path, so all of `Debug`, `core::fmt::Debug`,
+/// `::core::fmt::Debug`, and `std::fmt::Debug` should be treated as
+/// satisfying a `Debug` requirement. Comparing the last segment to
+/// `"Debug"` / `"Clone"` accepts every legal spelling without matching
+/// unrelated identifiers like `MyDebug` or `Debugger`.
+fn last_path_segment(token: &str) -> &str {
+    token.rsplit("::").next().unwrap_or(token).trim()
 }
 
 /// Returns `true` if `line` is a public fn declaration in any of its
@@ -1320,6 +1336,65 @@ pub struct Api {
 ";
 
         assert!(run(md).is_empty());
+    }
+
+    #[test]
+    fn accepts_path_qualified_derive_tokens() {
+        // Regression for the P2 review on PR #621: a path-qualified
+        // derive like `core::fmt::Debug` previously failed the
+        // raw-string-equality check (`derive == "Debug"`) and produced a
+        // bogus missing-`Debug`/`Clone` finding even though the trait was
+        // derived. The check now compares on the last `::` segment so
+        // every legal spelling satisfies the requirement.
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// Api for the component.
+#[derive(core::clone::Clone, core::fmt::Debug)]
+pub struct Api { }
+```
+";
+
+        let messages = run(md);
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.contains("`Api` must implement `Debug`")),
+            "core::fmt::Debug must satisfy the Debug requirement, got {messages:?}"
+        );
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.contains("`Api` must implement `Clone`")),
+            "core::clone::Clone must satisfy the Clone requirement, got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_unrelated_trait_names_with_debug_suffix() {
+        // Defensive companion: an unrelated trait whose name happens to
+        // contain `Debug` (e.g. `MyDebug` or a leading-segment-only path
+        // like `dbg::Debugger`) must NOT be treated as satisfying the
+        // `Debug` requirement. This pins the helper at exact
+        // last-segment equality.
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// Api for the component.
+#[derive(MyDebug, Debugger)]
+pub struct Api { }
+```
+";
+
+        let messages = run(md);
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("`Api` must implement `Debug`")),
+            "MyDebug/Debugger must NOT satisfy the Debug requirement, got {messages:?}"
+        );
     }
 
     #[test]
