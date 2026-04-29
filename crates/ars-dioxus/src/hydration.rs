@@ -15,9 +15,6 @@ use ars_core::{HasId, Machine, Service};
 use dioxus::prelude::{ReadableExt, WritableExt};
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-const HYDRATION_MODAL_INERT_ATTR: &str = "data-ars-modal-inert";
-
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
 const HYDRATION_FOCUS_TARGET_SELECTOR: &str = concat!(
     "[autofocus]:not([disabled]):not([aria-hidden='true']),",
     "button:not([disabled]):not([aria-hidden='true']),",
@@ -212,7 +209,7 @@ fn remove_orphaned_inert(document: &web_sys::Document) {
 
         if !has_open_modal_sibling(&element) {
             drop(element.remove_attribute("inert"));
-            drop(element.remove_attribute(HYDRATION_MODAL_INERT_ATTR));
+            drop(element.remove_attribute(ars_dom::portal::MODAL_INERT_ATTR));
         }
     }
 }
@@ -300,7 +297,22 @@ fn is_focus_target_candidate(element: &web_sys::Element) -> bool {
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn is_visible_focus_target(element: &web_sys::HtmlElement) -> bool {
-    element.offset_parent().is_some()
+    element.offset_parent().is_some() || is_visible_fixed_position_target(element)
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn is_visible_fixed_position_target(element: &web_sys::HtmlElement) -> bool {
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+
+    let Ok(Some(style)) = window.get_computed_style(element) else {
+        return false;
+    };
+
+    style.get_property_value("position").as_deref() == Ok("fixed")
+        && style.get_property_value("display").as_deref() != Ok("none")
+        && style.get_property_value("visibility").as_deref() != Ok("hidden")
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -875,6 +887,47 @@ mod wasm_tests {
 
         let container = append_html(
             r#"<section id="scope"><button tabindex="0" style="display: none">hidden</button></section>"#,
+        );
+
+        let scope: HtmlElement = container
+            .query_selector("#scope")
+            .expect("query should succeed")
+            .expect("scope should exist")
+            .dyn_into()
+            .expect("scope should be HtmlElement");
+
+        assert!(super::visible_focus_target(&scope).is_none());
+    }
+
+    #[wasm_bindgen_test]
+    fn visible_focus_target_accepts_fixed_position_target() {
+        reset_body();
+
+        let container = append_html(
+            r#"<section id="scope"><button id="target" style="position: fixed">target</button></section>"#,
+        );
+
+        let scope: HtmlElement = container
+            .query_selector("#scope")
+            .expect("query should succeed")
+            .expect("scope should exist")
+            .dyn_into()
+            .expect("scope should be HtmlElement");
+
+        assert_eq!(
+            super::visible_focus_target(&scope)
+                .and_then(|element| element.get_attribute("id"))
+                .as_deref(),
+            Some("target")
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn visible_focus_target_rejects_hidden_fixed_position_target() {
+        reset_body();
+
+        let container = append_html(
+            r#"<section id="scope"><button id="target" style="position: fixed; visibility: hidden">target</button></section>"#,
         );
 
         let scope: HtmlElement = container

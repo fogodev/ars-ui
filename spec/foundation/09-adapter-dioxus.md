@@ -3191,7 +3191,7 @@ fn warn_if_mounted_id_mismatch(element: &web_sys::Element, client_id: &str) {
 
 2. **Scan for orphaned adapter-owned `inert` on hydration.** A post-hydration `use_effect` queries elements with both `[inert]` and `data-ars-modal-inert` and removes both attributes from any marked element that is not currently a sibling of an open modal. This prevents "frozen" regions left over from SSR without clearing author-owned inert regions used for unrelated loading or interaction locks. Cleanup of the modal-open marker uses `use_drop` (Dioxus equivalent of Leptos `on_cleanup`).
 
-3. **Validate focus target existence and visibility.** Before calling `.focus()`, the FocusScope checks the focusable scope root first, then scans all descendants matching the hydration focus selector until it finds a visible target. It verifies `element.offset_parent().is_some()` before focusing. Elements that are `display: none` or detached return `None` and are skipped rather than aborting the scan.
+3. **Validate focus target existence and visibility.** Before calling `.focus()`, the FocusScope checks the focusable scope root first, then scans all descendants matching the hydration focus selector until it finds a visible target. It accepts elements with an `offsetParent` and visible `position: fixed` elements whose `offsetParent` is `null`, while rejecting `display: none`, `visibility: hidden`, and detached targets.
 
 4. **Gate focus trap activation on hydration completion.** The root `ArsProvider` sets a `data-ars-hydrated` attribute on the document body once hydration is complete. Nested providers MUST NOT repeatedly mark the body; the marker represents the root hydration boundary. FocusScope defers trap activation until this attribute is present, preventing premature focus movement during partial hydration. If the marker is absent when the effect first runs, FocusScope retries through `request_animation_frame` until the marker appears or the scope unmounts. In Dioxus, this check is wrapped in a `use_effect` (which only runs on the client), rather than a `#[cfg(not(feature = "ssr"))]` gated `Effect::new` as in the Leptos adapter.
 
@@ -3201,8 +3201,6 @@ fn warn_if_mounted_id_mismatch(element: &web_sys::Element, client_id: &str) {
 use dioxus::prelude::*;
 use std::{cell::Cell, rc::Rc};
 use wasm_bindgen::JsCast;
-
-const HYDRATION_MODAL_INERT_ATTR: &str = "data-ars-modal-inert";
 
 const HYDRATION_FOCUS_TARGET_SELECTOR: &str = concat!(
     "[autofocus]:not([disabled]):not([aria-hidden='true']),",
@@ -3326,7 +3324,7 @@ fn activate_focus_scope(
             // Only remove if no open modal is a sibling.
             if !has_open_modal_sibling(&html_el) {
                 html_el.remove_attribute("inert").ok();
-                html_el.remove_attribute(HYDRATION_MODAL_INERT_ATTR).ok();
+                html_el.remove_attribute(ars_dom::portal::MODAL_INERT_ATTR).ok();
             }
         }
     }
@@ -3409,7 +3407,21 @@ fn is_focus_target_candidate(element: &web_sys::Element) -> bool {
 }
 
 fn is_visible_focus_target(element: &web_sys::HtmlElement) -> bool {
-    element.offset_parent().is_some()
+    element.offset_parent().is_some() || is_visible_fixed_position_target(element)
+}
+
+fn is_visible_fixed_position_target(element: &web_sys::HtmlElement) -> bool {
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+
+    let Ok(Some(style)) = window.get_computed_style(element) else {
+        return false;
+    };
+
+    style.get_property_value("position").as_deref() == Ok("fixed")
+        && style.get_property_value("display").as_deref() != Ok("none")
+        && style.get_property_value("visibility").as_deref() != Ok("hidden")
 }
 
 fn has_open_modal_sibling(element: &web_sys::Element) -> bool {

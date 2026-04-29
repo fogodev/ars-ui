@@ -2615,15 +2615,19 @@ pub fn ensure_portal_mount_root(owner_id: &str) -> web_sys::Element {
     mount
 }
 
-/// Set `inert` and `aria-hidden="true"` on all siblings of the portal root.
-/// Returns a cleanup function that removes the attributes.
+/// Attribute marking `inert` as owned by adapter modal background handling.
+pub const MODAL_INERT_ATTR: &str = "data-ars-modal-inert";
+
+/// Set `inert`, `data-ars-modal-inert`, and `aria-hidden="true"` on all
+/// siblings of the portal root. Returns a cleanup function that restores the
+/// previous attributes.
 pub fn set_background_inert(portal_root_id: &str) -> Box<dyn FnOnce()> {
     let document = web_sys::window().expect("window exists in browser context")
         .document().expect("document exists");
     let body = document.body().expect("document has body");
     let portal_root = document.get_element_by_id(portal_root_id);
     let children = body.children();
-    let mut restored: Vec<(web_sys::Element, Option<String>, Option<String>)> = Vec::new();
+    let mut restored: Vec<(web_sys::Element, Option<String>, Option<String>, Option<String>)> = Vec::new();
 
     for i in 0..children.length() {
         if let Some(child) = children.item(i) {
@@ -2635,20 +2639,26 @@ pub fn set_background_inert(portal_root_id: &str) -> Box<dyn FnOnce()> {
             }
             // Save original attribute values for cleanup
             let prev_inert = child.get_attribute("inert");
+            let prev_modal_inert = child.get_attribute(MODAL_INERT_ATTR);
             let prev_aria_hidden = child.get_attribute("aria-hidden");
 
             child.set_attribute("inert", "").expect("set inert attribute");
+            child.set_attribute(MODAL_INERT_ATTR, "").expect("set modal inert marker");
             child.set_attribute("aria-hidden", "true").expect("set aria-hidden attribute");
-            restored.push((child, prev_inert, prev_aria_hidden));
+            restored.push((child, prev_inert, prev_modal_inert, prev_aria_hidden));
         }
     }
 
     // Return cleanup function
     Box::new(move || {
-        for (el, prev_inert, prev_aria_hidden) in restored {
+        for (el, prev_inert, prev_modal_inert, prev_aria_hidden) in restored {
             match prev_inert {
                 Some(v) => el.set_attribute("inert", &v).expect("restore inert attribute"),
                 None => el.remove_attribute("inert").expect("remove inert attribute"),
+            }
+            match prev_modal_inert {
+                Some(v) => el.set_attribute(MODAL_INERT_ATTR, &v).expect("restore modal inert marker"),
+                None => el.remove_attribute(MODAL_INERT_ATTR).expect("remove modal inert marker"),
             }
             match prev_aria_hidden {
                 Some(v) => el.set_attribute("aria-hidden", &v).expect("restore aria-hidden attribute"),
