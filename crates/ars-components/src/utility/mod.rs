@@ -6,6 +6,9 @@ pub mod as_child;
 /// Button component machine.
 pub mod button;
 
+/// `ClientOnly` logical boundary props.
+pub mod client_only;
+
 /// Dismissable helpers.
 pub mod dismissable;
 
@@ -26,3 +29,6 @@ pub mod separator;
 
 /// `VisuallyHidden` component (stateless attribute mapper).
 pub mod visually_hidden;
+
+/// `ZIndexAllocator` context provider contract.
+pub mod z_index_allocator;

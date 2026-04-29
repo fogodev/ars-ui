@@ -2361,117 +2361,79 @@ Overlay components need predictable stacking. When multiple overlays are open si
 
 ### 6.2 Strategy
 
-````rust
-// ars-dom/src/z_index.rs
+```rust
+// ars-core/src/z_index.rs
 
-use std::cell::{Cell, RefCell};
+use core::cell::{Cell, RefCell};
 
-thread_local! {
-    /// Base z-index value. Set high enough to sit above typical application content.
-    /// Consumer stylesheets should avoid z-index values at or above this base.
-    static NEXT_Z_INDEX: Cell<u32> = Cell::new(1000);
+pub const Z_INDEX_BASE: u32 = 1000;
+pub const Z_INDEX_CEILING: u32 = u32::MAX - 1000;
+
+/// Allocate the next z-index from the compatibility global counter.
+///
+/// In `std` builds the counter is thread-local. In `no_std` builds the same
+/// free function uses an atomic fallback so the pure core crate keeps compiling
+/// without `std`; that fallback preserves monotonic allocation but is not a
+/// browser runtime context boundary.
+pub fn next_z_index() -> u32;
+
+/// Reset the compatibility global z-index counter to the supplied base value.
+pub fn reset_z_index(base: u32);
+
+/// Handle for an allocated z-index claim.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ZIndexClaim {
+    value: u32,
+    id: u64,
 }
 
-/// Allocate the next z-index for an overlay.
-/// Each call returns a monotonically increasing value.
-/// Single-threaded: consistent with the library's `Rc`-based, WASM-first design.
-///
-/// # Example
-///
-/// ```rust
-/// let z = next_z_index(); // 1000
-/// let z2 = next_z_index(); // 1001
-/// assert!(z2 > z);
-/// ```
-/// Z-index overflow threshold. If the counter exceeds this, it resets to the
-/// base value. This prevents wrap-around to 0 on very long-running SPAs that
-/// open many overlays (e.g., tooltips, popovers over thousands of interactions).
-const Z_INDEX_BASE: u32 = 1000;
-const Z_INDEX_CEILING: u32 = u32::MAX - 1000;
-
-pub fn next_z_index() -> u32 {
-    NEXT_Z_INDEX.with(|z| {
-        let val = z.get();
-        if val >= Z_INDEX_CEILING {
-            // Return the fresh base now, but store BASE + 1 so the following
-            // allocation continues from the new sequence without repeating BASE.
-            // Reset to base — existing overlays at high z-indexes will still
-            // render above normal content; new overlays start fresh.
-            #[cfg(feature = "debug")]
-            log::warn!(
-                "[ars-dom] z-index counter reached ceiling ({Z_INDEX_CEILING}), \
-                 resetting to base ({Z_INDEX_BASE})"
-            );
-            z.set(Z_INDEX_BASE + 1);
-            Z_INDEX_BASE
-        } else {
-            z.set(val + 1);
-            val
-        }
-    })
-}
-
-/// Reset the z-index counter to a given base value.
-/// Intended for use in tests to ensure deterministic z-index values.
-///
-/// # Example
-///
-/// ```rust
-/// reset_z_index(1000);
-/// assert_eq!(next_z_index(), 1000);
-/// assert_eq!(next_z_index(), 1001);
-/// ```
-pub fn reset_z_index(base: u32) {
-    NEXT_Z_INDEX.with(|z| z.set(base));
+impl ZIndexClaim {
+    pub const fn value(self) -> u32;
 }
 
 /// Structured z-index allocator for managing overlay stacking with explicit
-/// lifecycle control. Wraps the thread-local counter and adds release tracking
-/// to enable future compaction strategies.
+/// lifecycle control.
+#[derive(Debug)]
 pub struct ZIndexAllocator {
-    allocated: RefCell<Vec<u32>>,
+    next_z_index: Cell<u32>,
+    allocated: RefCell<Vec<ZIndexClaim>>,
+    next_claim_id: Cell<u64>,
 }
 
 impl ZIndexAllocator {
-    pub fn new() -> Self {
-        Self {
-            allocated: RefCell::new(Vec::new()),
-        }
-    }
+    pub const fn new() -> Self;
 
-    /// Allocate the next z-index. Delegates to the thread-local counter
-    /// and records the value for later release/compaction.
-    pub fn allocate(&self) -> u32 {
-        let z = next_z_index();
-        self.allocated.borrow_mut().push(z);
-        z
-    }
+    /// Allocate and track the next z-index value.
+    pub fn allocate(&self) -> u32;
 
-    /// Release a previously allocated z-index. Removes it from the tracked
-    /// set. After release, the value will not be reused — new allocations
-    /// always increment. Release enables future compaction: when all values
-    /// in a range are released, the allocator can reclaim that range.
-    pub fn release(&self, z: u32) {
-        self.allocated.borrow_mut().retain(|&v| v != z);
-    }
+    /// Allocate and track the next z-index as an identity-safe claim handle.
+    pub fn allocate_claim(&self) -> ZIndexClaim;
 
-    /// Reset the allocator: clear all tracked allocations and reset the
-    /// thread-local counter to the base value. Intended for tests and
-    /// application-level teardown (e.g., full-page navigation in an SPA).
-    pub fn reset(&self) {
-        self.allocated.borrow_mut().clear();
-        reset_z_index(Z_INDEX_BASE);
-    }
+    /// Release the first tracked claim with this value. Unknown values are ignored.
+    pub fn release(&self, z: u32);
+
+    /// Release one exact claim handle. Unknown claims are ignored.
+    pub fn release_claim(&self, claim: ZIndexClaim);
+
+    /// Clear tracked allocations and reset the provider-scoped counter to `Z_INDEX_BASE`.
+    pub fn reset(&self);
 }
-````
+```
+
+When the counter reaches `Z_INDEX_CEILING`, allocation returns `Z_INDEX_BASE` for that call and stores `Z_INDEX_BASE + 1` for the next allocation. This prevents integer overflow while keeping the new sequence monotonic after wrap.
+
+`ZIndexAllocator` owns a provider-scoped counter. `allocate_claim()` / `release_claim()` are the preferred lifecycle API because release targets an allocator-local claim identity. `allocate()` / `release(u32)` remain available for compatibility and simple integrations; value-based release removes the first tracked claim with that value and ignores unknown values. Released values are never reused. `reset()` clears tracked claims and resets the provider-scoped counter, but allocator-local claim identity continues to move forward so stale handles cannot release newly allocated claims after reset.
+
+`ars-dom::z_index` re-exports `ZIndexAllocator`, `ZIndexClaim`, `next_z_index()`, `reset_z_index()`, `Z_INDEX_BASE`, and `Z_INDEX_CEILING` from `ars-core` so adapter code can keep DOM-facing imports. The free functions are compatibility global-counter APIs; provider-backed overlays should use `z_index_allocator::Context`. Browser capability detection such as `supports_top_layer()` remains owned by `ars-dom`.
 
 ### 6.3 Usage Pattern
 
-Each overlay component calls `next_z_index()` when it opens (mounts into the DOM). Components with both a backdrop and content element allocate two consecutive z-index values: one for the backdrop (lower) and one for the content (higher). The returned value is applied as an inline style on the overlay's positioner or root element:
+Each overlay component allocates from the nearest `z_index_allocator::Context` when it opens (mounts into the DOM). Components with both a backdrop and content element allocate two consecutive z-index values: one for the backdrop (lower) and one for the content (higher). The returned value is applied as an inline style on the overlay's positioner or root element:
 
 ```rust
-// Inside a Popover's connect function:
-let z = next_z_index();
+// Inside a Popover adapter hook:
+let claim = z_index_context.allocate_claim();
+let z = claim.value();
 positioner_attrs.set_style(CssProperty::ZIndex, z.to_string());
 ```
 
@@ -2483,7 +2445,7 @@ This guarantees that overlays stack in opening order:
 
 When an overlay closes and later reopens, it receives a new (higher) z-index. This avoids stale z-index conflicts when overlays open and close in unpredictable order.
 
-> **Z-index management.** The monotonic counter (`next_z_index()`) always increments; values are
+> **Z-index management.** The provider-scoped monotonic counter always increments; values are
 > never reused or compacted. When an overlay closes and reopens, it receives a new, higher value.
 > Gaps in the sequence (e.g., [1000, 1002, 1005]) are expected and harmless — they do not cause
 > stacking inversions because the opening order is preserved by the counter. The `ZIndexAllocator`
@@ -2498,9 +2460,9 @@ When an overlay closes and later reopens, it receives a new (higher) z-index. Th
 | 0–999 | User/application content. The library MUST NOT allocate in this range. |
 | 1000+ | Overlay components managed by `ZIndexAllocator`.                       |
 
-**Cross-adapter consistency:** All adapters (Leptos, Dioxus) share the same thread-local `NEXT_Z_INDEX` counter via `ars-dom`. This ensures that overlays opened by different adapter instances on the same page stack correctly.
+**Cross-adapter consistency:** Adapters (Leptos, Dioxus) must publish the same `z_index_allocator::Context` type and consume it from the nearest provider. Overlays under the same provider share one scoped sequence. Separate providers intentionally create separate scopes; applications that need all overlays on a page to share one sequence should place one allocator provider above all layered surfaces.
 
-**Nested overlay ordering:** Nested overlays (e.g., a Menu inside a Dialog) increment from the parent's z-index. The `next_z_index()` function handles this automatically since calls are sequential — the child always receives a higher value than the parent.
+**Nested overlay ordering:** Nested overlays (e.g., a Menu inside a Dialog) increment from the parent's provider scope. Sequential context allocations ensure the child receives a higher value than the parent when both consume the same provider.
 
 **Portal z-index independence:** Overlays rendered through portals (appended to `document.body`) are outside their parent's stacking context. Their z-index is absolute, not relative to the parent component's stacking context. This is by design — portal-based overlays must stack above all non-overlay content regardless of where the trigger component lives in the DOM tree.
 

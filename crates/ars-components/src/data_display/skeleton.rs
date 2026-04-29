@@ -3,7 +3,7 @@
 //! `Skeleton` is a stateless, framework-agnostic attribute mapper for loading
 //! placeholder shapes.
 
-use alloc::string::String;
+use alloc::string::{String, ToString as _};
 use core::{
     fmt::{self, Debug},
     num::NonZero,
@@ -427,6 +427,7 @@ mod tests {
         for (variant, expected, animated) in cases {
             assert_eq!(variant.as_str(), expected);
             assert_eq!(variant.is_animated(), animated);
+
             let attrs = api(Props::new().variant(variant)).root_attrs();
 
             assert_eq!(attrs.get(&HtmlAttr::Data("ars-variant")), Some(expected));
@@ -443,6 +444,7 @@ mod tests {
 
         for (shape, expected) in cases {
             assert_eq!(shape.as_str(), expected);
+
             let attrs = api(Props::new().shape(shape)).root_attrs();
 
             assert_eq!(attrs.get(&HtmlAttr::Data("ars-shape")), Some(expected));

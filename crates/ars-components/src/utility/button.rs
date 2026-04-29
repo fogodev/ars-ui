@@ -4,7 +4,10 @@
 //! adapters own DOM event normalization and native handler deduplication;
 //! this module owns typed props, state transitions, and `AttrMap` output.
 
-use alloc::{string::String, vec::Vec};
+use alloc::{
+    string::{String, ToString as _},
+    vec::Vec,
+};
 use core::fmt::{self, Debug, Display};
 
 use ars_core::{
@@ -680,6 +683,7 @@ impl ars_core::Machine for Machine {
             (State::Pressed, Event::Blur) => {
                 Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
                     ctx.pressed = false;
+
                     clear_focus(ctx);
                 }))
             }
@@ -714,6 +718,7 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
                     ctx.disabled = true;
                     ctx.pressed = false;
+
                     clear_focus(ctx);
                 }))
             }
@@ -722,6 +727,7 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(|ctx: &mut Context| {
                     ctx.disabled = true;
                     ctx.pressed = false;
+
                     clear_focus(ctx);
                 }))
             }
