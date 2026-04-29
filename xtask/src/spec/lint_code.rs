@@ -434,8 +434,15 @@ fn is_pub_fn_decl(line: &str) -> bool {
     false
 }
 
-/// Returns `true` if `lines[idx]` is preceded (after skipping blank lines and
-/// `#[...]` attribute lines) by a `///` doc comment.
+/// Returns `true` if `lines[idx]` is preceded by a `///` outer doc
+/// comment, allowing blank lines and `#[...]` attribute spans between
+/// the doc comment and the item (rustc accepts these gaps).
+///
+/// Inner doc comments (`//!`) are NOT accepted as item documentation —
+/// they document the enclosing module/crate, not the following item.
+/// Encountering one stops the search and returns `false`. Any other
+/// non-doc, non-attribute, non-blank line (regular code, `//` comments,
+/// item declarations) also stops the search.
 fn preceded_by_doc(lines: &[&str], idx: usize) -> bool {
     let mut cursor = idx;
 
@@ -448,10 +455,21 @@ fn preceded_by_doc(lines: &[&str], idx: usize) -> bool {
         let prev = lines[cursor - 1].trim();
 
         if prev.is_empty() {
+            // Rustc allows blank lines between an outer doc comment and
+            // the item it documents, so keep walking up rather than
+            // bailing out on the first blank.
+            cursor -= 1;
+            continue;
+        }
+
+        if prev.starts_with("//!") {
+            // Inner doc — documents the enclosing scope, not the
+            // following item. Reject explicitly so it can't satisfy the
+            // outer-doc requirement.
             return false;
         }
 
-        return prev.starts_with("///") || prev.starts_with("//!");
+        return prev.starts_with("///");
     }
 
     false
@@ -1368,6 +1386,84 @@ pub struct Api { }
                 .iter()
                 .any(|m| m.contains("`Api` must implement `Clone`")),
             "core::clone::Clone must satisfy the Clone requirement, got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn accepts_doc_with_blank_line_before_item() {
+        // Regression for the P2 review on PR #621: rustc allows blank
+        // lines between an outer doc comment and the item it documents,
+        // so `/// docs\n\npub struct Foo;` is correctly documented and
+        // must not be flagged.
+        let md = "\
+### 1.1 Props
+
+```rust
+/// Props for the component.
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Props {
+    /// The id.
+
+    pub id: String,
+}
+```
+";
+
+        let messages = run(md);
+        assert!(
+            messages.is_empty(),
+            "doc comments separated by blank lines must still satisfy R3/R4, got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_inner_doc_for_item_documentation() {
+        // Regression for the P2 review on PR #621: `//!` is an inner doc
+        // comment that documents the enclosing crate/module, NOT the
+        // following item. A public struct preceded only by `//!` is
+        // therefore undocumented and must be flagged.
+        let md = "\
+### 1.1 Props
+
+```rust
+//! Module-level docs.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Props {
+}
+```
+";
+
+        let messages = run(md);
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("public struct declaration is missing")),
+            "`//!` must not satisfy outer-doc requirement, got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn does_not_walk_past_code_to_find_doc() {
+        // Defensive companion: blank-line skipping must NOT cause an
+        // earlier item's doc comment to attach to a later item.
+        let md = "\
+### 1.1 Props
+
+```rust
+/// Docs for A.
+pub struct A {}
+
+pub struct B {}
+```
+";
+
+        let messages = run(md);
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("public struct declaration is missing")),
+            "B is undocumented despite earlier `///` for A, got {messages:?}"
         );
     }
 
