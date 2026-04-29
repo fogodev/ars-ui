@@ -1,0 +1,37 @@
+---
+source: crates/ars-components/src/input/textarea/mod.rs
+expression: "snapshot_attrs(&service(props()).connect(&|_| {}).label_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "label",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "textarea",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "bio-field-label",
+            ),
+        ),
+        (
+            For,
+            String(
+                "bio-field-textarea",
+            ),
+        ),
+    ],
+    styles: [],
+}

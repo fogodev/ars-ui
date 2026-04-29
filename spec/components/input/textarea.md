@@ -47,8 +47,14 @@ pub enum Event {
     SetInvalid(bool),
     /// IME composition started.
     CompositionStart,
-    /// IME composition ended.
-    CompositionEnd,
+    /// IME composition ended with the final committed value.
+    CompositionEnd(String),
+    /// Synchronize the externally controlled value prop.
+    SetValue(Option<String>),
+    /// Synchronize output-affecting props stored in context.
+    SetProps,
+    /// Track whether a Description part is rendered.
+    SetHasDescription(bool),
 }
 ```
 
@@ -105,6 +111,8 @@ pub struct Context {
     pub auto_resize: bool,
     /// Maximum height constraint for auto-resize (CSS value).
     pub max_height: Option<String>,
+    /// Maximum number of rows for auto-resize height capping.
+    pub max_rows: Option<u32>,
     /// True while an IME composition session is active.
     pub is_composing: bool,
     /// Whether a Description part is rendered (gates aria-describedby).
@@ -113,6 +121,8 @@ pub struct Context {
     pub dir: Direction,
     /// Mobile on-screen keyboard layout hint.
     pub input_mode: Option<InputMode>,
+    /// Resolved locale for character-count number formatting.
+    pub locale: Locale,
     /// Component IDs for part identification.
     pub ids: ComponentIds,
 }
@@ -165,6 +175,8 @@ pub struct Props {
     pub dir: Direction,
     /// Hint for the virtual keyboard type on mobile devices.
     pub input_mode: Option<InputMode>,
+    /// Callback fired when user interaction requests a value change.
+    pub on_value_change: Option<Callback<dyn Fn(String) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -178,7 +190,7 @@ impl Default for Props {
             rows: 3, cols: None,
             resize: ResizeMode::Vertical,
             auto_resize: false, max_height: None, max_rows: None,
-            dir: Direction::Ltr, input_mode: None,
+            dir: Direction::Ltr, input_mode: None, on_value_change: None,
         }
     }
 }
@@ -186,7 +198,7 @@ impl Default for Props {
 
 ### 1.5 Auto-Resize Behavior
 
-When `auto_resize=true`, the machine emits an auto-resize effect after every `Change` event. The adapter handles auto-resize via `platform.resize_to_content()` (see `PlatformEffects` in `01-architecture.md` section 2.2.7). The effect closure in `Event::Change` already calls this method -- no standalone resize function is needed in core.
+When `auto_resize=true`, the machine emits a pending effect named `"auto-resize"` after user-driven value changes, clears, composition commits, and external controlled value updates. The effect carries typed [`EffectMetadata::ResizeToContent`] data containing `element_id = ctx.ids.part("textarea")`, `max_height = ctx.max_height`, and `max_rows = ctx.max_rows`. The adapter handles the effect via its platform implementation. Core never calls DOM APIs and does not resolve a global platform handle inside the effect closure.
 
 **Growth rules:**
 
@@ -238,10 +250,12 @@ impl ars_core::Machine for Machine {
             resize: props.resize,
             auto_resize: props.auto_resize,
             max_height: props.max_height.clone(),
+            max_rows: props.max_rows,
             is_composing: false,
             has_description: false,
             dir: props.dir,
             input_mode: props.input_mode.clone(),
+            locale: env.locale.clone(),
             ids: ComponentIds::from_id(&props.id),
         };
         (state, ctx)
@@ -268,28 +282,34 @@ impl ars_core::Machine for Machine {
                 }))
             }
             Event::Change(val) => {
-                if ctx.disabled || ctx.readonly { return None; }
+                if ctx.disabled || ctx.readonly || ctx.is_composing { return None; }
                 let val = val.clone();
                 let auto_resize = ctx.auto_resize;
-                let max_height = ctx.max_height.clone();
-                let mut plan = TransitionPlan::context_only(move |ctx| {
-                    ctx.value.set(val);
-                });
+                let mut plan = TransitionPlan::context_only({
+                    let val = val.clone();
+                    move |ctx| {
+                        if !ctx.value.is_controlled() {
+                            ctx.value.set(val);
+                        }
+                    }
+                }).with_effect(value_change_effect(val));
                 if auto_resize {
-                    plan = plan.with_effect(PendingEffect::new("auto_resize", move |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        let input_id = ctx.ids.part("input");
-                        platform.resize_to_content(&input_id, max_height.as_deref());
-                        no_cleanup()
-                    }));
+                    plan = plan.with_effect(auto_resize_effect(ctx));
                 }
                 Some(plan)
             }
             Event::Clear => {
                 if ctx.disabled || ctx.readonly { return None; }
-                Some(TransitionPlan::context_only(|ctx| {
-                    ctx.value.set(String::new());
-                }))
+                let auto_resize = ctx.auto_resize;
+                let mut plan = TransitionPlan::context_only(|ctx| {
+                    if !ctx.value.is_controlled() {
+                        ctx.value.set(String::new());
+                    }
+                }).with_effect(value_change_effect(String::new()));
+                if auto_resize {
+                    plan = plan.with_effect(auto_resize_effect(ctx));
+                }
+                Some(plan)
             }
             Event::SetInvalid(invalid) => {
                 let inv = *invalid;
@@ -300,8 +320,69 @@ impl ars_core::Machine for Machine {
             Event::CompositionStart => {
                 Some(TransitionPlan::context_only(|ctx| { ctx.is_composing = true; }))
             }
-            Event::CompositionEnd => {
-                Some(TransitionPlan::context_only(|ctx| { ctx.is_composing = false; }))
+            Event::CompositionEnd(final_value) => {
+                let final_value = final_value.clone();
+                let should_change = !ctx.disabled && !ctx.readonly;
+                let auto_resize = ctx.auto_resize;
+                let mut plan = TransitionPlan::context_only({
+                    let final_value = final_value.clone();
+                    move |ctx| {
+                        ctx.is_composing = false;
+                        if should_change && !ctx.value.is_controlled() {
+                            ctx.value.set(final_value);
+                        }
+                    }
+                });
+                if should_change {
+                    plan = plan.with_effect(value_change_effect(final_value));
+                }
+                if should_change && auto_resize {
+                    plan = plan.with_effect(auto_resize_effect(ctx));
+                }
+                Some(plan)
+            }
+            Event::SetValue(value) => {
+                let value = value.clone();
+                let mut plan = TransitionPlan::context_only(move |ctx| {
+                    if let Some(value) = value {
+                        ctx.value.set(value.clone());
+                        ctx.value.sync_controlled(Some(value));
+                    } else {
+                        ctx.value.sync_controlled(None);
+                    }
+                });
+                if _props.auto_resize {
+                    plan = plan.with_effect(auto_resize_effect(ctx));
+                }
+                Some(plan)
+            }
+            Event::SetProps => {
+                let props = _props.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.invalid = props.invalid;
+                    ctx.required = props.required;
+                    ctx.placeholder = props.placeholder;
+                    ctx.max_length = props.max_length;
+                    ctx.min_length = props.min_length;
+                    ctx.name = props.name;
+                    ctx.autocomplete = props.autocomplete;
+                    ctx.rows = props.rows;
+                    ctx.cols = props.cols;
+                    ctx.resize = props.resize;
+                    ctx.auto_resize = props.auto_resize;
+                    ctx.max_height = props.max_height;
+                    ctx.max_rows = props.max_rows;
+                    ctx.dir = props.dir;
+                    ctx.input_mode = props.input_mode;
+                }))
+            }
+            Event::SetHasDescription(has_description) => {
+                let has_description = *has_description;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.has_description = has_description;
+                }))
             }
         }
     }
@@ -346,6 +427,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.id());
         attrs.set(HtmlAttr::Data("ars-state"), match self.state {
             State::Idle => "idle",
             State::Focused => "focused",
@@ -389,7 +471,7 @@ impl<'a> Api<'a> {
         if let Some(p) = &self.ctx.placeholder { attrs.set(HtmlAttr::Placeholder, p); }
         if let Some(max) = self.ctx.max_length { attrs.set(HtmlAttr::MaxLength, max.to_string()); }
         if let Some(min) = self.ctx.min_length { attrs.set(HtmlAttr::MinLength, min.to_string()); }
-        if let Some(ac) = &self.ctx.autocomplete { attrs.set(HtmlAttr::Autocomplete, ac); }
+        if let Some(ac) = &self.ctx.autocomplete { attrs.set(HtmlAttr::AutoComplete, ac); }
         if let Some(name) = &self.ctx.name { attrs.set(HtmlAttr::Name, name); }
         if let Some(ref form) = self.props.form { attrs.set(HtmlAttr::Form, form); }
         attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
@@ -424,6 +506,18 @@ impl<'a> Api<'a> {
         attrs
     }
 
+    pub fn character_count(&self) -> CharacterCount {
+        let current = grapheme_count(self.ctx.value.get());
+        let max = self.ctx.max_length;
+        let formatter = count_formatter(&self.ctx.locale);
+        let current_text = formatter.format(current as f64);
+        let text = match max {
+            Some(max) => format!("{current_text} / {}", formatter.format(f64::from(max))),
+            None => current_text,
+        };
+        CharacterCount { current, max, text }
+    }
+
     /// Attributes for the description/help text.
     pub fn description_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
@@ -447,7 +541,16 @@ impl<'a> Api<'a> {
 
     pub fn on_textarea_focus(&self, is_keyboard: bool) { (self.send)(Event::Focus { is_keyboard }); }
     pub fn on_textarea_blur(&self) { (self.send)(Event::Blur); }
-    pub fn on_textarea_change(&self, val: String) { (self.send)(Event::Change(val)); }
+    pub fn on_textarea_change(&self, val: String) {
+        if !self.ctx.is_composing {
+            (self.send)(Event::Change(val));
+        }
+    }
+    pub fn on_textarea_composition_start(&self) { (self.send)(Event::CompositionStart); }
+    pub fn on_textarea_composition_end(&self, final_value: String) {
+        (self.send)(Event::CompositionEnd(final_value));
+    }
+    pub fn on_clear(&self) { (self.send)(Event::Clear); }
 }
 
 impl ConnectApi for Api<'_> {
@@ -511,14 +614,14 @@ Textarea
 
 ### 3.3 IME Composition Handling
 
-See [IME Composition Protocol](./_category.md#ime-composition-protocol). During `compositionstart`...`compositionend`, adapters must suppress value change callbacks. The machine's `is_composing: bool` tracks composition state.
+See [IME Composition Protocol](./_category.md#ime-composition-protocol). During `compositionstart`...`compositionend`, adapters must suppress intermediate value changes. The machine's `is_composing: bool` tracks composition state. On `compositionend`, adapters send the final element value as `CompositionEnd(final_value)`, so clearing the composition flag and applying/reporting the final value happen in one transition.
 
 ## 4. Internationalization
 
 - `dir` attribute set from locale direction — ensures text entry direction matches language.
 - `placeholder` text is user-provided and must be localized by consumer.
 - `resize: Horizontal` should be `resize: Vertical` in vertical writing modes.
-- Character count format: "42 / 200" — numbers formatted per locale.
+- Character count format: "42 / 200" when `max_length` is present and "42" otherwise. The agnostic core counts Unicode extended grapheme clusters, formats numbers per locale, and exposes the formatted text through `Api::character_count()`.
 - RTL: Text direction follows the document locale.
 
 ## 5. Form Integration

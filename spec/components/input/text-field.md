@@ -61,8 +61,14 @@ pub enum Event {
     SetInvalid(bool),
     /// IME composition started (CJK, etc.).
     CompositionStart,
-    /// IME composition ended.
-    CompositionEnd,
+    /// IME composition ended with the final committed value.
+    CompositionEnd(String),
+    /// Synchronize the externally controlled value prop.
+    SetValue(Option<String>),
+    /// Synchronize output-affecting props stored in context.
+    SetProps,
+    /// Track whether a Description part is rendered.
+    SetHasDescription(bool),
 }
 ```
 
@@ -172,7 +178,9 @@ pub struct Props {
     /// Hint for the virtual keyboard type on mobile devices.
     pub input_mode: Option<InputMode>,
     /// Convenience callback fired with `true` on Focus and `false` on Blur.
-    pub on_focus_change: Option<Callback<bool>>,
+    pub on_focus_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
+    /// Callback fired when user interaction requests a value change.
+    pub on_value_change: Option<Callback<dyn Fn(String) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -185,7 +193,7 @@ impl Default for Props {
             max_length: None, min_length: None, pattern: None,
             autocomplete: None, name: None, form: None, clearable: false,
             dir: Direction::Ltr, input_mode: None,
-            on_focus_change: None,
+            on_focus_change: None, on_value_change: None,
         }
     }
 }
@@ -259,17 +267,24 @@ impl ars_core::Machine for Machine {
                 }))
             }
             Event::Change(val) => {
-                if ctx.disabled || ctx.readonly { return None; }
+                if ctx.disabled || ctx.readonly || ctx.is_composing { return None; }
                 let val = val.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.value.set(val);
-                }))
+                Some(TransitionPlan::context_only({
+                    let val = val.clone();
+                    move |ctx| {
+                        if !ctx.value.is_controlled() {
+                            ctx.value.set(val);
+                        }
+                    }
+                }).with_effect(value_change_effect(val)))
             }
             Event::Clear => {
                 if ctx.disabled || ctx.readonly { return None; }
                 Some(TransitionPlan::context_only(|ctx| {
-                    ctx.value.set(String::new());
-                }))
+                    if !ctx.value.is_controlled() {
+                        ctx.value.set(String::new());
+                    }
+                }).with_effect(value_change_effect(String::new())))
             }
             Event::SetInvalid(invalid) => {
                 let inv = *invalid;
@@ -282,9 +297,56 @@ impl ars_core::Machine for Machine {
                     ctx.is_composing = true;
                 }))
             }
-            Event::CompositionEnd => {
-                Some(TransitionPlan::context_only(|ctx| {
-                    ctx.is_composing = false;
+            Event::CompositionEnd(final_value) => {
+                let final_value = final_value.clone();
+                let should_change = !ctx.disabled && !ctx.readonly;
+                let mut plan = TransitionPlan::context_only({
+                    let final_value = final_value.clone();
+                    move |ctx| {
+                        ctx.is_composing = false;
+                        if should_change && !ctx.value.is_controlled() {
+                            ctx.value.set(final_value);
+                        }
+                    }
+                });
+                if should_change {
+                    plan = plan.with_effect(value_change_effect(final_value));
+                }
+                Some(plan)
+            }
+            Event::SetValue(value) => {
+                let value = value.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    if let Some(value) = value {
+                        ctx.value.set(value.clone());
+                        ctx.value.sync_controlled(Some(value));
+                    } else {
+                        ctx.value.sync_controlled(None);
+                    }
+                }))
+            }
+            Event::SetProps => {
+                let props = _props.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.invalid = props.invalid;
+                    ctx.required = props.required;
+                    ctx.placeholder = props.placeholder;
+                    ctx.input_type = props.input_type;
+                    ctx.max_length = props.max_length;
+                    ctx.min_length = props.min_length;
+                    ctx.pattern = props.pattern;
+                    ctx.autocomplete = props.autocomplete;
+                    ctx.name = props.name;
+                    ctx.dir = props.dir;
+                    ctx.input_mode = props.input_mode;
+                }))
+            }
+            Event::SetHasDescription(has_description) => {
+                let has_description = *has_description;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.has_description = has_description;
                 }))
             }
         }
@@ -332,6 +394,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.id());
         attrs.set(HtmlAttr::Data("ars-state"), match self.state {
             State::Idle => "idle",
             State::Focused => "focused",
@@ -370,7 +433,7 @@ impl<'a> Api<'a> {
             InputType::Search => "search",
         });
         attrs.set(HtmlAttr::Dir, self.ctx.dir.as_str());
-        if let Some(im) = &self.ctx.input_mode {
+        if let Some(im) = self.resolved_input_mode() {
             attrs.set(HtmlAttr::InputMode, im.as_str());
         }
         attrs.set(HtmlAttr::Value, self.ctx.value.get());
@@ -382,7 +445,7 @@ impl<'a> Api<'a> {
         if let Some(max) = self.ctx.max_length { attrs.set(HtmlAttr::MaxLength, max.to_string()); }
         if let Some(min) = self.ctx.min_length { attrs.set(HtmlAttr::MinLength, min.to_string()); }
         if let Some(pat) = &self.ctx.pattern { attrs.set(HtmlAttr::Pattern, pat); }
-        if let Some(ac) = &self.ctx.autocomplete { attrs.set(HtmlAttr::Autocomplete, ac); }
+        if let Some(ac) = &self.ctx.autocomplete { attrs.set(HtmlAttr::AutoComplete, ac); }
         if let Some(name) = &self.ctx.name { attrs.set(HtmlAttr::Name, name); }
         if let Some(ref form) = self.props.form { attrs.set(HtmlAttr::Form, form); }
         attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
@@ -455,8 +518,34 @@ impl<'a> Api<'a> {
 
     pub fn on_input_focus(&self, is_keyboard: bool) { (self.send)(Event::Focus { is_keyboard }); }
     pub fn on_input_blur(&self) { (self.send)(Event::Blur); }
-    pub fn on_input_change(&self, val: String) { (self.send)(Event::Change(val)); }
+    pub fn on_input_change(&self, val: String) {
+        if !self.ctx.is_composing {
+            (self.send)(Event::Change(val));
+        }
+    }
+    pub fn on_input_composition_start(&self) { (self.send)(Event::CompositionStart); }
+    pub fn on_input_composition_end(&self, final_value: String) {
+        (self.send)(Event::CompositionEnd(final_value));
+    }
+    pub fn on_input_keydown(&self, data: &KeyboardEventData) -> bool {
+        if data.key == KeyboardKey::Escape
+            && !data.is_composing
+            && self.props.clearable
+            && !self.ctx.disabled
+            && !self.ctx.readonly
+        {
+            (self.send)(Event::Clear);
+            return true;
+        }
+        false
+    }
     pub fn on_clear_click(&self) { (self.send)(Event::Clear); }
+    pub fn should_render_clear_trigger(&self) -> bool {
+        self.props.clearable
+            && !self.ctx.disabled
+            && !self.ctx.readonly
+            && !self.ctx.value.get().is_empty()
+    }
 }
 
 impl ConnectApi for Api<'_> {
@@ -485,22 +574,22 @@ TextField
 ├── Label              <label>   data-ars-part="label"
 ├── StartDecorator     <div>     data-ars-part="start-decorator" (optional, aria-hidden)
 ├── Input         [A]  <input>   data-ars-part="input"
-├── ClearTrigger       <button>  data-ars-part="clear-trigger" (optional, when clearable)
+├── ClearTrigger       <button>  data-ars-part="clear-trigger" (optional, when clearable and non-empty)
 ├── EndDecorator       <div>     data-ars-part="end-decorator" (optional, aria-hidden)
 ├── Description        <div>     data-ars-part="description" (optional)
 └── ErrorMessage       <div>     data-ars-part="error-message" (optional)
 ```
 
-| Part           | Element    | Key Attributes                                             |
-| -------------- | ---------- | ---------------------------------------------------------- |
-| Root           | `<div>`    | `data-ars-scope="text-field"`, `data-ars-state`            |
-| Label          | `<label>`  | `for` points to Input                                      |
-| Input          | `<input>`  | `type`, `aria-labelledby`, `aria-describedby`              |
-| StartDecorator | `<div>`    | `aria-hidden="true"` — icon/prefix slot (optional)         |
-| EndDecorator   | `<div>`    | `aria-hidden="true"` — icon/suffix slot (optional)         |
-| ClearTrigger   | `<button>` | `aria-label="Clear"`, `type="button"` (optional)           |
-| Description    | `<div>`    | Help text; linked via `aria-describedby` (optional)        |
-| ErrorMessage   | `<div>`    | Validation error; linked via `aria-describedby` (optional) |
+| Part           | Element    | Key Attributes                                                                |
+| -------------- | ---------- | ----------------------------------------------------------------------------- |
+| Root           | `<div>`    | `data-ars-scope="text-field"`, `data-ars-state`                               |
+| Label          | `<label>`  | `for` points to Input                                                         |
+| Input          | `<input>`  | `type`, `aria-labelledby`, `aria-describedby`                                 |
+| StartDecorator | `<div>`    | `aria-hidden="true"` — icon/prefix slot (optional)                            |
+| EndDecorator   | `<div>`    | `aria-hidden="true"` — icon/suffix slot (optional)                            |
+| ClearTrigger   | `<button>` | `aria-label="Clear"`, `type="button"` (optional when clearable and non-empty) |
+| Description    | `<div>`    | Help text; linked via `aria-describedby` (optional)                           |
+| ErrorMessage   | `<div>`    | Validation error; linked via `aria-describedby` (optional)                    |
 
 ## 3. Accessibility
 
@@ -520,9 +609,12 @@ TextField
 | Escape | Clear value (when clearable) |
 | Tab    | Move focus to/from input     |
 
+Adapters should render `ClearTrigger` only when `Api::should_render_clear_trigger()` returns
+`true`, which requires `clearable=true`, an editable enabled field, and a non-empty value.
+
 ### 3.3 IME Composition Handling
 
-During `compositionstart`...`compositionend`, adapters must suppress value change callbacks and typeahead. The machine's context field `is_composing: bool` tracks composition state. On `compositionend`, the final composed text from `InputEvent.data` is applied as a single value update. `KeyboardEvent` handlers must check `event.isComposing` and skip processing when `true`.
+During `compositionstart`...`compositionend`, adapters must suppress intermediate value changes and typeahead. The machine's context field `is_composing: bool` tracks composition state. On `compositionend`, adapters send the final element value as `CompositionEnd(final_value)`, so clearing the composition flag and applying/reporting the final value happen in one transition. `KeyboardEvent` handlers must check `event.isComposing` and skip processing when `true`.
 
 See [IME Composition Protocol](./_category.md#ime-composition-protocol) for the shared input method editor behavior.
 
@@ -532,6 +624,8 @@ See [IME Composition Protocol](./_category.md#ime-composition-protocol) for the 
 - `placeholder` text is user-provided and must be localized by consumer.
 - `inputmode` attribute may differ by locale (e.g., numeric keyboard for Arabic phone numbers
   still uses standard `tel` inputmode).
+- When `input_mode` is omitted, the core infers native keyboard hints from `input_type` for
+  `Email`, `Url`, `Tel`, and `Search`; explicit `input_mode` always wins.
 
 ### 4.1 Messages
 
@@ -630,12 +724,12 @@ TextField must handle mobile virtual keyboard interactions:
 
 ### 6.3 Events
 
-| Callback      | ars-ui                              | React Aria                              | Notes              |
-| ------------- | ----------------------------------- | --------------------------------------- | ------------------ |
-| Value changed | `Change(String)`                    | `onChange`                              | Full parity        |
-| Focus         | `Focus`/`Blur`                      | `onFocus`/`onBlur`/`onFocusChange`      | Full parity        |
-| Clear         | `Clear`                             | --                                      | ars-ui enhancement |
-| Composition   | `CompositionStart`/`CompositionEnd` | `onCompositionStart`/`onCompositionEnd` | Full parity        |
+| Callback      | ars-ui                                           | React Aria                              | Notes              |
+| ------------- | ------------------------------------------------ | --------------------------------------- | ------------------ |
+| Value changed | `Change(String)`                                 | `onChange`                              | Full parity        |
+| Focus         | `Focus`/`Blur`                                   | `onFocus`/`onBlur`/`onFocusChange`      | Full parity        |
+| Clear         | `Clear`                                          | --                                      | ars-ui enhancement |
+| Composition   | `CompositionStart`/`CompositionEnd(final_value)` | `onCompositionStart`/`onCompositionEnd` | Full parity        |
 
 **Gaps:** None.
 
