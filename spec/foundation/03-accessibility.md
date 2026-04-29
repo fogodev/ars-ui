@@ -2771,86 +2771,70 @@ When updating live regions, the **method of DOM mutation** and **timing** critic
 
 ### 5.3 VisuallyHidden
 
-Content that is visible to screen readers but hidden from sighted users. Used for supplementary accessibility labels, status messages, and hidden instructions.
+Content that is visible to screen readers but hidden from sighted users. Used
+for supplementary accessibility labels, status messages, and hidden
+instructions.
 
-````rust
-// ars-a11y/src/visually_hidden.rs
+The visually-hidden surface is exposed as a first-class component, not a
+foundation helper. See `spec/components/utility/visually-hidden.md` for the
+authoritative agnostic-core API (`Props`, `Part`, `Api`, `ConnectApi`). At
+the CSS layer, the technique below is the canonical implementation; the
+component's `Api::root_attrs()` emits either the `ars-visually-hidden`
+class or the `data-ars-visually-hidden-focusable` data hook, both of which
+target the rules in `crates/ars-core/ars-base.css`.
 
-/// Returns the AttrMap for a visually-hidden wrapper element.
-///
-/// The CSS technique used (absolute positioning + clip) avoids the following
-/// pitfalls of other approaches:
-///   - `display: none` / `visibility: hidden`: hidden from screen readers too.
-///   - `opacity: 0`: still takes up space, may be clipped by ancestors.
-///   - `font-size: 0`: VoiceOver on macOS may still read the element.
-///   - `text-indent: -9999px`: causes performance issues with long text.
-///
-/// This implementation is safe for RTL layouts and does not cause scroll issues.
-///
-/// **Important**: Because this technique uses `position: absolute`, the
-/// VisuallyHidden element must be placed inside a positioned ancestor
-/// (i.e., an element with `position: relative`, `absolute`, `fixed`, or
-/// `sticky`). Without a positioned ancestor, the absolutely-positioned
-/// element will be placed relative to the initial containing block (the
-/// viewport), which can cause unexpected layout shifts and scroll issues.
-/// Framework adapters should document this requirement. In practice, most
-/// component root elements already have `position: relative` set.
-pub fn visually_hidden_attrs() -> AttrMap {
-    let mut attrs = AttrMap::new();
-    attrs.set(HtmlAttr::Class, "ars-visually-hidden");
-    attrs
+**CSS technique:** absolute positioning + clip-rect. This approach avoids
+the following pitfalls of common alternatives:
+
+- `display: none` / `visibility: hidden`: hidden from screen readers too.
+- `opacity: 0`: still takes up space, may be clipped by ancestors.
+- `font-size: 0`: VoiceOver on macOS may still read the element.
+- `text-indent: -9999px`: causes performance issues with long text.
+
+This implementation is safe for RTL layouts and does not cause scroll
+issues.
+
+**Position note.** Because the technique uses `position: absolute` with a
+1×1 pixel clip rect, the element does not affect surrounding layout. A
+positioned ancestor is **not** required — the absolute positioning is
+solely to remove the element from normal flow. Framework adapters should
+document this so consumers understand the element is not visually
+positioned relative to a parent.
+
+**CSS classes (shipped in `crates/ars-core/ars-base.css`):**
+
+```css
+/* Always hidden but accessible to screen readers. */
+.ars-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
 }
 
-/// CSS for visually-hidden (non-focusable):
-///
-/// ```css
-/// .ars-visually-hidden {
-///   position: absolute;
-///   width: 1px;
-///   height: 1px;
-///   padding: 0;
-///   margin: -1px;
-///   overflow: hidden;
-///   clip: rect(0, 0, 0, 0);
-///   white-space: nowrap;
-///   border-width: 0;
-/// }
-/// ```
-#[derive(Debug)]
-pub struct VisuallyHiddenCssDoc;
-
-/// Returns visually hidden attrs for an element that MUST remain visible
-/// when it receives focus (e.g., a "Skip to content" link).
-/// When focused, the element becomes visible.
-///
-/// This variant deliberately does not apply the unconditional
-/// `ars-visually-hidden` class because that class would keep the element
-/// clipped even while focused. The focusable behavior is driven entirely by the
-/// `data-ars-visually-hidden-focusable` CSS hook.
-pub fn visually_hidden_focusable_attrs() -> AttrMap {
-    let mut attrs = AttrMap::new();
-    attrs.set_bool(HtmlAttr::Data("ars-visually-hidden-focusable"), true);
-    attrs
+/* Hidden until focused or focus-within; supports skip-link affordances. */
+[data-ars-visually-hidden-focusable]:not(:focus):not(:focus-within) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
 }
+```
 
-/// CSS for visually-hidden-focusable:
-///
-/// ```css
-/// [data-ars-visually-hidden-focusable]:not(:focus):not(:focus-within) {
-///   position: absolute;
-///   width: 1px;
-///   height: 1px;
-///   padding: 0;
-///   margin: -1px;
-///   overflow: hidden;
-///   clip: rect(0, 0, 0, 0);
-///   white-space: nowrap;
-///   border-width: 0;
-/// }
-/// ```
-#[derive(Debug)]
-pub struct VisuallyHiddenFocusableCssDoc;
-````
+The focusable variant must NOT also include the `ars-visually-hidden` class
+— that class clips unconditionally and would prevent the element from
+becoming visible on focus. The agnostic-core `Api::root_attrs()` enforces
+this exclusivity.
 
 ### 5.4 Label, Description, and Field Utilities
 
@@ -4262,7 +4246,8 @@ crates/ars-a11y/
                             // Shared type-ahead state lives in `ars-collections::typeahead`
     announcer.rs            // LiveAnnouncer, AnnouncementPriority, Announcement
     announcements.rs        // Pre-built announcement string helpers
-    visually_hidden.rs      // visually_hidden_attrs(), visually_hidden_focusable_attrs()
+    // VisuallyHidden lives in ars-components::utility::visually_hidden;
+    // ars-base.css carries the matching CSS classes.
     label.rs                // LabelConfig, DescriptionConfig, FieldContext
     // `ComponentIds` now lives in `ars-core`; downstream crates import it from there.
     media.rs                // Re-export facade behind #[cfg(feature = "dom")]; canonical

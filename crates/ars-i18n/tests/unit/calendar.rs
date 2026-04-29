@@ -25,6 +25,15 @@ fn japanese_era(code: &str, display_name: &str) -> Era {
     }
 }
 
+#[cfg(feature = "std")]
+fn local_time_zone_override_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("local time-zone override test lock should not be poisoned")
+}
+
 #[test]
 fn calendar_system_bcp47_roundtrips_and_lists_supported_calendars() {
     for (identifier, calendar) in [
@@ -595,8 +604,10 @@ fn native_interop_helpers_convert_to_system_time_without_exposing_temporal_types
 #[cfg(feature = "std")]
 #[test]
 fn zoned_date_time_and_local_zone_override_work() {
+    let _guard = local_time_zone_override_test_lock();
     let time_zone = TimeZoneId::new("America/New_York").expect("zone should validate");
 
+    parse::reset_local_time_zone_override();
     let local = CalendarDateTime::new(
         gregorian_date(2024, 3, 10),
         Time::new(1, 30, 0, 0).expect("time should validate"),
@@ -668,6 +679,8 @@ fn zoned_date_time_and_local_zone_override_work() {
 #[cfg(feature = "std")]
 #[test]
 fn get_local_time_zone_uses_local_host_zone_when_no_override_is_set() {
+    let _guard = local_time_zone_override_test_lock();
+
     parse::reset_local_time_zone_override();
 
     let expected = TimeZoneId::new(

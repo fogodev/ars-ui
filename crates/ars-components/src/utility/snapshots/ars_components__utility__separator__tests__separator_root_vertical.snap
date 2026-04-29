@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/utility/separator.rs
+expression: "snapshot_attrs(&Api::new(vertical()).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-orientation",
+            ),
+            String(
+                "vertical",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "separator",
+            ),
+        ),
+        (
+            Aria(
+                Orientation,
+            ),
+            String(
+                "vertical",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "separator",
+            ),
+        ),
+    ],
+    styles: [],
+}
