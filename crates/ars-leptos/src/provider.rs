@@ -131,6 +131,27 @@ pub(crate) fn current_ars_context() -> Option<ArsContext> {
     use_context::<ArsContext>()
 }
 
+#[cfg(all(feature = "hydrate", target_arch = "wasm32"))]
+#[derive(Clone, Copy)]
+struct ArsProviderRootMarker;
+
+#[cfg(all(feature = "hydrate", target_arch = "wasm32"))]
+fn is_root_ars_provider() -> bool {
+    use_context::<ArsProviderRootMarker>().is_none()
+}
+
+#[cfg(all(feature = "hydrate", target_arch = "wasm32"))]
+fn provide_ars_provider_root_marker() {
+    provide_context(ArsProviderRootMarker);
+}
+
+#[cfg(all(feature = "hydrate", target_arch = "wasm32"))]
+fn mark_body_hydrated_for_provider(is_root_provider: bool) {
+    if is_root_provider {
+        crate::hydration::mark_body_hydrated();
+    }
+}
+
 /// Publishes [`ArsContext`] into Leptos context.
 pub fn provide_ars_context(context: ArsContext) {
     provide_context(context);
@@ -190,7 +211,15 @@ pub fn ArsProvider(
     };
 
     #[cfg(all(feature = "hydrate", target_arch = "wasm32"))]
-    Effect::new(|_| crate::hydration::mark_body_hydrated());
+    let is_root_provider = is_root_ars_provider();
+
+    #[cfg(all(feature = "hydrate", target_arch = "wasm32"))]
+    provide_ars_provider_root_marker();
+
+    #[cfg(all(feature = "hydrate", target_arch = "wasm32"))]
+    Effect::new(move |_| {
+        mark_body_hydrated_for_provider(is_root_provider);
+    });
 
     use_nonce_css_context_provider();
 
@@ -832,8 +861,10 @@ mod wasm_tests {
     };
     use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend, Translate, locales, number};
     use leptos::prelude::*;
+    #[cfg(any(feature = "csr", feature = "hydrate"))]
+    use leptos::web_sys;
     #[cfg(feature = "csr")]
-    use leptos::{mount::mount_to, wasm_bindgen::JsCast, web_sys};
+    use leptos::{mount::mount_to, wasm_bindgen::JsCast};
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
     #[cfg(feature = "csr")]
@@ -1264,12 +1295,54 @@ mod wasm_tests {
         });
     }
 
-    #[cfg(feature = "csr")]
+    #[cfg(any(feature = "csr", feature = "hydrate"))]
     fn document() -> web_sys::Document {
         web_sys::window()
             .expect("window should exist")
             .document()
             .expect("document should exist")
+    }
+
+    #[cfg(feature = "hydrate")]
+    fn body() -> web_sys::HtmlElement {
+        document().body().expect("body should exist")
+    }
+
+    #[cfg(feature = "hydrate")]
+    #[wasm_bindgen_test]
+    fn nested_provider_marker_does_not_mark_body_hydrated_on_wasm() {
+        let owner = Owner::new();
+
+        owner.with(|| {
+            let body = body();
+
+            drop(body.remove_attribute("data-ars-hydrated"));
+            super::provide_ars_provider_root_marker();
+
+            assert!(!super::is_root_ars_provider());
+
+            super::mark_body_hydrated_for_provider(super::is_root_ars_provider());
+
+            assert_eq!(body.get_attribute("data-ars-hydrated"), None);
+        });
+    }
+
+    #[cfg(feature = "hydrate")]
+    #[wasm_bindgen_test]
+    fn root_provider_marker_marks_body_hydrated_on_wasm() {
+        let owner = Owner::new();
+
+        owner.with(|| {
+            let body = body();
+
+            drop(body.remove_attribute("data-ars-hydrated"));
+
+            assert!(super::is_root_ars_provider());
+
+            super::mark_body_hydrated_for_provider(super::is_root_ars_provider());
+
+            assert_eq!(body.get_attribute("data-ars-hydrated").as_deref(), Some(""));
+        });
     }
 
     #[cfg(feature = "csr")]
