@@ -10,13 +10,15 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+#[cfg(feature = "ssr")]
+use ars_core::HydrationSnapshot;
 use ars_core::{CleanupFn, Env, HasId, Machine, RenderMode, Service};
 use dioxus::prelude::*;
 
 use crate::{
     ephemeral::EphemeralRef,
     provider::{resolve_locale, use_intl_backend, use_messages},
-    use_id,
+    use_stable_id,
 };
 
 /// Return type from [`use_machine`].
@@ -236,7 +238,32 @@ where
     M::Event: Send + 'static,
     M::Messages: Send + Sync + 'static,
 {
-    let (result, ..) = use_machine_inner::<M>(props);
+    let (result, ..) = use_machine_inner::<M>(props, None);
+
+    result
+}
+
+/// Creates and manages a machine service from an SSR hydration snapshot.
+///
+/// The snapshot state is installed with [`Service::new_hydrated`] so the
+/// client preserves server-rendered machine state while recomputing context
+/// from the current adapter environment.
+#[cfg(feature = "ssr")]
+pub fn use_machine_hydrated<M: Machine + 'static>(
+    props: M::Props,
+    snapshot: HydrationSnapshot<M>,
+) -> UseMachineReturn<M>
+where
+    M::State: Clone + PartialEq + 'static,
+    M::Context: Clone + 'static,
+    M::Props: Clone + PartialEq + 'static,
+    M::Event: Send + 'static,
+    M::Messages: Send + Sync + 'static,
+{
+    let (result, ..) = use_machine_inner::<M>(
+        props_with_snapshot_id::<M>(props, &snapshot),
+        Some(snapshot.state),
+    );
 
     result
 }
@@ -260,11 +287,12 @@ where
     use_machine::<M>(props_signal())
 }
 
-/// Internal implementation shared between public hooks.
-///
-/// Returns the public `UseMachineReturn` plus the internal `context_version`
-/// signal so body-level prop sync can update it during re-renders.
-fn use_machine_inner<M: Machine + 'static>(props: M::Props) -> (UseMachineReturn<M>, Signal<u64>)
+/// Creates a reactive-props machine service from an SSR hydration snapshot.
+#[cfg(feature = "ssr")]
+pub fn use_machine_with_reactive_props_hydrated<M: Machine + 'static>(
+    props_signal: Signal<M::Props>,
+    snapshot: HydrationSnapshot<M>,
+) -> UseMachineReturn<M>
 where
     M::State: Clone + PartialEq + 'static,
     M::Context: Clone + 'static,
@@ -272,7 +300,25 @@ where
     M::Event: Send + 'static,
     M::Messages: Send + Sync + 'static,
 {
-    let generated_id = use_hook(|| use_id("component"));
+    use_machine_hydrated::<M>(props_signal(), snapshot)
+}
+
+/// Internal implementation shared between public hooks.
+///
+/// Returns the public `UseMachineReturn` plus the internal `context_version`
+/// signal so body-level prop sync can update it during re-renders.
+fn use_machine_inner<M: Machine + 'static>(
+    props: M::Props,
+    hydrated_state: Option<M::State>,
+) -> (UseMachineReturn<M>, Signal<u64>)
+where
+    M::State: Clone + PartialEq + 'static,
+    M::Context: Clone + 'static,
+    M::Props: Clone + PartialEq + 'static,
+    M::Event: Send + 'static,
+    M::Messages: Send + Sync + 'static,
+{
+    let generated_id = use_stable_id("component");
 
     let props_for_sync = props.clone();
 
@@ -295,7 +341,21 @@ where
     let messages = use_messages::<M::Messages>(None, Some(&env.locale));
 
     // Create the service once — use_signal runs its closure only on first mount.
-    let service_signal = use_signal(move || Service::<M>::new(props, &env, &messages));
+    let service_signal = use_signal(move || {
+        if let Some(state) = hydrated_state {
+            #[cfg(feature = "ssr")]
+            {
+                return Service::<M>::new_hydrated(props, state, &env, &messages);
+            }
+
+            #[cfg(not(feature = "ssr"))]
+            {
+                drop(state);
+            }
+        }
+
+        Service::<M>::new(props, &env, &messages)
+    });
 
     // Create a signal tracking the current state.
     // Use .peek() to avoid subscribing the component to service_signal changes.
@@ -409,6 +469,24 @@ where
 fn props_with_service_id<M: Machine>(mut props: M::Props, service_id: &str) -> M::Props {
     if props.id().is_empty() {
         props.set_id(service_id.to_owned());
+    }
+
+    props
+}
+
+#[cfg(feature = "ssr")]
+fn props_with_snapshot_id<M: Machine>(
+    mut props: M::Props,
+    snapshot: &HydrationSnapshot<M>,
+) -> M::Props {
+    if props.id().is_empty() {
+        props.set_id(snapshot.id.clone());
+    } else {
+        debug_assert_eq!(
+            props.id(),
+            snapshot.id,
+            "HydrationSnapshot id must match Props::id"
+        );
     }
 
     props

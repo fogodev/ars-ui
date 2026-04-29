@@ -2,6 +2,8 @@
 use std::sync::Mutex;
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
+#[cfg(feature = "ssr")]
+use ars_core::HydrationSnapshot;
 use ars_core::{HasId, I18nRegistries, MessageFn, NullPlatformEffects};
 use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend};
 use dioxus::dioxus_core::{NoOpMutations, ScopeId};
@@ -225,6 +227,103 @@ fn use_machine_creates_service_with_initial_state() {
 
         // Context version starts at 0
         assert_eq!(*machine.context_version.peek(), 0);
+
+        rsx! {
+            div {}
+        }
+    }
+
+    let mut dom = VirtualDom::new(app);
+
+    dom.rebuild_in_place();
+}
+
+#[cfg(feature = "ssr")]
+#[test]
+fn use_machine_hydrated_preserves_snapshot_state_and_id() {
+    fn app() -> Element {
+        let machine = use_machine_hydrated::<ToggleMachine>(
+            ToggleProps { id: String::new() },
+            HydrationSnapshot {
+                state: ToggleState::On,
+                id: String::from("toggle-hydrated"),
+            },
+        );
+
+        assert_eq!(*machine.state.peek(), ToggleState::On);
+        assert_eq!(machine.service.peek().props().id(), "toggle-hydrated");
+
+        rsx! {
+            div {}
+        }
+    }
+
+    let mut dom = VirtualDom::new(app);
+
+    dom.rebuild_in_place();
+}
+
+#[cfg(feature = "ssr")]
+#[test]
+fn use_machine_hydrated_accepts_matching_explicit_props_id() {
+    fn app() -> Element {
+        let machine = use_machine_hydrated::<ToggleMachine>(
+            ToggleProps {
+                id: String::from("toggle-explicit"),
+            },
+            HydrationSnapshot {
+                state: ToggleState::On,
+                id: String::from("toggle-explicit"),
+            },
+        );
+
+        assert_eq!(*machine.state.peek(), ToggleState::On);
+        assert_eq!(machine.service.peek().props().id(), "toggle-explicit");
+
+        rsx! {
+            div {}
+        }
+    }
+
+    let mut dom = VirtualDom::new(app);
+
+    dom.rebuild_in_place();
+}
+
+#[cfg(all(feature = "ssr", debug_assertions))]
+#[test]
+#[should_panic(expected = "HydrationSnapshot id must match Props::id")]
+fn props_with_snapshot_id_rejects_mismatched_explicit_props_id_in_debug() {
+    let _props = props_with_snapshot_id::<ToggleMachine>(
+        ToggleProps {
+            id: String::from("toggle-client"),
+        },
+        &HydrationSnapshot {
+            state: ToggleState::On,
+            id: String::from("toggle-server"),
+        },
+    );
+}
+
+#[cfg(feature = "ssr")]
+#[test]
+fn reactive_props_hydrated_preserves_snapshot_state_and_id() {
+    fn app() -> Element {
+        let props = use_signal(|| ToggleProps { id: String::new() });
+
+        let machine = use_machine_with_reactive_props_hydrated::<ToggleMachine>(
+            props,
+            HydrationSnapshot {
+                state: ToggleState::On,
+                id: String::from("toggle-reactive-hydrated"),
+            },
+        );
+
+        assert_eq!(*machine.state.peek(), ToggleState::On);
+        assert_eq!(
+            machine.service.peek().props().id(),
+            "toggle-reactive-hydrated"
+        );
 
         rsx! {
             div {}
@@ -564,7 +663,7 @@ fn generated_id_stays_stable_across_rerenders() {
     let snapshots = snapshots.borrow();
 
     assert_eq!(snapshots.len(), 3);
-    assert!(snapshots[0].starts_with("component-"));
+    assert!(snapshots[0].starts_with("ars-component-"));
     assert_eq!(snapshots[0], snapshots[1]);
     assert_eq!(snapshots[1], snapshots[2]);
 }
@@ -697,7 +796,7 @@ fn reactive_props_sync_preserves_service_id_when_signal_props_omit_id() {
     let snapshots = snapshots.borrow();
 
     assert_eq!(snapshots.len(), 3);
-    assert!(snapshots[0].0.starts_with("component-"));
+    assert!(snapshots[0].0.starts_with("ars-component-"));
     assert_eq!(snapshots[0].0, snapshots[1].0);
     assert_eq!(snapshots[1].0, snapshots[2].0);
     assert_eq!(

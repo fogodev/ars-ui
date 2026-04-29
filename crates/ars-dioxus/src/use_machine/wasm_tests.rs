@@ -80,7 +80,7 @@ fn use_machine_injects_generated_id_on_wasm() {
     dom.rebuild_in_place();
 
     assert_eq!(snapshots.borrow().len(), 1);
-    assert!(snapshots.borrow()[0].starts_with("component-"));
+    assert!(snapshots.borrow()[0].starts_with("ars-component-"));
 }
 
 #[wasm_bindgen_test]

@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use ars_core::PendingEffect;
 use ars_core::{AriaAttr, AttrMap, ComponentPart, ConnectApi, Env, HasId, HtmlAttr, Machine};
 
+#[cfg_attr(feature = "ssr", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ToggleState {
     Off,
@@ -115,6 +116,7 @@ impl Machine for ToggleMachine {
     }
 }
 
+#[cfg_attr(feature = "ssr", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PropState {
     Off,

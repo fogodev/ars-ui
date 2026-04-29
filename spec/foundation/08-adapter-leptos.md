@@ -232,21 +232,22 @@ This eliminates the use-after-free class of bugs where `Api<'a>` outlives the `S
 
 > **Note:** `EphemeralRef` / `with_api_ephemeral()` is for imperative, non-reactive API access (e.g., inside event handlers). For reactive derived values, use `machine.derive(|api| ...)` which returns a `Memo<T>`. These are complementary patterns: derive() for render-time reads, EphemeralRef for event-time reads.
 
-### 3.2 Hydration-Safe Component IDs
+### 3.2 Component IDs and Hydration
 
-The Leptos adapter MUST use `use_id()` (a global monotonic counter) for all component IDs to ensure SSR/hydration consistency. The counter produces the same sequence on server and client when the component tree renders in the same order. The ID resolution order is:
+The Leptos adapter MUST prefer explicit component IDs for hydrated SSR paths.
+Generated adapter IDs are unique within a render pass and stable only when the
+server and client render the same hook sequence. The ID resolution order is:
 
 1. **`props.id` takes priority** — If the consumer provides an explicit `id` prop, use it as-is. The consumer is responsible for ensuring uniqueness and hydration stability.
-2. **`use_id()` fallback** — If `props.id` is empty, the adapter calls `use_id("component")` to generate a hydration-safe ID. The global `ID_COUNTER` produces deterministic IDs as long as SSR and client render components in the same tree order. `reset_id_counter()` must be called at the start of each SSR request.
+2. **`use_id()` fallback** — If `props.id` is empty, the adapter calls `use_id("component")` to generate a fallback ID. The global `ID_COUNTER` produces deterministic IDs only when SSR and client render components in the same tree order. `reset_id_counter()` must be called at the start of each SSR request to avoid cross-request leakage, but it does not make generated IDs safe when render order diverges.
 
 ```rust
 // In use_machine_inner():
 let props = {
     let mut p = props;
     if p.id().is_empty() {
-        // use_id() returns a deterministic ID that matches between SSR and hydration.
-        // This is critical: non-deterministic IDs (e.g., random UUIDs) cause hydration
-        // mismatches, breaking ARIA linkage (label-for, describedby, etc.).
+        // Generated fallback IDs are stable only when SSR and hydration render
+        // the same hook path. Hydrated components should prefer explicit IDs.
         p.set_id(use_id("component"));
     }
     p
@@ -620,20 +621,20 @@ During server-side rendering, effects are not executed. The `use_machine` hook g
 
 1. **Emit valid focus targets during SSR.** Server-rendered modal overlays MUST include at least one focusable element in the HTML output. Use `<button autofocus>` or an element with `tabindex="-1"` so that the hydration effect has a valid target.
 
-2. **Scan for orphaned `inert` on hydration.** A post-hydration effect queries all elements with `[inert]` and removes the attribute from any element that is not currently a sibling of an open modal. This prevents "frozen" regions left over from SSR.
+2. **Scan for orphaned `inert` on hydration.** A post-hydration effect queries all elements with `[inert]` and removes the attribute from any element that is not currently a sibling of an open modal. This prevents "frozen" regions left over from SSR. Cleanup of the modal-open marker uses `on_cleanup`.
 
 3. **Validate focus target existence and visibility.** Before calling `.focus()`, the FocusScope checks that the target element exists and is visible by verifying `element.offset_parent().is_some()`. Elements that are `display: none` or detached return `None` and are skipped.
 
-4. **Gate focus trap activation on hydration completion.** The adapter sets a `data-ars-hydrated` attribute on the document body once hydration is complete. FocusScope defers trap activation until this attribute is present, preventing premature focus movement during partial hydration.
+4. **Gate focus trap activation on hydration completion.** The root provider sets a `data-ars-hydrated` attribute on the document body once hydration is complete. Nested providers MUST NOT repeatedly mark the body; the marker represents the root hydration boundary. FocusScope defers trap activation until this attribute is present, preventing premature focus movement during partial hydration. If the marker is absent when the effect first runs, FocusScope schedules one `request_animation_frame` retry before giving up.
 
 5. **Use `request_animation_frame` for DOM settlement.** After hydration, focus trap activation is wrapped in a `request_animation_frame` callback to ensure the DOM has fully settled before the trap is engaged.
 
 ```rust
 use leptos::prelude::*;
-use web_sys::wasm_bindgen::JsCast;
+use wasm_bindgen::JsCast;
 
 /// Hydration-safe FocusScope setup for modal overlays.
-/// Called from `use_machine` effect setup after hydration is confirmed.
+/// Called by FocusScope or Dialog component code after hydration is confirmed.
 fn setup_focus_scope_hydration_safe(
     scope_ref: NodeRef<html::Div>,
     restore_target: StoredValue<Option<web_sys::HtmlElement>>,
@@ -643,56 +644,106 @@ fn setup_focus_scope_hydration_safe(
     Effect::new(move |_| {
         let document = document();
 
-        // Gate on hydration completion.
+        // Gate on hydration completion, with one frame of tolerance for the
+        // root provider marker to settle.
         let body = document.body().expect("document.body");
         if body.get_attribute("data-ars-hydrated").is_none() {
-            return;
-        }
-
-        // Remove orphaned inert attributes.
-        let inert_elements = document
-            .query_selector_all("[inert]")
-            .expect("querySelectorAll");
-        for i in 0..inert_elements.length() {
-            if let Some(el) = inert_elements.item(i) {
-                let html_el: web_sys::HtmlElement = el.unchecked_into();
-                // Only remove if no open modal is a sibling.
-                if document
-                    .query_selector("[data-ars-modal-open]")
-                    .ok()
-                    .flatten()
-                    .is_none()
-                {
-                    html_el.remove_attribute("inert").ok();
-                }
-            }
-        }
-
-        // Step 2: Activate focus trap after DOM settles.
-        if let Some(scope_el) = scope_ref.get() {
-            let scope_el: web_sys::HtmlElement = scope_el.into();
             request_animation_frame(move || {
-                // Validate target exists and is visible.
-                let target = scope_el
-                    .query_selector("[autofocus], [tabindex]")
-                    .ok()
-                    .flatten()
-                    .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
-                    .filter(|el| el.offset_parent().is_some());
-
-                if let Some(el) = target {
-                    // Save the currently focused element BEFORE moving focus,
-                    // so it can be restored when the scope is deactivated.
-                    restore_target.set_value(
-                        document
-                            .active_element()
-                            .and_then(|ae| ae.dyn_into().ok()),
-                    );
-                    el.focus().ok();
+                let body = document.body().expect("document.body");
+                if body.get_attribute("data-ars-hydrated").is_some() {
+                    activate_focus_scope(&document, scope_ref, restore_target);
                 }
             });
+        } else {
+            activate_focus_scope(&document, scope_ref, restore_target);
         }
     });
+
+    on_cleanup(move || {
+        if let Some(scope_el) = scope_ref.get() {
+            let scope_el: web_sys::HtmlElement = scope_el.into();
+            scope_el.remove_attribute("data-ars-modal-open").ok();
+        }
+
+        if let Some(el) = restore_target.get_value().as_ref() {
+            el.focus().ok();
+        }
+    });
+}
+
+fn activate_focus_scope(
+    document: &web_sys::Document,
+    scope_ref: NodeRef<html::Div>,
+    restore_target: StoredValue<Option<web_sys::HtmlElement>>,
+) {
+    let scope_el = scope_ref.get().map(|node| {
+        let scope_el: web_sys::HtmlElement = node.into();
+        scope_el.set_attribute("data-ars-modal-open", "").ok();
+        scope_el
+    });
+
+    // Remove orphaned inert attributes. An inert element is retained while
+    // it remains a sibling of the hydrated modal scope.
+    let inert_elements = document
+        .query_selector_all("[inert]")
+        .expect("querySelectorAll");
+    for i in 0..inert_elements.length() {
+        if let Some(el) = inert_elements.item(i) {
+            let html_el: web_sys::Element = el.unchecked_into();
+            // Only remove if no open modal is a sibling.
+            if !has_open_modal_sibling(&html_el) {
+                html_el.remove_attribute("inert").ok();
+            }
+        }
+    }
+
+    // Step 2: Activate focus trap after DOM settles.
+    if let Some(scope_el) = scope_el {
+        let document = document.clone();
+        request_animation_frame(move || {
+            // Validate target exists and is visible.
+            let target = scope_el
+                .query_selector("[autofocus], [tabindex]")
+                .ok()
+                .flatten()
+                .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+                .filter(|el| el.offset_parent().is_some());
+
+            if let Some(el) = target {
+                // Save the currently focused element BEFORE moving focus,
+                // so it can be restored when the scope is deactivated.
+                restore_target.set_value(
+                    document
+                        .active_element()
+                        .and_then(|ae| ae.dyn_into().ok()),
+                );
+                el.focus().ok();
+            }
+        });
+    }
+}
+
+fn has_open_modal_sibling(element: &web_sys::Element) -> bool {
+    let Some(parent) = element.parent_element() else {
+        return false;
+    };
+
+    let children = parent.children();
+    for index in 0..children.length() {
+        let Some(child) = children.item(index) else {
+            continue;
+        };
+
+        if child.is_same_node(Some(element)) {
+            continue;
+        }
+
+        if child.has_attribute("data-ars-modal-open") {
+            return true;
+        }
+    }
+
+    false
 }
 ```
 
@@ -1623,7 +1674,7 @@ use ars_core::{HydrationSnapshot, Machine, Service};
 fn serialize_snapshot<M>(svc: &Service<M>) -> String
 where
     M: Machine,
-    M::State: serde::Serialize,
+    M::State: Clone + serde::Serialize,
 {
     serde_json::to_string(&HydrationSnapshot::<M> {
         state: svc.state().clone(),

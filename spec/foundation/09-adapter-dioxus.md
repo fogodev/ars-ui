@@ -257,13 +257,14 @@ const fn current_render_mode() -> RenderMode {
 
 fn use_machine_inner<M: Machine + 'static>(
     props: M::Props,
+    hydrated_state: Option<M::State>,
 ) -> (UseMachineReturn<M>, Signal<u64>)
 where
     M::State: Clone + PartialEq + 'static,
     M::Context: Clone + 'static,
     M::Props: Clone + PartialEq + 'static,
 {
-    let generated_id = use_hook(|| format!("ars-{}", dioxus_id_counter()));
+    let generated_id = use_stable_id("component");
     let props_for_sync = props.clone();
 
     // Auto-inject ID if not provided by the user.
@@ -271,8 +272,6 @@ where
     let props = {
         let mut p = props;
         if p.id().is_empty() {
-            // Same counter as use_stable_id() — inlined here since use_machine_inner
-            // has no prefix context. Component-level code should use use_stable_id().
             p.set_id(generated_id);
         }
         p
@@ -287,12 +286,25 @@ where
     // Resolve messages from adapter-level i18n hooks.
     let messages = use_messages::<M::Messages>(None, Some(&env.locale));
 
+    // `use_machine_hydrated()` passes `Some(snapshot.state)` so client hydration
+    // preserves the server-rendered state while recomputing context from the
+    // current adapter environment.
     // **Safety**: The `init()` function must not call `api.send()` or otherwise
     // produce events. It runs during component initialization and event
     // processing is not yet set up.
     // Move normalized props into Service creation.
     // use_signal's closure runs exactly once (first mount), consuming `props`.
-    let service_signal = use_signal(|| Service::<M>::new(props, env, messages));
+    let service_signal = use_signal(move || {
+        if let Some(state) = hydrated_state {
+            #[cfg(feature = "ssr")]
+            {
+                return Service::new_hydrated(props, state, &env, &messages);
+            }
+        }
+
+        Service::new(props, &env, &messages)
+    });
+
     let context_version: Signal<u64> = use_signal(|| 0u64);
 
     // Create state_signal BEFORE use_sync_props to ensure it exists if sync triggers re-render.
@@ -3097,13 +3109,22 @@ pub fn emit_map<T, U: 'static>(handler: Option<&EventHandler<U>>, value: T, f: i
 
 ---
 
-### 19.2 Hydration-Safe ID Generation
+### 19.2 Generated IDs and Hydration
 
-The `dioxus_id_counter()` function (thread-local on WASM, `AtomicU64` on native) is **NOT hydration-safe**. During SSR, the server increments the counter in rendering order; on hydration, the client may increment differently due to lazy loading, code splitting, or Suspense boundaries. This causes ARIA attribute mismatches (`aria-labelledby`, `aria-describedby`, `aria-controls` pointing to wrong elements).
+The `dioxus_id_counter()` function (thread-local on WASM, `AtomicU64` on
+native) is **NOT hydration-safe**. During SSR, the server increments the counter
+in rendering order; on hydration, the client may increment differently due to
+lazy loading, code splitting, or Suspense boundaries. This causes ARIA attribute
+mismatches (`aria-labelledby`, `aria-describedby`, `aria-controls` pointing to
+wrong elements).
 
 **Requirements:**
 
-1. **Deterministic ID scheme**: Replace `dioxus_id_counter()` with a deterministic ID generation strategy tied to the component tree position, analogous to React's `useId()`. The ID must be identical on server and client for the same component instance.
+1. **Explicit IDs for SSR + hydration**: Components rendered through SSR and
+   hydrated on the client MUST receive explicit `id` props from application code
+   or from a higher-level component API that can serialize and restore the same
+   value. Generated IDs are only a fallback for client-only rendering and for
+   non-hydrated SSR output.
 
 2. **SSR counter reset**: When the `dioxus/server` feature is active, the ID counter MUST be reset at the start of each SSR request to prevent cross-request counter leakage:
 
@@ -3118,23 +3139,43 @@ The `dioxus_id_counter()` function (thread-local on WASM, `AtomicU64` on native)
     }
     ```
 
-3. **Hydration mismatch detection**: In debug builds, the client SHOULD compare server-rendered IDs (extracted from the hydrated DOM) with client-generated IDs. On mismatch, emit a console warning:
+   Resetting the counter prevents request-to-request leakage, but it does not
+   make generated IDs safe if server and client render different hook paths.
+
+3. **Hydration mismatch detection**: In debug builds, the client SHOULD compare
+   the mounted DOM element's server-rendered `id` with the client ID it is about
+   to use. On mismatch, emit a console warning:
    `"ars-ui hydration ID mismatch: server='ars-dialog-7', client='ars-dialog-9'. Component IDs may be non-deterministic across SSR/client boundaries."`
 
-4. **Recommended implementation**: Use Dioxus's built-in hook ordering (which is stable across SSR/hydration) combined with a component-path prefix:
+4. **Generated fallback implementation**: `use_stable_id()` must use Dioxus hook
+   storage so the generated value is stable for the lifetime of a mounted
+   component and does not change across re-renders:
 
 ```rust
 fn use_stable_id(prefix: &str) -> String {
-    // Hook ordering is deterministic in Dioxus — same component
-    // at same tree position gets same hook slot on server and client.
+    // Hook storage keeps the generated suffix stable across re-renders, but
+    // the suffix still comes from the adapter counter and is not hydration-safe.
     let id = use_hook(|| dioxus_id_counter());
     format!("ars-{prefix}-{id}")
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn warn_if_mounted_id_mismatch(element: &web_sys::Element, client_id: &str) {
+    let server_id = element.id();
+    if server_id.is_empty() || server_id == client_id {
+        return;
+    }
+
+    #[cfg(debug_assertions)]
+    web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&format!(
+        "ars-ui hydration ID mismatch: server='{server_id}', client='{client_id}'. Component IDs may be non-deterministic across SSR/client boundaries."
+    )));
 }
 ```
 
 > **Warning:** `use_stable_id` currently delegates to `dioxus_id_counter()`, which is NOT
 > hydration-safe. SSR+hydration users MUST provide explicit `id` props on all components
-> until a deterministic tree-position-based ID scheme is implemented.
+> unless the component restores the exact server ID from a hydration snapshot.
 
 ---
 
@@ -3148,20 +3189,20 @@ fn use_stable_id(prefix: &str) -> String {
 
 1. **Emit valid focus targets during SSR.** Server-rendered modal overlays MUST include at least one focusable element in the HTML output. Use a `button` with `autofocus` or an element with `tabindex="-1"` so that the hydration effect has a valid target.
 
-2. **Scan for orphaned `inert` on hydration.** A post-hydration `use_effect` queries all elements with `[inert]` and removes the attribute from any element that is not currently a sibling of an open modal. This prevents "frozen" regions left over from SSR. Cleanup of these attributes uses `use_drop` (Dioxus equivalent of Leptos `on_cleanup`).
+2. **Scan for orphaned `inert` on hydration.** A post-hydration `use_effect` queries all elements with `[inert]` and removes the attribute from any element that is not currently a sibling of an open modal. This prevents "frozen" regions left over from SSR. Cleanup of the modal-open marker uses `use_drop` (Dioxus equivalent of Leptos `on_cleanup`).
 
 3. **Validate focus target existence and visibility.** Before calling `.focus()`, the FocusScope checks that the target element exists and is visible by verifying `element.offset_parent().is_some()`. Elements that are `display: none` or detached return `None` and are skipped.
 
-4. **Gate focus trap activation on hydration completion.** The adapter sets a `data-ars-hydrated` attribute on the document body once hydration is complete. FocusScope defers trap activation until this attribute is present, preventing premature focus movement during partial hydration. In Dioxus, this check is wrapped in a `use_effect` (which only runs on the client), rather than a `#[cfg(not(feature = "ssr"))]` gated `Effect::new` as in the Leptos adapter.
+4. **Gate focus trap activation on hydration completion.** The root `ArsProvider` sets a `data-ars-hydrated` attribute on the document body once hydration is complete. Nested providers MUST NOT repeatedly mark the body; the marker represents the root hydration boundary. FocusScope defers trap activation until this attribute is present, preventing premature focus movement during partial hydration. If the marker is absent when the effect first runs, FocusScope schedules one `request_animation_frame` retry before giving up. In Dioxus, this check is wrapped in a `use_effect` (which only runs on the client), rather than a `#[cfg(not(feature = "ssr"))]` gated `Effect::new` as in the Leptos adapter.
 
 5. **Use `request_animation_frame` for DOM settlement.** After hydration, focus trap activation is wrapped in a `request_animation_frame` callback to ensure the DOM has fully settled before the trap is engaged.
 
 ```rust
 use dioxus::prelude::*;
-use web_sys::wasm_bindgen::JsCast;
+use wasm_bindgen::JsCast;
 
 /// Hydration-safe FocusScope setup for modal overlays.
-/// Called from `use_machine` effect setup after hydration is confirmed.
+/// Called by FocusScope or Dialog component code after hydration is confirmed.
 ///
 /// Dioxus adapter differences from Leptos:
 /// - `use_effect` instead of `#[cfg(not(feature = "ssr"))]` gated `Effect::new`
@@ -3172,6 +3213,8 @@ fn setup_focus_scope_hydration_safe(
     scope_id: String,
     mut restore_target: Signal<Option<web_sys::HtmlElement>>,
 ) {
+    let cleanup_scope_id = scope_id.clone();
+
     // Step 1: Clean up orphaned inert attributes left by SSR.
     // use_effect only runs on the client, so no #[cfg(not(feature = "ssr"))] needed.
     use_effect(move || {
@@ -3180,73 +3223,118 @@ fn setup_focus_scope_hydration_safe(
             .document()
             .expect("document");
 
-        // Gate on hydration completion.
+        // Gate on hydration completion, with one frame of tolerance for the
+        // root provider marker to settle.
         let body = document.body().expect("document.body");
         if body.get_attribute("data-ars-hydrated").is_none() {
-            return;
-        }
-
-        // Remove orphaned inert attributes.
-        let inert_elements = document
-            .query_selector_all("[inert]")
-            .expect("querySelectorAll");
-        for i in 0..inert_elements.length() {
-            if let Some(el) = inert_elements.item(i) {
-                let html_el: web_sys::HtmlElement = el.unchecked_into();
-                // Only remove if no open modal is a sibling.
-                if document
-                    .query_selector("[data-ars-modal-open]")
-                    .ok()
-                    .flatten()
-                    .is_none()
-                {
-                    html_el.remove_attribute("inert").ok();
-                }
-            }
-        }
-
-        // Step 2: Activate focus trap after DOM settles.
-        let scope_el = document
-            .get_element_by_id(&scope_id)
-            .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok());
-
-        if let Some(scope_el) = scope_el {
-            // Use request_animation_frame to wait for DOM settlement.
-            let document_clone = document.clone();
-            let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
-                // Validate target exists and is visible.
-                let target = scope_el
-                    .query_selector("[autofocus], [tabindex]")
-                    .ok()
-                    .flatten()
-                    .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
-                    .filter(|el| el.offset_parent().is_some());
-
-                if let Some(el) = target {
-                    // Save the currently focused element BEFORE moving focus,
-                    // so it can be restored when the scope is deactivated.
-                    restore_target.set(
-                        document_clone
-                            .active_element()
-                            .and_then(|ae| ae.dyn_into().ok()),
-                    );
-                    el.focus().ok();
+            let scope_id = scope_id.clone();
+            let document = document.clone();
+            request_animation_frame(move || {
+                let body = document.body().expect("document.body");
+                if body.get_attribute("data-ars-hydrated").is_some() {
+                    activate_focus_scope(&document, &scope_id, restore_target);
                 }
             });
-            web_sys::window()
-                .expect("window must exist")
-                .request_animation_frame(cb.as_ref().unchecked_ref())
-                .ok();
+        } else {
+            activate_focus_scope(&document, &scope_id, restore_target);
         }
     });
 
     // Step 3: Clean up on unmount using use_drop (Dioxus equivalent of on_cleanup).
     use_drop(move || {
+        if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+            if let Some(scope_el) = document.get_element_by_id(&cleanup_scope_id) {
+                scope_el.remove_attribute("data-ars-modal-open").ok();
+            }
+        }
+
         // Restore focus to the previously focused element when scope deactivates.
         if let Some(el) = restore_target.peek().as_ref() {
             el.focus().ok();
         }
     });
+}
+
+fn activate_focus_scope(
+    document: &web_sys::Document,
+    scope_id: &str,
+    restore_target: Signal<Option<web_sys::HtmlElement>>,
+) {
+    let scope_el = document
+        .get_element_by_id(scope_id)
+        .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok());
+
+    if let Some(scope_el) = scope_el.as_ref() {
+        scope_el.set_attribute("data-ars-modal-open", "").ok();
+    }
+
+    // Remove orphaned inert attributes. An inert element is retained while
+    // it remains a sibling of the hydrated modal scope.
+    let inert_elements = document
+        .query_selector_all("[inert]")
+        .expect("querySelectorAll");
+    for i in 0..inert_elements.length() {
+        if let Some(el) = inert_elements.item(i) {
+            let html_el: web_sys::Element = el.unchecked_into();
+            // Only remove if no open modal is a sibling.
+            if !has_open_modal_sibling(&html_el) {
+                html_el.remove_attribute("inert").ok();
+            }
+        }
+    }
+
+    // Step 2: Activate focus trap after DOM settles.
+    if let Some(scope_el) = scope_el {
+        // Use request_animation_frame to wait for DOM settlement.
+        let document_clone = document.clone();
+        let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
+            // Validate target exists and is visible.
+            let target = scope_el
+                .query_selector("[autofocus], [tabindex]")
+                .ok()
+                .flatten()
+                .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+                .filter(|el| el.offset_parent().is_some());
+
+            if let Some(el) = target {
+                // Save the currently focused element BEFORE moving focus,
+                // so it can be restored when the scope is deactivated.
+                restore_target.set(
+                    document_clone
+                        .active_element()
+                        .and_then(|ae| ae.dyn_into().ok()),
+                );
+                el.focus().ok();
+            }
+        });
+        web_sys::window()
+            .expect("window must exist")
+            .request_animation_frame(cb.as_ref().unchecked_ref())
+            .ok();
+    }
+}
+
+fn has_open_modal_sibling(element: &web_sys::Element) -> bool {
+    let Some(parent) = element.parent_element() else {
+        return false;
+    };
+
+    let children = parent.children();
+    for index in 0..children.length() {
+        let Some(child) = children.item(index) else {
+            continue;
+        };
+
+        if child.is_same_node(Some(element)) {
+            continue;
+        }
+
+        if child.has_attribute("data-ars-modal-open") {
+            return true;
+        }
+    }
+
+    false
 }
 ```
 
@@ -3260,21 +3348,64 @@ halves of a round-trip must agree on the wire format, so a single source
 of truth lives in the foundation crate.
 
 ```rust
-use ars_core::{HydrationSnapshot, Machine, Service};
+use ars_core::{HasId, HydrationSnapshot, Machine, Service};
+use dioxus::prelude::*;
 
 /// In SSR mode: embed a snapshot as a JSON script tag.
-/// In hydration mode: read the snapshot and initialize the machine via
-/// `Service::new_hydrated(props, snapshot.state, &env, &messages)`.
 #[cfg(feature = "ssr")]
 fn serialize_snapshot<M: Machine>(svc: &Service<M>) -> String
 where
-    M::State: serde::Serialize,
+    M::State: Clone + serde::Serialize,
 {
     serde_json::to_string(&HydrationSnapshot::<M> {
         state: svc.state().clone(),
         id: svc.props().id().to_string(),
     })
     .expect("HydrationSnapshot must be serializable for SSR — ensure State implements Serialize")
+}
+
+/// In hydration mode: read the snapshot and initialize the machine via
+/// `Service::new_hydrated(props, snapshot.state, &env, &messages)`.
+#[cfg(feature = "ssr")]
+fn use_machine_hydrated<M: Machine + 'static>(
+    props: M::Props,
+    snapshot: HydrationSnapshot<M>,
+) -> UseMachineReturn<M>
+where
+    M::State: Clone + PartialEq + 'static,
+    M::Context: Clone + 'static,
+    M::Props: Clone + PartialEq + 'static,
+    M::Event: Send + 'static,
+    M::Messages: Send + Sync + 'static,
+{
+    let props = if props.id().is_empty() {
+        props.with_id(snapshot.id.clone())
+    } else {
+        debug_assert_eq!(
+            props.id(),
+            snapshot.id,
+            "HydrationSnapshot id must match Props::id"
+        );
+        props
+    };
+
+    let (result, ..) = use_machine_inner::<M>(props, Some(snapshot.state));
+    result
+}
+
+#[cfg(feature = "ssr")]
+fn use_machine_with_reactive_props_hydrated<M: Machine + 'static>(
+    props_signal: Signal<M::Props>,
+    snapshot: HydrationSnapshot<M>,
+) -> UseMachineReturn<M>
+where
+    M::State: Clone + PartialEq + 'static,
+    M::Context: Clone + 'static,
+    M::Props: Clone + PartialEq + 'static,
+    M::Event: Send + 'static,
+    M::Messages: Send + Sync + 'static,
+{
+    use_machine_hydrated::<M>(props_signal(), snapshot)
 }
 ```
 
