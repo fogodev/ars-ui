@@ -5,7 +5,7 @@ use std::{
 };
 
 use ars_components::overlay::presence;
-use ars_core::{ConnectApi, HtmlAttr};
+use ars_core::{ConnectApi, HtmlAttr, RenderMode};
 use dioxus::dioxus_core::{NoOpMutations, ScopeId};
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
@@ -15,6 +15,12 @@ wasm_bindgen_test_configure!(run_in_browser);
 
 type PresenceDerivedSnapshot = (bool, bool, bool, Option<String>, Option<String>);
 type PresenceSnapshot = (PresenceDerivedSnapshot, presence::State);
+
+#[wasm_bindgen_test]
+fn current_render_mode_reports_client_for_web_builds() {
+    assert_eq!(current_render_mode(false), RenderMode::Client);
+    assert_eq!(current_render_mode(true), RenderMode::Hydrating);
+}
 
 #[wasm_bindgen_test]
 fn use_machine_updates_state_on_wasm() {
@@ -80,7 +86,44 @@ fn use_machine_injects_generated_id_on_wasm() {
     dom.rebuild_in_place();
 
     assert_eq!(snapshots.borrow().len(), 1);
-    assert!(snapshots.borrow()[0].starts_with("component-"));
+    assert!(snapshots.borrow()[0].starts_with("ars-component-"));
+}
+
+#[wasm_bindgen_test]
+fn use_machine_hydrated_uses_hydrating_mode_on_wasm() {
+    let snapshots = Rc::new(RefCell::new(Vec::new()));
+
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "Dioxus root props are moved into the render function."
+    )]
+    fn app(snapshots: Rc<RefCell<Vec<(ToggleState, String)>>>) -> Element {
+        let machine = use_machine_hydrated::<ToggleMachine>(
+            ToggleProps { id: String::new() },
+            HydrationSnapshot {
+                state: ToggleState::On,
+                id: String::from("toggle-hydrated"),
+            },
+        );
+
+        snapshots.borrow_mut().push((
+            *machine.state.peek(),
+            machine.service.peek().props().id().to_owned(),
+        ));
+
+        rsx! {
+            div {}
+        }
+    }
+
+    let mut dom = VirtualDom::new_with_props(app, Rc::clone(&snapshots));
+
+    dom.rebuild_in_place();
+
+    assert_eq!(
+        snapshots.borrow().as_slice(),
+        &[(ToggleState::On, String::from("toggle-hydrated"))]
+    );
 }
 
 #[wasm_bindgen_test]

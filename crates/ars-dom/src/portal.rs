@@ -11,6 +11,12 @@ use std::string::String;
 /// owning overlay.
 pub const PORTAL_OWNER_ATTR: &str = "data-ars-portal-owner";
 
+/// HTML attribute marking `inert` as owned by adapter modal background handling.
+///
+/// Hydration cleanup uses this marker to remove stale SSR modal inert state
+/// without clearing author-owned `inert` regions.
+pub const MODAL_INERT_ATTR: &str = "data-ars-modal-inert";
+
 #[cfg(all(feature = "web", not(target_arch = "wasm32")))]
 use wasm_bindgen::{JsCast, JsValue};
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -93,6 +99,7 @@ fn restore_action(previous: Option<&str>) -> RestoreAction {
 struct SavedSiblingAttrs {
     element: web_sys::Element,
     previous_inert: Option<String>,
+    previous_modal_inert: Option<String>,
     previous_aria_hidden: Option<String>,
 }
 
@@ -311,6 +318,7 @@ fn apply_aria_hidden(siblings: &[web_sys::Element]) -> Vec<SavedSiblingAttrs> {
             SavedSiblingAttrs {
                 element: sibling.clone(),
                 previous_inert: sibling.get_attribute("inert"),
+                previous_modal_inert: sibling.get_attribute(MODAL_INERT_ATTR),
                 previous_aria_hidden,
             }
         })
@@ -323,6 +331,9 @@ fn apply_inert(siblings: &[web_sys::Element]) {
         sibling
             .set_attribute("inert", "")
             .expect("inert assignment must succeed");
+        sibling
+            .set_attribute(MODAL_INERT_ATTR, "")
+            .expect("modal inert marker assignment must succeed");
     }
 }
 
@@ -425,6 +436,11 @@ fn install_focus_trap(
 fn restore_native_inert(saved_siblings: Vec<SavedSiblingAttrs>) {
     for saved in saved_siblings {
         restore_element_attribute(&saved.element, "inert", saved.previous_inert.as_deref());
+        restore_element_attribute(
+            &saved.element,
+            MODAL_INERT_ATTR,
+            saved.previous_modal_inert.as_deref(),
+        );
         restore_element_attribute(
             &saved.element,
             "aria-hidden",
@@ -537,6 +553,11 @@ fn remove_inert_from_siblings_impl(portal_id: &str) {
         crate::debug::warn_dom_error(
             "removing inert from portal sibling",
             child.remove_attribute("inert"),
+        );
+
+        crate::debug::warn_dom_error(
+            "removing modal inert marker from portal sibling",
+            child.remove_attribute(MODAL_INERT_ATTR),
         );
 
         crate::debug::warn_dom_error(
@@ -798,8 +819,10 @@ mod wasm_tests {
         let cleanup = set_background_inert("ars-portal-root");
 
         assert_eq!(before.get_attribute("inert").as_deref(), Some(""));
+        assert_eq!(before.get_attribute(MODAL_INERT_ATTR).as_deref(), Some(""));
         assert_eq!(before.get_attribute("aria-hidden").as_deref(), Some("true"));
         assert_eq!(after.get_attribute("inert").as_deref(), Some(""));
+        assert_eq!(after.get_attribute(MODAL_INERT_ATTR).as_deref(), Some(""));
         assert_eq!(after.get_attribute("aria-hidden").as_deref(), Some("true"));
 
         cleanup();
@@ -809,8 +832,10 @@ mod wasm_tests {
             Some("false")
         );
         assert_eq!(before.get_attribute("inert"), None);
+        assert_eq!(before.get_attribute(MODAL_INERT_ATTR), None);
         assert_eq!(after.get_attribute("aria-hidden"), None);
         assert_eq!(after.get_attribute("inert"), None);
+        assert_eq!(after.get_attribute(MODAL_INERT_ATTR), None);
 
         cleanup_node(before.as_ref());
         cleanup_node(after.as_ref());
@@ -828,6 +853,9 @@ mod wasm_tests {
         before
             .set_attribute("inert", "")
             .expect("inert assignment must succeed");
+        before
+            .set_attribute(MODAL_INERT_ATTR, "")
+            .expect("modal inert marker assignment must succeed");
 
         before
             .set_attribute("aria-hidden", "true")
@@ -838,6 +866,9 @@ mod wasm_tests {
         after
             .set_attribute("inert", "")
             .expect("inert assignment must succeed");
+        after
+            .set_attribute(MODAL_INERT_ATTR, "")
+            .expect("modal inert marker assignment must succeed");
 
         after
             .set_attribute("aria-hidden", "true")
@@ -846,8 +877,10 @@ mod wasm_tests {
         remove_inert_from_siblings("ars-portal-root");
 
         assert_eq!(before.get_attribute("inert"), None);
+        assert_eq!(before.get_attribute(MODAL_INERT_ATTR), None);
         assert_eq!(before.get_attribute("aria-hidden"), None);
         assert_eq!(after.get_attribute("inert"), None);
+        assert_eq!(after.get_attribute(MODAL_INERT_ATTR), None);
         assert_eq!(after.get_attribute("aria-hidden"), None);
 
         cleanup_node(before.as_ref());

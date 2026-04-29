@@ -136,10 +136,13 @@ Any component that branches on runtime information (viewport size, user agent, e
 
 ## 4. Hydration ID Consistency Test
 
-Components that generate IDs (via `ComponentIds`, `HasId`, or hydration-safe ID
-generation) MUST verify that SSR and hydration produce identical
-IDs. A mismatch causes Leptos/Dioxus hydration errors and broken ARIA
-references (`aria-labelledby`, `aria-controls`, etc.).
+Components that participate in SSR hydration MUST verify that every DOM ID and
+ARIA ID reference used during hydration comes from an explicit prop or from a
+serialized hydration snapshot. Generated adapter counters are not a hydration
+contract: they are acceptable for client-only rendering and non-hydrated SSR
+output, but they can diverge when server and client render different hook paths.
+A mismatch causes Leptos/Dioxus hydration errors and broken ARIA references
+(`aria-labelledby`, `aria-controls`, etc.).
 
 ```rust
 #[test]
@@ -150,7 +153,7 @@ fn hydration_ids_match_between_ssr_and_client() {
         ..Default::default()
     };
 
-    // Step 1: Render with Service::new — extract all generated IDs.
+    // Step 1: Render with Service::new — extract all explicit and derived IDs.
     // SSR vs hydration mode is determined by the adapter (Leptos/Dioxus) wrapping,
     // not by the Service constructor. The Service API is the same in both modes.
     let ssr_svc = Service::<dialog::Machine>::new(props.clone());
@@ -163,18 +166,7 @@ fn hydration_ids_match_between_ssr_and_client() {
         ssr_api.backdrop_attrs(),
     ]);
 
-    // Reset ID counter to simulate the SSR→client boundary
-    // (server and client both start from 0)
-    // Reset the adapter's ID counter before each SSR test.
-    // Each adapter has its own counter — there is no shared ars_core counter.
-    // Leptos: ars_leptos::reset_id_counter() (see foundation 08 §15)
-    // Dioxus: ars_dioxus::reset_id_counter() (see foundation 09 §15)
-    #[cfg(feature = "leptos")]
-    ars_leptos::reset_id_counter();
-    #[cfg(feature = "dioxus")]
-    ars_dioxus::reset_id_counter();
-
-    // Step 2: Render again with same props — IDs must match.
+    // Step 2: Render again with the same explicit IDs — IDs must match.
     // In a real app, step 1 runs on the server and step 2 runs on the client.
     // Both use Service::new with the same props; the adapter controls which
     // rendering path (SSR string output vs hydration DOM attachment) is used.
@@ -220,9 +212,14 @@ fn extract_all_ids(attr_maps: &[AttrMap]) -> BTreeSet<String> {
 }
 ```
 
-> **Cross-reference:** This test pattern validates the hydration-safe ID
-> generation work. See `01-architecture.md` for
-> the `ComponentIds` contract.
+Generated fallback IDs should be covered separately by adapter-local tests that
+prove uniqueness and hook-slot stability. They MUST NOT be treated as sufficient
+proof that an SSR hydration path is stable unless the component restores the
+exact server ID from a hydration snapshot.
+
+> **Cross-reference:** This test pattern validates explicit and snapshot-restored
+> hydration ID contracts. See `01-architecture.md` for the `ComponentIds`
+> contract.
 
 ---
 

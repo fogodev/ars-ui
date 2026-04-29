@@ -1,7 +1,10 @@
-//! Hydration-safe deterministic ID generation.
+//! Hook-slot-stable generated ID allocation.
 //!
-//! Provides monotonic counters that produce the same ID sequence on both SSR and
-//! client when the component tree renders in the same order.
+//! Generated IDs are unique within a render pass and stable for a mounted hook
+//! slot. They are not a substitute for explicit IDs in SSR hydration paths where
+//! server and client render order may diverge.
+
+use dioxus::prelude::use_hook;
 
 // On WASM (single-threaded), use a thread-local Cell for zero-overhead counting.
 #[cfg(target_arch = "wasm32")]
@@ -22,8 +25,8 @@ mod counter {
 
     /// Resets the ID counter to zero.
     ///
-    /// Must be called at the start of each SSR request so that server-rendered IDs
-    /// match the client-side hydration sequence.
+    /// Must be called at the start of each SSR request to avoid leaking
+    /// generated ID allocations across requests.
     #[cfg(feature = "ssr")]
     pub(super) fn reset() {
         ID_COUNTER.with(|c| c.set(0));
@@ -43,24 +46,26 @@ mod counter {
 
     /// Resets the ID counter to zero.
     ///
-    /// Must be called at the start of each SSR request so that server-rendered IDs
-    /// match the client-side hydration sequence.
+    /// Must be called at the start of each SSR request to avoid leaking
+    /// generated ID allocations across requests.
     #[cfg(feature = "ssr")]
     pub(super) fn reset() {
         ID_COUNTER.store(0, Ordering::Relaxed);
     }
 }
 
-/// Generates a deterministic component ID with the given prefix.
+/// Generates a monotonic component ID with the given prefix.
 ///
 /// Returns a string of the form `"{prefix}-{counter}"`. The counter is global and
 /// monotonically increasing, ensuring uniqueness within a single render pass.
 ///
 /// # Hydration safety
 ///
-/// The counter produces identical sequences on SSR and client when the component tree
-/// renders in the same order. Call `reset_id_counter()` (available with the `ssr`
-/// feature) at the start of each SSR request to reset the sequence.
+/// The counter produces identical sequences on SSR and client only when the
+/// component tree renders in the same order. Call `reset_id_counter()`
+/// (available with the `ssr` feature) at the start of each SSR request to reset
+/// the sequence. Components that hydrate over server-rendered DOM should prefer
+/// explicit IDs.
 ///
 /// # Examples
 ///
@@ -76,10 +81,30 @@ pub fn use_id(prefix: &str) -> String {
     format!("{prefix}-{}", counter::next_id())
 }
 
+/// Generates a component ID with the adapter's stable public prefix format.
+///
+/// Returns a string of the form `"ars-{prefix}-{id}"`.
+///
+/// # Hydration safety
+///
+/// This helper uses Dioxus hook ordering so each component instance stores the
+/// counter allocation in a stable hook slot. It still delegates to the adapter's
+/// monotonic counter, which is not fully hydration-safe when SSR and client
+/// render orders diverge because of Suspense, lazy loading, or code splitting.
+/// SSR+hydration users should provide explicit component IDs until a true
+/// tree-position-based ID scheme is implemented.
+#[must_use]
+pub fn use_stable_id(prefix: &str) -> String {
+    let id = use_hook(counter::next_id);
+
+    format!("ars-{prefix}-{id}")
+}
+
 /// Resets the ID counter to zero for a new SSR request.
 ///
-/// Must be called at the start of each server-side render pass so that the generated
-/// IDs match the client-side hydration sequence exactly.
+/// Must be called at the start of each server-side render pass to avoid
+/// cross-request counter leakage. This does not make generated IDs safe when
+/// server and client render order diverge.
 #[cfg(feature = "ssr")]
 pub fn reset_id_counter() {
     counter::reset();
@@ -87,6 +112,11 @@ pub fn reset_id_counter() {
 
 #[cfg(test)]
 mod tests {
+    use dioxus::{
+        dioxus_core::{NoOpMutations, ScopeId},
+        prelude::*,
+    };
+
     use super::*;
 
     #[test]
@@ -100,6 +130,48 @@ mod tests {
         let id1 = use_id("component");
         let id2 = use_id("component");
         assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn use_stable_id_produces_ars_prefixed_ids() {
+        fn app() -> Element {
+            let id = use_stable_id("dialog");
+
+            assert!(id.starts_with("ars-dialog-"));
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new(app);
+
+        dom.rebuild_in_place();
+    }
+
+    #[test]
+    fn use_stable_id_reuses_hook_slot_across_renders() {
+        fn app() -> Element {
+            let id = use_stable_id("dialog");
+
+            let mut previous = use_signal(|| None::<String>);
+
+            if let Some(previous) = previous.peek().as_ref() {
+                assert_eq!(previous, &id);
+            } else {
+                previous.set(Some(id));
+            }
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new(app);
+
+        dom.rebuild_in_place();
+        dom.mark_dirty(ScopeId::APP);
+        dom.render_immediate(&mut NoOpMutations);
     }
 }
 
@@ -115,6 +187,7 @@ mod wasm_tests {
     fn use_id_produces_monotonic_sequence_on_wasm() {
         let id1 = use_id("component");
         let id2 = use_id("component");
+
         assert!(id1.starts_with("component-"));
         assert!(id2.starts_with("component-"));
         assert_ne!(id1, id2);

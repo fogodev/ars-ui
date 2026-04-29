@@ -193,6 +193,9 @@ pub fn ArsProvider(props: ArsProviderProps) -> Element {
 
     use_nonce_css_context_provider();
 
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    let is_root_provider = try_use_context::<ArsContext>().is_none();
+
     let style_strategy = style_strategy.unwrap_or(StyleStrategy::Inline);
     let nonce = match &style_strategy {
         StyleStrategy::Nonce(nonce) => Some(nonce.clone()),
@@ -217,6 +220,13 @@ pub fn ArsProvider(props: ArsProviderProps) -> Element {
     });
 
     let dir = direction_for_render.read().as_html_attr();
+
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    use_effect(move || {
+        if is_root_provider {
+            crate::hydration::mark_body_hydrated();
+        }
+    });
 
     rsx! {
         div { dir,
@@ -2215,6 +2225,32 @@ mod wasm_tests {
         rsx! {
             ArsProvider { ProviderProbe {} }
         }
+    }
+
+    #[wasm_bindgen_test]
+    fn root_ars_provider_marks_body_hydrated_on_wasm() {
+        let document = web_sys::window()
+            .expect("window should exist")
+            .document()
+            .expect("document should exist");
+        let body = document.body().expect("body should exist");
+
+        drop(body.remove_attribute("data-ars-hydrated"));
+
+        fn app() -> Element {
+            rsx! {
+                ArsProvider {
+                    div {}
+                }
+            }
+        }
+
+        let mut dom = VirtualDom::new(app);
+
+        dom.rebuild_in_place();
+        dom.render_immediate(&mut NoOpMutations);
+
+        assert_eq!(body.get_attribute("data-ars-hydrated").as_deref(), Some(""));
     }
 
     #[derive(Clone, Debug, PartialEq, Eq)]

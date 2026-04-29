@@ -10,13 +10,15 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+#[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
+use ars_core::HydrationSnapshot;
 use ars_core::{CleanupFn, Env, HasId, Machine, RenderMode, Service};
 use dioxus::prelude::*;
 
 use crate::{
     ephemeral::EphemeralRef,
     provider::{resolve_locale, use_intl_backend, use_messages},
-    use_id,
+    use_stable_id,
 };
 
 /// Return type from [`use_machine`].
@@ -55,7 +57,17 @@ where
     pub context_version: ReadSignal<u64>,
 }
 
-const fn current_render_mode() -> RenderMode {
+const fn current_render_mode(_hydrated_snapshot: bool) -> RenderMode {
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    {
+        if _hydrated_snapshot {
+            RenderMode::Hydrating
+        } else {
+            RenderMode::Client
+        }
+    }
+
+    #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
     if cfg!(feature = "ssr") {
         RenderMode::Server
     } else {
@@ -236,7 +248,32 @@ where
     M::Event: Send + 'static,
     M::Messages: Send + Sync + 'static,
 {
-    let (result, ..) = use_machine_inner::<M>(props);
+    let (result, ..) = use_machine_inner::<M>(props, None);
+
+    result
+}
+
+/// Creates and manages a machine service from an SSR hydration snapshot.
+///
+/// The snapshot state is installed with [`Service::new_hydrated`] so the
+/// client preserves server-rendered machine state while recomputing context
+/// from the current adapter environment.
+#[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
+pub fn use_machine_hydrated<M: Machine + 'static>(
+    props: M::Props,
+    snapshot: HydrationSnapshot<M>,
+) -> UseMachineReturn<M>
+where
+    M::State: Clone + PartialEq + 'static,
+    M::Context: Clone + 'static,
+    M::Props: Clone + PartialEq + 'static,
+    M::Event: Send + 'static,
+    M::Messages: Send + Sync + 'static,
+{
+    let (result, ..) = use_machine_inner::<M>(
+        props_with_snapshot_id::<M>(props, &snapshot),
+        Some(snapshot.state),
+    );
 
     result
 }
@@ -260,11 +297,12 @@ where
     use_machine::<M>(props_signal())
 }
 
-/// Internal implementation shared between public hooks.
-///
-/// Returns the public `UseMachineReturn` plus the internal `context_version`
-/// signal so body-level prop sync can update it during re-renders.
-fn use_machine_inner<M: Machine + 'static>(props: M::Props) -> (UseMachineReturn<M>, Signal<u64>)
+/// Creates a reactive-props machine service from an SSR hydration snapshot.
+#[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
+pub fn use_machine_with_reactive_props_hydrated<M: Machine + 'static>(
+    props_signal: Signal<M::Props>,
+    snapshot: HydrationSnapshot<M>,
+) -> UseMachineReturn<M>
 where
     M::State: Clone + PartialEq + 'static,
     M::Context: Clone + 'static,
@@ -272,7 +310,25 @@ where
     M::Event: Send + 'static,
     M::Messages: Send + Sync + 'static,
 {
-    let generated_id = use_hook(|| use_id("component"));
+    use_machine_hydrated::<M>(props_signal(), snapshot)
+}
+
+/// Internal implementation shared between public hooks.
+///
+/// Returns the public `UseMachineReturn` plus the internal `context_version`
+/// signal so body-level prop sync can update it during re-renders.
+fn use_machine_inner<M: Machine + 'static>(
+    props: M::Props,
+    hydrated_state: Option<M::State>,
+) -> (UseMachineReturn<M>, Signal<u64>)
+where
+    M::State: Clone + PartialEq + 'static,
+    M::Context: Clone + 'static,
+    M::Props: Clone + PartialEq + 'static,
+    M::Event: Send + 'static,
+    M::Messages: Send + Sync + 'static,
+{
+    let generated_id = use_stable_id("component");
 
     let props_for_sync = props.clone();
 
@@ -290,12 +346,27 @@ where
 
     let intl_backend = use_intl_backend();
 
-    let env = Env::new(locale, intl_backend).with_render_mode(current_render_mode());
+    let env = Env::new(locale, intl_backend)
+        .with_render_mode(current_render_mode(hydrated_state.is_some()));
 
     let messages = use_messages::<M::Messages>(None, Some(&env.locale));
 
     // Create the service once — use_signal runs its closure only on first mount.
-    let service_signal = use_signal(move || Service::<M>::new(props, &env, &messages));
+    let service_signal = use_signal(move || {
+        if let Some(state) = hydrated_state {
+            #[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
+            {
+                return Service::<M>::new_hydrated(props, state, &env, &messages);
+            }
+
+            #[cfg(not(any(feature = "ssr", all(feature = "web", target_arch = "wasm32"))))]
+            {
+                drop(state);
+            }
+        }
+
+        Service::<M>::new(props, &env, &messages)
+    });
 
     // Create a signal tracking the current state.
     // Use .peek() to avoid subscribing the component to service_signal changes.
@@ -409,6 +480,24 @@ where
 fn props_with_service_id<M: Machine>(mut props: M::Props, service_id: &str) -> M::Props {
     if props.id().is_empty() {
         props.set_id(service_id.to_owned());
+    }
+
+    props
+}
+
+#[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
+fn props_with_snapshot_id<M: Machine>(
+    mut props: M::Props,
+    snapshot: &HydrationSnapshot<M>,
+) -> M::Props {
+    if props.id().is_empty() {
+        props.set_id(snapshot.id.clone());
+    } else {
+        assert_eq!(
+            props.id(),
+            snapshot.id,
+            "HydrationSnapshot id must match Props::id"
+        );
     }
 
     props

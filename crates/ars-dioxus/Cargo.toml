@@ -10,19 +10,29 @@ rust-version.workspace = true
 [features]
 default = ["icu4x"]
 debug = ["dep:log", "ars-core/debug", "ars-interactions/debug", "ars-dom?/debug"]
+desktop = ["dioxus/desktop", "dep:arboard", "dep:uuid", "dep:rfd", "dep:log"]
+desktop-dom = ["desktop", "dep:ars-dom"]
+mobile = ["dioxus/mobile"]
+ssr = [
+  "dioxus/server",
+  "dep:ars-dom",
+  "ars-dom/ssr",
+  "ars-core/ssr",
+  "ars-core/serde",
+  "dep:serde",
+  "dep:serde_json"
+]
 web = [
   "dioxus/web",
   "dep:ars-dom",
   "ars-dom/web",
+  "ars-core/ssr",
+  "ars-core/serde",
   "dep:web-sys",
   "dep:wasm-bindgen",
   "dep:wasm-bindgen-futures",
   "dep:js-sys"
 ]
-desktop = ["dioxus/desktop", "dep:arboard", "dep:uuid", "dep:rfd", "dep:log"]
-desktop-dom = ["desktop", "dep:ars-dom"]
-mobile = ["dioxus/mobile"]
-ssr = ["dioxus/server", "dep:ars-dom", "ars-dom/ssr"]
 # Pre-compiled CLDR data via ICU4X. Default backend on native targets and the
 # server-side rendering path. Use `--no-default-features --features web,ars-i18n/web-intl`
 # to swap icu4x for the browser-native Intl API on wasm32 builds.
@@ -44,6 +54,8 @@ rfd                  = { version = "0.17", optional = true }
 js-sys               = { version = "0.3", optional = true }
 wasm-bindgen         = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
+serde                = { version = "1", default-features = false, features = ["alloc", "derive"], optional = true }
+serde_json           = { version = "1", optional = true }
 
 [dependencies.dioxus]
 version          = "0.7"
@@ -67,10 +79,13 @@ features = [
   "Event",
   "EventTarget",
   "FocusEvent",
+  "HtmlCollection",
   "HtmlElement",
   "KeyboardEvent",
   "MouseEvent",
   "Navigator",
+  "Node",
+  "NodeList",
   "Performance",
   "PointerEvent",
   "Window"

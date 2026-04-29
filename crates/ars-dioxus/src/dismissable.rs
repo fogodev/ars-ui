@@ -43,7 +43,7 @@ use {
 
 use crate::{
     attrs::attr_map_to_dioxus_inline_attrs,
-    id::use_id,
+    id::use_stable_id,
     provider::{resolve_locale, use_messages},
 };
 
@@ -124,7 +124,9 @@ pub fn use_dismissable(
     props: Props,
     inside_boundaries: ReadSignal<Vec<String>>,
 ) -> Handle {
-    let overlay_id = use_hook(|| CopyValue::new(use_id("ars-dismissable")));
+    let stable_overlay_id = use_stable_id("dismissable");
+
+    let overlay_id = use_hook(move || CopyValue::new(stable_overlay_id));
 
     let dismiss = build_dismiss_button_callback(&props);
 
@@ -726,13 +728,11 @@ mod wasm_tests {
     }
 
     fn provider_label_fixture() -> Element {
-        let registries = spanish_messages();
+        let i18n_registries = spanish_messages();
         let locale = use_signal(|| Locale::parse("es-MX").expect("locale should parse"));
 
         rsx! {
-            crate::ArsProvider {
-                locale,
-                i18n_registries: registries,
+            crate::ArsProvider { locale, i18n_registries,
                 Region { props: Props::new(),
                     span { "content" }
                 }
@@ -827,13 +827,11 @@ mod wasm_tests {
     }
 
     fn label_fixture(state: LabelFixtureProps) -> Element {
-        let registries = spanish_messages();
+        let i18n_registries = spanish_messages();
         let locale = use_signal(|| Locale::parse("es-MX").expect("locale should parse"));
 
         rsx! {
-            crate::ArsProvider {
-                locale,
-                i18n_registries: registries,
+            crate::ArsProvider { locale, i18n_registries,
                 Region { props: Props::new(), dismiss_label: state.dismiss_label,
                     span { "content" }
                 }

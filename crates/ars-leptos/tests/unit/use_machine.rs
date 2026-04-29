@@ -78,7 +78,8 @@ fn current_render_mode_reports_server_for_ssr_builds() {
         #[cfg(feature = "hydrate")]
         provide_context(IsHydrating(true));
 
-        assert_eq!(current_render_mode(), RenderMode::Server);
+        assert_eq!(current_render_mode(false), RenderMode::Server);
+        assert_eq!(current_render_mode(true), RenderMode::Server);
     });
 }
 
@@ -87,7 +88,13 @@ fn current_render_mode_reports_server_for_ssr_builds() {
 fn current_render_mode_reports_client_without_active_hydration() {
     let owner = Owner::new();
     owner.with(|| {
-        assert_eq!(current_render_mode(), RenderMode::Client);
+        assert_eq!(current_render_mode(false), RenderMode::Client);
+
+        #[cfg(feature = "hydrate")]
+        assert_eq!(current_render_mode(true), RenderMode::Hydrating);
+
+        #[cfg(not(feature = "hydrate"))]
+        assert_eq!(current_render_mode(true), RenderMode::Client);
     });
 }
 
@@ -98,13 +105,14 @@ fn current_render_mode_uses_hydration_context_at_runtime() {
     owner.with(|| {
         provide_context(IsHydrating(true));
 
-        assert_eq!(current_render_mode(), RenderMode::Hydrating);
+        assert_eq!(current_render_mode(false), RenderMode::Hydrating);
     });
 
     owner.with(|| {
         provide_context(IsHydrating(false));
 
-        assert_eq!(current_render_mode(), RenderMode::Client);
+        assert_eq!(current_render_mode(false), RenderMode::Client);
+        assert_eq!(current_render_mode(true), RenderMode::Hydrating);
     });
 }
 
@@ -484,6 +492,121 @@ fn use_machine_injects_generated_id_when_props_id_is_empty() {
 
         machine.service.with_value(|service| {
             assert!(service.props().id().starts_with("component-"));
+        });
+    });
+}
+
+#[cfg(feature = "ssr")]
+#[test]
+fn use_machine_hydrated_preserves_snapshot_state_and_id() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let machine = use_machine_hydrated::<ToggleMachine>(
+            ToggleProps { id: String::new() },
+            HydrationSnapshot::<ToggleMachine> {
+                state: ToggleState::On,
+                id: String::from("toggle-hydrated"),
+            },
+        );
+
+        assert_eq!(machine.state.get_untracked(), ToggleState::On);
+        machine.service.with_value(|service| {
+            assert_eq!(service.state(), &ToggleState::On);
+            assert_eq!(service.props().id(), "toggle-hydrated");
+        });
+    });
+}
+
+#[cfg(feature = "ssr")]
+#[test]
+fn use_machine_hydrated_consumes_generated_id_slot() {
+    crate::reset_id_counter();
+
+    let owner = Owner::new();
+    owner.with(|| {
+        let hydrated = use_machine_hydrated::<ToggleMachine>(
+            ToggleProps { id: String::new() },
+            HydrationSnapshot::<ToggleMachine> {
+                state: ToggleState::On,
+                id: String::from("toggle-hydrated"),
+            },
+        );
+
+        let generated = use_machine::<ToggleMachine>(ToggleProps { id: String::new() });
+
+        hydrated.service.with_value(|service| {
+            assert_eq!(service.props().id(), "toggle-hydrated");
+        });
+
+        generated.service.with_value(|service| {
+            assert_eq!(service.props().id(), "component-1");
+        });
+    });
+}
+
+#[cfg(feature = "ssr")]
+#[test]
+#[should_panic(expected = "HydrationSnapshot id must match Props::id")]
+fn use_machine_hydrated_rejects_mismatched_explicit_props_id() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let _machine = use_machine_hydrated::<ToggleMachine>(
+            ToggleProps {
+                id: String::from("client-id"),
+            },
+            HydrationSnapshot::<ToggleMachine> {
+                state: ToggleState::On,
+                id: String::from("server-id"),
+            },
+        );
+    });
+}
+
+#[cfg(feature = "ssr")]
+#[test]
+fn use_machine_with_reactive_props_hydrated_keeps_syncing_props() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let (props, set_props) = signal(PropProps {
+            id: String::new(),
+            checked: false,
+            label: "a",
+        });
+
+        let machine = use_machine_with_reactive_props_hydrated::<PropMachine>(
+            props.into(),
+            HydrationSnapshot::<PropMachine> {
+                state: PropState::On,
+                id: String::from("prop-hydrated"),
+            },
+        );
+
+        assert_eq!(machine.state.get_untracked(), PropState::On);
+        machine.service.with_value(|service| {
+            assert_eq!(service.props().id(), "prop-hydrated");
+        });
+
+        set_props.set(PropProps {
+            id: String::new(),
+            checked: true,
+            label: "b",
+        });
+
+        assert_eq!(machine.state.get_untracked(), PropState::On);
+        assert_eq!(machine.context_version.get_untracked(), 1);
+
+        set_props.set(PropProps {
+            id: String::new(),
+            checked: false,
+            label: "b",
+        });
+
+        assert_eq!(machine.state.get_untracked(), PropState::Off);
+        assert_eq!(machine.context_version.get_untracked(), 1);
+
+        machine.service.with_value(|service| {
+            assert_eq!(service.props().id(), "prop-hydrated");
+            assert_eq!(service.context().sync_count, 1);
         });
     });
 }
