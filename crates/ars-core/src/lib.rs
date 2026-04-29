@@ -36,6 +36,7 @@ mod component_ids;
 mod connect;
 mod error;
 mod i18n_registry;
+mod input_mode;
 mod message_fn;
 pub mod modality;
 pub mod platform;
@@ -71,6 +72,7 @@ pub use connect::{
 };
 pub use error::ComponentError;
 pub use i18n_registry::{I18nRegistries, MessagesRegistry, resolve_messages};
+pub use input_mode::InputMode;
 pub use message_fn::{ComponentMessages, MessageFn};
 // ── Modality ────────────────────────────────────────────────────────
 pub use modality::{
@@ -122,6 +124,27 @@ type EffectSetupFn<M> = Box<
     ) -> CleanupFn,
 >;
 
+/// Typed metadata attached to a pending effect.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EffectMetadata {
+    /// Resize an element to fit its content.
+    ResizeToContent(ResizeToContentEffect),
+}
+
+/// Metadata for an element content-resize effect.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResizeToContentEffect {
+    /// ID of the element to resize.
+    pub element_id: String,
+
+    /// Optional CSS maximum height to apply while resizing.
+    pub max_height: Option<String>,
+
+    /// Optional maximum row count used by adapters that derive a height cap
+    /// from computed textarea line metrics.
+    pub max_rows: Option<u32>,
+}
+
 /// A named side effect produced by a state transition.
 ///
 /// Pending effects are returned from [`Service::send`] inside [`SendResult`].
@@ -138,6 +161,9 @@ pub struct PendingEffect<M: Machine> {
     /// The state after the transition that produced this effect.
     /// Set by [`Service::drain_queue`] before returning to the adapter.
     pub target_state: Option<M::State>,
+
+    /// Optional typed metadata for adapters that need structured effect inputs.
+    pub metadata: Option<EffectMetadata>,
 
     /// Setup closure — receives a snapshot of context, props, and the
     /// strong send handle. Returns a cleanup function.
@@ -158,6 +184,7 @@ impl<M: Machine> PendingEffect<M> {
         Self {
             name,
             target_state: None,
+            metadata: None,
             setup: Box::new(move |ctx, props, send: StrongSend<M::Event>| {
                 let weak_send = WeakSend::from(&send);
                 setup(ctx, props, weak_send)
@@ -174,6 +201,18 @@ impl<M: Machine> PendingEffect<M> {
         Self {
             name,
             target_state: None,
+            metadata: None,
+            setup: Box::new(|_ctx, _props, _send| no_cleanup()),
+        }
+    }
+
+    /// Creates a marker-only effect with typed metadata.
+    #[must_use]
+    pub fn named_with_metadata(name: &'static str, metadata: EffectMetadata) -> Self {
+        Self {
+            name,
+            target_state: None,
+            metadata: Some(metadata),
             setup: Box::new(|_ctx, _props, _send| no_cleanup()),
         }
     }
@@ -192,6 +231,7 @@ impl<M: Machine> Debug for PendingEffect<M> {
         f.debug_struct("PendingEffect")
             .field("name", &self.name)
             .field("target_state", &self.target_state)
+            .field("metadata", &self.metadata)
             .field("setup", &"<closure>")
             .finish()
     }
@@ -2804,7 +2844,7 @@ mod tests {
 
         assert_eq!(
             format!("{effect:?}"),
-            "PendingEffect { name: \"focus\", target_state: None, setup: \"<closure>\" }"
+            "PendingEffect { name: \"focus\", target_state: None, metadata: None, setup: \"<closure>\" }"
         );
 
         let props = ToggleProps {
@@ -2818,6 +2858,20 @@ mod tests {
         let cleanup = effect.run(&context, &props, send);
 
         cleanup();
+    }
+
+    #[test]
+    fn pending_effect_named_with_metadata_exposes_typed_payload() {
+        let metadata = EffectMetadata::ResizeToContent(ResizeToContentEffect {
+            element_id: String::from("textarea"),
+            max_height: Some(String::from("240px")),
+            max_rows: Some(8),
+        });
+        let effect =
+            PendingEffect::<ToggleMachine>::named_with_metadata("auto-resize", metadata.clone());
+
+        assert_eq!(effect.name, "auto-resize");
+        assert_eq!(effect.metadata, Some(metadata));
     }
 
     #[test]

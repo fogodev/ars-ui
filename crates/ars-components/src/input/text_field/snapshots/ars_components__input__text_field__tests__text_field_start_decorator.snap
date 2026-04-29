@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/input/text_field/mod.rs
+expression: "snapshot_attrs(&service(props()).connect(&|_| {}).start_decorator_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "start-decorator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "text-field",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}

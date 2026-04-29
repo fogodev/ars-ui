@@ -36,6 +36,7 @@ pub mod number;
 mod plural;
 mod provider;
 mod relative_time;
+mod text;
 mod translate;
 mod weekday;
 
@@ -82,6 +83,7 @@ pub use provider::Icu4xBackend;
 pub use provider::WebIntlBackend;
 pub use provider::{StubIntlBackend, default_backend};
 pub use relative_time::{NumericOption, RelativeTimeFormatter};
+pub use text::grapheme_count;
 pub use translate::Translate;
 pub use weekday::Weekday;
 

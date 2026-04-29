@@ -1,0 +1,63 @@
+---
+source: crates/ars-components/src/input/textarea/mod.rs
+expression: "snapshot_attrs(&service(props().disabled(true).readonly(true).invalid(true)).connect(&|_|\n{}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-disabled",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-invalid",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-readonly",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "textarea",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "idle",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "bio-field",
+            ),
+        ),
+    ],
+    styles: [],
+}

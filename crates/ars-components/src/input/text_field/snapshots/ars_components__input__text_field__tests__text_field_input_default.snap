@@ -1,0 +1,57 @@
+---
+source: crates/ars-components/src/input/text_field/mod.rs
+expression: "snapshot_attrs(&service(props()).connect(&|_| {}).input_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "text-field",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "name-field-label",
+            ),
+        ),
+        (
+            Dir,
+            String(
+                "ltr",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "name-field-input",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "text",
+            ),
+        ),
+        (
+            Value,
+            String(
+                "",
+            ),
+        ),
+    ],
+    styles: [],
+}

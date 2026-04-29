@@ -1,0 +1,51 @@
+---
+source: crates/ars-components/src/input/text_field/mod.rs
+expression: "snapshot_attrs(&service(props().disabled(true)).connect(&|_|\n{}).clear_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "clear-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "text-field",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Clear",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+        (
+            Disabled,
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/input/textarea/mod.rs
+expression: "snapshot_attrs(&focused.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-focus-visible",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "textarea",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "focused",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "bio-field",
+            ),
+        ),
+    ],
+    styles: [],
+}

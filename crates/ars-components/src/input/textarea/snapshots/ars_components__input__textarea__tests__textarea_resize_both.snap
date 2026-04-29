@@ -1,0 +1,62 @@
+---
+source: crates/ars-components/src/input/textarea/mod.rs
+expression: "snapshot_attrs(&service(props().resize(resize)).connect(&|_|\n{}).textarea_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "textarea",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "textarea",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "bio-field-label",
+            ),
+        ),
+        (
+            Dir,
+            String(
+                "ltr",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "bio-field-textarea",
+            ),
+        ),
+        (
+            Rows,
+            String(
+                "3",
+            ),
+        ),
+        (
+            Value,
+            String(
+                "",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Resize,
+            "both",
+        ),
+    ],
+}
