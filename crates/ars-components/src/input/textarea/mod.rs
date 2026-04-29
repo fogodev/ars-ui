@@ -773,12 +773,12 @@ impl ars_core::Machine for Machine {
 
         let mut events = Vec::new();
 
-        if old.value != new.value {
-            events.push(Event::SetValue(new.value.clone()));
-        }
-
         if props_output_changed(old, new) {
             events.push(Event::SetProps);
+        }
+
+        if old.value != new.value {
+            events.push(Event::SetValue(new.value.clone()));
         }
 
         events
@@ -1624,6 +1624,25 @@ mod tests {
                 element_id: "bio-field-textarea".to_string(),
                 max_height: Some("240px".to_string()),
                 max_rows: Some(8),
+            }))
+        );
+
+        let result = resize_service.set_props(
+            props()
+                .auto_resize(true)
+                .max_height("320px")
+                .max_rows(12)
+                .value("parent-updated"),
+        );
+
+        assert_eq!(result.pending_effects.len(), 1);
+        assert_eq!(result.pending_effects[0].name, "auto-resize");
+        assert_eq!(
+            result.pending_effects[0].metadata,
+            Some(EffectMetadata::ResizeToContent(ResizeToContentEffect {
+                element_id: "bio-field-textarea".to_string(),
+                max_height: Some("320px".to_string()),
+                max_rows: Some(12),
             }))
         );
 
