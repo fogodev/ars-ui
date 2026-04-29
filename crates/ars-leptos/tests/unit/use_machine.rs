@@ -519,6 +519,33 @@ fn use_machine_hydrated_preserves_snapshot_state_and_id() {
 
 #[cfg(feature = "ssr")]
 #[test]
+fn use_machine_hydrated_consumes_generated_id_slot() {
+    crate::reset_id_counter();
+
+    let owner = Owner::new();
+    owner.with(|| {
+        let hydrated = use_machine_hydrated::<ToggleMachine>(
+            ToggleProps { id: String::new() },
+            HydrationSnapshot::<ToggleMachine> {
+                state: ToggleState::On,
+                id: String::from("toggle-hydrated"),
+            },
+        );
+
+        let generated = use_machine::<ToggleMachine>(ToggleProps { id: String::new() });
+
+        hydrated.service.with_value(|service| {
+            assert_eq!(service.props().id(), "toggle-hydrated");
+        });
+
+        generated.service.with_value(|service| {
+            assert_eq!(service.props().id(), "component-1");
+        });
+    });
+}
+
+#[cfg(feature = "ssr")]
+#[test]
 #[should_panic(expected = "HydrationSnapshot id must match Props::id")]
 fn use_machine_hydrated_rejects_mismatched_explicit_props_id() {
     let owner = Owner::new();

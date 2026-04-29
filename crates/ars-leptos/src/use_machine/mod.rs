@@ -419,9 +419,10 @@ where
 {
     let props = {
         let mut props = props;
+        let generated_id = use_id("component");
 
         if props.id().is_empty() {
-            props.set_id(use_id("component"));
+            props.set_id(generated_id);
         }
 
         props

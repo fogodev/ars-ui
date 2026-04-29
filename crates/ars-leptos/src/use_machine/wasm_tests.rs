@@ -12,7 +12,12 @@ wasm_bindgen_test_configure!(run_in_browser);
 #[wasm_bindgen_test]
 fn current_render_mode_reports_client_or_hydrating_on_wasm() {
     assert_eq!(current_render_mode(false), RenderMode::Client);
+
+    #[cfg(feature = "hydrate")]
     assert_eq!(current_render_mode(true), RenderMode::Hydrating);
+
+    #[cfg(not(feature = "hydrate"))]
+    assert_eq!(current_render_mode(true), RenderMode::Client);
 }
 
 #[wasm_bindgen_test]
@@ -59,6 +64,7 @@ fn use_machine_updates_state_on_wasm() {
 }
 
 #[wasm_bindgen_test]
+#[cfg(feature = "hydrate")]
 fn use_machine_hydrated_preserves_snapshot_on_wasm() {
     let owner = Owner::new();
     owner.with(|| {
