@@ -180,6 +180,14 @@ impl ars_core::Machine for Machine {
                 )
             }
 
+            (State::Mounted, Event::ContainerReady(id)) if matches!(&context.container, PortalTarget::Id(target_id) if target_id == id) =>
+            {
+                let id = id.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.container = PortalTarget::ResolvedId(id);
+                }))
+            }
+
             (_, Event::SetContainer(target)) => {
                 let target = target.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
@@ -478,6 +486,28 @@ mod tests {
         let result = service.send(Event::ContainerReady("late-root".to_string()));
 
         assert!(result.state_changed);
+        assert!(result.context_changed);
+        assert_eq!(service.state(), &State::Mounted);
+        assert_eq!(
+            service.context().container,
+            PortalTarget::ResolvedId("late-root".to_string())
+        );
+        assert!(service.context().mounted);
+    }
+
+    #[test]
+    fn container_ready_resolves_target_after_mount() {
+        let mut service = Service::<Machine>::new(
+            test_props().container(PortalTarget::Id("late-root".to_string())),
+            &Env::default(),
+            &Messages,
+        );
+
+        drop(service.send(Event::Mount));
+
+        let result = service.send(Event::ContainerReady("late-root".to_string()));
+
+        assert!(!result.state_changed);
         assert!(result.context_changed);
         assert_eq!(service.state(), &State::Mounted);
         assert_eq!(

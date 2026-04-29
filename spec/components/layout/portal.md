@@ -39,7 +39,8 @@ pub enum Event {
     Unmount,
     /// The target container became available (for `Id` targets that
     /// may not exist at `Mount` time). Carries the element ID and is honored
-    /// only when it matches the current `PortalTarget::Id`.
+    /// only when it matches the current `PortalTarget::Id`, whether the
+    /// portal is still unmounted or already mounted.
     ContainerReady(String),
     /// Synchronize the target container after props change.
     SetContainer(PortalTarget),
@@ -147,6 +148,14 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::to(State::Mounted).apply(move |ctx| {
                     ctx.container = PortalTarget::ResolvedId(id);
                     ctx.mounted = true;
+                }))
+            }
+            (State::Mounted, Event::ContainerReady(id))
+                if matches!(&ctx.container, PortalTarget::Id(target_id) if target_id == id) =>
+            {
+                let id = id.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.container = PortalTarget::ResolvedId(id);
                 }))
             }
             (_, Event::SetContainer(target)) => {
