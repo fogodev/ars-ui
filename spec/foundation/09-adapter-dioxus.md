@@ -3187,19 +3187,32 @@ fn warn_if_mounted_id_mismatch(element: &web_sys::Element, client_id: &str) {
 
 **Solution.** The following rules govern FocusScope behavior across the SSR-to-hydration boundary:
 
-1. **Emit valid focus targets during SSR.** Server-rendered modal overlays MUST include at least one focusable element in the HTML output. Use a `button` with `autofocus` or an element with `tabindex="-1"` so that the hydration effect has a valid target.
+1. **Emit valid focus targets during SSR.** Server-rendered modal overlays MUST include at least one focusable element in the HTML output. A naturally focusable control such as a `button` or `input`, an element with `autofocus`, or a focusable scope root with `tabindex="-1"` gives the hydration effect a valid target.
 
 2. **Scan for orphaned `inert` on hydration.** A post-hydration `use_effect` queries all elements with `[inert]` and removes the attribute from any element that is not currently a sibling of an open modal. This prevents "frozen" regions left over from SSR. Cleanup of the modal-open marker uses `use_drop` (Dioxus equivalent of Leptos `on_cleanup`).
 
-3. **Validate focus target existence and visibility.** Before calling `.focus()`, the FocusScope checks that the target element exists and is visible by verifying `element.offset_parent().is_some()`. Elements that are `display: none` or detached return `None` and are skipped.
+3. **Validate focus target existence and visibility.** Before calling `.focus()`, the FocusScope checks the focusable scope root first, then scans descendants matching the hydration focus selector. It verifies `element.offset_parent().is_some()` before focusing. Elements that are `display: none` or detached return `None` and are skipped.
 
-4. **Gate focus trap activation on hydration completion.** The root `ArsProvider` sets a `data-ars-hydrated` attribute on the document body once hydration is complete. Nested providers MUST NOT repeatedly mark the body; the marker represents the root hydration boundary. FocusScope defers trap activation until this attribute is present, preventing premature focus movement during partial hydration. If the marker is absent when the effect first runs, FocusScope schedules one `request_animation_frame` retry before giving up. In Dioxus, this check is wrapped in a `use_effect` (which only runs on the client), rather than a `#[cfg(not(feature = "ssr"))]` gated `Effect::new` as in the Leptos adapter.
+4. **Gate focus trap activation on hydration completion.** The root `ArsProvider` sets a `data-ars-hydrated` attribute on the document body once hydration is complete. Nested providers MUST NOT repeatedly mark the body; the marker represents the root hydration boundary. FocusScope defers trap activation until this attribute is present, preventing premature focus movement during partial hydration. If the marker is absent when the effect first runs, FocusScope retries through `request_animation_frame` until the marker appears or the scope unmounts. In Dioxus, this check is wrapped in a `use_effect` (which only runs on the client), rather than a `#[cfg(not(feature = "ssr"))]` gated `Effect::new` as in the Leptos adapter.
 
 5. **Use `request_animation_frame` for DOM settlement.** After hydration, focus trap activation is wrapped in a `request_animation_frame` callback to ensure the DOM has fully settled before the trap is engaged.
 
 ```rust
 use dioxus::prelude::*;
+use std::{cell::Cell, rc::Rc};
 use wasm_bindgen::JsCast;
+
+const HYDRATION_FOCUS_TARGET_SELECTOR: &str = concat!(
+    "[autofocus]:not([disabled]):not([aria-hidden='true']),",
+    "button:not([disabled]):not([aria-hidden='true']),",
+    "input:not([disabled]):not([aria-hidden='true']),",
+    "select:not([disabled]):not([aria-hidden='true']),",
+    "textarea:not([disabled]):not([aria-hidden='true']),",
+    "a[href]:not([aria-hidden='true']),",
+    "area[href]:not([aria-hidden='true']),",
+    "[tabindex]:not([disabled]):not([aria-hidden='true']),",
+    "[contenteditable]:not([contenteditable='false']):not([aria-hidden='true'])",
+);
 
 /// Hydration-safe FocusScope setup for modal overlays.
 /// Called by FocusScope or Dialog component code after hydration is confirmed.
@@ -3211,37 +3224,40 @@ use wasm_bindgen::JsCast;
 /// - Focus operations go through platform abstraction where available
 fn setup_focus_scope_hydration_safe(
     scope_id: String,
-    mut restore_target: Signal<Option<web_sys::HtmlElement>>,
+    restore_target: Signal<Option<web_sys::HtmlElement>>,
 ) {
     let cleanup_scope_id = scope_id.clone();
+    let activation_active = Rc::new(Cell::new(true));
 
     // Step 1: Clean up orphaned inert attributes left by SSR.
     // use_effect only runs on the client, so no #[cfg(not(feature = "ssr"))] needed.
-    use_effect(move || {
-        let document = web_sys::window()
-            .expect("window")
-            .document()
-            .expect("document");
+    use_effect({
+        let activation_active = Rc::clone(&activation_active);
 
-        // Gate on hydration completion, with one frame of tolerance for the
-        // root provider marker to settle.
-        let body = document.body().expect("document.body");
-        if body.get_attribute("data-ars-hydrated").is_none() {
-            let scope_id = scope_id.clone();
-            let document = document.clone();
-            request_animation_frame(move || {
-                let body = document.body().expect("document.body");
-                if body.get_attribute("data-ars-hydrated").is_some() {
-                    activate_focus_scope(&document, &scope_id, restore_target);
-                }
-            });
-        } else {
-            activate_focus_scope(&document, &scope_id, restore_target);
+        move || {
+            let document = web_sys::window()
+                .expect("window")
+                .document()
+                .expect("document");
+
+            // Gate on hydration completion, retrying until the root provider marker settles.
+            let body = document.body().expect("document.body");
+            if body.get_attribute("data-ars-hydrated").is_none() {
+                request_hydration_activation_after_frame(
+                    scope_id.clone(),
+                    restore_target,
+                    Rc::clone(&activation_active),
+                );
+            } else {
+                activate_focus_scope(&document, &scope_id, restore_target);
+            }
         }
     });
 
     // Step 3: Clean up on unmount using use_drop (Dioxus equivalent of on_cleanup).
     use_drop(move || {
+        activation_active.set(false);
+
         if let Some(document) = web_sys::window().and_then(|window| window.document()) {
             if let Some(scope_el) = document.get_element_by_id(&cleanup_scope_id) {
                 scope_el.remove_attribute("data-ars-modal-open").ok();
@@ -3253,6 +3269,35 @@ fn setup_focus_scope_hydration_safe(
             el.focus().ok();
         }
     });
+}
+
+fn request_hydration_activation_after_frame(
+    scope_id: String,
+    restore_target: Signal<Option<web_sys::HtmlElement>>,
+    activation_active: Rc<Cell<bool>>,
+) {
+    let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
+        if !activation_active.get() {
+            return;
+        }
+
+        let document = web_sys::window()
+            .expect("window")
+            .document()
+            .expect("document");
+
+        let body = document.body().expect("document.body");
+        if body.get_attribute("data-ars-hydrated").is_some() {
+            activate_focus_scope(&document, &scope_id, restore_target);
+        } else {
+            request_hydration_activation_after_frame(scope_id, restore_target, activation_active);
+        }
+    });
+
+    web_sys::window()
+        .expect("window must exist")
+        .request_animation_frame(cb.unchecked_ref())
+        .ok();
 }
 
 fn activate_focus_scope(
@@ -3289,12 +3334,7 @@ fn activate_focus_scope(
         let document_clone = document.clone();
         let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
             // Validate target exists and is visible.
-            let target = scope_el
-                .query_selector("[autofocus], [tabindex]")
-                .ok()
-                .flatten()
-                .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
-                .filter(|el| el.offset_parent().is_some());
+            let target = visible_focus_target(&scope_el);
 
             if let Some(el) = target {
                 // Save the currently focused element BEFORE moving focus,
@@ -3309,9 +3349,48 @@ fn activate_focus_scope(
         });
         web_sys::window()
             .expect("window must exist")
-            .request_animation_frame(cb.as_ref().unchecked_ref())
+            .request_animation_frame(cb.unchecked_ref())
             .ok();
     }
+}
+
+fn visible_focus_target(scope: &web_sys::HtmlElement) -> Option<web_sys::HtmlElement> {
+    if is_focus_target_candidate(scope) && is_visible_focus_target(scope) {
+        return Some(scope.clone());
+    }
+
+    scope
+        .query_selector(HYDRATION_FOCUS_TARGET_SELECTOR)
+        .ok()
+        .flatten()
+        .and_then(|element| element.dyn_into().ok())
+        .filter(is_visible_focus_target)
+}
+
+fn is_focus_target_candidate(element: &web_sys::Element) -> bool {
+    if element.has_attribute("disabled") {
+        return false;
+    }
+
+    if element.get_attribute("aria-hidden").as_deref() == Some("true") {
+        return false;
+    }
+
+    if element.has_attribute("autofocus") || element.has_attribute("tabindex") {
+        return true;
+    }
+
+    match element.tag_name().as_str() {
+        "BUTTON" | "INPUT" | "SELECT" | "TEXTAREA" => true,
+        "A" | "AREA" => element.has_attribute("href"),
+        _ => element
+            .get_attribute("contenteditable")
+            .is_some_and(|value| value != "false"),
+    }
+}
+
+fn is_visible_focus_target(element: &web_sys::HtmlElement) -> bool {
+    element.offset_parent().is_some()
 }
 
 fn has_open_modal_sibling(element: &web_sys::Element) -> bool {

@@ -14,6 +14,19 @@ use ars_core::{HasId, Machine, Service};
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use dioxus::prelude::{ReadableExt, WritableExt};
 
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+const HYDRATION_FOCUS_TARGET_SELECTOR: &str = concat!(
+    "[autofocus]:not([disabled]):not([aria-hidden='true']),",
+    "button:not([disabled]):not([aria-hidden='true']),",
+    "input:not([disabled]):not([aria-hidden='true']),",
+    "select:not([disabled]):not([aria-hidden='true']),",
+    "textarea:not([disabled]):not([aria-hidden='true']),",
+    "a[href]:not([aria-hidden='true']),",
+    "area[href]:not([aria-hidden='true']),",
+    "[tabindex]:not([disabled]):not([aria-hidden='true']),",
+    "[contenteditable]:not([contenteditable='false']):not([aria-hidden='true'])",
+);
+
 /// Serializes a machine service snapshot for embedding in SSR HTML.
 ///
 /// The returned JSON contains only the machine state and component ID. Context
@@ -227,12 +240,44 @@ fn has_open_modal_sibling(element: &web_sys::Element) -> bool {
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn visible_focus_target(scope: &web_sys::HtmlElement) -> Option<web_sys::HtmlElement> {
+    if is_focus_target_candidate(scope) && is_visible_focus_target(scope) {
+        return Some(scope.clone());
+    }
+
     scope
-        .query_selector("[autofocus], [tabindex]")
+        .query_selector(HYDRATION_FOCUS_TARGET_SELECTOR)
         .ok()
         .flatten()
         .and_then(|element| wasm_bindgen::JsCast::dyn_into(element).ok())
-        .filter(|element: &web_sys::HtmlElement| element.offset_parent().is_some())
+        .filter(is_visible_focus_target)
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn is_focus_target_candidate(element: &web_sys::Element) -> bool {
+    if element.has_attribute("disabled") {
+        return false;
+    }
+
+    if element.get_attribute("aria-hidden").as_deref() == Some("true") {
+        return false;
+    }
+
+    if element.has_attribute("autofocus") || element.has_attribute("tabindex") {
+        return true;
+    }
+
+    match element.tag_name().as_str() {
+        "BUTTON" | "INPUT" | "SELECT" | "TEXTAREA" => true,
+        "A" | "AREA" => element.has_attribute("href"),
+        _ => element
+            .get_attribute("contenteditable")
+            .is_some_and(|value| value != "false"),
+    }
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn is_visible_focus_target(element: &web_sys::HtmlElement) -> bool {
+    element.offset_parent().is_some()
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -788,12 +833,57 @@ mod wasm_tests {
         assert!(super::visible_focus_target(&scope).is_none());
     }
 
+    #[wasm_bindgen_test]
+    fn visible_focus_target_accepts_plain_button() {
+        reset_body();
+
+        let container =
+            append_html(r#"<section id="scope"><button id="target">target</button></section>"#);
+
+        let scope: HtmlElement = container
+            .query_selector("#scope")
+            .expect("query should succeed")
+            .expect("scope should exist")
+            .dyn_into()
+            .expect("scope should be HtmlElement");
+
+        assert_eq!(
+            super::visible_focus_target(&scope)
+                .and_then(|element| element.get_attribute("id"))
+                .as_deref(),
+            Some("target")
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn visible_focus_target_prefers_focusable_scope_root() {
+        reset_body();
+
+        let container = append_html(
+            r#"<section id="scope" tabindex="-1"><button id="target">target</button></section>"#,
+        );
+
+        let scope: HtmlElement = container
+            .query_selector("#scope")
+            .expect("query should succeed")
+            .expect("scope should exist")
+            .dyn_into()
+            .expect("scope should be HtmlElement");
+
+        assert_eq!(
+            super::visible_focus_target(&scope)
+                .and_then(|element| element.get_attribute("id"))
+                .as_deref(),
+            Some("scope")
+        );
+    }
+
     #[wasm_bindgen_test(async)]
     async fn focus_activation_is_deferred_until_animation_frame() {
         reset_body();
 
         let container = append_html(
-            r#"<button id="before">before</button><section id="scope"><button id="target" tabindex="0">target</button></section>"#,
+            r#"<button id="before">before</button><section id="scope"><button id="target">target</button></section>"#,
         );
 
         let before: HtmlElement = container
