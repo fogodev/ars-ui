@@ -202,6 +202,25 @@ fn extract_api_rust_blocks(source: &str) -> Vec<CodeBlock> {
 
         let trimmed = line.trim_start();
 
+        if in_block {
+            if trimmed == "```" {
+                blocks.push(CodeBlock {
+                    start_line: current_start,
+                    content: core::mem::take(&mut current),
+                });
+
+                in_block = false;
+
+                continue;
+            }
+
+            current.push_str(line);
+
+            current.push('\n');
+
+            continue;
+        }
+
         if let Some((level, body)) = parse_atx_heading(trimmed) {
             // Section heading — re-evaluate target-section state.
             if level == 3 {
@@ -214,33 +233,12 @@ fn extract_api_rust_blocks(source: &str) -> Vec<CodeBlock> {
             in_target_section = false;
         }
 
-        if in_target_section {
-            if !in_block && (trimmed == "```rust" || trimmed.starts_with("```rust")) {
-                in_block = true;
+        if in_target_section && (trimmed == "```rust" || trimmed.starts_with("```rust")) {
+            in_block = true;
 
-                current.clear();
+            current.clear();
 
-                current_start = line_no + 1;
-
-                continue;
-            }
-
-            if in_block && trimmed == "```" {
-                blocks.push(CodeBlock {
-                    start_line: current_start,
-                    content: core::mem::take(&mut current),
-                });
-
-                in_block = false;
-
-                continue;
-            }
-
-            if in_block {
-                current.push_str(line);
-
-                current.push('\n');
-            }
+            current_start = line_no + 1;
         }
     }
 
@@ -428,7 +426,7 @@ fn manual_impl_line_matches(line: &str, trait_name: &str, type_name: &str) -> bo
     let impl_prefix = &line[..for_idx];
     let implemented_type = line[for_idx + " for ".len()..].trim_start();
 
-    contains_identifier_token(impl_prefix, trait_name)
+    impl_trait_matches(impl_prefix, trait_name)
         && implemented_type.starts_with(type_name)
         && implemented_type[type_name.len()..]
             .chars()
@@ -436,29 +434,66 @@ fn manual_impl_line_matches(line: &str, trait_name: &str, type_name: &str) -> bo
             .is_none_or(|ch| !is_rust_identifier_continue(ch))
 }
 
-/// Returns whether `needle` appears in `haystack` as a full Rust identifier
-/// token, not as a prefix or suffix of another identifier.
-fn contains_identifier_token(haystack: &str, needle: &str) -> bool {
-    let mut search_from = 0;
+/// Returns whether the actual trait path in an `impl ... for` prefix matches
+/// the linted trait.
+fn impl_trait_matches(impl_prefix: &str, trait_name: &str) -> bool {
+    let Some(rest) = impl_prefix.trim().strip_prefix("impl") else {
+        return false;
+    };
 
-    while let Some(offset) = haystack[search_from..].find(needle) {
-        let start = search_from + offset;
-        let end = start + needle.len();
+    let rest = rest.trim_start();
+    let rest = if rest.starts_with('<') {
+        let Some(generics_end) = matching_angle_end(rest) else {
+            return false;
+        };
 
-        let before = haystack[..start].chars().next_back();
-        let after = haystack[end..].chars().next();
+        rest[generics_end + 1..].trim_start()
+    } else {
+        rest
+    };
 
-        let starts_at_boundary = before.is_none_or(|ch| !is_rust_identifier_continue(ch));
-        let ends_at_boundary = after.is_none_or(|ch| !is_rust_identifier_continue(ch));
+    let Some(trait_path) = rest.split_whitespace().next_back() else {
+        return false;
+    };
 
-        if starts_at_boundary && ends_at_boundary {
-            return true;
+    trait_path_segment_matches(trait_path, trait_name)
+}
+
+/// Returns the byte index of the matching `>` for a leading `<...>` group.
+fn matching_angle_end(source: &str) -> Option<usize> {
+    let mut depth = 0usize;
+
+    for (idx, ch) in source.char_indices() {
+        match ch {
+            '<' => depth += 1,
+            '>' => {
+                depth = depth.checked_sub(1)?;
+
+                if depth == 0 {
+                    return Some(idx);
+                }
+            }
+            _ => {}
         }
-
-        search_from = end;
     }
 
-    false
+    None
+}
+
+/// Returns whether the last path segment of `trait_path` is `trait_name`.
+fn trait_path_segment_matches(trait_path: &str, trait_name: &str) -> bool {
+    let trait_path = trait_path.split('<').next().unwrap_or(trait_path);
+    let trait_path = trait_path.trim_end_matches('{').trim_end();
+
+    if trait_path == trait_name {
+        return true;
+    }
+
+    let Some((_, segment)) = trait_path.rsplit_once("::") else {
+        return false;
+    };
+
+    segment == trait_name
 }
 
 /// Returns whether a character can continue a Rust identifier.
@@ -946,6 +981,34 @@ pub enum InternalEvent {
     }
 
     #[test]
+    fn ignores_atx_heading_like_lines_inside_rust_blocks() {
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// Api for the component.
+#[derive(Clone, Debug)]
+pub struct Api {
+}
+
+const SAMPLE: &str = r#\"
+### Not a markdown heading
+\"#;
+
+impl Api {
+    pub const fn new() -> Self { Self {} }
+}
+```
+";
+
+        assert!(
+            run(md)
+                .iter()
+                .any(|m| m.contains("public fn declaration is missing"))
+        );
+    }
+
+    #[test]
     fn does_not_inherit_derives_from_previous_item() {
         let md = "\
 ### 1.1 Props
@@ -1043,6 +1106,35 @@ impl Clone for Api2 {}
         );
         assert!(
             findings
+                .iter()
+                .any(|m| m.contains("`Api` must implement `Clone`"))
+        );
+    }
+
+    #[test]
+    fn matches_manual_impl_trait_name_not_generic_bound() {
+        let md = "\
+### 1.2 Connect / API
+
+```rust
+/// Api for the component.
+pub struct Api<T> {
+    _marker: core::marker::PhantomData<T>,
+}
+
+impl<T: Debug> Clone for Api<T> {}
+```
+";
+
+        let findings = run(md);
+
+        assert!(
+            findings
+                .iter()
+                .any(|m| m.contains("`Api` must implement `Debug`"))
+        );
+        assert!(
+            !findings
                 .iter()
                 .any(|m| m.contains("`Api` must implement `Clone`"))
         );
