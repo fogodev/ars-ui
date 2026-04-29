@@ -255,7 +255,11 @@ where
     let prev_props = StoredValue::<Option<M::Props>>::new(None);
 
     let sync_effect = ImmediateEffect::new_isomorphic(move || {
-        let new_props = props_signal.get();
+        let raw_props = props_signal.get();
+
+        let service_id = service.with_value(|svc| svc.props().id().to_owned());
+
+        let new_props = props_with_service_id::<M>(raw_props, &service_id);
 
         let should_sync = prev_props.with_value(|prev| prev.as_ref() != Some(&new_props));
 
@@ -300,6 +304,14 @@ where
     on_cleanup(move || drop(sync_effect));
 
     result
+}
+
+fn props_with_service_id<M: Machine>(mut props: M::Props, service_id: &str) -> M::Props {
+    if props.id().is_empty() {
+        props.set_id(service_id.to_owned());
+    }
+
+    props
 }
 
 type EffectCleanupStore = StoredValue<HashMap<&'static str, CleanupFn>, LocalStorage>;

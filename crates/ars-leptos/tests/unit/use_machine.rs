@@ -528,6 +528,76 @@ fn use_machine_with_reactive_props_syncs_state_and_context_changes() {
 }
 
 #[test]
+fn reactive_props_sync_preserves_service_id_when_signal_props_omit_id() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let (props, set_props) = signal(PropProps {
+            id: String::new(),
+            checked: false,
+            label: "a",
+        });
+
+        let machine = use_machine_with_reactive_props::<PropMachine>(props.into());
+
+        let service_id = machine.service.with_value(|service| {
+            let id = service.props().id().to_owned();
+
+            assert!(id.starts_with("component-"));
+
+            id
+        });
+
+        set_props.set(PropProps {
+            id: String::new(),
+            checked: true,
+            label: "a",
+        });
+
+        assert_eq!(machine.state.get_untracked(), PropState::On);
+        assert_eq!(machine.context_version.get_untracked(), 0);
+
+        set_props.set(PropProps {
+            id: String::new(),
+            checked: true,
+            label: "b",
+        });
+
+        assert_eq!(machine.context_version.get_untracked(), 1);
+
+        machine.service.with_value(|service| {
+            assert_eq!(service.props().id(), service_id);
+            assert_eq!(service.context().sync_count, 1);
+        });
+    });
+}
+
+#[test]
+fn reactive_props_sync_preserves_explicit_service_id_when_next_props_omit_id() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let (props, set_props) = signal(PropProps {
+            id: String::from("stable"),
+            checked: false,
+            label: "a",
+        });
+
+        let machine = use_machine_with_reactive_props::<PropMachine>(props.into());
+
+        set_props.set(PropProps {
+            id: String::new(),
+            checked: true,
+            label: "a",
+        });
+
+        assert_eq!(machine.state.get_untracked(), PropState::On);
+
+        machine.service.with_value(|service| {
+            assert_eq!(service.props().id(), "stable");
+        });
+    });
+}
+
+#[test]
 #[expect(
     clippy::redundant_closure_for_method_calls,
     reason = "Method pointers are not general enough for the lifetime-parameterized test API."

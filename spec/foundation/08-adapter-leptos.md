@@ -253,7 +253,7 @@ let props = {
 };
 ```
 
-**Invariant:** Once assigned at Service creation, the component ID MUST NOT change for the lifetime of the component instance. Re-renders do not regenerate IDs.
+**Invariant:** Once assigned at Service creation, the component ID MUST NOT change for the lifetime of the component instance. Re-renders do not regenerate IDs, and reactive prop synchronization must resolve later omitted `id` values to the service's current ID before calling `Service::set_props()`.
 
 ```rust
 #[cfg(feature = "hydrate")]
@@ -521,7 +521,9 @@ where
     // into `prev_props`, but skips calling `set_props()` because the machine was
     // already initialized with `initial_props`.
     let sync_effect = ImmediateEffect::new_isomorphic(move || {
-        let new_props = props_signal.get();
+        let raw_props = props_signal.get();
+        let service_id = service.with_value(|svc| svc.props().id().to_owned());
+        let new_props = props_with_service_id::<M>(raw_props, &service_id);
         let should_sync = prev_props.with_value(|prev| {
             prev.as_ref() != Some(&new_props)
         });
@@ -562,6 +564,14 @@ where
     on_cleanup(move || drop(sync_effect));
 
     result
+}
+
+fn props_with_service_id<M: Machine>(mut props: M::Props, service_id: &str) -> M::Props {
+    if props.id().is_empty() {
+        props.set_id(service_id.to_owned());
+    }
+
+    props
 }
 ```
 

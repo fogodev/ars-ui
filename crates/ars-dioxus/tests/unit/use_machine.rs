@@ -9,6 +9,8 @@ use dioxus::dioxus_core::{NoOpMutations, ScopeId};
 use super::{test_support, test_support::*, *};
 use crate::provider::{ArsContext, NullPlatform};
 
+type PropIdSnapshot = (String, PropState, u64, u32);
+
 #[derive(Clone)]
 struct TestIntlBackend;
 
@@ -632,6 +634,133 @@ fn use_machine_with_reactive_props_syncs_external_prop_changes() {
             (PropState::On, 0, 0),
             (PropState::On, 1, 1),
         ]
+    );
+}
+
+#[test]
+fn reactive_props_sync_preserves_service_id_when_signal_props_omit_id() {
+    let snapshots = Rc::new(RefCell::new(Vec::new()));
+
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "Dioxus root props are moved into the render function."
+    )]
+    fn app(snapshots: Rc<RefCell<Vec<PropIdSnapshot>>>) -> Element {
+        let mut props = use_signal(|| PropProps {
+            id: String::new(),
+            checked: false,
+            label: "a",
+        });
+
+        let mut phase = use_signal(|| 0u8);
+
+        let machine = use_machine_with_reactive_props::<PropMachine>(props);
+
+        snapshots.borrow_mut().push((
+            machine.service.peek().props().id().to_owned(),
+            *machine.state.peek(),
+            *machine.context_version.peek(),
+            machine.service.peek().context().sync_count,
+        ));
+
+        if phase() == 0 {
+            phase.set(1);
+
+            props.set(PropProps {
+                id: String::new(),
+                checked: true,
+                label: "a",
+            });
+        } else if phase() == 1 {
+            phase.set(2);
+
+            props.set(PropProps {
+                id: String::new(),
+                checked: true,
+                label: "b",
+            });
+        }
+
+        rsx! {
+            div {}
+        }
+    }
+
+    let mut dom = VirtualDom::new_with_props(app, Rc::clone(&snapshots));
+
+    dom.rebuild_in_place();
+    dom.mark_dirty(ScopeId::APP);
+    dom.render_immediate(&mut NoOpMutations);
+    dom.mark_dirty(ScopeId::APP);
+    dom.render_immediate(&mut NoOpMutations);
+
+    let snapshots = snapshots.borrow();
+
+    assert_eq!(snapshots.len(), 3);
+    assert!(snapshots[0].0.starts_with("component-"));
+    assert_eq!(snapshots[0].0, snapshots[1].0);
+    assert_eq!(snapshots[1].0, snapshots[2].0);
+    assert_eq!(
+        snapshots
+            .iter()
+            .map(|(_, state, version, sync_count)| (*state, *version, *sync_count))
+            .collect::<Vec<_>>()
+            .as_slice(),
+        &[
+            (PropState::Off, 0, 0),
+            (PropState::On, 0, 0),
+            (PropState::On, 1, 1),
+        ]
+    );
+}
+
+#[test]
+fn reactive_props_sync_preserves_explicit_service_id_when_next_props_omit_id() {
+    let snapshots = Rc::new(RefCell::new(Vec::new()));
+
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "Dioxus root props are moved into the render function."
+    )]
+    fn app(snapshots: Rc<RefCell<Vec<String>>>) -> Element {
+        let mut props = use_signal(|| PropProps {
+            id: String::from("stable"),
+            checked: false,
+            label: "a",
+        });
+
+        let mut phase = use_signal(|| 0u8);
+
+        let machine = use_machine_with_reactive_props::<PropMachine>(props);
+
+        snapshots
+            .borrow_mut()
+            .push(machine.service.peek().props().id().to_owned());
+
+        if phase() == 0 {
+            phase.set(1);
+
+            props.set(PropProps {
+                id: String::new(),
+                checked: true,
+                label: "a",
+            });
+        }
+
+        rsx! {
+            div {}
+        }
+    }
+
+    let mut dom = VirtualDom::new_with_props(app, Rc::clone(&snapshots));
+
+    dom.rebuild_in_place();
+    dom.mark_dirty(ScopeId::APP);
+    dom.render_immediate(&mut NoOpMutations);
+
+    assert_eq!(
+        snapshots.borrow().as_slice(),
+        &[String::from("stable"), String::from("stable")]
     );
 }
 
