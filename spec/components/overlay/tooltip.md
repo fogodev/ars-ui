@@ -110,6 +110,8 @@ pub struct Context {
     pub focus_active: bool,
     /// The positioning options for the tooltip.
     pub positioning: PositioningOptions,
+    /// Derived component part IDs.
+    pub ids: ComponentIds,
     /// The ID of the trigger element.
     pub trigger_id: String,
     /// The ID of the visible content element.
@@ -293,6 +295,7 @@ impl ars_core::Machine for Machine {
             hover_active: false,
             focus_active: false,
             positioning: props.positioning.clone(),
+            ids: ids.clone(),
             trigger_id: ids.part("trigger"),
             hidden_description_id: format!("{content_id}-description"),
             content_id,
@@ -518,6 +521,11 @@ impl ars_core::Machine for Machine {
         Api { state, ctx, props, send }
     }
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(
+            old.id, new.id,
+            "Tooltip id cannot change after initialization"
+        );
+
         let mut events = Vec::new();
 
         match (old.open, new.open) {
@@ -600,11 +608,14 @@ impl<'a> Api<'a> {
     pub fn trigger_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Trigger.data_attrs();
-        attrs.set(HtmlAttr::Id, &self.ctx.trigger_id);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("trigger"));
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         // Always point to the hidden description span, not just when open
-        attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), &self.ctx.hidden_description_id);
+        attrs.set(
+            HtmlAttr::Aria(AriaAttr::DescribedBy),
+            format!("{}-description", self.ctx.ids.part("content")),
+        );
         if self.ctx.disabled {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
@@ -679,7 +690,10 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::HiddenDescription.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.ctx.hidden_description_id);
+        attrs.set(
+            HtmlAttr::Id,
+            format!("{}-description", self.ctx.ids.part("content")),
+        );
         attrs.set(HtmlAttr::Data("ars-visually-hidden"), "true");
         // Visually hidden but accessible to screen readers
         attrs
@@ -705,7 +719,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Content.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.ctx.content_id);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("content"));
         attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
         attrs.set(HtmlAttr::Data("ars-state"), if self.is_open() { "open" } else { "closed" });
         attrs.set(HtmlAttr::Dir, self.ctx.dir.as_html_attr());
@@ -947,26 +961,26 @@ When the Tooltip machine receives `PointerEnter` or `Focus` in the `Closed` stat
 
 ### 6.1 Props
 
-| Feature               | ars-ui               | Ark UI               | Radix UI                        | React Aria                         | Notes                                                          |
-| --------------------- | -------------------- | -------------------- | ------------------------------- | ---------------------------------- | -------------------------------------------------------------- |
-| Controlled open       | `open`               | `open`               | `open`                          | `isOpen`                           | All libraries                                                  |
-| Default open          | `default_open`       | `defaultOpen`        | `defaultOpen`                   | `defaultOpen`                      | All libraries                                                  |
-| Open delay            | `open_delay`         | `openDelay`          | `delayDuration`                 | `delay`                            | All libraries; different defaults                              |
-| Close delay           | `close_delay`        | `closeDelay`         | --                              | `closeDelay`                       | Ark UI/React Aria; Radix uses provider-level skipDelayDuration |
-| Disabled              | `disabled`           | `disabled`           | --                              | `isDisabled`                       | All except Radix                                               |
-| Close on Escape       | `close_on_escape`    | `closeOnEscape`      | (onEscapeKeyDown)               | `isKeyboardDismissDisabled`        | All libraries                                                  |
-| Close on click        | `close_on_click`     | `closeOnClick`       | --                              | --                                 | Ark UI parity                                                  |
-| Close on pointer down | --                   | `closeOnPointerDown` | --                              | --                                 | Subsumed by `close_on_click`                                   |
-| Close on scroll       | `close_on_scroll`    | `closeOnScroll`      | --                              | --                                 | Ark UI parity                                                  |
-| Positioning           | `positioning`        | `positioning`        | (side/sideOffset/align)         | `placement`/`offset`/`crossOffset` | ars-ui unified struct                                          |
-| Dir                   | `dir`                | --                   | --                              | --                                 | ars-ui addition for mixed-direction                            |
-| Lazy mount            | `lazy_mount`         | `lazyMount`          | --                              | --                                 | Ark UI parity                                                  |
-| Unmount on exit       | `unmount_on_exit`    | `unmountOnExit`      | (forceMount inverse)            | --                                 | Ark UI parity                                                  |
-| Open change callback  | `on_open_change`     | `onOpenChange`       | `onOpenChange`                  | `onOpenChange`                     | All libraries                                                  |
-| Touch auto-hide       | `touch_auto_hide`    | --                   | --                              | --                                 | Adapter-owned ars-ui addition                                  |
-| `aria-label`          | (HiddenDescription)  | `aria-label`         | `aria-label`                    | --                                 | ars-ui uses always-rendered hidden span                        |
-| Skip delay duration   | (TooltipGroup)       | --                   | `skipDelayDuration`             | --                                 | Provider-level warmup/cooldown                                 |
-| Focus-only trigger    | --                   | --                   | --                              | `trigger="focus"`                  | React Aria only                                                |
+| Feature               | ars-ui              | Ark UI               | Radix UI                | React Aria                         | Notes                                                          |
+| --------------------- | ------------------- | -------------------- | ----------------------- | ---------------------------------- | -------------------------------------------------------------- |
+| Controlled open       | `open`              | `open`               | `open`                  | `isOpen`                           | All libraries                                                  |
+| Default open          | `default_open`      | `defaultOpen`        | `defaultOpen`           | `defaultOpen`                      | All libraries                                                  |
+| Open delay            | `open_delay`        | `openDelay`          | `delayDuration`         | `delay`                            | All libraries; different defaults                              |
+| Close delay           | `close_delay`       | `closeDelay`         | --                      | `closeDelay`                       | Ark UI/React Aria; Radix uses provider-level skipDelayDuration |
+| Disabled              | `disabled`          | `disabled`           | --                      | `isDisabled`                       | All except Radix                                               |
+| Close on Escape       | `close_on_escape`   | `closeOnEscape`      | (onEscapeKeyDown)       | `isKeyboardDismissDisabled`        | All libraries                                                  |
+| Close on click        | `close_on_click`    | `closeOnClick`       | --                      | --                                 | Ark UI parity                                                  |
+| Close on pointer down | --                  | `closeOnPointerDown` | --                      | --                                 | Subsumed by `close_on_click`                                   |
+| Close on scroll       | `close_on_scroll`   | `closeOnScroll`      | --                      | --                                 | Ark UI parity                                                  |
+| Positioning           | `positioning`       | `positioning`        | (side/sideOffset/align) | `placement`/`offset`/`crossOffset` | ars-ui unified struct                                          |
+| Dir                   | `dir`               | --                   | --                      | --                                 | ars-ui addition for mixed-direction                            |
+| Lazy mount            | `lazy_mount`        | `lazyMount`          | --                      | --                                 | Ark UI parity                                                  |
+| Unmount on exit       | `unmount_on_exit`   | `unmountOnExit`      | (forceMount inverse)    | --                                 | Ark UI parity                                                  |
+| Open change callback  | `on_open_change`    | `onOpenChange`       | `onOpenChange`          | `onOpenChange`                     | All libraries                                                  |
+| Touch auto-hide       | `touch_auto_hide`   | --                   | --                      | --                                 | Adapter-owned ars-ui addition                                  |
+| `aria-label`          | (HiddenDescription) | `aria-label`         | `aria-label`            | --                                 | ars-ui uses always-rendered hidden span                        |
+| Skip delay duration   | (TooltipGroup)      | --                   | `skipDelayDuration`     | --                                 | Provider-level warmup/cooldown                                 |
+| Focus-only trigger    | --                  | --                   | --                      | `trigger="focus"`                  | React Aria only                                                |
 
 **Intentional divergences:** Tooltip does not expose interactive content support. Interactive
 floating content belongs in HoverCard or Popover. React Aria's `trigger="focus"` (show only on

@@ -433,6 +433,30 @@ pub trait ConnectApi {
 /// - Non-`String` `id` field → `"HasId: `id` field must be of type String"`
 /// - Applied to enum or union → `"HasId can only be derived for structs"`
 
+/// Runtime render mode resolved by the adapter before initializing a machine.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum RenderMode {
+    /// The component is rendering in a normal client runtime.
+    #[default]
+    Client,
+    /// The component is rendering HTML on the server.
+    Server,
+    /// The component is hydrating server-rendered HTML on the client.
+    Hydrating,
+}
+
+impl RenderMode {
+    /// Returns whether this mode is server-side rendering.
+    pub const fn is_server(self) -> bool {
+        matches!(self, Self::Server)
+    }
+
+    /// Returns whether this mode is client hydration.
+    pub const fn is_hydrating(self) -> bool {
+        matches!(self, Self::Hydrating)
+    }
+}
+
 /// Adapter-resolved environment context passed to `Machine::init()`.
 ///
 /// The adapter reads these values from `ArsProvider` / `ArsContext` and passes
@@ -447,6 +471,26 @@ pub struct Env {
     /// Calendar/locale data provider for date-time formatting.
     /// Defaults to `StubIntlBackend` (English-only, zero dependencies).
     pub intl_backend: Arc<dyn IntlBackend>,
+    /// Runtime render mode for server, hydration, or normal client rendering.
+    pub render_mode: RenderMode,
+}
+
+impl Env {
+    /// Creates an environment with the supplied locale and internationalization
+    /// backend in normal client render mode.
+    pub fn new(locale: Locale, intl_backend: Arc<dyn IntlBackend>) -> Self {
+        Self {
+            locale,
+            intl_backend,
+            render_mode: RenderMode::Client,
+        }
+    }
+
+    /// Returns this environment with a different runtime render mode.
+    pub const fn with_render_mode(mut self, render_mode: RenderMode) -> Self {
+        self.render_mode = render_mode;
+        self
+    }
 }
 
 impl Default for Env {
@@ -454,6 +498,7 @@ impl Default for Env {
         Self {
             locale: Locale::parse("en-US").expect("en-US is a valid BCP-47 tag"),
             intl_backend: Arc::new(StubIntlBackend),
+            render_mode: RenderMode::Client,
         }
     }
 }

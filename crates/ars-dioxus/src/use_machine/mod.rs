@@ -10,7 +10,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use ars_core::{CleanupFn, Env, HasId, Machine, Service};
+use ars_core::{CleanupFn, Env, HasId, Machine, RenderMode, Service};
 use dioxus::prelude::*;
 
 use crate::{
@@ -53,6 +53,14 @@ where
     /// Used by [`derive()`](Self::derive) to track context mutations even when
     /// state remains the same.
     pub context_version: ReadSignal<u64>,
+}
+
+const fn current_render_mode() -> RenderMode {
+    if cfg!(feature = "ssr") {
+        RenderMode::Server
+    } else {
+        RenderMode::Client
+    }
 }
 
 struct MachineRuntime<M: Machine + 'static>
@@ -280,10 +288,7 @@ where
 
     let intl_backend = use_intl_backend();
 
-    let env = Env {
-        locale,
-        intl_backend,
-    };
+    let env = Env::new(locale, intl_backend).with_render_mode(current_render_mode());
 
     let messages = use_messages::<M::Messages>(None, Some(&env.locale));
 

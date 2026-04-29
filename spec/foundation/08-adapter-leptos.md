@@ -66,7 +66,7 @@ The central primitive. Creates a `Service<M>`, wraps it in a reactive signal, an
 ````rust
 use std::rc::Rc;
 use leptos::prelude::*;
-use ars_core::{Machine, Service, Env, Arc};
+use ars_core::{Machine, Service, Env, RenderMode, Arc};
 use ars_i18n::IntlBackend;
 
 /// Return type from `use_machine`.
@@ -256,6 +256,16 @@ let props = {
 **Invariant:** Once assigned at Service creation, the component ID MUST NOT change for the lifetime of the component instance. Re-renders do not regenerate IDs.
 
 ```rust
+const fn current_render_mode() -> RenderMode {
+    if cfg!(feature = "hydrate") {
+        RenderMode::Hydrating
+    } else if cfg!(feature = "ssr") {
+        RenderMode::Server
+    } else {
+        RenderMode::Client
+    }
+}
+
 /// Internal — creates a single Service and returns the public return type plus
 /// internal handles needed by `use_machine_with_reactive_props` to process
 /// SendResult from set_props (state_write, send_ref, effect_cleanups,
@@ -292,7 +302,7 @@ where
     let locale = resolve_locale(None);
     let intl_backend = use_intl_backend();
     let messages = use_messages::<M::Messages>(None, Some(&locale));
-    let env = Env { locale, intl_backend };
+    let env = Env::new(locale, intl_backend).with_render_mode(current_render_mode());
 
     // Create the service once — runs only on component initialization.
     // **Safety**: The `init()` function must not call `api.send()` or otherwise

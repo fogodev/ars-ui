@@ -17,6 +17,9 @@ pub mod input;
 /// Date and time component machines.
 pub mod date_time;
 
+/// Layout component machines.
+pub mod layout;
+
 /// Utility component machines.
 pub mod utility;
 

@@ -458,7 +458,7 @@ fn use_locale() -> Locale {
 // Adapter usage — resolve env before passing to core:
 let locale = resolve_locale(adapter_props.locale.as_ref());
 let intl_backend = use_intl_backend();
-let env = Env { locale, intl_backend };
+let env = Env::new(locale, intl_backend);
 let messages = resolve_messages::<dialog::Messages>(adapter_props.messages.as_ref(), &registries, &env.locale);
 let service = Service::new(core_props, env, messages);
 ```
@@ -2250,11 +2250,11 @@ mechanism and makes the string untranslatable. The only acceptable English strin
 text at call time. This means every message invocation in a connect function passes the active
 locale. The three patterns for how locale reaches the call site are:
 
-| Component type                                                       | Locale source                                                                                                                                  | Access pattern                                |
-| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| **Stateful** (has `Machine` + `Context`)                             | Adapter constructs `Env { locale, intl_backend }`, passes to `Machine::init(props, &env, &messages)`. `init()` stores `env.locale` in Context. | `(self.ctx.messages.label)(&self.ctx.locale)` |
-| **Stateless with `Api`** (no state machine, but has an `Api` struct) | Adapter passes `&Env` to `Api::new(props, env, messages)`. Api stores `&env.locale`.                                                           | `(self.messages.label)(self.locale)`          |
-| **Standalone function** (no `Api` struct)                            | Adapter passes `locale: &Locale` directly as a function parameter.                                                                             | `(messages.label)(locale)`                    |
+| Component type                                                       | Locale source                                                                                                                                    | Access pattern                                |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
+| **Stateful** (has `Machine` + `Context`)                             | Adapter constructs `Env::new(locale, intl_backend)`, passes to `Machine::init(props, &env, &messages)`. `init()` stores `env.locale` in Context. | `(self.ctx.messages.label)(&self.ctx.locale)` |
+| **Stateless with `Api`** (no state machine, but has an `Api` struct) | Adapter passes `&Env` to `Api::new(props, env, messages)`. Api stores `&env.locale`.                                                             | `(self.messages.label)(self.locale)`          |
+| **Standalone function** (no `Api` struct)                            | Adapter passes `locale: &Locale` directly as a function parameter.                                                                               | `(messages.label)(locale)`                    |
 
 For stateful components, the adapter resolves locale from `ArsProvider` context,
 places it in the `Env` struct, and passes `Env` to `Machine::init()`. The `init()`
@@ -2592,7 +2592,7 @@ let registries = use_i18n_registries();
 let messages = resolve_messages::<dialog::Messages>(
     adapter_props.messages.as_ref(), &registries, &locale,
 );
-let env = Env { locale, intl_backend };
+let env = Env::new(locale, intl_backend);
 let service = Service::new(core_props, env, messages);
 ```
 

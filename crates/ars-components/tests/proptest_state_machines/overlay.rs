@@ -228,6 +228,13 @@ fn assert_tooltip_state_context_invariants(service: &Service<tooltip::Machine>) 
         )
     );
     prop_assert!(service.context().touch_auto_hide >= MIN_TOUCH_AUTO_HIDE);
+    prop_assert_eq!(service.context().ids.id(), "tooltip");
+
+    let trigger_id = service.context().ids.part("trigger");
+    let content_id = service.context().ids.part("content");
+
+    prop_assert_eq!(&service.context().trigger_id, &trigger_id);
+    prop_assert_eq!(&service.context().content_id, &content_id);
     prop_assert_eq!(&service.context().trigger_id, "tooltip-trigger");
     prop_assert_eq!(&service.context().content_id, "tooltip-content");
     prop_assert_eq!(

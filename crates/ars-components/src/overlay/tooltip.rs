@@ -122,6 +122,9 @@ pub struct Context {
     /// Positioning options forwarded to framework adapters.
     pub positioning: PositioningOptions,
 
+    /// Derived component part IDs.
+    pub ids: ComponentIds,
+
     /// The ID of the trigger element.
     pub trigger_id: String,
 
@@ -380,6 +383,7 @@ impl ars_core::Machine for Machine {
                 focus_active: false,
                 positioning: props.positioning.clone(),
                 trigger_id: ids.part("trigger"),
+                ids,
                 hidden_description_id: format_description_id(&content_id),
                 content_id,
                 messages: messages.clone(),
@@ -605,6 +609,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(
+            old.id, new.id,
+            "Tooltip id cannot change after initialization"
+        );
+
         let mut events = Vec::new();
 
         match (old.open, new.open) {
@@ -696,12 +705,12 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Trigger.data_attrs();
 
         attrs
-            .set(HtmlAttr::Id, &self.ctx.trigger_id)
+            .set(HtmlAttr::Id, self.ctx.ids.part("trigger"))
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(
                 HtmlAttr::Aria(AriaAttr::DescribedBy),
-                &self.ctx.hidden_description_id,
+                format_description_id(self.ctx.ids.part("content")),
             );
 
         if self.ctx.disabled {
@@ -780,7 +789,10 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::HiddenDescription.data_attrs();
 
         attrs
-            .set(HtmlAttr::Id, &self.ctx.hidden_description_id)
+            .set(
+                HtmlAttr::Id,
+                format_description_id(self.ctx.ids.part("content")),
+            )
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Data("ars-visually-hidden"), "true");
@@ -817,7 +829,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Content.data_attrs();
 
         attrs
-            .set(HtmlAttr::Id, &self.ctx.content_id)
+            .set(HtmlAttr::Id, self.ctx.ids.part("content"))
             .set(HtmlAttr::Aria(AriaAttr::Hidden), "true")
             .set(HtmlAttr::Dir, self.ctx.dir.as_html_attr())
             .set(scope_attr, scope_val)
@@ -868,8 +880,8 @@ const fn close_delay(props: &Props) -> Duration {
     props.close_delay
 }
 
-fn format_description_id(content_id: &str) -> String {
-    let mut id = String::from(content_id);
+fn format_description_id(content_id: impl Into<String>) -> String {
+    let mut id = content_id.into();
 
     id.push_str("-description");
 
@@ -988,23 +1000,21 @@ fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
 }
 
 fn sync_props_context(ctx: &mut Context, props: &Props) {
-    let ids = ComponentIds::from_id(&props.id);
-    let content_id = ids.part("content");
+    let content_id = ctx.ids.part("content");
 
     ctx.open_delay = props.open_delay;
     ctx.close_delay = close_delay(props);
     ctx.disabled = props.disabled;
     ctx.dir = props.dir;
     ctx.positioning = props.positioning.clone();
-    ctx.trigger_id = ids.part("trigger");
+    ctx.trigger_id = ctx.ids.part("trigger");
     ctx.hidden_description_id = format_description_id(&content_id);
     ctx.content_id = content_id;
     ctx.touch_auto_hide = props.touch_auto_hide.max(MIN_TOUCH_AUTO_HIDE);
 }
 
 fn props_context_changed(old: &Props, new: &Props) -> bool {
-    old.id != new.id
-        || old.open_delay != new.open_delay
+    old.open_delay != new.open_delay
         || old.close_delay != new.close_delay
         || old.disabled != new.disabled
         || old.dir != new.dir
@@ -1992,7 +2002,6 @@ mod tests {
         let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
 
         let result = service.set_props(Props {
-            id: "renamed-tooltip".to_string(),
             open_delay: Duration::from_millis(12),
             close_delay: Duration::ZERO,
             disabled: true,
@@ -2005,9 +2014,10 @@ mod tests {
             ..test_props()
         });
 
-        let ids = ComponentIds::from_id("renamed-tooltip");
+        let ids = ComponentIds::from_id("tooltip");
         let content_id = ids.part("content");
 
+        assert_eq!(service.context().ids, ids);
         assert_eq!(service.context().open_delay, Duration::from_millis(12));
         assert_eq!(service.context().close_delay, Duration::ZERO);
         assert!(service.context().disabled);
@@ -2024,42 +2034,20 @@ mod tests {
     }
 
     #[test]
-    fn tooltip_id_prop_change_updates_connected_aria_ids() {
+    #[should_panic(expected = "Tooltip id cannot change after initialization")]
+    fn tooltip_set_props_panics_when_id_changes() {
         let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
 
         drop(service.set_props(Props {
             id: "renamed-tooltip".to_string(),
             ..test_props()
         }));
-
-        let api = service.connect(&|_| {});
-        let ids = ComponentIds::from_id("renamed-tooltip");
-        let content_id = ids.part("content");
-        let hidden_id = format_description_id(&content_id);
-
-        assert_eq!(
-            api.trigger_attrs()
-                .get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
-            Some(hidden_id.as_str())
-        );
-        assert_eq!(
-            api.hidden_description_attrs().get(&HtmlAttr::Id),
-            Some(hidden_id.as_str())
-        );
-        assert_eq!(
-            api.content_attrs().get(&HtmlAttr::Id),
-            Some(content_id.as_str())
-        );
     }
 
     #[test]
     fn tooltip_on_props_changed_reports_each_context_backed_prop() {
         let old = test_props();
         let cases = [
-            Props {
-                id: "renamed-tooltip".to_string(),
-                ..test_props()
-            },
             Props {
                 open_delay: Duration::from_millis(12),
                 ..test_props()

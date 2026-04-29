@@ -9,7 +9,7 @@ use std::{
     fmt::{self, Debug},
 };
 
-use ars_core::{CleanupFn, Env, HasId, Machine, Service};
+use ars_core::{CleanupFn, Env, HasId, Machine, RenderMode, Service};
 use leptos::{prelude::*, reactive::owner::LocalStorage};
 #[cfg(any(all(test, target_arch = "wasm32"), not(feature = "ssr")))]
 use {ars_core::StrongSend, std::sync::Arc};
@@ -54,6 +54,16 @@ where
     /// Used by [`derive()`](Self::derive) to track context mutations even when
     /// state remains the same.
     pub context_version: ReadSignal<u64>,
+}
+
+const fn current_render_mode() -> RenderMode {
+    if cfg!(feature = "hydrate") {
+        RenderMode::Hydrating
+    } else if cfg!(feature = "ssr") {
+        RenderMode::Server
+    } else {
+        RenderMode::Client
+    }
 }
 
 // Manual Clone/Copy impls to avoid requiring M: Clone/Copy — all fields are
@@ -315,10 +325,7 @@ where
 
     let messages = use_messages::<M::Messages>(None, Some(&locale));
 
-    let env = Env {
-        locale,
-        intl_backend,
-    };
+    let env = Env::new(locale, intl_backend).with_render_mode(current_render_mode());
 
     // Create the service once — runs only on component initialization.
     let service = StoredValue::new(Service::<M>::new(props, &env, &messages));

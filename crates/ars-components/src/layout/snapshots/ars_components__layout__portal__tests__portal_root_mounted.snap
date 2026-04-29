@@ -1,0 +1,55 @@
+---
+source: crates/ars-components/src/layout/portal.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-portal-id",
+            ),
+            String(
+                "portal",
+            ),
+        ),
+        (
+            Data(
+                "ars-portal-owner",
+            ),
+            String(
+                "portal",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "portal",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "mounted",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "ars-portal-portal",
+            ),
+        ),
+    ],
+    styles: [],
+}

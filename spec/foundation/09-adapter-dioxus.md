@@ -59,7 +59,7 @@ ssr = ["dioxus/server", "dep:ars-dom", "ars-dom/ssr"]
 ````rust
 use std::sync::Arc;
 use dioxus::prelude::*;
-use ars_core::{Machine, Service, Env};
+use ars_core::{Machine, Service, Env, RenderMode};
 use ars_i18n::{Locale, IntlBackend, ComponentMessages, I18nRegistries};
 
 /// Return type from `use_machine`.
@@ -247,6 +247,14 @@ pub fn related_id(base: &str, suffix: &str) -> String {
 /// Resolves environment values (locale, ICU provider) and messages from
 /// `ArsProvider` context before constructing the `Service`. Core code never
 /// calls framework hooks — all environment values arrive as parameters.
+const fn current_render_mode() -> RenderMode {
+    if cfg!(feature = "ssr") {
+        RenderMode::Server
+    } else {
+        RenderMode::Client
+    }
+}
+
 fn use_machine_inner<M: Machine + 'static>(
     props: M::Props,
 ) -> (UseMachineReturn<M>, Signal<u64>)
@@ -273,7 +281,7 @@ where
     // These are adapter-only hooks — core code receives Env and Messages as parameters.
     let locale = resolve_locale(None);
     let intl_backend = use_intl_backend();
-    let env = Env { locale, intl_backend };
+    let env = Env::new(locale, intl_backend).with_render_mode(current_render_mode());
 
     // Resolve messages from adapter-level i18n hooks.
     let messages = use_messages::<M::Messages>(None, Some(&env.locale));

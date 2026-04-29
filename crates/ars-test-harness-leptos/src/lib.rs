@@ -726,10 +726,10 @@ mod tests {
                 container: web_sys::HtmlElement,
                 locale: Option<Locale>,
             ) -> MountedLeptosHarness<MockMachine> {
-                let env = Env {
-                    locale: locale.clone().unwrap_or_else(locales::en_us),
-                    intl_backend: Arc::new(StubIntlBackend) as Arc<dyn IntlBackend>,
-                };
+                let env = Env::new(
+                    locale.clone().unwrap_or_else(locales::en_us),
+                    Arc::new(StubIntlBackend) as Arc<dyn IntlBackend>,
+                );
 
                 let service = Arc::new(Mutex::new(Service::new(MockProps::default(), &env, &())));
 
@@ -806,10 +806,10 @@ mod tests {
                 container: web_sys::HtmlElement,
                 locale: Option<Locale>,
             ) -> MountedLeptosHarness<MockMachine> {
-                let env = Env {
-                    locale: locale.clone().unwrap_or_else(locales::en_us),
-                    intl_backend: Arc::new(StubIntlBackend) as Arc<dyn IntlBackend>,
-                };
+                let env = Env::new(
+                    locale.clone().unwrap_or_else(locales::en_us),
+                    Arc::new(StubIntlBackend) as Arc<dyn IntlBackend>,
+                );
 
                 let service = Arc::new(Mutex::new(Service::new(MockProps::default(), &env, &())));
 
