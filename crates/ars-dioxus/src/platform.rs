@@ -55,12 +55,12 @@ pub struct FilePickerOptions {
 /// - **Web (wasm32 + `feature = "web"`)**: items as `DragItem::File`
 ///   for each `DataTransfer.files()` entry; `types` populated from the
 ///   subset of default probe formats for which `data_transfer.get_data()`
-///   returns a value.
+///   returns a non-empty value.
 /// - **Desktop (`feature = "desktop"`)**: items as `DragItem::File`
 ///   for each path in wry's `DragDropEvent::Drop { paths, .. }`. Each
 ///   item carries a real `FileHandle::from_path(_)` so the drop-zone
 ///   adapter can resolve content. `types` is best-effort via the same
-///   `get_data()` probe.
+///   non-empty `get_data()` probe.
 /// - **`PlatformDragEvent::empty()`** (any target): both fields empty.
 ///
 /// `dioxus_html::DataTransfer` does not expose a `types()` accessor on
@@ -114,7 +114,11 @@ impl DragData {
 
         let mut types = DEFAULT_DRAG_TYPE_PROBES
             .iter()
-            .filter(|&format| data_transfer.get_data(format).is_some())
+            .filter(|&format| {
+                data_transfer
+                    .get_data(format)
+                    .is_some_and(|payload| !payload.is_empty())
+            })
             .map(|&format| String::from(format))
             .collect::<Vec<_>>();
 
@@ -126,22 +130,11 @@ impl DragData {
                     .content_type()
                     .unwrap_or_else(|| String::from("application/octet-stream"));
 
-                // `FileData::path()` returns `PathBuf::new()` on web (no
-                // native path available); on desktop it carries the real
-                // path forwarded from `wry::DragDropEvent::Drop { paths }`.
-                let raw_path = file.path();
-
-                let handle = if raw_path.as_os_str().is_empty() {
-                    FileHandle::opaque()
-                } else {
-                    FileHandle::from_path(raw_path)
-                };
-
                 DragItem::File {
                     name: file.name(),
                     mime_type,
                     size: file.size(),
-                    handle,
+                    handle: drag_file_handle(file.path()),
                 }
             })
             .collect::<Vec<_>>();
@@ -157,6 +150,20 @@ impl DragData {
 
         Self { items, types }
     }
+}
+
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+fn drag_file_handle(raw_path: std::path::PathBuf) -> FileHandle {
+    if raw_path.as_os_str().is_empty() {
+        FileHandle::opaque()
+    } else {
+        FileHandle::from_path(raw_path)
+    }
+}
+
+#[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
+fn drag_file_handle(_raw_path: std::path::PathBuf) -> FileHandle {
+    FileHandle::opaque()
 }
 
 /// Platform-agnostic handle to a drag event.
@@ -1124,6 +1131,44 @@ mod tests {
             data.types,
             vec![String::from("text/plain"), String::from("text/html")]
         );
+    }
+
+    #[test]
+    fn drag_data_from_dioxus_drag_data_ignores_empty_probe_payloads() {
+        let native = TestNativeDataTransfer::with_data([
+            ("text/plain", ""),
+            ("text/html", "<p>hello</p>"),
+            ("text/uri-list", ""),
+            ("application/json", "{\"id\":1}"),
+        ]);
+
+        let event = DioxusDragData::new(TestDragData::new(native));
+
+        let data = DragData::from_drag_data(&event);
+
+        assert!(data.items.is_empty());
+        assert_eq!(
+            data.types,
+            vec![String::from("text/html"), String::from("application/json")]
+        );
+    }
+
+    #[test]
+    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    fn drag_file_handle_preserves_native_desktop_paths() {
+        let path = std::path::PathBuf::from("/tmp/report.json");
+
+        let handle = drag_file_handle(path.clone());
+
+        assert_eq!(handle.as_path(), Some(path.as_path()));
+    }
+
+    #[test]
+    #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
+    fn drag_file_handle_keeps_web_and_non_desktop_paths_opaque() {
+        let handle = drag_file_handle(std::path::PathBuf::from("uploads/report.json"));
+
+        assert_eq!(handle.as_path(), None);
     }
 
     #[test]
