@@ -3249,7 +3249,12 @@ fn setup_focus_scope_hydration_safe(
                     Rc::clone(&activation_active),
                 );
             } else {
-                activate_focus_scope(&document, &scope_id, restore_target);
+                activate_focus_scope(
+                    &document,
+                    &scope_id,
+                    restore_target,
+                    Rc::clone(&activation_active),
+                );
             }
         }
     });
@@ -3288,7 +3293,7 @@ fn request_hydration_activation_after_frame(
 
         let body = document.body().expect("document.body");
         if body.get_attribute("data-ars-hydrated").is_some() {
-            activate_focus_scope(&document, &scope_id, restore_target);
+            activate_focus_scope(&document, &scope_id, restore_target, activation_active);
         } else {
             request_hydration_activation_after_frame(scope_id, restore_target, activation_active);
         }
@@ -3304,6 +3309,7 @@ fn activate_focus_scope(
     document: &web_sys::Document,
     scope_id: &str,
     restore_target: Signal<Option<web_sys::HtmlElement>>,
+    activation_active: Rc<Cell<bool>>,
 ) {
     let scope_el = document
         .get_element_by_id(scope_id)
@@ -3334,6 +3340,10 @@ fn activate_focus_scope(
         // Use request_animation_frame to wait for DOM settlement.
         let document_clone = document.clone();
         let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
+            if !activation_active.get() {
+                return;
+            }
+
             // Validate target exists and is visible.
             let target = visible_focus_target(&scope_el);
 

@@ -101,7 +101,12 @@ pub fn setup_focus_scope_hydration_safe(
             };
 
             if body_is_hydrated(&document) {
-                activate_focus_scope(&document, &scope_id, restore_target);
+                activate_focus_scope(
+                    &document,
+                    &scope_id,
+                    restore_target,
+                    Rc::clone(&activation_active),
+                );
             } else {
                 request_hydration_activation_after_frame(
                     scope_id.clone(),
@@ -145,6 +150,7 @@ fn activate_focus_scope(
     document: &web_sys::Document,
     scope_id: &str,
     restore_target: dioxus::prelude::Signal<Option<web_sys::HtmlElement>>,
+    activation_active: Rc<Cell<bool>>,
 ) {
     let scope: Option<web_sys::HtmlElement> = document
         .get_element_by_id(scope_id)
@@ -157,7 +163,7 @@ fn activate_focus_scope(
     remove_orphaned_inert(document);
 
     if let Some(scope) = scope {
-        request_focus_after_frame(scope, restore_target);
+        request_focus_after_frame(scope, restore_target, activation_active);
     }
 }
 
@@ -183,7 +189,7 @@ fn request_hydration_activation_after_frame(
         };
 
         if body_is_hydrated(&document) {
-            activate_focus_scope(&document, &scope_id, restore_target);
+            activate_focus_scope(&document, &scope_id, restore_target, activation_active);
         } else {
             request_hydration_activation_after_frame(scope_id, restore_target, activation_active);
         }
@@ -319,6 +325,7 @@ fn is_visible_fixed_position_target(element: &web_sys::HtmlElement) -> bool {
 fn request_focus_after_frame(
     scope: web_sys::HtmlElement,
     mut restore_target: dioxus::prelude::Signal<Option<web_sys::HtmlElement>>,
+    activation_active: Rc<Cell<bool>>,
 ) {
     use wasm_bindgen::JsCast;
 
@@ -331,6 +338,10 @@ fn request_focus_after_frame(
     };
 
     let callback = wasm_bindgen::closure::Closure::once_into_js(move || {
+        if !activation_active.get() {
+            return;
+        }
+
         let Some(target) = visible_focus_target(&scope) else {
             return;
         };
@@ -1033,8 +1044,9 @@ mod wasm_tests {
                 .expect("scope should exist")
                 .dyn_into()
                 .expect("scope should be HtmlElement");
+            let activation_active = Rc::new(Cell::new(true));
 
-            super::request_focus_after_frame(scope, restore_target);
+            super::request_focus_after_frame(scope, restore_target, activation_active);
 
             rsx! {
                 div {}
@@ -1061,6 +1073,55 @@ mod wasm_tests {
                 .and_then(|element| element.get_attribute("id"))
                 .as_deref(),
             Some("target")
+        );
+    }
+
+    #[wasm_bindgen_test(async)]
+    async fn focus_activation_skips_after_unmount_guard_is_cleared() {
+        reset_body();
+
+        let container = append_html(
+            r#"<button id="before">before</button><section id="scope"><button id="target">target</button></section>"#,
+        );
+
+        let before: HtmlElement = container
+            .query_selector("#before")
+            .expect("query should succeed")
+            .expect("before should exist")
+            .dyn_into()
+            .expect("before should be HtmlElement");
+
+        before.focus().expect("focus before");
+
+        fn app() -> Element {
+            let restore_target = use_signal(|| None::<HtmlElement>);
+
+            let scope: HtmlElement = document()
+                .get_element_by_id("scope")
+                .expect("scope should exist")
+                .dyn_into()
+                .expect("scope should be HtmlElement");
+            let activation_active = Rc::new(Cell::new(true));
+
+            super::request_focus_after_frame(scope, restore_target, Rc::clone(&activation_active));
+            activation_active.set(false);
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new(app);
+
+        dom.rebuild_in_place();
+        animation_frame_turn().await;
+
+        assert_eq!(
+            document()
+                .active_element()
+                .and_then(|element| element.get_attribute("id"))
+                .as_deref(),
+            Some("before")
         );
     }
 
