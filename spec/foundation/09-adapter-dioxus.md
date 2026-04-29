@@ -45,11 +45,11 @@ log = { version = "0.4", default-features = false, optional = true }
 [features]
 default = []
 debug = ["dep:log", "ars-core/debug", "ars-interactions/debug", "ars-dom?/debug"]
-web = ["dioxus/web", "dep:ars-dom", "ars-dom/web"]
+web = ["dioxus/web", "dep:ars-dom", "ars-dom/web", "ars-core/ssr", "ars-core/serde"]
 desktop = ["dioxus/desktop"]
 desktop-dom = ["desktop", "dep:ars-dom"]
 mobile = ["dioxus/mobile"]  # Currently resolves to NullPlatform; MobilePlatform pending
-ssr = ["dioxus/server", "dep:ars-dom", "ars-dom/ssr"]
+ssr = ["dioxus/server", "dep:ars-dom", "ars-dom/ssr", "ars-core/ssr", "ars-core/serde", "dep:serde", "dep:serde_json"]
 ```
 
 ---
@@ -247,7 +247,17 @@ pub fn related_id(base: &str, suffix: &str) -> String {
 /// Resolves environment values (locale, ICU provider) and messages from
 /// `ArsProvider` context before constructing the `Service`. Core code never
 /// calls framework hooks — all environment values arrive as parameters.
-const fn current_render_mode() -> RenderMode {
+const fn current_render_mode(hydrated_snapshot: bool) -> RenderMode {
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    {
+        if hydrated_snapshot {
+            RenderMode::Hydrating
+        } else {
+            RenderMode::Client
+        }
+    }
+
+    #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
     if cfg!(feature = "ssr") {
         RenderMode::Server
     } else {
@@ -281,7 +291,8 @@ where
     // These are adapter-only hooks — core code receives Env and Messages as parameters.
     let locale = resolve_locale(None);
     let intl_backend = use_intl_backend();
-    let env = Env::new(locale, intl_backend).with_render_mode(current_render_mode());
+    let env = Env::new(locale, intl_backend)
+        .with_render_mode(current_render_mode(hydrated_state.is_some()));
 
     // Resolve messages from adapter-level i18n hooks.
     let messages = use_messages::<M::Messages>(None, Some(&env.locale));
@@ -296,7 +307,7 @@ where
     // use_signal's closure runs exactly once (first mount), consuming `props`.
     let service_signal = use_signal(move || {
         if let Some(state) = hydrated_state {
-            #[cfg(feature = "ssr")]
+            #[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
             {
                 return Service::new_hydrated(props, state, &env, &messages);
             }
@@ -3485,8 +3496,11 @@ where
 }
 
 /// In hydration mode: read the snapshot and initialize the machine via
-/// `Service::new_hydrated(props, snapshot.state, &env, &messages)`.
-#[cfg(feature = "ssr")]
+/// `Service::new_hydrated(props, snapshot.state, &env, &messages)`. The client
+/// hydration hook is available in browser builds without enabling the adapter's
+/// server runtime feature, because `web + ssr` would pull server-only Dioxus
+/// dependencies into `wasm32`.
+#[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
 fn use_machine_hydrated<M: Machine + 'static>(
     props: M::Props,
     snapshot: HydrationSnapshot<M>,
@@ -3501,7 +3515,7 @@ where
     let props = if props.id().is_empty() {
         props.with_id(snapshot.id.clone())
     } else {
-        debug_assert_eq!(
+        assert_eq!(
             props.id(),
             snapshot.id,
             "HydrationSnapshot id must match Props::id"
@@ -3513,7 +3527,7 @@ where
     result
 }
 
-#[cfg(feature = "ssr")]
+#[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
 fn use_machine_with_reactive_props_hydrated<M: Machine + 'static>(
     props_signal: Signal<M::Props>,
     snapshot: HydrationSnapshot<M>,

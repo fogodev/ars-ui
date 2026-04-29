@@ -10,7 +10,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-#[cfg(feature = "ssr")]
+#[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
 use ars_core::HydrationSnapshot;
 use ars_core::{CleanupFn, Env, HasId, Machine, RenderMode, Service};
 use dioxus::prelude::*;
@@ -57,7 +57,17 @@ where
     pub context_version: ReadSignal<u64>,
 }
 
-const fn current_render_mode() -> RenderMode {
+const fn current_render_mode(_hydrated_snapshot: bool) -> RenderMode {
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    {
+        if _hydrated_snapshot {
+            RenderMode::Hydrating
+        } else {
+            RenderMode::Client
+        }
+    }
+
+    #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
     if cfg!(feature = "ssr") {
         RenderMode::Server
     } else {
@@ -248,7 +258,7 @@ where
 /// The snapshot state is installed with [`Service::new_hydrated`] so the
 /// client preserves server-rendered machine state while recomputing context
 /// from the current adapter environment.
-#[cfg(feature = "ssr")]
+#[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
 pub fn use_machine_hydrated<M: Machine + 'static>(
     props: M::Props,
     snapshot: HydrationSnapshot<M>,
@@ -288,7 +298,7 @@ where
 }
 
 /// Creates a reactive-props machine service from an SSR hydration snapshot.
-#[cfg(feature = "ssr")]
+#[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
 pub fn use_machine_with_reactive_props_hydrated<M: Machine + 'static>(
     props_signal: Signal<M::Props>,
     snapshot: HydrationSnapshot<M>,
@@ -336,19 +346,20 @@ where
 
     let intl_backend = use_intl_backend();
 
-    let env = Env::new(locale, intl_backend).with_render_mode(current_render_mode());
+    let env = Env::new(locale, intl_backend)
+        .with_render_mode(current_render_mode(hydrated_state.is_some()));
 
     let messages = use_messages::<M::Messages>(None, Some(&env.locale));
 
     // Create the service once — use_signal runs its closure only on first mount.
     let service_signal = use_signal(move || {
         if let Some(state) = hydrated_state {
-            #[cfg(feature = "ssr")]
+            #[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
             {
                 return Service::<M>::new_hydrated(props, state, &env, &messages);
             }
 
-            #[cfg(not(feature = "ssr"))]
+            #[cfg(not(any(feature = "ssr", all(feature = "web", target_arch = "wasm32"))))]
             {
                 drop(state);
             }
@@ -474,7 +485,7 @@ fn props_with_service_id<M: Machine>(mut props: M::Props, service_id: &str) -> M
     props
 }
 
-#[cfg(feature = "ssr")]
+#[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
 fn props_with_snapshot_id<M: Machine>(
     mut props: M::Props,
     snapshot: &HydrationSnapshot<M>,

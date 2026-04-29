@@ -4,7 +4,7 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 #[cfg(feature = "ssr")]
 use ars_core::HydrationSnapshot;
-use ars_core::{HasId, I18nRegistries, MessageFn, NullPlatformEffects};
+use ars_core::{HasId, I18nRegistries, MessageFn, NullPlatformEffects, RenderMode};
 use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend};
 use dioxus::dioxus_core::{NoOpMutations, ScopeId};
 
@@ -12,6 +12,21 @@ use super::{test_support, test_support::*, *};
 use crate::{platform::NullPlatform, provider::ArsContext};
 
 type PropIdSnapshot = (String, PropState, u64, u32);
+
+#[test]
+fn current_render_mode_reports_server_for_ssr_builds() {
+    #[cfg(feature = "ssr")]
+    {
+        assert_eq!(current_render_mode(false), RenderMode::Server);
+        assert_eq!(current_render_mode(true), RenderMode::Server);
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    {
+        assert_eq!(current_render_mode(false), RenderMode::Client);
+        assert_eq!(current_render_mode(true), RenderMode::Client);
+    }
+}
 
 #[derive(Clone)]
 struct TestIntlBackend;

@@ -78,7 +78,8 @@ fn current_render_mode_reports_server_for_ssr_builds() {
         #[cfg(feature = "hydrate")]
         provide_context(IsHydrating(true));
 
-        assert_eq!(current_render_mode(), RenderMode::Server);
+        assert_eq!(current_render_mode(false), RenderMode::Server);
+        assert_eq!(current_render_mode(true), RenderMode::Server);
     });
 }
 
@@ -87,7 +88,13 @@ fn current_render_mode_reports_server_for_ssr_builds() {
 fn current_render_mode_reports_client_without_active_hydration() {
     let owner = Owner::new();
     owner.with(|| {
-        assert_eq!(current_render_mode(), RenderMode::Client);
+        assert_eq!(current_render_mode(false), RenderMode::Client);
+
+        #[cfg(feature = "hydrate")]
+        assert_eq!(current_render_mode(true), RenderMode::Hydrating);
+
+        #[cfg(not(feature = "hydrate"))]
+        assert_eq!(current_render_mode(true), RenderMode::Client);
     });
 }
 
@@ -98,13 +105,14 @@ fn current_render_mode_uses_hydration_context_at_runtime() {
     owner.with(|| {
         provide_context(IsHydrating(true));
 
-        assert_eq!(current_render_mode(), RenderMode::Hydrating);
+        assert_eq!(current_render_mode(false), RenderMode::Hydrating);
     });
 
     owner.with(|| {
         provide_context(IsHydrating(false));
 
-        assert_eq!(current_render_mode(), RenderMode::Client);
+        assert_eq!(current_render_mode(false), RenderMode::Client);
+        assert_eq!(current_render_mode(true), RenderMode::Hydrating);
     });
 }
 

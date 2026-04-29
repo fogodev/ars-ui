@@ -7,7 +7,7 @@
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use std::{cell::Cell, rc::Rc};
 
-#[cfg(feature = "ssr")]
+#[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
 pub use ars_core::HydrationSnapshot;
 #[cfg(feature = "ssr")]
 use ars_core::{HasId, Machine, Service};

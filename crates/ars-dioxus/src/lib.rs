@@ -34,8 +34,10 @@ pub use attrs::{
 pub use callbacks::{emit, emit_map};
 pub use ephemeral::EphemeralRef;
 pub use event_mapping::dioxus_key_to_keyboard_key;
+#[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
+pub use hydration::HydrationSnapshot;
 #[cfg(feature = "ssr")]
-pub use hydration::{HydrationSnapshot, serialize_snapshot};
+pub use hydration::serialize_snapshot;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub use hydration::{
     mark_body_hydrated, setup_focus_scope_hydration_safe, warn_if_mounted_id_mismatch,
@@ -65,7 +67,7 @@ pub use safe_listener::{
     SafeEventListener, SafeEventListenerOptions, use_safe_event_listener, use_safe_event_listeners,
 };
 pub use use_machine::{UseMachineReturn, use_machine, use_machine_with_reactive_props};
-#[cfg(feature = "ssr")]
+#[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
 pub use use_machine::{use_machine_hydrated, use_machine_with_reactive_props_hydrated};
 
 /// The name of this framework adapter, used in diagnostic messages and feature gating.

@@ -41,7 +41,7 @@ serde_json = { version = "1", optional = true }
 default = []
 debug = ["dep:log", "ars-core/debug", "ars-dom/debug", "ars-interactions/debug"]
 ssr = ["leptos/ssr", "ars-dom/ssr", "ars-core/ssr", "ars-core/serde", "dep:serde", "dep:serde_json"]
-hydrate = ["leptos/hydrate"]
+hydrate = ["leptos/hydrate", "ars-core/ssr", "ars-core/serde"]
 csr = ["leptos/csr"]
 ```
 
@@ -260,10 +260,10 @@ let props = {
 
 ```rust
 #[cfg(feature = "hydrate")]
-fn current_render_mode() -> RenderMode {
-    if cfg!(feature = "ssr") {
+fn current_render_mode(hydrated_snapshot: bool) -> RenderMode {
+    if cfg!(all(feature = "ssr", not(target_arch = "wasm32"))) {
         RenderMode::Server
-    } else if is_currently_hydrating() {
+    } else if hydrated_snapshot || is_currently_hydrating() {
         RenderMode::Hydrating
     } else {
         RenderMode::Client
@@ -271,7 +271,7 @@ fn current_render_mode() -> RenderMode {
 }
 
 #[cfg(not(feature = "hydrate"))]
-const fn current_render_mode() -> RenderMode {
+const fn current_render_mode(_hydrated_snapshot: bool) -> RenderMode {
     if cfg!(feature = "ssr") {
         RenderMode::Server
     } else {
@@ -320,7 +320,8 @@ where
     let locale = resolve_locale(None);
     let intl_backend = use_intl_backend();
     let messages = use_messages::<M::Messages>(None, Some(&locale));
-    let env = Env::new(locale, intl_backend).with_render_mode(current_render_mode());
+    let env = Env::new(locale, intl_backend)
+        .with_render_mode(current_render_mode(hydrated_state.is_some()));
 
     // Create the service once — runs only on component initialization.
     // **Safety**: The `init()` function must not call `api.send()` or otherwise
@@ -1797,7 +1798,7 @@ server and client halves of a hydration round-trip from disagreeing on
 field layout.
 
 ```rust
-#[cfg(feature = "ssr")]
+#[cfg(any(feature = "ssr", all(feature = "hydrate", target_arch = "wasm32")))]
 pub use ars_core::HydrationSnapshot;
 use ars_core::{HasId, Machine, Service};
 

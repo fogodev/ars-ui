@@ -26,6 +26,8 @@ web = [
   "dioxus/web",
   "dep:ars-dom",
   "ars-dom/web",
+  "ars-core/ssr",
+  "ars-core/serde",
   "dep:web-sys",
   "dep:wasm-bindgen",
   "dep:wasm-bindgen-futures",

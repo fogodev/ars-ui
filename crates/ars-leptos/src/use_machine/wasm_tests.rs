@@ -1,13 +1,19 @@
 use std::sync::{Arc, Mutex};
 
 use ars_components::overlay::presence;
-use ars_core::{ConnectApi, HtmlAttr};
+use ars_core::{ConnectApi, HtmlAttr, RenderMode};
 use leptos::reactive::traits::GetUntracked;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
 use super::{test_support::*, *};
 
 wasm_bindgen_test_configure!(run_in_browser);
+
+#[wasm_bindgen_test]
+fn current_render_mode_reports_client_or_hydrating_on_wasm() {
+    assert_eq!(current_render_mode(false), RenderMode::Client);
+    assert_eq!(current_render_mode(true), RenderMode::Hydrating);
+}
 
 #[wasm_bindgen_test]
 fn callback_to_strong_send_uses_wasm_send_handle() {
@@ -49,6 +55,25 @@ fn use_machine_updates_state_on_wasm() {
         machine.send.run(ToggleEvent::Toggle);
 
         assert_eq!(machine.state.get_untracked(), ToggleState::On);
+    });
+}
+
+#[wasm_bindgen_test]
+fn use_machine_hydrated_preserves_snapshot_on_wasm() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let machine = use_machine_hydrated::<ToggleMachine>(
+            ToggleProps { id: String::new() },
+            HydrationSnapshot {
+                state: ToggleState::On,
+                id: String::from("toggle-hydrated"),
+            },
+        );
+
+        assert_eq!(machine.state.get_untracked(), ToggleState::On);
+        machine.service.with_value(|service| {
+            assert_eq!(service.props().id(), "toggle-hydrated");
+        });
     });
 }
 
