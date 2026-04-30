@@ -12,7 +12,6 @@ use ars_core::{
     AriaAttr, AttrMap, Bindable, Callback, ComponentIds, ComponentPart, ConnectApi, Direction, Env,
     HtmlAttr, PendingEffect, TransitionPlan, no_cleanup,
 };
-use ars_interactions::keyboard::{KeyboardEventData, KeyboardKey};
 
 /// The state of the `Switch` component.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -756,13 +755,6 @@ impl Api<'_> {
         (self.send)(Event::Toggle);
     }
 
-    /// Sends [`Event::Toggle`] for non-repeating Space and Enter key presses.
-    pub fn on_control_keydown(&self, data: &KeyboardEventData, _shift: bool) {
-        if (data.key == KeyboardKey::Space || data.key == KeyboardKey::Enter) && !data.repeat {
-            (self.send)(Event::Toggle);
-        }
-    }
-
     /// Sends [`Event::Focus`] for control focus.
     pub fn on_control_focus(&self, is_keyboard: bool) {
         (self.send)(Event::Focus { is_keyboard });
@@ -854,7 +846,6 @@ mod tests {
     use std::sync::Mutex;
 
     use ars_core::{AriaAttr, ConnectApi, Direction, Env, HtmlAttr, Service, StrongSend, callback};
-    use ars_interactions::keyboard::{KeyboardEventData, KeyboardKey};
     use insta::assert_snapshot;
 
     use super::*;
@@ -877,27 +868,6 @@ mod tests {
 
     fn snapshot_attrs(attrs: &AttrMap) -> String {
         format!("{attrs:#?}")
-    }
-
-    fn keyboard_data(key: KeyboardKey) -> KeyboardEventData {
-        KeyboardEventData {
-            key,
-            character: None,
-            code: String::new(),
-            shift_key: false,
-            ctrl_key: false,
-            alt_key: false,
-            meta_key: false,
-            repeat: false,
-            is_composing: false,
-        }
-    }
-
-    fn repeated_keyboard_data(key: KeyboardKey) -> KeyboardEventData {
-        KeyboardEventData {
-            repeat: true,
-            ..keyboard_data(key)
-        }
     }
 
     #[test]
@@ -1575,10 +1545,6 @@ mod tests {
         let api = service.connect(&send);
 
         api.on_control_click();
-        api.on_control_keydown(&keyboard_data(KeyboardKey::Space), false);
-        api.on_control_keydown(&repeated_keyboard_data(KeyboardKey::Space), false);
-        api.on_control_keydown(&keyboard_data(KeyboardKey::Enter), false);
-        api.on_control_keydown(&keyboard_data(KeyboardKey::ArrowRight), false);
         api.on_control_focus(true);
         api.on_control_blur();
         api.on_hidden_input_change(true);
@@ -1588,8 +1554,6 @@ mod tests {
         assert_eq!(
             events.borrow().as_slice(),
             &[
-                Event::Toggle,
-                Event::Toggle,
                 Event::Toggle,
                 Event::Focus { is_keyboard: true },
                 Event::Blur,

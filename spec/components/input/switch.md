@@ -527,12 +527,6 @@ impl<'a> Api<'a> {
 
     pub fn on_control_click(&self) { (self.send)(Event::Toggle); }
 
-    pub fn on_control_keydown(&self, data: &KeyboardEventData, _shift: bool) {
-        if (data.key == KeyboardKey::Space || data.key == KeyboardKey::Enter) && !data.repeat {
-            (self.send)(Event::Toggle);
-        }
-    }
-
     pub fn on_control_focus(&self, is_keyboard: bool) { (self.send)(Event::Focus { is_keyboard }); }
 
     pub fn on_control_blur(&self) { (self.send)(Event::Blur); }
@@ -601,11 +595,16 @@ Switch
 
 ### 3.2 Keyboard Interaction
 
-| Key   | Action                                 |
-| ----- | -------------------------------------- |
-| Space | Toggle switch on non-repeating keydown |
-| Enter | Toggle switch on non-repeating keydown |
-| Tab   | Move focus to/from switch              |
+| Key   | Action                                                                  |
+| ----- | ----------------------------------------------------------------------- |
+| Space | Native `<button>` activation dispatches click, which toggles the switch |
+| Enter | Native `<button>` activation dispatches click, which toggles the switch |
+| Tab   | Move focus to/from switch                                               |
+
+`Control` is a native `<button>`, so the agnostic API does not expose a keydown
+toggle helper. Adapters must rely on the native synthesized click event for
+Space and Enter keyboard activation so a single activation cannot send both a
+keydown toggle and a click toggle.
 
 ### 3.3 Controlled Value Synchronization
 
@@ -704,6 +703,7 @@ through `Event::SetValue(Some(value))`.
   readonly, required, invalid, keyboard, and RTL behavior.
 - **Divergences:** ars-ui uses a neutral `Root` container plus a dedicated `Label` element
   targeting the hidden input for native label activation. ars-ui supports both Space and Enter
-  for toggling on non-repeating keydown (matching `role="switch"` best practice). ars-ui includes
-  built-in Description/ErrorMessage form-field parts. ars-ui adds `dir` prop for RTL thumb animation.
+  through native `<button>` keyboard activation, which dispatches the same click path as pointer
+  activation and avoids double toggles. ars-ui includes built-in Description/ErrorMessage form-field
+  parts. ars-ui adds `dir` prop for RTL thumb animation.
 - **Recommended additions:** None.
