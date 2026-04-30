@@ -392,14 +392,14 @@ fn props_with_snapshot_id<M: Machine>(
     props
 }
 
-type EffectCleanupStore = StoredValue<HashMap<&'static str, CleanupFn>, LocalStorage>;
+type EffectCleanupStore<M> = StoredValue<HashMap<<M as Machine>::Effect, CleanupFn>, LocalStorage>;
 type SendCallbackRef<M> = StoredValue<Option<Callback<<M as Machine>::Event>>>;
 type UseMachineInnerParts<M> = (
     UseMachineReturn<M>,
     WriteSignal<u64>,
     WriteSignal<<M as Machine>::State>,
     SendCallbackRef<M>,
-    EffectCleanupStore,
+    EffectCleanupStore<M>,
 );
 
 /// Internal implementation shared between public hooks.
@@ -502,6 +502,45 @@ where
 
     send_ref.set_value(Some(send));
 
+    // Drain `Machine::initial_effects` once, on first mount, immediately
+    // after `send_ref` is wired so the effect setup closures can hand the
+    // strong-send handle to adapter intents (e.g.
+    // `popover-attach-click-outside` dispatches
+    // `Event::CloseOnInteractOutside` back through this very `send`). The
+    // `Service::take_initial_effects` contract guarantees the buffer is
+    // consumed exactly once across the service's lifetime — see
+    // `spec/foundation/01-architecture.md` §2.1.1.
+    {
+        let mut extracted = None;
+
+        service.update_value(|svc| {
+            let pending = svc.take_initial_effects();
+
+            if pending.is_empty() {
+                return;
+            }
+
+            extracted = Some((pending, svc.context().clone(), svc.props().clone()));
+        });
+
+        if let Some((pending_effects, ctx, props)) = extracted {
+            let synthetic = ars_core::SendResult::<M> {
+                state_changed: false,
+                context_changed: false,
+                pending_effects,
+                cancel_effects: Vec::new(),
+                truncated: false,
+                context_change_count: 0,
+            };
+
+            #[cfg(feature = "ssr")]
+            handle_effects::<M>(&synthetic, &ctx, &props, send_ref, effect_cleanups);
+
+            #[cfg(not(feature = "ssr"))]
+            handle_effects::<M>(synthetic, &ctx, &props, send_ref, effect_cleanups);
+        }
+    }
+
     // Clean up effects when the component unmounts.
     on_cleanup(move || {
         let mut cleanups = Vec::new();
@@ -542,7 +581,7 @@ const fn handle_effects<M: Machine + 'static>(
     ctx: &M::Context,
     props: &M::Props,
     send_ref: SendCallbackRef<M>,
-    effect_cleanups: EffectCleanupStore,
+    effect_cleanups: EffectCleanupStore<M>,
 ) where
     M::State: Clone + PartialEq + Send + Sync + 'static,
     M::Context: Clone + Send + Sync + 'static,
@@ -558,7 +597,7 @@ fn handle_effects<M: Machine + 'static>(
     ctx: &M::Context,
     props: &M::Props,
     send_ref: SendCallbackRef<M>,
-    effect_cleanups: EffectCleanupStore,
+    effect_cleanups: EffectCleanupStore<M>,
 ) where
     M::State: Clone + PartialEq + Send + Sync + 'static,
     M::Context: Clone + Send + Sync + 'static,
@@ -573,14 +612,14 @@ fn handle_effects<M: Machine + 'static>(
         });
     } else if !send_result.cancel_effects.is_empty() || !send_result.pending_effects.is_empty() {
         effect_cleanups.update_value(|cleanups| {
-            for name in send_result.cancel_effects.iter().copied() {
+            for name in send_result.cancel_effects.iter() {
                 if let Some(cleanup) = cleanups.remove(name) {
                     cleanup();
                 }
             }
 
             for effect in &send_result.pending_effects {
-                if let Some(cleanup) = cleanups.remove(effect.name) {
+                if let Some(cleanup) = cleanups.remove(&effect.name) {
                     cleanup();
                 }
             }

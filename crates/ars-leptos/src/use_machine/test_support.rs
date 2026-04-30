@@ -94,6 +94,7 @@ impl Machine for ToggleMachine {
     type Context = ToggleContext;
     type Props = ToggleProps;
     type Messages = ();
+    type Effect = ars_core::NoEffect;
     type Api<'a> = ToggleApi<'a>;
 
     fn init(
@@ -175,6 +176,7 @@ impl Machine for PropMachine {
     type Context = PropContext;
     type Props = PropProps;
     type Messages = ();
+    type Effect = ars_core::NoEffect;
     type Api<'a> = PropApi;
 
     fn init(
@@ -344,6 +346,7 @@ impl Machine for EffectMachine {
     type Context = EffectContext;
     type Props = EffectProps;
     type Messages = ();
+    type Effect = &'static str;
     type Api<'a> = EffectApi;
 
     fn init(

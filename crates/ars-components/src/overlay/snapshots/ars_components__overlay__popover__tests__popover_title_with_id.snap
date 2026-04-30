@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/overlay/popover.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).title_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "title",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "popover",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "popover-title",
+            ),
+        ),
+    ],
+    styles: [],
+}

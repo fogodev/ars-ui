@@ -12,7 +12,7 @@ use std::{
 
 #[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
 use ars_core::HydrationSnapshot;
-use ars_core::{CleanupFn, Env, HasId, Machine, RenderMode, Service};
+use ars_core::{CleanupFn, EffectName, Env, HasId, Machine, RenderMode, Service};
 use dioxus::prelude::*;
 
 use crate::{
@@ -82,7 +82,7 @@ where
     service: Signal<Service<M>>,
     state: Signal<M::State>,
     context_version: Signal<u64>,
-    effect_cleanups: Signal<HashMap<&'static str, CleanupFn>>,
+    effect_cleanups: Signal<HashMap<M::Effect, CleanupFn>>,
     pending_events: Arc<Mutex<Vec<M::Event>>>,
 }
 
@@ -378,7 +378,7 @@ where
     // derive() memos re-run even when state itself hasn't changed.
     let context_version = use_signal(|| 0u64);
 
-    let effect_cleanups = use_signal(HashMap::<&'static str, CleanupFn>::new);
+    let effect_cleanups = use_signal(HashMap::<M::Effect, CleanupFn>::new);
 
     let pending_events = use_hook(|| Arc::new(Mutex::new(Vec::<M::Event>::new())));
 
@@ -407,11 +407,53 @@ where
         })
     });
 
+    // Drain `Machine::initial_effects` once, on first mount, immediately
+    // after the send callback is wired so the effect setup closures can
+    // dispatch events back through `runtime`. The `Service::take_initial_effects`
+    // contract guarantees the buffer is consumed exactly once across the
+    // service's lifetime — see
+    // `spec/foundation/01-architecture.md` §2.1.1.
+    {
+        let mut initial_runtime = runtime.clone();
+
+        use_hook(move || {
+            let extracted = {
+                let mut service = initial_runtime.service.write();
+
+                let pending = service.take_initial_effects();
+
+                if pending.is_empty() {
+                    None
+                } else {
+                    Some((pending, service.context().clone(), service.props().clone()))
+                }
+            };
+
+            if let Some((pending_effects, ctx, props)) = extracted {
+                let synthetic = ars_core::SendResult::<M> {
+                    state_changed: false,
+                    context_changed: false,
+                    pending_effects,
+                    cancel_effects: Vec::new(),
+                    truncated: false,
+                    context_change_count: 0,
+                };
+
+                #[cfg(feature = "ssr")]
+                handle_effects::<M>(&synthetic, &ctx, &props, &initial_runtime);
+
+                #[cfg(not(feature = "ssr"))]
+                handle_effects::<M>(synthetic, &ctx, &props, initial_runtime.clone());
+            }
+        });
+    }
+
     // Clean up effects when the component unmounts.
     let mut cleanup_runtime = runtime.clone();
 
     use_drop(move || {
         let cleanups = drain_effect_cleanups(cleanup_runtime.effect_cleanups);
+
         cleanup_runtime.service.write().unmount(cleanups);
     });
 
@@ -537,9 +579,10 @@ where
     handle_effects::<M>(result, &ctx, &props, runtime);
 }
 
-fn drain_effect_cleanups(
-    mut effect_cleanups: Signal<HashMap<&'static str, CleanupFn>>,
-) -> Vec<CleanupFn> {
+fn drain_effect_cleanups<E>(mut effect_cleanups: Signal<HashMap<E, CleanupFn>>) -> Vec<CleanupFn>
+where
+    E: EffectName,
+{
     let mut pending = Vec::new();
 
     for (_, cleanup) in effect_cleanups.write().drain() {
@@ -582,14 +625,14 @@ fn handle_effects<M: Machine + 'static>(
         {
             let mut active_cleanups = runtime.effect_cleanups.write();
 
-            for name in send_result.cancel_effects.iter().copied() {
+            for name in &send_result.cancel_effects {
                 if let Some(cleanup) = active_cleanups.remove(name) {
                     cleanups_to_run.push(cleanup);
                 }
             }
 
             for effect in &send_result.pending_effects {
-                if let Some(cleanup) = active_cleanups.remove(effect.name) {
+                if let Some(cleanup) = active_cleanups.remove(&effect.name) {
                     cleanups_to_run.push(cleanup);
                 }
             }

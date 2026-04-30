@@ -138,35 +138,17 @@ impl Role {
 
 ### 1.4 Props
 
-```rust
-/// An event that the consumer can prevent the default behavior of.
-/// Used for dismissal callbacks (`on_escape_key_down`, `on_interact_outside`)
-/// to let consumers intercept and cancel the default close behavior.
-///
-/// Example: preventing close when there are unsaved changes.
-///
-/// The veto flag is shared through `Arc<AtomicBool>` so the value can be
-/// passed by-clone into [`Callback`], which requires `Args: 'static` and
-/// therefore cannot accept `&mut PreventableEvent`. The same shared-veto
-/// pattern is used by [`DismissAttempt`](../utility/dismissable.md).
-#[derive(Clone, Debug, Default)]
-pub struct PreventableEvent {
-    veto: Arc<AtomicBool>,
-}
+Dismissal callbacks use the shared `DismissAttempt<()>` veto wrapper from
+`crates/ars-components/src/utility/dismissable.rs` — the same type Popover,
+HoverCard, and the dismissable utility component already use. The veto flag
+is backed by `Arc<AtomicBool>` so a clone passed into a `Callback` (with
+`Args: 'static`) still propagates `prevent_dismiss()` decisions back to the
+adapter that constructed the attempt. Dialog wraps `DismissAttempt<()>`
+because the underlying event payload (the keyboard / pointer event) is
+consumed by the adapter and is not forwarded to the consumer.
 
-impl PreventableEvent {
-    pub fn new() -> Self {
-        Self { veto: Arc::new(AtomicBool::new(false)) }
-    }
-    /// Prevent the default behavior (e.g., prevent dialog from closing). Idempotent.
-    pub fn prevent_default(&self) {
-        self.veto.store(true, Ordering::SeqCst);
-    }
-    /// Whether `prevent_default()` was called on this event or any of its clones.
-    pub fn is_default_prevented(&self) -> bool {
-        self.veto.load(Ordering::SeqCst)
-    }
-}
+```rust
+use ars_components::utility::dismissable::DismissAttempt;
 
 /// The props of the dialog.
 #[derive(Clone, Debug, PartialEq, HasId)]
@@ -204,19 +186,21 @@ pub struct Props {
     pub unmount_on_exit: bool,
     /// Callback invoked when the dialog open state changes.
     /// Fires after the transition with the new open state value.
-    pub on_open_change: Option<Callback<bool>>,
+    pub on_open_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
     /// Callback invoked when Escape is pressed while the dialog is open.
-    /// The adapter passes a clone of the [`PreventableEvent`] it constructed;
-    /// the consumer may call `event.prevent_default()` to prevent the dialog
-    /// from closing (the veto flag is shared between clones). Fires before
-    /// the close transition — if prevented, the transition is cancelled.
-    pub on_escape_key_down: Option<Callback<dyn Fn(PreventableEvent) + Send + Sync>>,
+    /// The adapter passes a clone of the [`DismissAttempt`] it constructed;
+    /// the consumer may call `attempt.prevent_dismiss()` to prevent the
+    /// dialog from closing (the veto flag is shared between clones).
+    /// Fires before the close transition — if prevented, the transition
+    /// is cancelled.
+    pub on_escape_key_down: Option<Callback<dyn Fn(DismissAttempt<()>) + Send + Sync>>,
     /// Callback invoked when a pointer down or focus event occurs outside the dialog content.
-    /// The adapter passes a clone of the [`PreventableEvent`] it constructed;
-    /// the consumer may call `event.prevent_default()` to prevent the dialog
-    /// from closing (the veto flag is shared between clones). Fires before
-    /// the close transition — if prevented, the transition is cancelled.
-    pub on_interact_outside: Option<Callback<dyn Fn(PreventableEvent) + Send + Sync>>,
+    /// The adapter passes a clone of the [`DismissAttempt`] it constructed;
+    /// the consumer may call `attempt.prevent_dismiss()` to prevent the
+    /// dialog from closing (the veto flag is shared between clones).
+    /// Fires before the close transition — if prevented, the transition
+    /// is cancelled.
+    pub on_interact_outside: Option<Callback<dyn Fn(DismissAttempt<()>) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -680,30 +664,70 @@ fn context_relevant_props_changed(old: &Props, new: &Props) -> bool {
         || old.final_focus != new.final_focus
         || old.role != new.role
 }
+
+// `Machine::initial_effects` — emits the open lifecycle when the dialog
+// boots straight into `State::Open` (via `default_open: true` or
+// controlled `open: Some(true)`). Without this override, an SSR-rendered
+// "initially open" dialog would not get focus moved inside, would not
+// scroll-lock the body, and would not freeze the background — `init`
+// returns `(State::Open, ctx)` directly so the regular open-plan effects
+// never fire. Adapters drain these on first mount via
+// `Service::take_initial_effects`; see
+// `spec/foundation/01-architecture.md` §2.1.1.
+impl ars_core::Machine for Machine {
+    /* … other methods elided … */
+
+    fn initial_effects(
+        state: &Self::State,
+        context: &Self::Context,
+        _props: &Self::Props,
+    ) -> Vec<PendingEffect<Self>> {
+        if !matches!(state, State::Open) {
+            return Vec::new();
+        }
+
+        let mut effects = vec![
+            PendingEffect::named(EFFECT_OPEN_CHANGE),
+            PendingEffect::named(EFFECT_FOCUS_INITIAL),
+            PendingEffect::named(EFFECT_FOCUS_FIRST_TABBABLE),
+        ];
+
+        if context.prevent_scroll {
+            effects.push(PendingEffect::named(EFFECT_SCROLL_LOCK_ACQUIRE));
+        }
+        if context.modal {
+            effects.push(PendingEffect::named(EFFECT_SET_BACKGROUND_INERT));
+        }
+
+        effects
+    }
+}
 ```
 
-> **Preventable event callbacks.** The `on_escape_key_down` and `on_interact_outside` callbacks are invoked by the adapter layer BEFORE sending the corresponding event to the state machine. If the consumer calls `prevent_default()`, the adapter MUST NOT send the event — the dialog stays open. This pattern keeps the state machine pure (no side-effect callbacks in `transition()`) while giving consumers veto power over dismissal.
+> **Preventable event callbacks.** The `on_escape_key_down` and `on_interact_outside` callbacks are invoked by the adapter layer BEFORE sending the corresponding event to the state machine. They receive a `DismissAttempt<()>` (the shared veto-capable wrapper from `crates/ars-components/src/utility/dismissable.rs`); if the consumer calls `attempt.prevent_dismiss()`, the adapter MUST NOT send the event — the dialog stays open. This pattern keeps the state machine pure (no side-effect callbacks in `transition()`) while giving consumers veto power over dismissal.
 >
 > **Adapter obligation for `CloseOnEscape`:** Before sending `Event::CloseOnEscape`, the adapter MUST:
 >
-> 1. Create a `PreventableEvent`
+> 1. Create a `DismissAttempt::new(())`
 > 2. Invoke `props.on_escape_key_down` with it (if set)
-> 3. Only send `Event::CloseOnEscape` if `!event.is_default_prevented()`
+> 3. Only send `Event::CloseOnEscape` if `!attempt.is_prevented()`
 >
 > **Adapter obligation for `CloseOnBackdropClick`:** Before sending `Event::CloseOnBackdropClick`, the adapter MUST:
 >
-> 1. Create a `PreventableEvent`
+> 1. Create a `DismissAttempt::new(())`
 > 2. Invoke `props.on_interact_outside` with it (if set)
-> 3. Only send `Event::CloseOnBackdropClick` if `!event.is_default_prevented()`
+> 3. Only send `Event::CloseOnBackdropClick` if `!attempt.is_prevented()`
 >
-> ```rust
+> ```rust,ignore
+> use ars_components::utility::dismissable::DismissAttempt;
+>
 > // Adapter pseudocode for Escape key handling:
 > fn on_keydown(event: &KeyboardEvent, props: &Props, send: &dyn Fn(Event)) {
 >     if event.key() == "Escape" && props.close_on_escape {
 >         if let Some(ref callback) = props.on_escape_key_down {
->             let preventable = PreventableEvent::new();
->             callback.call(preventable.clone());
->             if preventable.is_default_prevented() { return; }
+>             let attempt = DismissAttempt::new(());
+>             callback.call(attempt.clone());
+>             if attempt.is_prevented() { return; }
 >         }
 >         send(Event::CloseOnEscape);
 >     }
@@ -713,9 +737,9 @@ fn context_relevant_props_changed(old: &Props, new: &Props) -> bool {
 > fn on_backdrop_pointer_down(props: &Props, send: &dyn Fn(Event)) {
 >     if !props.close_on_backdrop { return; }
 >     if let Some(ref callback) = props.on_interact_outside {
->         let preventable = PreventableEvent::new();
->         callback.call(preventable.clone());
->         if preventable.is_default_prevented() { return; }
+>         let attempt = DismissAttempt::new(());
+>         callback.call(attempt.clone());
+>         if attempt.is_prevented() { return; }
 >     }
 >     send(Event::CloseOnBackdropClick);
 > }

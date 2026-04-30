@@ -33,8 +33,14 @@ pub struct SnapshotCountOptions {
     /// Minimum snapshot count per detected state variant.
     pub min_per_variant: usize,
 
-    /// Maximum snapshot count per component before failure.
+    /// Hard ceiling — no component may exceed this regardless of anatomy
+    /// part count. Acts as the workspace's review-fatigue safety cap.
     pub max_per_component: usize,
+
+    /// Multiplier applied to `state_variants × anatomy_parts` when
+    /// computing the per-component soft budget. The soft budget is
+    /// `min(per_part_per_variant × variants × parts, max_per_component)`.
+    pub per_part_per_variant: usize,
 }
 
 /// Options for error-variant coverage linting.
@@ -210,8 +216,13 @@ pub fn check_snapshot_count(options: &SnapshotCountOptions) -> Result<String, Er
 
     let total_snapshots = snapshots.len();
 
-    let state_variants = detect_state_variants(&workspace_root_for(&options.snapshots_dir))?;
-    let mut counts = BTreeMap::<String, usize>::new();
+    let workspace_root = workspace_root_for(&options.snapshots_dir);
+
+    let state_variants = detect_state_variants(&workspace_root)?;
+
+    let part_counts = detect_part_counts(&workspace_root)?;
+
+    let mut counts = BTreeMap::new();
 
     for snapshot in snapshots {
         if let Some(component) = infer_snapshot_component(&snapshot)
@@ -221,9 +232,10 @@ pub fn check_snapshot_count(options: &SnapshotCountOptions) -> Result<String, Er
         }
     }
 
-    let mut output = String::from("Component | Snapshots | State variants | Required | Status\n");
+    let mut output =
+        String::from("Component | Snapshots | Variants | Parts | Min | Max | Status\n");
 
-    output.push_str("----------|-----------|----------------|----------|-------\n");
+    output.push_str("----------|-----------|----------|-------|-----|-----|-------\n");
 
     let mut components = BTreeSet::new();
 
@@ -248,17 +260,38 @@ pub fn check_snapshot_count(options: &SnapshotCountOptions) -> Result<String, Er
 
         let variants = state_variants.get(&component).copied().unwrap_or(0);
 
-        let min_per_variant = snapshot_min_per_variant(
-            &workspace_root_for(&options.snapshots_dir),
-            &component,
-            options.min_per_variant,
-        );
+        let parts = part_counts.get(&component).copied().unwrap_or(0);
+
+        let min_per_variant =
+            snapshot_min_per_variant(&workspace_root, &component, options.min_per_variant);
 
         let required = if variants > 2 {
             variants * min_per_variant
         } else {
             0
         };
+
+        // Soft per-component budget — derived from anatomy size when
+        // detectable, falling back to the hard ceiling. The formula
+        // matches `spec/testing/13-policies.md` §3.1:
+        //
+        //     budget = min(per_part_per_variant × variants × parts,
+        //                  max_per_component)
+        //
+        // When a component's anatomy parts cannot be detected (no
+        // `#[derive(ComponentPart)]` enum found, or the component
+        // is not yet implemented), the formula collapses to
+        // `max_per_component` so the hard ceiling still applies.
+        let formula_budget = if variants > 0 && parts > 0 {
+            options
+                .per_part_per_variant
+                .saturating_mul(variants)
+                .saturating_mul(parts)
+        } else {
+            options.max_per_component
+        };
+
+        let budget = formula_budget.min(options.max_per_component);
 
         let mut status = "OK";
 
@@ -270,10 +303,12 @@ pub fn check_snapshot_count(options: &SnapshotCountOptions) -> Result<String, Er
             status = "FAIL";
         }
 
-        if count > options.max_per_component {
+        if count > budget {
             failures.push(format!(
-                "{component}: snapshots={count}, max={}",
-                options.max_per_component
+                "{component}: snapshots={count}, budget={budget} \
+                 (formula = min({per_part} × {variants} × {parts}, {ceiling}))",
+                per_part = options.per_part_per_variant,
+                ceiling = options.max_per_component
             ));
 
             status = "FAIL";
@@ -281,7 +316,7 @@ pub fn check_snapshot_count(options: &SnapshotCountOptions) -> Result<String, Er
 
         writeln!(
             output,
-            "{component} | {count} | {variants} | {required} | {status}"
+            "{component} | {count} | {variants} | {parts} | {required} | {budget} | {status}"
         )
         .expect("write to string");
     }
@@ -489,7 +524,48 @@ fn detect_state_variants(root: &Path) -> Result<BTreeMap<String, usize>, Error> 
 }
 
 fn parse_state_variant_count(content: &str, variant: &Regex) -> usize {
-    let Some(start) = content.find("enum State") else {
+    parse_enum_variant_count(content, "enum State", variant)
+}
+
+/// Counts variants of any `pub enum Part` decorated with a
+/// [`ComponentPart`] derive — the canonical way component machines
+/// declare their anatomy. Returns the maximum count across all matching
+/// enums in `content`, so a module that re-exports multiple Part enums
+/// still surfaces the largest anatomy.
+///
+/// `derive_marker` is the regex compiled by [`detect_part_counts`] — it
+/// matches `#[derive(...)]` attributes that include `ComponentPart` as a
+/// token regardless of path qualification (`ComponentPart`,
+/// `ars_core::ComponentPart`, etc.) and regardless of whether the derive
+/// list contains other traits.
+///
+/// [`ComponentPart`]: ars_core::ComponentPart
+fn parse_part_variant_count(content: &str, derive_marker: &Regex, variant: &Regex) -> usize {
+    let mut max = 0;
+    let mut search_start = 0;
+
+    while let Some(m) = derive_marker.find(&content[search_start..]) {
+        // Skip past the derive attribute and look for the next `enum`.
+        let derive_end_abs = search_start + m.end();
+
+        if let Some(enum_offset) = content[derive_end_abs..].find("enum ") {
+            let enum_abs = derive_end_abs + enum_offset;
+
+            let count = parse_enum_variant_count(&content[enum_abs..], "enum ", variant);
+
+            max = max.max(count);
+
+            search_start = enum_abs + "enum ".len();
+        } else {
+            break;
+        }
+    }
+
+    max
+}
+
+fn parse_enum_variant_count(content: &str, marker: &str, variant: &Regex) -> usize {
+    let Some(start) = content.find(marker) else {
         return 0;
     };
 
@@ -511,6 +587,7 @@ fn parse_state_variant_count(content: &str, variant: &Regex) -> usize {
                 depth -= 1;
                 if depth == 0 {
                     end = body_start + offset;
+
                     break;
                 }
             }
@@ -523,6 +600,59 @@ fn parse_state_variant_count(content: &str, variant: &Regex) -> usize {
         .lines()
         .filter(|line| variant.is_match(line.trim()))
         .count()
+}
+
+/// Detects the anatomy-part count for each component by walking source
+/// files for `#[derive(ComponentPart)] enum Part { … }` and counting
+/// variants. Components without an anatomy enum (or with their Part enum
+/// in a non-standard location) report 0 — the caller falls back to the
+/// hard ceiling for the budget.
+fn detect_part_counts(root: &Path) -> Result<BTreeMap<String, usize>, Error> {
+    let variant = Regex::new(r"^\s*([A-Z][A-Za-z0-9_]*)\s*(?:[{(,]|$)")?;
+
+    // Recognize both the bare `#[derive(ComponentPart)]` form and any
+    // path-qualified spelling such as `#[derive(ars_core::ComponentPart)]`,
+    // and also tolerate ComponentPart appearing alongside other derives
+    // (`#[derive(Clone, ComponentPart, Debug)]`). Word boundaries keep us
+    // from matching look-alikes like `ComponentPartial`.
+    let derive_marker = Regex::new(r"#\[derive\([^)]*\bComponentPart\b[^)]*\)\]")?;
+
+    let files = collect_files(root, |path| {
+        path.extension().is_some_and(|extension| extension == "rs")
+            && path
+                .components()
+                .any(|component| component.as_os_str() == "src")
+            && (path.file_name().is_some_and(|name| name == "component.rs")
+                || is_ars_components_machine_module(path))
+            && !path
+                .components()
+                .any(|component| component.as_os_str() == "target")
+    })?;
+
+    let mut parts = BTreeMap::new();
+
+    for file in files {
+        let content = fs::read_to_string(&file)?;
+
+        if !derive_marker.is_match(&content) {
+            continue;
+        }
+
+        let Some(component) = infer_source_component(&file) else {
+            continue;
+        };
+
+        let count = parse_part_variant_count(&content, &derive_marker, &variant);
+
+        if count > 0 {
+            parts
+                .entry(component)
+                .and_modify(|existing: &mut usize| *existing = (*existing).max(count))
+                .or_insert(count);
+        }
+    }
+
+    Ok(parts)
 }
 
 fn infer_source_component(path: &Path) -> Option<String> {
@@ -1054,6 +1184,7 @@ mod tests {
             snapshots_dir: root.join("crates/demo/src/field/snapshots"),
             min_per_variant: 3,
             max_per_component: 20,
+            per_part_per_variant: 3,
         };
 
         let result = check_snapshot_count(&options);
@@ -1076,6 +1207,7 @@ mod tests {
             snapshots_dir: root.join("crates"),
             min_per_variant: 3,
             max_per_component: 20,
+            per_part_per_variant: 3,
         };
 
         let result = check_snapshot_count(&options);
@@ -1107,6 +1239,7 @@ mod tests {
             snapshots_dir: root.join("crates/demo/src/button/snapshots"),
             min_per_variant: 3,
             max_per_component: 2,
+            per_part_per_variant: 3,
         };
 
         let result = check_snapshot_count(&options);
@@ -1133,6 +1266,7 @@ mod tests {
             snapshots_dir: root.join("crates"),
             min_per_variant: 3,
             max_per_component: 2,
+            per_part_per_variant: 3,
         };
 
         let output = check_snapshot_count(&options).expect("non-component snapshots are ignored");
@@ -1159,12 +1293,71 @@ mod tests {
             snapshots_dir: root.join("crates/demo/src/button/snapshots"),
             min_per_variant: 3,
             max_per_component: 600,
+            per_part_per_variant: 3,
         };
 
         let output = check_snapshot_count(&options).expect("warning should not fail");
 
         assert!(output.contains("Snapshot count warnings"));
         assert!(output.contains("total snapshots=501"));
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn detect_part_counts_recognizes_namespaced_component_part_derive() {
+        // Components written as `#[derive(ars_core::ComponentPart)]`
+        // (path-qualified) must produce the same `parts` count as
+        // components using the bare `#[derive(ComponentPart)]` form;
+        // otherwise `compute_max_per_component` falls back to the
+        // hard ceiling and the snapshot-budget formula is silently
+        // bypassed for those components.
+        let root = temp_dir("part-counts-namespaced");
+
+        // Bare derive — control case.
+        write(
+            &root.join("crates/ars-components/src/utility/bare/mod.rs"),
+            "#[derive(ComponentPart)]\npub enum BarePart {\n    Root,\n    Trigger,\n    Content,\n}\n",
+        );
+
+        // Namespaced derive — the exact form used by `form_submit.rs`.
+        write(
+            &root.join("crates/ars-components/src/utility/namespaced/mod.rs"),
+            "#[derive(ars_core::ComponentPart)]\npub enum NamespacedPart {\n    Root,\n    Trigger,\n    Content,\n    Status,\n}\n",
+        );
+
+        // Combined-with-other-derives — also a legal Rust spelling we
+        // shouldn't miss.
+        write(
+            &root.join("crates/ars-components/src/utility/combined/mod.rs"),
+            "#[derive(Clone, ComponentPart, Debug)]\npub enum CombinedPart {\n    Root,\n    Trigger,\n}\n",
+        );
+
+        // Look-alike that must NOT match — defends the `\bComponentPart\b`
+        // word boundaries against false positives.
+        write(
+            &root.join("crates/ars-components/src/utility/lookalike/mod.rs"),
+            "#[derive(MyComponentPartial)]\npub enum LookalikePart {\n    Root,\n}\n",
+        );
+
+        let counts = detect_part_counts(&root).expect("detect_part_counts");
+
+        assert_eq!(counts.get("bare"), Some(&3), "bare derive must be detected");
+        assert_eq!(
+            counts.get("namespaced"),
+            Some(&4),
+            "namespaced derive must be detected"
+        );
+        assert_eq!(
+            counts.get("combined"),
+            Some(&2),
+            "ComponentPart inside a multi-derive list must be detected"
+        );
+        assert_eq!(
+            counts.get("lookalike"),
+            None,
+            "ComponentPartial must not be misread as ComponentPart"
+        );
 
         drop(fs::remove_dir_all(root));
     }
@@ -1262,11 +1455,12 @@ mod tests {
             snapshots_dir: root.join("crates"),
             min_per_variant: 3,
             max_per_component: 20,
+            per_part_per_variant: 3,
         };
 
         let output = check_snapshot_count(&options).expect("ars-components snapshots should count");
 
-        assert!(output.contains("presence | 4 | 4 | 4 | OK"));
+        assert!(output.contains("presence | 4 | 4 | 0 | 4 | 20 | OK"));
 
         drop(fs::remove_dir_all(root));
     }

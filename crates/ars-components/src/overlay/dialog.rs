@@ -13,13 +13,9 @@
 
 use alloc::{
     string::{String, ToString as _},
-    sync::Arc,
     vec::Vec,
 };
-use core::{
-    fmt::{self, Debug},
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::fmt::{self, Debug};
 
 use ars_a11y::FocusTarget;
 use ars_core::{
@@ -27,6 +23,8 @@ use ars_core::{
     HtmlAttr, Locale, MessageFn, PendingEffect, TransitionPlan,
 };
 use ars_interactions::{KeyboardEventData, KeyboardKey};
+
+use crate::utility::dismissable::DismissAttempt;
 
 // ────────────────────────────────────────────────────────────────────
 // State
@@ -71,16 +69,16 @@ pub enum Event {
     /// [`Context::close_on_backdrop`] before transitioning.
     ///
     /// Adapters MUST invoke [`Props::on_interact_outside`] with a
-    /// [`PreventableEvent`] before sending this event, and MUST NOT send the
-    /// event when [`PreventableEvent::is_default_prevented`] returns `true`.
+    /// [`DismissAttempt`] before sending this event, and MUST NOT send the
+    /// event when [`DismissAttempt::is_prevented`] returns `true`.
     CloseOnBackdropClick,
 
     /// User pressed the Escape key. The state machine guards on
     /// [`Context::close_on_escape`] before transitioning.
     ///
     /// Adapters MUST invoke [`Props::on_escape_key_down`] with a
-    /// [`PreventableEvent`] before sending this event, and MUST NOT send the
-    /// event when [`PreventableEvent::is_default_prevented`] returns `true`.
+    /// [`DismissAttempt`] before sending this event, and MUST NOT send the
+    /// event when [`DismissAttempt::is_prevented`] returns `true`.
     CloseOnEscape,
 
     /// A title element was rendered; sets [`Context::has_title`] so the
@@ -130,72 +128,12 @@ impl Role {
     }
 }
 
-// ────────────────────────────────────────────────────────────────────
-// PreventableEvent
-// ────────────────────────────────────────────────────────────────────
-
-/// Cancelable event passed to dismissal callbacks.
-///
-/// Used by adapters when invoking [`Props::on_escape_key_down`] /
-/// [`Props::on_interact_outside`] before dispatching
-/// [`Event::CloseOnEscape`] / [`Event::CloseOnBackdropClick`]. Consumers
-/// receive the value by clone and may call
-/// [`PreventableEvent::prevent_default`] to veto the upcoming close
-/// transition (for example, to prompt about unsaved changes). The
-/// adapter that constructed the event observes the veto via
-/// [`PreventableEvent::is_default_prevented`].
-///
-/// Internally the prevention flag is shared through
-/// [`Arc<AtomicBool>`][AtomicBool] so the value can be passed by-clone into
-/// [`Callback`] (which requires `Args: 'static`) while still propagating
-/// veto decisions back to the adapter — the same pattern used by
-/// [`DismissAttempt`](super::super::utility::dismissable::DismissAttempt).
-#[derive(Clone, Debug, Default)]
-pub struct PreventableEvent {
-    veto: Arc<AtomicBool>,
-}
-
-impl PreventableEvent {
-    /// Creates a new event with `is_default_prevented() == false`.
-    ///
-    /// ```
-    /// use ars_components::overlay::dialog::PreventableEvent;
-    ///
-    /// let event = PreventableEvent::new();
-    /// assert!(!event.is_default_prevented());
-    /// ```
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            veto: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    /// Marks the default behaviour as prevented. Idempotent.
-    ///
-    /// The veto flag is shared across clones — adapters typically pass a
-    /// clone into the consumer's callback and then check the original
-    /// after the callback returns.
-    ///
-    /// ```
-    /// use ars_components::overlay::dialog::PreventableEvent;
-    ///
-    /// let event = PreventableEvent::new();
-    /// let view = event.clone();
-    /// view.prevent_default();
-    /// assert!(event.is_default_prevented());
-    /// ```
-    pub fn prevent_default(&self) {
-        self.veto.store(true, Ordering::SeqCst);
-    }
-
-    /// Returns `true` if [`prevent_default`](Self::prevent_default) was
-    /// called on this event or any of its clones.
-    #[must_use]
-    pub fn is_default_prevented(&self) -> bool {
-        self.veto.load(Ordering::SeqCst)
-    }
-}
+// PreventableEvent — shared. Dialog used to ship a local copy of this
+// pattern; the canonical type is now [`DismissAttempt`], which Popover and
+// the dismissable utility component also share. The veto flag is backed by
+// `Arc<AtomicBool>` so a clone passed into a `Callback` (with `Args:
+// 'static`) still propagates vetoes back to the adapter that constructed
+// the attempt.
 
 // ────────────────────────────────────────────────────────────────────
 // Context
@@ -345,17 +283,18 @@ pub struct Props {
     pub on_open_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
 
     /// Callback invoked before [`Event::CloseOnEscape`] is dispatched. The
-    /// adapter passes a clone of the [`PreventableEvent`] it constructed; if
-    /// the consumer calls [`PreventableEvent::prevent_default`] the close is
-    /// cancelled (the veto flag is shared between clones).
-    pub on_escape_key_down: Option<Callback<dyn Fn(PreventableEvent) + Send + Sync>>,
+    /// adapter passes a clone of the [`DismissAttempt`] it constructed; if
+    /// the consumer calls
+    /// [`DismissAttempt::prevent_dismiss`] the close is cancelled (the veto
+    /// flag is shared between clones).
+    pub on_escape_key_down: Option<Callback<dyn Fn(DismissAttempt<()>) + Send + Sync>>,
 
     /// Callback invoked before [`Event::CloseOnBackdropClick`] is
     /// dispatched, on outside pointer/focus interactions. The adapter passes
-    /// a clone of the [`PreventableEvent`] it constructed; if the consumer
-    /// calls [`PreventableEvent::prevent_default`] the close is cancelled
-    /// (the veto flag is shared between clones).
-    pub on_interact_outside: Option<Callback<dyn Fn(PreventableEvent) + Send + Sync>>,
+    /// a clone of the [`DismissAttempt`] it constructed; if the consumer
+    /// calls [`DismissAttempt::prevent_dismiss`] the close is cancelled (the
+    /// veto flag is shared between clones).
+    pub on_interact_outside: Option<Callback<dyn Fn(DismissAttempt<()>) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -520,7 +459,7 @@ impl Props {
     #[must_use]
     pub fn on_escape_key_down<F>(mut self, f: F) -> Self
     where
-        F: Fn(PreventableEvent) + Send + Sync + 'static,
+        F: Fn(DismissAttempt<()>) + Send + Sync + 'static,
     {
         self.on_escape_key_down = Some(Callback::new(f));
         self
@@ -530,7 +469,7 @@ impl Props {
     #[must_use]
     pub fn on_interact_outside<F>(mut self, f: F) -> Self
     where
-        F: Fn(PreventableEvent) + Send + Sync + 'static,
+        F: Fn(DismissAttempt<()>) + Send + Sync + 'static,
     {
         self.on_interact_outside = Some(Callback::new(f));
         self
@@ -571,70 +510,74 @@ pub enum Part {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Effect names
+// Effect
 // ────────────────────────────────────────────────────────────────────
 
-// Effect-name values are prefixed with `dialog-` for the same reason
-// Tooltip prefixes its names with `tooltip-`: when the name string surfaces
-// in adapter logs, devtools, or shared infrastructure, the component of
-// origin is self-describing without needing to consult the `Service<M>`
-// type parameter.
-
-/// `dialog-set-background-inert` adapter intent name (see spec §1.11).
-pub const EFFECT_SET_BACKGROUND_INERT: &str = "dialog-set-background-inert";
-
-/// `dialog-remove-background-inert` adapter intent name (see spec §1.11).
-pub const EFFECT_REMOVE_BACKGROUND_INERT: &str = "dialog-remove-background-inert";
-
-/// `dialog-scroll-lock-acquire` adapter intent name (see spec §1.11).
-pub const EFFECT_SCROLL_LOCK_ACQUIRE: &str = "dialog-scroll-lock-acquire";
-
-/// `dialog-scroll-lock-release` adapter intent name (see spec §1.11).
-pub const EFFECT_SCROLL_LOCK_RELEASE: &str = "dialog-scroll-lock-release";
-
-/// `dialog-focus-initial` adapter intent name (see spec §1.11).
-pub const EFFECT_FOCUS_INITIAL: &str = "dialog-focus-initial";
-
-/// `dialog-focus-first-tabbable` adapter intent name (see spec §1.11).
-pub const EFFECT_FOCUS_FIRST_TABBABLE: &str = "dialog-focus-first-tabbable";
-
-/// `dialog-restore-focus` adapter intent name (see spec §1.11).
-pub const EFFECT_RESTORE_FOCUS: &str = "dialog-restore-focus";
-
-/// `dialog-open-change` adapter intent name (see spec §1.11).
+/// Typed identifier for every named effect intent the dialog machine
+/// emits.
 ///
-/// Emitted on every state-flipping transition (`Closed → Open` and
-/// `Open → Closed`). The adapter resolves the intent by reading the
-/// post-transition open state from the connected [`Api`] (via
-/// [`Api::is_open`]) and invoking [`Props::on_open_change`] with that value.
+/// Adapters that dispatch on names use exhaustive
+/// `match effect.name { dialog::Effect::OpenChange => …, … }` so name
+/// typos and unhandled variants fail at compile time. The variant
+/// names themselves are the contract; there is no parallel kebab-case
+/// wire form to keep in sync.
 ///
 /// Adapter dispatch sketch:
 ///
 /// ```
-/// use ars_components::overlay::dialog::{
-///     EFFECT_OPEN_CHANGE, EFFECT_RESTORE_FOCUS, Event, Machine,
-/// };
+/// use ars_components::overlay::dialog::{Effect, Event, Machine, Messages, Props};
 /// use ars_core::{Env, Service};
 ///
-/// # use ars_components::overlay::dialog::{Messages, Props};
-/// #
-/// # let mut service = Service::<Machine>::new(
-/// #     Props { default_open: true, id: "dialog".into(), ..Props::default() },
-/// #     &Env::default(),
-/// #     &Messages::default(),
-/// # );
+/// let mut service = Service::<Machine>::new(
+///     Props { default_open: true, id: "dialog".into(), ..Props::default() },
+///     &Env::default(),
+///     &Messages::default(),
+/// );
 ///
 /// let result = service.send(Event::Close);
 ///
 /// for effect in &result.pending_effects {
 ///     match effect.name {
-///         EFFECT_OPEN_CHANGE => { /* notify consumer */ }
-///         EFFECT_RESTORE_FOCUS => { /* focus the trigger handle */ }
+///         Effect::OpenChange => { /* notify consumer */ }
+///         Effect::RestoreFocus => { /* focus the trigger handle */ }
 ///         _ => { /* ...other intents handled elsewhere... */ }
 ///     }
 /// }
 /// ```
-pub const EFFECT_OPEN_CHANGE: &str = "dialog-open-change";
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Emitted on `Closed → Open` for modal dialogs (see spec §1.11).
+    SetBackgroundInert,
+
+    /// Emitted on `Open → Closed` for modal dialogs (see spec §1.11).
+    RemoveBackgroundInert,
+
+    /// Emitted on `Closed → Open` when `prevent_scroll` is `true`
+    /// (see spec §1.11).
+    ScrollLockAcquire,
+
+    /// Emitted on `Open → Closed` when `prevent_scroll` is `true`
+    /// (see spec §1.11).
+    ScrollLockRelease,
+
+    /// Emitted on `Closed → Open` to move focus to the explicitly
+    /// configured initial focus target inside the dialog (see spec
+    /// §1.11).
+    FocusInitial,
+
+    /// Emitted on `Closed → Open` when no explicit initial-focus
+    /// target was configured; adapters move focus to the first
+    /// tabbable descendant of the content (see spec §1.11).
+    FocusFirstTabbable,
+
+    /// Emitted on `Open → Closed`; adapters return focus to the
+    /// trigger element captured before opening (see spec §1.11).
+    RestoreFocus,
+
+    /// Emitted on every state-flipping transition; adapters dispatch
+    /// the `on_open_change` callback (see spec §1.11).
+    OpenChange,
+}
 
 // ────────────────────────────────────────────────────────────────────
 // Machine
@@ -650,6 +593,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(
@@ -696,15 +640,16 @@ impl ars_core::Machine for Machine {
                     .apply(|ctx: &mut Context| {
                         ctx.open = true;
                     })
-                    .with_effect(PendingEffect::named(EFFECT_OPEN_CHANGE))
-                    .with_effect(PendingEffect::named(EFFECT_FOCUS_INITIAL))
-                    .with_effect(PendingEffect::named(EFFECT_FOCUS_FIRST_TABBABLE));
+                    .with_effect(PendingEffect::named(Effect::OpenChange))
+                    .with_effect(PendingEffect::named(Effect::FocusInitial))
+                    .with_effect(PendingEffect::named(Effect::FocusFirstTabbable));
 
                 if ctx.prevent_scroll {
-                    plan = plan.with_effect(PendingEffect::named(EFFECT_SCROLL_LOCK_ACQUIRE));
+                    plan = plan.with_effect(PendingEffect::named(Effect::ScrollLockAcquire));
                 }
+
                 if ctx.modal {
-                    plan = plan.with_effect(PendingEffect::named(EFFECT_SET_BACKGROUND_INERT));
+                    plan = plan.with_effect(PendingEffect::named(Effect::SetBackgroundInert));
                 }
 
                 Some(plan)
@@ -715,18 +660,18 @@ impl ars_core::Machine for Machine {
                     .apply(|ctx: &mut Context| {
                         ctx.open = false;
                     })
-                    .with_effect(PendingEffect::named(EFFECT_OPEN_CHANGE));
+                    .with_effect(PendingEffect::named(Effect::OpenChange));
 
                 if ctx.prevent_scroll {
-                    plan = plan.with_effect(PendingEffect::named(EFFECT_SCROLL_LOCK_RELEASE));
+                    plan = plan.with_effect(PendingEffect::named(Effect::ScrollLockRelease));
                 }
 
                 if ctx.modal {
-                    plan = plan.with_effect(PendingEffect::named(EFFECT_REMOVE_BACKGROUND_INERT));
+                    plan = plan.with_effect(PendingEffect::named(Effect::RemoveBackgroundInert));
                 }
 
                 if ctx.restore_focus {
-                    plan = plan.with_effect(PendingEffect::named(EFFECT_RESTORE_FOCUS));
+                    plan = plan.with_effect(PendingEffect::named(Effect::RestoreFocus));
                 }
 
                 Some(plan)
@@ -737,7 +682,7 @@ impl ars_core::Machine for Machine {
                     .apply(|ctx: &mut Context| {
                         ctx.open = false;
                     })
-                    .with_effect(PendingEffect::named(EFFECT_OPEN_CHANGE)),
+                    .with_effect(PendingEffect::named(Effect::OpenChange)),
             ),
 
             (State::Open, Event::CloseOnEscape) if ctx.close_on_escape => Some(
@@ -745,7 +690,7 @@ impl ars_core::Machine for Machine {
                     .apply(|ctx: &mut Context| {
                         ctx.open = false;
                     })
-                    .with_effect(PendingEffect::named(EFFECT_OPEN_CHANGE)),
+                    .with_effect(PendingEffect::named(Effect::OpenChange)),
             ),
 
             (_, Event::RegisterTitle) if !ctx.has_title => {
@@ -816,6 +761,39 @@ impl ars_core::Machine for Machine {
         }
 
         events
+    }
+
+    fn initial_effects(
+        state: &Self::State,
+        context: &Self::Context,
+        _props: &Self::Props,
+    ) -> Vec<PendingEffect<Self>> {
+        // When `default_open: true` (or controlled `open: Some(true)`) the
+        // dialog boots straight into `Open` without any `Closed → Open`
+        // transition — the regular open-plan effects (focus, scroll-lock,
+        // background-inert, open-change) are therefore never emitted. Mirror
+        // them here so adapters can drive the same lifecycle on first
+        // mount via `Service::take_initial_effects`. The same context-flag
+        // guards that `transition` consults are honoured.
+        if !matches!(state, State::Open) {
+            return Vec::new();
+        }
+
+        let mut effects = vec![
+            PendingEffect::named(Effect::OpenChange),
+            PendingEffect::named(Effect::FocusInitial),
+            PendingEffect::named(Effect::FocusFirstTabbable),
+        ];
+
+        if context.prevent_scroll {
+            effects.push(PendingEffect::named(Effect::ScrollLockAcquire));
+        }
+
+        if context.modal {
+            effects.push(PendingEffect::named(Effect::SetBackgroundInert));
+        }
+
+        effects
     }
 }
 
@@ -990,7 +968,7 @@ impl Api<'_> {
 
     /// Adapter handler: a pointer event closed the dialog from the
     /// backdrop. Adapters MUST consult [`Props::on_interact_outside`] (with
-    /// a [`PreventableEvent`]) before calling this method.
+    /// a [`DismissAttempt`]) before calling this method.
     pub fn on_backdrop_click(&self) {
         (self.send)(Event::CloseOnBackdropClick);
     }
@@ -1044,6 +1022,7 @@ impl Api<'_> {
                 self.ctx.ids.part("description"),
             );
         }
+
         attrs
     }
 
@@ -1171,7 +1150,7 @@ mod tests {
         }
     }
 
-    fn effect_names(result: &SendResult<Machine>) -> Vec<&'static str> {
+    fn effect_names(result: &SendResult<Machine>) -> Vec<Effect> {
         result
             .pending_effects
             .iter()
@@ -1450,7 +1429,7 @@ mod tests {
 
         let result = service.send(Event::Open);
 
-        assert!(effect_names(&result).contains(&EFFECT_SCROLL_LOCK_ACQUIRE));
+        assert!(effect_names(&result).contains(&Effect::ScrollLockAcquire));
     }
 
     // Test 20
@@ -1463,7 +1442,7 @@ mod tests {
 
         let result = service.send(Event::Open);
 
-        assert!(!effect_names(&result).contains(&EFFECT_SCROLL_LOCK_ACQUIRE));
+        assert!(!effect_names(&result).contains(&Effect::ScrollLockAcquire));
     }
 
     // Test 21
@@ -1476,7 +1455,7 @@ mod tests {
 
         let result = service.send(Event::Open);
 
-        assert!(effect_names(&result).contains(&EFFECT_SET_BACKGROUND_INERT));
+        assert!(effect_names(&result).contains(&Effect::SetBackgroundInert));
     }
 
     // Test 22
@@ -1489,7 +1468,7 @@ mod tests {
 
         let result = service.send(Event::Open);
 
-        assert!(!effect_names(&result).contains(&EFFECT_SET_BACKGROUND_INERT));
+        assert!(!effect_names(&result).contains(&Effect::SetBackgroundInert));
     }
 
     // Test 23
@@ -1501,8 +1480,86 @@ mod tests {
 
         let names = effect_names(&result);
 
-        assert!(names.contains(&EFFECT_FOCUS_INITIAL));
-        assert!(names.contains(&EFFECT_FOCUS_FIRST_TABBABLE));
+        assert!(names.contains(&Effect::FocusInitial));
+        assert!(names.contains(&Effect::FocusFirstTabbable));
+    }
+
+    // ── initial_effects override ─────────────────────────────────
+
+    fn initial_effect_names(service: &mut Service<Machine>) -> Vec<Effect> {
+        service
+            .take_initial_effects()
+            .into_iter()
+            .map(|effect| effect.name)
+            .collect()
+    }
+
+    #[test]
+    fn initial_effects_empty_when_default_open_false() {
+        let mut service = fresh_service(test_props());
+
+        assert!(service.take_initial_effects().is_empty());
+        assert!(service.initial_effects_taken());
+    }
+
+    #[test]
+    fn initial_effects_emit_full_open_lifecycle_when_default_open_true() {
+        let mut service = open_service(test_props());
+
+        let names = initial_effect_names(&mut service);
+
+        assert!(names.contains(&Effect::OpenChange));
+        assert!(names.contains(&Effect::FocusInitial));
+        assert!(names.contains(&Effect::FocusFirstTabbable));
+    }
+
+    #[test]
+    fn initial_effects_include_scroll_lock_when_modal_and_prevent_scroll_true() {
+        let mut service = open_service(Props {
+            modal: true,
+            prevent_scroll: true,
+            ..test_props()
+        });
+
+        let names = initial_effect_names(&mut service);
+
+        assert!(names.contains(&Effect::ScrollLockAcquire));
+        assert!(names.contains(&Effect::SetBackgroundInert));
+    }
+
+    #[test]
+    fn initial_effects_skip_scroll_lock_when_prevent_scroll_false() {
+        let mut service = open_service(Props {
+            prevent_scroll: false,
+            ..test_props()
+        });
+
+        let names = initial_effect_names(&mut service);
+
+        assert!(!names.contains(&Effect::ScrollLockAcquire));
+    }
+
+    #[test]
+    fn initial_effects_skip_set_background_inert_when_non_modal() {
+        let mut service = open_service(Props {
+            modal: false,
+            ..test_props()
+        });
+
+        let names = initial_effect_names(&mut service);
+
+        assert!(!names.contains(&Effect::SetBackgroundInert));
+    }
+
+    #[test]
+    fn initial_effects_drain_idempotently() {
+        let mut service = open_service(test_props());
+
+        assert!(!service.take_initial_effects().is_empty());
+
+        // Subsequent calls observe an empty buffer.
+        assert!(service.take_initial_effects().is_empty());
+        assert!(service.initial_effects_taken());
     }
 
     // Test 24
@@ -1515,7 +1572,7 @@ mod tests {
 
         let result = service.send(Event::Close);
 
-        assert!(effect_names(&result).contains(&EFFECT_SCROLL_LOCK_RELEASE));
+        assert!(effect_names(&result).contains(&Effect::ScrollLockRelease));
     }
 
     // Test 25
@@ -1528,7 +1585,7 @@ mod tests {
 
         let result = service.send(Event::Close);
 
-        assert!(effect_names(&result).contains(&EFFECT_REMOVE_BACKGROUND_INERT));
+        assert!(effect_names(&result).contains(&Effect::RemoveBackgroundInert));
     }
 
     // Test 26
@@ -1541,7 +1598,7 @@ mod tests {
 
         let result = service.send(Event::Close);
 
-        assert!(effect_names(&result).contains(&EFFECT_RESTORE_FOCUS));
+        assert!(effect_names(&result).contains(&Effect::RestoreFocus));
     }
 
     // Test 27
@@ -1554,22 +1611,22 @@ mod tests {
 
         let result = service.send(Event::Close);
 
-        assert!(!effect_names(&result).contains(&EFFECT_RESTORE_FOCUS));
+        assert!(!effect_names(&result).contains(&Effect::RestoreFocus));
     }
 
     // Test 27a — regression guard: every effect emitted by Open and Close is
     // one of the documented payload-free named intents from spec §1.11.
     #[test]
     fn effects_carry_no_id_payload() {
-        const ALLOWED: &[&str] = &[
-            EFFECT_FOCUS_INITIAL,
-            EFFECT_FOCUS_FIRST_TABBABLE,
-            EFFECT_SCROLL_LOCK_ACQUIRE,
-            EFFECT_SCROLL_LOCK_RELEASE,
-            EFFECT_SET_BACKGROUND_INERT,
-            EFFECT_REMOVE_BACKGROUND_INERT,
-            EFFECT_RESTORE_FOCUS,
-            EFFECT_OPEN_CHANGE,
+        const ALLOWED: &[Effect] = &[
+            Effect::FocusInitial,
+            Effect::FocusFirstTabbable,
+            Effect::ScrollLockAcquire,
+            Effect::ScrollLockRelease,
+            Effect::SetBackgroundInert,
+            Effect::RemoveBackgroundInert,
+            Effect::RestoreFocus,
+            Effect::OpenChange,
         ];
 
         let mut service = fresh_service(test_props());
@@ -1613,7 +1670,7 @@ mod tests {
 
         let result = service.send(Event::Open);
 
-        assert!(effect_names(&result).contains(&EFFECT_OPEN_CHANGE));
+        assert!(effect_names(&result).contains(&Effect::OpenChange));
     }
 
     #[test]
@@ -1622,18 +1679,18 @@ mod tests {
 
         let result = service.send(Event::Close);
 
-        assert!(effect_names(&result).contains(&EFFECT_OPEN_CHANGE));
+        assert!(effect_names(&result).contains(&Effect::OpenChange));
     }
 
     #[test]
     fn toggle_event_emits_open_change_intent_in_either_direction() {
         let mut closed = fresh_service(test_props());
 
-        assert!(effect_names(&closed.send(Event::Toggle)).contains(&EFFECT_OPEN_CHANGE));
+        assert!(effect_names(&closed.send(Event::Toggle)).contains(&Effect::OpenChange));
 
         let mut opened = open_service(test_props());
 
-        assert!(effect_names(&opened.send(Event::Toggle)).contains(&EFFECT_OPEN_CHANGE));
+        assert!(effect_names(&opened.send(Event::Toggle)).contains(&Effect::OpenChange));
     }
 
     #[test]
@@ -1642,7 +1699,7 @@ mod tests {
 
         let result = service.send(Event::CloseOnBackdropClick);
 
-        assert!(effect_names(&result).contains(&EFFECT_OPEN_CHANGE));
+        assert!(effect_names(&result).contains(&Effect::OpenChange));
     }
 
     #[test]
@@ -1651,7 +1708,7 @@ mod tests {
 
         let result = service.send(Event::CloseOnEscape);
 
-        assert!(effect_names(&result).contains(&EFFECT_OPEN_CHANGE));
+        assert!(effect_names(&result).contains(&Effect::OpenChange));
     }
 
     #[test]
@@ -1663,7 +1720,7 @@ mod tests {
 
         let result = service.send(Event::CloseOnBackdropClick);
 
-        assert!(!effect_names(&result).contains(&EFFECT_OPEN_CHANGE));
+        assert!(!effect_names(&result).contains(&Effect::OpenChange));
     }
 
     #[test]
@@ -1675,7 +1732,7 @@ mod tests {
 
         let result = service.send(Event::CloseOnEscape);
 
-        assert!(!effect_names(&result).contains(&EFFECT_OPEN_CHANGE));
+        assert!(!effect_names(&result).contains(&Effect::OpenChange));
     }
 
     #[test]
@@ -1684,7 +1741,7 @@ mod tests {
 
         let result = service.send(Event::RegisterTitle);
 
-        assert!(!effect_names(&result).contains(&EFFECT_OPEN_CHANGE));
+        assert!(!effect_names(&result).contains(&Effect::OpenChange));
     }
 
     #[test]
@@ -1693,7 +1750,7 @@ mod tests {
 
         let result = service.send(Event::RegisterDescription);
 
-        assert!(!effect_names(&result).contains(&EFFECT_OPEN_CHANGE));
+        assert!(!effect_names(&result).contains(&Effect::OpenChange));
     }
 
     #[test]
@@ -1702,7 +1759,7 @@ mod tests {
 
         let result = service.send(Event::Open);
 
-        assert!(!effect_names(&result).contains(&EFFECT_OPEN_CHANGE));
+        assert!(!effect_names(&result).contains(&Effect::OpenChange));
     }
 
     #[test]
@@ -1711,7 +1768,7 @@ mod tests {
 
         let result = service.send(Event::Close);
 
-        assert!(!effect_names(&result).contains(&EFFECT_OPEN_CHANGE));
+        assert!(!effect_names(&result).contains(&Effect::OpenChange));
     }
 
     // ── Api event-handler dispatch tests ──────────────────────────
@@ -1821,40 +1878,40 @@ mod tests {
         assert!(!service.connect(&|_| {}).is_open());
     }
 
-    // ── PreventableEvent tests ────────────────────────────────────
+    // ── DismissAttempt integration tests ───────────────────────────
 
     // Test 35
     #[test]
-    fn preventable_event_starts_not_prevented() {
-        let event = PreventableEvent::new();
+    fn dismiss_attempt_starts_not_prevented() {
+        let attempt = DismissAttempt::new(());
 
-        assert!(!event.is_default_prevented());
+        assert!(!attempt.is_prevented());
     }
 
     // Test 36
     #[test]
-    fn preventable_event_prevent_default_marks_prevented() {
-        let event = PreventableEvent::new();
+    fn dismiss_attempt_prevent_dismiss_marks_prevented() {
+        let attempt = DismissAttempt::new(());
 
-        event.prevent_default();
+        attempt.prevent_dismiss();
 
-        assert!(event.is_default_prevented());
+        assert!(attempt.is_prevented());
     }
 
     // Test 37
     #[test]
-    fn preventable_event_repeated_prevent_default_idempotent() {
-        let event = PreventableEvent::new();
+    fn dismiss_attempt_repeated_prevent_idempotent_and_clones_share_veto() {
+        let attempt = DismissAttempt::new(());
 
-        event.prevent_default();
-        event.prevent_default();
+        attempt.prevent_dismiss();
+        attempt.prevent_dismiss();
 
-        assert!(event.is_default_prevented());
+        assert!(attempt.is_prevented());
 
         // Cloned views observe the shared veto.
-        let cloned = event.clone();
+        let cloned = attempt.clone();
 
-        assert!(cloned.is_default_prevented());
+        assert!(cloned.is_prevented());
     }
 
     // ── on_props_changed tests ────────────────────────────────────
@@ -2368,6 +2425,162 @@ mod tests {
         );
     }
 
+    // ── Additional snapshot coverage (within the 40-snapshot budget) ──
+
+    #[test]
+    fn snapshot_root_open_modal_alertdialog() {
+        let service = snapshot_service(Props {
+            default_open: true,
+            modal: true,
+            role: Role::AlertDialog,
+            ..test_props()
+        });
+
+        assert_snapshot!(
+            "dialog_root_open_modal_alertdialog",
+            snapshot_attrs(&service.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn snapshot_trigger_open_with_alertdialog_role() {
+        // The trigger emits `aria-haspopup="dialog"` regardless of the
+        // content role, but `aria-controls` still points at the
+        // alertdialog content id when open. This locks down that
+        // behaviour as part of the trigger contract.
+        let service = snapshot_service(Props {
+            default_open: true,
+            modal: true,
+            role: Role::AlertDialog,
+            ..test_props()
+        });
+
+        assert_snapshot!(
+            "dialog_trigger_open_with_alertdialog_role",
+            snapshot_attrs(&service.connect(&|_| {}).trigger_attrs())
+        );
+    }
+
+    #[test]
+    fn snapshot_content_open_alertdialog_with_title() {
+        let mut service = snapshot_service(Props {
+            default_open: true,
+            modal: true,
+            role: Role::AlertDialog,
+            ..test_props()
+        });
+
+        drop(service.send(Event::RegisterTitle));
+
+        assert_snapshot!(
+            "dialog_content_open_alertdialog_with_title",
+            snapshot_attrs(&service.connect(&|_| {}).content_attrs())
+        );
+    }
+
+    #[test]
+    fn snapshot_content_open_alertdialog_with_description() {
+        let mut service = snapshot_service(Props {
+            default_open: true,
+            modal: true,
+            role: Role::AlertDialog,
+            ..test_props()
+        });
+
+        drop(service.send(Event::RegisterDescription));
+
+        assert_snapshot!(
+            "dialog_content_open_alertdialog_with_description",
+            snapshot_attrs(&service.connect(&|_| {}).content_attrs())
+        );
+    }
+
+    #[test]
+    fn snapshot_content_open_non_modal_with_title() {
+        // Non-modal dialog keeps `role="dialog"` but omits
+        // `aria-modal="true"`; the title still wires through
+        // `aria-labelledby`. Verifies the modal flag and the title flag
+        // compose independently.
+        let mut service = snapshot_service(Props {
+            default_open: true,
+            modal: false,
+            ..test_props()
+        });
+
+        drop(service.send(Event::RegisterTitle));
+
+        assert_snapshot!(
+            "dialog_content_open_non_modal_with_title",
+            snapshot_attrs(&service.connect(&|_| {}).content_attrs())
+        );
+    }
+
+    #[test]
+    fn snapshot_content_open_non_modal_with_title_and_description() {
+        let mut service = snapshot_service(Props {
+            default_open: true,
+            modal: false,
+            ..test_props()
+        });
+
+        drop(service.send(Event::RegisterTitle));
+        drop(service.send(Event::RegisterDescription));
+
+        assert_snapshot!(
+            "dialog_content_open_non_modal_with_title_and_description",
+            snapshot_attrs(&service.connect(&|_| {}).content_attrs())
+        );
+    }
+
+    #[test]
+    fn snapshot_title_h1_level() {
+        // Heading-level clamping is already covered for the `> 6` and
+        // `< 1` branches; this snapshot pins the in-range edge (level=1)
+        // so reviewers can see what the rendered `data-ars-heading-level`
+        // attribute looks like at the lowest legal value.
+        let service = snapshot_service(Props {
+            title_level: 1,
+            ..test_props()
+        });
+
+        assert_snapshot!(
+            "dialog_title_h1_level",
+            snapshot_attrs(&service.connect(&|_| {}).title_attrs())
+        );
+    }
+
+    #[test]
+    fn snapshot_close_trigger_localized_es() {
+        // Locale-aware close-trigger label: the same MessageFn closure
+        // (shared between English and Spanish locales) exercises the
+        // Spanish branch. The structural shape matches
+        // `dialog_close_trigger_default_label` but the aria-label value
+        // differs — pins the locale-aware path under snapshot review.
+        use ars_core::Locale;
+
+        let messages = Messages {
+            close_label: MessageFn::new(|locale: &Locale| {
+                if locale.to_bcp47().starts_with("es") {
+                    "Cerrar".to_string()
+                } else {
+                    "Close".to_string()
+                }
+            }),
+        };
+
+        let es_env = Env {
+            locale: Locale::parse("es").expect("`es` is a valid BCP-47 tag"),
+            ..Env::default()
+        };
+
+        let service = Service::<Machine>::new(test_props(), &es_env, &messages);
+
+        assert_snapshot!(
+            "dialog_close_trigger_localized_es",
+            snapshot_attrs(&service.connect(&|_| {}).close_trigger_attrs())
+        );
+    }
+
     // ── Additional regression / contract tests ─────────────────────
 
     // B — on_props_changed coverage gaps
@@ -2408,17 +2621,17 @@ mod tests {
         assert!(Machine::on_props_changed(&old, &new).is_empty());
     }
 
-    // C — PreventableEvent veto symmetry
+    // C — DismissAttempt veto symmetry
 
     #[test]
-    fn preventable_event_veto_set_on_clone_observable_on_original() {
-        let original = PreventableEvent::new();
+    fn dismiss_attempt_veto_set_on_clone_observable_on_original() {
+        let original = DismissAttempt::new(());
 
         let cloned = original.clone();
 
-        cloned.prevent_default();
+        cloned.prevent_dismiss();
 
-        assert!(original.is_default_prevented());
+        assert!(original.is_prevented());
     }
 
     // D — Default trio
@@ -2431,11 +2644,6 @@ mod tests {
     #[test]
     fn role_default_returns_dialog() {
         assert_eq!(Role::default(), Role::Dialog);
-    }
-
-    #[test]
-    fn preventable_event_default_is_not_prevented() {
-        assert!(!PreventableEvent::default().is_default_prevented());
     }
 
     // E — adapter-only prop accessors
@@ -2467,12 +2675,12 @@ mod tests {
     // F — Send + Sync compile-time assertion
 
     #[test]
-    fn preventable_event_is_send_sync() {
+    fn dismiss_attempt_is_send_sync() {
         const fn assert_send_sync<T: Send + Sync>() {}
 
-        // Will fail to compile if `PreventableEvent` ever loses `Send` or
+        // Will fail to compile if `DismissAttempt` ever loses `Send` or
         // `Sync` (e.g., if `Arc<AtomicBool>` is replaced with `Cell<bool>`).
-        assert_send_sync::<PreventableEvent>();
+        assert_send_sync::<DismissAttempt<()>>();
     }
 
     // G — controlled-mode round-trip via Service::set_props
@@ -2490,7 +2698,7 @@ mod tests {
 
         assert!(result.state_changed);
         assert_eq!(service.state(), &State::Open);
-        assert!(effect_names(&result).contains(&EFFECT_OPEN_CHANGE));
+        assert!(effect_names(&result).contains(&Effect::OpenChange));
 
         let result = service.set_props(Props {
             open: Some(false),
@@ -2499,7 +2707,7 @@ mod tests {
 
         assert!(result.state_changed);
         assert_eq!(service.state(), &State::Closed);
-        assert!(effect_names(&result).contains(&EFFECT_OPEN_CHANGE));
+        assert!(effect_names(&result).contains(&Effect::OpenChange));
     }
 
     // I — on_open_change registration round-trip
@@ -2523,11 +2731,11 @@ mod tests {
         assert_eq!(
             effect_names(&result),
             vec![
-                EFFECT_OPEN_CHANGE,
-                EFFECT_FOCUS_INITIAL,
-                EFFECT_FOCUS_FIRST_TABBABLE,
-                EFFECT_SCROLL_LOCK_ACQUIRE,
-                EFFECT_SET_BACKGROUND_INERT,
+                Effect::OpenChange,
+                Effect::FocusInitial,
+                Effect::FocusFirstTabbable,
+                Effect::ScrollLockAcquire,
+                Effect::SetBackgroundInert,
             ]
         );
     }
@@ -2546,10 +2754,10 @@ mod tests {
         assert_eq!(
             effect_names(&result),
             vec![
-                EFFECT_OPEN_CHANGE,
-                EFFECT_SCROLL_LOCK_RELEASE,
-                EFFECT_REMOVE_BACKGROUND_INERT,
-                EFFECT_RESTORE_FOCUS,
+                Effect::OpenChange,
+                Effect::ScrollLockRelease,
+                Effect::RemoveBackgroundInert,
+                Effect::RestoreFocus,
             ]
         );
     }
@@ -2569,7 +2777,7 @@ mod tests {
         assert!(r1.state_changed);
         assert_eq!(service.state(), &State::Open);
         assert!(service.context().open);
-        assert!(effect_names(&r1).contains(&EFFECT_OPEN_CHANGE));
+        assert!(effect_names(&r1).contains(&Effect::OpenChange));
 
         // 2. Close via backdrop click
         let r2 = service.send(Event::CloseOnBackdropClick);
@@ -2577,14 +2785,14 @@ mod tests {
         assert!(r2.state_changed);
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().open);
-        assert!(effect_names(&r2).contains(&EFFECT_OPEN_CHANGE));
+        assert!(effect_names(&r2).contains(&Effect::OpenChange));
 
         // 3. Re-open via Toggle
         let r3 = service.send(Event::Toggle);
 
         assert!(r3.state_changed);
         assert_eq!(service.state(), &State::Open);
-        assert!(effect_names(&r3).contains(&EFFECT_OPEN_CHANGE));
+        assert!(effect_names(&r3).contains(&Effect::OpenChange));
 
         // 4. Register title and description while open — both flips happen
         let r4 = service.send(Event::RegisterTitle);
@@ -2854,7 +3062,7 @@ mod tests {
         let close_result = service.send(Event::Close);
 
         assert!(
-            !effect_names(&close_result).contains(&EFFECT_REMOVE_BACKGROUND_INERT),
+            !effect_names(&close_result).contains(&Effect::RemoveBackgroundInert),
             "non-modal dialog must not request inert removal"
         );
     }
@@ -2936,7 +3144,7 @@ mod tests {
         });
 
         // The agnostic core stores the callback in props; an adapter handling
-        // `EFFECT_OPEN_CHANGE` would invoke `props.on_open_change` with the
+        // `Effect::OpenChange` would invoke `props.on_open_change` with the
         // post-transition state. We exercise that end-to-end here.
         let cb = props
             .on_open_change

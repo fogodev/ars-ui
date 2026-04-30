@@ -178,7 +178,9 @@ impl Default for Props { ... }
 fn is_disabled(ctx: &Context) -> bool { ctx.disabled }
 ```
 
-**§1.X Full Machine Implementation** — The complete `impl ars_core::Machine for Machine` block showing `init()` and `transition()`. This is the single most important section of any component spec. It must cover every (state, event) combination the machine handles.
+**§1.X Full Machine Implementation** — The complete `impl ars_core::Machine for Machine` block showing `init()`, `transition()`, `connect()`, `on_props_changed()` (when applicable), and **`initial_effects()` (when the machine can boot in a non-resting state)**. This is the single most important section of any component spec. It must cover every (state, event) combination the machine handles.
+
+> **`initial_effects` requirement.** When `Machine::init` can return a state that represents an active lifecycle (an open overlay, a mounted presence region, a focused trigger, …) the spec MUST show a `Machine::initial_effects` override that returns the same effect set the equivalent transition would have produced. Without this override, an SSR-rendered or `default_open: true` instance does not get listeners attached, z-index allocated, or focus moved on first mount because no `Closed → Open` transition runs. Adapters drain these via `Service::take_initial_effects` on first mount. See `spec/foundation/01-architecture.md` §2.1.1 for the full contract. Components whose initial state is always the resting state (e.g., a Toggle that always boots `Off`) do not need to override the method — the default returns no effects.
 
 **§1.Y Connect / API** — The Part enum, `Api<'a>` struct, and its per-part methods. Every component MUST define a Part enum with `#[derive(ComponentPart)]`. Each Part variant must have a corresponding `*_attrs()` inherent method returning `AttrMap`. Repeated parts that need instance-identity data (item key, step index) use data-carrying variants; field types must implement `Default` and should match the domain type (e.g., `Key` for collection-based components, `usize` for index-based components). Event handler methods follow the pattern `on_{part}_{event}()`. Must implement `ConnectApi`:
 
@@ -603,6 +605,7 @@ type Event = Event;
 type Context = Context;
 type Props = Props;
 type Messages = Messages;
+type Effect = Effect; // bespoke per-component enum, or `ars_core::NoEffect` for machines that never emit named effects (see `01-architecture.md` §2.1.2)
 type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {

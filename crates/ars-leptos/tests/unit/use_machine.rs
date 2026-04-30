@@ -400,6 +400,7 @@ impl Machine for EnvMachine {
     type Context = EnvContext;
     type Props = EnvProps;
     type Messages = ();
+    type Effect = ars_core::NoEffect;
     type Api<'a> = EnvApi;
 
     fn init(

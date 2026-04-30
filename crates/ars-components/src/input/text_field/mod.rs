@@ -523,6 +523,16 @@ impl Default for Messages {
 
 impl ComponentMessages for Messages {}
 
+/// Typed identifier for every named effect intent the `text_field` machine emits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter invokes `Props::on_focus_change` with the new focus state.
+    FocusChange,
+
+    /// Adapter invokes `Props::on_value_change` with the new committed value.
+    ValueChange,
+}
+
 /// The machine for the `TextField` component.
 #[derive(Debug)]
 pub struct Machine;
@@ -533,6 +543,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (State, Context) {
@@ -1078,7 +1089,7 @@ fn props_output_changed(old: &Props, new: &Props) -> bool {
 
 fn focus_change_effect(focused: bool) -> PendingEffect<Machine> {
     PendingEffect::new(
-        "focus-change",
+        Effect::FocusChange,
         move |_ctx: &Context, props: &Props, _send| {
             if let Some(callback) = &props.on_focus_change {
                 callback(focused);
@@ -1091,7 +1102,7 @@ fn focus_change_effect(focused: bool) -> PendingEffect<Machine> {
 
 fn value_change_effect(value: String) -> PendingEffect<Machine> {
     PendingEffect::new(
-        "value-change",
+        Effect::ValueChange,
         move |_ctx: &Context, props: &Props, _send| {
             if let Some(callback) = &props.on_value_change {
                 callback(value);

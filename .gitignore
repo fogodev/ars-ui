@@ -9,3 +9,8 @@ Cargo.lock
 # Coverage artifacts
 lcov.info
 *.profraw
+
+# Mutation testing artifacts (cargo-mutants)
+mutants.out/
+mutants.out.old/
+mutant-runs/

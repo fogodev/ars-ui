@@ -135,6 +135,7 @@ impl Machine for EnvMachine {
     type Context = EnvContext;
     type Props = EnvProps;
     type Messages = EnvMessages;
+    type Effect = ars_core::NoEffect;
     type Api<'a> = ToggleApi;
 
     fn init(

@@ -185,12 +185,20 @@ pub struct Machine;
 pub struct Messages;
 impl ComponentMessages for Messages {}
 
+/// Typed identifier for every named effect intent the switch machine emits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter invokes `Props::on_checked_change` with the new value.
+    CheckedChange,
+}
+
 impl ars_core::Machine for Machine {
     type State = State;
     type Event = Event;
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -370,7 +378,7 @@ fn value_change_plan(ctx: &Context, next: bool) -> TransitionPlan<Machine> {
 }
 
 fn checked_change_effect(next: bool) -> PendingEffect<Machine> {
-    PendingEffect::new("checked-change", move |_ctx, props, _send| {
+    PendingEffect::new(Effect::CheckedChange, move |_ctx, props, _send| {
         if let Some(callback) = &props.on_checked_change {
             callback(next);
         }
@@ -569,15 +577,15 @@ Switch
 └── ErrorMessage       <div>     data-ars-part="error-message" (optional)
 ```
 
-| Part         | Element    | Key Attributes                                             |
-| ------------ | ---------- | ---------------------------------------------------------- |
-| Root         | `<div>`    | `id`, `data-ars-scope="switch"`, `data-ars-state`, `dir`   |
-| Label        | `<label>`  | Text label; `for` targets `HiddenInput` unless readonly    |
+| Part         | Element    | Key Attributes                                                   |
+| ------------ | ---------- | ---------------------------------------------------------------- |
+| Root         | `<div>`    | `id`, `data-ars-scope="switch"`, `data-ars-state`, `dir`         |
+| Label        | `<label>`  | Text label; `for` targets `HiddenInput` unless readonly          |
 | Control      | `<button>` | `type="button"`, `role="switch"`, `aria-checked`, `tabindex="0"` |
-| Thumb        | `<span>`   | `aria-hidden="true"` — sliding thumb indicator             |
-| HiddenInput  | `<input>`  | `type="checkbox"`, `aria-hidden="true"`                    |
-| Description  | `<div>`    | Help text; linked via `aria-describedby` (optional)        |
-| ErrorMessage | `<div>`    | Validation error; linked via `aria-describedby` (optional) |
+| Thumb        | `<span>`   | `aria-hidden="true"` — sliding thumb indicator                   |
+| HiddenInput  | `<input>`  | `type="checkbox"`, `aria-hidden="true"`                          |
+| Description  | `<div>`    | Help text; linked via `aria-describedby` (optional)              |
+| ErrorMessage | `<div>`    | Validation error; linked via `aria-describedby` (optional)       |
 
 ## 3. Accessibility
 

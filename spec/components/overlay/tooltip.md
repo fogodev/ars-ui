@@ -540,6 +540,30 @@ impl ars_core::Machine for Machine {
 
         events
     }
+
+    // `Machine::initial_effects` — emits the open lifecycle when the
+    // tooltip boots straight into `State::Open` (via `default_open: true`
+    // or controlled `open: Some(true)`). Without this override, an
+    // SSR-rendered "initially open" tooltip would never get its
+    // `on_open_change` callback fired and would never have a z-index
+    // allocated by the adapter — `init` returns `(State::Open, ctx)`
+    // directly so the regular open-plan effects never fire. Adapters
+    // drain these on first mount via `Service::take_initial_effects`;
+    // see `spec/foundation/01-architecture.md` §2.1.1.
+    fn initial_effects(
+        state: &Self::State,
+        _context: &Self::Context,
+        _props: &Self::Props,
+    ) -> Vec<PendingEffect<Self>> {
+        if !matches!(state, State::Open) {
+            return Vec::new();
+        }
+
+        vec![
+            open_change_effect(true),
+            PendingEffect::named(ALLOCATE_Z_INDEX_EFFECT),
+        ]
+    }
 }
 
 // Helper constructors:

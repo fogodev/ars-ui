@@ -116,6 +116,55 @@ pub fn no_cleanup() -> CleanupFn {
     Box::new(|| {})
 }
 
+// ────────────────────────────────────────────────────────────────────
+// Effect identity types
+// ────────────────────────────────────────────────────────────────────
+
+/// Marker supertrait that names the bounds every [`Machine::Effect`] type
+/// must satisfy.
+///
+/// `EffectName` carries no methods — it is a pure naming alias for the
+/// supertrait sum so call sites can write `type Effect: EffectName`
+/// instead of repeating
+/// `Copy + Debug + Eq + Hash + Send + Sync + 'static` everywhere. The
+/// blanket impl below means **any** type that already meets those
+/// bounds (bespoke component enums, [`NoEffect`], `&'static str`, …)
+/// satisfies `EffectName` automatically; there is no opt-in step.
+///
+/// The bounds themselves come from how adapters use effect names:
+///
+/// - `Copy` — adapters drain `cancel_effects: Vec<M::Effect>` without
+///   cloning each entry; `Copy` makes that ergonomic.
+/// - `Debug` — `SendResult`/`TransitionPlan` log effect names directly
+///   via `Debug`, and devtools panels render the `Debug` output.
+/// - `Eq + Hash` — adapters store cleanup closures in a
+///   `HashMap<M::Effect, CleanupFn>`, keyed by the typed effect name.
+/// - `Send + Sync + 'static` — `Service<M>` is held inside framework
+///   reactivity (Leptos `StoredValue`, Dioxus `Signal`) which require
+///   thread-safety on the value.
+///
+/// This follows the same marker-supertrait idiom the crate uses for
+/// [`BindableValue`].
+pub trait EffectName: Copy + Debug + Eq + core::hash::Hash + Send + Sync + 'static {}
+
+impl<T: Copy + Debug + Eq + core::hash::Hash + Send + Sync + 'static> EffectName for T {}
+
+/// An uninhabited effect type for machines that never emit named effects.
+///
+/// Use as `type Effect = NoEffect` on machines whose `transition`
+/// implementations always return effect-free [`TransitionPlan`]s. Because
+/// the type is empty, `PendingEffect::<_>::named(...)` is uncallable —
+/// the type system enforces "this machine has no intents", which is
+/// stronger than `type Effect = ()` (which would let you accidentally
+/// emit `PendingEffect::named(())`).
+///
+/// Machines that emit ad-hoc string-named effects during prototyping
+/// (or in internal test fixtures) can use `type Effect = &'static str`
+/// directly — `&'static str` already implements [`EffectName`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NoEffect {}
+
+// ────────────────────────────────────────────────────────────────────
 // PendingEffect
 // ────────────────────────────────────────────────────────────────────
 
@@ -159,8 +208,13 @@ pub struct ResizeToContentEffect {
 /// It returns a [`CleanupFn`] invoked when the effect must stop (state
 /// change or unmount).
 pub struct PendingEffect<M: Machine> {
-    /// The identifier for this effect, used by adapters to match and execute it.
-    pub name: &'static str,
+    /// Typed identifier for this effect intent. Adapters that dispatch on
+    /// names typically write `match self.name { Effect::Foo => … }`
+    /// exhaustively. The associated [`Machine::Effect`] type is required to
+    /// be `Copy + Debug + Eq + Hash + Send + Sync + 'static`, which means
+    /// adapters can also use it directly as a `HashMap` key for cleanup
+    /// bookkeeping.
+    pub name: M::Effect,
 
     /// The state after the transition that produced this effect.
     /// Set by [`Service::drain_queue`] before returning to the adapter.
@@ -182,7 +236,7 @@ impl<M: Machine> PendingEffect<M> {
     /// conversion internally.
     #[must_use]
     pub fn new(
-        name: &'static str,
+        name: M::Effect,
         setup: impl FnOnce(&M::Context, &M::Props, WeakSend<M::Event>) -> CleanupFn + 'static,
     ) -> Self {
         Self {
@@ -201,7 +255,7 @@ impl<M: Machine> PendingEffect<M> {
     /// Useful when the effect name is the entire contract (the adapter
     /// implements the behavior based on the name alone).
     #[must_use]
-    pub fn named(name: &'static str) -> Self {
+    pub fn named(name: M::Effect) -> Self {
         Self {
             name,
             target_state: None,
@@ -212,7 +266,7 @@ impl<M: Machine> PendingEffect<M> {
 
     /// Creates a marker-only effect with typed metadata.
     #[must_use]
-    pub fn named_with_metadata(name: &'static str, metadata: EffectMetadata) -> Self {
+    pub fn named_with_metadata(name: M::Effect, metadata: EffectMetadata) -> Self {
         Self {
             name,
             target_state: None,
@@ -269,7 +323,7 @@ pub struct TransitionPlan<M: Machine> {
     pub effects: Vec<PendingEffect<M>>,
 
     /// Named effects to cancel (cleanup runs immediately, no replacement).
-    pub cancel_effects: Vec<&'static str>,
+    pub cancel_effects: Vec<M::Effect>,
 }
 
 impl<M: Machine> Default for TransitionPlan<M> {
@@ -314,14 +368,14 @@ impl<M: Machine> TransitionPlan<M> {
     /// after it — both run in order.
     #[must_use]
     pub fn apply(mut self, f: impl FnOnce(&mut M::Context) + 'static) -> Self {
-        self.apply = match self.apply {
-            Some(prev) => Some(Box::new(move |ctx: &mut M::Context| {
+        self.apply = Some(if let Some(prev) = self.apply {
+            Box::new(move |ctx: &mut M::Context| {
                 prev(ctx);
                 f(ctx);
-            })),
-
-            None => Some(Box::new(f)),
-        };
+            })
+        } else {
+            Box::new(f)
+        });
 
         self
     }
@@ -357,7 +411,7 @@ impl<M: Machine> TransitionPlan<M> {
     #[must_use]
     pub fn with_named_effect(
         self,
-        name: &'static str,
+        name: M::Effect,
         setup: impl FnOnce(&M::Context, &M::Props, WeakSend<M::Event>) -> CleanupFn + 'static,
     ) -> Self {
         self.with_effect(PendingEffect::new(name, setup))
@@ -368,7 +422,7 @@ impl<M: Machine> TransitionPlan<M> {
     /// The adapter runs the effect's cleanup closure immediately. No-op if
     /// no effect with `name` is currently active.
     #[must_use]
-    pub fn cancel_effect(mut self, name: &'static str) -> Self {
+    pub fn cancel_effect(mut self, name: M::Effect) -> Self {
         self.cancel_effects.push(name);
         self
     }
@@ -400,7 +454,11 @@ impl<M: Machine> Debug for TransitionPlan<M> {
             .field("then_send", &self.then_send)
             .field(
                 "effects",
-                &self.effects.iter().map(|e| e.name).collect::<Vec<_>>(),
+                &self
+                    .effects
+                    .iter()
+                    .map(|effect| &effect.name)
+                    .collect::<Vec<_>>(),
             )
             .field("cancel_effects", &self.cancel_effects)
             .finish()
@@ -685,6 +743,26 @@ pub trait Machine: Sized + 'static {
     /// Per-component i18n messages type.
     type Messages: ComponentMessages + Clone + Default + 'static;
 
+    /// Typed identifier for the named effect intents this machine emits.
+    ///
+    /// Each component declares its own enum (e.g. `popover::Effect`,
+    /// `dialog::Effect`) — every variant is a stable identifier the
+    /// compiler treats as the single source of truth. Adapters that
+    /// route on names use exhaustive `match effect.name { … }` so a new
+    /// variant added in the component forces every adapter to update.
+    ///
+    /// Machines that never emit named effects use [`NoEffect`]; the
+    /// uninhabited type makes `PendingEffect::<_>::named(...)`
+    /// uncallable for that machine.
+    ///
+    /// Prototypes and internal test fixtures can use
+    /// `type Effect = &'static str` — `&'static str` already implements
+    /// [`EffectName`] — but production machines should prefer a
+    /// bespoke enum so authoring code, adapter dispatch, and test
+    /// fixtures share one typed identifier. See [`EffectName`] for the
+    /// full bound rationale.
+    type Effect: EffectName;
+
     /// The connect API type that produces attributes from current state.
     type Api<'a>: ConnectApi
     where
@@ -727,6 +805,33 @@ pub trait Machine: Sized + 'static {
     fn on_props_changed(_old: &Self::Props, _new: &Self::Props) -> Vec<Self::Event> {
         Vec::new()
     }
+
+    /// Effects that fire because the machine is initialized in a non-resting
+    /// state.
+    ///
+    /// `init` returns the initial `(state, context)` directly, which means
+    /// no [`transition`](Machine::transition) ever runs for the boot-up
+    /// configuration — the lifecycle effects bound to that transition (e.g.
+    /// "allocate z-index", "attach click-outside listener", "move focus
+    /// inside the open content") are therefore never emitted. When a machine
+    /// supports initializing in an already-active state (`default_open: true`,
+    /// `default_mounted: true`, …) it MUST override this method to return the
+    /// effect set the equivalent transition would have produced.
+    ///
+    /// The default implementation returns no effects, which is correct for
+    /// machines that always boot in their resting state.
+    ///
+    /// Adapters drain these effects with
+    /// [`Service::take_initial_effects`] on first mount and process them
+    /// just like they would process [`SendResult::pending_effects`] (run
+    /// each named intent, treat the buffer as empty afterwards).
+    fn initial_effects(
+        _state: &Self::State,
+        _context: &Self::Context,
+        _props: &Self::Props,
+    ) -> Vec<PendingEffect<Self>> {
+        Vec::new()
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -746,7 +851,7 @@ fn format_effect_names<M: Machine>(effects: &[PendingEffect<M>]) -> String {
             formatted.push_str(", ");
         }
 
-        formatted.push_str(effect.name);
+        formatted.push_str(&format!("{:?}", effect.name));
     }
 
     formatted.push(']');
@@ -794,7 +899,7 @@ pub struct SendResult<M: Machine> {
 
     /// Named effects to cancel. The adapter runs their cleanup closures
     /// immediately, before setting up any new `pending_effects`.
-    pub cancel_effects: Vec<&'static str>,
+    pub cancel_effects: Vec<M::Effect>,
 
     /// Whether the event queue was truncated due to hitting `MAX_DRAIN_ITERATIONS`.
     pub truncated: bool,
@@ -816,7 +921,7 @@ impl<M: Machine> Debug for SendResult<M> {
                 &self
                     .pending_effects
                     .iter()
-                    .map(|e| e.name)
+                    .map(|effect| &effect.name)
                     .collect::<Vec<_>>(),
             )
             .field("cancel_effects", &self.cancel_effects)
@@ -873,7 +978,30 @@ pub struct Service<M: Machine> {
     context: M::Context,
     props: M::Props,
     event_queue: VecDeque<M::Event>,
+    /// Snapshot of [`Machine::init`]'s state output, captured at
+    /// construction so [`Service::take_initial_effects`] can call
+    /// [`Machine::initial_effects`] against the initial configuration even
+    /// if the adapter has already dispatched events (which would otherwise
+    /// race with the lazy computation and produce the wrong effect set).
+    /// `None` once [`Service::take_initial_effects`] has run.
+    initial_inputs: Option<InitialInputs<M>>,
     unmounted: bool,
+}
+
+/// Snapshot of the inputs to [`Machine::initial_effects`] captured at
+/// construction so the call is deterministic even after later events.
+struct InitialInputs<M: Machine> {
+    state: M::State,
+    context: M::Context,
+}
+
+impl<M: Machine> Debug for InitialInputs<M> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InitialInputs")
+            .field("state", &self.state)
+            .field("context", &self.context)
+            .finish()
+    }
 }
 
 impl<M: Machine> Debug for Service<M> {
@@ -897,11 +1025,17 @@ impl<M: Machine> Service<M> {
 
         let (state, context) = M::init(&props, env, messages);
 
+        let initial_inputs = Some(InitialInputs {
+            state: state.clone(),
+            context: context.clone(),
+        });
+
         Self {
             state,
             context,
             props,
             event_queue: VecDeque::new(),
+            initial_inputs,
             unmounted: false,
         }
     }
@@ -926,11 +1060,17 @@ impl<M: Machine> Service<M> {
 
         let (_init_state, context) = M::init(&props, env, messages);
 
+        let initial_inputs = Some(InitialInputs {
+            state: state.clone(),
+            context: context.clone(),
+        });
+
         Self {
             state,
             context,
             props,
             event_queue: VecDeque::new(),
+            initial_inputs,
             unmounted: false,
         }
     }
@@ -961,6 +1101,50 @@ impl<M: Machine> Service<M> {
     /// Returns a mutable reference to the current props.
     pub const fn props_mut(&mut self) -> &mut M::Props {
         &mut self.props
+    }
+
+    /// Returns the effects produced by [`Machine::initial_effects`] for
+    /// the initial state, exactly once.
+    ///
+    /// Adapters call this on first mount, immediately after creating the
+    /// [`Service`] (or after [`Service::new_hydrated`] when restoring an
+    /// SSR snapshot). Each returned effect should be processed identically
+    /// to [`SendResult::pending_effects`] from a regular
+    /// [`send`](Service::send) call: run the named intent, register any
+    /// cleanup the adapter associates with the effect, and discard the
+    /// item.
+    ///
+    /// The inputs to [`Machine::initial_effects`] are snapshotted from
+    /// [`Machine::init`]'s output at construction, so calling this method
+    /// after one or more [`send`](Service::send) invocations still yields
+    /// the *initial* lifecycle effect set rather than effects derived from
+    /// the (possibly already-mutated) current state. The first call drops
+    /// the snapshot and computes the result; subsequent calls return an
+    /// empty vector. This makes the contract both deterministic ("always
+    /// against the initial configuration") and idempotent ("each effect
+    /// fires exactly once").
+    ///
+    /// The effect set is computed lazily rather than stored on the
+    /// service so [`Service`] only needs to keep `Send + Sync` fields —
+    /// reactive containers like `leptos::StoredValue<Service<M>>` would
+    /// otherwise reject the value because the effect setup closures
+    /// inside [`PendingEffect`] are `!Send`.
+    pub fn take_initial_effects(&mut self) -> Vec<PendingEffect<M>> {
+        if let Some(inputs) = self.initial_inputs.take() {
+            M::initial_effects(&inputs.state, &inputs.context, &self.props)
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Returns whether the initial effects have been drained yet.
+    ///
+    /// Useful for diagnostics and tests; production code should use
+    /// [`take_initial_effects`](Self::take_initial_effects) so the buffer
+    /// is consumed exactly once.
+    #[must_use]
+    pub const fn initial_effects_taken(&self) -> bool {
+        self.initial_inputs.is_none()
     }
 
     /// Sends an event to the machine, processing it and any chained events.
@@ -1383,6 +1567,7 @@ mod tests {
         type Context = ToggleContext;
         type Props = ToggleProps;
         type Messages = ();
+        type Effect = &'static str;
         type Api<'a> = ToggleApi;
 
         fn init(
@@ -1582,6 +1767,7 @@ mod tests {
             type Context = ToggleContext;
             type Props = ToggleProps;
             type Messages = ();
+            type Effect = &'static str;
             type Api<'a> = ToggleApi;
 
             fn init(
@@ -1647,6 +1833,7 @@ mod tests {
             type Context = Ctx;
             type Props = ToggleProps;
             type Messages = ();
+            type Effect = &'static str;
             type Api<'a> = ToggleApi;
 
             fn init(
@@ -1706,6 +1893,7 @@ mod tests {
             type Context = ToggleContext;
             type Props = ToggleProps;
             type Messages = ();
+            type Effect = &'static str;
             type Api<'a> = ToggleApi;
 
             fn init(
@@ -1767,6 +1955,7 @@ mod tests {
             type Context = ToggleContext;
             type Props = ToggleProps;
             type Messages = ();
+            type Effect = &'static str;
             type Api<'a> = ToggleApi;
 
             fn init(
@@ -1839,6 +2028,7 @@ mod tests {
             type Context = PropsCtx;
             type Props = ToggleProps;
             type Messages = ();
+            type Effect = &'static str;
             type Api<'a> = ToggleApi;
 
             fn init(
@@ -1935,6 +2125,7 @@ mod tests {
             type Context = QueueOrderContext;
             type Props = ToggleProps;
             type Messages = ();
+            type Effect = &'static str;
             type Api<'a> = ToggleApi;
 
             fn init(
@@ -2100,6 +2291,7 @@ mod tests {
             type Context = ToggleContext;
             type Props = ToggleProps;
             type Messages = ();
+            type Effect = &'static str;
             type Api<'a> = ToggleApi;
 
             fn init(
@@ -2155,7 +2347,9 @@ mod tests {
             .expect("expected transition log");
 
         assert!(
-            transition.message.contains("effects: [focus, announce]"),
+            transition
+                .message
+                .contains("effects: [\"focus\", \"announce\"]"),
             "expected comma-joined effect names: {transition:?}"
         );
     }
@@ -2182,6 +2376,7 @@ mod tests {
             type Context = DebugContext;
             type Props = ToggleProps;
             type Messages = ();
+            type Effect = &'static str;
             type Api<'a> = ToggleApi;
 
             fn init(
@@ -2253,7 +2448,7 @@ mod tests {
             "missing guard result: {transition:?}"
         );
         assert!(
-            transition.message.contains("effects: [notify_change]"),
+            transition.message.contains("effects: [\"notify_change\"]"),
             "missing effect names: {transition:?}"
         );
 
@@ -2296,6 +2491,7 @@ mod tests {
             type Context = ToggleContext;
             type Props = ToggleProps;
             type Messages = ();
+            type Effect = &'static str;
             type Api<'a> = ToggleApi;
 
             fn init(
@@ -2369,6 +2565,7 @@ mod tests {
             type Context = ToggleContext;
             type Props = ToggleProps;
             type Messages = ();
+            type Effect = &'static str;
             type Api<'a> = ToggleApi;
 
             fn init(
@@ -2468,6 +2665,7 @@ mod tests {
             type Context = ToggleContext;
             type Props = ToggleProps;
             type Messages = ();
+            type Effect = &'static str;
             type Api<'a> = ToggleApi;
 
             fn init(
@@ -2538,6 +2736,7 @@ mod tests {
             type Context = LoopContext;
             type Props = ToggleProps;
             type Messages = ();
+            type Effect = &'static str;
             type Api<'a> = ToggleApi;
 
             fn init(
@@ -2636,6 +2835,7 @@ mod tests {
             type Context = ToggleContext;
             type Props = ToggleProps;
             type Messages = ();
+            type Effect = &'static str;
             type Api<'a> = ToggleApi;
 
             fn init(
@@ -2724,6 +2924,7 @@ mod tests {
             type Context = LoopContext;
             type Props = ToggleProps;
             type Messages = ();
+            type Effect = &'static str;
             type Api<'a> = ToggleApi;
 
             fn init(
@@ -2966,6 +3167,7 @@ mod tests {
             type Context = ChainContext;
             type Props = ToggleProps;
             type Messages = ();
+            type Effect = &'static str;
             type Api<'a> = ToggleApi;
 
             fn init(
@@ -3147,5 +3349,219 @@ mod tests {
         let cleanup = no_cleanup();
 
         cleanup();
+    }
+
+    #[test]
+    fn take_initial_effects_returns_empty_for_default_machine() {
+        struct DefaultInitMachine;
+
+        impl Machine for DefaultInitMachine {
+            type State = ToggleState;
+            type Event = ToggleEvent;
+            type Context = ToggleContext;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Effect = &'static str;
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::Off, ToggleContext)
+            }
+
+            fn transition(
+                _state: &Self::State,
+                _event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                None
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+        }
+
+        let mut service = Service::<DefaultInitMachine>::new(
+            ToggleProps {
+                id: String::from("init-default"),
+            },
+            &Env::default(),
+            &(),
+        );
+
+        assert!(!service.initial_effects_taken());
+        assert!(service.take_initial_effects().is_empty());
+        assert!(service.initial_effects_taken());
+    }
+
+    #[test]
+    fn take_initial_effects_drains_overridden_initial_effects_exactly_once() {
+        struct InitialOpenMachine;
+
+        impl Machine for InitialOpenMachine {
+            type State = ToggleState;
+            type Event = ToggleEvent;
+            type Context = ToggleContext;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Effect = &'static str;
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::On, ToggleContext)
+            }
+
+            fn transition(
+                _state: &Self::State,
+                _event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                None
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+
+            fn initial_effects(
+                state: &Self::State,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Vec<PendingEffect<Self>> {
+                if matches!(state, ToggleState::On) {
+                    vec![
+                        PendingEffect::named("init-allocate"),
+                        PendingEffect::named("init-attach"),
+                    ]
+                } else {
+                    Vec::new()
+                }
+            }
+        }
+
+        let mut service = Service::<InitialOpenMachine>::new(
+            ToggleProps {
+                id: String::from("init-open"),
+            },
+            &Env::default(),
+            &(),
+        );
+
+        assert!(!service.initial_effects_taken());
+
+        let drained: Vec<&'static str> = service
+            .take_initial_effects()
+            .into_iter()
+            .map(|effect| effect.name)
+            .collect();
+        assert_eq!(drained, vec!["init-allocate", "init-attach"]);
+
+        assert!(service.initial_effects_taken());
+
+        // Subsequent calls observe an empty buffer — the contract guarantees
+        // each effect fires exactly once even though `Machine::initial_effects`
+        // would otherwise still return the same set.
+        assert!(service.take_initial_effects().is_empty());
+    }
+
+    #[test]
+    fn take_initial_effects_uses_initial_state_even_after_send() {
+        // Regression: the lazy implementation must snapshot the *initial*
+        // state at construction so a misbehaving adapter that dispatches
+        // events before draining the initial effects still observes the
+        // boot-time lifecycle.
+        struct StateSensitiveMachine;
+
+        impl Machine for StateSensitiveMachine {
+            type State = ToggleState;
+            type Event = ToggleEvent;
+            type Context = ToggleContext;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Effect = &'static str;
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                // Boots in the active state.
+                (ToggleState::On, ToggleContext)
+            }
+
+            fn transition(
+                _state: &Self::State,
+                _event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                Some(TransitionPlan::to(ToggleState::Off))
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+
+            fn initial_effects(
+                state: &Self::State,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Vec<PendingEffect<Self>> {
+                // Only emits when the initial state was `On`.
+                if matches!(state, ToggleState::On) {
+                    vec![PendingEffect::named("active-boot")]
+                } else {
+                    Vec::new()
+                }
+            }
+        }
+
+        let mut service = Service::<StateSensitiveMachine>::new(
+            ToggleProps {
+                id: String::from("late-take"),
+            },
+            &Env::default(),
+            &(),
+        );
+
+        // Adapter (incorrectly) flips the state before draining the
+        // initial effects.
+        let toggle = service.send(ToggleEvent::Toggle);
+        assert!(toggle.state_changed);
+        assert_eq!(service.state(), &ToggleState::Off);
+
+        // The lazy snapshot still produces the initial-Open effect set.
+        let initial: Vec<&'static str> = service
+            .take_initial_effects()
+            .into_iter()
+            .map(|effect| effect.name)
+            .collect();
+        assert_eq!(initial, vec!["active-boot"]);
     }
 }

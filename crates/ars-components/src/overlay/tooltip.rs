@@ -17,11 +17,26 @@ use ars_interactions::{KeyboardEventData, KeyboardKey};
 
 use super::positioning::PositioningOptions;
 
-const OPEN_DELAY_EFFECT: &str = "tooltip-open-delay";
-const CLOSE_DELAY_EFFECT: &str = "tooltip-close-delay";
-const OPEN_CHANGE_EFFECT: &str = "tooltip-open-change";
-const ALLOCATE_Z_INDEX_EFFECT: &str = "tooltip-allocate-z-index";
 const MIN_TOUCH_AUTO_HIDE: Duration = Duration::from_secs(5);
+
+/// Typed identifier for every named effect intent the tooltip machine
+/// emits. See the `dialog::Effect` enum in this crate for the full
+/// rationale; the same compile-time-checked-name pattern is used here so
+/// adapters can `match effect.name` exhaustively.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter starts the open hover-delay timer.
+    OpenDelay,
+
+    /// Adapter starts the close delay timer.
+    CloseDelay,
+
+    /// Adapter invokes `Props::on_open_change`.
+    OpenChange,
+
+    /// Adapter allocates a z-index and dispatches `Event::SetZIndex` back.
+    AllocateZIndex,
+}
 
 /// The states of the tooltip.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -359,6 +374,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (State, Context) {
@@ -409,7 +425,7 @@ impl ars_core::Machine for Machine {
                     .apply(|ctx: &mut Context| {
                         ctx.hover_active = true;
                     })
-                    .with_effect(PendingEffect::named(OPEN_DELAY_EFFECT)),
+                    .with_effect(PendingEffect::named(Effect::OpenDelay)),
             ),
 
             (State::Closed, Event::Focus) => Some(open_plan(props, |ctx| {
@@ -426,7 +442,7 @@ impl ars_core::Machine for Machine {
                 open_plan(props, |ctx| {
                     ctx.hover_active = true;
                 })
-                .cancel_effect(OPEN_DELAY_EFFECT),
+                .cancel_effect(Effect::OpenDelay),
             ),
 
             (State::OpenPending, Event::PointerEnter) => {
@@ -439,7 +455,7 @@ impl ars_core::Machine for Machine {
                 open_plan(props, |ctx| {
                     ctx.focus_active = true;
                 })
-                .cancel_effect(OPEN_DELAY_EFFECT),
+                .cancel_effect(Effect::OpenDelay),
             ),
 
             (State::OpenPending, Event::PointerLeave) if ctx.focus_active => {
@@ -453,7 +469,7 @@ impl ars_core::Machine for Machine {
                     .apply(|ctx: &mut Context| {
                         ctx.hover_active = false;
                     })
-                    .cancel_effect(OPEN_DELAY_EFFECT),
+                    .cancel_effect(Effect::OpenDelay),
             ),
 
             (State::OpenPending, Event::Blur) if ctx.hover_active => {
@@ -467,7 +483,7 @@ impl ars_core::Machine for Machine {
                     .apply(|ctx: &mut Context| {
                         ctx.focus_active = false;
                     })
-                    .cancel_effect(OPEN_DELAY_EFFECT),
+                    .cancel_effect(Effect::OpenDelay),
             ),
 
             (
@@ -476,7 +492,7 @@ impl ars_core::Machine for Machine {
             ) if should_close_pending(*event, props) => Some(
                 TransitionPlan::to(State::Closed)
                     .apply(clear_activity)
-                    .cancel_effect(OPEN_DELAY_EFFECT),
+                    .cancel_effect(Effect::OpenDelay),
             ),
 
             (State::Open, Event::PointerEnter | Event::ContentPointerEnter) => {
@@ -525,21 +541,21 @@ impl ars_core::Machine for Machine {
                         ctx.hover_active = false;
                         ctx.focus_active = false;
                     })
-                    .cancel_effect(CLOSE_DELAY_EFFECT),
+                    .cancel_effect(Effect::CloseDelay),
             ),
 
             (State::ClosePending, Event::PointerEnter | Event::ContentPointerEnter) => Some(
                 open_plan(props, |ctx| {
                     ctx.hover_active = true;
                 })
-                .cancel_effect(CLOSE_DELAY_EFFECT),
+                .cancel_effect(Effect::CloseDelay),
             ),
 
             (State::ClosePending, Event::Focus) => Some(
                 open_plan(props, |ctx| {
                     ctx.focus_active = true;
                 })
-                .cancel_effect(CLOSE_DELAY_EFFECT),
+                .cancel_effect(Effect::CloseDelay),
             ),
 
             (State::ClosePending, Event::Blur) if ctx.hover_active => {
@@ -560,23 +576,23 @@ impl ars_core::Machine for Machine {
                 State::ClosePending,
                 Event::CloseOnEscape | Event::CloseOnClick | Event::CloseOnScroll,
             ) if should_close_visible(*event, props) => {
-                Some(close_now_plan(props).cancel_effect(CLOSE_DELAY_EFFECT))
+                Some(close_now_plan(props).cancel_effect(Effect::CloseDelay))
             }
 
             (State::Closed, Event::Open) => Some(open_plan(props, |_| {})),
 
             (State::OpenPending, Event::Open) => {
-                Some(open_plan(props, |_| {}).cancel_effect(OPEN_DELAY_EFFECT))
+                Some(open_plan(props, |_| {}).cancel_effect(Effect::OpenDelay))
             }
 
             (State::Open, Event::Close) => Some(close_now_plan(props)),
 
             (State::OpenPending, Event::Close) => {
-                Some(close_now_plan(props).cancel_effect(OPEN_DELAY_EFFECT))
+                Some(close_now_plan(props).cancel_effect(Effect::OpenDelay))
             }
 
             (State::ClosePending, Event::Close) => {
-                Some(close_now_plan(props).cancel_effect(CLOSE_DELAY_EFFECT))
+                Some(close_now_plan(props).cancel_effect(Effect::CloseDelay))
             }
 
             (_, Event::SetControlledOpen(open)) => Some(sync_controlled_plan(*open, props)),
@@ -629,6 +645,27 @@ impl ars_core::Machine for Machine {
         }
 
         events
+    }
+
+    fn initial_effects(
+        state: &Self::State,
+        _context: &Self::Context,
+        _props: &Self::Props,
+    ) -> Vec<PendingEffect<Self>> {
+        // When `default_open: true` (or controlled `open: Some(true)`) the
+        // tooltip boots straight into `Open` without any transition — the
+        // open-plan effects (open-change notification, z-index allocation)
+        // are therefore never emitted. Mirror them here so adapters can
+        // drive the same lifecycle on first mount via
+        // `Service::take_initial_effects`.
+        if !matches!(state, State::Open) {
+            return Vec::new();
+        }
+
+        vec![
+            open_change_effect(true),
+            PendingEffect::named(Effect::AllocateZIndex),
+        ]
     }
 }
 
@@ -908,7 +945,7 @@ const fn should_close_visible(event: Event, props: &Props) -> bool {
 
 fn open_change_effect(open: bool) -> PendingEffect<Machine> {
     PendingEffect::new(
-        OPEN_CHANGE_EFFECT,
+        Effect::OpenChange,
         move |_ctx: &Context, props: &Props, _send| {
             if let Some(cb) = &props.on_open_change {
                 cb(open);
@@ -932,7 +969,7 @@ fn open_plan(
                 apply_activity(ctx);
             })
             .with_effect(open_change_effect(true))
-            .with_effect(PendingEffect::named(ALLOCATE_Z_INDEX_EFFECT))
+            .with_effect(PendingEffect::named(Effect::AllocateZIndex))
     }
 }
 
@@ -947,7 +984,7 @@ fn close_pending_or_closed(
     } else {
         TransitionPlan::to(State::ClosePending)
             .apply(apply_activity)
-            .with_effect(PendingEffect::named(CLOSE_DELAY_EFFECT))
+            .with_effect(PendingEffect::named(Effect::CloseDelay))
     }
 }
 
@@ -980,11 +1017,11 @@ fn sync_controlled_plan(open: bool, props: &Props) -> TransitionPlan<Machine> {
     });
 
     if open {
-        plan = plan.with_effect(PendingEffect::named(ALLOCATE_Z_INDEX_EFFECT));
+        plan = plan.with_effect(PendingEffect::named(Effect::AllocateZIndex));
     } else {
         plan = plan
-            .cancel_effect(OPEN_DELAY_EFFECT)
-            .cancel_effect(CLOSE_DELAY_EFFECT);
+            .cancel_effect(Effect::OpenDelay)
+            .cancel_effect(Effect::CloseDelay);
     }
 
     plan
@@ -1072,7 +1109,7 @@ mod tests {
         }
     }
 
-    fn effect_names(result: &ars_core::SendResult<Machine>) -> Vec<&'static str> {
+    fn effect_names(result: &ars_core::SendResult<Machine>) -> Vec<Effect> {
         result
             .pending_effects
             .iter()
@@ -1166,7 +1203,7 @@ mod tests {
         assert_eq!(service.state(), &State::OpenPending);
         assert!(service.context().hover_active);
         assert!(!service.context().open);
-        assert_eq!(effect_names(&result), vec![OPEN_DELAY_EFFECT]);
+        assert_eq!(effect_names(&result), vec![Effect::OpenDelay]);
     }
 
     #[test]
@@ -1196,9 +1233,9 @@ mod tests {
         assert!(service.context().focus_active);
         assert_eq!(
             effect_names(&result),
-            vec![OPEN_CHANGE_EFFECT, ALLOCATE_Z_INDEX_EFFECT]
+            vec![Effect::OpenChange, Effect::AllocateZIndex]
         );
-        assert_eq!(result.cancel_effects, vec![OPEN_DELAY_EFFECT]);
+        assert_eq!(result.cancel_effects, vec![Effect::OpenDelay]);
     }
 
     #[test]
@@ -1213,9 +1250,9 @@ mod tests {
         assert!(service.context().open);
         assert_eq!(
             effect_names(&result),
-            vec![OPEN_CHANGE_EFFECT, ALLOCATE_Z_INDEX_EFFECT]
+            vec![Effect::OpenChange, Effect::AllocateZIndex]
         );
-        assert_eq!(result.cancel_effects, vec![OPEN_DELAY_EFFECT]);
+        assert_eq!(result.cancel_effects, vec![Effect::OpenDelay]);
     }
 
     #[test]
@@ -1244,7 +1281,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().hover_active);
-        assert_eq!(result.cancel_effects, vec![OPEN_DELAY_EFFECT]);
+        assert_eq!(result.cancel_effects, vec![Effect::OpenDelay]);
     }
 
     #[test]
@@ -1276,7 +1313,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().focus_active);
-        assert_eq!(result.cancel_effects, vec![OPEN_DELAY_EFFECT]);
+        assert_eq!(result.cancel_effects, vec![Effect::OpenDelay]);
     }
 
     #[test]
@@ -1294,7 +1331,7 @@ mod tests {
 
             assert_eq!(service.state(), &State::Closed);
             assert!(!service.context().hover_active);
-            assert_eq!(result.cancel_effects, vec![OPEN_DELAY_EFFECT]);
+            assert_eq!(result.cancel_effects, vec![Effect::OpenDelay]);
         }
     }
 
@@ -1308,7 +1345,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::Open);
         assert!(service.context().open);
-        assert_eq!(result.cancel_effects, vec![OPEN_DELAY_EFFECT]);
+        assert_eq!(result.cancel_effects, vec![Effect::OpenDelay]);
     }
 
     #[test]
@@ -1321,7 +1358,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().open);
-        assert_eq!(result.cancel_effects, vec![OPEN_DELAY_EFFECT]);
+        assert_eq!(result.cancel_effects, vec![Effect::OpenDelay]);
     }
 
     #[test]
@@ -1339,7 +1376,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::ClosePending);
         assert!(service.context().open);
-        assert_eq!(effect_names(&result), vec![CLOSE_DELAY_EFFECT]);
+        assert_eq!(effect_names(&result), vec![Effect::CloseDelay]);
     }
 
     #[test]
@@ -1426,7 +1463,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().open);
-        assert_eq!(effect_names(&result), vec![OPEN_CHANGE_EFFECT]);
+        assert_eq!(effect_names(&result), vec![Effect::OpenChange]);
     }
 
     #[test]
@@ -1446,8 +1483,8 @@ mod tests {
 
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().open);
-        assert_eq!(effect_names(&result), vec![OPEN_CHANGE_EFFECT]);
-        assert_eq!(result.cancel_effects, vec![CLOSE_DELAY_EFFECT]);
+        assert_eq!(effect_names(&result), vec![Effect::OpenChange]);
+        assert_eq!(result.cancel_effects, vec![Effect::CloseDelay]);
     }
 
     #[test]
@@ -1467,7 +1504,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::Open);
         assert!(service.context().focus_active);
-        assert_eq!(result.cancel_effects, vec![CLOSE_DELAY_EFFECT]);
+        assert_eq!(result.cancel_effects, vec![Effect::CloseDelay]);
     }
 
     #[test]
@@ -1559,7 +1596,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().open);
-        assert_eq!(result.cancel_effects, vec![CLOSE_DELAY_EFFECT]);
+        assert_eq!(result.cancel_effects, vec![Effect::CloseDelay]);
     }
 
     #[test]
@@ -1579,7 +1616,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().open);
-        assert_eq!(result.cancel_effects, vec![CLOSE_DELAY_EFFECT]);
+        assert_eq!(result.cancel_effects, vec![Effect::CloseDelay]);
     }
 
     #[test]
@@ -1612,7 +1649,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().hover_active);
-        assert_eq!(leave.cancel_effects, vec![OPEN_DELAY_EFFECT]);
+        assert_eq!(leave.cancel_effects, vec![Effect::OpenDelay]);
     }
 
     #[test]
@@ -1626,7 +1663,7 @@ mod tests {
         assert!(service.context().focus_active);
         assert_eq!(
             effect_names(&result),
-            vec![OPEN_CHANGE_EFFECT, ALLOCATE_Z_INDEX_EFFECT]
+            vec![Effect::OpenChange, Effect::AllocateZIndex]
         );
     }
 
@@ -1646,7 +1683,7 @@ mod tests {
         let result = service.send(Event::Blur);
 
         assert_eq!(service.state(), &State::ClosePending);
-        assert_eq!(effect_names(&result), vec![CLOSE_DELAY_EFFECT]);
+        assert_eq!(effect_names(&result), vec![Effect::CloseDelay]);
     }
 
     #[test]
@@ -1666,7 +1703,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::Open);
         assert!(service.context().hover_active);
-        assert_eq!(result.cancel_effects, vec![CLOSE_DELAY_EFFECT]);
+        assert_eq!(result.cancel_effects, vec![Effect::CloseDelay]);
     }
 
     #[test]
@@ -1684,7 +1721,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().open);
-        assert_eq!(effect_names(&result), vec![OPEN_CHANGE_EFFECT]);
+        assert_eq!(effect_names(&result), vec![Effect::OpenChange]);
     }
 
     #[test]
@@ -1777,7 +1814,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().open);
-        assert_eq!(result.cancel_effects, vec![CLOSE_DELAY_EFFECT]);
+        assert_eq!(result.cancel_effects, vec![Effect::CloseDelay]);
     }
 
     #[test]
@@ -1796,7 +1833,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().open);
-        assert_eq!(effect_names(&result), vec![OPEN_CHANGE_EFFECT]);
+        assert_eq!(effect_names(&result), vec![Effect::OpenChange]);
     }
 
     #[test]
@@ -1855,14 +1892,14 @@ mod tests {
         assert!(service.context().open);
         assert_eq!(
             effect_names(&open),
-            vec![OPEN_CHANGE_EFFECT, ALLOCATE_Z_INDEX_EFFECT]
+            vec![Effect::OpenChange, Effect::AllocateZIndex]
         );
 
         let close = service.send(Event::Close);
 
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().open);
-        assert_eq!(effect_names(&close), vec![OPEN_CHANGE_EFFECT]);
+        assert_eq!(effect_names(&close), vec![Effect::OpenChange]);
     }
 
     #[test]
@@ -1881,7 +1918,7 @@ mod tests {
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().open);
         assert!(service.context().focus_active);
-        assert_eq!(effect_names(&result), vec![OPEN_CHANGE_EFFECT]);
+        assert_eq!(effect_names(&result), vec![Effect::OpenChange]);
     }
 
     #[test]
@@ -1904,7 +1941,7 @@ mod tests {
         assert!(service.context().open);
         assert!(!service.context().hover_active);
         assert!(!service.context().focus_active);
-        assert_eq!(effect_names(&result), vec![OPEN_CHANGE_EFFECT]);
+        assert_eq!(effect_names(&result), vec![Effect::OpenChange]);
     }
 
     #[test]
@@ -1923,7 +1960,7 @@ mod tests {
         assert_eq!(service.state(), &State::Open);
         assert!(service.context().open);
         assert!(!service.context().hover_active);
-        assert_eq!(effect_names(&result), vec![OPEN_CHANGE_EFFECT]);
+        assert_eq!(effect_names(&result), vec![Effect::OpenChange]);
     }
 
     #[test]
@@ -1944,7 +1981,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::Open);
         assert!(service.context().open);
-        assert_eq!(effect_names(&result), vec![ALLOCATE_Z_INDEX_EFFECT]);
+        assert_eq!(effect_names(&result), vec![Effect::AllocateZIndex]);
     }
 
     #[test]
@@ -1969,7 +2006,7 @@ mod tests {
         assert!(!service.context().open);
         assert_eq!(
             result.cancel_effects,
-            vec![OPEN_DELAY_EFFECT, CLOSE_DELAY_EFFECT]
+            vec![Effect::OpenDelay, Effect::CloseDelay]
         );
     }
 
@@ -2085,6 +2122,38 @@ mod tests {
         }
 
         assert!(<Machine as ars_core::Machine>::on_props_changed(&old, &old).is_empty());
+    }
+
+    #[test]
+    fn tooltip_initial_effects_empty_when_default_open_false() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
+
+        assert!(service.take_initial_effects().is_empty());
+        assert!(service.initial_effects_taken());
+    }
+
+    #[test]
+    fn tooltip_initial_effects_emit_open_change_and_allocate_z_index_when_default_open_true() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        let names: Vec<Effect> = service
+            .take_initial_effects()
+            .into_iter()
+            .map(|effect| effect.name)
+            .collect();
+
+        assert!(names.contains(&Effect::OpenChange));
+        assert!(names.contains(&Effect::AllocateZIndex));
+
+        // Subsequent calls observe an empty buffer.
+        assert!(service.take_initial_effects().is_empty());
     }
 
     #[test]

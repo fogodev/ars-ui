@@ -2927,6 +2927,7 @@ mod tests {
         type Context = MockContext;
         type Props = MockProps;
         type Messages = ();
+        type Effect = ars_core::NoEffect;
         type Api<'a> = MockApi<'a>;
 
         fn init(

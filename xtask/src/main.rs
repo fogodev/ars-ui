@@ -159,9 +159,17 @@ enum LintCommand {
         #[arg(long, default_value_t = 3)]
         min_per_variant: usize,
 
-        /// Maximum snapshots per component before failure.
-        #[arg(long, default_value_t = 20)]
+        /// Hard ceiling — maximum snapshots per component regardless of
+        /// anatomy size.
+        #[arg(long, default_value_t = 40)]
         max_per_component: usize,
+
+        /// Multiplier applied to `state_variants × anatomy_parts` when
+        /// computing the per-component soft budget. The soft budget is
+        /// `min(per_part_per_variant × variants × parts,
+        /// max_per_component)`.
+        #[arg(long, default_value_t = 3)]
+        per_part_per_variant: usize,
     },
 
     /// Verify each error enum variant appears in a test function.
@@ -429,10 +437,12 @@ fn main() {
                     snapshots_dir,
                     min_per_variant,
                     max_per_component,
+                    per_part_per_variant,
                 } => lint::check_snapshot_count(&lint::SnapshotCountOptions {
                     snapshots_dir,
                     min_per_variant,
                     max_per_component,
+                    per_part_per_variant,
                 }),
 
                 LintCommand::ErrorVariantCoverage {

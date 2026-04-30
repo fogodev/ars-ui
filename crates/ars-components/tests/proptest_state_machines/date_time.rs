@@ -67,12 +67,7 @@ fn arb_date_field_action() -> impl Strategy<Value = DateFieldAction> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1000)
-    ))]
+    #![proptest_config(super::common::proptest_config())]
 
     #[test]
     #[ignore = "proptest — nightly extended-proptest job"]

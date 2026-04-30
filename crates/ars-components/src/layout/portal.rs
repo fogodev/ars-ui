@@ -137,6 +137,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = ars_core::NoEffect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, _messages: &Self::Messages) -> (State, Context) {

@@ -512,6 +512,7 @@ pub trait Machine: Sized + 'static {
     type Context: Clone + Debug;        // Debug added — enables logging/inspection of context
     type Props: Clone + PartialEq + HasId; // PartialEq required for Dioxus memoization; Clone for reactive prop sync; HasId for adapter ID access
     type Messages: ComponentMessages + Clone + Default + 'static; // Per-component i18n messages type
+    type Effect: EffectName;            // Typed identifier for the named effect intents this machine emits — see §2.1.2
     type Api<'a>: ConnectApi where Self: 'a; // ConnectApi bound enables generic adapter utilities (e.g., part_attrs() access); `where Self: 'a` required for GAT well-formedness
 
     /// Initialize the machine from props and adapter-resolved environment values,
@@ -551,8 +552,67 @@ pub trait Machine: Sized + 'static {
     fn on_props_changed(_old: &Self::Props, _new: &Self::Props) -> Vec<Self::Event> {
         Vec::new()
     }
+
+    /// Effects that fire because the machine is initialized in a non-resting
+    /// state.
+    ///
+    /// `init` returns the initial `(state, context)` directly, which means
+    /// no `transition` ever runs for the boot-up configuration — the
+    /// lifecycle effects bound to that transition (e.g. "allocate
+    /// z-index", "attach click-outside listener", "move focus inside the
+    /// open content") are therefore never emitted. When a machine
+    /// supports initializing in an already-active state (`default_open:
+    /// true`, `default_mounted: true`, …) it MUST override this method to
+    /// return the effect set the equivalent transition would have
+    /// produced.
+    ///
+    /// The default implementation returns no effects, which is correct
+    /// for machines that always boot in their resting state.
+    ///
+    /// Adapters drain these effects with `Service::take_initial_effects`
+    /// on first mount (see §2.3) and process them just like
+    /// `SendResult::pending_effects` from a regular `send` call.
+    fn initial_effects(
+        _state: &Self::State,
+        _context: &Self::Context,
+        _props: &Self::Props,
+    ) -> Vec<PendingEffect<Self>> {
+        Vec::new()
+    }
 }
 ````
+
+#### 2.1.1 Initial-Effects Contract
+
+When `Machine::init` returns a state that represents an active lifecycle
+(open overlay, mounted presence region, focused trigger, …) no transition
+runs and the standard `with_effect(...)` chain on `TransitionPlan` cannot
+fire — `Service::new` already has the initial state and never asks the
+machine for a transition into it. Without `initial_effects`, the adapter
+mounting an `default_open: true` popover would not get a click-outside
+listener attached, no z-index would be allocated, and focus would not move
+inside the content.
+
+The contract is:
+
+1. **Machine override:** machines whose initial state can carry an active
+   lifecycle MUST override `initial_effects` to return the same effect set
+   the equivalent transition would produce. Unit machines (`State::Off ↔
+   State::On`) typically need no override.
+2. **Adapter consumption:** adapters MUST call `Service::take_initial_effects`
+   exactly once, on first mount, immediately after constructing the service
+   (or after `new_hydrated` for SSR restoration). Each returned effect is
+   processed identically to `SendResult::pending_effects` from a regular
+   `send` call — run the named intent, register any cleanup the adapter
+   associates with the effect, and discard the item.
+3. **Idempotence:** the buffer is consumed by the first call; subsequent
+   calls return an empty vector. This prevents duplicate listeners and
+   double allocations on every overlay component.
+4. **Compositional consistency:** machines that own a separate Presence
+   composition (Dialog, Popover, Tooltip) override `initial_effects` to
+   emit the open-lifecycle effect set when state is `Open`; this keeps
+   server-rendered "initially open" overlays behaving identically to
+   client-side opens.
 
 > **Lifetime note — `Api<'a>` structs are ephemeral.** They borrow `state`, `ctx`, `props`, and `send` from the current scope. Consume the `Api` within the same expression or closure where `connect()` is called. Never store an `Api` across suspension points (`.await`, signal updates). If you need data from an `Api` across frames, extract the values you need into owned types first.
 >
@@ -633,6 +693,85 @@ This enables `data-ars-state` values and Service debug logging.
 > imports it at the adapter level where no local `Machine` struct exists.
 >
 > **Adapter import note:** Adapter crates (`ars-leptos`, `ars-dioxus`) use `use ars_core::Machine;` directly, since they do not define a local `Machine` struct. The shadowing concern only applies inside component modules.
+
+#### 2.1.2 Typed Effect Names (`type Effect: EffectName`)
+
+Each `Machine` declares a typed `Effect` associated type — a per-component
+enum that names every effect intent the machine emits. The bound is named
+[`EffectName`], a marker supertrait with a blanket impl that
+documents the supertrait sum the engine actually needs:
+
+```rust
+/// Marker supertrait that names the bounds every `Machine::Effect`
+/// type must satisfy. Carries no methods — pure naming alias.
+pub trait EffectName: Copy + Debug + Eq + core::hash::Hash + Send + Sync + 'static {}
+
+impl<T: Copy + Debug + Eq + core::hash::Hash + Send + Sync + 'static> EffectName for T {}
+
+/// Uninhabited effect type for machines that never emit named effects.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum NoEffect {}
+```
+
+The blanket impl means **any** type satisfying the supertrait sum
+automatically implements `EffectName` — bespoke component enums, the
+uninhabited `NoEffect`, `&'static str` for prototypes, etc. There is no
+opt-in step.
+
+Production machines define their own `Effect` enum:
+
+```rust
+pub mod popover {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum Effect {
+        OpenChange,
+        AttachClickOutside,
+        DetachClickOutside,
+        AllocateZIndex,
+        ReleaseZIndex,
+        RestoreFocus,
+        FocusInitial,
+    }
+
+    impl ars_core::Machine for Machine {
+        // ...
+        type Effect = Effect;
+        // ...
+    }
+}
+```
+
+`PendingEffect<M>` stores `name: M::Effect` (typed). `cancel_effects:
+Vec<M::Effect>` and `TransitionPlan::cancel_effect(name: M::Effect)` are
+similarly typed. Adapter cleanup bookkeeping uses the typed effect
+directly as a `HashMap<M::Effect, CleanupFn>` key — the `Eq + Hash`
+bounds make that ergonomic without any string round-trip.
+
+**Why typed:**
+
+- **Compile-time exhaustiveness.** Adapters that route on names use
+  `match effect.name { popover::Effect::OpenChange => …, … }`; a new
+  variant added in the component forces every adapter `match` to update.
+- **Refactor safety.** Renaming a variant ripples through every author
+  call site through normal compiler errors — there is no parallel
+  kebab-case wire string that can drift out of sync.
+- **Devtools friendliness.** `Debug` is part of the bound, so log lines,
+  devtools panels, and `SendResult` debug output print
+  `Effect::OpenChange` directly without a separate identifier table.
+
+**Choosing a typed enum vs `NoEffect` vs `&'static str`:**
+
+| Component shape                                    | `type Effect`                |
+| -------------------------------------------------- | ---------------------------- |
+| Production machine emitting named intents          | bespoke `pub enum Effect`    |
+| Machine that never emits effects (Presence, Form…) | `NoEffect`                   |
+| Internal test machine / prototype / migration      | `&'static str`               |
+
+`&'static str` already implements every required bound, so internal
+test machines and prototypes can use it directly as their `type Effect`
+without wrapping in a newtype. Production machines should still prefer
+a bespoke enum so authoring code, adapter dispatch, and test fixtures
+share one typed identifier.
 
 ### 2.2 TransitionPlan and PendingEffect
 
@@ -1833,6 +1972,27 @@ impl<M: Machine> Service<M> {
     pub fn state(&self) -> &M::State { &self.state }
     pub fn context(&self) -> &M::Context { &self.context }
     pub fn props(&self) -> &M::Props { &self.props }
+
+    /// Returns the effects produced by `Machine::initial_effects` for the
+    /// initial state, exactly once. Adapters MUST call this on first
+    /// mount, immediately after creating the service. See §2.1.1
+    /// "Initial-Effects Contract". The effect set is computed lazily
+    /// rather than stored on the service so `Service<M>` only carries
+    /// `Send + Sync` fields — `PendingEffect`'s setup closures are `!Send`
+    /// and would otherwise prevent storage in reactive containers like
+    /// `leptos::StoredValue<Service<M>>`.
+    pub fn take_initial_effects(&mut self) -> Vec<PendingEffect<M>> {
+        if self.initial_effects_taken {
+            return Vec::new();
+        }
+        self.initial_effects_taken = true;
+        M::initial_effects(&self.state, &self.context, &self.props)
+    }
+
+    /// Returns whether `take_initial_effects` has already been called.
+    /// Production code should use `take_initial_effects` so the buffer
+    /// is consumed exactly once; this accessor is for diagnostics.
+    pub const fn initial_effects_taken(&self) -> bool { self.initial_effects_taken }
 
     /// Test-only: force the service into a specific state. Re-derives context
     /// from the new state and current props via `Machine::init`, discarding

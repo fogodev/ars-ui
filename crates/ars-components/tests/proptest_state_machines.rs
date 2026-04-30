@@ -1,5 +1,13 @@
 //! Ignored nightly property-based tests for ars-components state machines.
 
+// Shared `proptest_config()` helper — every `proptest!` block in the
+// modules below uses `super::common::proptest_config()` so the
+// `PROPTEST_CASES` env-var handling and centralised failure-persistence
+// path stay in one place. See `proptest_state_machines/common.rs` for
+// rationale.
+#[path = "proptest_state_machines/common.rs"]
+mod common;
+
 #[path = "proptest_state_machines/input.rs"]
 mod input;
 

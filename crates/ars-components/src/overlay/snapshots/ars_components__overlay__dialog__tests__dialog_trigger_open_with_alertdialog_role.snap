@@ -1,0 +1,61 @@
+---
+source: crates/ars-components/src/overlay/dialog.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "dialog",
+            ),
+        ),
+        (
+            Aria(
+                Expanded,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                HasPopup,
+            ),
+            String(
+                "dialog",
+            ),
+        ),
+        (
+            Aria(
+                Controls,
+            ),
+            String(
+                "dialog-content",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "dialog-trigger",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

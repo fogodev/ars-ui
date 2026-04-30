@@ -556,6 +556,16 @@ pub struct CharacterCount {
     pub text: String,
 }
 
+/// Typed identifier for every named effect intent the textarea machine emits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter recomputes textarea height after content changes.
+    AutoResize,
+
+    /// Adapter invokes `Props::on_value_change` with the new committed value.
+    ValueChange,
+}
+
 /// The machine for the `Textarea` component.
 #[derive(Debug)]
 pub struct Machine;
@@ -566,6 +576,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(
@@ -1095,7 +1106,7 @@ fn props_output_changed(old: &Props, new: &Props) -> bool {
 
 fn auto_resize_effect(ctx: &Context) -> PendingEffect<Machine> {
     PendingEffect::named_with_metadata(
-        "auto-resize",
+        Effect::AutoResize,
         EffectMetadata::ResizeToContent(ResizeToContentEffect {
             element_id: ctx.ids.part("textarea"),
             max_height: ctx.max_height.clone(),
@@ -1106,7 +1117,7 @@ fn auto_resize_effect(ctx: &Context) -> PendingEffect<Machine> {
 
 fn value_change_effect(value: String) -> PendingEffect<Machine> {
     PendingEffect::new(
-        "value-change",
+        Effect::ValueChange,
         move |_ctx: &Context, props: &Props, _send| {
             if let Some(callback) = &props.on_value_change {
                 callback(value);
@@ -1565,7 +1576,7 @@ mod tests {
         let result = plain_service.send(Event::Change("plain".to_string()));
 
         assert_eq!(result.pending_effects.len(), 1);
-        assert_eq!(result.pending_effects[0].name, "value-change");
+        assert_eq!(result.pending_effects[0].name, Effect::ValueChange);
 
         let mut resize_service = service(
             props()
@@ -1578,8 +1589,8 @@ mod tests {
         let result = resize_service.send(Event::Change("resized".to_string()));
 
         assert_eq!(result.pending_effects.len(), 2);
-        assert_eq!(result.pending_effects[0].name, "value-change");
-        assert_eq!(result.pending_effects[1].name, "auto-resize");
+        assert_eq!(result.pending_effects[0].name, Effect::ValueChange);
+        assert_eq!(result.pending_effects[1].name, Effect::AutoResize);
         assert_eq!(
             result.pending_effects[1].metadata,
             Some(EffectMetadata::ResizeToContent(ResizeToContentEffect {
@@ -1617,7 +1628,7 @@ mod tests {
         );
 
         assert_eq!(result.pending_effects.len(), 1);
-        assert_eq!(result.pending_effects[0].name, "auto-resize");
+        assert_eq!(result.pending_effects[0].name, Effect::AutoResize);
         assert_eq!(
             result.pending_effects[0].metadata,
             Some(EffectMetadata::ResizeToContent(ResizeToContentEffect {
@@ -1636,7 +1647,7 @@ mod tests {
         );
 
         assert_eq!(result.pending_effects.len(), 1);
-        assert_eq!(result.pending_effects[0].name, "auto-resize");
+        assert_eq!(result.pending_effects[0].name, Effect::AutoResize);
         assert_eq!(
             result.pending_effects[0].metadata,
             Some(EffectMetadata::ResizeToContent(ResizeToContentEffect {
@@ -1649,14 +1660,14 @@ mod tests {
         let result = resize_service.send(Event::Clear);
 
         assert_eq!(result.pending_effects.len(), 2);
-        assert_eq!(result.pending_effects[1].name, "auto-resize");
+        assert_eq!(result.pending_effects[1].name, Effect::AutoResize);
 
         drop(resize_service.send(Event::CompositionStart));
 
         let result = resize_service.send(Event::CompositionEnd("final".to_string()));
 
         assert_eq!(result.pending_effects.len(), 2);
-        assert_eq!(result.pending_effects[1].name, "auto-resize");
+        assert_eq!(result.pending_effects[1].name, Effect::AutoResize);
     }
 
     #[test]
