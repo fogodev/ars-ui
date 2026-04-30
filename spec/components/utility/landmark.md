@@ -141,10 +141,11 @@ impl Api {
     }
 
     /// Returns `true` when the landmark has an accessible name from
-    /// a non-empty `aria-labelledby` value or from the resolved localized label
-    /// message.
+    /// a non-empty `aria-labelledby` value or from a resolved localized label
+    /// message containing non-whitespace text.
     pub fn has_accessible_name(&self) -> bool {
-        self.non_empty_labelledby_id().is_some() || !(self.messages.label)(&self.locale).is_empty()
+        self.non_empty_labelledby_id().is_some()
+            || label_has_text(&(self.messages.label)(&self.locale))
     }
 
     /// Returns `true` when this API should emit the debug warning for a
@@ -178,11 +179,9 @@ impl Api {
             attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), id);
         } else {
             let label = (self.messages.label)(&self.locale);
-            if !label.is_empty() {
+            if label_has_text(&label) {
                 attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
-            }
-
-            if label.is_empty() && self.missing_accessible_name_warning_needed() {
+            } else if self.missing_accessible_name_warning_needed() {
                 warn_missing_accessible_name(self.props.role);
             }
         }
@@ -196,6 +195,10 @@ impl Api {
             .as_deref()
             .filter(|id| !id.trim().is_empty())
     }
+}
+
+fn label_has_text(label: &str) -> bool {
+    !label.trim().is_empty()
 }
 
 impl ConnectApi for Api {

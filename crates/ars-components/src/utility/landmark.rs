@@ -209,10 +209,10 @@ impl Api {
     }
 
     /// Returns whether this landmark has either `aria-labelledby` or a
-    /// non-empty localized `aria-label`.
+    /// localized `aria-label` containing non-whitespace text.
     #[must_use]
     pub fn has_accessible_name(&self) -> bool {
-        self.non_empty_labelledby_id().is_some() || !self.label().is_empty()
+        self.non_empty_labelledby_id().is_some() || label_has_text(&self.label())
     }
 
     /// Returns whether connecting this landmark should emit the development
@@ -246,12 +246,10 @@ impl Api {
         } else {
             let label = self.label();
 
-            if label.is_empty() {
-                if self.missing_accessible_name_warning_needed() {
-                    warn_missing_accessible_name(self.props.role);
-                }
-            } else {
+            if label_has_text(&label) {
                 attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
+            } else if self.missing_accessible_name_warning_needed() {
+                warn_missing_accessible_name(self.props.role);
             }
         }
 
@@ -264,6 +262,10 @@ impl Api {
             .as_deref()
             .filter(|id| !id.trim().is_empty())
     }
+}
+
+fn label_has_text(label: &str) -> bool {
+    !label.trim().is_empty()
 }
 
 impl ConnectApi for Api {
@@ -422,6 +424,7 @@ mod tests {
     #[test]
     fn accessible_name_helpers_identify_required_and_missing_names() {
         let named = labelled_api(Props::new().role(Role::Region), "Activity");
+        let blank_label = labelled_api(Props::new().role(Role::Region), "   ");
 
         let labelledby = api(Props::new()
             .role(Role::Form)
@@ -438,6 +441,8 @@ mod tests {
         assert!(Role::Region.requires_accessible_name());
         assert!(!Role::Navigation.requires_accessible_name());
         assert!(named.has_accessible_name());
+        assert!(!blank_label.has_accessible_name());
+        assert!(blank_label.missing_accessible_name_warning_needed());
         assert!(labelledby.has_accessible_name());
         assert!(!empty_labelledby.has_accessible_name());
         assert!(!blank_labelledby.has_accessible_name());
@@ -622,6 +627,18 @@ mod tests {
 
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)), None);
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Label)), None);
+    }
+
+    #[test]
+    fn landmark_root_blank_label_message_is_treated_as_missing_name() {
+        let api = labelled_api(Props::new().id("blank-label").role(Role::Navigation), "   ");
+
+        assert!(!api.has_accessible_name());
+
+        let attrs = api.root_attrs(true);
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Label)), None);
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)), None);
     }
 
     #[test]
