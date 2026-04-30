@@ -19,7 +19,7 @@ Landmark provides semantic landmark regions for page structure, mapping to ARIA 
 
 ```rust
 /// The role of the landmark region.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Role {
     /// <header>
     Banner,
@@ -41,7 +41,7 @@ pub enum Role {
 
 impl Role {
     /// Returns the WAI-ARIA role string for use in `role` attribute.
-    pub fn aria_role(&self) -> &'static str {
+    pub const fn aria_role(self) -> &'static str {
         match self {
             Role::Banner => "banner",
             Role::Navigation => "navigation",
@@ -52,6 +52,12 @@ impl Role {
             Role::Form => "form",
             Role::Region => "region",
         }
+    }
+
+    /// Returns `true` when the role must have an accessible name to be
+    /// recognized as a landmark by assistive technology.
+    pub const fn requires_accessible_name(self) -> bool {
+        matches!(self, Role::Form | Role::Region)
     }
 }
 
@@ -64,8 +70,9 @@ pub struct Props {
     pub role: Role,
     /// Optional ID of an element that labels this landmark.
     /// Per WAI-ARIA, `aria-labelledby` and `aria-label` MUST NOT be set
-    /// simultaneously. When `labelledby_id` is set, it takes precedence
-    /// over `messages.label` and emits `aria-labelledby` instead of `aria-label`.
+    /// simultaneously. When `labelledby_id` is set to a non-empty value, it
+    /// takes precedence over `messages.label` and emits `aria-labelledby`
+    /// instead of `aria-label`.
     pub labelledby_id: Option<String>,
 }
 
@@ -76,6 +83,26 @@ impl Default for Props {
             role: Role::Region,
             labelledby_id: None,
         }
+    }
+}
+
+impl Props {
+    pub fn new() -> Self { Self::default() }
+    pub fn id(mut self, id: impl Into<String>) -> Self {
+        self.id = id.into();
+        self
+    }
+    pub const fn role(mut self, role: Role) -> Self {
+        self.role = role;
+        self
+    }
+    pub fn labelledby_id(mut self, id: impl Into<String>) -> Self {
+        self.labelledby_id = Some(id.into());
+        self
+    }
+    pub fn unlabelled(mut self) -> Self {
+        self.labelledby_id = None;
+        self
     }
 }
 ```
@@ -89,75 +116,141 @@ pub enum Part {
     Root,
 }
 
-pub struct Api<'a> {
-    props: &'a Props,
+pub struct Api {
+    props: Props,
     locale: Locale,
     messages: Messages,
 }
 
-impl<'a> Api<'a> {
-    pub fn new(props: &'a Props, locale: Locale, messages: Messages) -> Self {
-        Self { props, locale, messages }
+impl Api {
+    pub fn new(props: Props, env: &Env, messages: &Messages) -> Self {
+        Self {
+            props,
+            locale: env.locale.clone(),
+            messages: messages.clone(),
+        }
     }
 
-    /// Returns `true` when the adapter cannot render the semantic HTML5 element
-    /// for this role (e.g., `<search>` with limited browser support).
-    /// The adapter should then render a `<div>` with the explicit ARIA `role`.
-    pub fn uses_div_fallback(&self) -> bool {
+    /// Returns `true` when adapters should prefer their generic fallback
+    /// element for the default rendering path.
+    ///
+    /// Adapters can still call `root_attrs(false)` for any role when they
+    /// render an explicit-role fallback element.
+    pub fn prefers_generic_fallback_element(&self) -> bool {
         matches!(self.props.role, Role::Search)
     }
 
+    /// Returns `true` when the landmark has an accessible name from
+    /// a non-empty `aria-labelledby` value or from a resolved localized label
+    /// message containing non-whitespace text.
+    pub fn has_accessible_name(&self) -> bool {
+        self.non_empty_labelledby_id().is_some()
+            || label_has_text(&(self.messages.label)(&self.locale))
+    }
+
+    /// Returns `true` when this API should emit the debug warning for a
+    /// required but missing accessible name.
+    pub fn missing_accessible_name_warning_needed(&self) -> bool {
+        self.props.role.requires_accessible_name() && !self.has_accessible_name()
+    }
+
     /// Returns the root attributes.
-    pub fn root_attrs(&self) -> AttrMap {
+    ///
+    /// When the adapter renders a native landmark element, the explicit
+    /// `role` attribute is redundant and should be omitted. Set
+    /// `is_native_landmark_element` to `false` when rendering a generic fallback
+    /// element such as `<div>`.
+    pub fn root_attrs(&self, is_native_landmark_element: bool) -> AttrMap {
         let mut attrs = AttrMap::new();
         attrs.set(HtmlAttr::Id, &self.props.id);
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        // Only set role explicitly if using a <div> fallback
-        // (semantic HTML elements carry implicit roles)
-        if self.uses_div_fallback() {
+
+        // Only set role explicitly when using a generic fallback element;
+        // semantic HTML elements carry implicit roles.
+        if !is_native_landmark_element {
             attrs.set(HtmlAttr::Role, self.props.role.aria_role());
         }
 
         // Per WAI-ARIA, aria-labelledby and aria-label MUST NOT be set
-        // simultaneously. When labelledby_id is set, it takes precedence.
-        if let Some(ref id) = self.props.labelledby_id {
+        // simultaneously. When labelledby_id is non-empty, it takes precedence.
+        if let Some(id) = self.non_empty_labelledby_id() {
             attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), id);
         } else {
             let label = (self.messages.label)(&self.locale);
-            if !label.is_empty() {
+            if label_has_text(&label) {
                 attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
-            }
-
-            // Form and Region landmarks require an accessible name per WAI-ARIA.
-            // Emit a debug warning when the name is missing.
-            #[cfg(debug_assertions)]
-            if matches!(self.props.role, Role::Form | Role::Region)
-                && label.is_empty()
-            {
-                log::warn!(
-                    "Landmark with role {:?} requires an accessible name \
-                     (aria-label or aria-labelledby). Without one, assistive \
-                     technology will not recognize it as a landmark.",
-                    self.props.role,
-                );
+            } else if self.missing_accessible_name_warning_needed() {
+                warn_missing_accessible_name(self.props.role);
             }
         }
 
         attrs
     }
+
+    fn non_empty_labelledby_id(&self) -> Option<&str> {
+        self.props
+            .labelledby_id
+            .as_deref()
+            .filter(|id| !id.trim().is_empty())
+    }
 }
 
-impl ConnectApi for Api<'_> {
+fn label_has_text(label: &str) -> bool {
+    !label.trim().is_empty()
+}
+
+impl ConnectApi for Api {
     type Part = Part;
 
     fn part_attrs(&self, part: Part) -> AttrMap {
         match part {
-            Part::Root => self.root_attrs(),
+            Part::Root => self.root_attrs(true),
         }
     }
 }
+
+#[cfg(feature = "debug")]
+fn warn_missing_accessible_name(role: Role) {
+    if role.requires_accessible_name() {
+        log::warn!(
+            "landmark: role '{}' requires an accessible name (aria-label or aria-labelledby)",
+            role.aria_role()
+        );
+    }
+}
+
+#[cfg(all(
+    debug_assertions,
+    not(feature = "debug"),
+    feature = "std",
+    not(all(
+        target_arch = "wasm32",
+        not(any(target_os = "emscripten", target_os = "wasi"))
+    ))
+))]
+fn warn_missing_accessible_name(role: Role) {
+    if role.requires_accessible_name() {
+        eprintln!(
+            "landmark: role '{}' requires an accessible name (aria-label or aria-labelledby)",
+            role.aria_role()
+        );
+    }
+}
+
+#[cfg(not(any(
+    feature = "debug",
+    all(
+        debug_assertions,
+        feature = "std",
+        not(all(
+            target_arch = "wasm32",
+            not(any(target_os = "emscripten", target_os = "wasi"))
+        ))
+    )
+)))]
+const fn warn_missing_accessible_name(_role: Role) {}
 ```
 
 ## 2. Anatomy
@@ -185,11 +278,13 @@ The root element is chosen based on `role`:
 
 ### 3.1 ARIA Roles, States, and Properties
 
-- **Form** and **Region** landmarks are only recognized by assistive technology when they have an accessible name (`aria-label` or `aria-labelledby`). The spec warns at connect time if `messages.label` is empty for these roles.
+- **Form** and **Region** landmarks are only recognized by assistive technology when they have an accessible name (`aria-label` or `aria-labelledby`). The core emits a debug diagnostic when neither `labelledby_id` nor `messages.label` provides a name for these roles.
 - Multiple `Navigation` or `Complementary` landmarks on the same page should each have a distinct `aria-label` to differentiate them (e.g., "Primary navigation", "Footer navigation").
 - `Banner` and `ContentInfo` are page-level landmarks. Nesting them inside `<article>` or `<section>` changes their semantics — `Landmark` does not prevent this, but documentation warns against it.
 
 > **Implicit landmark context:** `<header>` and `<footer>` elements only map to `banner` and `contentinfo` landmark roles when they are NOT descendants of `<article>`, `<aside>`, `<main>`, `<nav>`, or `<section>`. When nested inside sectioning content, they have no corresponding landmark role. Adapters SHOULD emit a `cfg(debug_assertions)` warning when using `Banner` or `ContentInfo` roles with `<header>`/`<footer>` elements, as the landmark semantics may be lost depending on DOM context.
+
+Debug diagnostics are intentionally portable in the framework-agnostic core: use `log::warn!` under the workspace debug feature, fall back to `eprintln!` in native `std` debug builds when that feature is disabled, and leave browser-specific warning sinks to adapter crates.
 
 ## 4. Internationalization
 
@@ -205,7 +300,7 @@ pub struct Messages {
 
 impl Default for Messages {
     fn default() -> Self {
-        Self { label: MessageFn::new(|_locale| String::new()) }
+        Self { label: MessageFn::static_str("") }
     }
 }
 

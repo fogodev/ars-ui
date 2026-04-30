@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/utility/landmark.rs
+expression: "snapshot_attrs(&labelled_api(Props::new().id(\"complementary\").role(Role::Complementary),\n\"Related content\",).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "landmark",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Related content",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "complementary",
+            ),
+        ),
+    ],
+    styles: [],
+}

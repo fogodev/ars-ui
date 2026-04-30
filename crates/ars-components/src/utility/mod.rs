@@ -24,6 +24,12 @@ pub mod form;
 /// Form submit machine.
 pub mod form_submit;
 
+/// `Heading` component (stateless heading-level mapper).
+pub mod heading;
+
+/// `Landmark` component (stateless ARIA landmark mapper).
+pub mod landmark;
+
 /// Separator component (stateless attribute mapper).
 pub mod separator;
 

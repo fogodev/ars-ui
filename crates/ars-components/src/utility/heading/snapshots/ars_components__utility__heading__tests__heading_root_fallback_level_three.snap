@@ -1,0 +1,45 @@
+---
+source: crates/ars-components/src/utility/heading.rs
+expression: snapshot_attrs(&api.root_attrs(false))
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "heading",
+            ),
+        ),
+        (
+            Aria(
+                Level,
+            ),
+            String(
+                "3",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "heading-fallback",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "heading",
+            ),
+        ),
+    ],
+    styles: [],
+}
