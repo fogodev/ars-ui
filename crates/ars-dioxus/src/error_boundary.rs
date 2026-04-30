@@ -13,6 +13,8 @@
 //! `spec/dioxus-components/utility/error-boundary.md` for the full
 //! specification.
 
+use std::{cell::RefCell, collections::HashSet, rc::Rc};
+
 pub use ars_components::utility::error_boundary::{Api, Messages, Part};
 use ars_i18n::Locale;
 pub use dioxus::CapturedError;
@@ -54,10 +56,12 @@ pub struct BoundaryProps {
     #[props(optional)]
     pub fallback: Option<FallbackHandler>,
 
-    /// Optional telemetry hook fired with each captured error.
+    /// Optional telemetry hook fired once for each newly captured error
+    /// episode.
     ///
     /// Fired before the fallback renders. Consumers can forward the
-    /// [`CapturedError`] to monitoring services (Sentry, Datadog, …).
+    /// [`CapturedError`] to monitoring services (Sentry, Datadog, ...).
+    /// The same captured error is not replayed when the fallback re-renders.
     #[props(optional)]
     pub on_error: Option<EventHandler<CapturedError>>,
 
@@ -100,12 +104,19 @@ pub fn Boundary(props: BoundaryProps) -> Element {
 
     let heading = (resolved_messages.message)(&resolved_locale);
 
+    let seen_error_ptrs = Rc::new(RefCell::new(HashSet::new()));
+
     rsx! {
         ErrorBoundary {
             handle_error: move |ctx: ErrorContext| {
                 if let (Some(error), Some(handler)) = (ctx.error(), on_error.as_ref()) {
-                    handler.call(error);
+                    let mut seen = seen_error_ptrs.borrow_mut();
+
+                    if should_emit_new_error(&error, &mut seen) {
+                        handler.call(error);
+                    }
                 }
+
                 if let Some(custom) = fallback.as_ref() {
                     custom.call(ctx)
                 } else {
@@ -115,6 +126,12 @@ pub fn Boundary(props: BoundaryProps) -> Element {
             {children}
         }
     }
+}
+
+fn should_emit_new_error(error: &CapturedError, seen_error_ptrs: &mut HashSet<usize>) -> bool {
+    let error_ptr = std::sync::Arc::as_ptr(&error.0) as usize;
+
+    seen_error_ptrs.insert(error_ptr)
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -181,5 +198,33 @@ fn render_default_fallback(ctx: &ErrorContext, heading: &str) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn should_emit_new_error_deduplicates_same_captured_error() {
+        let mut seen_error_ptrs = HashSet::new();
+
+        let error = CapturedError::from_display("same episode");
+
+        assert!(
+            should_emit_new_error(&error, &mut seen_error_ptrs),
+            "first sighting of a captured error must emit telemetry"
+        );
+        assert!(
+            !should_emit_new_error(&error, &mut seen_error_ptrs),
+            "same captured error must not replay telemetry on fallback rerender"
+        );
+        assert!(
+            should_emit_new_error(
+                &CapturedError::from_display("same episode"),
+                &mut seen_error_ptrs,
+            ),
+            "a new captured error with the same display text is a new episode"
+        );
     }
 }

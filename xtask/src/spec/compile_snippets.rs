@@ -325,6 +325,14 @@ fn extract_rust_blocks(source: &str) -> Vec<CodeBlock> {
         }
     }
 
+    if in_block {
+        blocks.push(CodeBlock {
+            start_line: current_start,
+            content: current,
+            parse: current_parse,
+        });
+    }
+
     blocks
 }
 
@@ -453,6 +461,21 @@ mod tests {
         };
 
         assert!(check_block(&block).is_some());
+    }
+
+    #[test]
+    fn flushes_unterminated_final_rust_block() {
+        let source = "# Title\n\n```rust\npub fn broken(\n";
+
+        let blocks = extract_rust_blocks(source);
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].start_line, 4);
+        assert_eq!(blocks[0].content, "pub fn broken(\n");
+        assert!(
+            check_block(&blocks[0]).is_some(),
+            "unterminated final fences must still be parsed and reported"
+        );
     }
 
     #[test]
