@@ -12,10 +12,15 @@
 //! `spec/leptos-components/utility/error-boundary.md` for the full
 //! specification.
 
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex},
+};
+
 pub use ars_components::utility::error_boundary::{Api, Messages, Part};
 use ars_i18n::Locale;
 pub use leptos::error::Error as CapturedError;
-use leptos::{prelude::*, tachys::view::any_view::AnyView};
+use leptos::{error::ErrorId, prelude::*, tachys::view::any_view::AnyView};
 
 use crate::{
     attrs::attr_map_to_leptos_inline_attrs,
@@ -76,10 +81,10 @@ pub fn Boundary(
     #[prop(optional, into)]
     fallback: Option<FallbackHandler>,
 
-    /// Optional telemetry hook fired with each captured error during a
-    /// fallback render. Multi-error episodes fire the callback once per
-    /// `(ErrorId, Error)` pair on each render, so consumers should dedup
-    /// downstream if they need exactly-once delivery.
+    /// Optional telemetry hook fired once for each newly captured error
+    /// episode. Multi-error episodes fire the callback once per distinct
+    /// `(ErrorId, Error)` pair, without replaying already-seen entries when
+    /// the fallback re-renders.
     #[prop(optional, into)]
     on_error: Option<Callback<CapturedError>>,
 
@@ -98,13 +103,15 @@ pub fn Boundary(
 
     let heading = (resolved_messages.message)(&resolved_locale);
 
+    let seen_error_ids = Arc::new(Mutex::new(HashSet::new()));
+
     // The fallback closure must be `FnMut + Send + 'static`; capture the
     // resolved heading + optional callbacks by value and dispatch through
     // `run_fallback` so the on-error/custom-fallback/default-fallback
     // branching logic stays unit-testable in isolation from the
     // framework primitive.
     let fallback_closure = move |errors: ArcRwSignal<Errors>| -> AnyView {
-        run_fallback(errors, on_error, fallback, heading.clone())
+        run_fallback(errors, on_error, fallback, heading.clone(), &seen_error_ids)
     };
 
     view! {
@@ -126,10 +133,17 @@ fn run_fallback(
     on_error: Option<Callback<CapturedError>>,
     fallback: Option<FallbackHandler>,
     heading: String,
+    seen_error_ids: &Mutex<HashSet<ErrorId>>,
 ) -> AnyView {
     if let Some(handler) = on_error {
-        for (_, error) in errors.get() {
-            handler.run(error.clone());
+        let snapshot = errors.get().into_iter().collect::<Vec<_>>();
+
+        let mut seen = seen_error_ids.lock().expect("lock seen error ids");
+
+        for (id, error) in snapshot {
+            if seen.insert(id) {
+                handler.run(error.clone());
+            }
         }
     }
 
@@ -263,6 +277,7 @@ mod tests {
                 Some(on_error),
                 None,
                 "ignored heading".to_string(),
+                &Mutex::new(HashSet::new()),
             );
 
             let captured = captured.lock().expect("lock");
@@ -295,7 +310,13 @@ mod tests {
 
             // The mere fact that this returns without panicking proves the
             // None branch is exercised; the view itself is opaque AnyView.
-            let _view = run_fallback(ArcRwSignal::new(errors), None, None, "heading".to_string());
+            let _view = run_fallback(
+                ArcRwSignal::new(errors),
+                None,
+                None,
+                "heading".to_string(),
+                &Mutex::new(HashSet::new()),
+            );
         });
     }
 
@@ -323,7 +344,13 @@ mod tests {
 
             let signal = ArcRwSignal::new(errs);
 
-            let _view = run_fallback(signal.clone(), Some(on_error), None, "heading".to_string());
+            let _view = run_fallback(
+                signal.clone(),
+                Some(on_error),
+                None,
+                "heading".to_string(),
+                &Mutex::new(HashSet::new()),
+            );
 
             // on_error fired once per entry — proves the loop ran.
             assert_eq!(*captured_count.lock().expect("lock"), 2);
@@ -337,6 +364,55 @@ mod tests {
                 remaining, 2,
                 "signal must still hold 2 errors after on_error iteration; \
                  clone semantics regression"
+            );
+        });
+    }
+
+    /// Re-rendering the fallback with the same `Errors` signal must not
+    /// replay telemetry for already-seen `ErrorId`s. This pins the adapter
+    /// contract that `on_error` is per error episode, not per fallback render.
+    #[test]
+    fn run_fallback_deduplicates_telemetry_across_rerenders() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+            let captured_for_cb = Arc::clone(&captured);
+            let on_error = Callback::new(move |err: CapturedError| {
+                captured_for_cb.lock().expect("lock").push(err.to_string());
+            });
+
+            let mut errs = Errors::default();
+
+            errs.insert(ErrorId::from(1usize), BoomError("first"));
+            errs.insert(ErrorId::from(2usize), BoomError("second"));
+
+            let signal = ArcRwSignal::new(errs);
+
+            let seen_error_ids = Arc::new(Mutex::new(HashSet::new()));
+
+            let _view = run_fallback(
+                signal.clone(),
+                Some(on_error),
+                None,
+                "heading".to_string(),
+                &seen_error_ids,
+            );
+            let _view = run_fallback(
+                signal,
+                Some(on_error),
+                None,
+                "heading".to_string(),
+                &seen_error_ids,
+            );
+
+            let mut captured = captured.lock().expect("lock").clone();
+
+            captured.sort();
+
+            assert_eq!(
+                captured.as_slice(),
+                ["first", "second"],
+                "on_error must not replay unchanged errors after fallback rerender"
             );
         });
     }
