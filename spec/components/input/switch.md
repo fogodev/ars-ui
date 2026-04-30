@@ -447,6 +447,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("control"));
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Role, "switch");
         attrs.set(HtmlAttr::Aria(AriaAttr::Checked), if self.is_checked() { "true" } else { "false" });
         attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
@@ -572,7 +573,7 @@ Switch
 | ------------ | ---------- | ---------------------------------------------------------- |
 | Root         | `<div>`    | `id`, `data-ars-scope="switch"`, `data-ars-state`, `dir`   |
 | Label        | `<label>`  | Text label; `for` targets `HiddenInput` unless readonly    |
-| Control      | `<button>` | `role="switch"`, `aria-checked`, `tabindex="0"`            |
+| Control      | `<button>` | `type="button"`, `role="switch"`, `aria-checked`, `tabindex="0"` |
 | Thumb        | `<span>`   | `aria-hidden="true"` — sliding thumb indicator             |
 | HiddenInput  | `<input>`  | `type="checkbox"`, `aria-hidden="true"`                    |
 | Description  | `<div>`    | Help text; linked via `aria-describedby` (optional)        |

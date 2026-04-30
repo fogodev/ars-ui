@@ -613,6 +613,7 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Id, self.ctx.ids.part("control"))
+            .set(HtmlAttr::Type, "button")
             .set(HtmlAttr::Role, "switch")
             .set(
                 HtmlAttr::Aria(AriaAttr::Checked),
@@ -1418,6 +1419,13 @@ mod tests {
                 .control_attrs()
                 .get(&HtmlAttr::Role),
             Some("switch")
+        );
+        assert_eq!(
+            service
+                .connect(&|_| {})
+                .control_attrs()
+                .get(&HtmlAttr::Type),
+            Some("button")
         );
         assert_eq!(
             service

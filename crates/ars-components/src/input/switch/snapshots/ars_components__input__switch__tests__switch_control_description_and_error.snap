@@ -78,6 +78,12 @@ AttrMap {
                 "0",
             ),
         ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
     ],
     styles: [],
 }
