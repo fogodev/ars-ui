@@ -1,0 +1,83 @@
+---
+source: crates/ars-components/src/input/switch/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).control_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "control",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "switch",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "unchecked",
+            ),
+        ),
+        (
+            Aria(
+                Checked,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Aria(
+                Invalid,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "wifi-label",
+            ),
+        ),
+        (
+            Aria(
+                DescribedBy,
+            ),
+            String(
+                "wifi-description wifi-error-message",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "wifi-control",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "switch",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

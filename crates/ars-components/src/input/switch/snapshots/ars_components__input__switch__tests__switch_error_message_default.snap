@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/input/switch/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).error_message_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "error-message",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "switch",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "polite",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "wifi-error-message",
+            ),
+        ),
+    ],
+    styles: [],
+}
