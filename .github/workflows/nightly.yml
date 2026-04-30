@@ -91,62 +91,64 @@ jobs:
         #     job per crate
         include:
           # ─── ars-components (sharded 12-way) ──
+          # Job names stay 1-based for readability; cargo-mutants shard
+          # indices are 0-based (`k` from 0 to n-1), so never use n/n.
           - name: components-shard-1
             package: ars-components
-            shard: "1/12"
+            shard: "0/12"
           - name: components-shard-2
             package: ars-components
-            shard: "2/12"
+            shard: "1/12"
           - name: components-shard-3
             package: ars-components
-            shard: "3/12"
+            shard: "2/12"
           - name: components-shard-4
             package: ars-components
-            shard: "4/12"
+            shard: "3/12"
           - name: components-shard-5
             package: ars-components
-            shard: "5/12"
+            shard: "4/12"
           - name: components-shard-6
             package: ars-components
-            shard: "6/12"
+            shard: "5/12"
           - name: components-shard-7
             package: ars-components
-            shard: "7/12"
+            shard: "6/12"
           - name: components-shard-8
             package: ars-components
-            shard: "8/12"
+            shard: "7/12"
           - name: components-shard-9
             package: ars-components
-            shard: "9/12"
+            shard: "8/12"
           - name: components-shard-10
             package: ars-components
-            shard: "10/12"
+            shard: "9/12"
           - name: components-shard-11
             package: ars-components
-            shard: "11/12"
+            shard: "10/12"
           - name: components-shard-12
             package: ars-components
-            shard: "12/12"
+            shard: "11/12"
           # ─── ars-collections (≈ 1,080 mutants, sharded 4-way) ──
           - name: collections-shard-1
             package: ars-collections
-            shard: "1/4"
+            shard: "0/4"
           - name: collections-shard-2
             package: ars-collections
-            shard: "2/4"
+            shard: "1/4"
           - name: collections-shard-3
             package: ars-collections
-            shard: "3/4"
+            shard: "2/4"
           - name: collections-shard-4
             package: ars-collections
-            shard: "4/4"
+            shard: "3/4"
           # ─── ars-core (≈ 700 mutants, sharded 2-way) ───────────
           - name: core-shard-1
             package: ars-core
-            shard: "1/2"
+            shard: "0/2"
           - name: core-shard-2
             package: ars-core
-            shard: "2/2"
+            shard: "1/2"
           # ─── Single-job runs (small enough for one runner) ─────
           - name: a11y
             package: ars-a11y
