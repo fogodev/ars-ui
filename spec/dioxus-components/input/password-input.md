@@ -14,7 +14,7 @@ This spec maps the core [`PasswordInput`](../../components/input/password-input.
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct PasswordInputProps {
     #[props(optional)]
@@ -185,7 +185,7 @@ Dioxus should use the same input and composition wiring as `TextField`, keep the
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<password_input::Machine>(props);
 
 rsx! {

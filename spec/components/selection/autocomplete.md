@@ -536,7 +536,7 @@ impl ComponentMessages for Messages {}
 
 `Autocomplete` integrates with `FilteredCollection<T>` from `06-collections.md` §3:
 
-```rust
+```rust,no_check
 // Adapter-level wiring (Leptos example):
 let collection = create_filtered_collection(all_items, |input, item| {
     item.label.to_lowercase().contains(&input.to_lowercase())

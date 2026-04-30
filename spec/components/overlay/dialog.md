@@ -1197,7 +1197,7 @@ All overlay components (`Dialog`, `AlertDialog`, `Drawer`, `Popover`, `Tooltip`,
 
 **Composition pattern:**
 
-```rust
+```rust,no_check
 // In the adapter component (e.g., dialog::Content):
 let dialog = use_machine::<dialog::Machine>(dialog_props);
 let presence = use_machine::<presence::Machine>(presence::Props::default());

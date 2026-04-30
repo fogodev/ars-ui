@@ -14,7 +14,7 @@ This spec maps the core [`CheckboxGroup`](../../components/input/checkbox-group.
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct CheckboxGroupProps {
     #[props(optional)]
@@ -180,7 +180,7 @@ Dioxus should publish a stable group context object with `use_context_provider`,
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<checkbox_group::Machine>(props);
 use_context_provider(|| Context::new(machine));
 

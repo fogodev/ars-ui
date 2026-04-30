@@ -16,7 +16,7 @@ This spec maps the core [`Tour`](../../components/overlay/tour.md) behavior to D
 
 The adapter exposes a compound component set rather than a single hook. The root component establishes the machine and provides context; child parts consume it.
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct TourProps {
     #[props(into)]
@@ -614,7 +614,7 @@ pub fn Progress(props: ProgressProps) -> Element {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let props = build_tour_props(id, steps, open, ...);
 let machine = use_machine::<tour::Machine>(props);
 let tour_ctx = build_tour_context(machine);

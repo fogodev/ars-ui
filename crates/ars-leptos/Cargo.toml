@@ -39,5 +39,9 @@ wasm-bindgen-futures = "0.4"
 wasm-bindgen-test    = "0.3"
 web-sys              = { version = "0.3", features = ["EventInit", "KeyboardEventInit", "PointerEventInit"] }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+insta    = { version = "1", features = ["yaml"] }
+proptest = "1"
+
 [lints]
 workspace = true

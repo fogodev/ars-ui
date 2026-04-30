@@ -14,7 +14,7 @@ This spec maps the core [`SignaturePad`](../../components/specialized/signature-
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn SignaturePad(
     #[prop(optional)] value: Option<RwSignal<SignatureData>>,

@@ -14,7 +14,7 @@ This spec maps the core [`ScrollArea`](../../components/layout/scroll-area.md) c
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 pub mod scroll_area {
     #[component]
     pub fn ScrollArea(

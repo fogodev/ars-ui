@@ -449,7 +449,7 @@ impl ComponentMessages for Messages {}
 
 `Swap` composes with [`Presence`](../overlay/presence.md) for animated transitions between on/off content:
 
-```rust
+```rust,no_check
 // The adapter wires two Presence instances:
 let on_presence  = Presence::new(swap_api.is_on());
 let off_presence = Presence::new(!swap_api.is_on());

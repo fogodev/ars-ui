@@ -14,7 +14,7 @@ This spec maps the core [`ActionGroup`](../../components/utility/action-group.md
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct ActionGroupProps {
     #[props(optional)]
@@ -260,7 +260,7 @@ pub fn ActionGroup(props: ActionGroupSketchProps) -> Element {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = use_machine_or_adapter_controller(props);
 let refs = create_required_refs_and_helpers();
 let registry = create_optional_registration_or_cleanup_helper();

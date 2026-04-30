@@ -68,7 +68,7 @@ which wraps the closures in `Callback::new` automatically and starts `validation
 `Mode::default()`. Override the validation mode with the `.validation_mode(mode)` setter.
 Example:
 
-```rust
+```rust,no_check
 let props = form_submit::Props::new(
     "checkout",
     |(validators, send)| { /* spawn_local on Leptos / spawn on Dioxus */ },

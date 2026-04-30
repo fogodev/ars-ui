@@ -16,7 +16,7 @@ HoverCard is like Popover but triggered by hover with a longer delay (700ms defa
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 pub mod hover_card {
     use dioxus::prelude::*;
 
@@ -610,7 +610,7 @@ pub fn DismissButton(props: DismissButtonProps) -> Element {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 // 1. Machine setup
 let machine = use_machine::<hover_card::Machine>(props);
 let send = machine.send;

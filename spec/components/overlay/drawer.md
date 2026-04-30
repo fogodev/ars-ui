@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: [z-index-stacking]
 related: [dialog]
 references:
-  ark-ui: Dialog
+    ark-ui: Dialog
 ---
 
 # Drawer
@@ -239,7 +239,7 @@ Drawer follows the Dialog Machine pattern (see [Dialog §1.9](./dialog.md#19-ful
 
 In `init()`, the `title_id` and `description_id` fields MUST be initialized from `ComponentIds`:
 
-```rust
+```rust,no_check
 ctx.title_id = ids.part("title");
 ctx.description_id = ids.part("description");
 ```
@@ -546,7 +546,7 @@ that the user can swipe between.
 
 ### 5.1 Additional Props
 
-```rust
+```rust,no_check
 /// Added to Drawer Props.
 /// Ordered list of snap point heights. Values are fractions of viewport height
 /// (0.0–1.0). Example: `vec![0.25, 0.5, 1.0]` gives quarter, half, and full.
@@ -557,7 +557,7 @@ pub default_snap_index: usize,
 
 ### 5.2 Additional Context
 
-```rust
+```rust,no_check
 /// Added to Drawer Context.
 /// Index of the currently active snap point.
 pub current_snap: usize,
@@ -567,7 +567,7 @@ pub snap_height: f64,
 
 ### 5.3 Additional Events
 
-```rust
+```rust,no_check
 /// Fired when the drawer settles at a snap point (after drag or keyboard).
 Snap(usize),  // index into snap_points
 ```
@@ -607,7 +607,7 @@ When the user drags beyond the largest or smallest snap point, the sheet applies
 **rubber-band resistance** — the visual position moves at a decreasing rate relative
 to pointer movement:
 
-```rust
+```rust,no_check
 let visual_offset = max_snap + (drag_offset - max_snap) * RUBBER_BAND_FACTOR
 ```
 

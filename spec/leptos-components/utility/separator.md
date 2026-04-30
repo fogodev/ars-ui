@@ -14,7 +14,7 @@ This spec maps the core [`Separator`](../../components/utility/separator.md) uti
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component] pub fn Separator(...) -> impl IntoView
 ```
 

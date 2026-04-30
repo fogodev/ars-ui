@@ -2,6 +2,7 @@
 
 pub mod adapters;
 pub mod category;
+pub mod compile_snippets;
 pub mod context;
 pub mod deps;
 pub mod digest;

@@ -18,7 +18,7 @@
 
 ## 1. Leptos
 
-```rust
+```rust,no_check
 #[cfg(test)]
 mod leptos_tests {
     use leptos::prelude::*;
@@ -71,7 +71,7 @@ mod leptos_tests {
 > **Leptos 0.8 reactivity flush:** Use `leptos::task::tick().await`. The adapter spec
 > ([08-adapter-leptos.md](../foundation/08-adapter-leptos.md)) documents the canonical pattern.
 
-```rust
+```rust,no_check
 
         let content = document().query_selector("[data-ars-part='content']").expect("query must not error").expect("element must exist");
         assert_eq!(content.get_attribute("role").as_deref(), Some("dialog"));
@@ -88,7 +88,7 @@ mod leptos_tests {
 >
 > **Dioxus 0.7.3 SSR:** The SSR module is `dioxus::ssr`.
 
-```rust
+```rust,no_check
 #[cfg(test)]
 mod dioxus_tests {
     use dioxus::prelude::*;
@@ -109,7 +109,7 @@ mod dioxus_tests {
 > **Known gap — Dioxus interactive parity:** Dioxus tests currently exercise the `Service` layer directly because `VirtualDom` does not expose DOM event simulation APIs. This means Dioxus parity tests do NOT verify DOM event handler wiring. When `dioxus-testing` infrastructure becomes available, full DOM event simulation tests (`wasm_bindgen_test` with real mount + click + query) MUST be added to achieve true parity with Leptos interactive tests. Until then, interactive parity is verified only at the state machine level, not at the DOM integration level.
 > See [09-adapter-dioxus.md](../foundation/09-adapter-dioxus.md) §10 for `use_safe_event_listener` — a cleanup pattern for DOM listeners in the adapter, not an event simulation API. Dioxus does not provide built-in event simulation or testing utilities (verified docs.rs/dioxus 0.7.x). The interactive testing parity gap remains open until a `dioxus-testing` crate or equivalent emerges.
 
-```rust
+```rust,no_check
     #[test]
     fn toggle_on_off_via_machine() {
         // Dioxus 0.7.3: interactive testing uses the Service layer directly
@@ -505,11 +505,11 @@ the build. CI configuration:
 ```yaml
 # .github/workflows/ci.yml (excerpt)
 adapter-parity:
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-    - run: cargo test --package ars-test-parity --lib -- --test-threads=1
+    runs-on: ubuntu-latest
+    steps:
+        - uses: actions/checkout@v4
+        - uses: dtolnay/rust-toolchain@stable
+        - run: cargo test --package ars-test-parity --lib -- --test-threads=1
 ```
 
 ---

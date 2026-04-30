@@ -14,7 +14,7 @@ This spec maps the core [`Switch`](../../components/input/switch.md) contract on
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Switch(
     #[prop(optional, into)] checked: Option<Signal<bool>>,
@@ -171,7 +171,7 @@ Leptos should prefer `Signal<T>` watchers only for post-mount state, keep root a
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<switch::Machine>(props);
 
 view! {

@@ -225,7 +225,7 @@ pub fn with_api_ephemeral<R>(&self, f: impl Fn(EphemeralRef<'_, M::Api<'_>>) -> 
 
 **Compile-time safety**: Attempting to store the result in a signal produces a compile error:
 
-```rust
+```rust,no_check
 // COMPILE ERROR: EphemeralRef<'_, Api<'_>> does not satisfy `'static`
 let signal = RwSignal::new(ephemeral_ref); // ❌ Won't compile
 ```
@@ -243,7 +243,7 @@ server and client render the same hook sequence. The ID resolution order is:
 1. **`props.id` takes priority** — If the consumer provides an explicit `id` prop, use it as-is. The consumer is responsible for ensuring uniqueness and hydration stability.
 2. **`use_id()` fallback** — If `props.id` is empty, the adapter calls `use_id("component")` to generate a fallback ID. The global `ID_COUNTER` produces deterministic IDs only when SSR and client render components in the same tree order. `reset_id_counter()` must be called at the start of each SSR request to avoid cross-request leakage, but it does not make generated IDs safe when render order diverges.
 
-```rust
+```rust,no_check
 // In use_machine_inner():
 let props = {
     let mut p = props;
@@ -1143,7 +1143,7 @@ where
 Adapters wire typed handlers from the Api to Leptos event listeners. Use `derive()` to
 reactively obtain attributes and `send.run(checkbox::Event::Toggle)` (or the appropriate event variant) for event handling:
 
-```rust
+```rust,no_check
 // In a Leptos component:
 // Always convert AttrMap through `attr_map_to_leptos()` before spreading.
 // `LeptosAttrResult.attrs` uses native Leptos attributes, so reactive
@@ -1571,7 +1571,7 @@ The machine always generates the full handler set (it is DOM-element-agnostic). 
 
 When a closure or component returns different view types from branches (`if`/`else`, `match`), use `Either<A, B>` from `leptos::either` (or `EitherOf3`–`EitherOf16` for more branches). Do **not** use `.into_view()` or `.into_any()` for type unification — both erase concrete types and prevent Leptos from optimizing diffing.
 
-```rust
+```rust,no_check
 // CORRECT: preserves concrete types
 {move || if show_details.get() {
     Either::Left(view! { <DetailPanel machine=machine /> })
@@ -2064,7 +2064,7 @@ All `ars-leptos` components follow uniform naming conventions for accessors, sta
 
 Boolean state is always accessed through `is_*()` methods, never bare field access:
 
-```rust
+```rust,no_check
 api.is_disabled()       // not: api.disabled
 api.is_open()           // not: api.open
 api.is_checked()        // not: api.checked
@@ -2078,7 +2078,7 @@ api.is_indeterminate()  // not: api.indeterminate
 
 Non-boolean values use getter methods (or direct field access for simple data):
 
-```rust
+```rust,no_check
 api.value()             // current value (String, number, etc.)
 api.selected_items()    // current selection set
 api.highlighted_key()   // currently highlighted item key
@@ -2090,7 +2090,7 @@ api.orientation()       // Orientation enum
 
 All callback props use the `on_*` prefix:
 
-```rust
+```rust,no_check
 on_change               // value changed
 on_select               // item selected
 on_open_change          // open state toggled
@@ -2106,7 +2106,7 @@ on_dismiss              // overlay dismissed
 Adapter component specs that expose compound parts must use module scoping instead of
 repeating the component name in every part symbol:
 
-```rust
+```rust,no_check
 pub mod dialog {
     #[component]
     pub fn Dialog(...) -> impl IntoView
@@ -2185,7 +2185,7 @@ pub fn emit_map<T, U>(callback: Option<&Callback<U>>, value: T, f: impl Fn(T) ->
 
 For list-based components (Select, Listbox, Menu):
 
-````rust
+````rust,no_check
 use ars_collections::{Collection, Key};
 
 /// Render a collection with Leptos's `<For>` component.
@@ -2247,7 +2247,7 @@ Overlay exit animations are handled by the **Presence** machine (see `spec/compo
 3. Presence defers unmounting until the CSS exit animation completes.
 4. The adapter reads `presence_api.is_mounted()` to decide whether to render the element.
 
-```rust
+```rust,no_check
 // Usage in a Leptos overlay component:
 let presence = use_machine::<presence::Machine>(presence::Props::default());
 let is_mounted = presence.derive(|api| api.is_mounted());
@@ -2670,30 +2670,34 @@ pub fn Checkbox(
 
 ## 17. Error Boundary Pattern
 
-Wrap component trees with `ErrorBoundary` to gracefully handle machine panics
-or unexpected state transitions:
+Wrap component trees with the canonical accessible error-boundary wrapper to
+handle machine panics or unexpected state transitions. The full design
+(props, parts, attribute contract, accessibility, message bundle) lives in
+the shared core spec at
+[`components/utility/error-boundary.md`](../components/utility/error-boundary.md);
+the Leptos-specific adapter contract (`Boundary` component, `default_fallback`
+helper, `Errors` iteration) is at
+[`leptos-components/utility/error-boundary.md`](../leptos-components/utility/error-boundary.md).
+
+Adapter consumers reach the wrapper via the prelude:
 
 ```rust
-#[component]
-pub fn ArsErrorBoundary(children: Children) -> impl IntoView {
-    view! {
-        <ErrorBoundary fallback=|errors: ArcRwSignal<Errors>| view! {
-            <div data-ars-error="true" role="alert">
-                <p>"A component encountered an error."</p>
-                <ul>
-                    {move || errors.get()
-                        .into_iter()
-                        .map(|(_, e)| view! { <li>{e.to_string()}</li> })
-                        .collect_view()
-                    }
-                </ul>
-            </div>
-        }>
-            {children()}
-        </ErrorBoundary>
-    }
+use ars_leptos::prelude::*;
+
+view! {
+    <error_boundary::Boundary>
+        <ChildComponent/>
+    </error_boundary::Boundary>
 }
 ```
+
+The wrapper composes around `leptos::error::ErrorBoundary`. When a child
+returns `Err`, the framework primitive captures it and the wrapper renders
+the canonical `<div role="alert" data-ars-error="true" data-ars-error-count="N">`
+fallback with a localized heading and a `<ul>`/`<li>` list of caught errors —
+matching the Dioxus adapter byte-for-byte. Optional props expose a custom
+fallback override, an `on_error` telemetry hook, and a `messages` bundle
+override; see the linked specs for the full Rust signatures.
 
 ---
 
@@ -2707,7 +2711,7 @@ All `Machine` type parameters in adapter hooks must satisfy `M: Machine + 'stati
 
 `Api` borrows from `Service` and cannot be held across `.await` points. For async event handlers, clone the send callback from the `UseMachineReturn`:
 
-```rust
+```rust,no_check
 let send = machine.send; // Callback is Copy (arena-allocated in Leptos 0.8)
 // then use inside async block:
 spawn_local(async move {

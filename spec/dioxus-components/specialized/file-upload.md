@@ -14,7 +14,7 @@ This spec maps the core [`FileUpload`](../../components/specialized/file-upload.
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct FileUploadProps {
     #[props(optional)]

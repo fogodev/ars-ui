@@ -735,7 +735,7 @@ When `Props::name` is set:
 
 ### 5.2 Adapter Submit Handler Pattern
 
-```rust
+```rust,no_check
 // In the adapter's form submit handler:
 if let Some(ref name) = props.name {
     let items = api.form_data();

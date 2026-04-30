@@ -14,7 +14,7 @@ This spec maps the core [`NumberInput`](../../components/input/number-input.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct NumberInputProps {
     #[props(optional)]
@@ -191,7 +191,7 @@ Dioxus should keep prop synchronization for numeric constraints narrow, attach w
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<number_input::Machine>(props);
 
 rsx! {

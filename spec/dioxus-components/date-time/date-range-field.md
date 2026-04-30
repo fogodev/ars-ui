@@ -14,7 +14,7 @@ This spec maps the core [`DateRangeField`](../../components/date-time/date-range
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct DateRangeFieldProps {
     #[props(optional)]
@@ -215,7 +215,7 @@ The adapter owns the shared root, label, separator, error, and web-only hidden-i
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<date_range_field::Machine>(props);
 
 rsx! {
@@ -229,7 +229,7 @@ rsx! {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let start_props = machine.with_api_snapshot(|api| api.start_field_props());
 let end_props = machine.with_api_snapshot(|api| api.end_field_props());
 rsx! {

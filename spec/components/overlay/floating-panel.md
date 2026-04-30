@@ -902,7 +902,7 @@ impl ComponentMessages for Messages {}
 
 `FloatingPanel` integrates with [`ZIndexAllocator`](../utility/z-index-allocator.md):
 
-```rust
+```rust,no_check
 // On focus or BringToFront:
 let new_z = z_allocator.allocate();
 ctx.z_index = new_z;
@@ -915,7 +915,7 @@ The allocator's overflow detection prevents z-index exhaustion.
 
 `FloatingPanel` composes with `use_move` from `05-interactions.md` for drag functionality:
 
-```rust
+```rust,no_check
 // Adapter wiring (conceptual):
 use_move(MoveOptions {
     on_move_start: |_| send(Event::DragStart),

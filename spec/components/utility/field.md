@@ -47,7 +47,7 @@ Construct via the inherent builder: `Props::new()` returns the default; setters 
 `disabled`, `readonly`, `invalid`, `dir`) accept the natural argument and return `Self` for
 chaining. The `dir` setter accepts a `Direction` and wraps it in `Some` automatically.
 
-```rust
+```rust,no_check
 let props = field::Props::new()
     .id("email")
     .required(true)

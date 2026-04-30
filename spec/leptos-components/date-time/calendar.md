@@ -14,7 +14,7 @@ This spec maps the core [`Calendar`](../../components/date-time/calendar.md) con
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Calendar(
     #[prop(optional)] id: Option<String>,
@@ -199,7 +199,7 @@ The adapter exposes the full core prop surface, uses `Signal<Option<CalendarDate
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<calendar::Machine>(props);
 let offsets = move || 0..machine.derive(|api| api.visible_month_count()).get();
 

@@ -14,7 +14,7 @@ This spec maps the core [`Table`](../../components/data-display/table.md) contra
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 pub struct TableRenderCell(pub Callback<table::CellRenderCtx, AnyView>);
 pub struct TableRenderExpandedRow(pub Callback<Key, AnyView>);
 

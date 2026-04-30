@@ -14,7 +14,7 @@ This spec maps the core [`Menu`](../../components/selection/menu.md) contract on
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Menu(
     #[prop(optional)] id: Option<String>,

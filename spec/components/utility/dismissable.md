@@ -300,7 +300,7 @@ adapter responsibilities.
 
 Overlay components compose Dismissable internally:
 
-```rust
+```rust,no_check
 let dismissable = dismissable::Props::new()
     .on_dismiss(move |_reason: DismissReason| {
         machine.send(Event::Close);

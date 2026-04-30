@@ -893,7 +893,7 @@ pub enum ThumbCrossingMode {
 
 ### 6.4 Additional Events
 
-```rust
+```rust,no_check
 ThumbChange { index: usize, value: f64 },
 ThumbDragStart { index: usize },
 ThumbDragEnd { index: usize },

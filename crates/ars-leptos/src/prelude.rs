@@ -60,5 +60,10 @@ pub use ars_i18n::{Direction, Locale, Orientation, ResolvedDirection, Translate}
 // `DismissReason`, …) and the Leptos-side wrappers (`Handle`, `Region`,
 // `RegionProps`, `use_dismissable`).
 pub use crate::dismissable;
+// The `error_boundary` adapter module exposes the `ArsErrorBoundary`
+// wrapper component spec'd at
+// `spec/foundation/08-adapter-leptos.md` §17. End users reach it as
+// `error_boundary::ArsErrorBoundary` after `use ars_leptos::prelude::*;`.
+pub use crate::error_boundary;
 // -- User-facing helpers --
 pub use crate::{t, use_number_formatter};

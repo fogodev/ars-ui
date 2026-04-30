@@ -14,7 +14,7 @@ This spec maps the core [`ContextMenu`](../../components/selection/context-menu.
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn ContextMenu(
     #[prop(optional)] id: Option<String>,

@@ -14,7 +14,7 @@ This spec maps the core [`Steps`](../../components/navigation/steps.md) contract
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Steps(
     #[prop(optional, into)] step: Option<Signal<u32>>,
@@ -179,7 +179,7 @@ Leptos should watch the controlled `step` signal after mount and keep repeated i
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<steps::Machine>(props);
 
 view! {

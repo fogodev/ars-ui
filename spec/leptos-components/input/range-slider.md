@@ -14,7 +14,7 @@ This spec maps the core [`RangeSlider`](../../components/input/range-slider.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn RangeSlider(
     #[prop(optional, into)] value: Option<Signal<[f64; 2]>>,
@@ -177,7 +177,7 @@ Leptos should keep separate refs for start and end thumbs, attach scroll or resi
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<range_slider::Machine>(props);
 
 view! {

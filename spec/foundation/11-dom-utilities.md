@@ -465,7 +465,7 @@ On mobile browsers, the virtual keyboard reduces the visible area without changi
 
 1. **`auto_update()` MUST subscribe to `visualViewport` events** when `window.visualViewport` is available:
 
-    ```rust
+    ```rust,no_check
     // In ars-dom auto_update implementation:
     if let Some(vv) = window.visual_viewport() {
         // Subscribe to resize (keyboard open/close) and scroll (keyboard pan)
@@ -535,7 +535,7 @@ On mobile browsers, the virtual keyboard reduces the visible area without changi
 
 3. **`keyboard_aware` positioning option**: Add to `PositioningOptions`:
 
-    ```rust
+    ```rust,no_check
     /// When true, reposition floating elements in response to virtual keyboard
     /// open/close events (visualViewport resize). Default: false.
     /// Enable for floating elements that contain or are triggered by input fields.
@@ -660,7 +660,7 @@ perspective-transformed coordinate spaces.
 
 Read the anchor element's bounding client rect and the floating element's dimensions from the DOM. Both are represented as `Rect` values. The viewport `Rect` is also measured (or provided explicitly in tests).
 
-```rust
+```rust,no_check
 let anchor_dom = anchor.get_bounding_client_rect();
 let anchor_rect = Rect { x: anchor_dom.x(), y: anchor_dom.y(),
     width: anchor_dom.width(), height: anchor_dom.height() };
@@ -1028,7 +1028,7 @@ pub struct VirtualElement {
 
 **Usage example — context menu at cursor position:**
 
-```rust
+```rust,no_check
 let cursor_rect = Rect { x: cursor_x, y: cursor_y, width: 0.0, height: 0.0 };
 let result = compute_position(&cursor_rect, &menu_rect, &viewport, &options);
 ```
@@ -1079,7 +1079,7 @@ fn compute_auto_placement(
 
 To use auto placement, set `auto_placement: true` in `PositioningOptions`. When enabled, the algorithm runs `compute_auto_placement()` before the flip step to determine the initial placement:
 
-```rust
+```rust,no_check
 // In compute_position(), before step 1:
 let placement = if options.auto_placement {
     compute_auto_placement(anchor, floating, viewport, &options)
@@ -1114,7 +1114,7 @@ All positioning calculations use a consistent coordinate system. This section do
 
 - **`position: absolute` positioning (non-portal).** When the floating element uses `Strategy::Absolute` (e.g., it is not portaled and lives inside a positioned ancestor), convert client-space coordinates into the offset parent's **scroll-adjusted padding-box** coordinate space. CSS resolves absolute `top`/`left` against the offset parent's padding box, and the positioned contents move with the offset parent's scroll position, so the local origin must include `clientLeft`/`clientTop` and subtract `scrollLeft`/`scrollTop` instead of using the raw border-box origin:
 
-    ```rust
+    ```rust,no_check
     let offset_parent_rect = offset_parent.get_bounding_client_rect();
     let local_x = client_x
         - (offset_parent_rect.x() + f64::from(offset_parent.client_left())
@@ -1870,7 +1870,7 @@ does not need a scroll listener, and an element with overflowing content but
 
 In `auto_update()`, iterate the result and attach scroll listeners:
 
-```rust
+```rust,no_check
 // In ars-dom auto_update implementation:
 let scroll_ancestors = scrollable_ancestors(&reference_element);
 for ancestor in &scroll_ancestors {
@@ -2430,7 +2430,7 @@ When the counter reaches `Z_INDEX_CEILING`, allocation returns `Z_INDEX_BASE` fo
 
 Each overlay component allocates from the nearest `z_index_allocator::Context` when it opens (mounts into the DOM). Components with both a backdrop and content element allocate two consecutive z-index values: one for the backdrop (lower) and one for the content (higher). The returned value is applied as an inline style on the overlay's positioner or root element:
 
-```rust
+```rust,no_check
 // Inside a Popover adapter hook:
 let claim = z_index_context.allocate_claim();
 let z = claim.value();
@@ -2880,7 +2880,7 @@ pub fn reset_overlay_stack() {
 
 Each overlay component calls `push_overlay()` when it mounts (opens) and `remove_overlay()` when it unmounts (closes):
 
-```rust
+```rust,no_check
 // Inside an overlay component's connect function:
 let z = if supports_top_layer() {
     None

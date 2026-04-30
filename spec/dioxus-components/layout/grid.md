@@ -14,7 +14,7 @@ This spec maps the core [`Grid`](../../components/layout/grid.md) contract onto 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct GridProps {
     #[props(optional)]

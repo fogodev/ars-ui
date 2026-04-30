@@ -14,7 +14,7 @@ This spec maps the core [`SegmentGroup`](../../components/selection/segment-grou
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct SegmentGroupProps {
     #[props(optional)]

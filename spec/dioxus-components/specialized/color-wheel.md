@@ -14,7 +14,7 @@ This spec maps the core [`ColorWheel`](../../components/specialized/color-wheel.
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct ColorWheelProps {
     #[props(optional)]

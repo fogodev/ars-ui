@@ -14,7 +14,7 @@ This spec maps the core [`Pagination`](../../components/navigation/pagination.md
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Pagination(
     #[prop(optional, into)] page: Option<Signal<u32>>,
@@ -177,7 +177,7 @@ Leptos should watch the controlled `page` signal after mount and keep the hidden
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<pagination::Machine>(props);
 let range = machine.derive(|api| api.visible_range());
 

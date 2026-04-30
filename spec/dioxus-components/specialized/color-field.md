@@ -14,7 +14,7 @@ This spec maps the core [`ColorField`](../../components/specialized/color-field.
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct ColorFieldProps {
     #[props(optional)]

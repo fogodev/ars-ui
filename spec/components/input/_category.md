@@ -51,49 +51,49 @@ All input components share these traits:
   `ErrorMessage` anatomy parts. The standard wiring pattern for the primary interactive
   element's attrs method is:
 
-  ```rust
-  // Build aria-describedby from description + error message parts.
-  // IMPORTANT: Only reference IDs for parts that are actually rendered,
-  // otherwise the aria-describedby will point to a non-existent element
-  // (a "dangling reference"), which confuses assistive technology.
-  let mut describedby_parts = Vec::new();
-  if self.ctx.has_description {
-      describedby_parts.push(self.ctx.ids.part("description"));
-  }
-  if self.ctx.invalid && self.ctx.has_error_message {
-      describedby_parts.push(self.ctx.ids.part("error-message"));
-  }
-  if !describedby_parts.is_empty() {
-      attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), describedby_parts.join(" "));
-  }
-  ```
+    ```rust,no_check
+    // Build aria-describedby from description + error message parts.
+    // IMPORTANT: Only reference IDs for parts that are actually rendered,
+    // otherwise the aria-describedby will point to a non-existent element
+    // (a "dangling reference"), which confuses assistive technology.
+    let mut describedby_parts = Vec::new();
+    if self.ctx.has_description {
+        describedby_parts.push(self.ctx.ids.part("description"));
+    }
+    if self.ctx.invalid && self.ctx.has_error_message {
+        describedby_parts.push(self.ctx.ids.part("error-message"));
+    }
+    if !describedby_parts.is_empty() {
+        attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), describedby_parts.join(" "));
+    }
+    ```
 
-  **Dangling reference prevention**: The error ID MUST only be appended to `aria-describedby`
-  when the component is in an invalid state AND the error message element is actually rendered
-  in the DOM (i.e., `invalid && has_error_message`). If the error message element is not
-  rendered, including its ID creates a dangling ARIA reference to a non-existent element, which
-  confuses assistive technology. The same guard applies to `aria-errormessage`.
+    **Dangling reference prevention**: The error ID MUST only be appended to `aria-describedby`
+    when the component is in an invalid state AND the error message element is actually rendered
+    in the DOM (i.e., `invalid && has_error_message`). If the error message element is not
+    rendered, including its ID creates a dangling ARIA reference to a non-existent element, which
+    confuses assistive technology. The same guard applies to `aria-errormessage`.
 
-  **Multiple IDs order in `aria-describedby`**: When multiple IDs are present in
-  `aria-describedby`, the order MUST be: description ID first, then error ID. Example:
-  `aria-describedby="field-desc field-error"`. Screen readers announce referenced elements in
-  the order the IDs are listed, so placing the description before the error ensures the user
-  hears contextual help before the error message.
+    **Multiple IDs order in `aria-describedby`**: When multiple IDs are present in
+    `aria-describedby`, the order MUST be: description ID first, then error ID. Example:
+    `aria-describedby="field-desc field-error"`. Screen readers announce referenced elements in
+    the order the IDs are listed, so placing the description before the error ensures the user
+    hears contextual help before the error message.
 
 - **Error announcement strategy**: Error messages are announced to assistive technology
   through a two-part mechanism:
-  1. **`aria-describedby`**: The primary interactive element's `aria-describedby` points to
-     the error-message part ID (when invalid). Screen readers announce this on focus.
-  2. **`aria-live="polite"` region** (optional): For real-time validation (e.g., as-you-type),
-     the error-message part may include `aria-live="polite"` so changes are announced without
-     requiring focus movement. Components using `role="alert"` (which implies
-     `aria-live="assertive"`) should NOT also set `aria-live` explicitly to avoid
-     double-announcement.
-  3. **Multi-field form batching**: When validating multiple fields simultaneously (e.g., on
-     form submit), adapters SHOULD debounce error announcements to avoid overwhelming screen
-     reader users. A recommended pattern is to announce a summary (e.g., "3 errors found")
-     via a single live region, then let individual field errors be discovered via
-     `aria-describedby` on focus.
+    1. **`aria-describedby`**: The primary interactive element's `aria-describedby` points to
+       the error-message part ID (when invalid). Screen readers announce this on focus.
+    2. **`aria-live="polite"` region** (optional): For real-time validation (e.g., as-you-type),
+       the error-message part may include `aria-live="polite"` so changes are announced without
+       requiring focus movement. Components using `role="alert"` (which implies
+       `aria-live="assertive"`) should NOT also set `aria-live` explicitly to avoid
+       double-announcement.
+    3. **Multi-field form batching**: When validating multiple fields simultaneously (e.g., on
+       form submit), adapters SHOULD debounce error announcements to avoid overwhelming screen
+       reader users. A recommended pattern is to announce a summary (e.g., "3 errors found")
+       via a single live region, then let individual field errors be discovered via
+       `aria-describedby` on focus.
 - **Disabled and readonly propagation**: Both states flow to ARIA attributes and native HTML.
 - **Focus visibility**: Keyboard-initiated focus emits `data-ars-focus-visible`; pointer does
   not.
@@ -199,7 +199,7 @@ All input components emit these data attributes on their Root part:
 
 Every input value uses `Bindable<T>` (defined in `01-architecture.md`):
 
-```rust
+```rust,no_check
 // Uncontrolled: consumer provides default_value, machine owns state
 let checkbox = Props { default_checked: checkbox::State::Checked, ..Default::default() };
 
@@ -214,7 +214,7 @@ let checkbox = Props {
 
 The connect API returns `AttrMap` values that framework adapters spread onto DOM elements:
 
-```rust
+```rust,no_check
 // Leptos example
 let api = Machine::connect(&state, &ctx, &props, &send);
 view! {

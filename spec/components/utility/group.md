@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility]
 shared_deps: []
 related: [fieldset, action-group]
 references:
-  react-aria: Group
+    react-aria: Group
 ---
 
 # Group
@@ -195,7 +195,7 @@ Group
 
 Adapters MUST provide `GroupContext` via the framework context system (`provide_context` in Leptos, `use_context_provider` in Dioxus). Child components that support disabling (Button, TextField, etc.) SHOULD read from `GroupContext` and merge with their own props:
 
-```rust
+```rust,no_check
 // Inside a child component's adapter:
 let group_ctx = use_context::<GroupContext>();
 let effective_disabled = props.disabled || group_ctx.map_or(false, |g| g.disabled);

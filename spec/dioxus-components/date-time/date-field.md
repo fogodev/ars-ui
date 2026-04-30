@@ -14,7 +14,7 @@ This spec maps the core [`DateField`](../../components/date-time/date-field.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct DateFieldProps {
     #[props(optional)]
@@ -217,7 +217,7 @@ Plain props remain preferred; the controlled value becomes a `Signal` only when 
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<date_field::Machine>(props);
 
 rsx! {

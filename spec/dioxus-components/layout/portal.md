@@ -14,7 +14,7 @@ This spec maps the core [`Portal`](../../components/layout/portal.md) contract o
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct PortalProps {
     #[props(optional)]

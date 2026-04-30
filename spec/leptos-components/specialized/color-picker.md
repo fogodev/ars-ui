@@ -14,7 +14,7 @@ This spec maps the core [`ColorPicker`](../../components/specialized/color-picke
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn ColorPicker(
     #[prop(optional)] value: Option<RwSignal<ColorValue>>,

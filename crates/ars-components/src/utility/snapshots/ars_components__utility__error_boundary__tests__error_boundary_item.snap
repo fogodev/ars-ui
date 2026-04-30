@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/utility/error_boundary.rs
+expression: snapshot_attrs(&item_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "error-boundary",
+            ),
+        ),
+    ],
+    styles: [],
+}

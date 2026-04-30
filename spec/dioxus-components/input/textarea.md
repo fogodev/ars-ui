@@ -14,7 +14,7 @@ This spec maps the core [`Textarea`](../../components/input/textarea.md) contrac
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct TextareaProps {
     #[props(optional)]
@@ -191,7 +191,7 @@ Dioxus should keep the native textarea in a mounted-node path suitable for measu
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<textarea::Machine>(props);
 
 rsx! {

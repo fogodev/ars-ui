@@ -14,7 +14,7 @@ This spec maps the core [`ContextualHelp`](../../components/specialized/contextu
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[slot] pub struct ContextualHelpHeading { children: Children }
 #[slot] pub struct ContextualHelpFooter { children: Children }
 

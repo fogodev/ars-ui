@@ -14,7 +14,7 @@ This spec maps the core [`Pagination`](../../components/navigation/pagination.md
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct PaginationProps {
     #[props(optional)]
@@ -182,7 +182,7 @@ Dioxus can watch the controlled page prop through ordinary prop synchronization 
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<pagination::Machine>(props);
 let range = machine.derive(|api| api.visible_range());
 

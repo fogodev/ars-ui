@@ -64,20 +64,20 @@ cargo llvm-cov test -p ars-interactions --text -- hover
 # Per-crate summary only
 cargo llvm-cov test -p ars-interactions -- hover
 
-# Full workspace coverage (matches CI, excludes adapter/derive/xtask crates)
+# Native-only workspace coverage (host target; excludes wasm-only crates)
 cargo llvm-cov --workspace \
   --exclude ars-leptos --exclude ars-dioxus \
   --exclude ars-test-harness-leptos --exclude ars-test-harness-dioxus \
   --exclude ars-derive --exclude xtask \
   --lcov --output-path lcov.info
 
-# Check all crates against spec-defined thresholds
+# Check all crates against spec-defined thresholds (run after a *merged* lcov)
 cargo xtask coverage check-all --file lcov.info
 ```
 
 The `--text` flag produces line-by-line annotated source showing hit counts and `^0` markers on uncovered branches — use this to identify gaps after writing tests. Uncovered no-op callback closures in tests (e.g., `|_| {}`) are expected and not a gap.
 
-CI excludes adapter crates (tested via wasm-pack, can't produce lcov), `ars-derive` (proc-macro, runs in compiler), and `xtask` (build tooling). See `spec/testing/14-ci.md` §2 for rationale.
+The local recipe above excludes the adapter and adapter-test-harness crates because their `target_arch = "wasm32"` / `feature = "web"` code paths can't be measured via host-target `cargo llvm-cov`. **CI runs an additional wasm-coverage pipeline on nightly** (`cargo xtask ci coverage`) that uses `wasm-bindgen-test`'s experimental coverage recipe with LLVM 22 / `clang-22` to emit lcov for `ars-leptos` (csr), `ars-dioxus` (web), `ars-dom` (web), `ars-i18n` (web-intl), and the adapter test harnesses, then merges with the native lcov via `cargo xtask coverage merge`. The per-crate thresholds in `xtask::coverage::default_thresholds()` are enforced against the merged file — including adapter targets (`ars-leptos` 74/55, `ars-dioxus` 77/70, `ars-test-harness-leptos` 60/0, `ars-test-harness-dioxus` 60/0). `ars-derive` (proc-macro, runs in compiler) is exercised via `crates/ars-core/tests/derive_contract.rs` and is unmeasured. `xtask` has its own enforced threshold (30/35) and is measured. See `spec/testing/14-ci.md` §2 for the full pipeline.
 
 ### Adapter Prelude Convention
 

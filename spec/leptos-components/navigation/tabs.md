@@ -14,7 +14,7 @@ This spec maps the core [`Tabs`](../../components/navigation/tabs.md) contract o
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Tabs(
     #[prop(optional, into)] value: Option<Signal<Key>>,
@@ -191,7 +191,7 @@ Leptos should watch the controlled selected key after mount, compose each tab `N
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<tabs::Machine>(props);
 provide_context(Context::from_machine(machine));
 

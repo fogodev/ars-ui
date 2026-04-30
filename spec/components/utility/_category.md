@@ -30,6 +30,7 @@ reading any overlay or form component specification.
 - [DownloadTrigger](download-trigger.md)
 - [DropZone](drop-zone.md)
 - [ArsProvider](ars-provider.md)
+- [ErrorBoundary](error-boundary.md)
 - [Field](field.md)
 - [Fieldset](fieldset.md)
 - [FocusRing](focus-ring.md)

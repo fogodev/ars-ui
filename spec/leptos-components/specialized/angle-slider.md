@@ -14,7 +14,7 @@ This spec maps the core [`AngleSlider`](../../components/specialized/angle-slide
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn AngleSlider(
     #[prop(optional)] value: Option<RwSignal<f64>>,

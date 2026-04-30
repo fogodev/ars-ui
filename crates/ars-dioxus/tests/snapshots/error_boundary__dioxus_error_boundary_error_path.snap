@@ -1,0 +1,5 @@
+---
+source: crates/ars-dioxus/tests/error_boundary.rs
+expression: render_app(app)
+---
+<div data-ars-error="true" data-ars-error-count="1" data-ars-part="root" data-ars-scope="error-boundary" aria-atomic="true" aria-live="assertive" role="alert"><p data-ars-part="message" data-ars-scope="error-boundary">A component encountered an error.</p><ul data-ars-part="list" data-ars-scope="error-boundary"><li data-ars-part="item" data-ars-scope="error-boundary">boom-from-child</li></ul></div>

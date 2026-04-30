@@ -14,7 +14,7 @@ This spec maps the core [`Field`](../../components/utility/field.md) contract an
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component] pub fn Field(...) -> impl IntoView
 #[component] pub fn Label(children: Children) -> impl IntoView
 #[component] pub fn Description(children: Children) -> impl IntoView
@@ -224,7 +224,7 @@ pub fn Description(children: Children) -> impl IntoView {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = use_machine::<field::Machine>(props);
 let ids = derive_stable_field_ids(machine);
 let machine_ctx = publish_field_machine_context(machine);

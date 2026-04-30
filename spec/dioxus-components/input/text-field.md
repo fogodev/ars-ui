@@ -14,7 +14,7 @@ This spec maps the core [`TextField`](../../components/input/text-field.md) cont
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct TextFieldProps {
     #[props(optional)]
@@ -190,7 +190,7 @@ Dioxus should keep the native input in a mounted node path that can still expose
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<text_field::Machine>(props);
 
 rsx! {

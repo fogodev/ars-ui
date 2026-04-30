@@ -16,7 +16,7 @@ This spec maps the core [`Tour`](../../components/overlay/tour.md) behavior to L
 
 The adapter exposes a compound component set rather than a single hook. The root component establishes the machine and provides context; child parts consume it.
 
-```rust
+```rust,no_check
 pub fn Tour(props) -> impl IntoView       // machine owner, context provider
 pub fn Backdrop() -> impl IntoView         // overlay with optional cutout
 pub fn Spotlight() -> impl IntoView        // highlight ring around target
@@ -528,7 +528,7 @@ pub fn Progress(children: Children) -> impl IntoView {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let props = build_tour_props(id, steps, open, ...);
 let machine = use_machine::<tour::Machine>(props);
 let tour_ctx = build_tour_context(machine);

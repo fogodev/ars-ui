@@ -14,7 +14,7 @@ This spec maps the core [`Popover`](../../components/overlay/popover.md) machine
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component] pub fn Popover(...) -> impl IntoView
 #[component] pub fn Trigger(children: Children) -> impl IntoView
 #[component] pub fn Anchor(children: Children) -> impl IntoView
@@ -290,7 +290,7 @@ Leptos uses `on_cleanup` for teardown of positioning subscriptions, click-outsid
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 use leptos::prelude::*;
 
 #[component]
@@ -450,7 +450,7 @@ pub fn Content(children: Children) -> impl IntoView {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 // Popover
 let machine = use_machine::<popover::Machine>(props);
 let trigger_ref = create_trigger_ref();

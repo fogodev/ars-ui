@@ -14,7 +14,7 @@ This spec maps the core [`TagGroup`](../../components/data-display/tag-group.md)
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct TagGroupProps {
     #[props(optional)]

@@ -14,7 +14,7 @@ This spec maps the core [`Tabs`](../../components/navigation/tabs.md) contract o
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct TabsProps {
     #[props(optional)]
@@ -200,7 +200,7 @@ Dioxus should sync the controlled selected key through props, compose each tab n
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<tabs::Machine>(props);
 use_context_provider(|| Context::from_machine(machine));
 

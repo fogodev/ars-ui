@@ -14,7 +14,7 @@ This spec maps the core [`Meter`](../../components/data-display/meter.md) contra
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Meter(
     #[prop(optional)] id: Option<String>,

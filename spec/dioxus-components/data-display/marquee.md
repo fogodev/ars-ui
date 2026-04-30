@@ -14,7 +14,7 @@ This spec maps the core [`Marquee`](../../components/data-display/marquee.md) co
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct MarqueeProps {
     #[props(optional)]

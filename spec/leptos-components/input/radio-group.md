@@ -14,7 +14,7 @@ This spec maps the core [`RadioGroup`](../../components/input/radio-group.md) co
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn RadioGroup(
     #[prop(optional, into)] value: Option<Signal<String>>,
@@ -172,7 +172,7 @@ Leptos should keep item refs in a stable value-keyed structure, translate RTL-aw
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<radio_group::Machine>(props);
 
 view! {

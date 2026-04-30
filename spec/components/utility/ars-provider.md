@@ -152,7 +152,7 @@ impl Default for ArsContext {
 
 Consumers access the context via the framework's context API:
 
-```rust
+```rust,no_check
 // Leptos
 let ctx = use_context::<ArsContext>();
 

@@ -194,7 +194,7 @@ When `max_visible_actions` is `Some(0)`, all actions are placed in the overflow 
 
 **Dioxus Web:** Use `ResizeObserver` to detect overflow. The observer MUST be cleaned up via `use_drop`:
 
-```rust
+```rust,no_check
 use_effect(move || {
     #[cfg(feature = "web")]
     {
@@ -207,7 +207,7 @@ use_effect(move || {
 
 **Dioxus Desktop/Mobile:** `ResizeObserver` is unavailable. Use a window resize event listener as fallback:
 
-```rust
+```rust,no_check
 #[cfg(not(feature = "web"))]
 {
     let listener = window().on_resize(move |_| recalculate_overflow());

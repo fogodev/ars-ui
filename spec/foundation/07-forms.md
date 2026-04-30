@@ -114,7 +114,7 @@ pub use ars_i18n::{plural_category, PluralCategory};
 
 **Error Message Pattern**: `MessageFn` closures for count-based validations MUST use `plural_category()` to select the correct message form:
 
-```rust
+```rust,no_check
 // MessageFn wraps Arc<dyn Fn(...) + Send + Sync> on every target.
 // The closure must return String and satisfy Send + Sync bounds.
 let min_length_message: MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync> =
@@ -129,7 +129,7 @@ let min_length_message: MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync
 
 For languages with complex plural rules (e.g., Polish: 1 znak, 2-4 znaki, 5-21 znaków, 22-24 znaki):
 
-```rust
+```rust,no_check
 // Polish example
 match category {
     PluralCategory::One => format!("Minimum {count} znak"),
@@ -838,7 +838,7 @@ impl Validator for PatternValidator {
 
 > **Security note:** `PatternValidator` MUST use the `regex` crate (RE2-class finite automaton, no catastrophic backtracking). Do NOT substitute `fancy-regex` or other backtracking engines without adding a compilation timeout. The compiled `Regex` SHOULD be cached in the `PatternValidator` struct (constructed once at creation, not per validation call) to avoid repeated compilation cost. If the pattern comes from user input, apply a `regex_size_limit` (e.g., 1MB compiled size limit via `RegexBuilder::size_limit()`).
 
-````rust
+````rust,no_check
 
 > `EmailValidator` uses RFC-grade address parsing when the `ars-forms`
 > `email-validation` Cargo feature is enabled. That feature is enabled by
@@ -1193,7 +1193,7 @@ commonly await `JsFuture` (from `wasm-bindgen-futures`) which is `!Send`.
 This cfg-gating applies to the `AsyncValidationFuture` type alias and to the
 `Fut` bound on `AsyncFnValidator`.
 
-```rust
+```rust,no_check
 use std::{collections::BTreeMap, pin::Pin, sync::Arc};
 use ars_i18n::Locale;
 
@@ -2709,7 +2709,7 @@ After form submission, the server may return field-level validation errors (e.g.
 
 **Sync pattern — single field**:
 
-```rust
+```rust,no_check
 // Server returns a single field error after submission.
 // The adapter sends a SetServerErrors event with the field name and error messages:
 machine.send(Event::SetServerErrors(
@@ -2719,7 +2719,7 @@ machine.send(Event::SetServerErrors(
 
 **Sync pattern — multiple fields**:
 
-```rust
+```rust,no_check
 // Server returns errors for multiple fields (e.g., from a bulk validation endpoint).
 let server_errors: BTreeMap<String, Vec<String>> = response.field_errors;
 machine.send(Event::SetServerErrors(server_errors));
@@ -2734,7 +2734,7 @@ machine.send(Event::SetServerErrors(server_errors));
 
 **Adapter integration** (Leptos example):
 
-```rust
+```rust,no_check
 // In the on_submit handler, after receiving a server response:
 let on_submit = move |_| {
     spawn_local(async move {
@@ -2786,7 +2786,7 @@ pub fn first_invalid_field_id(form: &Context, field_descriptors: &IndexMap<Strin
 
 ### 10.1 Leptos
 
-````rust
+````rust,no_check
 // ars-leptos/src/form.rs
 
 use leptos::prelude::*;
@@ -2877,7 +2877,7 @@ pub struct UseFormReturn<Reg, Change, Blur, Submit> {
 
 ### 10.2 Dioxus
 
-````rust
+````rust,no_check
 // ars-dioxus/src/form.rs
 
 use dioxus::prelude::*;
@@ -3833,7 +3833,7 @@ When nested inside a `Fieldset`, the `Field` merges its own state with the `Fiel
 
 **Adapter-layer merge pattern:**
 
-```rust
+```rust,no_check
 // Inside the adapter's Field component (Leptos or Dioxus):
 // 1. Attempt to read Context from the parent Fieldset/CheckboxGroup/RadioGroup.
 let field_ctx: Option<Context> = /* adapter-specific context read */;

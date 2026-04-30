@@ -14,7 +14,7 @@ This spec maps the core [`ColorSlider`](../../components/specialized/color-slide
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn ColorSlider(
     channel: ColorChannel,

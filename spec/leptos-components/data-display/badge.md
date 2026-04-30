@@ -14,7 +14,7 @@ This spec maps the core [`Badge`](../../components/data-display/badge.md) contra
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Badge(
     #[prop(optional)] id: Option<String>,

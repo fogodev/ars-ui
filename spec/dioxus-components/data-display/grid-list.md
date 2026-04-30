@@ -14,7 +14,7 @@ This spec maps the core [`GridList`](../../components/data-display/grid-list.md)
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 pub struct GridListRenderItem(pub EventHandler<grid_list::ItemDef>);
 
 #[derive(Props, Clone, PartialEq)]

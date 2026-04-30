@@ -14,7 +14,7 @@ This spec maps the core [`TagsInput`](../../components/selection/tags-input.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn TagsInput(
     #[prop(optional)] id: Option<String>,

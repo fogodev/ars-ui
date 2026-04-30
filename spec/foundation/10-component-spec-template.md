@@ -159,7 +159,7 @@ pub struct Context {
 
 **§1.4 Props** — A Rust struct of user-provided configuration. Must derive `HasId`, `Clone`, `Debug`, `PartialEq`. Must implement `Default`. Use `Option<T>` for controlled values (present = controlled, absent = uncontrolled):
 
-```rust
+```rust,no_check
 #[derive(Clone, Debug, PartialEq, HasId)]
 pub struct Props {
     pub id: String,
@@ -182,7 +182,7 @@ fn is_disabled(ctx: &Context) -> bool { ctx.disabled }
 
 **§1.Y Connect / API** — The Part enum, `Api<'a>` struct, and its per-part methods. Every component MUST define a Part enum with `#[derive(ComponentPart)]`. Each Part variant must have a corresponding `*_attrs()` inherent method returning `AttrMap`. Repeated parts that need instance-identity data (item key, step index) use data-carrying variants; field types must implement `Default` and should match the domain type (e.g., `Key` for collection-based components, `usize` for index-based components). Event handler methods follow the pattern `on_{part}_{event}()`. Must implement `ConnectApi`:
 
-```rust
+```rust,no_check
 #[derive(ComponentPart)]
 #[scope = "example"]
 pub enum Part {
@@ -284,7 +284,7 @@ REQUIRED for stateful/complex. CONDITIONAL for stateless (include only if i18n c
 
 **§N.1 Messages** — CONDITIONAL but common. The `Messages` struct with `Cow<'static, str>` or `MessageFn` fields, following the pattern in `04-internationalization.md` §7. Must implement `Default` and `ComponentMessages`:
 
-```rust
+```rust,no_check
 #[derive(Clone, Debug)]
 pub struct Messages {
     pub close_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,

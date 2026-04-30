@@ -14,7 +14,7 @@ This spec maps the core [`FocusRing`](../../components/utility/focus-ring.md) ut
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component] pub fn FocusRing(...) -> impl IntoView
 ```
 
@@ -156,7 +156,7 @@ pub fn FocusRing(children: Children) -> impl IntoView {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = derive_focus_ring_state(props);
 let root_ref = create_optional_root_ref();
 let modality = resolve_focus_visible_source();

@@ -14,7 +14,7 @@ This spec maps the core [`DownloadTrigger`](../../components/utility/download-tr
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct DownloadTriggerProps {
     pub href: String,
@@ -192,7 +192,7 @@ pub fn DownloadTrigger(props: DownloadTriggerSketchProps) -> Element {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = build_adapter_surface_from_props(props);
 let root_attrs = derive_root_anchor_attrs(machine);
 let capability = resolve_download_capability();

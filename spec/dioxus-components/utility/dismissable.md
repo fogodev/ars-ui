@@ -19,7 +19,7 @@ The adapter exposes everything through a single `dismissable` module
 agnostic `ars_components::utility::dismissable::*` surface alongside the
 Dioxus-side wrappers, so callers spell every type with the same prefix:
 
-```rust
+```rust,no_check
 pub fn dismissable::use_dismissable(
     root_ref: ReadSignal<Option<Rc<MountedData>>>,
     props: dismissable::Props,
@@ -301,7 +301,7 @@ visually-hidden control, so dismissal is unconditional).
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = use_machine_or_normalized_handle(props);
 let root_ref = create_root_ref();
 let boundary_registry = create_boundary_registration_helper();

@@ -14,7 +14,7 @@ This spec maps the core [`PinInput`](../../components/input/pin-input.md) contra
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn PinInput(
     #[prop(optional, into)] value: Option<Signal<Vec<String>>>,
@@ -170,7 +170,7 @@ Leptos should keep cell refs in a stable indexed collection, use native `input` 
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<pin_input::Machine>(props);
 
 view! {

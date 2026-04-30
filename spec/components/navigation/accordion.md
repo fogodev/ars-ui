@@ -777,7 +777,7 @@ When keyboard focus moves between `Accordion` triggers (or Tab triggers — see 
 
 A **Disclosure** is a single expandable/collapsible section — equivalent to React Aria's `useDisclosure`. Rather than defining a separate component, ars-ui implements Disclosure as a constrained Accordion configuration:
 
-```rust
+```rust,no_check
 /// Create a Disclosure by configuring Accordion with a single item.
 let disclosure_props = accordion::Props {
     id: "my-disclosure".into(),

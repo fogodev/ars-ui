@@ -142,39 +142,39 @@ mod tests {
 - Guard conditions (e.g. `ctx.disabled`, `ctx.selection_mode`) must have both true and false branches tested.
   When a guard depends on multiple context fields simultaneously, test each combination:
 
-  ```rust
-  // Example: compound guard — `ctx.disabled && !ctx.allow_while_disabled`
-  TransitionCase {
-      name: "disabled AND allow_while_disabled=false → blocks event",
-      initial_state: State::Idle,
-      initial_ctx: Context { disabled: true, allow_while_disabled: false, ..default() },
-      props: Props::default(),
-      event: Event::Press,
-      expected_state: None, // guard rejects
-      expected_ctx: None,
-      expected_acknowledged: false,
-  },
-  TransitionCase {
-      name: "disabled AND allow_while_disabled=true → permits event",
-      initial_state: State::Idle,
-      initial_ctx: Context { disabled: true, allow_while_disabled: true, ..default() },
-      props: Props::default(),
-      event: Event::Press,
-      expected_state: Some(State::Pressed),
-      expected_ctx: Some(Box::new(|ctx: &Context| assert!(ctx.pressed))),
-      expected_acknowledged: false,
-  },
-  TransitionCase {
-      name: "not disabled → permits event regardless of allow_while_disabled",
-      initial_state: State::Idle,
-      initial_ctx: Context { disabled: false, allow_while_disabled: false, ..default() },
-      props: Props::default(),
-      event: Event::Press,
-      expected_state: Some(State::Pressed),
-      expected_ctx: Some(Box::new(|ctx: &Context| assert!(ctx.pressed))),
-      expected_acknowledged: false,
-  },
-  ```
+    ```rust,no_check
+    // Example: compound guard — `ctx.disabled && !ctx.allow_while_disabled`
+    TransitionCase {
+        name: "disabled AND allow_while_disabled=false → blocks event",
+        initial_state: State::Idle,
+        initial_ctx: Context { disabled: true, allow_while_disabled: false, ..default() },
+        props: Props::default(),
+        event: Event::Press,
+        expected_state: None, // guard rejects
+        expected_ctx: None,
+        expected_acknowledged: false,
+    },
+    TransitionCase {
+        name: "disabled AND allow_while_disabled=true → permits event",
+        initial_state: State::Idle,
+        initial_ctx: Context { disabled: true, allow_while_disabled: true, ..default() },
+        props: Props::default(),
+        event: Event::Press,
+        expected_state: Some(State::Pressed),
+        expected_ctx: Some(Box::new(|ctx: &Context| assert!(ctx.pressed))),
+        expected_acknowledged: false,
+    },
+    TransitionCase {
+        name: "not disabled → permits event regardless of allow_while_disabled",
+        initial_state: State::Idle,
+        initial_ctx: Context { disabled: false, allow_while_disabled: false, ..default() },
+        props: Props::default(),
+        event: Event::Press,
+        expected_state: Some(State::Pressed),
+        expected_ctx: Some(Box::new(|ctx: &Context| assert!(ctx.pressed))),
+        expected_acknowledged: false,
+    },
+    ```
 
 - Context mutations must be explicitly asserted (not just state transitions).
 
@@ -186,19 +186,19 @@ transition tables. Use these strategies to keep tests manageable:
 1. **Group by state**: Organize test cases into sub-vectors or separate test functions per
    state. This makes it easy to verify that every event is covered for a given state.
 
-   ```rust
-   fn idle_cases() -> Vec<TransitionCase> { vec![/* all (Idle, *) cases */] }
-   fn open_cases() -> Vec<TransitionCase> { vec![/* all (Open, *) cases */] }
-   fn selecting_cases() -> Vec<TransitionCase> { vec![/* all (Selecting, *) cases */] }
+    ```rust
+    fn idle_cases() -> Vec<TransitionCase> { vec![/* all (Idle, *) cases */] }
+    fn open_cases() -> Vec<TransitionCase> { vec![/* all (Open, *) cases */] }
+    fn selecting_cases() -> Vec<TransitionCase> { vec![/* all (Selecting, *) cases */] }
 
-   #[test]
-   fn transition_table() {
-       let cases: Vec<TransitionCase> = [
-           idle_cases(), open_cases(), selecting_cases(),
-       ].into_iter().flatten().collect();
-       run_transition_table(&cases);
-   }
-   ```
+    #[test]
+    fn transition_table() {
+        let cases: Vec<TransitionCase> = [
+            idle_cases(), open_cases(), selecting_cases(),
+        ].into_iter().flatten().collect();
+        run_transition_table(&cases);
+    }
+    ```
 
 2. **Document ignored pairs**: When a `(State, Event)` pair is intentionally unhandled
    (returns `None`), include a test case with `expected_state: None` and a comment explaining
@@ -207,36 +207,36 @@ transition tables. Use these strategies to keep tests manageable:
 3. **Helper macros**: For components with many similar transitions, use a macro to reduce
    boilerplate:
 
-   ```rust
-   macro_rules! case {
-       ($name:expr, $state:expr, $event:expr => $target:expr) => {
-           TransitionCase {
-               name: $name,
-               initial_state: $state,
-               initial_ctx: default_ctx(),
-               props: Props::default(),
-               event: $event,
-               expected_state: Some($target),
-               expected_ctx: None,
-               expected_acknowledged: false,
-           }
-       };
-   }
-   ```
+    ```rust
+    macro_rules! case {
+        ($name:expr, $state:expr, $event:expr => $target:expr) => {
+            TransitionCase {
+                name: $name,
+                initial_state: $state,
+                initial_ctx: default_ctx(),
+                props: Props::default(),
+                event: $event,
+                expected_state: Some($target),
+                expected_ctx: None,
+                expected_acknowledged: false,
+            }
+        };
+    }
+    ```
 
 4. **Property-based testing with proptest**: For exhaustive coverage of large matrices,
    generate arbitrary `(State, Event)` pairs and assert that `transition()` never panics:
 
-   ```rust
-   proptest! {
-       #[test]
-       fn transition_never_panics(state in arb_state(), event in arb_event()) {
-           let ctx = default_ctx();
-           let props = Props::default();
-           let _plan = Machine::transition(&state, &event, &ctx, &props);
-       }
-   }
-   ```
+    ```rust
+    proptest! {
+        #[test]
+        fn transition_never_panics(state in arb_state(), event in arb_event()) {
+            let ctx = default_ctx();
+            let props = Props::default();
+            let _plan = Machine::transition(&state, &event, &ctx, &props);
+        }
+    }
+    ```
 
 ### 1.4 State/Context synchronization invariant
 
@@ -246,7 +246,7 @@ agree after every transition. A common defect pattern is using `TransitionPlan::
 to set `ctx.open = true` without transitioning to `State::Open`, which causes state-guarded
 handlers (e.g., `(State::Open, Event::Close)`) to become unreachable.
 
-```rust
+```rust,no_check
 // BAD: context_only sets ctx.open but state stays Closed
 TransitionCase {
     name: "focus with open_on_focus opens the dropdown",
@@ -278,7 +278,7 @@ Every `Props` field that influences transition behavior MUST have at least one t
 verifies the field is actually read. A common defect is declaring a prop (e.g.,
 `clamp_value_on_blur: bool`) without wiring it into the `transition()` function.
 
-```rust
+```rust,no_check
 // Verify that clamp_value_on_blur=false disables clamping
 TransitionCase {
     name: "blur with clamp_value_on_blur=false does not clamp",

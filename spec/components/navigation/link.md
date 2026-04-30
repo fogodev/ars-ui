@@ -474,7 +474,7 @@ When `Target::Route` is used:
 - The rendered `<a>` element still receives an `href` attribute (for SSR crawlability and progressive enhancement). The adapter computes the href from the route string.
 - **`is_current` auto-detection**: When `is_current` is `None` and the target is `Route(path)`, the adapter compares `path` against the current route. If they match, `is_current` is automatically set to `Some(AriaCurrent::Page)`. This enables automatic `aria-current="page"` highlighting for the active navigation item without requiring the consumer to track router state.
 
-```rust
+```rust,no_check
 // Adapter-level auto-detection (e.g., in ars-leptos):
 let current_path = use_location().pathname.get();
 let auto_current = match &props.target {

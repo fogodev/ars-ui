@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-ars-ui targets **111 components (including 1 internal utility: Dismissable) and 6 format utilities (117 total)** covering the union of Ark UI and React Aria feature sets. Components are organized into categories and assigned priority tiers that respect dependency ordering.
+ars-ui targets **112 components (including 1 internal utility: Dismissable) and 6 format utilities (118 total)** covering the union of Ark UI and React Aria feature sets. Components are organized into categories and assigned priority tiers that respect dependency ordering.
 
 ### 1.1 Priority Tiers
 
@@ -163,6 +163,7 @@ ars-ui targets **111 components (including 1 internal utility: Dismissable) and 
 | **Dismissable** _(internal)_ |   —    |     Y      |    P0    | **Internal utility** — not part of the public component API. Dismisses overlay content on outside click or Escape. Used internally by Dialog, Popover, Menu. Specified in `components/utility/dismissable.md`. Consumers should not use directly; overlay components compose it internally. |
 | **AsChild**                  |   Y    |     —      |    P0    | Primitives composition utility — render component as a child element                                                                                                                                                                                                                        |
 | **ArsProvider**              |   Y    |     —      |    P0    | Single root provider supplying shared configuration (locale, direction, color mode, disabled/read-only cascades, ID prefix, portal/focus scope boundaries) to all descendant components                                                                                                     |
+| **ErrorBoundary**            |   Y    |     —      |    P1    | Accessible wrapper around the framework's native error boundary primitive. Renders a `role="alert"` fallback with localized heading and `<ul>`/`<li>` error list (`data-ars-error-count`). Specified in `components/utility/error-boundary.md`.                                             |
 | **ZIndexAllocator**          |   —    |     —      |    P1    | Dynamic z-index allocation for stacking context management                                                                                                                                                                                                                                  |
 | **Toggle**                   |   Y    |     —      |    P1    | Stateful toggle primitive with on/off state. Simpler than ToggleButton — no press interaction, just state management. Specified in `components/utility/toggle.md`.                                                                                                                          |
 | **Field**                    |   Y    |     Y      |    P1    | Wrapper associating label, input, description, and error message via ARIA linkage. Specified in `components/utility/field.md` and `07-forms.md` §13.                                                                                                                                        |

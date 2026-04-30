@@ -14,7 +14,7 @@ This spec maps the core [`Progress`](../../components/data-display/progress.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Progress(
     #[prop(optional)] id: Option<String>,

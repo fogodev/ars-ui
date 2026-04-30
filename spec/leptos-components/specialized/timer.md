@@ -14,7 +14,7 @@ This spec maps the core [`Timer`](../../components/specialized/timer.md) contrac
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Timer(
     mode: TimerMode,

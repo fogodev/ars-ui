@@ -14,7 +14,7 @@ This spec maps the core [`DateField`](../../components/date-time/date-field.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn DateField(
     #[prop(optional)] id: Option<String>,
@@ -201,7 +201,7 @@ The adapter keeps segments machine-owned, uses `Signal<Option<CalendarDate>>` fo
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<date_field::Machine>(props);
 
 view! {

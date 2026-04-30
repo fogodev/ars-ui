@@ -864,7 +864,7 @@ Toasts with a `duration` can display a visual progress bar showing time remainin
 
 ### 6.1 Additional Props
 
-```rust
+```rust,no_check
 /// Added to toast::Props.
 /// When true, a progress bar is rendered inside the toast showing elapsed/remaining time.
 pub show_progress: bool,

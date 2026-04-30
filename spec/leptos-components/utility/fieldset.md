@@ -14,7 +14,7 @@ This spec maps the core [`Fieldset`](../../components/utility/fieldset.md) contr
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component] pub fn Fieldset(...) -> impl IntoView
 #[component] pub fn Legend(children: Children) -> impl IntoView
 #[component] pub fn Description(children: Children) -> impl IntoView
@@ -206,7 +206,7 @@ pub fn Fieldset(children: Children) -> impl IntoView {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = use_machine::<fieldset::Machine>(props);
 let ids = derive_stable_fieldset_ids(machine);
 publish_fieldset_machine_context(machine);

@@ -14,7 +14,7 @@ This spec maps the core [`ContextMenu`](../../components/selection/context-menu.
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct ContextMenuProps {
     #[props(optional)]

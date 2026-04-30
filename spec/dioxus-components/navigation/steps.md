@@ -14,7 +14,7 @@ This spec maps the core [`Steps`](../../components/navigation/steps.md) contract
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct StepsProps {
     #[props(optional)]
@@ -185,7 +185,7 @@ Dioxus can sync the controlled step prop through ordinary prop updates and keep 
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<steps::Machine>(props);
 
 rsx! {

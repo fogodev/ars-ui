@@ -14,7 +14,7 @@ This spec maps the core [`AlertDialog`](../../components/overlay/alert-dialog.md
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 pub mod alert_dialog {
     #[derive(Props, Clone, PartialEq)]
     pub struct AlertDialogProps {
@@ -646,7 +646,7 @@ pub fn CloseTrigger(props: CloseTriggerProps) -> Element {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 // Root
 let machine = use_machine::<alert_dialog::Machine>(core_props);
 let is_open = machine.derive(|api| api.is_open());

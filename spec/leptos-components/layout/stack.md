@@ -14,7 +14,7 @@ This spec maps the core [`Stack`](../../components/layout/stack.md) contract ont
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Stack(
     #[prop(optional)] id: Option<String>,

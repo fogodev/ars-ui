@@ -14,7 +14,7 @@ This spec maps the core [`RangeSlider`](../../components/input/range-slider.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct RangeSliderProps {
     #[props(optional)]
@@ -188,7 +188,7 @@ Dioxus should keep separate refs for start and end thumbs, isolate host-specific
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<range_slider::Machine>(props);
 
 rsx! {

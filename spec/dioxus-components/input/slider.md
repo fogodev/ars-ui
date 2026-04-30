@@ -14,7 +14,7 @@ This spec maps the core [`Slider`](../../components/input/slider.md) contract on
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct SliderProps {
     #[props(optional)]
@@ -186,7 +186,7 @@ Dioxus should use mounted-node measurement on hosts that support it, isolate hos
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<slider::Machine>(props);
 
 rsx! {

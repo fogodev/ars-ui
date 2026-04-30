@@ -14,7 +14,7 @@ This spec maps the core [`Clipboard`](../../components/specialized/clipboard.md)
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct ClipboardProps {
     #[props(optional)]

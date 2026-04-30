@@ -542,13 +542,13 @@ When the user navigates to a different page, the adapter MUST announce the new p
 
 **Implementation:** The adapter renders a visually-hidden `LiveRegion` element inside the Pagination root. When the `SetPage` event transitions to a new page, the adapter inserts the announcement text using the two-step pattern defined in `spec/components/utility/live-region.md` (clear → 100ms delay → insert).
 
-```rust
+```rust,no_check
 // Additional Messages field:
 /// Page change announcement (default: "Page {current} of {total}")
 pub page_change_announcement: MessageFn<dyn Fn(usize, usize, &Locale) -> String + Send + Sync>,
 ```
 
-```rust
+```rust,no_check
 // In Default impl, add:
 page_change_announcement: MessageFn::new(|current, total, _locale| {
     format!("Page {current} of {total}")

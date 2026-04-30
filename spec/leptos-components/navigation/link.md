@@ -14,7 +14,7 @@ This spec maps the core [`Link`](../../components/navigation/link.md) contract o
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Link(
     href: link::Target,
@@ -173,7 +173,7 @@ Leptos should use the active router hooks only inside the client interception pa
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<link::Machine>(props);
 let attrs = machine.derive(|api| api.root_attrs());
 

@@ -14,7 +14,7 @@ This spec maps the core [`Editable`](../../components/input/editable.md) contrac
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct EditableProps {
     #[props(optional)]
@@ -182,7 +182,7 @@ Dioxus should keep the edit input in a stable mounted-node path, use local focus
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<editable::Machine>(props);
 
 rsx! {

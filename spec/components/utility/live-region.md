@@ -527,7 +527,7 @@ must preserve the existing element rather than replacing it.
 
 **Dioxus timer cancellation safety:** When the `announce_delay` timer fires, its callback calls `send(Event::Rendered)`. If the component unmounts before the timer fires, `use_drop` runs cleanup but the timer callback may still be pending. The timer callback MUST check a cancellation flag (`SharedFlag`) before calling `send()`:
 
-```rust
+```rust,no_check
 let platform = use_platform_effects();
 let cancelled = SharedFlag::new(false);
 let cancelled_clone = cancelled.clone();

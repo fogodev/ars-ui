@@ -14,7 +14,7 @@ This spec maps the core [`Center`](../../components/layout/center.md) contract o
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Center(
     #[prop(optional)] id: Option<String>,

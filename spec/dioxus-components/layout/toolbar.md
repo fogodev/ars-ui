@@ -14,7 +14,7 @@ This spec maps the core [`Toolbar`](../../components/layout/toolbar.md) contract
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 pub mod toolbar {
     #[derive(Props, Clone, PartialEq)]
     pub struct ToolbarProps {

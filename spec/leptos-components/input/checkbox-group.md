@@ -14,7 +14,7 @@ This spec maps the core [`CheckboxGroup`](../../components/input/checkbox-group.
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn CheckboxGroup(
     #[prop(optional, into)] value: Option<Signal<BTreeSet<String>>>,
@@ -169,7 +169,7 @@ Leptos should provide a stable group context object, keep controlled set synchro
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<checkbox_group::Machine>(props);
 provide_context(Context::new(machine));
 

@@ -14,7 +14,7 @@ This spec maps the core [`TimeField`](../../components/date-time/time-field.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct TimeFieldProps {
     #[props(optional)]
@@ -218,7 +218,7 @@ Plain props remain preferred; the controlled value becomes a `Signal` only when 
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<time_field::Machine>(props);
 
 rsx! {

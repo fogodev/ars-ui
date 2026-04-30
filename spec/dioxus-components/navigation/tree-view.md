@@ -14,7 +14,7 @@ This spec maps the core [`TreeView`](../../components/navigation/tree-view.md) c
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct TreeViewProps {
     pub items: TreeCollection<TreeItem>,
@@ -193,7 +193,7 @@ Dioxus should keep the visible-node registry in context, compose each node handl
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<tree_view::Machine>(props);
 use_context_provider(|| Context::from_machine(machine));
 

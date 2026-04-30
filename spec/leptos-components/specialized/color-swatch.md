@@ -14,7 +14,7 @@ This spec maps the core [`ColorSwatch`](../../components/specialized/color-swatc
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn ColorSwatch(
     value: ColorValue,

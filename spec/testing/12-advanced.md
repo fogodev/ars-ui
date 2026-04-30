@@ -222,7 +222,7 @@ fn qr_code_canvas_has_alt_text() {
 
 Mock the browser File API:
 
-```rust
+```rust,no_check
 // Create mock File objects via wasm-bindgen
 let file = web_sys::File::new_with_str_sequence(
     &js_sys::Array::of1(&"content".into()),

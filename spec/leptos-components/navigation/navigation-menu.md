@@ -14,7 +14,7 @@ This spec maps the core [`NavigationMenu`](../../components/navigation/navigatio
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn NavigationMenu(
     #[prop(optional, into)] value: Option<Signal<Option<Key>>>,
@@ -192,7 +192,7 @@ Leptos should publish the navigation-menu context with `provide_context`, keep t
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<navigation_menu::Machine>(props);
 provide_context(Context::from_machine(machine));
 

@@ -14,7 +14,7 @@ This spec maps the core [`Select`](../../components/selection/select.md) contrac
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Select(
     #[prop(optional)] id: Option<String>,

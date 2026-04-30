@@ -14,7 +14,7 @@ This spec maps the core [`FocusScope`](../../components/utility/focus-scope.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component] pub fn FocusScope(...) -> impl IntoView
 ```
 
@@ -183,7 +183,7 @@ pub fn FocusScope(children: Children) -> impl IntoView {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = use_machine::<focus_scope::Machine>(props);
 let container_ref = create_container_ref();
 let scope_stack = create_scope_registration_helper();

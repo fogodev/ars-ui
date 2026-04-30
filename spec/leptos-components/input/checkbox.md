@@ -14,7 +14,7 @@ This spec maps the core [`Checkbox`](../../components/input/checkbox.md) contrac
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Checkbox(
     #[prop(optional, into)] checked: Option<Signal<checkbox::State>>,
@@ -172,7 +172,7 @@ Leptos should use `Signal<T>` watchers only for values that may change after mou
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<checkbox::Machine>(props);
 let control_attrs = machine.derive(|api| api.control_attrs());
 let hidden_input_attrs = machine.derive(|api| api.hidden_input_attrs());

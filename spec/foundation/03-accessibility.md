@@ -1390,7 +1390,7 @@ unfamiliar terms.
 - Do NOT use it when the standard role name (e.g., "button", "dialog", "tab") already
   accurately describes the widget.
 
-```rust
+```rust,no_check
 // Example: Carousel root attrs
 attrs.set(HtmlAttr::Aria(AriaAttr::RoleDescription),
     &self.i18n.role_description); // e.g., "carousel" in English

@@ -541,7 +541,7 @@ and locale, and MUST use `PluralRules::select()` to choose the correct form.
 
 **Examples for count-displaying components:**
 
-```rust
+```rust,no_check
 // Badge: accessible label with plural form
 pub badge_label: MessageFn<dyn Fn(u64, &str, &Locale) -> String + Send + Sync>,
 // Usage: (3, "notification", en) → "3 notifications"

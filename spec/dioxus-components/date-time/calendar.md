@@ -14,7 +14,7 @@ This spec maps the core [`Calendar`](../../components/date-time/calendar.md) con
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct CalendarProps {
     #[props(optional)]
@@ -212,7 +212,7 @@ Plain props are preferred; `value` becomes a `Signal` only when the adapter must
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<calendar::Machine>(props);
 
 rsx! {

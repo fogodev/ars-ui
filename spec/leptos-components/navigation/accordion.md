@@ -14,7 +14,7 @@ This spec maps the core [`Accordion`](../../components/navigation/accordion.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Accordion(
     #[prop(optional, into)] value: Option<Signal<BTreeSet<Key>>>,
@@ -178,7 +178,7 @@ Leptos should publish the accordion context with `provide_context`, compose trig
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<accordion::Machine>(props);
 provide_context(Context::from_machine(machine));
 

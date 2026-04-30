@@ -14,7 +14,7 @@ This spec maps the core [`Splitter`](../../components/layout/splitter.md) contra
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 pub mod splitter {
     #[derive(Props, Clone, PartialEq)]
     pub struct SplitterProps {

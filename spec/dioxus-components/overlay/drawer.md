@@ -14,7 +14,7 @@ This spec maps the core [`Drawer`](../../components/overlay/drawer.md) machine t
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 pub mod drawer {
     #[derive(Props, Clone, PartialEq)]
     pub struct DrawerProps {
@@ -682,7 +682,7 @@ pub fn CloseTrigger(props: CloseTriggerProps) -> Element {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 // Drawer initialization
 let machine = use_machine::<drawer::Machine>(core_props);
 let ctx = create_drawer_context(machine);

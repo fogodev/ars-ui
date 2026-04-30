@@ -14,7 +14,7 @@ This spec maps the core [`Swap`](../../components/utility/swap.md) machine to a 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Swap(
     #[prop(optional)] id: Option<String>,
@@ -203,7 +203,7 @@ pub fn Swap(on_content: Children, off_content: Children) -> impl IntoView {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = use_machine::<swap::Machine>(props);
 let root_ref = create_optional_root_ref();
 let presence = create_presence_bookkeeping_helper();
