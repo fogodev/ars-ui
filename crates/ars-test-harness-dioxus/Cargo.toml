@@ -7,9 +7,13 @@ description.workspace  = true
 repository.workspace   = true
 rust-version.workspace = true
 
+[features]
+default = ["icu4x"]
+icu4x   = ["ars-dioxus/icu4x"]
+
 [dependencies]
 ars-core             = { path = "../ars-core" }
-ars-dioxus           = { path = "../ars-dioxus", features = ["web"] }
+ars-dioxus           = { path = "../ars-dioxus", default-features = false, features = ["web"] }
 ars-i18n             = { path = "../ars-i18n", default-features = false }
 ars-test-harness     = { path = "../ars-test-harness" }
 dioxus-web           = "0.7.6"

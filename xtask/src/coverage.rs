@@ -368,8 +368,8 @@ pub const fn default_wasm_coverage_targets() -> &'static [WasmCoverageTarget] {
         },
         WasmCoverageTarget {
             package: "ars-test-harness-dioxus",
-            features: &[],
-            no_default_features: false,
+            features: &["ars-i18n/web-intl"],
+            no_default_features: true,
         },
     ]
 }
@@ -1386,8 +1386,8 @@ version = "0.2.118"
         }));
         assert!(targets.iter().any(|target| {
             target.package == "ars-test-harness-dioxus"
-                && target.features.is_empty()
-                && !target.no_default_features
+                && target.features == ["ars-i18n/web-intl"]
+                && target.no_default_features
         }));
     }
 
