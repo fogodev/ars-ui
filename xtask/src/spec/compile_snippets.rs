@@ -189,7 +189,9 @@ fn rewrite_fences_to_no_check(source: &str, fence_lines: &[usize]) -> String {
 
         let leading = &line[..line.len() - trimmed.len()];
 
-        if !trimmed.starts_with("```") {
+        let fence_width = trimmed.chars().take_while(|ch| *ch == '`').count();
+
+        if fence_width < 3 {
             continue;
         }
 
@@ -217,7 +219,9 @@ fn rewrite_fences_to_no_check(source: &str, fence_lines: &[usize]) -> String {
             format!("{info},no_check")
         };
 
-        *line = format!("{leading}```{new_info}");
+        let fence = "`".repeat(fence_width);
+
+        *line = format!("{leading}{fence}{new_info}");
     }
 
     lines.clear();
@@ -732,6 +736,21 @@ fn render() {
         assert!(
             rewritten.contains("```rust,foo,no_check"),
             "expected appended marker, got: {rewritten}"
+        );
+    }
+
+    #[test]
+    fn rewrite_fences_to_no_check_preserves_wide_fence_width() {
+        // Wider fences are used when the block body itself contains triple
+        // backticks; rewriting them to three backticks would corrupt the
+        // surrounding markdown structure.
+        let source = "````rust\nconst DOC: &str = \"```inner```\";\n````\n";
+
+        let rewritten = rewrite_fences_to_no_check(source, &[1]);
+
+        assert!(
+            rewritten.starts_with("````rust,no_check"),
+            "expected preserved four-backtick opener, got: {rewritten}"
         );
     }
 

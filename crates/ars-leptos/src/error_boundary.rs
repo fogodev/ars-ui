@@ -13,7 +13,7 @@
 //! specification.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
@@ -103,7 +103,7 @@ pub fn Boundary(
 
     let heading = (resolved_messages.message)(&resolved_locale);
 
-    let seen_error_ids = Arc::new(Mutex::new(HashSet::new()));
+    let seen_errors = Arc::new(Mutex::new(HashMap::new()));
 
     // The fallback closure must be `FnMut + Send + 'static`; capture the
     // resolved heading + optional callbacks by value and dispatch through
@@ -111,7 +111,7 @@ pub fn Boundary(
     // branching logic stays unit-testable in isolation from the
     // framework primitive.
     let fallback_closure = move |errors: ArcRwSignal<Errors>| -> AnyView {
-        run_fallback(errors, on_error, fallback, heading.clone(), &seen_error_ids)
+        run_fallback(errors, on_error, fallback, heading.clone(), &seen_errors)
     };
 
     view! {
@@ -133,7 +133,7 @@ fn run_fallback(
     on_error: Option<Callback<CapturedError>>,
     fallback: Option<FallbackHandler>,
     heading: String,
-    seen_error_ids: &Mutex<HashSet<ErrorId>>,
+    seen_errors: &Mutex<HashMap<ErrorId, String>>,
 ) -> AnyView {
     if let Some(handler) = on_error {
         let snapshot = errors.get().into_iter().collect::<Vec<_>>();
@@ -142,12 +142,15 @@ fn run_fallback(
             .map(|(id, _)| id.clone())
             .collect::<HashSet<_>>();
 
-        let mut seen = seen_error_ids.lock().expect("lock seen error ids");
+        let mut seen = seen_errors.lock().expect("lock seen errors");
 
-        seen.retain(|id| current_ids.contains(id));
+        seen.retain(|id, _| current_ids.contains(id));
 
         for (id, error) in snapshot {
-            if seen.insert(id) {
+            let error_fingerprint = error.to_string();
+
+            if seen.get(&id) != Some(&error_fingerprint) {
+                seen.insert(id, error_fingerprint);
                 handler.run(error.clone());
             }
         }
@@ -283,7 +286,7 @@ mod tests {
                 Some(on_error),
                 None,
                 "ignored heading".to_string(),
-                &Mutex::new(HashSet::new()),
+                &Mutex::new(HashMap::new()),
             );
 
             let captured = captured.lock().expect("lock");
@@ -321,7 +324,7 @@ mod tests {
                 None,
                 None,
                 "heading".to_string(),
-                &Mutex::new(HashSet::new()),
+                &Mutex::new(HashMap::new()),
             );
         });
     }
@@ -355,7 +358,7 @@ mod tests {
                 Some(on_error),
                 None,
                 "heading".to_string(),
-                &Mutex::new(HashSet::new()),
+                &Mutex::new(HashMap::new()),
             );
 
             // on_error fired once per entry — proves the loop ran.
@@ -394,21 +397,21 @@ mod tests {
 
             let signal = ArcRwSignal::new(errs);
 
-            let seen_error_ids = Arc::new(Mutex::new(HashSet::new()));
+            let seen_errors = Arc::new(Mutex::new(HashMap::new()));
 
             let _view = run_fallback(
                 signal.clone(),
                 Some(on_error),
                 None,
                 "heading".to_string(),
-                &seen_error_ids,
+                &seen_errors,
             );
             let _view = run_fallback(
                 signal,
                 Some(on_error),
                 None,
                 "heading".to_string(),
-                &seen_error_ids,
+                &seen_errors,
             );
 
             let mut captured = captured.lock().expect("lock").clone();
@@ -436,14 +439,14 @@ mod tests {
             let mut first = Errors::default();
             first.insert(ErrorId::from(1usize), BoomError("first episode"));
 
-            let seen_error_ids = Arc::new(Mutex::new(HashSet::new()));
+            let seen_errors = Arc::new(Mutex::new(HashMap::new()));
 
             let _view = run_fallback(
                 ArcRwSignal::new(first),
                 Some(on_error),
                 None,
                 "heading".to_string(),
-                &seen_error_ids,
+                &seen_errors,
             );
 
             let _view = run_fallback(
@@ -451,7 +454,7 @@ mod tests {
                 Some(on_error),
                 None,
                 "heading".to_string(),
-                &seen_error_ids,
+                &seen_errors,
             );
 
             let mut second = Errors::default();
@@ -462,13 +465,55 @@ mod tests {
                 Some(on_error),
                 None,
                 "heading".to_string(),
-                &seen_error_ids,
+                &seen_errors,
             );
 
             assert_eq!(
                 captured.lock().expect("lock").as_slice(),
                 ["first episode", "second episode"],
                 "cleared error snapshots must prune seen ids so reused ids can emit again"
+            );
+        });
+    }
+
+    #[test]
+    fn run_fallback_emits_when_same_id_receives_new_error_value() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+            let captured_for_cb = Arc::clone(&captured);
+            let on_error = Callback::new(move |err: CapturedError| {
+                captured_for_cb.lock().expect("lock").push(err.to_string());
+            });
+
+            let mut first = Errors::default();
+            first.insert(ErrorId::from(1usize), BoomError("first value"));
+
+            let seen_errors = Arc::new(Mutex::new(HashMap::new()));
+
+            let _view = run_fallback(
+                ArcRwSignal::new(first),
+                Some(on_error),
+                None,
+                "heading".to_string(),
+                &seen_errors,
+            );
+
+            let mut second = Errors::default();
+            second.insert(ErrorId::from(1usize), BoomError("second value"));
+
+            let _view = run_fallback(
+                ArcRwSignal::new(second),
+                Some(on_error),
+                None,
+                "heading".to_string(),
+                &seen_errors,
+            );
+
+            assert_eq!(
+                captured.lock().expect("lock").as_slice(),
+                ["first value", "second value"],
+                "replacing an existing ErrorId with a different error must emit telemetry"
             );
         });
     }
