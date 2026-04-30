@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/utility/landmark.rs
+expression: "snapshot_attrs(&labelled_api(Props::new().id(\"navigation\").role(Role::Navigation),\n\"Primary navigation\",).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "landmark",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Primary navigation",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "navigation",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/utility/landmark.rs
+expression: snapshot_attrs(&attrs)
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "landmark",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "external-label",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "labelledby",
+            ),
+        ),
+    ],
+    styles: [],
+}

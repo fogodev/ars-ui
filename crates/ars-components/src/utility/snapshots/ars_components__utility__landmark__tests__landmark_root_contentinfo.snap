@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/utility/landmark.rs
+expression: "snapshot_attrs(&api(Props::new().id(\"contentinfo\").role(Role::ContentInfo)).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "landmark",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "contentinfo",
+            ),
+        ),
+    ],
+    styles: [],
+}

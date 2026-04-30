@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/utility/landmark.rs
+expression: "snapshot_attrs(&labelled_api(Props::new().id(\"search\").role(Role::Search),\n\"Site search\").root_attrs(true))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "landmark",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Site search",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "search",
+            ),
+        ),
+    ],
+    styles: [],
+}
