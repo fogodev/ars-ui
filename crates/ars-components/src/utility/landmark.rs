@@ -185,10 +185,10 @@ impl Api {
         self.props.role
     }
 
-    /// Returns the external labelling element ID, when present.
+    /// Returns the external labelling element ID, when present and non-empty.
     #[must_use]
     pub fn labelledby_id(&self) -> Option<&str> {
-        self.props.labelledby_id.as_deref()
+        self.non_empty_labelledby_id()
     }
 
     /// Returns `true` when adapters should prefer their generic fallback
@@ -212,7 +212,7 @@ impl Api {
     /// non-empty localized `aria-label`.
     #[must_use]
     pub fn has_accessible_name(&self) -> bool {
-        self.props.labelledby_id.is_some() || !self.label().is_empty()
+        self.non_empty_labelledby_id().is_some() || !self.label().is_empty()
     }
 
     /// Returns whether connecting this landmark should emit the development
@@ -241,7 +241,7 @@ impl Api {
             attrs.set(HtmlAttr::Role, self.props.role.aria_role());
         }
 
-        if let Some(labelledby_id) = &self.props.labelledby_id {
+        if let Some(labelledby_id) = self.non_empty_labelledby_id() {
             attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), labelledby_id);
         } else {
             let label = self.label();
@@ -256,6 +256,13 @@ impl Api {
         }
 
         attrs
+    }
+
+    fn non_empty_labelledby_id(&self) -> Option<&str> {
+        self.props
+            .labelledby_id
+            .as_deref()
+            .filter(|id| !id.trim().is_empty())
     }
 }
 
@@ -420,6 +427,9 @@ mod tests {
             .role(Role::Form)
             .labelledby_id("external-label"));
 
+        let empty_labelledby = api(Props::new().role(Role::Form).labelledby_id(""));
+        let blank_labelledby = api(Props::new().role(Role::Region).labelledby_id("   "));
+
         let missing_region = api(Props::new().role(Role::Region));
 
         let missing_navigation = api(Props::new().role(Role::Navigation));
@@ -429,6 +439,10 @@ mod tests {
         assert!(!Role::Navigation.requires_accessible_name());
         assert!(named.has_accessible_name());
         assert!(labelledby.has_accessible_name());
+        assert!(!empty_labelledby.has_accessible_name());
+        assert!(!blank_labelledby.has_accessible_name());
+        assert!(empty_labelledby.missing_accessible_name_warning_needed());
+        assert!(blank_labelledby.missing_accessible_name_warning_needed());
         assert!(!missing_region.has_accessible_name());
         assert!(missing_region.missing_accessible_name_warning_needed());
         assert!(!missing_navigation.missing_accessible_name_warning_needed());
@@ -569,6 +583,45 @@ mod tests {
             "landmark_root_labelledby_takes_precedence",
             snapshot_attrs(&attrs)
         );
+    }
+
+    #[test]
+    fn landmark_root_empty_labelledby_falls_back_to_label_message() {
+        let api = labelled_api(
+            Props::new()
+                .id("empty-labelledby")
+                .role(Role::Region)
+                .labelledby_id(""),
+            "Activity",
+        );
+
+        assert_eq!(api.labelledby_id(), None);
+
+        let attrs = api.root_attrs(true);
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)), None);
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::Label)),
+            Some("Activity")
+        );
+    }
+
+    #[test]
+    fn landmark_root_blank_labelledby_is_treated_as_missing_name() {
+        let region = api(Props::new().role(Role::Region).labelledby_id("   "));
+
+        assert_eq!(region.labelledby_id(), None);
+        assert!(!region.has_accessible_name());
+        assert!(region.missing_accessible_name_warning_needed());
+
+        let api = api(Props::new()
+            .id("blank-labelledby")
+            .role(Role::Navigation)
+            .labelledby_id("   "));
+        let attrs = api.root_attrs(true);
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)), None);
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Label)), None);
     }
 
     #[test]

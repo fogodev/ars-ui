@@ -70,8 +70,9 @@ pub struct Props {
     pub role: Role,
     /// Optional ID of an element that labels this landmark.
     /// Per WAI-ARIA, `aria-labelledby` and `aria-label` MUST NOT be set
-    /// simultaneously. When `labelledby_id` is set, it takes precedence
-    /// over `messages.label` and emits `aria-labelledby` instead of `aria-label`.
+    /// simultaneously. When `labelledby_id` is set to a non-empty value, it
+    /// takes precedence over `messages.label` and emits `aria-labelledby`
+    /// instead of `aria-label`.
     pub labelledby_id: Option<String>,
 }
 
@@ -140,9 +141,10 @@ impl Api {
     }
 
     /// Returns `true` when the landmark has an accessible name from
-    /// `aria-labelledby` or from the resolved localized label message.
+    /// a non-empty `aria-labelledby` value or from the resolved localized label
+    /// message.
     pub fn has_accessible_name(&self) -> bool {
-        self.props.labelledby_id.is_some() || !(self.messages.label)(&self.locale).is_empty()
+        self.non_empty_labelledby_id().is_some() || !(self.messages.label)(&self.locale).is_empty()
     }
 
     /// Returns `true` when this API should emit the debug warning for a
@@ -171,8 +173,8 @@ impl Api {
         }
 
         // Per WAI-ARIA, aria-labelledby and aria-label MUST NOT be set
-        // simultaneously. When labelledby_id is set, it takes precedence.
-        if let Some(ref id) = self.props.labelledby_id {
+        // simultaneously. When labelledby_id is non-empty, it takes precedence.
+        if let Some(id) = self.non_empty_labelledby_id() {
             attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), id);
         } else {
             let label = (self.messages.label)(&self.locale);
@@ -186,6 +188,13 @@ impl Api {
         }
 
         attrs
+    }
+
+    fn non_empty_labelledby_id(&self) -> Option<&str> {
+        self.props
+            .labelledby_id
+            .as_deref()
+            .filter(|id| !id.trim().is_empty())
     }
 }
 
