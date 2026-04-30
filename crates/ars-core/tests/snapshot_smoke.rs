@@ -1,7 +1,8 @@
 //! Snapshot coverage for the spec-defined `connect()` / `AttrMap` pattern.
 
 use ars_core::{
-    AriaAttr, AttrMap, ComponentPart, ConnectApi, Env, HasId, HtmlAttr, Machine, TransitionPlan,
+    AriaAttr, AttrMap, ComponentPart, ConnectApi, Env, HasId, HtmlAttr, Machine, NoEffect,
+    TransitionPlan,
 };
 use insta::assert_snapshot;
 
@@ -113,6 +114,7 @@ impl Machine for SnapshotMachine {
     type Context = SnapshotContext;
     type Props = SnapshotProps;
     type Messages = ();
+    type Effect = NoEffect;
     type Api<'a> = SnapshotApi<'a>;
 
     fn init(

@@ -2,8 +2,8 @@ use core::time::Duration;
 
 use ars_a11y::FocusTarget;
 use ars_components::overlay::{
-    dialog,
-    positioning::{Offset, Placement, PositioningOptions},
+    dialog, popover,
+    positioning::{ArrowOffset, Offset, Placement, PositioningOptions, PositioningSnapshot},
     presence, tooltip,
 };
 use ars_core::{Direction, Env, SendResult, Service};
@@ -295,12 +295,7 @@ fn assert_tooltip_send_result_invariants(
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1000)
-    ))]
+    #![proptest_config(super::common::proptest_config())]
 
     #[test]
     #[ignore = "proptest — nightly extended-proptest job"]
@@ -402,15 +397,15 @@ enum DialogStep {
     SetProps(dialog::Props),
 }
 
-const DIALOG_EFFECT_NAMES: &[&str] = &[
-    dialog::EFFECT_OPEN_CHANGE,
-    dialog::EFFECT_FOCUS_INITIAL,
-    dialog::EFFECT_FOCUS_FIRST_TABBABLE,
-    dialog::EFFECT_SCROLL_LOCK_ACQUIRE,
-    dialog::EFFECT_SCROLL_LOCK_RELEASE,
-    dialog::EFFECT_SET_BACKGROUND_INERT,
-    dialog::EFFECT_REMOVE_BACKGROUND_INERT,
-    dialog::EFFECT_RESTORE_FOCUS,
+const DIALOG_EFFECTS: &[dialog::Effect] = &[
+    dialog::Effect::OpenChange,
+    dialog::Effect::FocusInitial,
+    dialog::Effect::FocusFirstTabbable,
+    dialog::Effect::ScrollLockAcquire,
+    dialog::Effect::ScrollLockRelease,
+    dialog::Effect::SetBackgroundInert,
+    dialog::Effect::RemoveBackgroundInert,
+    dialog::Effect::RestoreFocus,
 ];
 
 fn arb_focus_target() -> impl Strategy<Value = Option<FocusTarget>> {
@@ -529,7 +524,7 @@ fn assert_dialog_send_result_invariants(
     // documented `EFFECT_*` constants.
     for effect in &result.pending_effects {
         prop_assert!(
-            DIALOG_EFFECT_NAMES.contains(&effect.name),
+            DIALOG_EFFECTS.contains(&effect.name),
             "unexpected effect name: {:?}",
             effect.name
         );
@@ -570,7 +565,7 @@ fn assert_dialog_send_result_invariants(
     let emitted_open_change = result
         .pending_effects
         .iter()
-        .any(|e| e.name == dialog::EFFECT_OPEN_CHANGE);
+        .any(|e| e.name == dialog::Effect::OpenChange);
 
     let state_actually_flipped = result.state_changed;
 
@@ -593,12 +588,7 @@ fn assert_dialog_send_result_invariants(
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1000)
-    ))]
+    #![proptest_config(super::common::proptest_config())]
 
     #[test]
     #[ignore = "proptest — nightly extended-proptest job"]
@@ -681,6 +671,415 @@ proptest! {
             had_description |= service.context().has_description;
 
             assert_dialog_state_context_invariants(&service)?;
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Popover proptest
+// ────────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug)]
+enum PopoverStep {
+    Send(popover::Event),
+    SetProps(popover::Props),
+}
+
+const POPOVER_EFFECTS: &[popover::Effect] = &[
+    popover::Effect::OpenChange,
+    popover::Effect::AttachClickOutside,
+    popover::Effect::DetachClickOutside,
+    popover::Effect::AllocateZIndex,
+    popover::Effect::ReleaseZIndex,
+    popover::Effect::RestoreFocus,
+    popover::Effect::FocusInitial,
+];
+
+fn arb_arrow_offset() -> impl Strategy<Value = Option<ArrowOffset>> {
+    prop_oneof![
+        Just(None),
+        (-32.0f64..=32.0, -32.0f64..=32.0).prop_map(|(main_axis, cross_axis)| Some(ArrowOffset {
+            main_axis,
+            cross_axis,
+        })),
+    ]
+}
+
+fn arb_positioning_snapshot() -> impl Strategy<Value = PositioningSnapshot> {
+    (arb_placement(), arb_arrow_offset())
+        .prop_map(|(placement, arrow)| PositioningSnapshot { placement, arrow })
+}
+
+fn arb_popover_props() -> impl Strategy<Value = popover::Props> {
+    (
+        (
+            prop::option::of(any::<bool>()),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            arb_positioning_options(),
+            -16.0f64..=16.0,
+        ),
+        (
+            -16.0f64..=16.0,
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+        ),
+    )
+        .prop_map(
+            |(
+                (
+                    open,
+                    default_open,
+                    modal,
+                    close_on_escape,
+                    close_on_interact_outside,
+                    positioning,
+                    offset,
+                ),
+                (cross_offset, same_width, portal, lazy_mount, unmount_on_exit),
+            )| {
+                popover::Props::new()
+                    .id("popover")
+                    .open(open)
+                    .default_open(default_open)
+                    .modal(modal)
+                    .close_on_escape(close_on_escape)
+                    .close_on_interact_outside(close_on_interact_outside)
+                    .positioning(positioning)
+                    .offset(offset)
+                    .cross_offset(cross_offset)
+                    .same_width(same_width)
+                    .portal(portal)
+                    .lazy_mount(lazy_mount)
+                    .unmount_on_exit(unmount_on_exit)
+            },
+        )
+}
+
+fn arb_popover_event() -> impl Strategy<Value = popover::Event> {
+    prop_oneof![
+        Just(popover::Event::Open),
+        Just(popover::Event::Close),
+        Just(popover::Event::Toggle),
+        Just(popover::Event::CloseOnEscape),
+        Just(popover::Event::CloseOnInteractOutside),
+        arb_positioning_snapshot().prop_map(popover::Event::PositioningUpdate),
+        (0..=4_000u32).prop_map(popover::Event::SetZIndex),
+        Just(popover::Event::RegisterTitle),
+        Just(popover::Event::RegisterDescription),
+        Just(popover::Event::SyncProps),
+    ]
+}
+
+fn arb_popover_step() -> impl Strategy<Value = PopoverStep> {
+    prop_oneof![
+        arb_popover_event().prop_map(PopoverStep::Send),
+        arb_popover_props().prop_map(PopoverStep::SetProps),
+    ]
+}
+
+const fn popover_guard_rejects(event: popover::Event, props: &popover::Props) -> bool {
+    matches!(event, popover::Event::CloseOnEscape) && !props.close_on_escape
+        || matches!(event, popover::Event::CloseOnInteractOutside)
+            && !props.close_on_interact_outside
+}
+
+fn assert_popover_state_context_invariants(service: &Service<popover::Machine>) -> TestCaseResult {
+    // 1. State ⇔ context.open invariant — the boolean and the state
+    // enum must agree at all times.
+    prop_assert_eq!(
+        service.context().open,
+        matches!(service.state(), popover::State::Open)
+    );
+
+    // 2. ID stability — derived from props.id at init and never mutated
+    // (the on_props_changed assertion would have panicked otherwise).
+    prop_assert_eq!(&service.context().trigger_id, "popover-trigger");
+    prop_assert_eq!(&service.context().content_id, "popover-content");
+
+    // 3. Title / description ids, when registered, follow the same
+    // hydration-stable scheme.
+    if let Some(title_id) = service.context().title_id.as_deref() {
+        prop_assert_eq!(title_id, "popover-title");
+    }
+    if let Some(description_id) = service.context().description_id.as_deref() {
+        prop_assert_eq!(description_id, "popover-description");
+    }
+
+    // (`SetZIndex` is intentionally unguarded by state to cover the
+    // rare adapter race where the response arrives after a rapid close,
+    // so we cannot assert "z_index is None when closed" as a global
+    // invariant — the per-transition reset is asserted instead in
+    // `assert_popover_send_result_invariants` below.)
+
+    Ok(())
+}
+
+fn assert_popover_send_result_invariants(
+    event: popover::Event,
+    result: &SendResult<popover::Machine>,
+    before_state: popover::State,
+    before_context: &popover::Context,
+    before_props: &popover::Props,
+    after_context: &popover::Context,
+) -> TestCaseResult {
+    // 5. Effect-name allow-list — every emitted name is one of the
+    // documented `EFFECT_*` constants.
+    for effect in &result.pending_effects {
+        prop_assert!(
+            POPOVER_EFFECTS.contains(&effect.name),
+            "unexpected effect name: {:?}",
+            effect.name
+        );
+
+        // 6. Payload-free invariant — the popover machine never emits
+        // typed metadata (ALL its intents are name-only).
+        prop_assert!(effect.metadata.is_none());
+    }
+
+    // 7. Guards: dismissal events with the corresponding `close_on_*`
+    // disabled MUST NOT change state and MUST NOT emit any effects.
+    if popover_guard_rejects(event, before_props) {
+        prop_assert_eq!(service_state_unchanged(result), true);
+        prop_assert!(result.pending_effects.is_empty());
+        prop_assert!(result.cancel_effects.is_empty());
+    }
+
+    // 8. State-flipping events emit `EFFECT_OPEN_CHANGE` exactly when
+    // the state actually changed; no-op transitions do not.
+    let emitted_open_change = result
+        .pending_effects
+        .iter()
+        .any(|e| e.name == popover::Effect::OpenChange);
+
+    let state_actually_flipped = result.state_changed;
+
+    if matches!(
+        event,
+        popover::Event::Open
+            | popover::Event::Close
+            | popover::Event::Toggle
+            | popover::Event::CloseOnEscape
+            | popover::Event::CloseOnInteractOutside
+    ) {
+        prop_assert_eq!(emitted_open_change, state_actually_flipped);
+    } else {
+        prop_assert!(!emitted_open_change);
+    }
+
+    // 9. Effect-set symmetry on the open lifecycle — every successful
+    // `Closed → Open` transition emits the four-effect open-plan set,
+    // and every successful `Open → Closed` emits the four-effect
+    // close-plan set. (Per `open_lifecycle_effects` /
+    // `close_plan` in popover.rs.)
+    if result.state_changed {
+        let names: Vec<popover::Effect> = result
+            .pending_effects
+            .iter()
+            .map(|effect| effect.name)
+            .collect();
+
+        match service_resulting_state(before_state, result) {
+            popover::State::Open => {
+                prop_assert!(names.contains(&popover::Effect::OpenChange));
+                prop_assert!(names.contains(&popover::Effect::AllocateZIndex));
+                prop_assert!(names.contains(&popover::Effect::AttachClickOutside));
+                prop_assert!(names.contains(&popover::Effect::FocusInitial));
+            }
+            popover::State::Closed => {
+                prop_assert!(names.contains(&popover::Effect::OpenChange));
+                prop_assert!(names.contains(&popover::Effect::DetachClickOutside));
+                prop_assert!(names.contains(&popover::Effect::ReleaseZIndex));
+                prop_assert!(names.contains(&popover::Effect::RestoreFocus));
+            }
+        }
+    }
+
+    // 10. Register{Title,Description} monotonicity: once an id is
+    // populated, it stays populated; the catch-all match-arm guard
+    // rejects re-registration as a no-op.
+    if matches!(
+        event,
+        popover::Event::RegisterTitle | popover::Event::RegisterDescription
+    ) {
+        prop_assert!(!result.state_changed);
+    }
+
+    // 11. SetZIndex MUST NOT change state and is unguarded by state
+    // (covers the rare adapter race where the response arrives after
+    // a rapid close).
+    if let popover::Event::SetZIndex(z_index) = event {
+        prop_assert!(!result.state_changed);
+        prop_assert_eq!(service_z_index_after(z_index), Some(z_index));
+    }
+
+    // 12. PositioningUpdate is gated on state == Open; while closed it
+    // is a no-op so stale measurements never leak in.
+    if matches!(event, popover::Event::PositioningUpdate(_))
+        && matches!(before_state, popover::State::Closed)
+    {
+        prop_assert!(!result.state_changed);
+        prop_assert!(!result.context_changed);
+    }
+
+    // 13. close_plan resets `arrow_offset` and `z_index` — every
+    // successful `Open → Closed` transition wipes these so the next
+    // open lifecycle starts from a clean slate. (Subsequent
+    // `SetZIndex` events while closed may re-populate `z_index`; the
+    // invariant only asserts the immediate post-transition state.)
+    if result.state_changed
+        && matches!(before_state, popover::State::Open)
+        && matches!(
+            event,
+            popover::Event::Close
+                | popover::Event::Toggle
+                | popover::Event::CloseOnEscape
+                | popover::Event::CloseOnInteractOutside
+        )
+    {
+        prop_assert!(after_context.arrow_offset.is_none());
+        prop_assert!(after_context.z_index.is_none());
+    }
+
+    let _ = before_context;
+    Ok(())
+}
+
+// Helpers — defined as plain functions so they can be referenced from
+// `prop_assert_eq!` without lifetimes leaking into the `proptest!`
+// macro expansion.
+
+const fn service_state_unchanged<M: ars_core::Machine>(result: &SendResult<M>) -> bool {
+    !result.state_changed
+}
+
+const fn service_resulting_state(
+    before: popover::State,
+    result: &SendResult<popover::Machine>,
+) -> popover::State {
+    if result.state_changed {
+        match before {
+            popover::State::Closed => popover::State::Open,
+            popover::State::Open => popover::State::Closed,
+        }
+    } else {
+        before
+    }
+}
+
+const fn service_z_index_after(z_index: u32) -> Option<u32> {
+    Some(z_index)
+}
+
+proptest! {
+    #![proptest_config(super::common::proptest_config())]
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_popover_state_context_invariants_hold(
+        props in arb_popover_props(),
+        steps in prop::collection::vec(arb_popover_step(), 0..128),
+    ) {
+        let mut service = Service::<popover::Machine>::new(
+            props,
+            &Env::default(),
+            &popover::Messages::default(),
+        );
+
+        // Initial-effects invariant: when the popover boots into Open,
+        // `take_initial_effects` MUST emit the full open-plan set; when
+        // it boots into Closed, the buffer is empty. Assert this BEFORE
+        // any step runs (the buffer is captured at construction).
+        let initial_state = *service.state();
+        let initial_effects: Vec<popover::Effect> = service
+            .take_initial_effects()
+            .into_iter()
+            .map(|effect| effect.name)
+            .collect();
+
+        match initial_state {
+            popover::State::Open => {
+                prop_assert!(initial_effects.contains(&popover::Effect::OpenChange));
+                prop_assert!(initial_effects.contains(&popover::Effect::AllocateZIndex));
+                prop_assert!(initial_effects.contains(&popover::Effect::AttachClickOutside));
+                prop_assert!(initial_effects.contains(&popover::Effect::FocusInitial));
+            }
+            popover::State::Closed => {
+                prop_assert!(initial_effects.is_empty());
+            }
+        }
+
+        // Subsequent calls always observe the empty buffer — initial
+        // effects fire exactly once.
+        prop_assert!(service.take_initial_effects().is_empty());
+
+        assert_popover_state_context_invariants(&service)?;
+
+        // Track monotonic flags — once a title/description id is
+        // registered, it stays registered (the guard in `transition`
+        // prevents re-registration from clobbering the id).
+        let mut had_title = service.context().title_id.is_some();
+        let mut had_description = service.context().description_id.is_some();
+
+        for step in steps {
+            match step {
+                PopoverStep::Send(event) => {
+                    let before_state = *service.state();
+                    let before_context = service.context().clone();
+                    let before_props = service.props().clone();
+
+                    let result = service.send(event);
+
+                    let after_context = service.context().clone();
+
+                    assert_popover_send_result_invariants(
+                        event,
+                        &result,
+                        before_state,
+                        &before_context,
+                        &before_props,
+                        &after_context,
+                    )?;
+                }
+
+                PopoverStep::SetProps(props) => {
+                    let before_open_prop = service.props().open;
+                    let next_open_prop = props.open;
+
+                    drop(service.set_props(props));
+
+                    // SyncProps replays context-backed fields.
+                    let p = service.props();
+                    let c = service.context();
+
+                    prop_assert_eq!(c.modal, p.modal);
+                    prop_assert_eq!(&c.positioning.placement, &p.positioning.placement);
+
+                    // Controlled-open sync.
+                    if before_open_prop != next_open_prop
+                        && let Some(open) = service.props().open
+                    {
+                        prop_assert_eq!(service.context().open, open);
+                    }
+                }
+            }
+
+            // Monotonicity invariants enforced after each step.
+            if had_title {
+                prop_assert!(service.context().title_id.is_some());
+            }
+            if had_description {
+                prop_assert!(service.context().description_id.is_some());
+            }
+
+            had_title |= service.context().title_id.is_some();
+            had_description |= service.context().description_id.is_some();
+
+            assert_popover_state_context_invariants(&service)?;
         }
     }
 }

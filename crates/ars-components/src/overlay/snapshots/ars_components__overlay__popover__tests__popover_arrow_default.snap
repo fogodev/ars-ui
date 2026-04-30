@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/overlay/popover.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).arrow_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "arrow",
+            ),
+        ),
+        (
+            Data(
+                "ars-placement",
+            ),
+            String(
+                "bottom",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "popover",
+            ),
+        ),
+    ],
+    styles: [],
+}

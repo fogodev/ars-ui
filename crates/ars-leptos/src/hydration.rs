@@ -433,6 +433,7 @@ mod tests {
         type Context = ();
         type Props = TestProps;
         type Messages = ();
+        type Effect = ars_core::NoEffect;
         type Api<'a> = TestApi;
 
         fn init(

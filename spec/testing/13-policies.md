@@ -342,30 +342,38 @@ adapter-level component coverage starts for that component.
 ### 3.1 Snapshot Count Budgeting
 
 - **Warning threshold:** When total snapshot count exceeds 500, a CI warning is emitted.
-- **Per-component limit:** No single component should have more than 20 snapshot files. Components exceeding this should consolidate state variants.
+- **Per-component soft budget:** Each component's budget is computed from the lint-detected anatomy size (the number of `#[derive(ComponentPart)]` enum variants) and state-variant count: `budget = min(3 × state_variants × anatomy_parts, 40)`.
+- **Hard ceiling:** No single component may exceed **40 snapshot files**, regardless of anatomy size — this protects review-time fatigue for components with rich anatomy (Dialog, Popover, Combobox).
 - **Quarterly audit:** Review snapshot growth each quarter. Prune snapshots for removed or significantly refactored components.
-- **Review budget guideline:** Each new rendered component starts review with a snapshot plan of 3 snapshots per state variant × number of anatomy parts. `ars-components` machine modules instead plan snapshots around output-affecting connect-API attrs.
 - **CI floor:** Rendered `component.rs` files with more than two `State` variants must have at least 3 snapshots per state variant. Canonical `ars-components` machine modules with more than two variants must have at least 1 snapshot per state variant.
 
-Each component is budgeted a maximum of **20 snapshots**. The review guideline formula is:
+The budget formula scales with each component's published anatomy — small
+components like `tooltip` (6 parts × 2 useful state branches × 3 = 36, capped
+at the hard ceiling at 40) get the same budget as larger overlays, while very
+small components like `portal` (1 part × 2 variants × 3 = 6) are kept tight.
+This replaces the previous flat 20-snapshot cap so growth is gated by genuine
+anatomy complexity rather than an arbitrary number.
 
-`budget = min(3 × state_variants × anatomy_parts, 20)`
+**Enforcement:** `cargo xtask lint snapshot-count` verifies per-component
+snapshot counts using:
 
-Components exceeding 20 snapshots fail the snapshot-count lint and should
-consolidate state variants before merge.
+- A state-variant floor (`min_per_variant`, default `3` for rendered
+  `component.rs` modules; canonical `ars-components` machine modules use
+  `min_per_variant = 1`).
+- The soft budget formula above (configurable via `--per-part-per-variant`,
+  default `3`, and `--max-per-component`, default `40`).
 
-**Enforcement:** `cargo xtask lint snapshot-count` verifies per-component snapshot counts
-using the implementation-derived state-variant floor and a flat cap of 20. The lint
-counts `*.snap` files per component directory. The anatomy-part multiplier is a
-review guideline because anatomy parts are specified in component specs rather than
-implementation files.
+The lint counts `*.snap` files per component directory and detects anatomy
+size by parsing `#[derive(ComponentPart)] pub enum Part { … }` blocks in the
+implementation. Components without an anatomy enum collapse to the hard
+ceiling, so legacy or in-progress components are still bounded by the 40-cap.
 
-> **CI enforcement:** The snapshot count linting job in [14-ci.md section 2.4](14-ci.md#24-snapshot-count-linting) enforces both minimum (>= 3 per component variant) and maximum (<= 20 per component) bounds.
+> **CI enforcement:** The snapshot count linting job in [14-ci.md section 2.4](14-ci.md#24-snapshot-count-linting) enforces the per-variant floor and the per-component formula budget. The hard ceiling acts as an absolute upper bound regardless of detected anatomy size.
 
 **Review triggers:**
 
 - Any PR adding more than 5 new snapshots
-- Any component exceeding the 20-snapshot cap
+- Any component exceeding the formula budget or the 40-snapshot hard ceiling
 - Quarterly audit (manually triggered, tracked via GitHub issue template)
 
 > **Process:** Quarterly snapshot audits are tracked via GitHub issue template

@@ -1,0 +1,53 @@
+---
+source: crates/ars-components/src/overlay/popover.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "popover",
+            ),
+        ),
+        (
+            Aria(
+                Expanded,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Aria(
+                HasPopup,
+            ),
+            String(
+                "dialog",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "popover-trigger",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

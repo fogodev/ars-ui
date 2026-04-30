@@ -312,6 +312,13 @@ pub struct Messages;
 
 impl ars_core::ComponentMessages for Messages {}
 
+/// Typed identifier for every named effect intent the switch machine emits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter invokes `Props::on_checked_change` with the new value.
+    CheckedChange,
+}
+
 /// Machine for the `Switch` component.
 #[derive(Debug)]
 pub struct Machine;
@@ -322,6 +329,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(
@@ -825,7 +833,7 @@ fn reset_plan(ctx: &Context, default_checked: bool) -> TransitionPlan<Machine> {
 
 fn checked_change_effect(next: bool) -> PendingEffect<Machine> {
     PendingEffect::new(
-        "checked-change",
+        Effect::CheckedChange,
         move |_ctx: &Context, props: &Props, _send| {
             if let Some(cb) = &props.on_checked_change {
                 cb(next);
@@ -1012,7 +1020,7 @@ mod tests {
         assert_eq!(service.state(), &State::Off);
         assert!(!service.context().checked.get());
         assert_eq!(result.pending_effects.len(), 1);
-        assert_eq!(result.pending_effects[0].name, "checked-change");
+        assert_eq!(result.pending_effects[0].name, Effect::CheckedChange);
     }
 
     #[test]
@@ -1157,7 +1165,7 @@ mod tests {
         assert!(!service.context().checked.get());
         assert!(service.context().checked.is_controlled());
         assert_eq!(result.pending_effects.len(), 1);
-        assert_eq!(result.pending_effects[0].name, "checked-change");
+        assert_eq!(result.pending_effects[0].name, Effect::CheckedChange);
     }
 
     #[test]

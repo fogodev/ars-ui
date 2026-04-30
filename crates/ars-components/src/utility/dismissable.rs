@@ -131,6 +131,19 @@ impl<E: PartialEq> PartialEq for DismissAttempt<E> {
     }
 }
 
+impl<E: Default> Default for DismissAttempt<E> {
+    /// Creates a fresh attempt whose payload is `E::default()` and whose
+    /// veto flag is unset.
+    ///
+    /// Convenience constructor for the common `DismissAttempt<()>` case
+    /// used by Dialog, Popover, and `HoverCard` — the `()` payload is
+    /// trivial and `DismissAttempt::default()` reads more cleanly than
+    /// `DismissAttempt::new(())` in test fixtures.
+    fn default() -> Self {
+        Self::new(E::default())
+    }
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Messages
 // ────────────────────────────────────────────────────────────────────

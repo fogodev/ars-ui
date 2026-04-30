@@ -199,12 +199,7 @@ fn form_submit_props(initial_mode: Mode) -> form_submit::Props {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1000)
-    ))]
+    #![proptest_config(super::common::proptest_config())]
 
     #[test]
     #[ignore = "proptest — nightly extended-proptest job"]
@@ -397,12 +392,7 @@ fn arb_separator_props() -> impl Strategy<Value = separator::Props> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1000)
-    ))]
+    #![proptest_config(super::common::proptest_config())]
 
     /// `Api::part_attrs(Part::Root)` always equals `Api::root_attrs()` for
     /// any valid `Props`. Pins the `ConnectApi` dispatch shape.

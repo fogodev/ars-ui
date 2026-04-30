@@ -472,6 +472,7 @@ impl Machine for HarnessBridgeMachine {
     type Context = ();
     type Props = HarnessBridgeProps;
     type Messages = ();
+    type Effect = ars_core::NoEffect;
     type Api<'a> = HarnessBridgeApi;
 
     fn init(
@@ -636,6 +637,7 @@ mod tests {
             type Context = MockContext;
             type Props = MockProps;
             type Messages = ();
+            type Effect = ars_core::NoEffect;
             type Api<'a> = MockApi<'a>;
 
             fn init(

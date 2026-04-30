@@ -483,7 +483,19 @@ fn run_snapshot_count() -> Result<(), Error> {
     match lint::check_snapshot_count(&lint::SnapshotCountOptions {
         snapshots_dir: PathBuf::from("crates"),
         min_per_variant: 3,
-        max_per_component: 20,
+        // Soft per-component budget formula:
+        //
+        //     budget = min(per_part_per_variant × variants × parts,
+        //                  max_per_component)
+        //
+        // - `per_part_per_variant: 3` matches the
+        //   `spec/testing/13-policies.md` §3.1 review guideline.
+        // - `max_per_component: 40` is the hard ceiling that protects
+        //   review-time fatigue regardless of anatomy size. Components
+        //   with rich anatomy (Dialog, Popover) hit it; components with
+        //   small anatomy (Tooltip, Presence) are gated by the formula.
+        per_part_per_variant: 3,
+        max_per_component: 40,
     }) {
         Ok(output) => {
             eprint!("{output}");

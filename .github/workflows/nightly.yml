@@ -54,6 +54,155 @@ jobs:
           wasm-pack test --headless --chrome crates/ars-leptos --test axe
           wasm-pack test --headless --chrome crates/ars-dioxus --test axe
 
+  mutation-testing:
+    name: Mutation Tests (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    # Each matrix entry is independent; let them all run so failures on one
+    # module don't mask data on another.
+    strategy:
+      fail-fast: false
+      matrix:
+        # Mutation testing covers framework-agnostic crates whose tests are
+        # dominated by deterministic logic. Adapter (`ars-leptos`,
+        # `ars-dioxus`), DOM-FFI (`ars-dom`), ICU-FFI (`ars-i18n`),
+        # test-harness (`ars-test-harness*`), and proc-macro (`ars-derive`)
+        # crates are deliberately excluded — their behaviour is dominated
+        # by side effects that mutation testing can't observe reliably.
+        #
+        # Each entry runs `cargo mutants -p <package>` on the whole crate.
+        # Larger crates use `--shard k/n` so the work spreads across
+        # parallel runners — adding a new state machine to `ars-components`
+        # therefore needs zero CI changes; the new mutations are just
+        # auto-distributed across the existing shards. Re-balance the
+        # shard count only when a crate's per-shard wall clock starts
+        # exceeding ~30 min on the dashboard.
+        #
+        # Initial sizing (≈ 3.5s/mutant amortized on the GitHub Actions
+        # ubuntu runner; refresh by reading the slowest-shard wall-clock
+        # in the Actions UI when a new component lands):
+        #   - ars-components: ≈ 1,630 mutants today → 12 shards × ≈ 135
+        #     (sized for ≈ 112 components in the spec endpoint, where
+        #     mutants will likely cross 10,000; 12-way keeps the slowest
+        #     shard under ~50 min even at endpoint without further
+        #     re-balancing)
+        #   - ars-collections: ≈ 1,080 mutants → 4 shards × ≈ 270
+        #   - ars-core: ≈ 700 mutants → 2 shards × ≈ 350
+        #   - ars-a11y, ars-forms, ars-interactions: < 600 each → single
+        #     job per crate
+        include:
+          # ─── ars-components (sharded 12-way) ──
+          - name: components-shard-1
+            package: ars-components
+            shard: "1/12"
+          - name: components-shard-2
+            package: ars-components
+            shard: "2/12"
+          - name: components-shard-3
+            package: ars-components
+            shard: "3/12"
+          - name: components-shard-4
+            package: ars-components
+            shard: "4/12"
+          - name: components-shard-5
+            package: ars-components
+            shard: "5/12"
+          - name: components-shard-6
+            package: ars-components
+            shard: "6/12"
+          - name: components-shard-7
+            package: ars-components
+            shard: "7/12"
+          - name: components-shard-8
+            package: ars-components
+            shard: "8/12"
+          - name: components-shard-9
+            package: ars-components
+            shard: "9/12"
+          - name: components-shard-10
+            package: ars-components
+            shard: "10/12"
+          - name: components-shard-11
+            package: ars-components
+            shard: "11/12"
+          - name: components-shard-12
+            package: ars-components
+            shard: "12/12"
+          # ─── ars-collections (≈ 1,080 mutants, sharded 4-way) ──
+          - name: collections-shard-1
+            package: ars-collections
+            shard: "1/4"
+          - name: collections-shard-2
+            package: ars-collections
+            shard: "2/4"
+          - name: collections-shard-3
+            package: ars-collections
+            shard: "3/4"
+          - name: collections-shard-4
+            package: ars-collections
+            shard: "4/4"
+          # ─── ars-core (≈ 700 mutants, sharded 2-way) ───────────
+          - name: core-shard-1
+            package: ars-core
+            shard: "1/2"
+          - name: core-shard-2
+            package: ars-core
+            shard: "2/2"
+          # ─── Single-job runs (small enough for one runner) ─────
+          - name: a11y
+            package: ars-a11y
+            shard: ""
+          - name: forms
+            package: ars-forms
+            shard: ""
+          - name: interactions
+            package: ars-interactions
+            shard: ""
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-mutants
+            target
+          # Key by package, not shard — every shard of the same crate
+          # builds the same baseline, so they share the registry and
+          # toolchain caches and only diverge on the per-shard scratch
+          # dirs that cargo-mutants manages internally.
+          key: ${{ runner.os }}-cargo-nightly-mutants-${{ matrix.package }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Install cargo-mutants
+        # Pin to the version the scout run was validated against. Bump
+        # deliberately when upgrading and re-run the scout to confirm
+        # behaviour hasn't changed.
+        run: cargo install cargo-mutants --locked --version 27.0.0
+      - name: Run mutation testing on ${{ matrix.name }}
+        env:
+          PACKAGE: ${{ matrix.package }}
+          SHARD: ${{ matrix.shard }}
+        # `SHARD` is empty for single-job entries and `k/n` for sharded
+        # entries; the conditional keeps both shapes in one job template.
+        # Both env vars are quoted to defend against accidental whitespace
+        # from matrix overrides.
+        run: |
+          if [ -n "$SHARD" ]; then
+            cargo mutants -p "$PACKAGE" --shard "$SHARD" --output mutants.out
+          else
+            cargo mutants -p "$PACKAGE" --output mutants.out
+          fi
+      # Always upload, even on success — surviving "missed" entries on a
+      # passing run are valuable feedback for follow-up tightening.
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-${{ matrix.name }}
+          path: mutants.out/mutants.out/
+          retention-days: 14
+
   cross-compile:
     name: Cross-Compile (${{ matrix.name }})
     runs-on: ubuntu-latest

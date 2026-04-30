@@ -879,7 +879,7 @@ fn numeric_typeahead_returns_timer_marker_effect_until_value_is_complete() {
 
     assert_eq!(service.context().type_buffer, "1");
     assert_eq!(result.pending_effects.len(), 1);
-    assert_eq!(result.pending_effects[0].name, "type-buffer-commit");
+    assert_eq!(result.pending_effects[0].name, Effect::TypeBufferCommit);
 }
 
 #[test]

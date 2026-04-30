@@ -211,6 +211,17 @@ impl Props {
 // Machine
 // ────────────────────────────────────────────────────────────────────
 
+/// Typed identifier for every named effect intent the `form-submit` machine
+/// emits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter forwards the submission to the underlying handler.
+    Submit,
+
+    /// Adapter runs the async validation pipeline.
+    AsyncValidation,
+}
+
 /// The form submission state machine.
 ///
 /// See spec `07-forms.md` §8 for the full lifecycle specification.
@@ -223,6 +234,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = ();
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(
@@ -261,7 +273,7 @@ impl ars_core::Machine for Machine {
                         ctx.sync_valid = ctx.form.validate_all();
                     })
                     .with_effect(PendingEffect::new(
-                        "async-validation",
+                        Effect::AsyncValidation,
                         |ctx: &Context, props: &Props, send: WeakSend<Event>| {
                             if ctx.form.has_async_validators() {
                                 let validators = ctx.form.collect_async_validators();
@@ -276,13 +288,14 @@ impl ars_core::Machine for Machine {
 
                                 let cancelled = Arc::new(AtomicBool::new(false));
 
-                                let cancelled_clone = Arc::clone(&cancelled);
-
-                                (props.schedule_microtask)(Box::new(move || {
-                                    let is_cancelled =
-                                        cancelled_clone.load(atomic::Ordering::Relaxed);
-                                    if !is_cancelled {
-                                        send.call_if_alive(event);
+                                (props.schedule_microtask)(Box::new({
+                                    let cancelled = Arc::clone(&cancelled);
+                                    move || {
+                                        let is_cancelled =
+                                            cancelled.load(atomic::Ordering::Relaxed);
+                                        if !is_cancelled {
+                                            send.call_if_alive(event);
+                                        }
                                     }
                                 }));
 
@@ -299,7 +312,7 @@ impl ars_core::Machine for Machine {
                     .apply(|ctx: &mut Context| {
                         ctx.form.is_submitting = true;
                     })
-                    .with_effect(PendingEffect::new("submit", |_ctx, _props, _send| {
+                    .with_effect(PendingEffect::new(Effect::Submit, |_ctx, _props, _send| {
                         // Adapter observes Submitting state and invokes user on_submit.
                         // This effect exists so the adapter can register a cleanup
                         // function that cancels in-flight requests on state change.
@@ -347,8 +360,8 @@ impl ars_core::Machine for Machine {
                 let mode = props.validation_mode;
                 Some(
                     TransitionPlan::to(State::Idle)
-                        .cancel_effect("async-validation")
-                        .cancel_effect("submit")
+                        .cancel_effect(Effect::AsyncValidation)
+                        .cancel_effect(Effect::Submit)
                         .apply(move |ctx: &mut Context| {
                             ctx.form.reset();
 
@@ -669,7 +682,7 @@ mod tests {
 
         // Should have "async-validation" effect
         assert_eq!(result.pending_effects.len(), 1);
-        assert_eq!(result.pending_effects[0].name, "async-validation");
+        assert_eq!(result.pending_effects[0].name, Effect::AsyncValidation);
     }
 
     #[test]
@@ -760,7 +773,7 @@ mod tests {
         assert_eq!(service.state(), &State::Submitting);
         assert!(service.context().form.is_submitting);
         assert_eq!(result.pending_effects.len(), 1);
-        assert_eq!(result.pending_effects[0].name, "submit");
+        assert_eq!(result.pending_effects[0].name, Effect::Submit);
     }
 
     #[test]
@@ -884,7 +897,10 @@ mod tests {
         assert!(result.state_changed);
         assert_eq!(service.state(), &State::Idle);
         assert!(service.context().submit_error.is_none());
-        assert_eq!(result.cancel_effects, vec!["async-validation", "submit"]);
+        assert_eq!(
+            result.cancel_effects,
+            vec![Effect::AsyncValidation, Effect::Submit]
+        );
     }
 
     // --- SetMode tests ---
@@ -1617,7 +1633,7 @@ mod tests {
         let result = service.send(Event::Reset);
 
         assert_eq!(service.state(), &State::Idle);
-        assert!(result.cancel_effects.contains(&"async-validation"));
+        assert!(result.cancel_effects.contains(&Effect::AsyncValidation));
     }
 
     #[test]
@@ -1632,7 +1648,7 @@ mod tests {
         let result = service.send(Event::Reset);
 
         assert_eq!(service.state(), &State::Idle);
-        assert!(result.cancel_effects.contains(&"submit"));
+        assert!(result.cancel_effects.contains(&Effect::Submit));
         assert!(!service.context().form.is_submitting);
     }
 
@@ -1694,16 +1710,18 @@ mod tests {
     #[test]
     fn props_builder_schedule_microtask_setter_invokes_supplied_closure() {
         let calls = Arc::new(atomic::AtomicUsize::new(0));
-        let calls_for_props = Arc::clone(&calls);
 
         let props = Props::new(
             "form",
             |_: (Vec<(String, BoxedAsyncValidator)>, WeakSend<Event>)| -> Box<dyn FnOnce()> {
                 Box::new(|| {})
             },
-            move |task: Box<dyn FnOnce()>| {
-                calls_for_props.fetch_add(1, atomic::Ordering::SeqCst);
-                task();
+            {
+                let calls = Arc::clone(&calls);
+                move |task: Box<dyn FnOnce()>| {
+                    calls.fetch_add(1, atomic::Ordering::SeqCst);
+                    task();
+                }
             },
         );
 

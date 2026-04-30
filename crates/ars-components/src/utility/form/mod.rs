@@ -192,6 +192,7 @@ impl ars_core::Machine for Machine {
     // Localized form strings live in `crate::form::Messages` and are resolved
     // by adapters/validation helpers, not by the core component machine.
     type Messages = ();
+    type Effect = ars_core::NoEffect;
     type Api<'a> = Api<'a>;
 
     fn init(

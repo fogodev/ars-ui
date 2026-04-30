@@ -303,12 +303,7 @@ fn arb_textarea_event() -> impl Strategy<Value = textarea::Event> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1000)
-    ))]
+    #![proptest_config(super::common::proptest_config())]
 
     #[test]
     #[ignore = "proptest — nightly extended-proptest job"]
@@ -506,7 +501,7 @@ proptest! {
             );
 
             for effect in &result.pending_effects {
-                if effect.name == "auto-resize" {
+                if effect.name == textarea::Effect::AutoResize {
                     prop_assert_eq!(
                         effect.metadata.as_ref(),
                         Some(&EffectMetadata::ResizeToContent(ars_core::ResizeToContentEffect {

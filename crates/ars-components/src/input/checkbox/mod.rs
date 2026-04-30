@@ -281,6 +281,13 @@ pub struct Messages;
 
 impl ars_core::ComponentMessages for Messages {}
 
+/// Typed identifier for every named effect intent the checkbox machine emits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter invokes `Props::on_checked_change`.
+    CheckedChange,
+}
+
 /// Machine for the Checkbox component.
 #[derive(Debug)]
 pub struct Machine;
@@ -291,6 +298,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(
@@ -775,7 +783,7 @@ fn value_change_plan(ctx: &Context, next: State) -> TransitionPlan<Machine> {
 
 fn checked_change_effect(next: State) -> PendingEffect<Machine> {
     PendingEffect::new(
-        "checked-change",
+        Effect::CheckedChange,
         move |_ctx: &Context, props: &Props, _send| {
             if let Some(cb) = &props.on_checked_change {
                 cb(next);
@@ -1046,7 +1054,7 @@ mod tests {
         assert_eq!(service.context().checked.get(), &State::Unchecked);
         assert!(service.context().checked.is_controlled());
         assert_eq!(result.pending_effects.len(), 1);
-        assert_eq!(result.pending_effects[0].name, "checked-change");
+        assert_eq!(result.pending_effects[0].name, Effect::CheckedChange);
     }
 
     #[test]
@@ -1158,7 +1166,7 @@ mod tests {
         assert_eq!(service.state(), &State::Unchecked);
         assert_eq!(service.context().checked.get(), &State::Unchecked);
         assert_eq!(result.pending_effects.len(), 1);
-        assert_eq!(result.pending_effects[0].name, "checked-change");
+        assert_eq!(result.pending_effects[0].name, Effect::CheckedChange);
     }
 
     #[test]
@@ -1183,7 +1191,7 @@ mod tests {
 
         assert!(!attrs.contains(&HtmlAttr::Checked));
         assert_eq!(result.pending_effects.len(), 1);
-        assert_eq!(result.pending_effects[0].name, "checked-change");
+        assert_eq!(result.pending_effects[0].name, Effect::CheckedChange);
     }
 
     #[test]

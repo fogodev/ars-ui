@@ -168,6 +168,53 @@ impl Default for PositioningOptions {
     }
 }
 
+/// Adapter-supplied arrow offset relative to the floating element.
+///
+/// The adapter measures the trigger / floating / arrow rectangles and reports
+/// where the arrow should sit so the agnostic core can emit it as a `style`
+/// attribute on the [`Arrow`](#) part. The values are in CSS pixels and
+/// follow the same axis convention as [`Offset`]: `main_axis` is the distance
+/// along the placement direction (so `top` / `bottom` for vertical placements,
+/// `left` / `right` for horizontal placements) and `cross_axis` is the
+/// perpendicular distance.
+///
+/// The agnostic core never computes these values — it only stores what an
+/// adapter reports through the per-component positioning event (e.g.
+/// [`popover::Event::PositioningUpdate`](super::popover::Event::PositioningUpdate))
+/// and surfaces them through the connect API.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ArrowOffset {
+    /// Distance along the placement main axis, in CSS pixels.
+    pub main_axis: f64,
+
+    /// Distance perpendicular to the placement main axis, in CSS pixels.
+    pub cross_axis: f64,
+}
+
+/// DOM-free positioning result reported by an adapter after measurement.
+///
+/// Adapters compute popover/tooltip placement using the framework-specific
+/// positioning engine (see `crates/ars-dom/src/positioning/`) and then send a
+/// snapshot back to the agnostic state machine via a per-component event so
+/// the connect API can render the resolved placement and arrow position.
+///
+/// The snapshot is intentionally narrow — it carries only the data the core
+/// needs to surface in attributes (`data-ars-placement`, arrow inline styles).
+/// Live element references, bounding rectangles, and intermediate computation
+/// state stay in the adapter layer.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PositioningSnapshot {
+    /// The placement the adapter resolved to after applying flip/shift/auto
+    /// rules from the consumer's [`PositioningOptions`]. May differ from the
+    /// requested placement when the floating element overflowed the boundary
+    /// and the adapter chose a fallback side.
+    pub placement: Placement,
+
+    /// Adapter-computed arrow offset, when an arrow part is present.
+    /// `None` when the adapter has not (yet) measured the arrow.
+    pub arrow: Option<ArrowOffset>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,5 +265,34 @@ mod tests {
         assert!(options.fallback_placements.is_empty());
         assert!(!options.keyboard_aware);
         assert!(!options.auto_placement);
+    }
+
+    #[test]
+    fn positioning_snapshot_default_uses_default_placement_and_no_arrow() {
+        let snap = PositioningSnapshot::default();
+
+        assert_eq!(snap.placement, Placement::Bottom);
+        assert_eq!(snap.arrow, None);
+    }
+
+    #[test]
+    fn positioning_snapshot_round_trips_arrow_offset() {
+        let snap = PositioningSnapshot {
+            placement: Placement::TopStart,
+            arrow: Some(ArrowOffset {
+                main_axis: 12.5,
+                cross_axis: -3.0,
+            }),
+        };
+
+        // Reconstruct via Clone to confirm Copy/Clone preserve the payload.
+        let cloned = snap;
+
+        assert_eq!(cloned.placement, Placement::TopStart);
+
+        let arrow = cloned.arrow.expect("arrow offset should be carried");
+
+        assert!((arrow.main_axis - 12.5).abs() < f64::EPSILON);
+        assert!((arrow.cross_axis - -3.0).abs() < f64::EPSILON);
     }
 }

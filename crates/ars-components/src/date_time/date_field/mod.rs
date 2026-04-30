@@ -875,6 +875,13 @@ impl Default for Messages {
 
 impl ComponentMessages for Messages {}
 
+/// Typed identifier for every named effect intent the `date_field` machine emits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter starts the type-buffer commit timer.
+    TypeBufferCommit,
+}
+
 /// Machine for the `DateField` component.
 #[derive(Debug)]
 pub struct Machine;
@@ -885,6 +892,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(
@@ -1019,7 +1027,7 @@ impl ars_core::Machine for Machine {
 
                         ctx.type_buffer.clear();
                     })
-                    .cancel_effect("type-buffer-commit"),
+                    .cancel_effect(Effect::TypeBufferCommit),
             ),
 
             Event::FocusNextSegment => {
@@ -1036,7 +1044,7 @@ impl ars_core::Machine for Machine {
 
                                 ctx.focused_segment = next;
                             })
-                            .cancel_effect("type-buffer-commit"),
+                            .cancel_effect(Effect::TypeBufferCommit),
                     )
                 } else {
                     let first = ctx.first_editable()?;
@@ -1060,7 +1068,7 @@ impl ars_core::Machine for Machine {
 
                                 ctx.focused_segment = Some(previous);
                             })
-                            .cancel_effect("type-buffer-commit"),
+                            .cancel_effect(Effect::TypeBufferCommit),
                     )
                 } else {
                     None
@@ -1081,7 +1089,7 @@ impl ars_core::Machine for Machine {
 
                         maybe_publish(ctx);
                     })
-                    .cancel_effect("type-buffer-commit"),
+                    .cancel_effect(Effect::TypeBufferCommit),
                 )
             }
 
@@ -1099,7 +1107,7 @@ impl ars_core::Machine for Machine {
 
                         maybe_publish(ctx);
                     })
-                    .cancel_effect("type-buffer-commit"),
+                    .cancel_effect(Effect::TypeBufferCommit),
                 )
             }
 
@@ -1162,7 +1170,7 @@ impl ars_core::Machine for Machine {
 
                         ctx.value.set(None);
                     })
-                    .cancel_effect("type-buffer-commit"),
+                    .cancel_effect(Effect::TypeBufferCommit),
                 )
             }
 
@@ -1189,7 +1197,7 @@ impl ars_core::Machine for Machine {
                             ctx.focused_segment = None;
                             ctx.type_buffer.clear();
                         })
-                        .cancel_effect("type-buffer-commit"),
+                        .cancel_effect(Effect::TypeBufferCommit),
                 )
             }
 
@@ -1743,11 +1751,11 @@ fn type_into_segment(
     });
 
     if should_advance {
-        plan = plan.cancel_effect("type-buffer-commit");
+        plan = plan.cancel_effect(Effect::TypeBufferCommit);
     } else {
         plan = plan
-            .cancel_effect("type-buffer-commit")
-            .with_effect(PendingEffect::named("type-buffer-commit"));
+            .cancel_effect(Effect::TypeBufferCommit)
+            .with_effect(PendingEffect::named(Effect::TypeBufferCommit));
     }
 
     Some(plan)
@@ -1793,11 +1801,11 @@ fn type_month_name(ctx: &Context, state: &State, ch: char) -> Option<TransitionP
     });
 
     if should_advance {
-        plan = plan.cancel_effect("type-buffer-commit");
+        plan = plan.cancel_effect(Effect::TypeBufferCommit);
     } else {
         plan = plan
-            .cancel_effect("type-buffer-commit")
-            .with_effect(PendingEffect::named("type-buffer-commit"));
+            .cancel_effect(Effect::TypeBufferCommit)
+            .with_effect(PendingEffect::named(Effect::TypeBufferCommit));
     }
 
     Some(plan)
