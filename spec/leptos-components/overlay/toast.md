@@ -14,7 +14,7 @@ This spec maps the core [`Toast`](../../components/overlay/toast.md) notificatio
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 /// Provider component. Place at the application root so that the dual
 /// aria-live regions are present in server-rendered HTML.
 #[component]
@@ -319,7 +319,7 @@ Leptos 0.8.x specifics:
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 use leptos::prelude::*;
 
 #[component]
@@ -450,7 +450,7 @@ pub fn use_toast() -> Toaster {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 // Provider
 let (toasts, set_toasts) = signal(Vec::new());
 let (queue, set_queue) = signal(Vec::new());

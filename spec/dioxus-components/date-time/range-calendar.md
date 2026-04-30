@@ -14,7 +14,7 @@ This spec maps the core [`RangeCalendar`](../../components/date-time/range-calen
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct RangeCalendarProps {
     #[props(optional)]
@@ -206,7 +206,7 @@ Plain props remain preferred; the controlled range uses `Signal` only when post-
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<range_calendar::Machine>(props);
 
 rsx! {

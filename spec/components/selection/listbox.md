@@ -868,7 +868,7 @@ impl ConnectApi for Api<'_> {
 When the `Listbox` has `orientation: Horizontal` and `dir: Rtl`, the meanings of `ArrowLeft`
 and `ArrowRight` MUST be swapped to match the physical layout direction:
 
-```rust
+```rust,no_check
 // In on_keydown, resolve horizontal arrow keys with RTL awareness:
 let resolved_key = match (data.key, self.ctx.orientation, self.ctx.dir) {
     (KeyboardKey::ArrowRight, Orientation::Horizontal, Direction::Rtl) => KeyboardKey::ArrowLeft,

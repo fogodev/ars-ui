@@ -14,7 +14,7 @@ This spec maps the core [`Listbox`](../../components/selection/listbox.md) contr
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct ListboxProps {
     #[props(optional)]

@@ -14,7 +14,7 @@ This spec maps the core [`ZIndexAllocator`](../../components/utility/z-index-all
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component] pub fn ZIndexAllocatorProvider(children: Children) -> impl IntoView
 ```
 
@@ -163,7 +163,7 @@ pub fn ZIndexAllocatorProvider(children: Children) -> impl IntoView {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let allocator = create_allocator_context(props);
 let claims = create_claim_registry_helper();
 

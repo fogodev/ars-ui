@@ -74,7 +74,7 @@ Construct via the inherent builder: `Props::new()` returns the default; setters
 `impl Into<String>` and return `Self` for chaining. `Option<String>` setters wrap the supplied
 value in `Some` automatically:
 
-```rust
+```rust,no_check
 let props = form::Props::new()
     .id("checkout")
     .validation_behavior(ValidationBehavior::Aria)

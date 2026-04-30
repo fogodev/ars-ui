@@ -14,7 +14,7 @@ This spec maps the core [`ColorSwatchPicker`](../../components/specialized/color
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct ColorSwatchPickerProps {
     pub colors: Vec<ColorValue>,

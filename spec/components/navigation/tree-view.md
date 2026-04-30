@@ -946,7 +946,7 @@ pub struct ReorderEvent {
 
 ### 5.1 Additional Props
 
-```rust
+```rust,no_check
 /// The load_children callback is registered in the adapter layer, not in Props.
 /// When provided, nodes without pre-loaded children will trigger lazy loading on expand.
 /// The adapter observes `LoadChildren(Key)` events and calls the user-provided callback.
@@ -962,7 +962,7 @@ pub type LoadChildrenFn = Rc<dyn Fn(Key)>;
 
 ### 5.2 Additional Events
 
-```rust
+```rust,no_check
 /// Added to TreeView Event enum.
 /// Fired when a node is expanded for the first time and has no children loaded.
 LoadChildren(Key),
@@ -1011,7 +1011,7 @@ display is replaced by an inline `<input>` element until the rename is committed
 
 ### 6.1 Additional Props
 
-```rust
+```rust,no_check
 /// Additional props for the renamable variant.
 impl Props {
     /// When true, tree items can be renamed inline via F2 or slow double-click.
@@ -1025,7 +1025,7 @@ impl Props {
 
 ### 6.2 Additional Events
 
-```rust
+```rust,no_check
 /// Added to TreeView Event enum for the renamable variant.
 
 /// User initiates rename on a node (e.g., F2 or slow double-click).
@@ -1038,7 +1038,7 @@ RenameCancel(Key),
 
 ### 6.3 Additional Context
 
-```rust
+```rust,no_check
 /// Added to TreeView Context for the renamable variant.
 impl Context {
     /// The node currently being renamed, if any. When `Some(key)`, the node
@@ -1064,7 +1064,7 @@ impl Context {
 - **`RenameCancel(key)`**: Clears `renaming_key` to `None`. No value change occurs. Focus
   returns to the tree item that was being renamed.
 
-```rust
+```rust,no_check
 /// Transition logic for rename events.
 /// Added to the Machine::transition match block.
 
@@ -1122,7 +1122,7 @@ The `NodeRenameInput(Key)` part is an `<input type="text">` element rendered ins
 branch control or leaf when `renaming_key == Some(key)`. It replaces the text display during
 rename and is pre-filled with the node's current `label` value.
 
-```rust
+```rust,no_check
 /// Added to Part enum.
 NodeRenameInput { node_id: String },
 ```
@@ -1184,7 +1184,7 @@ pub fn is_renaming(&self, node_id: &str) -> bool {
 
 The `part_attrs` match is extended:
 
-```rust
+```rust,no_check
 Part::NodeRenameInput { ref node_id } => self.node_rename_input_attrs(node_id),
 ```
 
@@ -1206,7 +1206,7 @@ Part::NodeRenameInput { ref node_id } => self.node_rename_input_attrs(node_id),
 
 ### 6.7 Messages
 
-```rust
+```rust,no_check
 /// Added to the Messages struct for the renamable variant.
 impl Messages {
     /// Accessible label for the rename input. Called with the node's current

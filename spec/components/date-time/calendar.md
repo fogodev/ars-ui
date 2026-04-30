@@ -1319,7 +1319,7 @@ Calendar supports multiple non-contiguous date selection in addition to the defa
 
 ### 5.1 Additional Props
 
-```rust
+```rust,no_check
 /// Added to Props.
 pub selection_mode: CalendarSelectionMode,
 /// Maximum number of dates that can be selected.
@@ -1337,7 +1337,7 @@ pub enum CalendarSelectionMode {
 
 ### 5.2 Additional Context
 
-```rust
+```rust,no_check
 /// Extended CalendarContext for multi-selection.
 /// When selection_mode is Multiple:
 pub selected_dates: BTreeSet<CalendarDate>,
@@ -1345,7 +1345,7 @@ pub selected_dates: BTreeSet<CalendarDate>,
 
 ### 5.3 Additional Events
 
-```rust
+```rust,no_check
 /// Added to Calendar Event enum.
 /// Toggle a date in/out of the selection set.
 ToggleDate(CalendarDate),

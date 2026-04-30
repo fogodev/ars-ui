@@ -152,7 +152,7 @@ The Dioxus adapter uses the same `EphemeralRef<'a, T>` newtype as the Leptos ada
 
 **Dioxus signal safety**: Dioxus `Signal<T>` requires `T: 'static`. `EphemeralRef` contains `PhantomData<(Rc<()>, &'a ())>`, which is not `'static`, so the compiler rejects any attempt to store it:
 
-```rust
+```rust,no_check
 // COMPILE ERROR in Dioxus: EphemeralRef does not implement 'static
 let sig = use_signal(|| ephemeral_ref); // ❌ Won't compile
 ```
@@ -406,7 +406,7 @@ The Clipboard component follows the same SSR-safe rules as the Leptos adapter (s
 
 Effect cleanup functions are never executed during SSR. However, effect **setup** closures that capture `web_sys` types will fail to compile for the SSR target. All effect setup closures that reference DOM APIs must be gated with `#[cfg(not(feature = "ssr"))]` or wrapped in a platform check:
 
-```rust
+```rust,no_check
 #[cfg(not(feature = "ssr"))]
 use_effect(move || {
     // DOM-accessing code here
@@ -593,7 +593,7 @@ can dispatch events correctly.
 - **`with_api_snapshot(|api| ...)`** — one-shot, non-reactive read. Prefer `derive()` for
   anything rendered in the DOM.
 
-```rust
+```rust,no_check
 // Example usage:
 let machine = use_machine::<select::Machine>(props);
 let is_open = machine.derive(|api| api.is_open());
@@ -962,7 +962,7 @@ macro_rules! dioxus_attrs {
 Adapters use `derive()` to reactively extract attributes from the connect API,
 and wire event handlers through `send.call()`:
 
-```rust
+```rust,no_check
 // In a Dioxus component:
 let strategy = use_style_strategy();
 let root_attrs = machine.derive(move |api| attr_map_to_dioxus(api.root_attrs(), &strategy, Some("checkbox-root")));
@@ -1995,7 +1995,7 @@ pub fn use_platform() -> Arc<dyn DioxusPlatform> {
 
 For list-based components (Select, Listbox, Menu, Combobox), Dioxus renders collection items using standard iteration:
 
-````rust
+````rust,no_check
 use ars_collections::{Collection, Key};
 
 /// Render a collection in Dioxus using for-loop iteration with key.
@@ -2053,7 +2053,7 @@ Overlay exit animations are handled by the **Presence** machine (see `spec/compo
 3. Presence defers unmounting until the CSS exit animation completes.
 4. The adapter reads `presence_api.is_mounted()` to decide whether to render the element.
 
-```rust
+```rust,no_check
 // Usage in a Dioxus overlay component:
 let presence = use_machine::<presence::Machine>(presence::Props::default());
 let is_mounted = presence.derive(|api| api.is_mounted());
@@ -2088,7 +2088,7 @@ No adapter-level `create_presence()` helper is needed — Presence is a standard
 
 Leptos uses the `#[slot]` macro for named slot composition. In Dioxus, named slots are modeled as explicit `Element` props:
 
-````rust
+````rust,no_check
 #[component]
 pub fn Dialog(
     // Simplified example — uses plain bool for brevity.
@@ -2337,7 +2337,7 @@ All `ars-dioxus` components follow uniform naming conventions for accessors, sta
 
 Boolean state is always accessed through `is_*()` methods, never bare field access:
 
-```rust
+```rust,no_check
 api.is_disabled()       // not: api.disabled
 api.is_open()           // not: api.open
 api.is_checked()        // not: api.checked
@@ -2351,7 +2351,7 @@ api.is_indeterminate()  // not: api.indeterminate
 
 Non-boolean values use getter methods (or direct field access for simple data):
 
-```rust
+```rust,no_check
 api.value()             // current value (String, number, etc.)
 api.selected_items()    // current selection set
 api.highlighted_key()   // currently highlighted item key
@@ -2363,7 +2363,7 @@ api.orientation()       // Orientation enum
 
 All callback props use the `on_*` prefix:
 
-```rust
+```rust,no_check
 on_change               // value changed
 on_select               // item selected
 on_open_change          // open state toggled
@@ -2379,7 +2379,7 @@ on_dismiss              // overlay dismissed
 Adapter component specs that expose compound parts must use module scoping instead of
 repeating the component name in every part symbol:
 
-```rust
+```rust,no_check
 pub mod dialog {
     #[component]
     pub fn Dialog(props: DialogProps) -> Element
@@ -3150,8 +3150,8 @@ wrong elements).
     }
     ```
 
-   Resetting the counter prevents request-to-request leakage, but it does not
-   make generated IDs safe if server and client render different hook paths.
+    Resetting the counter prevents request-to-request leakage, but it does not
+    make generated IDs safe if server and client render different hook paths.
 
 3. **Hydration mismatch detection**: In debug builds, the client SHOULD compare
    the mounted DOM element's server-rendered `id` with the client ID it is about
@@ -3547,29 +3547,34 @@ where
 
 ## 21. Error Boundary Pattern
 
-Wrap component trees with `ErrorBoundary` to gracefully handle machine panics
-or unexpected state transitions:
+Wrap component trees with the canonical accessible error-boundary wrapper to
+handle machine panics or unexpected state transitions. The full design
+(props, parts, attribute contract, accessibility, message bundle) lives in
+the shared core spec at
+[`components/utility/error-boundary.md`](../components/utility/error-boundary.md);
+the Dioxus-specific adapter contract (props struct, `default_fallback` helper,
+`ErrorContext` mapping) is at
+[`dioxus-components/utility/error-boundary.md`](../dioxus-components/utility/error-boundary.md).
+
+Adapter consumers reach the wrapper via the prelude:
 
 ```rust
-#[component]
-pub fn ArsErrorBoundary(children: Element) -> Element {
-    rsx! {
-        ErrorBoundary {
-            handle_error: |ctx: ErrorContext| {
-                rsx! {
-                    div {
-                        "data-ars-error": "true",
-                        role: "alert",
-                        p { "A component encountered an error." }
-                        p { {ctx.error().map(|e| format!("{e}")).unwrap_or_default()} }
-                    }
-                }
-            },
-            {children}
-        }
+use ars_dioxus::prelude::*;
+
+rsx! {
+    error_boundary::Boundary {
+        ChildComponent {}
     }
 }
 ```
+
+The wrapper composes around `dioxus_core::ErrorBoundary`. When a child
+returns `Err`, the framework primitive captures it and the wrapper renders
+the canonical `<div role="alert" data-ars-error="true" data-ars-error-count="N">`
+fallback with a localized heading and a `<ul>`/`<li>` list of caught errors —
+matching the Leptos adapter byte-for-byte. Optional props expose a custom
+fallback override, an `on_error` telemetry hook, and a `messages` bundle
+override; see the linked specs for the full Rust signatures.
 
 ---
 
@@ -3583,7 +3588,7 @@ All `Machine` type parameters in adapter hooks must satisfy `M: Machine + 'stati
 
 `Api` borrows from `Service` and cannot be held across `.await` points. For async event handlers, clone the send callback from the `UseMachineReturn`:
 
-```rust
+```rust,no_check
 let send = machine.send;
 // then use inside async block (Dioxus auto-spawns async in event handlers):
 spawn(async move {

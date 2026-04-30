@@ -14,7 +14,7 @@ This spec maps the core [`SearchInput`](../../components/input/search-input.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct SearchInputProps {
     #[props(optional)]
@@ -193,7 +193,7 @@ Dioxus should keep debounce scheduling instance-local, use the normal input-even
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<search_input::Machine>(props);
 
 rsx! {

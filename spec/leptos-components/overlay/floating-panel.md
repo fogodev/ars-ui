@@ -14,7 +14,7 @@ This spec maps the core [`FloatingPanel`](../../components/overlay/floating-pane
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn FloatingPanel(
     #[prop(optional)] id: Option<String>,
@@ -578,7 +578,7 @@ pub fn MaximizeTrigger(children: Children) -> impl IntoView {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let props = build_core_props_from_adapter_props();
 let machine = use_machine::<floating_panel::Machine>(props);
 provide_context(Context { machine });

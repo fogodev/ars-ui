@@ -14,6 +14,7 @@ mod attrs;
 mod callbacks;
 pub mod dismissable;
 mod ephemeral;
+pub mod error_boundary;
 mod event_mapping;
 mod hydration;
 mod id;

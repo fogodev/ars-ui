@@ -14,7 +14,7 @@ This spec maps the core [`Editable`](../../components/input/editable.md) contrac
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Editable(
     #[prop(optional, into)] value: Option<Signal<String>>,
@@ -172,7 +172,7 @@ Leptos should keep the edit input in a stable `NodeRef`, use local focus restora
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<editable::Machine>(props);
 
 view! {

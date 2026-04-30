@@ -14,7 +14,7 @@ This spec maps the core [`ActionGroup`](../../components/utility/action-group.md
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component] pub fn ActionGroup(...) -> impl IntoView
 #[component] pub fn Item(item_id: Key, children: Children) -> impl IntoView
 #[component] pub fn OverflowTrigger(children: Children) -> impl IntoView
@@ -204,7 +204,7 @@ pub fn ActionGroup(children: Children) -> impl IntoView {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = use_machine_or_adapter_controller(props);
 let refs = create_required_refs_and_helpers();
 let registry = create_optional_registration_or_cleanup_helper();

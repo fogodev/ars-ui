@@ -14,7 +14,7 @@ This spec maps the core [`TextField`](../../components/input/text-field.md) cont
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn TextField(
     #[prop(optional, into)] value: Option<Signal<String>>,
@@ -176,7 +176,7 @@ Leptos should keep the native input in a `NodeRef`, use `Effect::new` plus `Stor
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<text_field::Machine>(props);
 
 view! {

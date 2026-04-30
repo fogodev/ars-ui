@@ -14,7 +14,7 @@ This spec maps the core [`Switch`](../../components/input/switch.md) contract on
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct SwitchProps {
     #[props(optional)]
@@ -183,7 +183,7 @@ Dioxus should prefer plain props for the public surface, keep attrs in `derive(.
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<switch::Machine>(props);
 
 rsx! {

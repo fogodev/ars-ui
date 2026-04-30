@@ -14,7 +14,7 @@ This spec maps the core [`FileTrigger`](../../components/input/file-trigger.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct FileTriggerProps {
     pub accept: Vec<String>,
@@ -173,7 +173,7 @@ Dioxus should keep the hidden input in a mounted-data or direct DOM ref path tha
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let api = file_trigger::Api::new(&props);
 let input_ref = use_signal(|| None::<MountedData>);
 

@@ -13,7 +13,7 @@ use std::{
     process,
 };
 
-use crate::{coverage, i18n, lint, test};
+use crate::{coverage, i18n, lint, manifest, spec, test};
 
 const MUTUAL_EXCLUSION_GUARD: &str = "features `icu4x` and `web-intl` are mutually exclusive";
 
@@ -61,6 +61,11 @@ pub enum Step {
     /// Enforce per-component snapshot-count policy.
     SnapshotCount,
 
+    /// Parse every fenced Rust code block in the spec corpus and report
+    /// any `syn::parse_file` syntax errors. Catches structural Rust bugs
+    /// in spec snippets before they ship.
+    SpecCompileSnippets,
+
     /// Verify every `ComponentError` variant appears in tests.
     ErrorVariantCoverage,
 
@@ -103,6 +108,7 @@ const PIPELINE_ORDER: &[Step] = &[
     Step::AdapterParity,
     Step::Coverage,
     Step::SnapshotCount,
+    Step::SpecCompileSnippets,
     Step::ErrorVariantCoverage,
     Step::FeatureMatrixCore,
     Step::FeatureMatrixI18n,
@@ -144,6 +150,10 @@ pub enum Error {
 
     /// Repository lint check failed.
     Lint(lint::Error),
+
+    /// Spec corpus check failed (e.g. `compile-snippets` reported a Rust
+    /// syntax error in a fenced code block).
+    Spec(manifest::Error),
 }
 
 impl Display for Error {
@@ -175,6 +185,8 @@ impl Display for Error {
             Self::Coverage(e) => write!(f, "{e}"),
 
             Self::Lint(e) => write!(f, "{e}"),
+
+            Self::Spec(e) => write!(f, "{e}"),
         }
     }
 }
@@ -271,6 +283,8 @@ fn run_step(step: Step, message_format: Option<&str>) -> Result<(), Error> {
         Step::Coverage => run_coverage(),
 
         Step::SnapshotCount => run_snapshot_count(),
+
+        Step::SpecCompileSnippets => run_spec_compile_snippets(),
 
         Step::ErrorVariantCoverage => run_error_variant_coverage(),
 
@@ -478,6 +492,30 @@ fn run_snapshot_count() -> Result<(), Error> {
 
         Err(error) => Err(Error::Lint(error)),
     }
+}
+
+fn run_spec_compile_snippets() -> Result<(), Error> {
+    let cwd = std::env::current_dir().map_err(Error::Io)?;
+
+    let root = manifest::SpecRoot::discover(&cwd).map_err(Error::Spec)?;
+
+    // `fix = false` — CI must never silently rewrite spec files. Maintainers
+    // run `cargo xtask spec compile-snippets --fix` locally to apply fixes.
+    let report = spec::compile_snippets::execute(&root, false).map_err(Error::Spec)?;
+
+    if report.contains("finding(s) across") {
+        eprint!("{report}");
+
+        return Err(Error::StepFailed {
+            step: Step::SpecCompileSnippets,
+            command: "cargo xtask spec compile-snippets".to_string(),
+            code: Some(1),
+        });
+    }
+
+    eprint!("{report}");
+
+    Ok(())
 }
 
 fn run_error_variant_coverage() -> Result<(), Error> {
@@ -767,6 +805,7 @@ const fn step_name(step: Step) -> &'static str {
         Step::AdapterParity => "adapter-parity",
         Step::Coverage => "coverage",
         Step::SnapshotCount => "snapshot-count",
+        Step::SpecCompileSnippets => "spec-compile-snippets",
         Step::ErrorVariantCoverage => "error-variant-coverage",
         Step::FeatureMatrix => "feature-matrix",
         Step::FeatureMatrixCore => "feature-matrix-core",

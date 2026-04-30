@@ -587,7 +587,7 @@ completion into `Event::AnimationEnd`. A web implementation should follow this s
 
 Run inside a `requestAnimationFrame` callback after the adapter has set `data-ars-state="closed"` to ensure the browser has applied new styles.
 
-```rust
+```rust,no_check
 // Read computed styles for the element
 let style = get_computed_style(&node);
 let anim_name = style.animation_name();

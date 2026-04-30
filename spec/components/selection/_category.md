@@ -58,7 +58,7 @@ initialization time (via `navigator.userAgent` or `navigator.platform`) and fall
 roving tabindex when running on iOS. The detection SHOULD be centralized in a shared
 `use_focus_strategy()` hook or equivalent runtime check:
 
-```rust
+```rust,no_check
 /// Determines the focus strategy based on the runtime environment.
 pub fn resolve_focus_strategy(preferred: FocusStrategy) -> FocusStrategy {
     if preferred == FocusStrategy::ActiveDescendant && is_ios_voiceover() {
@@ -81,24 +81,24 @@ Per-component strategy:
 - **Select**: Primary = `aria-activedescendant`. iOS fallback = roving tabindex on listbox items.
 - **Combobox**: Primary = `aria-activedescendant` (focus MUST stay on input for typing). iOS fallback = add `aria-selected="true"` on active option for improved VoiceOver announcements. Roving tabindex is NOT used because focus cannot leave the input. See §2.5 Connect API for implementation details.
 
-  **Combobox iOS VoiceOver Implementation Detail:**
-  When `is_ios_voiceover()` returns `true`, the `Combobox` connect code MUST:
-  1. **Omit `aria-activedescendant`** from the input element entirely (do not set it even when
-     an item is highlighted). iOS VoiceOver ignores this attribute and may produce confusing
-     announcements when it is present.
-  2. **Set `aria-selected="true"`** on the currently highlighted option (in addition to the
-     existing `aria-selected` for selection state). This is the primary mechanism VoiceOver
-     uses to announce the active option on iOS.
-  3. **Do NOT use roving tabindex** — focus must remain on the `<input>` for typing. This
-     distinguishes `Combobox` from `Select`/`Listbox`, which can use roving tabindex as their iOS
-     fallback.
-  4. **Virtualized lists**: When combined with `Virtualizer`, ensure the highlighted item is
-     scrolled into view before setting `aria-selected="true"`. The adapter must wait for the
-     DOM node to mount (via `requestAnimationFrame` or `MutationObserver`) before applying
-     the attribute.
+    **Combobox iOS VoiceOver Implementation Detail:**
+    When `is_ios_voiceover()` returns `true`, the `Combobox` connect code MUST:
+    1. **Omit `aria-activedescendant`** from the input element entirely (do not set it even when
+       an item is highlighted). iOS VoiceOver ignores this attribute and may produce confusing
+       announcements when it is present.
+    2. **Set `aria-selected="true"`** on the currently highlighted option (in addition to the
+       existing `aria-selected` for selection state). This is the primary mechanism VoiceOver
+       uses to announce the active option on iOS.
+    3. **Do NOT use roving tabindex** — focus must remain on the `<input>` for typing. This
+       distinguishes `Combobox` from `Select`/`Listbox`, which can use roving tabindex as their iOS
+       fallback.
+    4. **Virtualized lists**: When combined with `Virtualizer`, ensure the highlighted item is
+       scrolled into view before setting `aria-selected="true"`. The adapter must wait for the
+       DOM node to mount (via `requestAnimationFrame` or `MutationObserver`) before applying
+       the attribute.
 
-  The detection is performed once at initialization via `resolve_focus_strategy()` and stored
-  in `Context` as `is_ios: bool` for use in the connect code.
+    The detection is performed once at initialization via `resolve_focus_strategy()` and stored
+    in `Context` as `is_ios: bool` for use in the connect code.
 
 - **Listbox**: Primary = `aria-activedescendant`. iOS fallback = roving tabindex.
 - **Menu / ContextMenu / MenuBar**: Primary = roving tabindex (no fallback needed; already VoiceOver-compatible).
@@ -128,21 +128,21 @@ the following rules apply:
   `Combobox`, `TagsInput`), `aria-describedby` is wired on the primary interactive element
   using the same pattern as input components:
 
-  ```rust
-  // IMPORTANT: Only reference IDs for parts that are actually rendered,
-  // otherwise the aria-describedby will point to a non-existent element
-  // (a "dangling reference"), which confuses assistive technology.
-  let mut describedby_parts = Vec::new();
-  if self.ctx.has_description {
-      describedby_parts.push(self.ctx.ids.part("description"));
-  }
-  if self.ctx.invalid {
-      describedby_parts.push(self.ctx.ids.part("error-message"));
-  }
-  if !describedby_parts.is_empty() {
-      attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), describedby_parts.join(" "));
-  }
-  ```
+    ```rust,no_check
+    // IMPORTANT: Only reference IDs for parts that are actually rendered,
+    // otherwise the aria-describedby will point to a non-existent element
+    // (a "dangling reference"), which confuses assistive technology.
+    let mut describedby_parts = Vec::new();
+    if self.ctx.has_description {
+        describedby_parts.push(self.ctx.ids.part("description"));
+    }
+    if self.ctx.invalid {
+        describedby_parts.push(self.ctx.ids.part("error-message"));
+    }
+    if !describedby_parts.is_empty() {
+        attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), describedby_parts.join(" "));
+    }
+    ```
 
 | Component      | Value Type        | Popup    | Key ARIA Pattern                 |
 | -------------- | ----------------- | -------- | -------------------------------- |
@@ -209,7 +209,7 @@ affecting other selected items. This matches desktop OS conventions (Finder, Exp
 
 **Event variant:**
 
-```rust
+```rust,no_check
 /// Emitted when Ctrl/Cmd+Click toggles a single item in a Replace-mode multi-select.
 /// The adapter translates `pointerup` with `ctrlKey` (or `metaKey` on macOS) into this event.
 Event::SelectItemCtrl(Key)
@@ -223,7 +223,7 @@ The adapter layer intercepts `pointerup` events on item elements and checks modi
 - `pointerup` with `ctrlKey` (Windows/Linux) or `metaKey` (macOS) → `Event::SelectItemCtrl(key)`
 - `pointerup` with `shiftKey` → `Event::RangeSelect { anchor: last_selected_key, target: key }`
 
-```rust
+```rust,no_check
 // Adapter-level pointer event handler (Leptos example):
 fn on_item_pointerup(key: Key, event: web_sys::PointerEvent, send: &dyn Fn(Event)) {
     let is_ctrl = if cfg!(target_os = "macos") {
@@ -248,7 +248,7 @@ fn on_item_pointerup(key: Key, event: web_sys::PointerEvent, send: &dyn Fn(Event
 
 **Transition handler:**
 
-```rust
+```rust,no_check
 /// Toggle a single item without affecting the rest of the selection.
 /// Only effective when selection_behavior == Replace && selection_mode == Multiple.
 (_, Event::SelectItemCtrl(key)) => {
@@ -281,14 +281,14 @@ machine computes the inclusive range between anchor and target.
 
 **Event variant:**
 
-```rust
+```rust,no_check
 /// Emitted when Shift+Click or Shift+Arrow extends a selection range.
 Event::RangeSelect { anchor: Key, target: Key }
 ```
 
 **Context extension:**
 
-```rust
+```rust,no_check
 /// Added to the shared selection context alongside `selection::State`.
 /// Tracks the last explicitly selected key, serving as the anchor for
 /// subsequent range operations.
@@ -399,7 +399,7 @@ its `Context`.
 
 The adapter is responsible for scheduling the 500ms timeout cleanup via `PendingEffect`:
 
-```rust
+```rust,no_check
 (_, Event::TypeaheadSearch(ch, now_ms)) => {
     let (new_ta, found) = ctx.typeahead.process_char(*ch, *now_ms,
         ctx.highlighted_key.as_ref(), &ctx.items);

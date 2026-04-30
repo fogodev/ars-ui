@@ -14,7 +14,7 @@ This spec maps the core [`FloatingPanel`](../../components/overlay/floating-pane
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 pub mod floating_panel {
     #[derive(Props, Clone, PartialEq)]
     pub struct FloatingPanelProps {
@@ -667,7 +667,7 @@ pub fn StageTrigger(props: StageTriggerProps) -> Element {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let props = build_core_props_from_adapter_props();
 let machine = use_machine::<floating_panel::Machine>(props);
 use_context_provider(|| Context { machine });

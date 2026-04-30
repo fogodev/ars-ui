@@ -14,7 +14,7 @@ This spec maps the core [`ToggleButton`](../../components/utility/toggle-button.
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct ToggleButtonProps {
     #[props(optional)]
@@ -231,7 +231,7 @@ pub fn ToggleButton(props: ToggleButtonSketchProps) -> Element {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = use_machine::<toggle_button::Machine>(props);
 let root_ref = create_root_ref();
 let form_helper = create_hidden_input_or_validator_helper();

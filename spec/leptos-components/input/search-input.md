@@ -14,7 +14,7 @@ This spec maps the core [`SearchInput`](../../components/input/search-input.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn SearchInput(
     #[prop(optional, into)] value: Option<Signal<String>>,
@@ -177,7 +177,7 @@ Leptos should use a local timer cleanup path for debounce scheduling, keep the i
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<search_input::Machine>(props);
 
 view! {

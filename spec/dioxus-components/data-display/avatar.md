@@ -14,7 +14,7 @@ This spec maps the core [`Avatar`](../../components/data-display/avatar.md) cont
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct AvatarProps {
     #[props(optional)]

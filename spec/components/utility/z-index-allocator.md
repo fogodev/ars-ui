@@ -191,7 +191,7 @@ ZIndexAllocator has no ARIA semantics. It is a context-only provider invisible t
 
 ## 4. Usage
 
-```rust
+```rust,no_check
 // Adapter creates the context in a top-level provider
 let context = z_index_allocator::Context::new();
 

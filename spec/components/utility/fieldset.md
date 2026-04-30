@@ -49,7 +49,7 @@ Construct via the inherent builder: `Props::new()` returns the default; setters 
 `invalid`, `readonly`, `dir`) accept the natural argument and return `Self` for chaining. The
 `dir` setter accepts a `Direction` and wraps it in `Some` automatically.
 
-```rust
+```rust,no_check
 let props = fieldset::Props::new()
     .id("billing-address")
     .disabled(true)

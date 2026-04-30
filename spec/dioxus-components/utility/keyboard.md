@@ -14,7 +14,7 @@ This spec maps the core [`Keyboard`](../../components/utility/keyboard.md) utili
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct KeyboardProps {
     #[props(optional)]

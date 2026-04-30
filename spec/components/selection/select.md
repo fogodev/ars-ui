@@ -107,7 +107,7 @@ The `Event::UpdateItems(StaticCollection<Item>)` event MUST be emitted by the ad
 
 **Transition Handler for UpdateItems**:
 
-```rust
+```rust,no_check
 Event::UpdateItems(new_items) => {
     // 1. Update the items collection
     ctx.items = new_items;

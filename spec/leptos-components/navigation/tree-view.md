@@ -14,7 +14,7 @@ This spec maps the core [`TreeView`](../../components/navigation/tree-view.md) c
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn TreeView(
     items: TreeCollection<TreeItem>,
@@ -186,7 +186,7 @@ Leptos should keep the visible-node registry in context, compose each node `Node
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<tree_view::Machine>(props);
 provide_context(Context::from_machine(machine));
 

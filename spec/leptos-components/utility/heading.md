@@ -14,7 +14,7 @@ This spec maps the core [`Heading`](../../components/utility/heading.md) utility
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component] pub fn Heading(...) -> impl IntoView
 ```
 

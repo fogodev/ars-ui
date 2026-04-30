@@ -14,7 +14,7 @@ This spec maps the core [`Drawer`](../../components/overlay/drawer.md) machine t
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component] pub fn Drawer(...) -> impl IntoView
 #[component] pub fn Trigger(children: Children) -> impl IntoView
 #[component] pub fn Backdrop() -> impl IntoView
@@ -287,7 +287,7 @@ Leptos uses `NodeRef<html::Div>` for Positioner, Content, and DragHandle refs. D
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 use leptos::prelude::*;
 use ars_core::drawer;
 
@@ -457,7 +457,7 @@ pub fn Description(children: Children) -> impl IntoView {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 // Drawer initialization
 let machine = use_machine::<drawer::Machine>(core_props);
 let ctx = create_drawer_context(machine);

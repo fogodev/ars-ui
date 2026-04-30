@@ -14,7 +14,7 @@ This spec maps the core [`SegmentGroup`](../../components/selection/segment-grou
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn SegmentGroup(
     #[prop(optional)] id: Option<String>,

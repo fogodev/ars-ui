@@ -210,7 +210,7 @@ and avoids per-target trait-bound drift in component props and provider state.
 
 A closure capturing `Rc<RefCell<T>>` compiles on WASM but fails on desktop:
 
-```rust
+```rust,no_check
 use std::rc::Rc;
 use std::cell::RefCell;
 
@@ -228,7 +228,7 @@ let callback = move || {
 
 For code that must compile on both WASM and native targets, use `Arc<Mutex<T>>` instead of `Rc<RefCell<T>>`:
 
-```rust
+```rust,no_check
 use std::sync::{Arc, Mutex};
 
 let shared_state = Arc::new(Mutex::new(0u32));
@@ -273,7 +273,7 @@ This pattern surfaces platform incompatibilities at compile time on any target, 
 
 `SharedState<T>` extends the same `cfg`-gated pattern to interior-mutable state containers (interaction result state, live reactive values). On WASM it wraps `Rc<RefCell<T>>`, on native it wraps `Arc<Mutex<T>>`. Key API:
 
-```rust
+```rust,no_check
 use ars_core::SharedState;
 
 let state = SharedState::new(HoverState::NotHovered);
@@ -1014,7 +1014,7 @@ pub fn callback<Args: 'static, Out: 'static>(f: impl Fn(Args) -> Out + Send + Sy
 
 **Preferred usage:**
 
-```rust
+```rust,no_check
 // Recommended — type inference works naturally:
 let cb = callback(|s: String| log::info!("{s}"));
 
@@ -1033,7 +1033,7 @@ MyProps {
 
 When `callback()` is not suitable (e.g., when constructing inside a trait impl or macro), the turbofish syntax on `Callback::new()` remains available:
 
-```rust
+```rust,no_check
 // Turbofish resolves ambiguity when the compiler cannot infer the closure signature:
 let cb = Callback::<dyn Fn(String)>::new(|s| log::info!("{s}"));
 ```
@@ -1048,7 +1048,7 @@ Both `Callback<T>` and `MessageFn<T>` wrap `Arc<T>` internally. The `Arc` field 
 
 **Trait-bound implication**: Code that is generic over `Callback` or `MessageFn` should assume the stronger `Send + Sync + 'static` contract on every target.
 
-````rust
+````rust,no_check
 /// ## MessageFn Definition
 ///
 /// `MessageFn<T>` wraps i18n message closures — functions that produce localized strings.
@@ -1093,7 +1093,7 @@ Code that previously used `impl SmartCallback<T>` bounds should instead accept `
 
 > **Default English Messages:** Each component module MUST provide a `default()` impl on its `XyzMessages` struct that returns fallback English messages. Adapters override these defaults via Props fields or context injection (e.g., `ArsProvider`). This ensures components render meaningful text even when no i18n configuration is present. See `04-internationalization.md` for the full message override chain.
 
-````rust
+````rust,no_check
 /// ## Callback Type Taxonomy
 ///
 /// The library uses four distinct closure/callback wrapper types:
@@ -1271,7 +1271,7 @@ impl<M: Machine> PendingEffect<M> {
 
 Rc cycles form when a cleanup closure captures the `send` callback by cloning the `Rc`:
 
-```rust
+```rust,no_check
 // ❌ INCORRECT — holding a strong reference in the cleanup prevents cleanup from ever running
 PendingEffect::new("auto-dismiss", |_ctx, _props, send| {
     let timer = set_timeout(move || {
@@ -1286,7 +1286,7 @@ PendingEffect::new("auto-dismiss", |_ctx, _props, send| {
 The `send` parameter is a `WeakSend<M::Event>` — a weak reference that does not keep the
 service alive. Use `send.call_if_alive(event)` to dispatch events safely:
 
-```rust
+```rust,no_check
 // ✅ CORRECT — WeakSend is already weak, so no cycle is possible
 PendingEffect::new("auto-dismiss", |_ctx, _props, send| {
     let timer = set_timeout(move || {
@@ -1360,7 +1360,7 @@ User closures passed to `PendingEffect::new()` MUST accept `send: WeakSend<M::Ev
 
 `PendingEffect::setup` closures that need to dispatch events during cleanup MUST accept `WeakSend<M::Event>` instead of `Arc<dyn Fn(M::Event) + Send + Sync>`:
 
-```rust
+```rust,no_check
 // ✅ Type-safe cycle prevention
 PendingEffect::new("auto-dismiss", |_ctx, _props, send| {
     // `send` is already `WeakSend<M::Event>` — use directly in cleanup
@@ -1641,7 +1641,7 @@ impl PlatformEffects for MissingProviderEffects {
 
 **Usage in effect closures:**
 
-```rust
+```rust,no_check
 // Platform-agnostic effect — works on web, desktop, and mobile:
 PendingEffect::new("focus-content", |ctx, _props, _send| {
     let platform = use_platform_effects();
@@ -1754,7 +1754,7 @@ Adapters SHOULD prefer Strategy 1 unless they have a specific reason to require 
 
 ### 2.3 Service Runtime
 
-```rust
+```rust,no_check
 use alloc::collections::VecDeque;
 
 /// Maximum number of events processed per `drain_queue` call before
@@ -2043,7 +2043,7 @@ The `send()` method (defined in §2.3 above) checks the `unmounted` flag and ret
    use `TransitionPlan::then_send` or schedule them asynchronously after
    the current effect batch completes.
 
-```rust
+```rust,no_check
     // NOTE: The Service does NOT internally track active effects or manage
     // their lifecycle. Effects are returned in `SendResult::pending_effects`
     // for the adapter to manage. When `state_changed` is true, the adapter
@@ -2241,7 +2241,7 @@ impl<T: BindableValue> Bindable<T> {
 
 For components managing large collections (TreeView, TagGroup, Table selections), use `Rc<Vec<T>>`/`Arc<Vec<T>>` with `make_mut()` instead of `Vec<T>` directly. This avoids cloning when only one reference exists:
 
-```rust
+```rust,no_check
 // On WASM: use Rc (single-threaded, no atomic overhead)
 #[cfg(target_arch = "wasm32")]
 use alloc::rc::Rc;
@@ -2301,7 +2301,7 @@ However, the `on_change` callback fires for **both** user-initiated and programm
 
 **Consumer responsibility:** Consumers who perform side effects in `on_change` (e.g., network requests, analytics) MUST guard against redundant invocations:
 
-```rust
+```rust,no_check
 // In the parent component's on_change handler (Dioxus example; Leptos
 // uses equivalent signal APIs — see adapter specs for framework-specific patterns):
 let previous = use_signal(|| String::new());
@@ -2326,7 +2326,7 @@ Without this guard, the `on_change` -> signal update -> `SetValue` -> `on_change
 
 **Uncontrolled mode** — the component manages its own state. The parent provides a default value and optionally listens for changes:
 
-```rust
+```rust,no_check
 // Uncontrolled checkbox — component tracks checked state internally.
 // Parent receives notifications but does not drive the value.
 let on_change = Callback::new(|checked: bool| {
@@ -2344,7 +2344,7 @@ view! {
 
 **Controlled mode** — the parent owns the value and passes it as a prop. The component reflects the parent's value and reports changes via `on_change`:
 
-```rust
+```rust,no_check
 // Controlled input — parent signal is the source of truth.
 let value = use_signal(|| "hello".to_string());
 
@@ -2363,7 +2363,7 @@ view! {
 
 **Two-way sync** — controlled mode with transformation. The parent can reject or modify the value before confirming it:
 
-```rust
+```rust,no_check
 // Controlled input that uppercases all input
 let value = use_signal(|| String::new());
 
@@ -2686,7 +2686,7 @@ A rejected event (guard fails):
 
 When using the `tracing` crate instead of `log`, each `drain_queue()` call opens a span:
 
-```rust
+```rust,no_check
 let span = tracing::trace_span!("ars_transition",
     component_id = %self.props.id(),
 );
@@ -4957,7 +4957,7 @@ During SSR, there is no user interaction, so callbacks don't exist. This avoids 
 
 Adapters gate effect setup with `#[cfg(not(feature = "ssr"))]`:
 
-```rust
+```rust,no_check
 // In adapter's use_machine hook:
 let result = service.send(event);
 if result.state_changed {

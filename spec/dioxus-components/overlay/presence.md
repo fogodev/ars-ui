@@ -14,7 +14,7 @@ This spec maps the core [`Presence`](../../components/overlay/presence.md) behav
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 /// Hook that wires the Presence state machine, installs DOM listeners,
 /// and returns a handle for querying mount/unmount state.
 pub fn use_presence(

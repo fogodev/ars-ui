@@ -14,7 +14,7 @@ This spec maps the core [`ColorSwatch`](../../components/specialized/color-swatc
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct ColorSwatchProps {
     pub value: ColorValue,

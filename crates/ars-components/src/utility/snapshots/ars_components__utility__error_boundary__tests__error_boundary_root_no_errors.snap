@@ -1,0 +1,63 @@
+---
+source: crates/ars-components/src/utility/error_boundary.rs
+expression: "snapshot_attrs(&Api::new(0).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-error",
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Data(
+                "ars-error-count",
+            ),
+            String(
+                "0",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "error-boundary",
+            ),
+        ),
+        (
+            Aria(
+                Atomic,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "assertive",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "alert",
+            ),
+        ),
+    ],
+    styles: [],
+}

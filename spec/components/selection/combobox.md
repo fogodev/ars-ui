@@ -109,7 +109,7 @@ pub enum Event {
 
 ### 1.3 Context
 
-```rust
+```rust,no_check
 /// The context for the Combobox state machine.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Context {

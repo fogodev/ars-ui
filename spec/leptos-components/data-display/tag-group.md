@@ -14,7 +14,7 @@ This spec maps the core [`TagGroup`](../../components/data-display/tag-group.md)
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn TagGroup(
     #[prop(optional)] id: Option<String>,

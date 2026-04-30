@@ -14,7 +14,7 @@ This spec maps the core [`Carousel`](../../components/layout/carousel.md) contra
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 pub mod carousel {
     #[derive(Props, Clone, PartialEq)]
     pub struct CarouselProps {

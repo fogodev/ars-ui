@@ -14,7 +14,7 @@ This spec maps the core [`Group`](../../components/utility/group.md) utility to 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component] pub fn Group(...) -> impl IntoView
 ```
 

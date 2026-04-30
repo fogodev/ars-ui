@@ -14,7 +14,7 @@ This spec maps the core [`Fieldset`](../../components/utility/fieldset.md) contr
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct FieldsetProps {
     #[props(optional)]
@@ -249,7 +249,7 @@ pub fn Fieldset(props: FieldsetSketchProps) -> Element {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = use_machine::<fieldset::Machine>(props);
 let ids = derive_stable_fieldset_ids(machine);
 publish_fieldset_machine_context(machine);

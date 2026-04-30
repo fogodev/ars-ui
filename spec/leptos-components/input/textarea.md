@@ -14,7 +14,7 @@ This spec maps the core [`Textarea`](../../components/input/textarea.md) contrac
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Textarea(
     #[prop(optional, into)] value: Option<Signal<String>>,
@@ -175,7 +175,7 @@ Leptos should use a `NodeRef<html::Textarea>` for auto-resize measurement, keep 
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<textarea::Machine>(props);
 let textarea_ref = NodeRef::<html::Textarea>::new();
 

@@ -14,7 +14,7 @@ This spec maps the core [`ImageCropper`](../../components/specialized/image-crop
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn ImageCropper(
     #[prop(into)] src: String,

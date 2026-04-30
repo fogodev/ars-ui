@@ -14,7 +14,7 @@ This spec maps the core [`Skeleton`](../../components/data-display/skeleton.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Skeleton(
     #[prop(optional)] id: Option<String>,

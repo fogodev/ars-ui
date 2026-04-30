@@ -14,7 +14,7 @@ This spec maps the core [`Highlight`](../../components/utility/highlight.md) uti
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component] pub fn Highlight(...) -> impl IntoView
 ```
 

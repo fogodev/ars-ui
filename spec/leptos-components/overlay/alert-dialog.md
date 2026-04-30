@@ -14,7 +14,7 @@ This spec maps the core [`AlertDialog`](../../components/overlay/alert-dialog.md
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 pub mod alert_dialog {
     #[component] pub fn AlertDialog(...) -> impl IntoView
     #[component] pub fn Trigger(children: Children) -> impl IntoView
@@ -446,7 +446,7 @@ pub fn ActionTrigger(children: Children) -> impl IntoView {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 // Root
 let machine = use_machine::<alert_dialog::Machine>(core_props);
 let is_open = machine.derive(|api| api.is_open());

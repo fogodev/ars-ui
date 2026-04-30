@@ -849,7 +849,7 @@ pub struct TabDef {
 
 ### 5.2 Additional Event
 
-```rust
+```rust,no_check
 /// Added to the Tabs Event enum.
 CloseTab(Key),  // tab key
 ```
@@ -905,7 +905,7 @@ Tabs may be reordered by the user via drag-and-drop or keyboard shortcuts.
 
 ### 6.1 Additional Props for reorderable tabs
 
-```rust
+```rust,no_check
 /// Added to the Tabs Props struct.
 /// When true, tabs can be reordered by drag-and-drop or keyboard.
 pub reorderable: bool,
@@ -913,7 +913,7 @@ pub reorderable: bool,
 
 ### 6.2 Additional Event for reorderable tabs
 
-```rust
+```rust,no_check
 /// Added to the Tabs Event enum.
 ReorderTab { tab: Key, new_index: usize },
 ```

@@ -4,7 +4,16 @@ category: specialized
 tier: complex
 foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
-related: [color-area, color-slider, color-field, color-swatch, color-swatch-picker, color-wheel, angle-slider]
+related:
+    [
+        color-area,
+        color-slider,
+        color-field,
+        color-swatch,
+        color-swatch-picker,
+        color-wheel,
+        angle-slider,
+    ]
 references:
     ark-ui: ColorPicker
     react-aria: ColorPicker
@@ -237,7 +246,7 @@ impl ColorValue {
 
 **Usage example** (application-level validation):
 
-```rust
+```rust,no_check
 let foreground = color_picker_api.value();
 let background = ColorValue::from_hex("#ffffff").unwrap();
 let ratio = foreground.contrast_ratio(&background);

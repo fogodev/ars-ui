@@ -14,7 +14,7 @@ This spec maps the core [`Popover`](../../components/overlay/popover.md) machine
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct PopoverProps {
     #[props(into)]
@@ -391,7 +391,7 @@ On web targets, `requestAnimationFrame` is available for the rAF-deferred click-
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
@@ -639,7 +639,7 @@ pub fn Title(props: TitleProps) -> Element {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 // Popover
 let machine = use_machine::<popover::Machine>(props);
 let is_open = machine.derive(|api| api.is_open());

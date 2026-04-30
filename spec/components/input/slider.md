@@ -298,7 +298,7 @@ When the `Slider`'s containing element has `dir="rtl"`, the following behaviors 
 
 ### 1.7 Full Machine Implementation
 
-```rust
+```rust,no_check
 /// The machine for the Slider component.
 pub struct Machine;
 
@@ -909,7 +909,7 @@ Slider
 
 Sliders operate in one of two modes, controlled by the `discrete` prop:
 
-```rust
+```rust,no_check
 /// When true, the slider snaps to defined steps and reports discrete labels.
 pub discrete: bool,  // default: false
 /// Optional labels for each discrete step. Length must match the number of steps.
@@ -963,7 +963,7 @@ value selection (e.g., color gradient stops, multi-range audio EQ). The `RangeSl
 
 ### 6.1 Additional Props
 
-```rust
+```rust,no_check
 /// N-thumb slider props — generalization of the single-thumb Slider.
 /// When `values` has one element, this behaves identically to the single Slider.
 /// When `values` has two elements, this is equivalent to RangeSlider.
@@ -973,7 +973,7 @@ pub default_values: Vec<f64>,
 
 ### 6.2 Additional Context
 
-```rust
+```rust,no_check
 /// Generalized multi-thumb context.
 pub values: Bindable<Vec<f64>>,
 /// Index of the thumb currently focused / being dragged.
@@ -1007,7 +1007,7 @@ fn set_thumb_value(ctx: &mut Context, index: usize, raw: f64) {
 
 ### 6.4 Additional Events
 
-```rust
+```rust,no_check
 /// Generalized events for N-thumb slider.
 /// `thumb` is the 0-based index of the target thumb.
 Increment { thumb: usize },

@@ -14,7 +14,7 @@ This spec maps the core [`Accordion`](../../components/navigation/accordion.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct AccordionProps {
     #[props(optional)]
@@ -184,7 +184,7 @@ Dioxus should publish the accordion context with `use_context_provider`, compose
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<accordion::Machine>(props);
 use_context_provider(|| Context::from_machine(machine));
 

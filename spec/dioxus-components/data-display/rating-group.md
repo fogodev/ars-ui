@@ -14,7 +14,7 @@ This spec maps the core [`RatingGroup`](../../components/data-display/rating-gro
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct RatingGroupProps {
     #[props(optional)]

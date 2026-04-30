@@ -14,7 +14,7 @@ This spec maps the core [`Toast`](../../components/overlay/toast.md) notificatio
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 /// Provider props.
 #[derive(Props, Clone, PartialEq)]
 pub struct ProviderProps {
@@ -377,7 +377,7 @@ Dioxus 0.7.x specifics:
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 use dioxus::prelude::*;
 
 #[component]
@@ -492,7 +492,7 @@ pub fn use_toast() -> Toaster {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 // Provider
 let mut toasts = use_signal(Vec::new);
 let mut queue = use_signal(Vec::new);

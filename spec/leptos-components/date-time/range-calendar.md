@@ -14,7 +14,7 @@ This spec maps the core [`RangeCalendar`](../../components/date-time/range-calen
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn RangeCalendar(
     #[prop(optional)] id: Option<String>,
@@ -193,7 +193,7 @@ The adapter keeps the full range-selection machine and surfaces only machine-com
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<range_calendar::Machine>(props);
 
 view! {

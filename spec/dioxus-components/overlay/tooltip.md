@@ -14,7 +14,7 @@ This spec maps the core [`Tooltip`](../../components/overlay/tooltip.md) behavio
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 /// Root component: initializes the machine, provides Context.
 #[derive(Props, Clone, PartialEq)]
 pub struct TooltipProps {
@@ -523,7 +523,7 @@ rsx! {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 // Tooltip
 let core_props = build_core_props(adapter_props);
 let machine = use_machine::<tooltip::Machine>(core_props);

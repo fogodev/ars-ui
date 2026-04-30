@@ -14,7 +14,7 @@ This spec maps the core [`TimeField`](../../components/date-time/time-field.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn TimeField(
     #[prop(optional)] id: Option<String>,
@@ -200,7 +200,7 @@ The adapter mirrors the full core prop surface, keeps segments machine-owned, an
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<time_field::Machine>(props);
 
 view! {

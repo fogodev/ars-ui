@@ -14,7 +14,7 @@ This spec maps the core [`MenuBar`](../../components/selection/menu-bar.md) cont
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn MenuBar(
     #[prop(optional)] id: Option<String>,

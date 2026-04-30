@@ -14,7 +14,7 @@ This spec maps the core [`QrCode`](../../components/specialized/qr-code.md) cont
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn QrCode(
     #[prop(into)] value: String,

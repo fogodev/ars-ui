@@ -14,7 +14,7 @@ This spec maps the core [`FileUpload`](../../components/specialized/file-upload.
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn FileUpload(
     #[prop(optional)] files: Option<RwSignal<Vec<file_upload::Item>>>,

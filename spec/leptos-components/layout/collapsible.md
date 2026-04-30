@@ -14,7 +14,7 @@ This spec maps the core [`Collapsible`](../../components/layout/collapsible.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 pub mod collapsible {
     #[component]
     pub fn Collapsible(

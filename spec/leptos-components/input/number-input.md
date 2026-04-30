@@ -14,7 +14,7 @@ This spec maps the core [`NumberInput`](../../components/input/number-input.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn NumberInput(
     #[prop(optional, into)] value: Option<Signal<f64>>,
@@ -177,7 +177,7 @@ Leptos should keep prop watchers for `min`, `max`, and `step` narrow, attach whe
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<number_input::Machine>(props);
 
 view! {

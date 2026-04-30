@@ -14,7 +14,7 @@ This spec maps the core [`DateTimePicker`](../../components/date-time/date-time-
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn DateTimePicker(
     #[prop(optional)] id: Option<String>,
@@ -202,7 +202,7 @@ The adapter keeps the unified machine from the agnostic spec, renders both date 
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<date_time_picker::Machine>(props);
 
 view! {

@@ -217,7 +217,7 @@ pre-filled with the tag's current value.
 
 **Editing Context Fields**:
 
-```rust
+```rust,no_check
 // Already present in Context:
 pub editing_tag: Option<usize>,     // Index of the tag currently being edited
 

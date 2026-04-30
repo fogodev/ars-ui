@@ -30,7 +30,7 @@ The `ars-collections` crate lives at layer three of the dependency graph, above 
 
 **Reactivity pattern:** To make a collection reactive, wrap it in a signal rather than adding interior mutability to the collection itself:
 
-```rust
+```rust,no_check
 // CORRECT: RwSignal wraps the entire collection
 let items = RwSignal::new(StaticCollection::new([item1, item2]));
 
@@ -40,7 +40,7 @@ let items = RwSignal::new(StaticCollection::new([item1, item2]));
 
 **Async loading safe pattern:** For collections populated asynchronously, use `Signal<Option<Collection<T>>>` to represent the loading state, or use `AsyncCollection<T>` (§5) which manages loading state internally:
 
-```rust
+```rust,no_check
 // Safe async loading pattern
 let items: RwSignal<Option<ListCollection<MyItem>>> = RwSignal::new(None);
 
@@ -2620,7 +2620,7 @@ For large trees, splitting the tree structure signal from the expanded-keys sign
 
 **Dioxus signal-splitting pattern:**
 
-```rust
+```rust,no_check
 // Structure signal (rarely changes) + expanded-keys signal (changes on toggle)
 let tree_structure = use_signal(|| build_tree(items));
 let expanded_keys = use_signal(|| BTreeSet::new());
@@ -2634,7 +2634,7 @@ let is_visible = use_memo(move || {
 
 **Leptos separate-signals pattern:**
 
-```rust
+```rust,no_check
 let (tree_structure, _) = signal(build_tree(items));
 let (expanded_keys, set_expanded_keys) = signal(BTreeSet::new());
 
@@ -3252,7 +3252,7 @@ When `anchor_key` is invalidated (deleted via `UpdateItems`), it resets to the c
 2. If `anchor_key` references a non-existent key, **fall back to single-item Replace selection** on the target key.
 3. Update `anchor_key` to the new selection target so subsequent range operations have a valid anchor.
 
-```rust
+```rust,no_check
 // In selection::State::extend_selection() / range_select():
 // If anchor_key is stale (deleted between UpdateItems and the Shift+Click),
 // degrade gracefully to a single-select Replace operation.
@@ -3366,7 +3366,7 @@ Components should render a visual indicator (e.g., checkboxes on each item) when
 
 Collection-rendering components (Table, GridList, Select, Combobox, etc.) **MUST** include an `empty_label` field in their Messages struct:
 
-```rust
+```rust,no_check
 /// Displayed when the collection contains zero items. Screen readers
 /// announce this via `aria-live`.
 pub empty_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
@@ -3610,7 +3610,7 @@ impl State {
 
 Inside the component's `transition` function (see `01-architecture.md §2.7`):
 
-```rust
+```rust,no_check
 // Pseudocode inside a Listbox::transition match arm:
 
 Event::KeyDown(key_event) => {
@@ -4869,7 +4869,7 @@ When the user presses Arrow keys, the focused item may not currently be rendered
 
 This means keyboard navigation through unrendered items produces a scroll rather than a direct `focus()` call. The machine tracks the _intended_ focused key even before the DOM element exists.
 
-```rust
+```rust,no_check
 // Pseudocode: inside Listbox::transition for ArrowDown
 
 Event::KeyDown(KeyboardEvent { key: KeyboardKey::ArrowDown, .. }) => {
@@ -5706,7 +5706,7 @@ serde   = ["dep:serde", "indexmap/serde", "uuid?/serde"]    # Serialize/Deserial
 
 ### 9.1 Static Listbox Collection
 
-```rust
+```rust,no_check
 use ars_collections::{CollectionBuilder, Key, selection};
 
 let collection = CollectionBuilder::new()
@@ -5727,7 +5727,7 @@ assert!(!selection.is_selected(&Key::str("banana")));
 
 ### 9.2 Async Paginated Collection
 
-```rust
+```rust,no_check
 use ars_collections::{AsyncCollection, Key};
 
 // Initial state — no items yet.
@@ -5757,7 +5757,7 @@ assert!(!col.has_more);
 
 ### 9.3 Tree with Expand/Collapse
 
-```rust
+```rust,no_check
 use ars_collections::{TreeCollection, TreeItemConfig, Key};
 
 let tree = TreeCollection::new(vec![
@@ -5790,7 +5790,7 @@ assert!(collapsed.nodes().all(|n| n.key != Key::str("apple"))); // not in visibl
 
 ### 9.4 Type-Ahead Navigation
 
-```rust
+```rust,no_check
 use ars_collections::{typeahead, StaticCollection, Key};
 
 let collection = StaticCollection::new([
@@ -5816,7 +5816,7 @@ assert_eq!(found, Some(Key::int(3))); // Blueberry
 
 ### 9.5 Virtualizer Scroll Math
 
-```rust
+```rust,no_check
 use ars_collections::{Virtualizer, LayoutStrategy, ScrollAlign};
 
 let mut virt = Virtualizer::new(10_000, LayoutStrategy::FixedHeight { item_height: 48.0 });

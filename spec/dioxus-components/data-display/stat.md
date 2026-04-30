@@ -14,7 +14,7 @@ This spec maps the core [`Stat`](../../components/data-display/stat.md) contract
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct StatProps {
     #[props(optional)]

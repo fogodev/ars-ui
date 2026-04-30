@@ -97,7 +97,7 @@ ars-core/
 
 Types use **module namespacing** to avoid name stuttering. Each component lives in its own module and uses short, generic names:
 
-```rust
+```rust,no_check
 // In mod checkbox:
 pub struct Machine;      // Machine struct -- used as checkbox::Machine externally
 pub enum State { ... }    // States — used as checkbox::State externally
@@ -368,7 +368,7 @@ This section provides a side-by-side comparison for developers porting component
 
 ### 9.1 Signal / State Creation
 
-```rust
+```rust,no_check
 // Leptos                                               // Dioxus
 let (count, set_count) = signal(0);                     let mut count = use_signal(|| 0);
 let derived = Memo::new(move |_prev| count() * 2);      let derived = use_memo(move || count() * 2);

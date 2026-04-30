@@ -12,6 +12,13 @@ pub mod client_only;
 /// Dismissable helpers.
 pub mod dismissable;
 
+/// Error boundary fallback structure and shared message bundle. Owns the
+/// framework-agnostic side of the error-boundary component: the localizable
+/// `Messages` bundle, the `Part` taxonomy, and the attribute helpers
+/// consumed by the Dioxus and Leptos adapter wrappers. See
+/// `spec/components/utility/error-boundary.md`.
+pub mod error_boundary;
+
 /// Field machine.
 pub mod field;
 

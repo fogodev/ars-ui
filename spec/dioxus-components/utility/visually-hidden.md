@@ -14,7 +14,7 @@ This spec maps the core [`VisuallyHidden`](../../components/utility/visually-hid
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct VisuallyHiddenProps {
     #[props(optional)]

@@ -14,7 +14,7 @@ This spec maps the core [`DateRangePicker`](../../components/date-time/date-rang
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct DateRangePickerProps {
     #[props(optional)]
@@ -222,7 +222,7 @@ The adapter owns the shared control row, overlay shell, and web-only hidden-inpu
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<date_range_picker::Machine>(props);
 
 rsx! {

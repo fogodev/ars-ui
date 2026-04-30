@@ -253,7 +253,7 @@ pointer crosses the gap between trigger and tooltip.
 Tooltip does not support buttons, links, or other focusable descendants inside content. Use
 HoverCard or Popover when the floating surface must be interactive.
 
-```rust
+```rust,no_check
 close_delay: props.close_delay,
 ```
 

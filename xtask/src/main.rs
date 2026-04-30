@@ -268,6 +268,18 @@ enum SpecCommand {
     /// on `Props`/`Api`.
     LintCode,
 
+    /// Parse every fenced Rust code block across the spec (foundation,
+    /// components, leptos-components, dioxus-components, shared, testing)
+    /// with `syn::parse_file` and report syntax errors. Skips blocks tagged
+    /// `rust,no_check` / `rust,ignore` / `rust,no_run`.
+    CompileSnippets {
+        /// Auto-tag every failing block's opening fence with `,no_check`
+        /// in place. Useful for converting pre-existing partial-Rust
+        /// snippets into explicitly-opted-out blocks in a single pass.
+        #[arg(long)]
+        fix: bool,
+    },
+
     /// List adapter files for a framework.
     Adapters {
         /// Framework: "leptos" or "dioxus".
@@ -499,6 +511,20 @@ fn main() {
 
                 SpecCommand::LintCode => {
                     let report = spec::lint_code::execute(&root);
+
+                    if let Ok(text) = &report
+                        && text.contains("finding(s) across")
+                    {
+                        print!("{text}");
+
+                        process::exit(1);
+                    }
+
+                    report
+                }
+
+                SpecCommand::CompileSnippets { fix } => {
+                    let report = spec::compile_snippets::execute(&root, fix);
 
                     if let Ok(text) = &report
                         && text.contains("finding(s) across")

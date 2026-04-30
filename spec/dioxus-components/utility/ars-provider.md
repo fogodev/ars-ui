@@ -14,7 +14,7 @@ This spec maps the core [`ArsProvider`](../../components/utility/ars-provider.md
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone)]
 pub struct ArsProviderProps {
     #[props(optional, into)]

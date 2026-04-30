@@ -14,7 +14,7 @@ This spec maps the core [`Landmark`](../../components/utility/landmark.md) utili
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component] pub fn Landmark(...) -> impl IntoView
 ```
 

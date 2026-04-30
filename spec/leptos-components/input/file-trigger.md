@@ -14,7 +14,7 @@ This spec maps the core [`FileTrigger`](../../components/input/file-trigger.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn FileTrigger(
     #[prop(optional)] accept: Vec<String>,
@@ -164,7 +164,7 @@ Leptos should keep the hidden input in a `NodeRef<html::Input>`, attach the clic
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let api = file_trigger::Api::new(&props);
 let input_ref = NodeRef::<html::Input>::new();
 

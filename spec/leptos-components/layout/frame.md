@@ -14,7 +14,7 @@ This spec maps the core [`Frame`](../../components/layout/frame.md) contract ont
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Frame(
     #[prop(optional)] id: Option<String>,

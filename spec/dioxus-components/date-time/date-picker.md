@@ -14,7 +14,7 @@ This spec maps the core [`DatePicker`](../../components/date-time/date-picker.md
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct DatePickerProps {
     #[props(optional)]
@@ -227,7 +227,7 @@ Plain props are preferred; `Signal` is reserved for controlled value and control
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<date_picker::Machine>(props);
 
 rsx! {

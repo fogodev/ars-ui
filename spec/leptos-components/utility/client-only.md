@@ -14,7 +14,7 @@ This spec maps the core [`ClientOnly`](../../components/utility/client-only.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn ClientOnly(
     #[prop(optional)] fallback: Option<ChildrenFn>,
@@ -165,7 +165,7 @@ pub fn ClientOnly(
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let gate = create_client_mount_gate(props);
 
 render_fallback_or_nothing_for_ssr(gate);

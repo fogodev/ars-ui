@@ -14,7 +14,7 @@ This spec maps the core [`LiveRegion`](../../components/utility/live-region.md) 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct LiveRegionProps {
     #[props(optional)]
@@ -185,7 +185,7 @@ pub fn LiveRegion() -> Element {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = create_live_region_controller(props);
 let root_ref = create_root_ref();
 let timer_helper = create_announcement_timer_helper();

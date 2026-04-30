@@ -14,7 +14,7 @@ This spec maps the core [`DropZone`](../../components/utility/drop-zone.md) mach
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component] pub fn DropZone(...) -> impl IntoView
 ```
 
@@ -184,7 +184,7 @@ pub fn DropZone(children: Children) -> impl IntoView {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = use_machine_or_payload_controller(props);
 let root_ref = create_root_ref();
 let payload_helper = create_drop_payload_normalizer();

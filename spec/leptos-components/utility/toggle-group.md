@@ -14,7 +14,7 @@ This spec maps the core [`ToggleGroup`](../../components/utility/toggle-group.md
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component] pub fn ToggleGroup(...) -> impl IntoView
 #[component] pub fn Item(value: String, children: Children) -> impl IntoView
 #[component] pub fn Indicator() -> impl IntoView
@@ -209,7 +209,7 @@ pub fn ToggleGroup(children: Children) -> impl IntoView {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = use_machine::<toggle_group::Machine>(props);
 let registry = create_item_registry_helper();
 let hidden_input_helper = create_group_hidden_input_helper();

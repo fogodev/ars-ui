@@ -3,7 +3,7 @@
 
 [meta]
 version                = "0.3"
-total_components       = 112   # [components.*] entries only
+total_components       = 113   # [components.*] entries only
 total_format_utilities = 6     # [format_utilities] entries (FormatNumber, FormatDate, etc.)
 
 # ──────────────────────────────────────────────
@@ -739,6 +739,13 @@ foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
 
+[components.error-boundary]
+path            = "components/utility/error-boundary.md"
+category        = "utility"
+foundation_deps = ["architecture", "accessibility"]
+shared_deps     = []
+related         = ["ars-provider"]
+
 [components.download-trigger]
 path            = "components/utility/download-trigger.md"
 category        = "utility"
@@ -1000,6 +1007,7 @@ button            = "leptos-components/utility/button.md"
 client-only       = "leptos-components/utility/client-only.md"
 dismissable       = "leptos-components/utility/dismissable.md"
 download-trigger  = "leptos-components/utility/download-trigger.md"
+error-boundary    = "leptos-components/utility/error-boundary.md"
 drop-zone         = "leptos-components/utility/drop-zone.md"
 field             = "leptos-components/utility/field.md"
 fieldset          = "leptos-components/utility/fieldset.md"
@@ -1127,6 +1135,7 @@ button            = "dioxus-components/utility/button.md"
 client-only       = "dioxus-components/utility/client-only.md"
 dismissable       = "dioxus-components/utility/dismissable.md"
 download-trigger  = "dioxus-components/utility/download-trigger.md"
+error-boundary    = "dioxus-components/utility/error-boundary.md"
 drop-zone         = "dioxus-components/utility/drop-zone.md"
 field             = "dioxus-components/utility/field.md"
 fieldset          = "dioxus-components/utility/fieldset.md"

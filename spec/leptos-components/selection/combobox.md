@@ -14,7 +14,7 @@ This spec maps the core [`Combobox`](../../components/selection/combobox.md) con
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Combobox(
     #[prop(optional)] id: Option<String>,

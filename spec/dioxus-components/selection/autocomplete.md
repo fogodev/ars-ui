@@ -14,7 +14,7 @@ This spec maps the core [`Autocomplete`](../../components/selection/autocomplete
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct AutocompleteProps {
     #[props(optional)]

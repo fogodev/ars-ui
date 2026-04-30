@@ -14,7 +14,7 @@ This spec maps the core [`Grid`](../../components/layout/grid.md) contract onto 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Grid(
     #[prop(optional)] id: Option<String>,

@@ -14,7 +14,7 @@ This spec maps the core [`Breadcrumbs`](../../components/navigation/breadcrumbs.
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Breadcrumbs(
     items: Vec<breadcrumbs::ItemDef>,
@@ -169,7 +169,7 @@ Leptos can keep ellipsis expansion as local signal state and render the ordered 
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let api = breadcrumbs::Api::new(props);
 let layout = api.layout(items.len());
 

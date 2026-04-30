@@ -14,7 +14,7 @@ This spec maps the core [`Form`](../../components/utility/form.md) and canonical
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn Form(
     #[prop(optional)] id: Option<String>,
@@ -226,7 +226,7 @@ pub fn Form(children: Children) -> impl IntoView {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = use_machine::<form::Machine>(props);
 let form_ref = create_form_ref();
 let status_ref = create_status_region_ref();

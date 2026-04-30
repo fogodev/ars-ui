@@ -872,7 +872,7 @@ impl TestHarness {
 
 Usage:
 
-```rust
+```rust,no_check
 // `render(...)` is imported from the active adapter harness crate.
 let harness = render(Dialog::new().open(true)).await;
 assert_snapshot!("dialog_open", harness.snapshot_attrs());

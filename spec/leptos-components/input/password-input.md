@@ -14,7 +14,7 @@ This spec maps the core [`PasswordInput`](../../components/input/password-input.
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn PasswordInput(
     #[prop(optional, into)] value: Option<Signal<String>>,
@@ -172,7 +172,7 @@ Leptos should use the same input and composition wiring as `TextField`, keep the
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<password_input::Machine>(props);
 
 view! {

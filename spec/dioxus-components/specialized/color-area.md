@@ -14,7 +14,7 @@ This spec maps the core [`ColorArea`](../../components/specialized/color-area.md
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct ColorAreaProps {
     #[props(optional)]

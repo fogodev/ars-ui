@@ -19,7 +19,7 @@ The adapter exposes everything through a single `dismissable` module
 agnostic `ars_components::utility::dismissable::*` surface alongside the
 Leptos-side wrappers, so callers spell every type with the same prefix:
 
-```rust
+```rust,no_check
 pub fn use_dismissable(
     root_ref: NodeRef<html::Div>,
     props: dismissable::Props,
@@ -297,7 +297,7 @@ Both dismiss buttons must be native `<button>` elements.
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = use_machine_or_normalized_handle(props);
 let root_ref = create_root_ref();
 let boundary_registry = create_boundary_registration_helper();

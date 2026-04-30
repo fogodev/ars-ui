@@ -1218,10 +1218,9 @@ fn highlight_next_skips_disabled_items() {
 
 ### 9.2 HighlightFirst When First N Items Disabled
 
-```rust
+```rust,no_check
 #[test]
 fn highlight_first_skips_leading_disabled_items() {
-    let items = vec![
     let collection = CollectionBuilder::new()
         .item(Key::from("a"), select::Item { label: "A".into() })
         .item(Key::from("b"), select::Item { label: "B".into() })
@@ -1267,10 +1266,9 @@ fn highlight_last_skips_trailing_disabled_items() {
 
 ### 9.4 HighlightPrev Skipping Disabled Items
 
-```rust
+```rust,no_check
 #[test]
 fn highlight_prev_skips_disabled_items() {
-    let items = vec![
     let collection = CollectionBuilder::new()
         .item(Key::from("a"), select::Item { label: "A".into() })
         .item(Key::from("b"), select::Item { label: "B".into() })

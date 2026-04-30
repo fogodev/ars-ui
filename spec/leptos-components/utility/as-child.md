@@ -14,7 +14,7 @@ This spec maps the core [`AsChild`](../../components/utility/as-child.md) patter
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn AsChildSlot(
     attrs: AttrMap,

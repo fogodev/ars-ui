@@ -1,0 +1,5 @@
+---
+source: crates/ars-dioxus/tests/error_boundary.rs
+expression: render_app(app)
+---
+<p>child-ok</p>

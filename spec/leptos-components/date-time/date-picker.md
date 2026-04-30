@@ -14,7 +14,7 @@ This spec maps the core [`DatePicker`](../../components/date-time/date-picker.md
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn DatePicker(
     #[prop(optional)] id: Option<String>,
@@ -206,7 +206,7 @@ The adapter may render either a text input or a composed `DateField` control, bu
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<date_picker::Machine>(props);
 
 view! {

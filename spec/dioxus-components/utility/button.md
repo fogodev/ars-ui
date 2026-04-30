@@ -14,7 +14,7 @@ This spec maps the core [`Button`](../../components/utility/button.md) contract 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct ButtonProps {
     #[props(optional)]
@@ -274,7 +274,7 @@ For native `<button>`, the adapter must deduplicate Space-key handlers as requir
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 // Pseudo-Rust: keep machine state authoritative and layer helpers around it.
 let machine = use_machine::<button::Machine>(props);
 let root_ref = create_root_ref();

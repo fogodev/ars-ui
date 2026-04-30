@@ -4,7 +4,7 @@ Shared z-index allocation strategy for overlay components.
 
 All overlay components render into `ars-portal-root` and MUST use a coordinated z-index allocation strategy to prevent stacking context collisions. The canonical runtime allocator is `z_index_allocator::Context`, provided by the `ZIndexAllocator` component (see `components/utility/z-index-allocator.md`) and backed by `ars_core::ZIndexAllocator`. The compatibility `next_z_index()` free function remains available from `ars-core` and `ars-dom`, but provider-backed overlays should allocate through context so the allocation scope is explicit:
 
-```rust
+```rust,no_check
 let claim = z_index_context.allocate_claim();
 let z = claim.value();
 ```

@@ -201,7 +201,7 @@ pub struct Props {
 
 Tables support asynchronous data loading for large datasets:
 
-```rust
+```rust,no_check
     /// Whether the table is currently loading data.
     /// When `true`, the adapter renders skeleton placeholder rows.
     pub loading: Bindable<bool>,
@@ -1135,7 +1135,7 @@ fn build_sort_announcement(
 
 When the Table uses virtual scrolling (only rendering visible rows), the `<table>` element must include `aria-colcount` and `aria-rowcount` attributes reflecting the total column and row counts (not just visible ones). Each visible `<tr>` must include `aria-rowindex` indicating its 1-based position in the full dataset.
 
-```rust
+```rust,no_check
 // In table_attrs() when virtual scrolling is enabled:
 if self.ctx.virtual_scrolling {
     attrs.set(HtmlAttr::Aria(AriaAttr::RowCount), self.ctx.total_rows.to_string());
@@ -1299,14 +1299,14 @@ Table supports user-driven column resizing via drag handles between column heade
 
 ### 6.1 Additional Events
 
-```rust
+```rust,no_check
 /// Column resize event — added to the Table Event enum.
 ColumnResize { column: String, width: f64 },
 ```
 
 ### 6.2 Additional Context
 
-```rust
+```rust,no_check
 /// Added to the Table Context struct.
 /// Map from column ID to current width in pixels. `None` means auto-width.
 pub column_widths: BTreeMap<String, f64>,

@@ -14,7 +14,7 @@ This spec maps the core [`Toggle`](../../components/utility/toggle.md) machine t
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct ToggleProps {
     #[props(optional)]
@@ -191,7 +191,7 @@ pub fn Toggle(props: ToggleSketchProps) -> Element {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 let machine = use_machine::<toggle::Machine>(props);
 let root_attrs = derive_root_attrs(machine);
 let indicator_attrs = maybe_derive_indicator_attrs(machine);

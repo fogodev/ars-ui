@@ -28,7 +28,7 @@ This spec maps the core [`Dialog`](../../components/overlay/dialog.md) contract 
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 pub mod dialog {
     #[derive(Props, Clone, PartialEq)]
     pub struct DialogProps {
@@ -678,7 +678,7 @@ pub fn CloseTrigger(props: CloseTriggerProps) -> Element {
 
 ## 25. Reference Implementation Skeleton
 
-```rust
+```rust,no_check
 // ── Dialog ──
 let machine = use_machine::<dialog::Machine>(core_props);
 let is_open = machine.derive(|api| api.is_open());

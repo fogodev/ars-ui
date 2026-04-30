@@ -92,7 +92,7 @@ Each interaction's `connect` function produces an `AttrMap` (data attributes, AR
 
 **Combined AttrMap example — Button with Press + Focus + Hover:**
 
-```rust
+```rust,no_check
 // In Button's connect():
 let press = use_press(press_config.clone());
 let hover = use_hover();
@@ -1826,7 +1826,7 @@ When a move interaction operates inside a container that has CSS `zoom` or `tran
 
 **On `DragStart` (transition to `Moving`)**, compute the scale factor:
 
-```rust
+```rust,no_check
 // Compute scale from the difference between CSS and layout dimensions:
 let rect = container.get_bounding_client_rect();
 let scale_x = rect.width() / container.offset_width() as f64;
@@ -1836,7 +1836,7 @@ let scale_y = rect.height() / container.offset_height() as f64;
 
 **On each `PointerMove`**, apply the inverse scale to pointer deltas:
 
-```rust
+```rust,no_check
 // In the pointermove handler:
 let adjusted_dx = raw_delta_x / scale_x;
 let adjusted_dy = raw_delta_y / scale_y;
@@ -2371,7 +2371,7 @@ impl core::fmt::Debug for DragAnnouncements {
 
 Announcements are posted to `ars-a11y`'s `LiveAnnouncer` with `AnnouncementPriority::Assertive` for critical events (drag start, drop, cancel) and `AnnouncementPriority::Polite` for informational events (drag enter, drag move).
 
-```rust
+```rust,no_check
 // Adapter dispatch: DragAnnouncements → LiveAnnouncer
 // MessageFn<T> implements Deref to the inner Fn trait object (see 04-internationalization.md §7.1),
 // so the call-syntax `(field)(args...)` works via auto-deref through Rc/Arc.
@@ -2837,7 +2837,7 @@ See `SPACE_SEPARATED` in `01-architecture.md`.
 
 **Dev-mode `style` conflict warning:** When the `ars-interactions/debug` feature is enabled, `merge_attrs` SHOULD emit a `log::warn!` if the same CSS property is set by two different interaction `AttrMap` sources with different values. This helps component authors detect unintentional style conflicts during development while keeping diagnostics routed through the application's logger setup:
 
-```rust
+```rust,no_check
 // In merge_attrs, during style merging (debug feature only):
 #[cfg(feature = "debug")]
 if let Some(existing_value) = merged.iter_styles().find(|(k, _)| k == &property).map(|(_, v)| v) {
@@ -2944,7 +2944,7 @@ When multiple interactions are composed on the same element, some interactions m
 
 4. **State reset:** The shared state is reset to `None` when a new gesture begins from a fully idle press state, and it is also cleared when the matching release consumes the suppression. This prevents stale suppression from leaking across gestures while preserving the originating modality.
 
-```rust
+```rust,no_check
 // Shared cancellation state between Press and LongPress
 let long_press_fired = SharedState::new(None);
 
@@ -4173,7 +4173,7 @@ The adapter attaches `keydown` and `keyup` listeners to the target element and n
 
 During Input Method Editor (IME) composition (used for Chinese, Japanese, Korean, and other languages requiring multi-keystroke input), `keydown` fires with `key = KeyboardKey::Process` and `is_composing = true`. Components that respond to character input in real time (e.g., type-ahead search in Select/Combobox) **must** check `is_composing` and suppress character-keyed interactions during composition:
 
-```rust
+```rust,no_check
 // In a Combobox filter handler:
 KeyboardEvent::KeyDown(data) => {
     if data.is_composing {
@@ -4209,7 +4209,7 @@ Currently each overlay component re-implements this logic independently. `Intera
 
 ### 12.2 Configuration of InteractOutside
 
-```rust
+```rust,no_check
 // ars-interactions/src/interact_outside.rs
 
 use ars_core::{Callback, PointerType};

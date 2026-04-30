@@ -213,7 +213,7 @@ const RTL_SCRIPTS: &[&str] = &[
 
 When interpolating user-provided text into messages, labels, or ARIA attributes, the interpolated text MUST be wrapped in Unicode bidirectional isolates to prevent BiDi reordering of the surrounding text.
 
-```rust
+```rust,no_check
 /// Wrap text in Unicode bidirectional isolates appropriate for its direction.
 ///
 /// - LTR text in an RTL context: U+2066 (LRI) ... U+2069 (PDI)
@@ -436,7 +436,7 @@ The adapter resolves locale through a three-level chain:
 2. **ArsProvider inheritance** — If the adapter prop is `None`, the adapter calls `use_locale()` to read the locale from the nearest `ArsProvider` in the component tree.
 3. **Ultimate fallback** — If no `ArsProvider` is found, the fallback is `Locale::parse("en-US").expect("en-US is always valid")`.
 
-```rust
+```rust,no_check
 // resolve_locale() — an ADAPTER-ONLY utility (defined in 08-adapter-leptos.md / 09-adapter-dioxus.md).
 // NOT available in core crates. Core code receives a fully-resolved Locale via Env.
 fn resolve_locale(adapter_props_locale: Option<&Locale>) -> Locale {
@@ -489,7 +489,7 @@ fn use_intl_backend() -> Arc<dyn IntlBackend> {
 The adapter calls `use_intl_backend()` and passes the result via `Env.intl_backend`.
 Core component code accesses the backend from `Env` during `init()`:
 
-```rust
+```rust,no_check
 // In Props: NO backend prop — resolved by the adapter.
 // In Context:
 pub intl_backend: Arc<dyn IntlBackend>,
@@ -1307,7 +1307,7 @@ pub fn decimal_and_group_separators(locale: &Locale) -> (char, char) {
 
 ### 4.2 Percent and Range Formatting
 
-```rust
+```rust,no_check
 impl Formatter {
     /// Format a fractional value such as `0.47` as a localized percentage.
     ///
@@ -2153,7 +2153,7 @@ Components that display positional labels (e.g., "1st of 6", "Digit 3 of 4") req
 ordinal-aware formatting. The `ordinal_label` field on relevant Messages structs
 handles this:
 
-```rust
+```rust,no_check
 /// Ordinal position label (e.g., "1st of 6", "Digit 3 of 4").
 /// Requires CLDR ordinal data for correct localization.
 /// Default English: |pos, total| format!("{pos} of {total}")
@@ -2584,7 +2584,7 @@ fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::Sta
 
 **Adapter usage** — the adapter resolves environment values and passes them to core:
 
-```rust
+```rust,no_check
 // In Leptos/Dioxus adapter component:
 let locale = resolve_locale(adapter_props.locale.as_ref());
 let intl_backend = use_intl_backend();
@@ -2598,7 +2598,7 @@ let service = Service::new(core_props, env, messages);
 
 **Application setup:**
 
-```rust
+```rust,no_check
 // Build i18n registries and pass to ArsProvider
 let mut registries = I18nRegistries::new();
 
@@ -2774,7 +2774,7 @@ The `t()` function is the adapter-specific bridge between `Translate` enums and 
 framework's reactive rendering system. It reads locale and intl backend from `ArsProvider`
 context and produces a reactive text node.
 
-```rust
+```rust,no_check
 /// Resolve a `Translate` value into a reactive text node for rendering.
 ///
 /// Reads the current locale and intl backend from `ArsProvider` context,
@@ -3097,7 +3097,7 @@ Calendar support remains part of the unconditional public API. Cargo features se
 
 ### 9.3 Lazy-Loaded Formatters
 
-```rust
+```rust,no_check
 /// Ambient formatter reuse is handled by adapter hooks rather than a public
 /// global cache API.
 ///

@@ -14,7 +14,7 @@ This spec maps the core [`AspectRatio`](../../components/layout/aspect-ratio.md)
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[component]
 pub fn AspectRatio(
     #[prop(optional)] id: Option<String>,

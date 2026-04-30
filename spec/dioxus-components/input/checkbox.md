@@ -14,7 +14,7 @@ This spec maps the core [`Checkbox`](../../components/input/checkbox.md) contrac
 
 ## 2. Public Adapter API
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct CheckboxProps {
     #[props(optional)]
@@ -184,7 +184,7 @@ Dioxus should prefer plain props for the public surface, `use_context_provider` 
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 let machine = use_machine::<checkbox::Machine>(props);
 let control_attrs = machine.derive(|api| api.control_attrs());
 let hidden_input_attrs = machine.derive(|api| api.hidden_input_attrs());
