@@ -137,8 +137,14 @@ fn run_fallback(
 ) -> AnyView {
     if let Some(handler) = on_error {
         let snapshot = errors.get().into_iter().collect::<Vec<_>>();
+        let current_ids = snapshot
+            .iter()
+            .map(|(id, _)| id.clone())
+            .collect::<HashSet<_>>();
 
         let mut seen = seen_error_ids.lock().expect("lock seen error ids");
+
+        seen.retain(|id| current_ids.contains(id));
 
         for (id, error) in snapshot {
             if seen.insert(id) {
@@ -413,6 +419,56 @@ mod tests {
                 captured.as_slice(),
                 ["first", "second"],
                 "on_error must not replay unchanged errors after fallback rerender"
+            );
+        });
+    }
+
+    #[test]
+    fn run_fallback_prunes_seen_ids_when_errors_clear() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+            let captured_for_cb = Arc::clone(&captured);
+            let on_error = Callback::new(move |err: CapturedError| {
+                captured_for_cb.lock().expect("lock").push(err.to_string());
+            });
+
+            let mut first = Errors::default();
+            first.insert(ErrorId::from(1usize), BoomError("first episode"));
+
+            let seen_error_ids = Arc::new(Mutex::new(HashSet::new()));
+
+            let _view = run_fallback(
+                ArcRwSignal::new(first),
+                Some(on_error),
+                None,
+                "heading".to_string(),
+                &seen_error_ids,
+            );
+
+            let _view = run_fallback(
+                ArcRwSignal::new(Errors::default()),
+                Some(on_error),
+                None,
+                "heading".to_string(),
+                &seen_error_ids,
+            );
+
+            let mut second = Errors::default();
+            second.insert(ErrorId::from(1usize), BoomError("second episode"));
+
+            let _view = run_fallback(
+                ArcRwSignal::new(second),
+                Some(on_error),
+                None,
+                "heading".to_string(),
+                &seen_error_ids,
+            );
+
+            assert_eq!(
+                captured.lock().expect("lock").as_slice(),
+                ["first episode", "second episode"],
+                "cleared error snapshots must prune seen ids so reused ids can emit again"
             );
         });
     }

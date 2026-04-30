@@ -886,7 +886,7 @@ fn error_boundary_html_snapshot_happy_path() {
     }
     .to_html();
 
-    insta::assert_snapshot!("leptos_error_boundary_happy_path", html);
+    insta::assert_snapshot!(html, @"<p>child-ok</p>");
 }
 
 /// `insta` snapshot of the rendered HTML on the **error path** —
@@ -900,7 +900,7 @@ fn error_boundary_html_snapshot_error_path() {
     }
     .to_html();
 
-    insta::assert_snapshot!("leptos_error_boundary_error_path", html);
+    insta::assert_snapshot!(html, @r#"<div data-ars-error="true" data-ars-error-count="1" data-ars-part="root" data-ars-scope="error-boundary" aria-atomic="true" aria-live="assertive" role="alert"><p data-ars-part="message" data-ars-scope="error-boundary">A component encountered an error.</p><ul data-ars-part="list" data-ars-scope="error-boundary"><li data-ars-part="item" data-ars-scope="error-boundary">boom-from-child</li><!></ul></div>"#);
 }
 
 /// Nested-Boundary contract: when an inner `Boundary` catches an error,

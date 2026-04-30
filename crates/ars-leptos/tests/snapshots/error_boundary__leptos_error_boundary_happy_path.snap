@@ -1,5 +1,0 @@
----
-source: crates/ars-leptos/tests/error_boundary.rs
-expression: html
----
-<p>child-ok</p>

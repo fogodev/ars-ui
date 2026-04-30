@@ -13,7 +13,7 @@
 //! `spec/dioxus-components/utility/error-boundary.md` for the full
 //! specification.
 
-use std::{cell::RefCell, collections::HashSet, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 pub use ars_components::utility::error_boundary::{Api, Messages, Part};
 use ars_i18n::Locale;
@@ -104,13 +104,13 @@ pub fn Boundary(props: BoundaryProps) -> Element {
 
     let heading = (resolved_messages.message)(&resolved_locale);
 
-    let seen_error_ptrs = Rc::new(RefCell::new(HashSet::new()));
+    let seen_error = Rc::new(RefCell::new(None));
 
     rsx! {
         ErrorBoundary {
             handle_error: move |ctx: ErrorContext| {
                 if let (Some(error), Some(handler)) = (ctx.error(), on_error.as_ref()) {
-                    let mut seen = seen_error_ptrs.borrow_mut();
+                    let mut seen = seen_error.borrow_mut();
 
                     if should_emit_new_error(&error, &mut seen) {
                         handler.call(error);
@@ -128,10 +128,16 @@ pub fn Boundary(props: BoundaryProps) -> Element {
     }
 }
 
-fn should_emit_new_error(error: &CapturedError, seen_error_ptrs: &mut HashSet<usize>) -> bool {
-    let error_ptr = std::sync::Arc::as_ptr(&error.0) as usize;
+fn should_emit_new_error(error: &CapturedError, seen_error: &mut Option<CapturedError>) -> bool {
+    let is_new = seen_error
+        .as_ref()
+        .is_none_or(|seen| !std::sync::Arc::ptr_eq(&seen.0, &error.0));
 
-    seen_error_ptrs.insert(error_ptr)
+    if is_new {
+        *seen_error = Some(error.clone());
+    }
+
+    is_new
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -207,24 +213,28 @@ mod tests {
 
     #[test]
     fn should_emit_new_error_deduplicates_same_captured_error() {
-        let mut seen_error_ptrs = HashSet::new();
+        let mut seen_error = None;
 
         let error = CapturedError::from_display("same episode");
 
         assert!(
-            should_emit_new_error(&error, &mut seen_error_ptrs),
+            should_emit_new_error(&error, &mut seen_error),
             "first sighting of a captured error must emit telemetry"
         );
         assert!(
-            !should_emit_new_error(&error, &mut seen_error_ptrs),
+            !should_emit_new_error(&error, &mut seen_error),
             "same captured error must not replay telemetry on fallback rerender"
         );
+        let next_error = CapturedError::from_display("same episode");
+
         assert!(
-            should_emit_new_error(
-                &CapturedError::from_display("same episode"),
-                &mut seen_error_ptrs,
-            ),
+            should_emit_new_error(&next_error, &mut seen_error),
             "a new captured error with the same display text is a new episode"
+        );
+
+        assert!(
+            !should_emit_new_error(&next_error, &mut seen_error),
+            "dedupe state should keep only the latest captured error identity"
         );
     }
 }
