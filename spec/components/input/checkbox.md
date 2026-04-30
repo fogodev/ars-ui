@@ -6,9 +6,9 @@ foundation_deps: [architecture, accessibility, interactions, forms]
 shared_deps: []
 related: [checkbox-group]
 references:
-  ark-ui: Checkbox
-  radix-ui: Checkbox
-  react-aria: Checkbox
+    ark-ui: Checkbox
+    radix-ui: Checkbox
+    react-aria: Checkbox
 ---
 
 # Checkbox
@@ -45,6 +45,8 @@ pub enum Event {
     Check,
     /// Transition to Unchecked.
     Uncheck,
+    /// Restore checked state to default_checked for form resets.
+    Reset,
     /// Synchronize the externally controlled checked prop.
     SetValue(Option<State>),
     /// Synchronize output-affecting props stored in context.
@@ -224,6 +226,7 @@ impl ars_core::Machine for Machine {
 
         match (state, event) {
             // ── Controlled/context sync ─────────────────────────────
+            (_, Event::Reset) => Some(reset_plan(ctx, props.default_checked)),
             (_, Event::SetValue(value)) => match value {
                 Some(value) => {
                     let value = *value;
@@ -338,6 +341,21 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+fn reset_plan(ctx: &Context, default_checked: State) -> TransitionPlan<Machine> {
+    if *ctx.checked.get() == default_checked {
+        return TransitionPlan::new();
+    }
+
+    if ctx.checked.is_controlled() {
+        return value_change_plan(ctx, default_checked);
+    }
+
+    TransitionPlan::to(default_checked).apply(move |ctx| {
+        ctx.checked.set(default_checked);
+        ctx.checked.sync_controlled(None);
+    })
 }
 
 fn value_change_plan(ctx: &Context, next: State) -> TransitionPlan<Machine> {
@@ -556,6 +574,9 @@ impl<'a> Api<'a> {
     pub fn on_hidden_input_change(&self, checked: bool) {
         (self.send)(if checked { Event::Check } else { Event::Uncheck });
     }
+
+    /// Reset handler for the native form.
+    pub fn on_form_reset(&self) { (self.send)(Event::Reset); }
 }
 
 impl ConnectApi for Api<'_> {
@@ -633,9 +654,12 @@ parent confirms it by passing `checked: Some(State::Checked)`.
    accept `State::Checked`, keep `State::Indeterminate`, or choose another state.
 3. **Re-render timing**: The adapter applies the confirmed `checked` prop through
    `Event::SetValue(Some(state))` in the same render cycle.
-4. **Uncontrolled reset preservation**: `Event::SetValue(Some(state))` only syncs the
-   controlled slot while `Props.checked` is `Some`; uncontrolled reset flows update the
-   internal value and remain uncontrolled.
+4. **Uncontrolled prop synchronization**: `Event::SetValue(Some(state))` updates the internal
+   value while leaving the bindable uncontrolled when `Props.checked` is `None`.
+5. **Form reset**: `Event::Reset` is not blocked by `disabled` or `readonly`. In uncontrolled
+   mode it restores `default_checked` without calling `on_checked_change`; in controlled mode it
+   requests `default_checked` through `on_checked_change(default_checked)` and waits for parent
+   confirmation through `Event::SetValue(Some(state))`.
 
 ## 4. Internationalization
 
@@ -648,12 +672,12 @@ parent confirms it by passing `checked: Some(State::Checked)`.
 
 ## 5. Form Integration
 
-- **Hidden input**: A hidden `<input type="checkbox">` is rendered via `HiddenInput` part. It carries `id`, `name`, and `value` from context, and the `checked` attribute when state is `Checked`. The indeterminate state does not set `checked` — only `Checked` does. The native input is disabled only when the component is disabled; readonly values remain enabled so they can be submitted with native forms.
+- **Hidden input**: A hidden `<input type="checkbox">` is rendered via `HiddenInput` part. It carries `id`, `name`, `form`, and `value` from context, and the `checked` attribute when state is `Checked`. The indeterminate state does not set `checked` — only `Checked` does. The native input is disabled only when the component is disabled; readonly values remain enabled so they can be submitted with native forms.
 - **Label activation**: `Label` points `for` at `HiddenInput` so native label activation targets a labelable form control. When readonly, `Label` omits `for` because checkboxes have no native readonly behavior and label activation would otherwise mutate the hidden input. Adapters must wire hidden input changes to `Api::on_hidden_input_change(checked)`.
 - **Validation states**: `aria-invalid="true"` is set on the Control part when `invalid=true`. The `ErrorMessage` part is linked via `aria-describedby`.
 - **Error message association**: `aria-describedby` on Control points to `Description` (when present) and `ErrorMessage` (when invalid). See `control_attrs()` for the wiring logic.
 - **Required**: `aria-required="true"` on Control; `required` attribute on the hidden input.
-- **Reset behavior**: On form reset, the adapter sends `Event::SetValue(Some(default_checked))` to restore `checked` to `default_checked`.
+- **Reset behavior**: On form reset, the adapter sends `Event::Reset`. Reset is not blocked by `disabled` or `readonly`. Uncontrolled checkboxes restore `checked` to `default_checked` without emitting `on_checked_change`; controlled checkboxes request `default_checked` through `on_checked_change(default_checked)` and wait for the parent to confirm with `checked: Some(default_checked)`.
 - **Disabled/readonly propagation**: When inside a `Field` or `Fieldset`, the adapter merges `disabled`/`readonly` from `FieldCtx` per `07-forms.md` §12.6.
 
 ## 6. Library Parity

@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/input/switch/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).thumb_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "thumb",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "switch",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "unchecked",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}

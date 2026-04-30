@@ -1,0 +1,45 @@
+---
+source: crates/ars-components/src/input/switch/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "switch",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "unchecked",
+            ),
+        ),
+        (
+            Dir,
+            String(
+                "ltr",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "wifi",
+            ),
+        ),
+    ],
+    styles: [],
+}
