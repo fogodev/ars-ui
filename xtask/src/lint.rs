@@ -527,22 +527,29 @@ fn parse_state_variant_count(content: &str, variant: &Regex) -> usize {
     parse_enum_variant_count(content, "enum State", variant)
 }
 
-/// Counts variants of any `pub enum Part` decorated with the
-/// `#[derive(ComponentPart)]` macro — the canonical way component machines
+/// Counts variants of any `pub enum Part` decorated with a
+/// [`ComponentPart`] derive — the canonical way component machines
 /// declare their anatomy. Returns the maximum count across all matching
 /// enums in `content`, so a module that re-exports multiple Part enums
 /// still surfaces the largest anatomy.
-fn parse_part_variant_count(content: &str, variant: &Regex) -> usize {
+///
+/// `derive_marker` is the regex compiled by [`detect_part_counts`] — it
+/// matches `#[derive(...)]` attributes that include `ComponentPart` as a
+/// token regardless of path qualification (`ComponentPart`,
+/// `ars_core::ComponentPart`, etc.) and regardless of whether the derive
+/// list contains other traits.
+///
+/// [`ComponentPart`]: ars_core::ComponentPart
+fn parse_part_variant_count(content: &str, derive_marker: &Regex, variant: &Regex) -> usize {
     let mut max = 0;
     let mut search_start = 0;
 
-    while let Some(rel) = content[search_start..].find("#[derive(ComponentPart)]") {
-        let abs = search_start + rel;
-
+    while let Some(m) = derive_marker.find(&content[search_start..]) {
         // Skip past the derive attribute and look for the next `enum`.
-        let after_derive = &content[abs..];
-        if let Some(enum_offset) = after_derive.find("enum ") {
-            let enum_abs = abs + enum_offset;
+        let derive_end_abs = search_start + m.end();
+
+        if let Some(enum_offset) = content[derive_end_abs..].find("enum ") {
+            let enum_abs = derive_end_abs + enum_offset;
 
             let count = parse_enum_variant_count(&content[enum_abs..], "enum ", variant);
 
@@ -603,6 +610,13 @@ fn parse_enum_variant_count(content: &str, marker: &str, variant: &Regex) -> usi
 fn detect_part_counts(root: &Path) -> Result<BTreeMap<String, usize>, Error> {
     let variant = Regex::new(r"^\s*([A-Z][A-Za-z0-9_]*)\s*(?:[{(,]|$)")?;
 
+    // Recognize both the bare `#[derive(ComponentPart)]` form and any
+    // path-qualified spelling such as `#[derive(ars_core::ComponentPart)]`,
+    // and also tolerate ComponentPart appearing alongside other derives
+    // (`#[derive(Clone, ComponentPart, Debug)]`). Word boundaries keep us
+    // from matching look-alikes like `ComponentPartial`.
+    let derive_marker = Regex::new(r"#\[derive\([^)]*\bComponentPart\b[^)]*\)\]")?;
+
     let files = collect_files(root, |path| {
         path.extension().is_some_and(|extension| extension == "rs")
             && path
@@ -620,7 +634,7 @@ fn detect_part_counts(root: &Path) -> Result<BTreeMap<String, usize>, Error> {
     for file in files {
         let content = fs::read_to_string(&file)?;
 
-        if !content.contains("#[derive(ComponentPart)]") {
+        if !derive_marker.is_match(&content) {
             continue;
         }
 
@@ -628,7 +642,7 @@ fn detect_part_counts(root: &Path) -> Result<BTreeMap<String, usize>, Error> {
             continue;
         };
 
-        let count = parse_part_variant_count(&content, &variant);
+        let count = parse_part_variant_count(&content, &derive_marker, &variant);
 
         if count > 0 {
             parts
@@ -1286,6 +1300,64 @@ mod tests {
 
         assert!(output.contains("Snapshot count warnings"));
         assert!(output.contains("total snapshots=501"));
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn detect_part_counts_recognizes_namespaced_component_part_derive() {
+        // Components written as `#[derive(ars_core::ComponentPart)]`
+        // (path-qualified) must produce the same `parts` count as
+        // components using the bare `#[derive(ComponentPart)]` form;
+        // otherwise `compute_max_per_component` falls back to the
+        // hard ceiling and the snapshot-budget formula is silently
+        // bypassed for those components.
+        let root = temp_dir("part-counts-namespaced");
+
+        // Bare derive — control case.
+        write(
+            &root.join("crates/ars-components/src/utility/bare/mod.rs"),
+            "#[derive(ComponentPart)]\npub enum BarePart {\n    Root,\n    Trigger,\n    Content,\n}\n",
+        );
+
+        // Namespaced derive — the exact form used by `form_submit.rs`.
+        write(
+            &root.join("crates/ars-components/src/utility/namespaced/mod.rs"),
+            "#[derive(ars_core::ComponentPart)]\npub enum NamespacedPart {\n    Root,\n    Trigger,\n    Content,\n    Status,\n}\n",
+        );
+
+        // Combined-with-other-derives — also a legal Rust spelling we
+        // shouldn't miss.
+        write(
+            &root.join("crates/ars-components/src/utility/combined/mod.rs"),
+            "#[derive(Clone, ComponentPart, Debug)]\npub enum CombinedPart {\n    Root,\n    Trigger,\n}\n",
+        );
+
+        // Look-alike that must NOT match — defends the `\bComponentPart\b`
+        // word boundaries against false positives.
+        write(
+            &root.join("crates/ars-components/src/utility/lookalike/mod.rs"),
+            "#[derive(MyComponentPartial)]\npub enum LookalikePart {\n    Root,\n}\n",
+        );
+
+        let counts = detect_part_counts(&root).expect("detect_part_counts");
+
+        assert_eq!(counts.get("bare"), Some(&3), "bare derive must be detected");
+        assert_eq!(
+            counts.get("namespaced"),
+            Some(&4),
+            "namespaced derive must be detected"
+        );
+        assert_eq!(
+            counts.get("combined"),
+            Some(&2),
+            "ComponentPart inside a multi-derive list must be detected"
+        );
+        assert_eq!(
+            counts.get("lookalike"),
+            None,
+            "ComponentPartial must not be misread as ComponentPart"
+        );
 
         drop(fs::remove_dir_all(root));
     }
