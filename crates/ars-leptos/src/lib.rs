@@ -10,6 +10,7 @@
 //! - [`EphemeralRef`] — borrow wrapper preventing signal storage of borrowed APIs
 //! - [`use_id`] — hydration-safe deterministic ID generation
 
+pub mod as_child;
 mod attrs;
 mod callbacks;
 mod controlled;

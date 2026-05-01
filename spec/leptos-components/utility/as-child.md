@@ -15,64 +15,96 @@ This spec maps the core [`AsChild`](../../components/utility/as-child.md) patter
 ## 2. Public Adapter API
 
 ```rust,no_check
+use leptos::{
+    children::TypedChildren,
+    prelude::*,
+    tachys::view::add_attr::AddAnyAttr,
+};
+
+#[derive(Clone, Debug)]
+pub struct AsChildAttrs;
+
+impl AsChildAttrs {
+    pub fn from_attr_map(attrs: AttrMap) -> Self;
+    pub fn from_merged_attr_maps(component_attrs: AttrMap, child_attrs: AttrMap) -> Self;
+    pub fn into_inner(self) -> Vec<LeptosAttribute>;
+}
+
 #[component]
-pub fn AsChildSlot(
-    attrs: AttrMap,
-    children: Children,
+pub fn AsChildSlot<T>(
+    #[prop(into)] attrs: AsChildAttrs,
+    children: TypedChildren<T>,
 ) -> impl IntoView
+where
+    View<T>: AddAnyAttr,
+    <View<T> as AddAnyAttr>::Output<Vec<LeptosAttribute>>: IntoView;
 ```
 
 `as_child: bool` is surfaced by the hosting component, not by a standalone core component.
+`TypedChildren<T>` is required intentionally: opaque `Children` erases the root type before
+the adapter can apply attrs and cannot preserve a typed single-root reassignment contract.
+`attrs` is already converted to Leptos attributes before it reaches the slot; hosting
+components choose the active style strategy and own any CSSOM or nonce-style side effects.
+Hosting components should use `attr_map_to_leptos(attrs, strategy, element_id)` so
+inline, CSSOM, and nonce style strategy payloads are handled consistently before the slot
+receives native attrs.
+`AsChildAttrs::from_merged_attr_maps` is an inline-style convenience for simple callers
+that still have both component and child attrs as `AttrMap`s. Production components with
+CSSOM or nonce side effects should merge the `AttrMap`s first and then use
+`attr_map_to_leptos` directly so the non-inline payloads remain visible to the host.
 
 ## 3. Mapping to Core Component Contract
 
 - Pattern parity: the adapter must preserve root reassignment semantics.
-- Attr parity: component attrs merge onto the consumer child.
-- Event parity: component handlers and child handlers must both be preserved.
+- Attr parity: hosting components merge component attrs onto consumer-child attrs before converting to Leptos attributes.
+- Event parity: event handler composition belongs to the hosting component adapter, not to `AsChildSlot`.
 
 ## 4. Part Mapping
 
-| Core part / structure      | Required?                     | Adapter rendering target      | Ownership        | Attr source                | Notes                                                             |
-| -------------------------- | ----------------------------- | ----------------------------- | ---------------- | -------------------------- | ----------------------------------------------------------------- |
-| reassigned root            | required when `as_child=true` | single consumer child element | consumer-owned   | merged component `AttrMap` | The conceptual root remains; only the rendering target changes.   |
-| suppressed default wrapper | conditional                   | no DOM output                 | adapter behavior | none                       | Must be documented whenever default wrapper rendering is skipped. |
+| Core part / structure      | Required?                     | Adapter rendering target      | Ownership        | Attr source            | Notes                                                             |
+| -------------------------- | ----------------------------- | ----------------------------- | ---------------- | ---------------------- | ----------------------------------------------------------------- |
+| reassigned root            | required when `as_child=true` | single consumer child element | consumer-owned   | converted Leptos attrs | The conceptual root remains; only the rendering target changes.   |
+| suppressed default wrapper | conditional                   | no DOM output                 | adapter behavior | none                   | Must be documented whenever default wrapper rendering is skipped. |
 
 ## 5. Attr Merge and Ownership Rules
 
-| Target node           | Core attrs                                                                    | Adapter-owned attrs                                                           | Consumer attrs                                  | Merge order                                                                                                                                                                                                                                   | Ownership notes                                                                                 |
-| --------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| reassigned root child | forwarded component `AttrMap` including ARIA, role, state, and event handlers | any adapter-local structural `data-*` markers needed by the hosting component | the child element's original attrs and handlers | core required ARIA/state attrs win when conflict would break the contract; child `class`/`style` merge additively; handler order is adapter normalization first for guard logic, then child handler, then adapter notification-only callbacks | rendered node is consumer-owned, but semantic root ownership remains with the hosting component |
+| Target node           | Core attrs                                                                     | Adapter-owned attrs                                                           | Consumer attrs                                  | Merge order                                                                                                                                                                                                                                                                                                                                   | Ownership notes                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| reassigned root child | converted Leptos attrs produced from the hosting component's merged root attrs | any adapter-local structural `data-*` markers needed by the hosting component | the child element's original attrs and handlers | hosting components must merge framework-agnostic attrs before conversion; core required ARIA/state attrs win when conflict would break the contract; child `class`/`style` and ARIA token lists merge through the core `AsChildMerge` rules before reaching the slot; handler order remains the hosting component's normalized event contract | rendered node is consumer-owned, but semantic root ownership remains with the hosting component |
 
-- Exactly one child element is allowed.
+- Exactly one typed child root is allowed.
 - No wrapper node may be introduced in `as_child` mode.
 - If the child already has `role`, `tabindex`, or `aria-*`, the merge result must preserve required core semantics instead of blindly preferring the child value.
-- If a child handler calls `prevent_default()`, later notification-only handlers may observe that state but must not re-enable a blocked action.
+- If a child handler calls `prevent_default()`, later notification-only handlers may observe that state but must not re-enable a blocked action; this composition is owned by the hosting component.
+- The slot receives final converted attrs and applies them with Leptos `AddAnyAttr`; it does not inspect or mutate an already-rendered opaque child vnode.
+- Literal attrs already baked into the typed child root cannot be inspected after rendering; child attrs that need `AsChildMerge` semantics must be supplied to the hosting component before conversion.
+- Inline attr conversion through `attr_map_to_leptos_inline_attrs` is only a convenience for simple callers and tests; production component adapters must preserve their active style strategy before calling the slot.
 
 ## 6. Composition / Context Contract
 
-Exactly one child element is required. Context behavior of the hosting component does not change under root reassignment.
+Exactly one typed child root is required. Context behavior of the hosting component does not change under root reassignment.
 
 ## 7. Prop Sync and Event Mapping
 
-`AsChild` itself has no independent machine state. The hosting component remains responsible for prop sync. This adapter slot only normalizes forwarded attrs and handlers.
+`AsChild` itself has no independent machine state. The hosting component remains responsible for prop sync. This adapter slot only applies forwarded native attrs.
 
-| Adapter prop      | Mode                      | Sync trigger                         | Machine event / update path                | Visible effect                                       | Notes                                       |
-| ----------------- | ------------------------- | ------------------------------------ | ------------------------------------------ | ---------------------------------------------------- | ------------------------------------------- |
-| forwarded `attrs` | non-reactive adapter prop | each render of the hosting component | forwarded directly to the reassigned child | child receives the hosting component's root contract | no independent controlled/uncontrolled mode |
+| Adapter prop      | Mode                      | Sync trigger                         | Machine event / update path              | Visible effect                                       | Notes                                                 |
+| ----------------- | ------------------------- | ------------------------------------ | ---------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------- |
+| forwarded `attrs` | non-reactive adapter prop | each render of the hosting component | applied directly to the reassigned child | child receives the hosting component's root contract | attrs are already converted to `Vec<LeptosAttribute>` |
 
-| UI event             | Preconditions                   | Machine event / callback path           | Ordering notes                                                                                                                                                   | Notes                                                                            |
-| -------------------- | ------------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| child event handlers | exactly one valid child element | composed hosting-component handler path | guard logic runs before child-only behavior when the hosting component needs to prevent invalid activation; notification-only callbacks run after child handlers | actual machine events are defined by the hosting component, not by `AsChildSlot` |
+| UI event             | Preconditions                | Machine event / callback path           | Ordering notes                                                                                                                                                   | Notes                                                                                       |
+| -------------------- | ---------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| child event handlers | exactly one typed child root | composed hosting-component handler path | guard logic runs before child-only behavior when the hosting component needs to prevent invalid activation; notification-only callbacks run after child handlers | event composition is defined and implemented by the hosting component, not by `AsChildSlot` |
 
 ## 8. Registration and Cleanup Contract
 
-- No registration lifecycle exists beyond validating that exactly one child is present.
-- Child-count validation happens at render time.
+- No registration lifecycle exists beyond the typed child root accepted by `TypedChildren<T>`.
+- Opaque child-count validation is intentionally not performed by this helper because the supported API avoids opaque `Children`.
 - Cleanup is ordinary vnode disposal; no persistent listeners or timers belong to the slot helper itself.
 
-| Registered entity       | Registration trigger | Identity key               | Cleanup trigger                  | Cleanup action                    | Notes                                                                    |
-| ----------------------- | -------------------- | -------------------------- | -------------------------------- | --------------------------------- | ------------------------------------------------------------------------ |
-| child validation result | each render          | hosting component instance | next render or component cleanup | discard previous validation state | multiple children and zero-child cases are immediate contract violations |
+| Registered entity | Registration trigger | Identity key               | Cleanup trigger                  | Cleanup action          | Notes                                                                  |
+| ----------------- | -------------------- | -------------------------- | -------------------------------- | ----------------------- | ---------------------------------------------------------------------- |
+| typed child root  | each render          | hosting component instance | next render or component cleanup | ordinary vnode disposal | the child root remains typed until attrs are applied with `AddAnyAttr` |
 
 ## 9. Ref and Node Contract
 
@@ -89,9 +121,9 @@ Exactly one child element is required. Context behavior of the hosting component
 
 ## 11. Callback Payload Contract
 
-| Callback                                                               | Payload source | Payload shape | Timing         | Cancelable? | Notes                                                                                                                 |
-| ---------------------------------------------------------------------- | -------------- | ------------- | -------------- | ----------- | --------------------------------------------------------------------------------------------------------------------- |
-| no public adapter-specific callback beyond normalized component events | none           | none          | not applicable | no          | When wrappers expose callbacks, they must preserve the normalized timing documented in `Prop Sync and Event Mapping`. |
+| Callback               | Payload source | Payload shape | Timing         | Cancelable? | Notes                                                                                       |
+| ---------------------- | -------------- | ------------- | -------------- | ----------- | ------------------------------------------------------------------------------------------- |
+| slot callback payloads | none           | none          | not applicable | no          | `AsChildSlot` has no callback payloads. Event callbacks are owned by the hosting component. |
 
 ## 12. Failure and Degradation Rules
 
@@ -152,29 +184,39 @@ Exactly one child element is required. Context behavior of the hosting component
 
 ## 21. Debug Diagnostics and Production Policy
 
-| Condition                                                                           | Debug build behavior | Production behavior | Notes                                                                                       |
-| ----------------------------------------------------------------------------------- | -------------------- | ------------------- | ------------------------------------------------------------------------------------------- |
-| anchor-like child receives button semantics without equivalent Space-key activation | debug warning        | no diagnostic       | Diagnostic only; merged semantics remain unchanged until the host fixes the child behavior. |
-| zero or multiple children in root reassignment mode                                 | fail fast            | fail fast           | `as_child` requires exactly one concrete child element.                                     |
+| Condition                                    | Debug build behavior    | Production behavior     | Notes                                                                      |
+| -------------------------------------------- | ----------------------- | ----------------------- | -------------------------------------------------------------------------- |
+| opaque `Children` used for root reassignment | fail fast at API review | fail fast at API review | `as_child` requires a typed root so attrs can be applied before rendering. |
 
 ## 22. Shared Adapter Helper Notes
 
-| Helper concept                | Required?   | Responsibility                                                                      | Reused by                                                             | Notes                                                                         |
-| ----------------------------- | ----------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `as_child` vnode merge helper | required    | Clone or rebuild exactly one child with merged attrs, handlers, and guard ordering. | `as-child`, `button`, `visually-hidden`, any polymorphic root utility | This helper owns root reassignment without deleting the conceptual root part. |
-| debug-warning helper          | recommended | Emit semantic-mismatch diagnostics in debug builds only.                            | `as-child`, `button`, `download-trigger`, `action-group`              | Warnings must never silently alter runtime semantics.                         |
+| Helper concept               | Required? | Responsibility                                                                                                    | Reused by                                                             | Notes                                                                                                               |
+| ---------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `as_child` typed slot helper | required  | Apply already-converted `AsChildAttrs` to `TypedChildren<T>` with `AddAnyAttr`.                                   | `as-child`, `button`, `visually-hidden`, any polymorphic root utility | This helper owns root reassignment without deleting the conceptual root part or mutating opaque vnodes.             |
+| `AsChildAttrs` merge helper  | required  | Preserve the supported pre-conversion merge path for simple inline-style callers that still have child attrs.     | `as-child`, adapter tests, simple polymorphic root utilities          | Components with CSSOM or nonce style side effects should merge maps first and use the full attr converter directly. |
+| semantic-warning helper      | optional  | Emit semantic-mismatch diagnostics in debug builds when the hosting component has enough explicit child metadata. | `button`, `download-trigger`, `action-group`                          | Warnings are host-level diagnostics, not slot behavior.                                                             |
 
 ## 23. Framework-Specific Behavior
 
-Leptos needs an adapter-local helper because arbitrary vnode mutation is not built in. In debug builds, the adapter should emit a warning when `as_child` forwards button semantics such as `role="button"` onto an anchor-like child that still lacks Space-key activation semantics, because the merged result may look valid while remaining keyboard-incomplete.
+Leptos needs an adapter-local helper because arbitrary vnode mutation is not a stable API.
+The supported mechanism is to keep the child typed with `TypedChildren<T>` and apply
+already-converted Leptos attributes with `AddAnyAttr` before the view is erased. Hosting
+components convert the merged `AttrMap` with the active style strategy before calling the
+slot, and they own any CSSOM synchronization or nonce-style injection. The slot cannot
+deduplicate literal child-root attrs that were already embedded in the typed child view.
 
 ## 24. Canonical Implementation Sketch
 
 ```rust
 #[component]
-pub fn AsChildSlot(attrs: AttrMap, children: Children) -> impl IntoView {
-    // Adapter-local helper: render exactly one child with merged attrs.
-    view! { <>{children()}</> }
+pub fn AsChildSlot<T>(#[prop(into)] attrs: AsChildAttrs, children: TypedChildren<T>) -> impl IntoView
+where
+    View<T>: AddAnyAttr,
+    <View<T> as AddAnyAttr>::Output<Vec<LeptosAttribute>>: IntoView,
+{
+    let child = children.into_inner()();
+
+    child.add_any_attr(attrs.into_inner())
 }
 ```
 
@@ -184,36 +226,42 @@ No expanded skeleton beyond the canonical sketch is required for this utility.
 
 ## 26. Adapter Invariants
 
-- Exactly one consumer child is required whenever root reassignment is used.
+- Exactly one typed consumer child root is required whenever root reassignment is used.
 - Root reassignment must not delete the conceptual root part; it only changes ownership of the rendered node.
-- Handler composition order must be explicit so consumer handlers and adapter handlers do not race unpredictably.
+- Handler composition order must be explicit in each hosting component so consumer handlers and adapter handlers do not race unpredictably.
 - Role, ARIA, and state attr merge rules must remain explicit when attrs are forwarded onto the child.
+- Opaque `Children` and arbitrary vnode rebuilding are forbidden for this helper.
+- The slot must not force inline styles; style-strategy conversion happens before attrs reach the slot.
 
 ## 27. Accessibility and SSR Notes
 
-Semantic correctness of the final root element remains the responsibility of the hosting component and consumer.
-When `as_child` merges button semantics onto an anchor-like child, the adapter should warn in debug builds if the resulting element still relies on link-native keyboard behavior and therefore does not activate on Space.
+Semantic correctness of the final root element remains the responsibility of the hosting component and consumer. Slot-level code cannot infer the concrete tag or keyboard behavior from `TypedChildren<T>`.
 
 ## 28. Parity Summary and Intentional Deviations
 
 Parity summary: full pattern parity.
 
-Intentional deviations: none.
+Intentional deviations: opaque-child vnode mutation is not part of parity; `TypedChildren<T>`
+plus `AddAnyAttr` is the Leptos-supported way to provide the same root reassignment
+contract. The slot accepts native attrs so hosting components can preserve inline, CSSOM,
+and nonce style strategies outside the slot.
 
 ## 29. Test Scenarios
 
 - root reassignment
 - suppressed wrapper documentation
-- merged handler preservation
-- debug warning for anchor-like children that receive button semantics without equivalent Space-key activation
+- native Leptos attrs are applied to the typed child root
+- merged class, style, and ARIA preservation through the hosting component's converted attrs
+- `attr_map_to_leptos` preserves CSSOM and nonce style payloads for hosting components
+- SSR output with the same root element shape and attrs as the client path
 
 ## 30. Test Oracle Notes
 
-| Behavior                               | Preferred oracle type | Notes                                                                                                           |
-| -------------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------- |
-| structural rendering and part presence | rendered structure    | Verify the documented part mapping rather than incidental wrapper details.                                      |
-| accessibility and state attrs          | DOM attrs             | Assert the normalized attrs emitted by the adapter-owned node.                                                  |
-| semantic-mismatch warning              | cleanup side effects  | Verify debug-only warning or equivalent diagnostic fires for anchor-like children with merged button semantics. |
+| Behavior                               | Preferred oracle type | Notes                                                                                                            |
+| -------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| structural rendering and part presence | rendered structure    | Verify the documented part mapping rather than incidental wrapper details.                                       |
+| accessibility and state attrs          | DOM attrs             | Assert the normalized attrs emitted by the adapter-owned node.                                                   |
+| style-strategy preservation            | component integration | Verify concrete hosting components convert attrs before calling the slot and handle CSSOM or nonce side effects. |
 
 ## 31. Implementation Checklist
 
@@ -221,5 +269,7 @@ Intentional deviations: none.
 - [ ] Attr merge precedence matches the documented contract.
 - [ ] Prop sync and event normalization follow the documented machine paths.
 - [ ] Cleanup releases every resource owned by the component instance.
-- [ ] Debug-only semantic-mismatch warnings are documented for anchor-like children that receive button semantics through `as_child`.
 - [ ] SSR/client boundary behavior matches the documented structure and test oracles.
+- [ ] Opaque `Children` is not used for root reassignment; attrs are applied to `TypedChildren<T>` via `AddAnyAttr`.
+- [ ] The slot accepts native Leptos attrs and does not force inline-only conversion.
+- [ ] Hosting components use `attr_map_to_leptos` before calling the slot.
