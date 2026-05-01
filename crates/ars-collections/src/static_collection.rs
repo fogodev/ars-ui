@@ -360,6 +360,10 @@ mod tests {
 
         assert_eq!(c.size(), 3);
         assert!(!c.is_empty());
+
+        let mutable_collection = fruit_collection();
+
+        assert!(!StaticCollection::is_empty(&mutable_collection));
     }
 
     #[test]

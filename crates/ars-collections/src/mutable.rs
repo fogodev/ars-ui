@@ -1272,6 +1272,8 @@ mod tests {
         assert_eq!(list.last_key(), Some(&Key::int(3)));
         assert_eq!(list.key_after(&Key::int(1)), Some(&Key::int(2)));
         assert_eq!(list.key_before(&Key::int(2)), Some(&Key::int(1)));
+        assert_eq!(list.key_after_no_wrap(&Key::int(1)), Some(&Key::int(2)));
+        assert_eq!(list.key_before_no_wrap(&Key::int(3)), Some(&Key::int(2)));
         assert_eq!(
             list.key_after_no_wrap(&Key::int(3)),
             None,

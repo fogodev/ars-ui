@@ -704,8 +704,8 @@ impl Context {
                             &CalendarDateFields {
                                 era: Some(era),
                                 year: Some(1),
-                                month: Some(1),
-                                day: Some(1),
+                                month: Some(12),
+                                day: Some(31),
                                 ..CalendarDateFields::default()
                             },
                         )

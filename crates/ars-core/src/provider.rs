@@ -296,6 +296,8 @@ mod tests {
         assert_eq!(context.id_prefix(), None);
         assert_eq!(context.portal_container_id(), None);
         assert_eq!(context.root_node_id(), None);
+        assert!(!context.disabled());
+        assert!(!context.read_only());
         assert_eq!(context.style_strategy(), &StyleStrategy::Inline);
         assert_eq!(context.platform().now_ms(), 0);
         assert_eq!(context.modality().snapshot(), ModalitySnapshot::default());

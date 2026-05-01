@@ -351,6 +351,10 @@ mod tests {
         assert!(event.ctrl);
         assert!(event.meta);
         assert!(event.alt);
+        assert!(event.shift_key());
+        assert!(event.ctrl_key());
+        assert!(event.meta_key());
+        assert!(event.alt_key());
     }
 
     #[test]

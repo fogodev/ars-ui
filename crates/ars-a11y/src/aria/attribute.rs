@@ -949,6 +949,15 @@ mod tests {
     }
 
     #[test]
+    fn aria_id_list_reports_non_empty_after_push() {
+        let mut list = AriaIdList::new();
+
+        list.push("label");
+
+        assert!(!list.is_empty());
+    }
+
+    #[test]
     fn aria_enum_string_tokens_match_spec() {
         let autocomplete = [
             (AriaAutocomplete::None, "none"),

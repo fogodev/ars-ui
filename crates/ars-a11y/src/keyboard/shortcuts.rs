@@ -224,6 +224,7 @@ mod tests {
     #[test]
     fn platform_detect_returns_macos_for_mac_without_touch_points() {
         assert_eq!(Platform::detect("MacIntel", 0), Platform::MacOs);
+        assert_eq!(Platform::detect("MacIntel", 1), Platform::MacOs);
     }
 
     #[test]

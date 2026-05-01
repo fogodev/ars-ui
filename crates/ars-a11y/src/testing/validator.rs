@@ -583,6 +583,16 @@ mod tests {
     }
 
     #[test]
+    fn structural_separator_without_tabindex_has_no_hint_warning() {
+        let mut validator = AriaValidator::new();
+
+        validator.check_role(AriaRole::StructuralSeparator, &[], false, &[]);
+
+        assert!(validator.errors().is_empty());
+        assert!(validator.warnings().is_empty());
+    }
+
+    #[test]
     fn option_has_no_globally_required_attributes() {
         assert!(required_attributes_for_role(AriaRole::Option).is_empty());
     }
@@ -786,6 +796,62 @@ mod tests {
     }
 
     #[test]
+    fn validate_attr_map_catches_dangling_active_descendant_reference() {
+        let mut attr_map = AttrMap::new();
+
+        attr_map.set(
+            HtmlAttr::Aria(AriaAttr::ActiveDescendant),
+            AttrValue::from("missing-active"),
+        );
+
+        let validator = validate_attr_map(
+            None,
+            &attr_map,
+            AriaValidationContext {
+                known_ids: &[],
+                owned_roles: &[],
+            },
+        );
+
+        assert!(
+            validator
+                .errors()
+                .contains(&AriaValidationError::DanglingIdReference {
+                    attribute: "aria-activedescendant",
+                    id: String::from("missing-active"),
+                })
+        );
+    }
+
+    #[test]
+    fn validate_attr_map_catches_dangling_describedby_reference() {
+        let mut attr_map = AttrMap::new();
+
+        attr_map.set(
+            HtmlAttr::Aria(AriaAttr::DescribedBy),
+            AttrValue::from("missing-description"),
+        );
+
+        let validator = validate_attr_map(
+            None,
+            &attr_map,
+            AriaValidationContext {
+                known_ids: &[],
+                owned_roles: &[],
+            },
+        );
+
+        assert!(
+            validator
+                .errors()
+                .contains(&AriaValidationError::DanglingIdReference {
+                    attribute: "aria-describedby",
+                    id: String::from("missing-description"),
+                })
+        );
+    }
+
+    #[test]
     fn validate_attr_map_catches_dangling_aria_errormessage_reference() {
         let mut attr_map = AttrMap::new();
 
@@ -924,6 +990,13 @@ mod tests {
 
         assert!(validator.errors().is_empty());
         assert!(validator.warnings().is_empty());
+    }
+
+    #[cfg(not(feature = "aria-drag-drop-compat"))]
+    #[test]
+    fn drag_drop_compat_aria_attrs_are_not_supported_by_default() {
+        assert!(supported_aria_attribute(AriaAttr::DropEffect).is_none());
+        assert!(supported_aria_attribute(AriaAttr::Grabbed).is_none());
     }
 
     #[test]

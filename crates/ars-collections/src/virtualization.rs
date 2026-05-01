@@ -1197,6 +1197,21 @@ mod tests {
     }
 
     #[test]
+    fn variable_height_visible_range_treats_item_bottom_as_exclusive_start_boundary() {
+        let mut virt = Virtualizer::new(
+            3,
+            LayoutStrategy::VariableHeight {
+                estimated_item_height: 40.0,
+            },
+        );
+
+        virt.set_scroll_state_mut(40.0, 0.0, 40.0, 0.0);
+        virt.overscan = 0;
+
+        assert_eq!(virt.visible_range(), 1..2);
+    }
+
+    #[test]
     fn variable_height_visible_range_clamps_when_scrolled_past_end() {
         let mut virt = Virtualizer::new(
             4,
@@ -1253,6 +1268,22 @@ mod tests {
         assert_eq!(virt.item_offset_px(7), 60.0);
         assert_eq!(virt.total_height_px(), 120.0);
         assert_eq!(virt.scroll_to_index(7, ScrollAlign::Top), 60.0);
+    }
+
+    #[test]
+    fn grid_visible_range_uses_scroll_plus_viewport_for_row_end() {
+        let mut virt = Virtualizer::new(
+            30,
+            LayoutStrategy::Grid {
+                item_height: 30.0,
+                columns: NonZeroUsize::new(3).expect("non-zero columns"),
+            },
+        );
+
+        virt.set_scroll_state_mut(30.0, 0.0, 60.0, 0.0);
+        virt.overscan = 0;
+
+        assert_eq!(virt.visible_range(), 3..9);
     }
 
     #[test]
@@ -1445,6 +1476,25 @@ mod tests {
     }
 
     #[test]
+    fn grid_layout_non_positive_stride_defaults_to_one_column() {
+        let mut virt = Virtualizer::new(
+            3,
+            LayoutStrategy::GridLayout {
+                min_item_width: 120.0,
+                max_item_width: 240.0,
+                min_item_height: 130.0,
+                max_item_height: None,
+                gap: -120.0,
+            },
+        );
+
+        virt.set_scroll_state_mut(0.0, 0.0, 40.0, 500.0);
+
+        assert_eq!(virt.total_height_px(), 150.0);
+        assert_eq!(virt.item_offset_px(2), 20.0);
+    }
+
+    #[test]
     fn grid_layout_horizontal_uses_cross_axis_for_columns() {
         let mut virt = Virtualizer::new(
             12,
@@ -1611,6 +1661,42 @@ mod tests {
     }
 
     #[test]
+    fn waterfall_layout_visible_range_uses_half_open_boundaries() {
+        let mut virt = Virtualizer::new(
+            9,
+            LayoutStrategy::WaterfallLayout {
+                min_item_width: 120.0,
+                max_item_width: 240.0,
+                min_item_height: 45.0,
+                gap: 12.0,
+            },
+        );
+
+        virt.set_scroll_state_mut(45.0, 0.0, 12.0, 400.0);
+        virt.overscan = 0;
+
+        assert_eq!(virt.visible_range(), 0..0);
+    }
+
+    #[test]
+    fn waterfall_layout_visible_range_uses_sum_for_item_bottom() {
+        let mut virt = Virtualizer::new(
+            9,
+            LayoutStrategy::WaterfallLayout {
+                min_item_width: 120.0,
+                max_item_width: 240.0,
+                min_item_height: 45.0,
+                gap: 12.0,
+            },
+        );
+
+        virt.set_scroll_state_mut(103.0, 0.0, 1.0, 400.0);
+        virt.overscan = 0;
+
+        assert_eq!(virt.visible_range(), 0..0);
+    }
+
+    #[test]
     fn waterfall_layout_empty_collection() {
         let virt = Virtualizer::new(
             0,
@@ -1743,6 +1829,16 @@ mod tests {
     }
 
     #[test]
+    fn table_layout_visible_range_subtracts_header_from_scroll_offset() {
+        let mut virt = table_virt();
+
+        virt.set_scroll_state_mut(102.0, 0.0, 40.0, 400.0);
+        virt.overscan = 0;
+
+        assert_eq!(virt.visible_range(), 2..4);
+    }
+
+    #[test]
     fn table_layout_scroll_to_index_uses_header_offset() {
         let mut virt = Virtualizer::new(
             20,
@@ -1799,6 +1895,32 @@ mod tests {
 
         assert_eq!(range.start, 0);
         assert_eq!(range.end, 2);
+    }
+
+    #[test]
+    fn table_layout_horizontal_uses_column_boundaries_and_column_count() {
+        let mut virt = Virtualizer::new(
+            8,
+            LayoutStrategy::TableLayout {
+                row_height: 35.0,
+                header_height: 24.0,
+                column_widths: vec![120.0, 160.0, 80.0],
+                row_gap: 4.0,
+            },
+        );
+
+        virt.orientation = Orientation::Horizontal;
+        virt.set_scroll_state_mut(0.0, 120.0, 300.0, 160.0);
+        virt.overscan = 0;
+
+        assert_eq!(virt.visible_range(), 1..2);
+        assert_eq!(virt.scroll_to_index(2, ScrollAlign::Top), 200.0);
+
+        virt.overscan = usize::MAX;
+
+        let focused_at_column_count = virt.set_focused_index(Some(3));
+
+        assert_eq!(focused_at_column_count.visible_range(), 0..3);
     }
 
     // ── RTL scroll normalization ─────────────────────────────────────

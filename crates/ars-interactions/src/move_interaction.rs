@@ -953,6 +953,32 @@ mod tests {
     }
 
     #[test]
+    fn handle_key_up_ignores_non_move_key_even_if_tracked() {
+        let mut result = use_move(MoveConfig::default());
+
+        *result.state.borrow_mut() = MoveState::Moving {
+            pointer_type: PointerType::Keyboard,
+            last_x: 0.0,
+            last_y: 0.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
+        };
+        result.active_move_keys.push(KeyboardKey::Tab);
+
+        assert!(!result.handle_key_up(KeyboardKey::Tab, KeyModifiers::default()));
+        assert_eq!(
+            *result.state.borrow(),
+            MoveState::Moving {
+                pointer_type: PointerType::Keyboard,
+                last_x: 0.0,
+                last_y: 0.0,
+                scale_x: 1.0,
+                scale_y: 1.0,
+            },
+        );
+    }
+
+    #[test]
     fn handle_key_down_reuses_keyboard_session_and_rejects_non_move_or_pointer_conflicts() {
         let starts = Arc::new(Mutex::new(Vec::new()));
         let moves = Arc::new(Mutex::new(Vec::new()));

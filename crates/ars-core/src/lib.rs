@@ -1817,6 +1817,282 @@ mod tests {
         assert_eq!(service.context(), &ToggleContext);
     }
 
+    #[cfg(debug_assertions)]
+    #[test]
+    fn drain_queue_processes_exactly_iteration_limit_events_without_truncating() {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum RejectEvent {
+            Ignore,
+        }
+
+        struct RejectMachine;
+
+        impl Machine for RejectMachine {
+            type State = ToggleState;
+            type Event = RejectEvent;
+            type Context = ToggleContext;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Effect = &'static str;
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::Off, ToggleContext)
+            }
+
+            fn transition(
+                _state: &Self::State,
+                _event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                None
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+        }
+
+        let mut service = Service::<RejectMachine>::new(
+            ToggleProps {
+                id: String::from("toggle"),
+            },
+            &Env::default(),
+            &(),
+        );
+
+        service.event_queue.extend(core::iter::repeat_n(
+            RejectEvent::Ignore,
+            MAX_DRAIN_ITERATIONS,
+        ));
+
+        let result = service.drain_queue();
+
+        assert!(!result.state_changed);
+        assert!(!result.context_changed);
+        assert!(!result.truncated);
+        assert_eq!(result.context_change_count, 0);
+        assert!(service.event_queue.is_empty());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "Event queue exceeded 100 iterations")]
+    fn drain_queue_panics_after_iteration_limit_boundary() {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum RejectEvent {
+            Ignore,
+        }
+
+        struct RejectMachine;
+
+        impl Machine for RejectMachine {
+            type State = ToggleState;
+            type Event = RejectEvent;
+            type Context = ToggleContext;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Effect = &'static str;
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::Off, ToggleContext)
+            }
+
+            fn transition(
+                _state: &Self::State,
+                _event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                None
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+        }
+
+        let mut service = Service::<RejectMachine>::new(
+            ToggleProps {
+                id: String::from("toggle"),
+            },
+            &Env::default(),
+            &(),
+        );
+
+        service.event_queue.extend(core::iter::repeat_n(
+            RejectEvent::Ignore,
+            MAX_DRAIN_ITERATIONS + 1,
+        ));
+
+        let _result = service.drain_queue();
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn drain_queue_reports_context_only_count_before_context_loop_limit() {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum ContextEvent {
+            Update,
+        }
+
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        struct ContextCounter {
+            updates: usize,
+        }
+
+        struct ContextMachine;
+
+        impl Machine for ContextMachine {
+            type State = ToggleState;
+            type Event = ContextEvent;
+            type Context = ContextCounter;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Effect = &'static str;
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::Off, ContextCounter { updates: 0 })
+            }
+
+            fn transition(
+                _state: &Self::State,
+                _event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                Some(TransitionPlan::context_only(
+                    |context: &mut ContextCounter| context.updates += 1,
+                ))
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+        }
+
+        let mut service = Service::<ContextMachine>::new(
+            ToggleProps {
+                id: String::from("toggle"),
+            },
+            &Env::default(),
+            &(),
+        );
+
+        service.event_queue.extend(core::iter::repeat_n(
+            ContextEvent::Update,
+            MAX_DRAIN_ITERATIONS - 1,
+        ));
+
+        let result = service.drain_queue();
+
+        assert!(!result.state_changed);
+        assert!(result.context_changed);
+        assert!(!result.truncated);
+        assert_eq!(result.context_change_count, MAX_DRAIN_ITERATIONS - 1);
+        assert_eq!(service.context().updates, MAX_DRAIN_ITERATIONS - 1);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "consecutive context_only iterations")]
+    fn drain_queue_panics_at_context_only_loop_limit() {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum ContextEvent {
+            Update,
+        }
+
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        struct ContextCounter {
+            updates: usize,
+        }
+
+        struct ContextMachine;
+
+        impl Machine for ContextMachine {
+            type State = ToggleState;
+            type Event = ContextEvent;
+            type Context = ContextCounter;
+            type Props = ToggleProps;
+            type Messages = ();
+            type Effect = &'static str;
+            type Api<'a> = ToggleApi;
+
+            fn init(
+                _props: &Self::Props,
+                _env: &Env,
+                _messages: &Self::Messages,
+            ) -> (Self::State, Self::Context) {
+                (ToggleState::Off, ContextCounter { updates: 0 })
+            }
+
+            fn transition(
+                _state: &Self::State,
+                _event: &Self::Event,
+                _context: &Self::Context,
+                _props: &Self::Props,
+            ) -> Option<TransitionPlan<Self>> {
+                Some(TransitionPlan::context_only(
+                    |context: &mut ContextCounter| context.updates += 1,
+                ))
+            }
+
+            fn connect<'a>(
+                _state: &'a Self::State,
+                _context: &'a Self::Context,
+                _props: &'a Self::Props,
+                _send: &'a dyn Fn(Self::Event),
+            ) -> Self::Api<'a> {
+                ToggleApi
+            }
+        }
+
+        let mut service = Service::<ContextMachine>::new(
+            ToggleProps {
+                id: String::from("toggle"),
+            },
+            &Env::default(),
+            &(),
+        );
+
+        service.event_queue.extend(core::iter::repeat_n(
+            ContextEvent::Update,
+            MAX_DRAIN_ITERATIONS,
+        ));
+
+        let _result = service.drain_queue();
+    }
+
     #[test]
     fn context_only_plan_does_not_change_state() {
         // Verify context_only plan reports context_changed but not state_changed.

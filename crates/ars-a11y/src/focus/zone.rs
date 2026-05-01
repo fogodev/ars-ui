@@ -864,6 +864,40 @@ mod tests {
     }
 
     #[test]
+    fn no_wrap_still_allows_first_item_when_moving_backward() {
+        let zone = FocusZone {
+            options: FocusZoneOptions {
+                wrap: false,
+                ..FocusZoneOptions::default()
+            },
+            active_index: 1,
+            item_count: 4,
+        };
+
+        assert_eq!(
+            zone.handle_key(KeyboardKey::ArrowUp, false, disabled_items(&[])),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn no_wrap_returns_none_before_first_item() {
+        let zone = FocusZone {
+            options: FocusZoneOptions {
+                wrap: false,
+                ..FocusZoneOptions::default()
+            },
+            active_index: 0,
+            item_count: 4,
+        };
+
+        assert_eq!(
+            zone.handle_key(KeyboardKey::ArrowUp, false, disabled_items(&[])),
+            None
+        );
+    }
+
+    #[test]
     fn handle_key_returns_none_when_navigation_keeps_same_index() {
         let zone = FocusZone {
             options: FocusZoneOptions::default(),
@@ -941,6 +975,27 @@ mod tests {
     }
 
     #[test]
+    fn home_end_keys_respect_disabled_option() {
+        let zone = FocusZone {
+            options: FocusZoneOptions {
+                home_end: false,
+                ..FocusZoneOptions::default()
+            },
+            active_index: 2,
+            item_count: 5,
+        };
+
+        assert_eq!(
+            zone.handle_key(KeyboardKey::Home, false, disabled_items(&[])),
+            None
+        );
+        assert_eq!(
+            zone.handle_key(KeyboardKey::End, false, disabled_items(&[])),
+            None
+        );
+    }
+
+    #[test]
     fn page_navigation_jumps_by_page_size() {
         let zone = FocusZone {
             options: FocusZoneOptions {
@@ -959,6 +1014,28 @@ mod tests {
         assert_eq!(
             zone.handle_key(KeyboardKey::PageUp, false, disabled_items(&[])),
             Some(1)
+        );
+    }
+
+    #[test]
+    fn page_keys_respect_disabled_option() {
+        let zone = FocusZone {
+            options: FocusZoneOptions {
+                page_navigation: false,
+                page_size: NonZero::new(2).expect("hardcoded nonzero"),
+                ..FocusZoneOptions::default()
+            },
+            active_index: 2,
+            item_count: 5,
+        };
+
+        assert_eq!(
+            zone.handle_key(KeyboardKey::PageDown, false, disabled_items(&[])),
+            None
+        );
+        assert_eq!(
+            zone.handle_key(KeyboardKey::PageUp, false, disabled_items(&[])),
+            None
         );
     }
 
@@ -1096,6 +1173,23 @@ mod tests {
     }
 
     #[test]
+    fn grid_vertical_wrap_uses_last_cell_when_column_exactly_fills() {
+        let zone = FocusZone {
+            options: FocusZoneOptions {
+                direction: FocusZoneDirection::grid(NonZero::new(3).expect("hardcoded nonzero")),
+                ..FocusZoneOptions::default()
+            },
+            active_index: 1,
+            item_count: 7,
+        };
+
+        assert_eq!(
+            zone.handle_key(KeyboardKey::ArrowUp, false, disabled_items(&[])),
+            Some(4)
+        );
+    }
+
+    #[test]
     fn page_navigation_scans_for_enabled_item_without_wrapping() {
         let page_down_zone = FocusZone {
             options: FocusZoneOptions {
@@ -1123,6 +1217,38 @@ mod tests {
         );
         assert_eq!(
             page_up_zone.handle_key(KeyboardKey::PageUp, false, disabled_items(&[1])),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn page_navigation_scan_steps_in_requested_direction() {
+        let page_down_zone = FocusZone {
+            options: FocusZoneOptions {
+                page_navigation: true,
+                page_size: NonZero::new(2).expect("hardcoded nonzero"),
+                ..FocusZoneOptions::default()
+            },
+            active_index: 0,
+            item_count: 5,
+        };
+
+        let page_up_zone = FocusZone {
+            options: FocusZoneOptions {
+                page_navigation: true,
+                page_size: NonZero::new(2).expect("hardcoded nonzero"),
+                ..FocusZoneOptions::default()
+            },
+            active_index: 4,
+            item_count: 5,
+        };
+
+        assert_eq!(
+            page_down_zone.handle_key(KeyboardKey::PageDown, false, disabled_items(&[2, 3])),
+            Some(4)
+        );
+        assert_eq!(
+            page_up_zone.handle_key(KeyboardKey::PageUp, false, disabled_items(&[1, 2])),
             Some(0)
         );
     }

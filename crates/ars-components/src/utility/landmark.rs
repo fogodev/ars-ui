@@ -382,7 +382,12 @@ mod tests {
         assert_eq!(props.id, "landmark-1");
         assert_eq!(props.role, Role::Navigation);
         assert_eq!(props.labelledby_id.as_deref(), Some("landmark-label"));
-        assert_eq!(props.unlabelled().labelledby_id, None);
+
+        let unlabelled = props.unlabelled();
+
+        assert_eq!(unlabelled.id, "landmark-1");
+        assert_eq!(unlabelled.role, Role::Navigation);
+        assert_eq!(unlabelled.labelledby_id, None);
     }
 
     #[test]
@@ -569,15 +574,17 @@ mod tests {
 
     #[test]
     fn landmark_root_labelledby_takes_precedence() {
-        let attrs = labelled_api(
+        let api = labelled_api(
             Props::new()
                 .id("labelledby")
                 .role(Role::Region)
                 .labelledby_id("external-label"),
             "Ignored label",
-        )
-        .root_attrs(true);
+        );
 
+        let attrs = api.root_attrs(true);
+
+        assert_eq!(api.labelledby_id(), Some("external-label"));
         assert_eq!(
             attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
             Some("external-label")

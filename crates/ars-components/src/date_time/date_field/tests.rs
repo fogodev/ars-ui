@@ -4,7 +4,7 @@ use core::cell::RefCell;
 use ars_core::{
     AriaAttr, AttrMap, ConnectApi, Direction, Env, HtmlAttr, KeyboardKey, Service, StubIntlBackend,
 };
-use ars_i18n::{CalendarDate, CalendarSystem, Locale};
+use ars_i18n::{CalendarDate, CalendarDateFields, CalendarSystem, Era, Locale};
 use ars_interactions::KeyboardEventData;
 use insta::assert_snapshot;
 
@@ -12,6 +12,23 @@ use super::*;
 
 fn date(year: i32, month: u8, day: u8) -> CalendarDate {
     CalendarDate::new_gregorian(year, month, day).expect("test date should be valid")
+}
+
+fn japanese_date(era: &str, year: i32, month: u8, day: u8) -> CalendarDate {
+    CalendarDate::new(
+        CalendarSystem::Japanese,
+        &CalendarDateFields {
+            era: Some(Era {
+                code: String::from(era),
+                display_name: String::from(era),
+            }),
+            year: Some(year),
+            month: Some(month),
+            day: Some(day),
+            ..CalendarDateFields::default()
+        },
+    )
+    .expect("test Japanese date should be valid")
 }
 
 fn props() -> Props {
@@ -333,6 +350,44 @@ fn type_buffer_commit_publishes_numeric_and_month_name_buffers() {
         Some(1)
     );
     assert!(service.context().type_buffer.is_empty());
+
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Day)));
+    drop(service.send(Event::TypeIntoSegment(DateSegmentKind::Day, '3')));
+
+    assert_eq!(service.context().type_buffer, "3");
+
+    drop(service.send(Event::BlurAll));
+
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Day),
+        Some(3)
+    );
+    assert!(service.context().type_buffer.is_empty());
+}
+
+#[test]
+fn commit_type_buffer_uses_the_focused_segment() {
+    let mut ctx = service().context().clone();
+
+    ctx.focused_segment = Some(DateSegmentKind::Year);
+    ctx.type_buffer = String::from("2024");
+
+    commit_type_buffer(&mut ctx);
+
+    assert_eq!(ctx.get_segment_value(DateSegmentKind::Year), Some(2024));
+    assert!(ctx.type_buffer.is_empty());
+}
+
+#[test]
+fn commit_buffer_for_kind_handles_month_name_buffers_directly() {
+    let mut ctx = service().context().clone();
+
+    ctx.type_buffer = String::from("J");
+
+    commit_buffer_for_kind(&mut ctx, DateSegmentKind::Month);
+
+    assert_eq!(ctx.get_segment_value(DateSegmentKind::Month), Some(1));
+    assert!(ctx.type_buffer.is_empty());
 }
 
 #[test]
@@ -375,6 +430,191 @@ fn incomplete_increment_uses_segment_range_wrapping() {
         service.context().get_segment_value(DateSegmentKind::Day),
         Some(31)
     );
+}
+
+#[test]
+fn context_completion_requires_all_required_date_segments() {
+    let mut ctx = service().context().clone();
+
+    assert!(!ctx.is_complete());
+
+    ctx.set_segment_value(DateSegmentKind::Year, 2024);
+    ctx.set_segment_value(DateSegmentKind::Month, 2);
+
+    assert!(!ctx.is_complete());
+
+    ctx.set_segment_value(DateSegmentKind::Day, 29);
+
+    assert!(ctx.is_complete());
+}
+
+#[test]
+fn context_assemble_date_preserves_selected_japanese_era() {
+    let service = Service::<Machine>::new(
+        props().calendar(CalendarSystem::Japanese),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    let mut ctx = service.context().clone();
+
+    assert!(
+        ctx.calendar.eras().len() > 1,
+        "Japanese calendar should expose historical eras"
+    );
+
+    let heisei = ctx
+        .calendar
+        .eras()
+        .iter()
+        .position(|era| era.code == "heisei")
+        .and_then(|index| i32::try_from(index + 1).ok())
+        .expect("Japanese calendar should include the Heisei era");
+
+    ctx.set_segment_value(DateSegmentKind::Era, heisei);
+    ctx.set_segment_value(DateSegmentKind::Year, 31);
+    ctx.set_segment_value(DateSegmentKind::Month, 4);
+    ctx.set_segment_value(DateSegmentKind::Day, 30);
+
+    let assembled = ctx.assemble_date().expect("era date should assemble");
+
+    assert_eq!(ctx.era_index_for_date(&assembled), Some(heisei));
+}
+
+#[test]
+fn context_selected_japanese_era_limits_year_range_and_formats_era_text() {
+    let service = Service::<Machine>::new(
+        props().calendar(CalendarSystem::Japanese),
+        &Env::new(
+            Locale::parse("en-US").expect("valid locale"),
+            Arc::new(StubIntlBackend),
+        ),
+        &Messages::default(),
+    );
+
+    let mut ctx = service.context().clone();
+
+    let heisei = ctx
+        .calendar
+        .eras()
+        .iter()
+        .position(|era| era.code == "heisei")
+        .and_then(|index| i32::try_from(index + 1).ok())
+        .expect("Japanese calendar should include the Heisei era");
+
+    ctx.set_segment_value(DateSegmentKind::Era, heisei);
+
+    assert_eq!(ctx.segment_range(DateSegmentKind::Year), (1, 31));
+
+    let era_segment = ctx
+        .segments
+        .iter()
+        .find(|segment| segment.kind == DateSegmentKind::Era)
+        .expect("era segment should exist");
+
+    assert_eq!(era_segment.text, "Heisei");
+}
+
+#[test]
+fn context_increment_and_decrement_cycle_year_month_and_day() {
+    for (kind, incremented, decremented) in [
+        (DateSegmentKind::Year, (2025, 6, 15), (2023, 6, 15)),
+        (DateSegmentKind::Month, (2024, 7, 15), (2024, 5, 15)),
+        (DateSegmentKind::Day, (2024, 6, 16), (2024, 6, 14)),
+    ] {
+        let mut inc = Service::<Machine>::new(
+            props().default_value(Some(date(2024, 6, 15))),
+            &Env::default(),
+            &Messages::default(),
+        )
+        .context()
+        .clone();
+
+        inc.increment_segment(kind);
+
+        assert_eq!(
+            inc.assemble_date(),
+            Some(date(incremented.0, incremented.1, incremented.2)),
+            "incrementing {kind:?}"
+        );
+
+        let mut dec = Service::<Machine>::new(
+            props().default_value(Some(date(2024, 6, 15))),
+            &Env::default(),
+            &Messages::default(),
+        )
+        .context()
+        .clone();
+
+        dec.decrement_segment(kind);
+
+        assert_eq!(
+            dec.assemble_date(),
+            Some(date(decremented.0, decremented.1, decremented.2)),
+            "decrementing {kind:?}"
+        );
+    }
+}
+
+#[test]
+fn context_year_cycle_crosses_japanese_era_boundaries() {
+    let service = Service::<Machine>::new(
+        props().calendar(CalendarSystem::Japanese),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    let eras = service.context().calendar.eras();
+
+    let heisei = eras
+        .iter()
+        .position(|era| era.code == "heisei")
+        .and_then(|index| i32::try_from(index + 1).ok())
+        .expect("Japanese calendar should include the Heisei era");
+
+    let reiwa = eras
+        .iter()
+        .position(|era| era.code == "reiwa")
+        .and_then(|index| i32::try_from(index + 1).ok())
+        .expect("Japanese calendar should include the Reiwa era");
+
+    let mut inc = service.context().clone();
+
+    inc.set_segment_value(DateSegmentKind::Era, heisei);
+    inc.set_segment_value(DateSegmentKind::Year, 31);
+    inc.set_segment_value(DateSegmentKind::Month, 4);
+    inc.set_segment_value(DateSegmentKind::Day, 30);
+
+    inc.increment_segment(DateSegmentKind::Year);
+
+    assert_eq!(inc.get_segment_value(DateSegmentKind::Era), Some(reiwa));
+    assert_eq!(inc.get_segment_value(DateSegmentKind::Year), Some(2));
+    assert_eq!(inc.get_segment_value(DateSegmentKind::Month), Some(4));
+    assert_eq!(inc.get_segment_value(DateSegmentKind::Day), Some(30));
+
+    let mut dec = service.context().clone();
+
+    dec.set_segment_value(DateSegmentKind::Era, reiwa);
+    dec.set_segment_value(DateSegmentKind::Year, 1);
+    dec.set_segment_value(DateSegmentKind::Month, 5);
+    dec.set_segment_value(DateSegmentKind::Day, 1);
+
+    dec.decrement_segment(DateSegmentKind::Year);
+
+    assert_eq!(dec.get_segment_value(DateSegmentKind::Era), Some(heisei));
+    assert_eq!(dec.get_segment_value(DateSegmentKind::Year), Some(30));
+    assert_eq!(dec.get_segment_value(DateSegmentKind::Month), Some(5));
+    assert_eq!(dec.get_segment_value(DateSegmentKind::Day), Some(1));
+}
+
+#[test]
+fn context_incomplete_month_increment_wraps_from_max_to_min() {
+    let mut ctx = service().context().clone();
+
+    ctx.set_segment_value(DateSegmentKind::Month, 12);
+    ctx.increment_segment(DateSegmentKind::Month);
+
+    assert_eq!(ctx.get_segment_value(DateSegmentKind::Month), Some(1));
 }
 
 #[test]
@@ -701,6 +941,17 @@ fn controlled_to_uncontrolled_handoff_clears_stale_deferred_value() {
 }
 
 #[test]
+fn apply_value_update_with_focus_and_empty_buffer_applies_immediately() {
+    let mut ctx = service().context().clone();
+
+    ctx.focused_segment = Some(DateSegmentKind::Month);
+
+    assert!(apply_value_update(&mut ctx, Some(date(2024, 5, 6))));
+    assert_eq!(ctx.value.get(), &Some(date(2024, 5, 6)));
+    assert!(ctx.pending_controlled_value.is_none());
+}
+
+#[test]
 fn sync_props_refocuses_when_segment_set_removes_focused_segment() {
     let mut service = Service::<Machine>::new(
         props().calendar(CalendarSystem::Japanese),
@@ -723,6 +974,103 @@ fn sync_props_refocuses_when_segment_set_removes_focused_segment() {
             .iter()
             .all(|segment| segment.kind != DateSegmentKind::Era)
     );
+}
+
+#[test]
+fn sync_props_rebuild_restores_active_buffered_segment() {
+    let mut service = service();
+
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Month)));
+    drop(service.send(Event::TypeIntoSegment(DateSegmentKind::Month, '1')));
+    drop(service.set_props(props().force_leading_zeros(true)));
+
+    let month = service
+        .context()
+        .segments
+        .iter()
+        .find(|segment| segment.kind == DateSegmentKind::Month)
+        .expect("month segment should exist");
+
+    assert_eq!(service.state(), &State::Focused(DateSegmentKind::Month));
+    assert_eq!(service.context().type_buffer, "1");
+    assert_eq!(month.value, Some(1));
+    assert_eq!(month.text, "01");
+}
+
+#[test]
+fn sync_props_rebuilds_when_segment_order_changes() {
+    let mut service = service();
+
+    drop(service.set_props(props().segment_order(Some(vec![
+        DateSegmentKind::Year,
+        DateSegmentKind::Month,
+        DateSegmentKind::Day,
+    ]))));
+
+    let editable = service
+        .context()
+        .segments
+        .iter()
+        .filter(|segment| segment.is_editable)
+        .map(|segment| segment.kind)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        editable,
+        vec![
+            DateSegmentKind::Year,
+            DateSegmentKind::Month,
+            DateSegmentKind::Day,
+        ]
+    );
+}
+
+#[test]
+fn controlled_to_uncontrolled_with_focus_and_empty_buffer_still_clamps() {
+    let mut service = Service::<Machine>::new(
+        props().value(Some(date(2024, 1, 1))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Month)));
+    drop(service.set_props(props().min_value(Some(date(2024, 1, 10)))));
+
+    assert!(!service.context().value.is_controlled());
+    assert!(service.context().type_buffer.is_empty());
+    assert_eq!(service.context().value.get(), &Some(date(2024, 1, 10)));
+}
+
+#[test]
+fn restore_buffered_segment_only_restores_editable_segments() {
+    let mut ctx = service().context().clone();
+
+    restore_buffered_segment(&mut ctx, Some((DateSegmentKind::Month, Some(7))));
+
+    assert_eq!(ctx.get_segment_value(DateSegmentKind::Month), Some(7));
+
+    let weekday_ctx = Service::<Machine>::new(
+        props().segment_order(Some(vec![
+            DateSegmentKind::Weekday,
+            DateSegmentKind::Month,
+            DateSegmentKind::Day,
+            DateSegmentKind::Year,
+        ])),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    let mut ctx = weekday_ctx.context().clone();
+
+    restore_buffered_segment(&mut ctx, Some((DateSegmentKind::Weekday, Some(5))));
+
+    let weekday = ctx
+        .segments
+        .iter()
+        .find(|segment| segment.kind == DateSegmentKind::Weekday)
+        .expect("weekday segment should exist");
+
+    assert_eq!(weekday.value, None);
 }
 
 #[test]
@@ -811,6 +1159,34 @@ fn disabled_state_allows_props_to_resync_context() {
 }
 
 #[test]
+fn disabled_state_blocks_composition_end_edits() {
+    let mut service = Service::<Machine>::new(
+        props().default_value(Some(date(2024, 1, 2))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Month)));
+    drop(service.send(Event::CompositionStart));
+    drop(service.set_props(props().default_value(Some(date(2024, 1, 2))).disabled(true)));
+
+    assert!(service.context().is_composing);
+
+    let result = service.send(Event::CompositionEnd(
+        DateSegmentKind::Month,
+        String::from("12"),
+    ));
+
+    assert!(result.context_changed);
+    assert!(!service.context().is_composing);
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Month),
+        Some(1)
+    );
+    assert_eq!(service.context().value.get(), &Some(date(2024, 1, 2)));
+}
+
+#[test]
 fn controlled_empty_value_is_distinct_from_uncontrolled_default() {
     let service = Service::<Machine>::new(
         props().value(None).default_value(Some(date(2024, 1, 1))),
@@ -883,6 +1259,69 @@ fn numeric_typeahead_returns_timer_marker_effect_until_value_is_complete() {
 }
 
 #[test]
+fn numeric_typeahead_rejects_non_numeric_segments_and_advances_on_overflow() {
+    let mut japanese = Service::<Machine>::new(
+        props()
+            .calendar(CalendarSystem::Japanese)
+            .default_value(Some(date(2024, 1, 2))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(japanese.send(Event::FocusSegment(DateSegmentKind::Era)));
+
+    let before_era = japanese.context().get_segment_value(DateSegmentKind::Era);
+
+    let result = japanese.send(Event::TypeIntoSegment(DateSegmentKind::Era, '2'));
+
+    assert!(!result.context_changed);
+    assert_eq!(
+        japanese.context().get_segment_value(DateSegmentKind::Era),
+        before_era
+    );
+
+    let mut service = Service::<Machine>::new(
+        props().default_value(Some(date(2024, 1, 2))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Day)));
+    drop(service.send(Event::TypeIntoSegment(DateSegmentKind::Day, '4')));
+
+    assert_eq!(service.state(), &State::Focused(DateSegmentKind::Year));
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Day),
+        Some(4)
+    );
+}
+
+#[test]
+fn numeric_typeahead_advances_when_buffer_reaches_max_digits() {
+    let mut service = Service::<Machine>::new(
+        props().segment_order(Some(vec![
+            DateSegmentKind::Year,
+            DateSegmentKind::Month,
+            DateSegmentKind::Day,
+        ])),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Year)));
+
+    for ch in ['0', '0', '0', '1'] {
+        drop(service.send(Event::TypeIntoSegment(DateSegmentKind::Year, ch)));
+    }
+
+    assert_eq!(service.state(), &State::Focused(DateSegmentKind::Month));
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Year),
+        Some(1)
+    );
+}
+
+#[test]
 fn month_name_typeahead_matches_locale_month_prefixes() {
     let mut service = service();
 
@@ -950,6 +1389,46 @@ fn japanese_calendar_uses_era_segment_and_ideographic_literals() {
         rendered,
         vec!["era", "year", "年", "month", "月", "day", "日"]
     );
+}
+
+#[test]
+fn build_segments_applies_date_values_for_all_editable_date_parts() {
+    let service = Service::<Machine>::new(
+        props()
+            .calendar(CalendarSystem::Japanese)
+            .default_value(Some(japanese_date("reiwa", 6, 6, 7))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    for (kind, expected) in [
+        (DateSegmentKind::Era, Some(5)),
+        (DateSegmentKind::Year, Some(6)),
+        (DateSegmentKind::Month, Some(6)),
+        (DateSegmentKind::Day, Some(7)),
+    ] {
+        assert_eq!(
+            service.context().get_segment_value(kind),
+            expected,
+            "{kind:?}"
+        );
+    }
+
+    for (kind, min, max, placeholder) in [
+        (DateSegmentKind::Year, 1, 9999, "yyyy"),
+        (DateSegmentKind::Day, 1, 30, "dd"),
+    ] {
+        let segment = service
+            .context()
+            .segments
+            .iter()
+            .find(|segment| segment.kind == kind)
+            .expect("segment should exist");
+
+        assert_eq!(segment.min, min, "{kind:?} min");
+        assert_eq!(segment.max, max, "{kind:?} max");
+        assert_eq!(segment.placeholder, placeholder, "{kind:?} placeholder");
+    }
 }
 
 #[test]
@@ -1226,6 +1705,18 @@ fn ime_composition_suppresses_character_typing_until_end() {
         service.context().get_segment_value(DateSegmentKind::Month),
         Some(12)
     );
+
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Day)));
+    drop(service.send(Event::CompositionStart));
+    drop(service.send(Event::CompositionEnd(
+        DateSegmentKind::Day,
+        String::from("1a2"),
+    )));
+
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Day),
+        Some(12)
+    );
 }
 
 #[test]
@@ -1373,6 +1864,30 @@ fn segment_order_non_editable_kinds_stay_non_editable() {
 }
 
 #[test]
+fn explicit_literal_kind_uses_locale_literal_text() {
+    let service = Service::<Machine>::new(
+        props().segment_order(Some(vec![
+            DateSegmentKind::Month,
+            DateSegmentKind::Literal,
+            DateSegmentKind::Day,
+            DateSegmentKind::Year,
+        ])),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    let literals = service
+        .context()
+        .segments
+        .iter()
+        .filter(|segment| segment.kind == DateSegmentKind::Literal)
+        .collect::<Vec<_>>();
+
+    assert_eq!(literals.len(), 4);
+    assert!(literals.iter().all(|segment| segment.display_text() == "/"));
+}
+
+#[test]
 fn locale_order_uses_environment_locale() {
     let env = Env::new(
         Locale::parse("de-DE").expect("valid locale"),
@@ -1402,6 +1917,15 @@ fn locale_order_uses_environment_locale() {
 #[test]
 fn locale_specific_orders_and_literals_are_resolved() {
     for (locale, expected_kinds, expected_literal) in [
+        (
+            "de-DE",
+            vec![
+                DateSegmentKind::Day,
+                DateSegmentKind::Month,
+                DateSegmentKind::Year,
+            ],
+            ".",
+        ),
         (
             "zh-CN",
             vec![
@@ -1443,8 +1967,34 @@ fn locale_specific_orders_and_literals_are_resolved() {
             .find_map(|segment| segment.literal.as_deref())
             .expect("literal segment exists");
 
+        let rendered = service
+            .context()
+            .segments
+            .iter()
+            .map(|segment| {
+                segment
+                    .literal
+                    .clone()
+                    .unwrap_or_else(|| segment.kind.data_name().to_string())
+            })
+            .collect::<Vec<_>>();
+
+        let expected_rendered = expected_kinds
+            .iter()
+            .enumerate()
+            .flat_map(|(index, kind)| {
+                let mut parts = Vec::new();
+                if index > 0 {
+                    parts.push(expected_literal.to_string());
+                }
+                parts.push(kind.data_name().to_string());
+                parts
+            })
+            .collect::<Vec<_>>();
+
         assert_eq!(kinds, expected_kinds);
         assert_eq!(literal, expected_literal);
+        assert_eq!(rendered, expected_rendered);
     }
 }
 
@@ -1511,6 +2061,56 @@ fn connect_api_helpers_and_part_attrs_cover_all_parts() {
     assert_eq!(
         api.segment_attrs(&DateSegmentKind::Literal),
         api.literal_attrs(0)
+    );
+}
+
+#[test]
+fn connect_api_reports_idle_focus_and_scopes_segment_tab_stop() {
+    let mut service = service();
+
+    assert!(!service.connect(&|_| {}).is_focused());
+
+    drop(service.send(Event::FocusSegment(DateSegmentKind::Day)));
+
+    let api = service.connect(&|_| {});
+
+    let month = api.segment_attrs(&DateSegmentKind::Month);
+
+    let day = api.segment_attrs(&DateSegmentKind::Day);
+
+    assert!(api.is_focused());
+    assert_eq!(attr(&month, HtmlAttr::TabIndex), Some("-1"));
+    assert_eq!(attr(&day, HtmlAttr::TabIndex), Some("0"));
+}
+
+#[test]
+fn field_group_describes_error_only_when_invalid() {
+    let service = Service::<Machine>::new(
+        props().error_message(Some(String::from("Required"))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    let attrs = service.connect(&|_| {}).field_group_attrs();
+
+    assert_eq!(
+        attrs.get_value(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
+        None
+    );
+
+    let invalid = Service::<Machine>::new(
+        props()
+            .error_message(Some(String::from("Required")))
+            .invalid(true),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    let attrs = invalid.connect(&|_| {}).field_group_attrs();
+
+    assert_eq!(
+        attr(&attrs, HtmlAttr::Aria(AriaAttr::DescribedBy)),
+        Some("birthday-error-message")
     );
 }
 
@@ -1593,6 +2193,10 @@ fn date_segment_display_and_day_period_aria_value_text_are_resolved() {
 
     assert_eq!(segment.display_text(), "am/pm");
     assert_eq!(segment.aria_value_text(&backend, &locale), None);
+
+    segment.value = Some(0);
+
+    assert_eq!(segment.display_text(), "am/pm");
 
     segment.value = Some(1);
     segment.text = String::from("PM");
@@ -1822,6 +2426,7 @@ fn japanese_era_value_text_uses_localized_era_names() {
 #[test]
 fn private_locale_and_format_helpers_cover_edge_branches() {
     let locale = Locale::parse("ja-JP").expect("valid locale");
+    let en = Locale::parse("en-US").expect("valid locale");
 
     assert_eq!(
         segment_order_for_locale(&locale, CalendarSystem::Japanese),
@@ -1838,6 +2443,43 @@ fn private_locale_and_format_helpers_cover_edge_branches() {
     assert_eq!(
         format_segment_value(&backend, &locale, DateSegmentKind::DayPeriod, 1, false),
         "PM"
+    );
+    assert_eq!(
+        format_segment_value(&backend, &en, DateSegmentKind::Year, 42, false),
+        "0042"
+    );
+    assert_eq!(
+        format_segment_value_for(
+            &backend,
+            &en,
+            CalendarSystem::Gregorian,
+            DateSegmentKind::Month,
+            4,
+            true,
+        ),
+        "04"
+    );
+    assert_eq!(
+        format_segment_value_for(
+            &backend,
+            &locale,
+            CalendarSystem::Japanese,
+            DateSegmentKind::Era,
+            5,
+            false,
+        ),
+        "令和"
+    );
+    assert_eq!(
+        localized_era_name(
+            CalendarSystem::Gregorian,
+            &Era {
+                code: String::from("ce"),
+                display_name: String::from("CE"),
+            },
+            &en,
+        ),
+        "CE"
     );
     assert_eq!(digits_needed(0), 1);
 }

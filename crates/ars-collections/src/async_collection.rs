@@ -556,6 +556,8 @@ mod tests {
         assert_eq!(c.key_before(&Key::int(1)), Some(&Key::int(3)));
 
         // No-wrap
+        assert_eq!(c.key_after_no_wrap(&Key::int(1)), Some(&Key::int(2)));
+        assert_eq!(c.key_before_no_wrap(&Key::int(3)), Some(&Key::int(2)));
         assert_eq!(c.key_after_no_wrap(&Key::int(3)), None);
         assert_eq!(c.key_before_no_wrap(&Key::int(1)), None);
 

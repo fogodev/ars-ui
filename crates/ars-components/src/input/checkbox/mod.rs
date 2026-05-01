@@ -1595,6 +1595,29 @@ mod tests {
     }
 
     #[test]
+    fn checkbox_control_keydown_only_toggles_for_non_repeated_space() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
+
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let sent = Rc::clone(&events);
+        let send = move |event| sent.borrow_mut().push(event);
+
+        let api = service.connect(&send);
+
+        api.on_control_keydown(&keyboard_data(KeyboardKey::Enter), false);
+
+        assert!(events.borrow().is_empty());
+
+        api.on_control_keydown(&repeated_keyboard_data(KeyboardKey::Space), false);
+
+        assert!(events.borrow().is_empty());
+
+        api.on_control_keydown(&keyboard_data(KeyboardKey::Space), false);
+
+        assert_eq!(events.borrow().as_slice(), &[Event::Toggle]);
+    }
+
+    #[test]
     fn checkbox_api_debug_is_stable() {
         let service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
         let api = service.connect(&|_| {});
@@ -1646,6 +1669,7 @@ mod tests {
             .checked(State::Checked)
             .name("agree")
             .form("settings")
+            .value("yes")
             .on_checked_change(|_| {})
             .uncontrolled()
             .no_name()
@@ -1655,6 +1679,7 @@ mod tests {
         assert_eq!(props.checked, None);
         assert_eq!(props.name, None);
         assert_eq!(props.form, None);
+        assert_eq!(props.value, "yes");
         assert!(props.on_checked_change.is_none());
     }
 
