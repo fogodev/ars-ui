@@ -57,6 +57,10 @@ fn native_dioxus_attr(name: &'static str, value: &'static str) -> Attribute {
     Attribute::new(name, AttributeValue::Text(String::from(value)), None, false)
 }
 
+fn native_dioxus_attr_value(name: &'static str, value: AttributeValue) -> Attribute {
+    Attribute::new(name, value, None, false)
+}
+
 #[test]
 fn as_child_slot_props_debug_redacts_render_callback() {
     thread_local! {
@@ -337,6 +341,101 @@ fn merge_dioxus_attrs_replaces_non_mergeable_conflicts_with_component_attrs() {
             native_dioxus_attr("data-ars-state", "open"),
         ]
     );
+}
+
+#[test]
+fn merge_dioxus_attrs_appends_non_conflicting_component_attrs() {
+    let attrs = merge_dioxus_attrs(
+        vec![native_dioxus_attr("data-child", "yes")],
+        vec![native_dioxus_attr("data-component", "yes")],
+    );
+
+    assert_eq!(
+        attrs,
+        vec![
+            native_dioxus_attr("data-child", "yes"),
+            native_dioxus_attr("data-component", "yes"),
+        ]
+    );
+}
+
+#[test]
+fn merge_dioxus_attrs_replaces_non_text_mergeable_conflicts() {
+    let attrs = merge_dioxus_attrs(
+        vec![
+            native_dioxus_attr_value("class", AttributeValue::Bool(true)),
+            native_dioxus_attr("aria-labelledby", "child-label"),
+        ],
+        vec![
+            native_dioxus_attr("class", "component"),
+            native_dioxus_attr_value("aria-labelledby", AttributeValue::Bool(false)),
+        ],
+    );
+
+    assert_eq!(
+        attrs,
+        vec![
+            native_dioxus_attr("class", "component"),
+            native_dioxus_attr_value("aria-labelledby", AttributeValue::Bool(false)),
+        ]
+    );
+}
+
+#[test]
+fn merge_dioxus_attrs_handles_empty_token_lists_and_styles() {
+    let attrs = merge_dioxus_attrs(
+        vec![
+            native_dioxus_attr("class", ""),
+            native_dioxus_attr("aria-describedby", "child-hint"),
+            native_dioxus_attr("aria-controls", "shared component"),
+            native_dioxus_attr("style", ""),
+            native_dioxus_attr("data-empty-style-component", "placeholder"),
+            native_dioxus_attr("data-full-style", "placeholder"),
+        ],
+        vec![
+            native_dioxus_attr("class", "component"),
+            native_dioxus_attr("aria-describedby", ""),
+            native_dioxus_attr("aria-controls", "component panel"),
+            native_dioxus_attr("style", "display: inline-flex;"),
+            native_dioxus_attr("data-empty-style-component", "placeholder"),
+            native_dioxus_attr("data-full-style", "placeholder"),
+        ],
+    );
+
+    assert!(attrs.contains(&native_dioxus_attr("class", "component")));
+    assert!(attrs.contains(&native_dioxus_attr("aria-describedby", "child-hint")));
+    assert!(attrs.contains(&native_dioxus_attr(
+        "aria-controls",
+        "shared component panel"
+    )));
+    assert!(attrs.contains(&native_dioxus_attr("style", "display: inline-flex;")));
+
+    let attrs = merge_dioxus_attrs(
+        vec![
+            native_dioxus_attr("style", "color: red;"),
+            native_dioxus_attr("aria-owns", "child-owner"),
+        ],
+        vec![
+            native_dioxus_attr("style", ""),
+            native_dioxus_attr("aria-owns", "child-owner component-owner"),
+        ],
+    );
+
+    assert!(attrs.contains(&native_dioxus_attr("style", "color: red")));
+    assert!(attrs.contains(&native_dioxus_attr(
+        "aria-owns",
+        "child-owner component-owner"
+    )));
+
+    let attrs = merge_dioxus_attrs(
+        vec![native_dioxus_attr("style", "color: red;")],
+        vec![native_dioxus_attr("style", "display: inline-flex;")],
+    );
+
+    assert!(attrs.contains(&native_dioxus_attr(
+        "style",
+        "color: red; display: inline-flex;"
+    )));
 }
 
 #[test]
