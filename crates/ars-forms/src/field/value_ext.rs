@@ -159,6 +159,16 @@ mod tests {
     }
 
     #[test]
+    fn calendar_date_some_not_empty() {
+        let date = Some(
+            ars_i18n::CalendarDate::new_gregorian(2024, 3, 15)
+                .expect("fixture date should be valid"),
+        );
+
+        assert!(!date.is_empty());
+    }
+
+    #[test]
     fn option_f64_none_empty() {
         let n = None::<f64>;
 

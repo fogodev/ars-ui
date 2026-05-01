@@ -537,6 +537,14 @@ mod tests {
                 .validate(&Value::Number(Some(5.0)), &Context::standalone("x"))
                 .is_ok()
         );
+
+        let result = chain_base.validate(&Value::Number(Some(4.0)), &Context::standalone("x"));
+
+        assert!(
+            result
+                .expect_err("step base should offset accepted increments")
+                .has_code(&ErrorCode::Step(2.0))
+        );
     }
 
     #[test]

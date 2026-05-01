@@ -120,8 +120,12 @@ mod tests {
         assert!(is_safe_url("/path"));
         assert!(is_safe_url("./path"));
         assert!(is_safe_url("../path"));
+        assert!(is_safe_url("./path:with-colon"));
+        assert!(is_safe_url("../path:with-colon"));
         assert!(is_safe_url("#anchor"));
         assert!(is_safe_url("?query=1"));
+        assert!(is_safe_url("#anchor:with-colon"));
+        assert!(is_safe_url("?query=value:with-colon"));
         assert!(is_safe_url("relative/path"));
     }
 

@@ -304,6 +304,10 @@ mod tests {
         assert_eq!(api.orientation(), Orientation::Vertical);
         assert!(api.decorative());
         assert_eq!(api.props(), &original);
+
+        let default = Api::new(horizontal());
+
+        assert!(!default.decorative());
     }
 
     // ── Connect / API ──────────────────────────────────────────────

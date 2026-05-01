@@ -943,6 +943,63 @@ mod tests {
     }
 
     #[test]
+    fn move_long_press_public_method_keeps_active_at_exact_threshold() {
+        let mut result = use_long_press(LongPressConfig::default());
+
+        result.begin_long_press(
+            PointerType::Touch,
+            Some(100.0),
+            Some(100.0),
+            KeyModifiers::default(),
+            TimerHandle::new(128),
+        );
+
+        result.move_long_press(110.0, 100.0);
+
+        assert_eq!(
+            result.current_state(),
+            LongPressState::Timing {
+                pointer_type: PointerType::Touch,
+                origin_x: Some(100.0),
+                origin_y: Some(100.0),
+                timer_handle: TimerHandle::new(128),
+            }
+        );
+        assert!(result.is_long_pressing);
+    }
+
+    #[test]
+    fn move_long_press_public_method_cancels_for_y_axis_and_diagonal_motion() {
+        for (timer, x, y) in [(129, 100.0, 111.0), (130, 108.0, 108.0)] {
+            let cancel_count = Arc::new(AtomicUsize::new(0));
+
+            let mut result = use_long_press(LongPressConfig {
+                on_long_press_cancel: Some({
+                    let cancel_count = Arc::clone(&cancel_count);
+                    Callback::new(move |_: LongPressEvent| {
+                        cancel_count.fetch_add(1, Ordering::SeqCst);
+                    })
+                }),
+                ..LongPressConfig::default()
+            });
+
+            result.begin_long_press(
+                PointerType::Touch,
+                Some(100.0),
+                Some(100.0),
+                KeyModifiers::default(),
+                TimerHandle::new(timer),
+            );
+
+            result.move_long_press(x, y);
+
+            assert_eq!(cancel_count.load(Ordering::SeqCst), 1);
+            assert_eq!(result.current_state(), LongPressState::Idle);
+            assert!(!result.is_long_pressing);
+        }
+    }
+
+    #[test]
     fn move_long_press_public_method_within_threshold_keeps_active() {
         let mut result = use_long_press(LongPressConfig::default());
 

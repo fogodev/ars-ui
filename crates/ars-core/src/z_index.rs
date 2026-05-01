@@ -305,6 +305,11 @@ mod tests {
     }
 
     #[test]
+    fn z_index_ceiling_leaves_headroom_below_u32_max() {
+        assert_eq!(Z_INDEX_CEILING, u32::MAX - Z_INDEX_BASE);
+    }
+
+    #[test]
     fn next_z_index_is_monotonically_increasing() {
         let _guard = serial_reset();
 

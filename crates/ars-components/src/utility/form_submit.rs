@@ -975,6 +975,10 @@ mod tests {
     fn api_is_valid_reflects_form_context() {
         let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
 
+        let noop = |_: Event| {};
+
+        assert!(service.connect(&noop).is_valid());
+
         service.context_mut().form.register(
             "email",
             Value::Text(String::new()),
@@ -983,8 +987,6 @@ mod tests {
         );
 
         let _ = service.context_mut().form.validate_all();
-
-        let noop = |_: Event| {};
 
         assert!(!service.connect(&noop).is_valid());
     }

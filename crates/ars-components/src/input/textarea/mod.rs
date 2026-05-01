@@ -18,7 +18,7 @@ use ars_core::{
 };
 use ars_i18n::{
     grapheme_count,
-    number::{FormatOptions, Formatter, SignDisplay, Style},
+    number::{FormatOptions, Formatter, SignDisplay},
 };
 
 /// The state of the `Textarea` component.
@@ -1132,7 +1132,6 @@ fn count_formatter(locale: &Locale) -> Formatter {
     Formatter::new(
         locale,
         FormatOptions {
-            style: Style::Decimal,
             max_fraction_digits: 0,
             sign_display: SignDisplay::Never,
             ..FormatOptions::default()
@@ -1372,11 +1371,14 @@ mod tests {
     #[test]
     fn textarea_builder_clearers_are_covered() {
         let props = props()
+            .rows(8)
             .placeholder("Bio")
             .no_placeholder()
             .on_value_change(callback(|_: String| {}))
             .no_value_change();
 
+        assert_eq!(props.id, "bio-field");
+        assert_eq!(props.rows, 8);
         assert_eq!(props.placeholder, None);
         assert_eq!(props.on_value_change, None);
     }
@@ -1511,6 +1513,26 @@ mod tests {
             assert!(!service.context().is_composing);
             assert_eq!(service.context().value.get(), "before");
         }
+    }
+
+    #[test]
+    fn textarea_blocked_composition_end_does_not_auto_resize() {
+        let mut service = service(
+            props()
+                .disabled(true)
+                .auto_resize(true)
+                .max_height("240px")
+                .default_value("before"),
+        );
+
+        drop(service.send(Event::CompositionStart));
+
+        let result = service.send(Event::CompositionEnd("after".to_string()));
+
+        assert!(result.context_changed);
+        assert!(result.pending_effects.is_empty());
+        assert_eq!(service.context().value.get(), "before");
+        assert!(!service.context().is_composing);
     }
 
     #[test]
@@ -1756,6 +1778,13 @@ mod tests {
                 text: "3".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn textarea_count_formatter_suppresses_sign_and_fraction_digits() {
+        let formatter = count_formatter(&Locale::parse("en-US").expect("locale should parse"));
+
+        assert_eq!(formatter.format(-1.25), "1");
     }
 
     #[test]

@@ -44,3 +44,26 @@ impl InputMode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::InputMode;
+
+    #[test]
+    fn as_str_returns_html_inputmode_tokens() {
+        let cases = [
+            (InputMode::None, "none"),
+            (InputMode::Text, "text"),
+            (InputMode::Tel, "tel"),
+            (InputMode::Url, "url"),
+            (InputMode::Email, "email"),
+            (InputMode::Numeric, "numeric"),
+            (InputMode::Decimal, "decimal"),
+            (InputMode::Search, "search"),
+        ];
+
+        for (mode, token) in cases {
+            assert_eq!(mode.as_str(), token);
+        }
+    }
+}

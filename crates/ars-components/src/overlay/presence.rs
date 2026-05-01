@@ -472,6 +472,31 @@ mod tests {
     }
 
     #[test]
+    fn remount_during_unmount_pending_cancels_exit() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                present: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        drop(service.send(Event::Unmount));
+
+        assert_eq!(service.state(), &State::UnmountPending);
+
+        let result = service.send(Event::Mount);
+
+        assert!(result.state_changed);
+        assert!(result.context_changed);
+        assert_eq!(service.state(), &State::Mounted);
+        assert!(service.context().present);
+        assert!(service.context().mounted);
+        assert!(!service.context().unmounting);
+    }
+
+    #[test]
     fn skip_animation_forces_direct_unmount() {
         let mut service = Service::<Machine>::new(
             Props {
@@ -532,7 +557,37 @@ mod tests {
     }
 
     #[test]
+    fn lazy_mount_unmount_before_content_ready_cancels_mount() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
+
+        drop(service.set_props(Props {
+            present: true,
+            lazy_mount: true,
+            ..test_props()
+        }));
+
+        assert_eq!(service.state(), &State::Mounting);
+
+        let result = service.send(Event::Unmount);
+
+        assert!(result.state_changed);
+        assert!(result.context_changed);
+        assert_eq!(service.state(), &State::Unmounted);
+        assert!(!service.context().present);
+        assert!(!service.context().mounted);
+        assert!(!service.context().unmounting);
+    }
+
+    #[test]
     fn api_flags_reflect_mounted_and_unmount_pending() {
+        let unmounted = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
+
+        let unmounted_api = unmounted.connect(&|_| {});
+
+        assert!(!unmounted_api.is_mounted());
+        assert!(!unmounted_api.is_present());
+        assert!(!unmounted_api.is_unmounting());
+
         let service = Service::<Machine>::new(
             Props {
                 present: true,
@@ -564,6 +619,23 @@ mod tests {
         assert!(exiting_api.is_mounted());
         assert!(!exiting_api.is_present());
         assert!(exiting_api.is_unmounting());
+    }
+
+    #[test]
+    fn props_changed_false_present_dispatches_unmount() {
+        let old = Props {
+            present: true,
+            ..test_props()
+        };
+        let new = Props {
+            present: false,
+            ..test_props()
+        };
+
+        assert_eq!(
+            <Machine as ars_core::Machine>::on_props_changed(&old, &new),
+            vec![Event::Unmount]
+        );
     }
 
     #[test]

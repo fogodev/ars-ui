@@ -480,6 +480,9 @@ mod tests {
 
         assert!(empty.is_empty());
         assert!(!single.is_empty());
+        assert!(!empty.is_all());
+        assert!(!single.is_all());
+        assert!(!multiple.is_all());
         assert!(all.is_all());
 
         assert_eq!(empty.first(), None);
@@ -610,6 +613,8 @@ mod tests {
         });
 
         assert_eq!(state.select(Key::int(2)), state);
+        assert!(state.is_disabled(&Key::int(2)));
+        assert!(!state.is_disabled(&Key::int(1)));
     }
 
     #[test]
@@ -794,6 +799,8 @@ mod tests {
         assert_eq!(next.selected_keys, Set::Empty);
         assert_eq!(next.anchor_key, None);
         assert!(!next.selection_mode_active);
+        assert_eq!(next.mode, Mode::Multiple);
+        assert_eq!(next.behavior, Behavior::Toggle);
     }
 
     #[test]

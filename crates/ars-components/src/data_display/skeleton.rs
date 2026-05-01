@@ -460,17 +460,18 @@ mod tests {
 
     #[test]
     fn api_exposes_render_plan_helpers() {
-        let api = api(Props::new()
+        let skeleton = api(Props::new()
             .count(NonZero::new(3).expect("3 is non-zero"))
             .variant(Variant::Wave)
             .shape(Shape::Rect)
             .leading_circle_size("2rem"));
 
-        assert_eq!(api.count().get(), 3);
-        assert_eq!(api.variant(), Variant::Wave);
-        assert_eq!(api.shape(), Shape::Rect);
-        assert_eq!(api.item_indices().collect::<Vec<_>>(), vec![0, 1, 2]);
-        assert!(api.has_leading_circle());
+        assert_eq!(skeleton.count().get(), 3);
+        assert_eq!(skeleton.variant(), Variant::Wave);
+        assert_eq!(skeleton.shape(), Shape::Rect);
+        assert_eq!(skeleton.item_indices().collect::<Vec<_>>(), vec![0, 1, 2]);
+        assert!(skeleton.has_leading_circle());
+        assert!(!api(Props::new()).has_leading_circle());
     }
 
     #[test]

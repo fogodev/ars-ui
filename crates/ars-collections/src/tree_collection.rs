@@ -1396,6 +1396,17 @@ mod tests {
     }
 
     #[test]
+    fn is_visible_with_expanded_ignores_previous_same_level_sibling() {
+        let tree = sample_tree();
+
+        let mut expanded = BTreeSet::new();
+
+        expanded.insert(Key::int(1)); // Fruits expanded; Apple itself is not an ancestor.
+
+        assert!(tree.is_visible_with_expanded(&Key::int(3), &expanded));
+    }
+
+    #[test]
     fn is_visible_with_expanded_nonexistent_key() {
         let tree = sample_tree();
 
@@ -1919,6 +1930,29 @@ mod tests {
     }
 
     #[test]
+    fn reorder_sibling_preserves_moved_subtree_order() {
+        let mut tree = fruit_tree();
+
+        tree.insert_child(Some(&Key::int(3)), 0, TreeFruit::new(30, "Baby Banana"));
+        tree = tree.set_expanded(&Key::int(3), true);
+
+        tree.reorder_sibling(&Key::int(3), 0);
+
+        let keys = tree.keys().cloned().collect::<Vec<_>>();
+
+        assert_eq!(
+            keys,
+            vec![
+                Key::int(1),
+                Key::int(3),
+                Key::int(30),
+                Key::int(2),
+                Key::int(4)
+            ]
+        );
+    }
+
+    #[test]
     fn replace_value() {
         let mut tree = fruit_tree();
 
@@ -1977,6 +2011,17 @@ mod tests {
         let a = sample_tree();
 
         let b = a.set_expanded(&Key::int(4), true);
+
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn partial_eq_detects_extra_trailing_node() {
+        let a = fruit_tree();
+
+        let mut b = fruit_tree();
+
+        b.insert_child(None, 2, TreeFruit::new(99, "Extra"));
 
         assert_ne!(a, b);
     }
@@ -2234,6 +2279,22 @@ mod tests {
         assert!(cherry_idx > baby_idx);
     }
 
+    #[test]
+    fn flat_insert_position_inserts_before_equal_level_sibling() {
+        let tree = fruit_tree();
+
+        assert_eq!(tree.flat_insert_position(Some(&Key::int(1)), 1), 2);
+    }
+
+    #[test]
+    fn flat_insert_position_ignores_grandchildren_as_direct_children() {
+        let mut tree = fruit_tree();
+
+        tree.insert_child(Some(&Key::int(3)), 0, TreeFruit::new(30, "Baby Banana"));
+
+        assert_eq!(tree.flat_insert_position(Some(&Key::int(1)), 2), 4);
+    }
+
     // ---------------------------------------------------------------
     // Cached first_key / last_key correctness
     // ---------------------------------------------------------------
@@ -2415,6 +2476,21 @@ mod tests {
         // Reparent Apple(2) to root level — same nodes, different hierarchy
         tree_b.reparent(&Key::int(2), None, 0);
 
+        assert_ne!(tree_a, tree_b);
+    }
+
+    #[test]
+    fn partial_eq_detects_level_change_without_parent_change() {
+        let tree_a = sample_tree();
+
+        let mut tree_b = sample_tree();
+
+        tree_b.all_nodes[1].level += 1;
+
+        assert_eq!(
+            tree_a.all_nodes[1].parent_key,
+            tree_b.all_nodes[1].parent_key
+        );
         assert_ne!(tree_a, tree_b);
     }
 

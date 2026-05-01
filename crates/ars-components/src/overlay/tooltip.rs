@@ -1336,6 +1336,44 @@ mod tests {
     }
 
     #[test]
+    fn tooltip_open_pending_dismiss_respects_close_props() {
+        for (event, props) in [
+            (
+                Event::CloseOnEscape,
+                Props {
+                    close_on_escape: false,
+                    ..test_props()
+                },
+            ),
+            (
+                Event::CloseOnClick,
+                Props {
+                    close_on_click: false,
+                    ..test_props()
+                },
+            ),
+            (
+                Event::CloseOnScroll,
+                Props {
+                    close_on_scroll: false,
+                    ..test_props()
+                },
+            ),
+        ] {
+            let mut service = Service::<Machine>::new(props, &Env::default(), &Messages);
+
+            drop(service.send(Event::PointerEnter));
+
+            let result = service.send(event);
+
+            assert_eq!(service.state(), &State::OpenPending);
+            assert!(service.context().hover_active);
+            assert!(result.pending_effects.is_empty());
+            assert!(result.cancel_effects.is_empty());
+        }
+    }
+
+    #[test]
     fn tooltip_open_pending_programmatic_open_cancels_open_delay() {
         let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
 
@@ -1532,6 +1570,31 @@ mod tests {
     }
 
     #[test]
+    fn tooltip_close_pending_blur_without_hover_is_ignored() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        drop(service.send(Event::PointerLeave));
+
+        service.context_mut().hover_active = false;
+        service.context_mut().focus_active = true;
+
+        let result = service.send(Event::Blur);
+
+        assert_eq!(service.state(), &State::ClosePending);
+        assert!(!service.context().hover_active);
+        assert!(service.context().focus_active);
+        assert!(!result.context_changed);
+        assert!(result.pending_effects.is_empty());
+    }
+
+    #[test]
     fn tooltip_close_pending_pointer_leave_with_focus_stays_pending() {
         let mut service = Service::<Machine>::new(
             Props {
@@ -1580,6 +1643,31 @@ mod tests {
     }
 
     #[test]
+    fn tooltip_close_pending_leave_without_focus_is_ignored() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        drop(service.send(Event::PointerLeave));
+
+        service.context_mut().hover_active = true;
+        service.context_mut().focus_active = false;
+
+        let result = service.send(Event::PointerLeave);
+
+        assert_eq!(service.state(), &State::ClosePending);
+        assert!(service.context().hover_active);
+        assert!(!service.context().focus_active);
+        assert!(!result.context_changed);
+        assert!(result.pending_effects.is_empty());
+    }
+
+    #[test]
     fn tooltip_close_pending_dismiss_closes_and_cancels_delay() {
         let mut service = Service::<Machine>::new(
             Props {
@@ -1597,6 +1685,28 @@ mod tests {
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().open);
         assert_eq!(result.cancel_effects, vec![Effect::CloseDelay]);
+    }
+
+    #[test]
+    fn tooltip_close_pending_dismiss_respects_close_props() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                close_on_escape: false,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        drop(service.send(Event::PointerLeave));
+
+        let result = service.send(Event::CloseOnEscape);
+
+        assert_eq!(service.state(), &State::ClosePending);
+        assert!(service.context().open);
+        assert!(result.pending_effects.is_empty());
+        assert!(result.cancel_effects.is_empty());
     }
 
     #[test]
@@ -1996,6 +2106,8 @@ mod tests {
         );
 
         drop(service.send(Event::PointerLeave));
+        service.context_mut().hover_active = true;
+        service.context_mut().focus_active = true;
 
         let result = service.set_props(Props {
             open: Some(false),
@@ -2004,6 +2116,8 @@ mod tests {
 
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().open);
+        assert!(!service.context().hover_active);
+        assert!(!service.context().focus_active);
         assert_eq!(
             result.cancel_effects,
             vec![Effect::OpenDelay, Effect::CloseDelay]
@@ -2122,6 +2236,24 @@ mod tests {
         }
 
         assert!(<Machine as ars_core::Machine>::on_props_changed(&old, &old).is_empty());
+    }
+
+    #[test]
+    fn tooltip_on_props_changed_syncs_context_when_controlled_open_is_unchanged() {
+        let old = Props {
+            open: Some(true),
+            ..test_props()
+        };
+        let new = Props {
+            open: Some(true),
+            open_delay: Duration::from_millis(12),
+            ..test_props()
+        };
+
+        assert_eq!(
+            <Machine as ars_core::Machine>::on_props_changed(&old, &new),
+            vec![Event::SyncProps]
+        );
     }
 
     #[test]

@@ -1340,6 +1340,7 @@ mod tests {
     #[test]
     fn text_field_builder_clearers_are_covered() {
         let props = props()
+            .clearable(true)
             .placeholder("Name")
             .no_placeholder()
             .on_focus_change(callback(|_: bool| {}))
@@ -1347,6 +1348,8 @@ mod tests {
             .on_value_change(callback(|_: String| {}))
             .no_value_change();
 
+        assert_eq!(props.id, "name-field");
+        assert!(props.clearable);
         assert_eq!(props.placeholder, None);
         assert_eq!(props.on_focus_change, None);
         assert_eq!(props.on_value_change, None);

@@ -1803,6 +1803,27 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_drag_registry_unregister_immediately_before_selected_adjusts_index() {
+        let mut registry = KeyboardDragRegistry::new();
+
+        registry.register(keyboard_target("drop-a", "Alpha", DropConfig::default()));
+        registry.register(keyboard_target("drop-b", "Beta", DropConfig::default()));
+        registry.register(keyboard_target("drop-c", "Charlie", DropConfig::default()));
+
+        let _ = registry.next();
+
+        let current = registry.next().expect("should reach drop-b");
+
+        assert_eq!(current.element_id, "drop-b");
+
+        registry.unregister("drop-a");
+
+        let current = registry.current().expect("selection should be preserved");
+
+        assert_eq!(current.element_id, "drop-b");
+    }
+
+    #[test]
     fn keyboard_drag_registry_unregister_after_selected_preserves_index() {
         let mut registry = KeyboardDragRegistry::new();
 
@@ -2981,6 +3002,41 @@ mod tests {
     }
 
     #[test]
+    fn drop_result_drag_over_fires_enter_callback_when_snapshot_was_inactive() {
+        let enter_events = Arc::new(Mutex::new(Vec::<DropTargetEvent>::new()));
+
+        let observed_events = Arc::clone(&enter_events);
+
+        let mut result = use_drop(DropConfig {
+            on_drag_enter: Some(Callback::new(move |event: DropTargetEvent| {
+                observed_events
+                    .lock()
+                    .expect("enter events lock should succeed")
+                    .push(event);
+            })),
+            ..DropConfig::default()
+        });
+
+        result.enter_count = 2;
+        result.drag_over = false;
+
+        let operation = result.drag_over(
+            &[preview(DragItemKind::Text, &["text/plain"])],
+            DropOperation::Copy,
+            PointerType::Mouse,
+        );
+
+        let enter_events = enter_events
+            .lock()
+            .expect("enter events lock should succeed");
+
+        assert_eq!(operation, DropOperation::Copy);
+        assert_eq!(result.enter_count, 2);
+        assert!(result.drag_over);
+        assert_eq!(enter_events.len(), 1);
+    }
+
+    #[test]
     fn drop_result_drag_over_updates_operation_and_position_snapshot() {
         let mut result = use_drop(DropConfig {
             on_drag_over: Some(Callback::new(resolve_link_operation)),
@@ -3265,6 +3321,28 @@ mod tests {
 
         assert!(debug.contains("active_priority: Some(Polite)"));
         assert!(debug.contains("Left drop target: Inbox."));
+    }
+
+    #[test]
+    fn keyboard_drag_leave_does_not_announce_when_disabled() {
+        let announcements = DragAnnouncements::default();
+        let mut announcer = LiveAnnouncer::new();
+        let mut result = use_drop(DropConfig {
+            disabled: true,
+            ..DropConfig::default()
+        });
+
+        result.enter_count = 1;
+
+        result.keyboard_drag_leave(
+            &[preview(DragItemKind::Text, &["text/plain"])],
+            "Inbox",
+            &locales::en_us(),
+            &mut announcer,
+            &announcements,
+        );
+
+        assert!(!announcer_debug(&announcer).contains("Left drop target"));
     }
 
     #[test]
@@ -3680,6 +3758,28 @@ mod tests {
 
         result.drag_over = true;
         result.drop_operation = Some(DropOperation::Cancel);
+        result.indicator_position = Some(DropIndicatorPosition::OnTarget);
+
+        assert!(
+            result
+                .drop(vec![DragItem::Text("payload".into())], PointerType::Mouse)
+                .is_none()
+        );
+        assert!(!result.drag_over);
+        assert!(result.drop_operation.is_none());
+        assert!(result.indicator_position.is_none());
+    }
+
+    #[test]
+    fn drop_result_drop_disabled_target_returns_none_even_when_drag_over() {
+        let mut result = use_drop(DropConfig {
+            disabled: true,
+            on_drop: Some(Callback::new(ignore_drop_event)),
+            ..DropConfig::default()
+        });
+
+        result.drag_over = true;
+        result.drop_operation = Some(DropOperation::Move);
         result.indicator_position = Some(DropIndicatorPosition::OnTarget);
 
         assert!(

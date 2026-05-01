@@ -90,6 +90,18 @@ fn assert_portal_send_result_invariants(
             prop_assert!(service.context().mounted);
         }
 
+        portal::Event::ContainerReady(id)
+            if before_state == &portal::State::Mounted
+                && before_context.container == portal::PortalTarget::Id(id.clone()) =>
+        {
+            prop_assert_eq!(service.state(), &portal::State::Mounted);
+            prop_assert_eq!(
+                service.context().container.clone(),
+                portal::PortalTarget::ResolvedId(id.clone())
+            );
+            prop_assert!(service.context().mounted);
+        }
+
         portal::Event::SetContainer(target) => {
             prop_assert_eq!(service.state(), before_state);
             prop_assert_eq!(service.context().container.clone(), target.clone());

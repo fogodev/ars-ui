@@ -953,7 +953,11 @@ mod tests {
         let result = ctx.submit(|_| called = true);
 
         assert!(!called);
-        assert!(result.is_err());
+
+        let errors = result.expect_err("invalid form should return collected errors");
+
+        assert_eq!(errors.0.len(), 1);
+        assert_eq!(errors.0[0].code, ErrorCode::Required);
         assert!(ctx.is_submitted);
     }
 
@@ -999,6 +1003,21 @@ mod tests {
     }
 
     #[test]
+    fn reset_increments_validation_generation() {
+        let mut ctx = Context::new(Mode::on_submit());
+
+        ctx.register("name", text("initial"), Some(required_validator()), None);
+
+        let gen_before = ctx.field("name").expect("exists").validation_generation;
+
+        ctx.reset();
+
+        let gen_after = ctx.field("name").expect("exists").validation_generation;
+
+        assert_eq!(gen_after, gen_before + 1);
+    }
+
+    #[test]
     fn is_valid_and_is_dirty() {
         let mut ctx = Context::new(Mode::on_submit());
 
@@ -1010,6 +1029,16 @@ mod tests {
         ctx.on_change("name", text("Alice"));
 
         assert!(ctx.is_dirty());
+
+        ctx.fields
+            .get_mut("name")
+            .expect("registered field")
+            .validation = Err(Errors(vec![Error {
+            code: ErrorCode::Required,
+            message: "required".to_string(),
+        }]));
+
+        assert!(!ctx.is_valid());
     }
 
     #[test]
@@ -1027,6 +1056,21 @@ mod tests {
         let confirm = ctx.field("confirm").expect("exists");
 
         assert!(confirm.validation.is_err());
+    }
+
+    #[test]
+    fn on_change_does_not_revalidate_existing_client_error_without_mode_flag() {
+        let mut ctx = Context::new(Mode::on_submit());
+
+        ctx.register("name", text(""), Some(required_validator()), None);
+
+        let _result = ctx.validate_field("name");
+
+        assert!(ctx.field("name").expect("exists").validation.is_err());
+
+        ctx.on_change("name", text("Alice"));
+
+        assert!(ctx.field("name").expect("exists").validation.is_err());
     }
 
     #[test]
@@ -1061,6 +1105,32 @@ mod tests {
 
         assert!(ctx.field("password").expect("exists").validation.is_ok());
         assert!(ctx.field("confirm").is_none());
+    }
+
+    #[test]
+    fn direct_validation_does_not_run_cross_field_validators_for_same_target() {
+        use core::sync::atomic::{AtomicUsize, Ordering};
+
+        let mut ctx = Context::new(Mode::on_submit());
+
+        ctx.register("confirm", text("secret"), None, None);
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_validator = Arc::clone(&calls);
+
+        ctx.cross_field_registry.insert(
+            "confirm".to_string(),
+            vec![CrossFieldValidator {
+                depends_on: vec!["confirm".to_string()],
+                validate_fn: Arc::new(move |_value, _ctx| {
+                    calls_for_validator.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                }),
+            }],
+        );
+
+        assert_eq!(ctx.validate_field("confirm"), Ok(()));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     // ── AnyValidator ────────────────────────────────────────────────────
@@ -1260,6 +1330,21 @@ mod tests {
         let gen_before = ctx.field("name").expect("exists").validation_generation;
 
         ctx.on_input("name", text("a"));
+
+        let gen_after = ctx.field("name").expect("exists").validation_generation;
+
+        assert_eq!(gen_after, gen_before + 1);
+    }
+
+    #[test]
+    fn on_change_increments_validation_generation() {
+        let mut ctx = Context::new(Mode::on_submit());
+
+        ctx.register("name", text(""), None, None);
+
+        let gen_before = ctx.field("name").expect("exists").validation_generation;
+
+        ctx.on_change("name", text("a"));
 
         let gen_after = ctx.field("name").expect("exists").validation_generation;
 
