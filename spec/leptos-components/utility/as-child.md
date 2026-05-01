@@ -21,9 +21,18 @@ use leptos::{
     tachys::view::add_attr::AddAnyAttr,
 };
 
+#[derive(Clone, Debug)]
+pub struct AsChildAttrs;
+
+impl AsChildAttrs {
+    pub fn from_attr_map(attrs: AttrMap) -> Self;
+    pub fn from_merged_attr_maps(component_attrs: AttrMap, child_attrs: AttrMap) -> Self;
+    pub fn into_inner(self) -> Vec<LeptosAttribute>;
+}
+
 #[component]
 pub fn AsChildSlot<T>(
-    attrs: Vec<LeptosAttribute>,
+    #[prop(into)] attrs: AsChildAttrs,
     children: TypedChildren<T>,
 ) -> impl IntoView
 where
@@ -39,6 +48,10 @@ components choose the active style strategy and own any CSSOM or nonce-style sid
 Hosting components should use `attr_map_to_leptos(attrs, strategy, element_id)` so
 inline, CSSOM, and nonce style strategy payloads are handled consistently before the slot
 receives native attrs.
+`AsChildAttrs::from_merged_attr_maps` is an inline-style convenience for simple callers
+that still have both component and child attrs as `AttrMap`s. Production components with
+CSSOM or nonce side effects should merge the `AttrMap`s first and then use
+`attr_map_to_leptos` directly so the non-inline payloads remain visible to the host.
 
 ## 3. Mapping to Core Component Contract
 
@@ -64,6 +77,7 @@ receives native attrs.
 - If the child already has `role`, `tabindex`, or `aria-*`, the merge result must preserve required core semantics instead of blindly preferring the child value.
 - If a child handler calls `prevent_default()`, later notification-only handlers may observe that state but must not re-enable a blocked action; this composition is owned by the hosting component.
 - The slot receives final converted attrs and applies them with Leptos `AddAnyAttr`; it does not inspect or mutate an already-rendered opaque child vnode.
+- Literal attrs already baked into the typed child root cannot be inspected after rendering; child attrs that need `AsChildMerge` semantics must be supplied to the hosting component before conversion.
 - Inline attr conversion through `attr_map_to_leptos_inline_attrs` is only a convenience for simple callers and tests; production component adapters must preserve their active style strategy before calling the slot.
 
 ## 6. Composition / Context Contract
@@ -176,10 +190,11 @@ Exactly one typed child root is required. Context behavior of the hosting compon
 
 ## 22. Shared Adapter Helper Notes
 
-| Helper concept               | Required? | Responsibility                                                                                                    | Reused by                                                             | Notes                                                                                                   |
-| ---------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `as_child` typed slot helper | required  | Apply already-converted `Vec<LeptosAttribute>` to `TypedChildren<T>` with `AddAnyAttr`.                           | `as-child`, `button`, `visually-hidden`, any polymorphic root utility | This helper owns root reassignment without deleting the conceptual root part or mutating opaque vnodes. |
-| semantic-warning helper      | optional  | Emit semantic-mismatch diagnostics in debug builds when the hosting component has enough explicit child metadata. | `button`, `download-trigger`, `action-group`                          | Warnings are host-level diagnostics, not slot behavior.                                                 |
+| Helper concept               | Required? | Responsibility                                                                                                    | Reused by                                                             | Notes                                                                                                               |
+| ---------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `as_child` typed slot helper | required  | Apply already-converted `AsChildAttrs` to `TypedChildren<T>` with `AddAnyAttr`.                                   | `as-child`, `button`, `visually-hidden`, any polymorphic root utility | This helper owns root reassignment without deleting the conceptual root part or mutating opaque vnodes.             |
+| `AsChildAttrs` merge helper  | required  | Preserve the supported pre-conversion merge path for simple inline-style callers that still have child attrs.     | `as-child`, adapter tests, simple polymorphic root utilities          | Components with CSSOM or nonce style side effects should merge maps first and use the full attr converter directly. |
+| semantic-warning helper      | optional  | Emit semantic-mismatch diagnostics in debug builds when the hosting component has enough explicit child metadata. | `button`, `download-trigger`, `action-group`                          | Warnings are host-level diagnostics, not slot behavior.                                                             |
 
 ## 23. Framework-Specific Behavior
 
@@ -187,20 +202,21 @@ Leptos needs an adapter-local helper because arbitrary vnode mutation is not a s
 The supported mechanism is to keep the child typed with `TypedChildren<T>` and apply
 already-converted Leptos attributes with `AddAnyAttr` before the view is erased. Hosting
 components convert the merged `AttrMap` with the active style strategy before calling the
-slot, and they own any CSSOM synchronization or nonce-style injection.
+slot, and they own any CSSOM synchronization or nonce-style injection. The slot cannot
+deduplicate literal child-root attrs that were already embedded in the typed child view.
 
 ## 24. Canonical Implementation Sketch
 
 ```rust
 #[component]
-pub fn AsChildSlot<T>(attrs: Vec<LeptosAttribute>, children: TypedChildren<T>) -> impl IntoView
+pub fn AsChildSlot<T>(#[prop(into)] attrs: AsChildAttrs, children: TypedChildren<T>) -> impl IntoView
 where
     View<T>: AddAnyAttr,
     <View<T> as AddAnyAttr>::Output<Vec<LeptosAttribute>>: IntoView,
 {
     let child = children.into_inner()();
 
-    child.add_any_attr(attrs)
+    child.add_any_attr(attrs.into_inner())
 }
 ```
 

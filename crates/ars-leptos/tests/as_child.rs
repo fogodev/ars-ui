@@ -4,7 +4,10 @@
 
 use ars_components::utility::as_child::AsChildMerge;
 use ars_core::{AriaAttr, AttrMap, CssProperty, HtmlAttr, StyleStrategy};
-use ars_leptos::{as_child::AsChildSlot, attr_map_to_leptos, attr_map_to_leptos_inline_attrs};
+use ars_leptos::{
+    as_child::{AsChildAttrs, AsChildSlot},
+    attr_map_to_leptos, attr_map_to_leptos_inline_attrs,
+};
 use leptos::prelude::*;
 
 fn component_attrs() -> AttrMap {
@@ -143,6 +146,39 @@ fn as_child_slot_preserves_merged_class_style_and_aria_tokens() {
     assert!(
         html.contains(r#"aria-labelledby="child-label component-label""#),
         "missing merged aria-labelledby: {html}"
+    );
+}
+
+#[test]
+fn as_child_attrs_merges_child_attrs_before_conversion() {
+    let mut component_attrs = AttrMap::new();
+
+    component_attrs
+        .set(HtmlAttr::Class, "component")
+        .set(HtmlAttr::Aria(AriaAttr::LabelledBy), "component-label");
+
+    let mut child_attrs = AttrMap::new();
+
+    child_attrs
+        .set(HtmlAttr::Class, "child")
+        .set(HtmlAttr::Aria(AriaAttr::LabelledBy), "child-label");
+
+    let attrs = AsChildAttrs::from_merged_attr_maps(component_attrs, child_attrs);
+
+    let html = view! {
+        <AsChildSlot attrs=attrs>
+            <button type="button">"Launch"</button>
+        </AsChildSlot>
+    }
+    .to_html();
+
+    assert!(
+        html.contains(r#"class="child component""#),
+        "child and component classes should merge before conversion: {html}"
+    );
+    assert!(
+        html.contains(r#"aria-labelledby="child-label component-label""#),
+        "child and component aria-labelledby values should merge before conversion: {html}"
     );
 }
 

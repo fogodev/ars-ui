@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use ars_components::utility::as_child::AsChildMerge;
 use ars_core::{AriaAttr, AttrMap, CssProperty, HtmlAttr, StyleStrategy};
 use ars_dioxus::{
-    as_child::{AsChildRenderProps, AsChildSlot, AsChildSlotProps},
+    as_child::{AsChildRenderProps, AsChildSlot, AsChildSlotProps, merge_dioxus_attrs},
     attr_map_to_dioxus, attr_map_to_dioxus_inline_attrs,
 };
 use dioxus::{dioxus_core::AttributeValue, prelude::*};
@@ -272,6 +272,70 @@ fn as_child_slot_preserves_class_style_and_aria_values() {
     assert!(
         html.contains(r#"aria-labelledby="child-label component-label""#),
         "missing merged aria-labelledby: {html}"
+    );
+}
+
+#[test]
+fn as_child_render_props_merges_callback_root_attrs_before_spread() {
+    fn app() -> Element {
+        let mut attrs = AttrMap::new();
+
+        attrs
+            .set(HtmlAttr::Class, "component")
+            .set(HtmlAttr::Aria(AriaAttr::LabelledBy), "component-label");
+
+        let attrs = attr_map_to_dioxus_inline_attrs(attrs);
+
+        rsx! {
+            AsChildSlot {
+                attrs,
+                render: |slot: AsChildRenderProps| rsx! {
+                    button {
+                        r#type: "button",
+                        ..slot.merged_attrs(
+                            vec![
+                                native_dioxus_attr("class", "child"),
+                                native_dioxus_attr("aria-labelledby", "child-label"),
+                            ],
+                        ),
+                        "Launch"
+                    }
+                },
+            }
+        }
+    }
+
+    let html = render_app(app);
+
+    assert!(
+        html.contains(r#"class="child component""#),
+        "child and component classes should merge before spread: {html}"
+    );
+    assert!(
+        html.contains(r#"aria-labelledby="child-label component-label""#),
+        "child and component aria-labelledby values should merge before spread: {html}"
+    );
+}
+
+#[test]
+fn merge_dioxus_attrs_replaces_non_mergeable_conflicts_with_component_attrs() {
+    let attrs = merge_dioxus_attrs(
+        vec![
+            native_dioxus_attr("role", "link"),
+            native_dioxus_attr("data-ars-state", "closed"),
+        ],
+        vec![
+            native_dioxus_attr("role", "button"),
+            native_dioxus_attr("data-ars-state", "open"),
+        ],
+    );
+
+    assert_eq!(
+        attrs,
+        vec![
+            native_dioxus_attr("role", "button"),
+            native_dioxus_attr("data-ars-state", "open"),
+        ]
     );
 }
 

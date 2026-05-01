@@ -20,6 +20,12 @@ pub struct AsChildRenderProps {
     pub attrs: Vec<Attribute>,
 }
 
+impl AsChildRenderProps {
+    pub fn merged_attrs(&self, child_attrs: Vec<Attribute>) -> Vec<Attribute>;
+}
+
+pub fn merge_dioxus_attrs(child_attrs: Vec<Attribute>, component_attrs: Vec<Attribute>) -> Vec<Attribute>;
+
 #[derive(Props, Clone, PartialEq)]
 pub struct AsChildSlotProps {
     #[props(extends = GlobalAttributes)]
@@ -40,6 +46,10 @@ components choose the active style strategy and own any CSSOM or nonce-style sid
 The `attrs` field uses `#[props(extends = GlobalAttributes)]` so callers may pass native
 Dioxus global attributes directly to `AsChildSlot` when they are already operating in
 Dioxus attr space.
+`AsChildRenderProps::merged_attrs` is the supported native-attribute merge path when a
+callback root has attrs that would otherwise duplicate slot attrs after `..attrs`
+spreading. It mirrors core `AsChildMerge` for `class`, `style`, and relationship token
+lists while preserving component attrs for ordinary conflicts.
 Hosting components should use `attr_map_to_dioxus(attrs, strategy, element_id)` so
 inline, CSSOM, and nonce style strategy payloads are handled consistently before the slot
 receives native attrs.
@@ -68,6 +78,7 @@ receives native attrs.
 - If the child already has `role`, `tabindex`, or `aria-*`, the merge result must preserve required core semantics instead of blindly preferring the child value.
 - If a child handler calls `prevent_default()`, later notification-only handlers may observe that state but must not re-enable a blocked action; this composition is owned by the hosting component.
 - The slot passes final converted Dioxus attrs to the callback; it must not mutate arbitrary `VNode` templates.
+- Literal callback-root attrs are not automatically deduplicated by the slot; callback roots with duplicate-prone attrs must use `AsChildRenderProps::merged_attrs` or receive pre-merged attrs from the hosting component.
 - Inline attr conversion through `attr_map_to_dioxus_inline_attrs` is only a convenience for simple callers and tests; production component adapters must preserve their active style strategy before calling the slot.
 
 ## 6. Composition / Context Contract
@@ -185,6 +196,7 @@ Exactly one render callback root element is required. Context behavior of the ho
 | Helper concept                    | Required? | Responsibility                                                                                                    | Reused by                                                             | Notes                                                                                                   |
 | --------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `as_child` render callback helper | required  | Pass already-converted `Vec<Attribute>` to a callback that owns the root element.                                 | `as-child`, `button`, `visually-hidden`, any polymorphic root utility | This helper owns root reassignment without deleting the conceptual root part or mutating opaque vnodes. |
+| native Dioxus attr merge helper   | required  | Merge callback-root attrs with slot attrs before spreading when attrs are still visible as Dioxus `Attribute`s.   | `as-child`, callback-based polymorphic root utilities                 | This avoids duplicate `class`, `style`, and relationship attrs without mutating the returned `VNode`.   |
 | semantic-warning helper           | optional  | Emit semantic-mismatch diagnostics in debug builds when the hosting component has enough explicit child metadata. | `button`, `download-trigger`, `action-group`                          | Warnings are host-level diagnostics, not slot behavior.                                                 |
 
 ## 23. Framework-Specific Behavior
@@ -194,7 +206,8 @@ mutation is not a stable API. The supported mechanism is to pass already-convert
 attributes as `AsChildRenderProps { attrs }` and require the callback to spread `..attrs`
 onto exactly one root element. Hosting components convert the merged `AttrMap` with the
 active style strategy before calling the slot, and they own any CSSOM synchronization or
-nonce-style injection.
+nonce-style injection. When the callback root contributes native attrs directly, the
+callback must merge them with `AsChildRenderProps::merged_attrs` before spreading.
 
 ## 24. Canonical Implementation Sketch
 
@@ -202,6 +215,10 @@ nonce-style injection.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AsChildRenderProps {
     pub attrs: Vec<Attribute>,
+}
+
+impl AsChildRenderProps {
+    pub fn merged_attrs(&self, child_attrs: Vec<Attribute>) -> Vec<Attribute>;
 }
 
 #[derive(Props, Clone, PartialEq)]
