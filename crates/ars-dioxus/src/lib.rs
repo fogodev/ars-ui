@@ -10,6 +10,7 @@
 //! - [`EphemeralRef`] — borrow wrapper preventing signal storage of borrowed APIs
 //! - [`use_stable_id`] — hook-slot-stable generated ID allocation
 
+pub mod as_child;
 mod attrs;
 mod callbacks;
 pub mod dismissable;

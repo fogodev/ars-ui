@@ -59,6 +59,7 @@ pub use ars_i18n::{Direction, Locale, Orientation, ResolvedDirection, Translate}
 // re-export covers both the framework-agnostic types (`Props`, `Messages`,
 // `DismissReason`, …) and the Dioxus-side wrappers (`Handle`, `Region`,
 // `RegionProps`, `use_dismissable`).
+pub use crate::as_child;
 pub use crate::dismissable;
 // The `error_boundary` adapter module exposes the `ArsErrorBoundary`
 // wrapper component spec'd at
