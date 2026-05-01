@@ -516,6 +516,32 @@ fn context_selected_japanese_era_limits_year_range_and_formats_era_text() {
 }
 
 #[test]
+fn context_selected_non_gregorian_era_limits_year_range_with_short_months() {
+    let service = Service::<Machine>::new(
+        props().calendar(CalendarSystem::Persian),
+        &Env::new(
+            Locale::parse("en-US").expect("valid locale"),
+            Arc::new(StubIntlBackend),
+        ),
+        &Messages::default(),
+    );
+
+    let mut ctx = service.context().clone();
+
+    let persian_era = ctx
+        .calendar
+        .eras()
+        .iter()
+        .position(|era| era.code == "ap")
+        .and_then(|index| i32::try_from(index + 1).ok())
+        .expect("Persian calendar should include the AP era");
+
+    ctx.set_segment_value(DateSegmentKind::Era, persian_era);
+
+    assert_eq!(ctx.segment_range(DateSegmentKind::Year), (1, 9377));
+}
+
+#[test]
 fn context_increment_and_decrement_cycle_year_month_and_day() {
     for (kind, incremented, decremented) in [
         (DateSegmentKind::Year, (2025, 6, 15), (2023, 6, 15)),

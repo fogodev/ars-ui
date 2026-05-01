@@ -698,20 +698,7 @@ impl Context {
             DateSegmentKind::Year => {
                 let max = self
                     .current_era_for_assembly()
-                    .and_then(|era| {
-                        CalendarDate::new(
-                            self.calendar,
-                            &CalendarDateFields {
-                                era: Some(era),
-                                year: Some(1),
-                                month: Some(12),
-                                day: Some(31),
-                                ..CalendarDateFields::default()
-                            },
-                        )
-                        .ok()
-                    })
-                    .and_then(|date| self.intl_backend.years_in_era(&date))
+                    .and_then(|era| self.years_in_era(&era))
                     .unwrap_or(9999);
 
                 (1, max)
@@ -770,6 +757,33 @@ impl Context {
                 (0, 0)
             }
         }
+    }
+
+    fn years_in_era(&self, era: &Era) -> Option<i32> {
+        for month in 1..=13 {
+            for day in 1..=31 {
+                let date = CalendarDate::new(
+                    self.calendar,
+                    &CalendarDateFields {
+                        era: Some(era.clone()),
+                        year: Some(1),
+                        month: Some(month),
+                        day: Some(day),
+                        ..CalendarDateFields::default()
+                    },
+                )
+                .ok();
+
+                if let Some(max) = date
+                    .as_ref()
+                    .and_then(|date| self.intl_backend.years_in_era(date))
+                {
+                    return Some(max);
+                }
+            }
+        }
+
+        None
     }
 
     fn current_era_for_assembly(&self) -> Option<Era> {
