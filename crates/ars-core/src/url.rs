@@ -5,7 +5,7 @@
 //! implements the spec allowlist for safe schemes and relative URL forms while
 //! rejecting dangerous or unknown schemes such as `javascript:`.
 
-use alloc::string::String;
+use alloc::{borrow::Cow, string::String};
 use core::fmt::{self, Display};
 
 /// Check whether a URL is safe for use in `href`, `action`, or `formaction`
@@ -19,16 +19,84 @@ use core::fmt::{self, Display};
 pub fn is_safe_url(url: &str) -> bool {
     let trimmed = url.trim_start().as_bytes();
 
-    starts_with_ignore_case(trimmed, b"http://")
+    is_safe_url_trimmed_bytes(trimmed)
+}
+
+const fn is_safe_url_bytes(url: &[u8]) -> bool {
+    let trimmed = trim_ascii_start(url);
+
+    is_safe_url_trimmed_bytes(trimmed)
+}
+
+const fn is_safe_url_trimmed_bytes(trimmed: &[u8]) -> bool {
+    if trimmed.is_empty() {
+        return true;
+    }
+
+    if starts_with_ignore_case(trimmed, b"http://")
         || starts_with_ignore_case(trimmed, b"https://")
         || starts_with_ignore_case(trimmed, b"mailto:")
         || starts_with_ignore_case(trimmed, b"tel:")
-        || trimmed.first() == Some(&b'/')
-        || trimmed.first() == Some(&b'#')
-        || trimmed.first() == Some(&b'?')
+        || trimmed[0] == b'/'
+        || trimmed[0] == b'#'
+        || trimmed[0] == b'?'
         || starts_with_ignore_case(trimmed, b"./")
         || starts_with_ignore_case(trimmed, b"../")
-        || !trimmed.contains(&b':')
+    {
+        return true;
+    }
+
+    !contains_byte(trimmed, b':')
+}
+
+const fn trim_ascii_start(url: &[u8]) -> &[u8] {
+    let mut start = 0;
+
+    while start < url.len() && url[start].is_ascii_whitespace() {
+        start += 1;
+    }
+
+    url.split_at(start).1
+}
+
+const fn contains_byte(haystack: &[u8], needle: u8) -> bool {
+    let mut index = 0;
+
+    while index < haystack.len() {
+        if haystack[index] == needle {
+            return true;
+        }
+
+        index += 1;
+    }
+
+    false
+}
+
+const fn starts_with_ignore_case(haystack: &[u8], needle: &[u8]) -> bool {
+    if haystack.len() < needle.len() {
+        return false;
+    }
+
+    let mut index = 0;
+
+    while index < needle.len() {
+        if ascii_lowercase(haystack[index]) != needle[index] {
+            return false;
+        }
+
+        index += 1;
+    }
+
+    true
+}
+
+const fn ascii_lowercase(byte: u8) -> u8 {
+    if byte >= b'A' && byte <= b'Z' {
+        byte + 32
+    } else {
+        byte
+    }
 }
 
 /// Sanitize a URL for HTML attribute output.
@@ -47,7 +115,7 @@ pub fn sanitize_url(url: &str) -> &str {
 /// store a URL value that is already guaranteed to satisfy the safe-scheme
 /// allowlist.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct SafeUrl(String);
+pub struct SafeUrl(Cow<'static, str>);
 
 impl SafeUrl {
     /// Create a validated URL value.
@@ -59,9 +127,29 @@ impl SafeUrl {
     pub fn new(url: impl Into<String>) -> Result<Self, UnsafeUrlError> {
         let url = url.into();
         if is_safe_url(&url) {
-            Ok(Self(url))
+            Ok(Self(Cow::Owned(url)))
         } else {
             Err(UnsafeUrlError(url))
+        }
+    }
+
+    /// Create a validated URL value from a string literal or other static
+    /// string.
+    ///
+    /// This constructor is intended for hardcoded component URLs where an
+    /// invalid value is a programmer error. Because it is `const`, invalid
+    /// values used in a const context fail during compile-time evaluation;
+    /// otherwise they panic when the function is evaluated at runtime.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `url` uses a disallowed or unknown scheme.
+    #[must_use]
+    pub const fn from_static(url: &'static str) -> Self {
+        if is_safe_url_bytes(url.as_bytes()) {
+            Self(Cow::Borrowed(url))
+        } else {
+            panic!("static URL uses an unsafe scheme")
         }
     }
 
@@ -69,6 +157,12 @@ impl SafeUrl {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl From<&'static str> for SafeUrl {
+    fn from(value: &'static str) -> Self {
+        Self::from_static(value)
     }
 }
 
@@ -89,15 +183,6 @@ impl Display for UnsafeUrlError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "unsafe URL scheme: {:?}", self.0)
     }
-}
-
-/// Case-insensitive prefix check without allocating.
-fn starts_with_ignore_case(haystack: &[u8], needle: &[u8]) -> bool {
-    haystack.len() >= needle.len()
-        && haystack[..needle.len()]
-            .iter()
-            .zip(needle)
-            .all(|(a, b)| a.to_ascii_lowercase() == *b)
 }
 
 #[cfg(test)]
@@ -180,8 +265,21 @@ mod tests {
     }
 
     #[test]
+    fn safe_url_from_static_accepts_safe_input_in_const_context() {
+        const SAFE: SafeUrl = SafeUrl::from_static("/submit");
+
+        assert_eq!(SAFE.as_str(), "/submit");
+    }
+
+    #[test]
+    #[should_panic(expected = "static URL uses an unsafe scheme")]
+    fn safe_url_from_static_panics_for_unsafe_input() {
+        drop(SafeUrl::from_static("javascript:alert(1)"));
+    }
+
+    #[test]
     fn safe_url_display_prints_validated_url() {
-        let safe = SafeUrl::new("/docs").expect("safe URL should validate");
+        let safe = SafeUrl::from_static("/docs");
 
         assert_eq!(safe.to_string(), "/docs");
     }

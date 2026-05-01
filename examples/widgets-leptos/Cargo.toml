@@ -1,0 +1,9 @@
+[package]
+name = "widgets-leptos"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+ars-leptos = { path = "../../crates/ars-leptos", features = ["csr"] }
+leptos = { version = "0.8", default-features = false, features = ["csr"] }

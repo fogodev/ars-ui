@@ -6,8 +6,8 @@
 //! and the [`Api`] / attr helpers that build the accessible fallback
 //! container's attributes.
 //!
-//! The adapter-side wrappers (`ars_dioxus::error_boundary::Boundary`,
-//! `ars_leptos::error_boundary::Boundary`) compose around these helpers so
+//! The adapter-side wrappers (`ars_dioxus::utility::error_boundary::Boundary`,
+//! `ars_leptos::utility::error_boundary::Boundary`) compose around these helpers so
 //! both adapters emit the **same** HTML structure for the default
 //! fallback — a `<div role="alert" data-ars-error="true">` with a message
 //! paragraph and a `<ul>` of `<li>` error entries — regardless of whether

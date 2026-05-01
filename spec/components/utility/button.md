@@ -788,11 +788,11 @@ Button
 └── Content            <span>    data-ars-part="content" (label text / icons slot)
 ```
 
-| Part             | Element    | Key Attributes                                                                                                             |
-| ---------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Root             | `<button>` | `data-ars-scope="button"`, `data-ars-state`, `data-ars-variant`, `data-ars-size`, `type`, `aria-disabled`, `aria-busy`     |
-| LoadingIndicator | `<span>`   | `data-ars-part="loading-indicator"`, `role="status"` and `aria-live="polite"` when loading, `aria-hidden="true"` when idle |
-| Content          | `<span>`   | `data-ars-part="content"`, `data-ars-loading="true\|false"`                                                                |
+| Part             | Element    | Key Attributes                                                                                                         |
+| ---------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Root             | `<button>` | `data-ars-scope="button"`, `data-ars-state`, `data-ars-variant`, `data-ars-size`, `type`, `aria-disabled`, `aria-busy` |
+| LoadingIndicator | `<span>`   | `data-ars-part="loading-indicator"`, `role="status"` and `aria-live="polite"` when loading                             |
+| Content          | `<span>`   | `data-ars-part="content"`, `data-ars-loading="true\|false"`                                                            |
 
 ## 3. Accessibility
 
@@ -820,7 +820,7 @@ Button
 
 ### 3.2 Accessible Name Diagnostics
 
-The framework adapters, not the agnostic core, are responsible for accessible-name diagnostics. Adapters can inspect rendered children and merged consumer attributes; the core `root_attrs()` cannot know whether text content, `aria-label`, or `aria-labelledby` will be present after rendering. In debug builds, adapters SHOULD warn when a rendered button has no accessible name, using this wording:
+The framework adapters, not the agnostic core, are responsible for accessible-name diagnostics. Adapters can inspect rendered children and merged consumer attributes; the core `root_attrs()` cannot know whether text content, `aria-label`, or `aria-labelledby` will be present after rendering. In debug builds, adapters SHOULD warn when a rendered button has no accessible name if a shared accessible-name inspection helper is available. Adapter implementations should not duplicate incomplete accessible-name computation locally. When emitted, use this wording:
 
 ```text
 Button has no accessible name. Provide `aria-label` for icon-only buttons.
@@ -832,7 +832,7 @@ Loading indicator visual elements MUST use `currentColor` or `forced-color-adjus
 
 ### 3.4 Native Element Handler Deduplication
 
-When the `Button` component renders onto a native `<button>` element (the default), the framework adapter **must strip** the Space key `keydown`/`keyup` handlers from the `AttrMap` before applying them to the DOM. Native `<button>` elements already synthesize `click` events from Space key presses, so attaching the machine's Space handlers would cause duplicate activation. The adapter should detect this by checking whether the target element is a `<button>` and, if so, omit handlers whose sole purpose is Space key handling. When rendering via `as_child` onto a non-button element (e.g., `<div role="button">`), all keyboard handlers must be preserved.
+When the `Button` component renders onto a native `<button>` element (the default), the framework adapter must rely on native Enter/Space activation and must not attach duplicate Space key `keydown`/`keyup` activation handlers. When rendering via `as_child`, the first adapter contract forwards root attrs only; a consumer-owned non-button root is responsible for any additional keyboard activation handling until an adapter event-forwarding slot exists.
 
 > **Adapter Note:** Native `<button>` elements handle Enter/Space natively. Adapters must deduplicate keyboard handlers to avoid double-firing.
 
@@ -867,22 +867,23 @@ impl ComponentMessages for Messages {}
 
 ### 4.2 Adapter Callback Props
 
-Adapters MUST expose these callback props:
+Native Button adapter components MUST expose these callback props:
 
-| Prop              | Type                               | Description                    |
-| ----------------- | ---------------------------------- | ------------------------------ |
-| `on_press_start`  | `Option<Callback<PressEventData>>` | Fires on Press event           |
-| `on_press_end`    | `Option<Callback<PressEventData>>` | Fires on Release event         |
-| `on_press_change` | `Option<Callback<bool>>`           | Fires when press state changes |
-| `on_press_up`     | `Option<Callback<PressEventData>>` | Fires on pointer/key up        |
+| Prop              | Type                           | Description                    |
+| ----------------- | ------------------------------ | ------------------------------ |
+| `on_press_start`  | `Option<Callback<PressEvent>>` | Fires on Press event           |
+| `on_press_end`    | `Option<Callback<PressEvent>>` | Fires on Release event         |
+| `on_press`        | `Option<Callback<PressEvent>>` | Fires on activation            |
+| `on_press_change` | `Option<Callback<bool>>`       | Fires when press state changes |
+| `on_press_up`     | `Option<Callback<PressEvent>>` | Fires on pointer/key up        |
 
-Where `PressEventData` is defined in `05-interactions.md` and includes `pointer_type`, `shift_key`, `ctrl_key`, `meta_key`, `alt_key`.
+Where `PressEvent` is re-exported from `ars-interactions` and includes normalized pointer type, event type, coordinates when available, modifier state, and propagation control. `as_child` adapter components are attr-forwarding only until the shared as-child contract grows event-handler forwarding.
 
 ### 4.3 Adapter Contract: Loading + Submit Prevention
 
 When `type="submit"` and `is_loading()` is true, the root element has `aria-disabled="true"` but NOT the HTML `disabled` attribute. However, `aria-disabled` does **not** prevent native `<button type="submit">` from submitting the form.
 
-**Adapters MUST** call `event.preventDefault()` on the native `submit` event when `is_loading()` returns true, to prevent double-submission. Similarly, when `type="reset"` and `is_loading()` is true, the adapter MUST prevent the native reset action if reset-during-loading is undesired.
+Adapters must call `event.preventDefault()` on the activation event that would trigger native submit/reset when `is_loading()` returns true. For native `<button>` roots this can be handled on the click event before the browser performs the default submit or reset action.
 
 ### 4.4 Adapter Contract: Prevent Focus on Press
 
@@ -928,14 +929,14 @@ When `should_prevent_focus_on_press()` returns true, the adapter MUST call `even
 
 ### 5.3 Events
 
-| Callback     | ars-ui                         | React Aria                           | Notes                                             |
-| ------------ | ------------------------------ | ------------------------------------ | ------------------------------------------------- |
-| Press events | `on_press_start/end/change/up` | `onPress/onPressStart/End/Change/Up` | Both libraries                                    |
-| Hover events | Adapter-level                  | `onHoverStart/End/Change`            | RA exposes hover; ars-ui handles at adapter level |
-| Focus events | Adapter-level                  | `onFocus/onBlur/onFocusChange`       | RA exposes focus; ars-ui handles at adapter level |
-| Key events   | Adapter-level                  | `onKeyDown/onKeyUp`                  | RA exposes key events                             |
+| Callback     | ars-ui                                  | React Aria                           | Notes                                                                  |
+| ------------ | --------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------- |
+| Press events | `on_press/on_press_start/end/change/up` | `onPress/onPressStart/End/Change/Up` | Native `Button` has parity; `as_child` awaits event-handler forwarding |
+| Hover events | Adapter-level                           | `onHoverStart/End/Change`            | RA exposes hover; ars-ui handles at adapter level                      |
+| Focus events | Adapter-level                           | `onFocus/onBlur/onFocusChange`       | RA exposes focus; ars-ui handles at adapter level                      |
+| Key events   | Adapter-level                           | `onKeyDown/onKeyUp`                  | RA exposes key events                                                  |
 
-**Gaps:** None. Event handling is equivalent; ars-ui handles hover/focus/key at the adapter layer.
+**Gaps:** `as_child` event-handler forwarding is intentionally not exposed yet. Native `Button` event handling is equivalent for the press surface ars-ui supports; hover/focus/key callbacks are adapter-owned internals rather than public Button props.
 
 ### 5.4 Features
 
@@ -948,10 +949,10 @@ When `should_prevent_focus_on_press()` returns true, the adapter MUST call `even
 | Form submission          | Yes    | Yes               |
 | as_child composition     | Yes    | Yes (render prop) |
 
-**Gaps:** None.
+**Gaps:** `as_child` currently forwards attrs only; consumers own any non-native keyboard activation and event handler wiring on the reassigned root.
 
 ### 5.5 Summary
 
-- **Overall:** Full parity.
+- **Overall:** Native Button press/form/loading behavior has parity with the supported React Aria Button surface.
 - **Divergences:** ars-ui uses a `loading` boolean with explicit `State::Loading`; React Aria uses `isPending`. ars-ui adds typed `Variant`/`Size` visual tokens. React Aria exposes hover/focus/key callbacks as props; ars-ui handles these at the adapter layer.
-- **Recommended additions:** None.
+- **Recommended additions:** Add shared as-child event-handler forwarding before exposing press callbacks on `ButtonAsChild`.

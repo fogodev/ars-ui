@@ -23,7 +23,7 @@ use std::{
     },
 };
 
-use ars_dioxus::dismissable::{self, DismissReason, use_dismissable};
+use ars_dioxus::utility::dismissable::{self, DismissReason, use_dismissable};
 use ars_test_harness_dioxus::desktop::DesktopHarness;
 use dioxus::prelude::*;
 

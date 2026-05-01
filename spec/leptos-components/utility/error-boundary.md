@@ -33,9 +33,9 @@ agnostic `ars_components::utility::error_boundary::*` surface (Messages,
 Part, Api, attr helpers) alongside the Leptos-side wrappers, so callers
 spell every type with the same prefix:
 
-```rust
+```rust,no_check
 #[component]
-pub fn Boundary(
+pub fn Boundary<T: 'static>(
     /// Optional override for the entire fallback closure. When `None`,
     /// `default_fallback` is used.
     #[prop(optional, into)] fallback: Option<FallbackHandler>,
@@ -48,9 +48,14 @@ pub fn Boundary(
     /// needs to inject custom wording.
     #[prop(optional)] messages: Option<error_boundary::Messages>,
 
+    /// Explicit locale override used for fallback heading resolution.
+    #[prop(optional)] locale: Option<Locale>,
+
     /// Subtree wrapped by the boundary.
-    children: Children,
-) -> impl IntoView;
+    children: TypedChildren<T>,
+) -> impl IntoView
+where
+    View<T>: IntoView;
 
 /// Renders the canonical accessible fallback markup. Adapters call this
 /// from inside `Boundary`'s default branch; consumers may also pass it
@@ -58,9 +63,21 @@ pub fn Boundary(
 /// the wrapper at all.
 pub fn default_fallback(errors: ArcRwSignal<Errors>) -> impl IntoView;
 
-/// Boxed fallback closure used by the `fallback` prop.
-pub type FallbackHandler =
-    Callback<ArcRwSignal<Errors>, leptos::tachys::view::any_view::AnyView>;
+/// Typed fallback closure used by the `fallback` prop.
+pub struct FallbackHandler { /* private fields */ }
+
+impl FallbackHandler {
+    /// Create a fallback handler from a typed Leptos view-producing closure.
+    pub fn new<F, V>(fallback: F) -> Self
+    where
+        F: Fn(ArcRwSignal<Errors>) -> V + Send + Sync + 'static,
+        V: RenderHtml + Send + 'static;
+}
+
+impl<F, V> From<F> for FallbackHandler
+where
+    F: Fn(ArcRwSignal<Errors>) -> V + Send + Sync + 'static,
+    V: RenderHtml + Send + 'static;
 
 /// A single captured error from the Leptos `Errors` collection.
 pub use leptos::error::Error as CapturedError;
@@ -72,11 +89,9 @@ namespace.
 
 ## 3. Mapping to Core Component Contract
 
-- **Props parity:** the four logical props from the core spec
-  (`children`, `fallback`, `on_error`, `messages`) map 1:1 to adapter props.
-  Leptos additionally accepts an `Option<Signal<Locale>>` only via the
-  surrounding `ArsProvider`; the adapter does not expose a per-boundary
-  locale prop.
+- **Props parity:** the logical props from the core spec plus the adapter
+  heading overrides (`children`, `fallback`, `on_error`, `messages`,
+  `locale`) map 1:1 to adapter props.
 - **Event parity:** the only event surface is `on_error`, fired once per
   captured error episode. Multi-error `Errors` collections fire `on_error`
   for each `(ErrorId, Error)` pair on insertion.
@@ -87,12 +102,12 @@ namespace.
 
 ## 4. Part Mapping
 
-| Core part / structure | Required? | Adapter rendering target | Ownership     | Attr source             | Notes                                     |
-| --------------------- | --------- | ------------------------ | ------------- | ----------------------- | ----------------------------------------- |
-| `Root`                | required  | `<div>` alert region     | adapter-owned | `api.root_attrs()`      | rendered only in the error-fallback branch |
-| `Message`             | required  | `<p>` heading            | adapter-owned | `api.message_attrs()`   | text is the resolved `Messages.message`   |
-| `List`                | required  | `<ul>`                   | adapter-owned | `api.list_attrs()`      | always present in fallback                 |
-| `Item`                | repeated  | `<li>`                   | adapter-owned | `api.item_attrs()`      | one per `(ErrorId, Error)` entry           |
+| Core part / structure | Required? | Adapter rendering target | Ownership     | Attr source           | Notes                                      |
+| --------------------- | --------- | ------------------------ | ------------- | --------------------- | ------------------------------------------ |
+| `Root`                | required  | `<div>` alert region     | adapter-owned | `api.root_attrs()`    | rendered only in the error-fallback branch |
+| `Message`             | required  | `<p>` heading            | adapter-owned | `api.message_attrs()` | text is the resolved `Messages.message`    |
+| `List`                | required  | `<ul>`                   | adapter-owned | `api.list_attrs()`    | always present in fallback                 |
+| `Item`                | repeated  | `<li>`                   | adapter-owned | `api.item_attrs()`    | one per `(ErrorId, Error)` entry           |
 
 ## 5. Locale and Messages Resolution
 
@@ -104,8 +119,9 @@ priority order:
    locale.
 3. `Messages::default()` (English `"A component encountered an error."`).
 
-The resolved `Locale` comes from `use_locale()` (from `ArsContext`). The
-final string is rendered into the `Message` part via `view!`.
+The resolved `Locale` comes from the explicit `locale` prop when provided,
+otherwise from `use_locale()` (from `ArsContext`). The final string is
+rendered into the `Message` part via `view!`.
 
 ## 6. Error Iteration
 
@@ -136,12 +152,15 @@ The adapter relies on the `attr_map_to_leptos_inline_attrs` helper from
 
 When `fallback` is `Some`, the adapter forwards the framework's
 `ArcRwSignal<Errors>` to the user closure unchanged. The user's closure
-returns an `AnyView` rendered in place of the default markup; none of the
-canonical `data-ars-*` attributes are emitted.
+returns any typed Leptos view rendered in place of the default markup; none
+of the canonical `data-ars-*` attributes are emitted. The adapter performs
+the internal view erasure needed by Leptos's native `ErrorBoundary`
+primitive after the user closure runs, so consumers do not have to name
+Leptos's type-erased view type in their fallback API.
 
 When `fallback` is `None`, the adapter calls `default_fallback`, which is
 the same renderer used internally — guaranteeing that consumers who skip
-the wrapper (`<ErrorBoundary fallback=ars_leptos::error_boundary::default_fallback>`)
+the wrapper (`<ErrorBoundary fallback=ars_leptos::utility::error_boundary::default_fallback>`)
 get byte-identical markup.
 
 ## 8. Telemetry (`on_error`)

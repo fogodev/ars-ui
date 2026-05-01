@@ -1,6 +1,6 @@
 //! Dioxus adapter for the framework-agnostic `Dismissable` behavior.
 //!
-//! Mirrors the Leptos adapter (`ars_leptos::dismissable`) one-for-one,
+//! Mirrors the Leptos adapter (`ars_leptos::utility::dismissable`) one-for-one,
 //! composing [`Props`] with the shared
 //! [`ars_dom::outside_interaction`] helpers so overlay components across
 //! the Dioxus build inherit document-level outside-interaction listeners,
@@ -30,7 +30,7 @@ pub use ars_components::utility::dismissable::{
 };
 use ars_i18n::Locale;
 use dioxus::prelude::*;
-#[cfg(feature = "web")]
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
 use {
     ars_dom::{
         OutsideInteractionConfig,
@@ -67,11 +67,11 @@ use crate::{
 #[derive(Clone, Copy)]
 pub struct Handle {
     /// Programmatic dismiss-button activation. Invoking
-    /// `Callback::call(())` fires
+    /// `EventHandler::call(())` fires
     /// `props.on_dismiss(DismissReason::DismissButton)` if a callback is
     /// registered. Backed by Dioxus's arena-allocated callback storage so
     /// the handle stays `Copy`.
-    pub dismiss: Callback<()>,
+    pub dismiss: EventHandler<()>,
 
     /// Stable id used for overlay-stack registration, portal-owner
     /// matching, and DOM root resolution. Stored in the Dioxus arena via
@@ -85,7 +85,7 @@ impl Debug for Handle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug = f.debug_struct("Handle");
 
-        debug.field("dismiss", &"<Callback<()>>");
+        debug.field("dismiss", &"<EventHandler<()>>");
 
         if let Ok(id) = self.overlay_id.try_read() {
             debug.field("overlay_id", &*id);
@@ -104,8 +104,8 @@ impl Debug for Handle {
 /// Adapter-owned dismissable hook for Dioxus.
 ///
 /// Allocates an overlay id, registers it on the global overlay stack
-/// while mounted, and installs the document `pointerdown`/`focusin` and
-/// root-scoped `keydown` listener triplet via
+/// while mounted, and installs the document `pointerdown`/`focusin`/`keydown`
+/// listener triplet via
 /// [`ars_dom::install_outside_interaction_listeners`]. Listeners are
 /// `feature = "web"`-only — non-web Dioxus builds (Desktop, mobile, SSR)
 /// fall through to the degrade-gracefully no-op in `ars-dom`.
@@ -130,13 +130,13 @@ pub fn use_dismissable(
 
     let dismiss = build_dismiss_button_callback(&props);
 
-    #[cfg(feature = "web")]
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
     install_dismissable_listeners(root_ref, props, inside_boundaries, overlay_id.cloned());
 
     // Reference unused parameters under non-web builds so the public
     // signature exercises every input even when listeners are stubbed
     // out.
-    #[cfg(not(feature = "web"))]
+    #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
     {
         drop((root_ref, props, inside_boundaries));
     }
@@ -151,10 +151,10 @@ pub fn use_dismissable(
 /// and into [`Handle::dismiss`]. Invoking it fires
 /// `props.on_dismiss(DismissReason::DismissButton)` directly per spec
 /// §11 — no veto-capable callbacks run first.
-fn build_dismiss_button_callback(props: &Props) -> Callback<()> {
+fn build_dismiss_button_callback(props: &Props) -> EventHandler<()> {
     let on_dismiss = props.on_dismiss.clone();
 
-    Callback::new(move |()| {
+    EventHandler::new(move |()| {
         if let Some(cb) = on_dismiss.as_ref() {
             cb(DismissReason::DismissButton);
         }
@@ -165,7 +165,7 @@ fn build_dismiss_button_callback(props: &Props) -> Callback<()> {
 // Client-only listener wiring
 // ────────────────────────────────────────────────────────────────────
 
-#[cfg(feature = "web")]
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn install_dismissable_listeners(
     root_ref: ReadSignal<Option<Rc<MountedData>>>,
     props: Props,
@@ -219,7 +219,7 @@ fn install_dismissable_listeners(
     });
 }
 
-#[cfg(feature = "web")]
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
 struct DismissableState {
     overlay_id: String,
     props: RefCell<Props>,
@@ -228,7 +228,7 @@ struct DismissableState {
     cleaned_up: RefCell<bool>,
 }
 
-#[cfg(feature = "web")]
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn attach(
     state: &Rc<DismissableState>,
     root_ref: ReadSignal<Option<Rc<MountedData>>>,
@@ -238,23 +238,23 @@ fn attach(
         return;
     }
 
-    // Subscribe via `read()` — `onmounted` populates the ref *after*
-    // the use_effect first runs, so without subscribing the effect
-    // would short-circuit on the initial `None` and never re-run.
-    // Re-runs are idempotent: the `cleaned_up` / `teardown.is_some()`
-    // guards above ensure listeners install at most once.
-    let mounted = root_ref.read();
-
-    let Some(root_data) = mounted.as_ref() else {
-        return;
-    };
-
     // `MountedData::downcast::<web_sys::Element>` returns `None` on
     // non-web `RenderedElementBacking` impls (Dioxus Desktop, mobile,
     // SSR), so the install short-circuits without panicking — matching
     // the documented graceful-degrade contract from
-    // `spec/dioxus-components/utility/dismissable.md` §12.
-    let Some(root_element) = root_data.downcast::<WebElement>().cloned() else {
+    // `spec/dioxus-components/utility/dismissable.md` §12. On web, also
+    // fall back to the stable rendered root id: Dioxus can run effects
+    // before `onmounted` has produced a usable mounted handle, while the
+    // root element itself is already queryable by the time effects run.
+    let root_element = root_ref()
+        .and_then(|root_data| root_data.downcast::<WebElement>().cloned())
+        .or_else(|| {
+            web_sys::window()
+                .and_then(|window| window.document())
+                .and_then(|document| document.get_element_by_id(&state.overlay_id))
+        });
+
+    let Some(root_element) = root_element else {
         return;
     };
 
@@ -363,7 +363,7 @@ fn attach(
     *state.teardown.borrow_mut() = Some(teardown_fn);
 }
 
-#[cfg(feature = "web")]
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn teardown(state: &Rc<DismissableState>) {
     if *state.cleaned_up.borrow() {
         return;
@@ -460,6 +460,7 @@ pub fn Region(props: RegionProps) -> Element {
     let resolved_locale = locale
         .as_ref()
         .map_or(provider_locale, |locale| locale.read().clone());
+
     let resolved_messages = use_messages(messages.as_ref(), Some(&resolved_locale));
     let dismiss_label =
         dismiss_label.unwrap_or_else(|| (resolved_messages.dismiss_label)(&resolved_locale));
@@ -467,6 +468,7 @@ pub fn Region(props: RegionProps) -> Element {
     let api = Api::new(props.clone(), dismiss_label);
 
     let root_attrs = attr_map_to_dioxus_inline_attrs(api.root_attrs());
+
     let inline_attrs = attr_map_to_dioxus_inline_attrs(api.dismiss_button_attrs());
     let start_attrs = inline_attrs.clone();
     let end_attrs = inline_attrs;
@@ -474,9 +476,11 @@ pub fn Region(props: RegionProps) -> Element {
     let mut root_ref = use_signal(|| None::<Rc<MountedData>>);
 
     let handle = use_dismissable(ReadSignal::from(root_ref), props, boundaries);
+    let root_id = handle.overlay_id.cloned();
 
     rsx! {
         div {
+            id: root_id,
             onmounted: move |evt| {
                 root_ref.set(Some(evt.data()));
             },
@@ -507,7 +511,7 @@ mod tests {
     use super::*;
 
     // Tests that exercise `build_dismiss_button_callback`, `Handle`, or
-    // `Handle`'s `Debug` impl now require a Dioxus runtime (Callback +
+    // `Handle`'s `Debug` impl now require a Dioxus runtime (EventHandler +
     // CopyValue both live in the scope-local arena). They are covered
     // end-to-end through `crates/ars-dioxus/tests/desktop_dismissable.rs`,
     // which mounts a real fixture inside `DesktopHarness::launch_with_props`
@@ -802,7 +806,7 @@ mod wasm_tests {
     // Escape and outside-pointerdown wasm tests are intentionally
     // omitted from this initial Dioxus wasm test pass — under
     // `dioxus_web::launch_virtual_dom`, the document `pointerdown` /
-    // `focusin` and root-scoped `keydown` listener attachment doesn't
+    // `focusin` / `keydown` listener attachment doesn't
     // fire reliably from synthetic `dispatch_event(...)` calls inside
     // a `#[wasm_bindgen_test]`, even with extended flush windows. The
     // Leptos adapter's symmetric tests (`escape_keydown_fires…` /

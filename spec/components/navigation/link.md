@@ -109,7 +109,7 @@ impl Default for Props {
     fn default() -> Self {
         Self {
             id: String::new(),
-            href: SafeUrl::new("").expect("empty string is a safe URL"),
+            href: SafeUrl::from_static(""),
             target: None,
             rel: None,
             is_current: None,

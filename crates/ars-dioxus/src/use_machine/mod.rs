@@ -44,7 +44,7 @@ where
 
     /// Send an event to the machine.
     /// Safe to call from any handler — does not require reactive scope.
-    pub send: Callback<M::Event>,
+    pub send: EventHandler<M::Event>,
 
     /// Access the underlying service for context/props reads and [`derive()`](Self::derive).
     /// Use sparingly — prefer [`derive()`](Self::derive) for reactive data and
@@ -176,9 +176,7 @@ where
         f: impl Fn(&M::Api<'_>) -> T + 'static,
     ) -> Memo<T> {
         let state = self.state;
-
         let context_version = self.context_version;
-
         let service = self.service;
         use_memo(move || {
             // Subscribe to both state and context_version so the memo
@@ -398,11 +396,11 @@ where
     // 3. Update signals if state/context changed
     //
     // use_hook runs its closure once on mount and returns the cached value on
-    // re-renders. Callback is Copy, so the handle is stable. The captured
+    // re-renders. EventHandler is Copy, so the handle is stable. The captured
     // signal handles are Copy indirections that always access current data.
     let send_runtime = runtime.clone();
     let send = use_hook(|| {
-        Callback::new(move |event: M::Event| {
+        EventHandler::new(move |event: M::Event| {
             dispatch_event::<M>(event, send_runtime.clone());
         })
     });

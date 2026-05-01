@@ -1,12 +1,20 @@
 {
-  "rust-analyzer.check.overrideCommand": [
-    "cargo",
-    "xclippy",
-    "--message-format=json"
-  ],
-  "rust-analyzer.rustfmt.extraArgs": ["+nightly"],
-  "[rust]": {
-    "editor.defaultFormatter": "rust-lang.rust-analyzer",
-    "editor.formatOnSave": true
-  }
+    "files.associations": {
+        "**/tailwind.css": "tailwindcss"
+    },
+    "rust-analyzer.check.overrideCommand": [
+        "bash",
+        "-lc",
+        "case \"$PWD\" in */examples) cargo clippy --workspace --all-targets --message-format=json ;; *) cargo xclippy --message-format=json ;; esac"
+    ],
+    "rust-analyzer.linkedProjects": ["Cargo.toml", "examples/Cargo.toml"],
+    "rust-analyzer.rustfmt.overrideCommand": [
+        "bash",
+        "-lc",
+        "root=\"$PWD\"; while [ \"$root\" != \"/\" ] && [ ! -f \"$root/.cargo/config.toml\" ]; do root=\"$(dirname \"$root\")\"; done; cd \"$root\" && cargo xfmt --stdin"
+    ],
+    "[rust]": {
+        "editor.defaultFormatter": "rust-lang.rust-analyzer",
+        "editor.formatOnSave": true
+    }
 }

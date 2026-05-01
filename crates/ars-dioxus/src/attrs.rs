@@ -145,7 +145,7 @@ pub fn attr_map_to_dioxus(
 
             AttrValue::Bool(true) => Some(Attribute::new(
                 intern_attr_name(&key),
-                AttributeValue::Text(String::new()),
+                AttributeValue::Bool(true),
                 None,
                 false,
             )),
@@ -167,14 +167,14 @@ pub fn attr_map_to_dioxus(
 
             // Reactive booleans follow the HTML presence/absence
             // semantics symmetric with the static [`AttrValue::Bool`]
-            // path: `true` materializes to an empty-value Attribute,
+            // path: `true` materializes to a Dioxus boolean Attribute,
             // `false` skips the attribute entirely. Dioxus re-runs
             // component bodies on signal changes, so each render's
             // conversion picks up the current closure result.
             AttrValue::ReactiveBool(f) => f().then(|| {
                 Attribute::new(
                     intern_attr_name(&key),
-                    AttributeValue::Text(String::new()),
+                    AttributeValue::Bool(true),
                     None,
                     false,
                 )
@@ -509,6 +509,14 @@ mod tests {
         }
     }
 
+    /// Helper: extract bool value from an Attribute.
+    const fn bool_value(attr: &Attribute) -> Option<bool> {
+        match attr.value {
+            AttributeValue::Bool(value) => Some(value),
+            _ => None,
+        }
+    }
+
     fn build_test_map() -> AttrMap {
         let mut map = AttrMap::new();
 
@@ -668,7 +676,7 @@ mod tests {
 
         let disabled_attr = find_attr(&result.attrs, "disabled").expect("disabled attr present");
 
-        assert_eq!(text_value(disabled_attr), Some(""));
+        assert_eq!(bool_value(disabled_attr), Some(true));
 
         // Bool(false) attributes are filtered out
         assert!(find_attr(&result.attrs, "hidden").is_none());
@@ -758,9 +766,9 @@ mod tests {
         assert_eq!(text_value(aria), Some("Schließen"));
     }
 
-    /// Reactive booleans materialize with HTML presence semantics
+    /// Reactive booleans materialize with HTML boolean semantics
     /// symmetric with [`AttrValue::Bool`]: `true` renders the
-    /// attribute with an empty value, `false` skips it.
+    /// attribute as a Dioxus boolean value, `false` skips it.
     #[test]
     fn attr_map_to_dioxus_reactive_bool_follows_presence_semantics() {
         let mut map = AttrMap::new();
@@ -772,7 +780,7 @@ mod tests {
 
         let disabled = find_attr(&result.attrs, "disabled").expect("disabled attr present");
 
-        assert_eq!(text_value(disabled), Some(""));
+        assert_eq!(bool_value(disabled), Some(true));
         assert!(find_attr(&result.attrs, "required").is_none());
     }
 
@@ -901,6 +909,13 @@ mod wasm_tests {
         }
     }
 
+    const fn bool_value(attr: &Attribute) -> Option<bool> {
+        match attr.value {
+            AttributeValue::Bool(value) => Some(value),
+            _ => None,
+        }
+    }
+
     #[wasm_bindgen_test]
     fn intern_attr_name_and_attr_map_to_dioxus_cover_core_conversion_paths_on_wasm() {
         assert_eq!(intern_attr_name(&HtmlAttr::Class), "class");
@@ -940,8 +955,8 @@ mod wasm_tests {
             Some("width: 100px;")
         );
         assert_eq!(
-            text_value(find_attr(&inline.attrs, "disabled").expect("disabled attr present")),
-            Some("")
+            bool_value(find_attr(&inline.attrs, "disabled").expect("disabled attr present")),
+            Some(true)
         );
         assert!(find_attr(&inline.attrs, "hidden").is_none());
         assert!(find_attr(&inline.attrs, "title").is_none());

@@ -1,0 +1,15 @@
+[application]
+name = "widgets-dioxus-css"
+default_platform = "web"
+asset_dir = "public"
+
+[web.app]
+title = "ars-ui Dioxus CSS Widgets"
+
+[web.resource]
+style = ["./ars-base.css", "./ars-interactions.css", "./style.css"]
+script = []
+
+[web.resource.dev]
+style = ["./ars-base.css", "./ars-interactions.css", "./style.css"]
+script = []

@@ -23,7 +23,7 @@ use ars_core::{
 };
 use ars_dioxus::{
     ArsContext, NullPlatform,
-    error_boundary::{self, Boundary, default_fallback},
+    utility::error_boundary::{self, Boundary, default_fallback},
 };
 use ars_i18n::{Direction, Locale, StubIntlBackend};
 use dioxus::{CapturedError, dioxus_core::NoOpMutations, prelude::*};
@@ -277,6 +277,32 @@ fn custom_messages_override_default_heading() {
     assert!(
         !html.contains("A component encountered an error."),
         "default English string should not render when override is provided: {html}"
+    );
+}
+
+#[test]
+fn explicit_locale_prop_is_passed_to_messages_override() {
+    fn app() -> Element {
+        let messages = error_boundary::Messages {
+            message: MessageFn::new(|locale: &Locale| {
+                format!("Boundary heading for {}", locale.to_bcp47())
+            }),
+        };
+
+        rsx! {
+            Boundary {
+                messages,
+                locale: Locale::parse("pt-BR").expect("locale should parse"),
+                ThrowingChild {}
+            }
+        }
+    }
+
+    let html = render_app(app);
+
+    assert!(
+        html.contains("Boundary heading for pt-BR"),
+        "explicit locale prop was not passed to the messages override: {html}"
     );
 }
 
@@ -835,6 +861,57 @@ fn provider_registry_messages_drive_heading_when_no_prop_override() {
         !html.contains("A component encountered an error."),
         "default English heading must not leak when the registry provides a localized variant: \
          {html}"
+    );
+}
+
+#[test]
+fn explicit_locale_prop_selects_provider_registry_bundle() {
+    fn app() -> Element {
+        let mut registries = I18nRegistries::new();
+
+        registries.register(
+            MessagesRegistry::new(error_boundary::Messages::default()).register(
+                "es",
+                error_boundary::Messages {
+                    message: MessageFn::static_str("Algo salió mal."),
+                },
+            ),
+        );
+
+        let ctx = ArsContext::new(
+            Locale::parse("en-US").expect("locale should parse"),
+            Direction::Ltr,
+            ColorMode::System,
+            false,
+            false,
+            None,
+            None,
+            None,
+            Arc::new(NullPlatformEffects),
+            Arc::new(DefaultModalityContext::new()),
+            Arc::new(StubIntlBackend),
+            Arc::new(registries),
+            Arc::new(NullPlatform),
+            StyleStrategy::Inline,
+        );
+
+        use_context_provider(|| ctx);
+
+        rsx! {
+            Boundary { locale: Locale::parse("es-MX").expect("locale should parse"), ThrowingChild {} }
+        }
+    }
+
+    let html = render_app(app);
+
+    assert!(
+        html.contains("Algo salió mal."),
+        "explicit locale prop should select the Spanish registry bundle over provider en-US: \
+         {html}"
+    );
+    assert!(
+        !html.contains("A component encountered an error."),
+        "provider en-US default should not win over explicit locale prop: {html}"
     );
 }
 

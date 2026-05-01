@@ -33,7 +33,7 @@ pub use ars_components::utility::dismissable::{
 };
 use ars_core::{I18nRegistries, resolve_messages};
 use ars_i18n::Locale;
-use leptos::{callback::Callback as LeptosCallback, html, prelude::*};
+use leptos::{callback::Callback, children::TypedChildren, html, prelude::*};
 #[cfg(not(feature = "ssr"))]
 use {
     ars_dom::{
@@ -74,7 +74,7 @@ pub struct Handle {
     /// `Callback::run(())` fires `props.on_dismiss(DismissReason::DismissButton)`
     /// if a callback is registered. Backed by Leptos's arena-allocated
     /// callback storage so the handle stays `Copy`.
-    pub dismiss: LeptosCallback<()>,
+    pub dismiss: Callback<()>,
 
     /// Stable id used for overlay-stack registration and portal-owner
     /// matching. Stored in the Leptos arena so [`Handle`] remains `Copy`;
@@ -109,8 +109,8 @@ impl Debug for Handle {
 /// Adapter-owned dismissable hook for Leptos.
 ///
 /// Allocates an overlay id, registers it on the global overlay stack
-/// while mounted, and installs the document `pointerdown`/`focusin` and
-/// root-scoped `keydown` listener triplet via
+/// while mounted, and installs the document `pointerdown`/`focusin`/`keydown`
+/// listener triplet via
 /// [`ars_dom::install_outside_interaction_listeners`]. Listeners are
 /// client-only — under SSR the hook is a no-op aside from id allocation
 /// and handle construction.
@@ -144,10 +144,10 @@ pub fn use_dismissable(
 /// and into [`Handle::dismiss`]. Invoking it fires
 /// `props.on_dismiss(DismissReason::DismissButton)` directly per spec
 /// §11 — no veto-capable callbacks run first.
-fn build_dismiss_button_callback(props: &Props) -> LeptosCallback<()> {
+fn build_dismiss_button_callback(props: &Props) -> Callback<()> {
     let on_dismiss = props.on_dismiss.clone();
 
-    LeptosCallback::new(move |()| {
+    Callback::new(move |()| {
         if let Some(cb) = on_dismiss.as_ref() {
             cb(DismissReason::DismissButton);
         }
@@ -354,7 +354,7 @@ fn teardown(state: &Rc<DismissableState>) {
 /// DismissButton (end)" anatomy with the right attrs and listener
 /// wiring.
 #[component]
-pub fn Region(
+pub fn Region<T>(
     /// Behavioural props forwarded to [`use_dismissable`].
     props: Props,
 
@@ -385,8 +385,11 @@ pub fn Region(
     messages: Option<Messages>,
 
     /// Children rendered between the start and end dismiss buttons.
-    children: Children,
-) -> impl IntoView {
+    children: TypedChildren<T>,
+) -> impl IntoView
+where
+    View<T>: IntoView,
+{
     let root_ref = NodeRef::<html::Div>::new();
 
     let boundaries = inside_boundaries.unwrap_or_else(|| Signal::stored(Vec::new()));
@@ -414,6 +417,7 @@ pub fn Region(
     let api = Api::new(props.clone(), move || dismiss_label.get());
 
     let root_attrs = attr_map_to_leptos_inline_attrs(api.root_attrs());
+
     let inline_attrs = attr_map_to_leptos_inline_attrs(api.dismiss_button_attrs());
     let start_attrs = inline_attrs.clone();
     let end_attrs = inline_attrs;
@@ -424,12 +428,16 @@ pub fn Region(
         <div {..root_attrs} node_ref=root_ref>
             <button
                 {..start_attrs}
-                on:click=move |_| { handle.dismiss.run(()); }
+                on:click=move |_| {
+                    handle.dismiss.run(());
+                }
             />
-            {children()}
+            {children.into_inner()()}
             <button
                 {..end_attrs}
-                on:click=move |_| { handle.dismiss.run(()); }
+                on:click=move |_| {
+                    handle.dismiss.run(());
+                }
             />
         </div>
     }
@@ -451,7 +459,7 @@ mod tests {
     use super::*;
 
     /// Sets up a fresh Leptos reactive [`Owner`] for the duration of a
-    /// test. Both [`LeptosCallback`] and [`StoredValue`] live in the
+    /// test. Both [`Callback`] and [`StoredValue`] live in the
     /// active owner's arena, so any test constructing a [`Handle`] needs
     /// one of these guards in scope.
     #[must_use = "the returned Owner guard must outlive the test body"]
@@ -822,18 +830,6 @@ mod wasm_tests {
 
         tick().await;
 
-        // Find the rendered root <div> — it's the parent of the dismiss button
-        // we just located. Dispatch keydown(Escape) on it directly so the
-        // root-scoped keydown listener picks it up.
-        let dismiss_button = container
-            .query_selector("button[data-ars-part='dismiss-button']")
-            .expect("query_selector should succeed")
-            .expect("dismiss button must exist");
-
-        let root: Element = dismiss_button
-            .parent_element()
-            .expect("dismiss button must have a parent");
-
         let init = KeyboardEventInit::new();
 
         init.set_key("Escape");
@@ -843,7 +839,8 @@ mod wasm_tests {
         let event = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init)
             .expect("keydown event should construct");
 
-        root.dispatch_event(&event)
+        container
+            .dispatch_event(&event)
             .expect("dispatch_event should succeed");
 
         tick().await;
@@ -853,7 +850,7 @@ mod wasm_tests {
         assert_eq!(
             log.as_slice(),
             &[DismissReason::Escape],
-            "Escape on the root must fire on_dismiss with Escape",
+            "Escape on the document path must fire on_dismiss with Escape",
         );
 
         drop(log);
@@ -1277,10 +1274,7 @@ mod wasm_tests {
                     locale=Locale::parse("es-MX").expect("locale should parse")
                     i18n_registries=Arc::clone(&registries)
                 >
-                    <Region
-                        props=Props::new()
-                        dismiss_label="Close dialog"
-                    >
+                    <Region props=Props::new() dismiss_label="Close dialog">
                         <span>"content"</span>
                     </Region>
                 </crate::ArsProvider>
@@ -1311,10 +1305,7 @@ mod wasm_tests {
 
         let _handle = mount_to(parent, move || {
             view! {
-                <Region
-                    props=Props::new()
-                    dismiss_label=dismiss_label
-                >
+                <Region props=Props::new() dismiss_label>
                     <span>"content"</span>
                 </Region>
             }

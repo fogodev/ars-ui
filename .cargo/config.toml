@@ -2,6 +2,7 @@
 xtask   = "run --package xtask --"
 xci     = "xtask ci"
 xclippy = "xtask clippy"
+xfmt    = "run --quiet --package xtask -- fmt"
 xmcp    = "xtask mcp"
 xspec   = "xtask spec"
 xtest   = "xtask test"

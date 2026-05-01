@@ -29,9 +29,8 @@ use ars_core::{
 };
 use ars_i18n::{Direction, Locale, StubIntlBackend};
 use ars_leptos::{
-    ArsContext,
-    error_boundary::{self, Boundary, default_fallback},
-    provide_ars_context,
+    ArsContext, provide_ars_context,
+    utility::error_boundary::{self, Boundary, default_fallback},
 };
 use leptos::prelude::*;
 
@@ -69,12 +68,7 @@ fn renders_children_when_no_error() {
 
 #[test]
 fn renders_canonical_fallback_attrs_when_child_returns_err() {
-    let html = view! {
-        <Boundary>
-            {boom()}
-        </Boundary>
-    }
-    .to_html();
+    let html = view! { <Boundary>{boom()}</Boundary> }.to_html();
 
     assert!(
         html.contains(r#"data-ars-scope="error-boundary""#),
@@ -104,12 +98,7 @@ fn renders_canonical_fallback_attrs_when_child_returns_err() {
 
 #[test]
 fn fallback_includes_default_message_and_error_text() {
-    let html = view! {
-        <Boundary>
-            {boom()}
-        </Boundary>
-    }
-    .to_html();
+    let html = view! { <Boundary>{boom()}</Boundary> }.to_html();
 
     assert!(
         html.contains("A component encountered an error."),
@@ -127,12 +116,7 @@ fn fallback_includes_default_message_and_error_text() {
 
 #[test]
 fn fallback_wraps_errors_in_unordered_list() {
-    let html = view! {
-        <Boundary>
-            {boom()}
-        </Boundary>
-    }
-    .to_html();
+    let html = view! { <Boundary>{boom()}</Boundary> }.to_html();
 
     assert!(
         html.contains(r#"data-ars-part="list""#),
@@ -144,12 +128,7 @@ fn fallback_wraps_errors_in_unordered_list() {
 
 #[test]
 fn fallback_emits_data_ars_error_count() {
-    let html = view! {
-        <Boundary>
-            {boom()}
-        </Boundary>
-    }
-    .to_html();
+    let html = view! { <Boundary>{boom()}</Boundary> }.to_html();
 
     assert!(
         html.contains(r#"data-ars-error-count="1""#),
@@ -161,9 +140,7 @@ fn fallback_emits_data_ars_error_count() {
 fn boundary_does_not_propagate_error_past_wrapper() {
     let html = view! {
         <div data-outside="1">
-            <Boundary>
-                {boom()}
-            </Boundary>
+            <Boundary>{boom()}</Boundary>
             <p>"after-boundary"</p>
         </div>
     }
@@ -191,12 +168,7 @@ fn on_error_telemetry_fires_with_captured_error() {
             .push(err.to_string());
     });
 
-    let _html = view! {
-        <Boundary on_error=on_error>
-            {boom()}
-        </Boundary>
-    }
-    .to_html();
+    let _html = view! { <Boundary on_error=on_error>{boom()}</Boundary> }.to_html();
 
     let captured = captured.lock().expect("lock");
 
@@ -208,18 +180,11 @@ fn on_error_telemetry_fires_with_captured_error() {
 
 #[test]
 fn custom_fallback_replaces_default_markup() {
-    use leptos::tachys::view::any_view::AnyView;
-
-    let fallback: error_boundary::FallbackHandler = Callback::new(|_errors| -> AnyView {
-        view! { <div class="my-custom-error">"Custom UI"</div> }.into_any()
+    let fallback = error_boundary::FallbackHandler::new(|_errors| {
+        view! { <div class="my-custom-error">"Custom UI"</div> }
     });
 
-    let html = view! {
-        <Boundary fallback=fallback>
-            {boom()}
-        </Boundary>
-    }
-    .to_html();
+    let html = view! { <Boundary fallback=fallback>{boom()}</Boundary> }.to_html();
 
     assert!(
         html.contains("Custom UI"),
@@ -233,12 +198,8 @@ fn custom_fallback_replaces_default_markup() {
 
 #[test]
 fn default_fallback_helper_emits_canonical_markup() {
-    let html = view! {
-        <ErrorBoundary fallback=default_fallback>
-            {boom()}
-        </ErrorBoundary>
-    }
-    .to_html();
+    let html =
+        view! { <ErrorBoundary fallback=default_fallback>{boom()}</ErrorBoundary> }.to_html();
 
     assert!(html.contains(r#"data-ars-error="true""#));
     assert!(html.contains("A component encountered an error."));
@@ -251,12 +212,7 @@ fn custom_messages_override_default_heading() {
         message: MessageFn::static_str("Algo deu errado."),
     };
 
-    let html = view! {
-        <Boundary messages=messages>
-            {boom()}
-        </Boundary>
-    }
-    .to_html();
+    let html = view! { <Boundary messages=messages>{boom()}</Boundary> }.to_html();
 
     assert!(
         html.contains("Algo deu errado."),
@@ -265,6 +221,27 @@ fn custom_messages_override_default_heading() {
     assert!(
         !html.contains("A component encountered an error."),
         "default English string should not render when override is provided: {html}"
+    );
+}
+
+#[test]
+fn explicit_locale_prop_is_passed_to_messages_override() {
+    let messages = error_boundary::Messages {
+        message: MessageFn::new(|locale: &Locale| {
+            format!("Boundary heading for {}", locale.to_bcp47())
+        }),
+    };
+
+    let html = view! {
+        <Boundary messages=messages locale=Locale::parse("pt-BR").expect("locale should parse")>
+            {boom()}
+        </Boundary>
+    }
+    .to_html();
+
+    assert!(
+        html.contains("Boundary heading for pt-BR"),
+        "explicit locale prop was not passed to the messages override: {html}"
     );
 }
 
@@ -309,12 +286,7 @@ fn provider_registry_messages_drive_heading_when_no_prop_override() {
             StyleStrategy::Inline,
         ));
 
-        view! {
-            <Boundary>
-                {boom()}
-            </Boundary>
-        }
-        .to_html()
+        view! { <Boundary>{boom()}</Boundary> }.to_html()
     });
 
     assert!(
@@ -325,6 +297,47 @@ fn provider_registry_messages_drive_heading_when_no_prop_override() {
         !html.contains("A component encountered an error."),
         "default English heading must not leak when the registry provides a localized variant: \
          {html}"
+    );
+}
+
+#[test]
+fn explicit_locale_prop_selects_provider_registry_bundle() {
+    let owner = Owner::new();
+    let html = owner.with(|| {
+        let mut registries = I18nRegistries::new();
+
+        registries.register(
+            MessagesRegistry::new(error_boundary::Messages::default()).register(
+                "es",
+                error_boundary::Messages {
+                    message: MessageFn::static_str("Algo salió mal."),
+                },
+            ),
+        );
+
+        provide_ars_context(ArsContext::new(
+            Locale::parse("en-US").expect("locale should parse"),
+            Direction::Ltr,
+            ColorMode::System,
+            false,
+            false,
+            None,
+            None,
+            None,
+            Arc::new(NullPlatformEffects),
+            Arc::new(DefaultModalityContext::new()),
+            Arc::new(StubIntlBackend),
+            Arc::new(registries),
+            StyleStrategy::Inline,
+        ));
+
+        view! { <Boundary locale=Locale::parse("es-MX").expect("locale should parse")>{boom()}</Boundary> }
+        .to_html()
+    });
+
+    assert!(
+        html.contains("Algo salió mal."),
+        "explicit locale prop should select the Spanish registry bundle over provider en-US: {html}"
     );
 }
 
@@ -446,14 +459,7 @@ fn public_types_have_non_empty_debug_impls() {
 fn fallback_render_is_deterministic_across_two_owners() {
     fn render() -> String {
         let owner = Owner::new();
-        owner.with(|| {
-            view! {
-                <Boundary>
-                    {boom()}
-                </Boundary>
-            }
-            .to_html()
-        })
+        owner.with(|| view! { <Boundary>{boom()}</Boundary> }.to_html())
     }
 
     let first = render();
@@ -482,12 +488,7 @@ fn fallback_render_is_deterministic_across_two_owners() {
 ///   checks because the misspelling silently never appears).
 #[test]
 fn fallback_satisfies_wai_aria_alert_region_contract() {
-    let html = view! {
-        <Boundary>
-            {boom()}
-        </Boundary>
-    }
-    .to_html();
+    let html = view! { <Boundary>{boom()}</Boundary> }.to_html();
 
     assert_eq!(
         html.matches(r#"role="alert""#).count(),
@@ -590,12 +591,7 @@ fn explicit_messages_prop_wins_over_provider_registry() {
             message: MessageFn::static_str("DIRECT_PROP"),
         };
 
-        view! {
-            <Boundary messages=direct>
-                {boom()}
-            </Boundary>
-        }
-        .to_html()
+        view! { <Boundary messages=direct>{boom()}</Boundary> }.to_html()
     });
 
     assert!(
@@ -632,39 +628,44 @@ fn explicit_messages_prop_wins_over_provider_registry() {
 ///    boundary to render children on the next reactive pass.
 #[test]
 fn custom_fallback_can_clear_errors_for_reactive_recovery() {
-    use leptos::{error::ErrorId, tachys::view::any_view::AnyView};
+    let observations = Arc::new(Mutex::new(Vec::new()));
 
-    let owner = Owner::new();
-    owner.with(|| {
-        let mut errors = Errors::default();
+    let fallback = error_boundary::FallbackHandler::new({
+        let observations = Arc::clone(&observations);
+        move |errors: ArcRwSignal<Errors>| {
+            observations
+                .lock()
+                .expect("lock observations")
+                .push(errors.with(|e| e.iter().count()));
 
-        errors.insert(ErrorId::from(7usize), BoomError("recoverable"));
+            // A custom fallback that wires a "Try again" affordance would
+            // mutate the errors signal from inside an event handler. We
+            // mirror that behavior synchronously here. Replacing with
+            // `Errors::default()` is the public idiom because `Errors` does
+            // not expose a `clear()` method directly.
+            errors.update(|e| *e = Errors::default());
 
-        let signal = ArcRwSignal::new(errors);
+            observations
+                .lock()
+                .expect("lock observations")
+                .push(errors.with(|e| e.iter().count()));
 
-        // Sanity: the signal currently has one error.
-        assert_eq!(signal.with(|e| e.iter().count()), 1);
-
-        // A custom fallback that wires a "Try again" affordance would
-        // mutate the errors signal from inside an event handler. We
-        // mirror that behavior synchronously here. Replacing with
-        // `Errors::default()` is the public idiom because `Errors` does
-        // not expose a `clear()` method directly.
-        let fallback: error_boundary::FallbackHandler =
-            Callback::new(|errors: ArcRwSignal<Errors>| -> AnyView {
-                errors.update(|e| *e = Errors::default());
-                view! { <span>"after-clear"</span> }.into_any()
-            });
-
-        // Drive the fallback the way the framework would.
-        let _view = fallback.run(signal.clone());
-
-        // After the fallback runs, the recovery API has cleared every
-        // entry — proving the wrapper's exposed signal is the same one
-        // the framework primitive watches for the children-reset path.
-        assert_eq!(signal.with(|e| e.iter().count()), 0);
-        assert!(signal.with(Errors::is_empty));
+            view! { <span>"after-clear"</span> }
+        }
     });
+
+    let html = view! { <Boundary fallback=fallback>{boom()}</Boundary> }.to_html();
+
+    assert!(
+        html.contains("after-clear"),
+        "custom fallback did not render: {html}"
+    );
+
+    assert_eq!(
+        observations.lock().expect("lock observations").as_slice(),
+        [1, 0],
+        "fallback must receive the live, mutable framework error signal"
+    );
 }
 
 /// Verifies the canonical multi-error contract: when the `Errors` signal
@@ -687,7 +688,7 @@ fn custom_fallback_can_clear_errors_for_reactive_recovery() {
 /// accumulate over multiple render passes.
 #[test]
 fn fallback_renders_all_errors_with_matching_count() {
-    use leptos::{error::ErrorId, tachys::view::any_view::AnyView};
+    use leptos::error::ErrorId;
 
     let owner = Owner::new();
     let html = owner.with(|| {
@@ -702,9 +703,7 @@ fn fallback_renders_all_errors_with_matching_count() {
 
         let signal = ArcRwSignal::new(errors);
 
-        let view: AnyView = default_fallback(signal);
-
-        view.to_html()
+        default_fallback(signal).to_html()
     });
 
     assert!(
@@ -745,12 +744,8 @@ fn error_message_text_is_html_escaped_in_fallback_list() {
 
     impl std::error::Error for ScriptyError {}
 
-    let html = view! {
-        <Boundary>
-            {Result::<&str, ScriptyError>::Err(ScriptyError)}
-        </Boundary>
-    }
-    .to_html();
+    let html =
+        view! { <Boundary>{Result::<&str, ScriptyError>::Err(ScriptyError)}</Boundary> }.to_html();
 
     assert!(
         !html.contains("<script>alert('xss')</script>"),
@@ -782,12 +777,8 @@ fn non_ascii_error_text_is_preserved_through_render() {
 
     impl std::error::Error for JapaneseError {}
 
-    let html = view! {
-        <Boundary>
-            {Result::<&str, JapaneseError>::Err(JapaneseError)}
-        </Boundary>
-    }
-    .to_html();
+    let html = view! { <Boundary>{Result::<&str, JapaneseError>::Err(JapaneseError)}</Boundary> }
+        .to_html();
 
     assert!(
         html.contains("値が無効です"),
@@ -893,12 +884,7 @@ fn error_boundary_html_snapshot_happy_path() {
 /// fallback markup including localized heading and one error item.
 #[test]
 fn error_boundary_html_snapshot_error_path() {
-    let html = view! {
-        <Boundary>
-            {boom()}
-        </Boundary>
-    }
-    .to_html();
+    let html = view! { <Boundary>{boom()}</Boundary> }.to_html();
 
     insta::assert_snapshot!(html, @r#"<div data-ars-error="true" data-ars-error-count="1" data-ars-part="root" data-ars-scope="error-boundary" aria-atomic="true" aria-live="assertive" role="alert"><p data-ars-part="message" data-ars-scope="error-boundary">A component encountered an error.</p><ul data-ars-part="list" data-ars-scope="error-boundary"><li data-ars-part="item" data-ars-scope="error-boundary">boom-from-child</li><!></ul></div>"#);
 }
@@ -913,9 +899,7 @@ fn inner_boundary_catches_outer_stays_idle() {
     let html = view! {
         <Boundary>
             <p>"outer-sibling"</p>
-            <Boundary>
-                {boom()}
-            </Boundary>
+            <Boundary>{boom()}</Boundary>
         </Boundary>
     }
     .to_html();

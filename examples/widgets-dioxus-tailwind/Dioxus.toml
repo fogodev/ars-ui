@@ -1,0 +1,17 @@
+[application]
+name = "widgets-dioxus-tailwind"
+default_platform = "web"
+asset_dir = "public"
+tailwind_input = "tailwind.css"
+tailwind_output = "public/tailwind.css"
+
+[web.app]
+title = "ars-ui Dioxus Tailwind Widgets"
+
+[web.resource]
+style = ["./ars-base.css", "./ars-interactions.css", "./tailwind.css"]
+script = []
+
+[web.resource.dev]
+style = ["./ars-base.css", "./ars-interactions.css", "./tailwind.css"]
+script = []

@@ -3,7 +3,7 @@
 use std::{env, path::PathBuf, process, sync};
 
 use clap::{Parser, Subcommand};
-use xtask::{ci, coverage, lint, manifest, mcp, spec, test};
+use xtask::{ci, coverage, examples, lint, manifest, mcp, spec, test};
 
 /// ars-ui workspace task runner.
 #[derive(Parser)]
@@ -27,6 +27,15 @@ enum Command {
         /// rust-analyzer's `overrideCommand`).
         #[arg(long)]
         message_format: Option<String>,
+    },
+
+    /// Format the workspace in place (alias: `cargo xfmt`).
+    Fmt {
+        /// Format one Rust source buffer from stdin to stdout.
+        ///
+        /// This mode is rustfmt-compatible for editor integrations.
+        #[arg(long)]
+        stdin: bool,
     },
 
     /// Run workspace clippy without `-D warnings` (alias: `cargo xclippy`).
@@ -54,6 +63,12 @@ enum Command {
     Coverage {
         #[command(subcommand)]
         cmd: CoverageCommand,
+    },
+
+    /// Run browser examples.
+    Examples {
+        #[command(subcommand)]
+        cmd: ExamplesCommand,
     },
 
     /// Repository testing policy lints.
@@ -185,6 +200,30 @@ enum LintCommand {
         /// Enum name whose variants must be exercised.
         #[arg(long, default_value = "ComponentError")]
         enum_name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ExamplesCommand {
+    /// List runnable browser examples.
+    List,
+
+    /// Serve one browser example.
+    Serve {
+        /// Example name, such as "widgets-leptos".
+        name: String,
+
+        /// Port for the dev server.
+        #[arg(long)]
+        port: Option<u16>,
+
+        /// Whether to open a browser.
+        #[arg(long, default_value_t = true, default_missing_value = "true", num_args = 0..=1)]
+        open: bool,
+
+        /// Whether Dioxus examples should enable CLI hot reload.
+        #[arg(long, default_value_t = false, default_missing_value = "true", num_args = 0..=1)]
+        hot_reload: bool,
     },
 }
 
@@ -361,6 +400,21 @@ fn main() {
             }
         }
 
+        // ── Format (dev) ─────────────────────────────────────────────
+        Command::Fmt { stdin } => {
+            let result = if stdin {
+                ci::format_stdin()
+            } else {
+                ci::format_workspace()
+            };
+
+            if let Err(e) = result {
+                eprintln!("error: {e}");
+
+                process::exit(1);
+            }
+        }
+
         // ── Clippy (dev) ─────────────────────────────────────────────
         Command::Clippy { message_format } => {
             if let Err(e) = ci::clippy_workspace(message_format.as_deref(), false) {
@@ -462,6 +516,28 @@ fn main() {
                     eprintln!("{e}");
                     process::exit(1);
                 }
+            }
+        }
+
+        // ── Examples ─────────────────────────────────────────────────
+        Command::Examples { cmd } => {
+            let result = match cmd {
+                ExamplesCommand::List => {
+                    print!("{}", examples::list());
+                    Ok(())
+                }
+
+                ExamplesCommand::Serve {
+                    name,
+                    port,
+                    open,
+                    hot_reload,
+                } => examples::serve(&name, port, open, hot_reload),
+            };
+
+            if let Err(e) = result {
+                eprintln!("error: {e}");
+                process::exit(1);
             }
         }
 

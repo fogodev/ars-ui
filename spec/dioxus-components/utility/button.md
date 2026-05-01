@@ -15,84 +15,149 @@ This spec maps the core [`Button`](../../components/utility/button.md) contract 
 ## 2. Public Adapter API
 
 ```rust,no_check
+pub use ars_components::utility::button::{FormEncType, FormMethod, FormTarget, Size, Type, Variant};
+pub use ars_core::{SafeUrl, UnsafeUrlError};
+pub use ars_interactions::{PressEvent, PressEventType};
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FormAction(Option<SafeUrl>);
+
+impl From<SafeUrl> for FormAction { /* ... */ }
+impl From<&'static str> for FormAction { /* ... */ }
+
 #[derive(Props, Clone, PartialEq)]
 pub struct ButtonProps {
-    #[props(optional)]
+    #[props(optional, into)]
     pub id: Option<String>,
     #[props(default = false)]
     pub disabled: bool,
     #[props(default = false)]
     pub loading: bool,
-    #[props(optional)]
-    pub variant: Option<String>,
-    #[props(optional)]
-    pub size: Option<String>,
-    #[props(optional)]
+    #[props(optional, into)]
+    pub variant: Option<button::Variant>,
+    #[props(optional, into)]
+    pub size: Option<button::Size>,
+    #[props(optional, into)]
     pub r#type: Option<button::Type>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub form: Option<String>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub name: Option<String>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub value: Option<String>,
+    #[props(default, into)]
+    pub form_action: FormAction,
+    #[props(optional, into)]
+    pub form_method: Option<button::FormMethod>,
+    #[props(optional, into)]
+    pub form_enc_type: Option<button::FormEncType>,
+    #[props(optional, into)]
+    pub form_target: Option<button::FormTarget>,
     #[props(default = false)]
-    pub as_child: bool,
+    pub form_no_validate: bool,
     #[props(default = false)]
     pub exclude_from_tab_order: bool,
     #[props(default = false)]
     pub auto_focus: bool,
     #[props(default = false)]
     pub prevent_focus_on_press: bool,
+    #[props(optional, into)]
+    pub class: Option<String>,
+    #[props(optional, into)]
+    pub style: Option<String>,
+    #[props(optional, into)]
+    pub aria_label: Option<String>,
+    #[props(optional, into)]
+    pub aria_labelledby: Option<String>,
+    #[props(optional)]
+    pub on_press_start: Option<Callback<PressEvent>>,
+    #[props(optional)]
+    pub on_press_end: Option<Callback<PressEvent>>,
+    #[props(optional)]
+    pub on_press: Option<Callback<PressEvent>>,
+    #[props(optional)]
+    pub on_press_change: Option<Callback<bool>>,
+    #[props(optional)]
+    pub on_press_up: Option<Callback<PressEvent>>,
     pub children: Element,
 }
 
 #[component]
 pub fn Button(props: ButtonProps) -> Element
+
+#[derive(Props, Clone, PartialEq)]
+pub struct ButtonAsChildProps {
+    #[props(optional, into)]
+    pub id: Option<String>,
+    #[props(default = false)]
+    pub disabled: bool,
+    #[props(default = false)]
+    pub loading: bool,
+    #[props(optional, into)]
+    pub variant: Option<button::Variant>,
+    #[props(optional, into)]
+    pub size: Option<button::Size>,
+    #[props(default = false)]
+    pub exclude_from_tab_order: bool,
+    #[props(optional, into)]
+    pub class: Option<String>,
+    #[props(optional, into)]
+    pub style: Option<String>,
+    #[props(optional, into)]
+    pub aria_label: Option<String>,
+    #[props(optional, into)]
+    pub aria_labelledby: Option<String>,
+    pub render: Callback<AsChildRenderProps, Element>,
+}
+
+#[component]
+pub fn ButtonAsChild(props: ButtonAsChildProps) -> Element
 ```
 
-The adapter surfaces the full core prop set. Plain props are preferred; controlled reactivity is introduced only when a wrapper needs it.
+The native `Button` surfaces the full core prop set. `ButtonAsChild` exposes state, visual, tab-order, and consumer root attrs only; native button/form attrs belong on a callback-owned child root when needed. Plain props are preferred; controlled reactivity is introduced only when a wrapper needs it.
 
 ## 3. Mapping to Core Component Contract
 
-- Props parity: full parity with the core `Props`, including form overrides, locale/messages, and `as_child`.
-- Event parity: `Focus`, `Blur`, `Press`, `Release`, `Click`, `SetLoading`, and `SetDisabled` are all adapter-driven.
+- Props parity: native `Button` has full parity with the core `Props`, including the typed `Variant`/`Size` surface and full native form overrides. `ButtonAsChild` forwards only the root attrs that are legal for arbitrary callback roots.
+- Event parity: native `Button` drives `Focus`, `Blur`, `Press`, `Release`, `Click`, `SetLoading`, and `SetDisabled`. `ButtonAsChild` is attr-forwarding only until the shared as-child contract supports handler forwarding.
 - Core machine ownership: `use_machine::<button::Machine>(...)` remains the single source of truth for state and attrs.
 
 ## 4. Part Mapping
 
-| Core part / structure | Required?   | Adapter rendering target                                   | Ownership                                                                                                                  | Attr source                                                   | Notes                                                                             |
-| --------------------- | ----------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `Root`                | required    | `<button>` by default; consumer child when `as_child=true` | adapter-owned by default; consumer-owned under root reassignment                                                           | `api.root_attrs()`                                            | The core `Root` never disappears; only the rendering target changes.              |
-| `LoadingIndicator`    | conditional | `<span>` inside `Root` while `api.is_loading()`            | adapter-owned                                                                                                              | `api.loading_indicator_attrs()`                               | Must stay `aria-hidden="true"`.                                                   |
-| `Content`             | required    | `<span>` wrapping the visible label/icon slot              | adapter-owned by default; may be suppressed only if a documented `as_child` strategy merges directly into a consumer child | adapter-owned structural attrs plus `data-ars-part="content"` | The core `Part::Content` exists even though `part_attrs(Part::Content)` is empty. |
+| Core part / structure | Required?   | Adapter rendering target                                    | Ownership                                                                    | Attr source                     | Notes                                                                |
+| --------------------- | ----------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------- |
+| `Root`                | required    | `<button>` by default; consumer child when `as_child=true`  | adapter-owned by default; consumer-owned under root reassignment             | `api.root_attrs()`              | The core `Root` never disappears; only the rendering target changes. |
+| `LoadingIndicator`    | conditional | `<span>` inside `Root` while `button::Api::is_loading(api)` | adapter-owned                                                                | `api.loading_indicator_attrs()` | Uses the core status/live attrs while loading.                       |
+| `Content`             | required    | `<span>` wrapping the visible label/icon slot               | adapter-owned by default; suppressed under `ButtonAsChild` root reassignment | `api.content_attrs()`           | The native `Button` renders the core content attrs directly.         |
 
 ## 5. Attr Merge and Ownership Rules
 
-| Target node        | Core attrs                                                                    | Adapter-owned attrs                                                              | Consumer attrs                                                                         | Merge order                                                                                                                                                                                                                            | Ownership notes                                                                                             |
-| ------------------ | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `Root`             | `api.root_attrs()` including state, ARIA, `type`, `form`, and tab-order attrs | pointer-modality bookkeeping hooks and any adapter-local `data-ars-part` helpers | hosting-component root attrs; child attrs when `as_child=true`                         | core required state/ARIA attrs win; native attrs required by the core contract win; `class`/`style` merge additively; handlers compose adapter after child for observation and adapter before child when preventing invalid activation | adapter-owned by default; consumer-owned only after root reassignment under `as_child`                      |
-| `LoadingIndicator` | `api.loading_indicator_attrs()`                                               | none beyond structural wrapper choice                                            | no direct consumer attrs unless the hosting component exposes a dedicated loading slot | core attrs apply as-is; consumer decoration must not remove `aria-hidden`                                                                                                                                                              | always adapter-owned when rendered                                                                          |
-| `Content`          | no core attr map beyond conceptual part identity                              | `data-ars-part="content"` and any wrapper-only attrs                             | consumer children content only                                                         | adapter structural attrs always remain; consumer classes decorate content inside the wrapper rather than replacing it                                                                                                                  | wrapper is adapter-owned unless a documented `as_child` strategy folds the wrapper into the reassigned root |
+| Target node        | Core attrs                                                                    | Adapter-owned attrs                                                              | Consumer attrs                                                                                  | Merge order                                                                                                                                                                                                      | Ownership notes                                                                                             |
+| ------------------ | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `Root`             | `api.root_attrs()` including state, ARIA, `type`, `form`, and tab-order attrs | pointer-modality bookkeeping hooks and any adapter-local `data-ars-part` helpers | exposed `class`, `style`, `aria_label`, and `aria_labelledby`; child attrs when `as_child=true` | core required state/ARIA attrs win; native attrs required by the native root contract win; `class`/`style` merge additively; handlers compose adapter before public callbacks when preventing invalid activation | adapter-owned by default; consumer-owned only after root reassignment under `as_child`                      |
+| `LoadingIndicator` | `api.loading_indicator_attrs()`                                               | none beyond structural wrapper choice                                            | no direct consumer attrs unless the hosting component exposes a dedicated loading slot          | core attrs apply as-is; consumer decoration must not remove status/live attrs while loading                                                                                                                      | always adapter-owned when rendered                                                                          |
+| `Content`          | no core attr map beyond conceptual part identity                              | `data-ars-part="content"` and any wrapper-only attrs                             | consumer children content only                                                                  | adapter structural attrs always remain; consumer classes decorate content inside the wrapper rather than replacing it                                                                                            | wrapper is adapter-owned unless a documented `as_child` strategy folds the wrapper into the reassigned root |
 
-- `id`, `role`, `tabindex`, `aria-*`, `data-*`, `type`, `name`, `value`, and `form` must preserve the core contract even when consumer attrs are present.
+- Native `Button` preserves `id`, `role`, `tabindex`, `aria-*`, `data-*`, `type`, `name`, `value`, and `form` even when consumer attrs are present.
+- `ButtonAsChild` preserves `id`, `role`, `tabindex`, `aria-*`, and `data-*`, but filters native-only button/form attrs before forwarding to arbitrary callback roots.
 - `class` and `style` are additive unless the hosting component explicitly declares a non-additive escape hatch.
 - Under `as_child`, root reassignment changes rendered-node ownership only; it does not allow the consumer child to drop core accessibility or state attrs.
 
 ## 6. Composition / Context Contract
 
-`Button` is standalone. When `as_child=true`, the adapter reassigns `Root` to the single consumer child and must document whether `Content` remains a wrapper or is folded into the child structure. No other contexts are required.
+`Button` is standalone. `ButtonAsChild` reassigns `Root` through an explicit render callback that receives `AsChildRenderProps`; the callback-owned root must spread the provided root attrs. This path forwards the root attr map without adding a wrapper node. The native `Button` keeps the `Content` wrapper, while `ButtonAsChild` treats the callback root as the root and does not render the adapter-owned content wrapper. No other contexts are required.
 
 ## 7. Prop Sync and Event Mapping
 
 Controlled/uncontrolled switching is not supported after mount. `disabled` and `loading` are controlled reactive inputs; all default-only values are read at initialization unless a higher-level wrapper documents additional sync.
 
-| Adapter prop             | Mode                      | Sync trigger                      | Machine event / update path                              | Visible effect                                                            | Notes                                                                              |
-| ------------------------ | ------------------------- | --------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `disabled`               | controlled                | signal or prop change after mount | `SetDisabled`                                            | updates focusability, disabled semantics, and blocked activation behavior | sync is immediate and effect-based                                                 |
-| `loading`                | controlled                | signal or prop change after mount | `SetLoading`                                             | toggles loading indicator, busy state, and blocked activation behavior    | sync is immediate and effect-based                                                 |
-| `prevent_focus_on_press` | controlled                | signal or prop change after mount | adapter reads latest value before pointer press handling | affects whether `pointerdown` prevents focus movement                     | no separate machine event unless the core machine models it directly               |
-| `type`                   | non-reactive adapter prop | render time only                  | included in root props passed to the machine             | controls native submit/reset/button behavior                              | post-mount changes should be treated as unsupported unless a wrapper reinitializes |
-| `form`                   | non-reactive adapter prop | render time only                  | included in root props passed to the machine             | binds the button to the target form owner                                 | post-mount changes should be treated as unsupported unless a wrapper reinitializes |
+| Adapter prop              | Mode                      | Sync trigger                      | Machine event / update path                                       | Visible effect                                                            | Notes                                                                              |
+| ------------------------- | ------------------------- | --------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `disabled`                | controlled                | signal or prop change after mount | `SetDisabled`                                                     | updates focusability, disabled semantics, and blocked activation behavior | sync is immediate and effect-based                                                 |
+| `loading`                 | controlled                | signal or prop change after mount | `SetLoading`                                                      | toggles loading indicator, busy state, and blocked activation behavior    | sync is immediate and effect-based                                                 |
+| `prevent_focus_on_press`  | adapter prop              | prop change after mount           | adapter reads current machine props before pointer press handling | affects whether `pointerdown` prevents focus movement                     | no separate machine event unless the core machine models it directly               |
+| `type`                    | non-reactive adapter prop | render time only                  | included in root props passed to the machine                      | controls native submit/reset/button behavior                              | post-mount changes should be treated as unsupported unless a wrapper reinitializes |
+| `form` and form overrides | non-reactive adapter prop | render time only                  | included in root props passed to the machine                      | binds the button to the target form owner and native form override attrs  | `form_action` accepts `SafeUrl` or a static string through `FormAction`; DOM output remains sanitized by the core contract |
 
 | UI event                      | Preconditions                                          | Machine event / callback path              | Ordering notes                                                                                       | Notes                                                         |
 | ----------------------------- | ------------------------------------------------------ | ------------------------------------------ | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
@@ -116,11 +181,11 @@ Controlled/uncontrolled switching is not supported after mount. `disabled` and `
 
 ## 9. Ref and Node Contract
 
-| Target part / node | Ref required?                                                                   | Ref owner                                                                   | Node availability                  | Composition rule                                               | Notes                                                                    |
-| ------------------ | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `Root`             | yes for focus management, press normalization, and `as_child` root reassignment | adapter-owned by default; composed with the consumer child under `as_child` | required after mount               | compose adapter ref with the consumer ref when `as_child=true` | The adapter may not rely on IDs alone for focus and activation behavior. |
-| `LoadingIndicator` | no                                                                              | adapter-owned                                                               | always structural, handle optional | no composition                                                 | Structural only.                                                         |
-| `Content` wrapper  | no                                                                              | adapter-owned unless folded into a documented `as_child` strategy           | always structural, handle optional | no composition unless root reassignment eliminates the wrapper | The content wrapper is not the interaction target.                       |
+| Target part / node | Ref required?                                                     | Ref owner                                                         | Node availability                      | Composition rule                                               | Notes                                                                           |
+| ------------------ | ----------------------------------------------------------------- | ----------------------------------------------------------------- | -------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `Root`             | no public ref requirement unless an imperative focus API is added | adapter-owned by default; consumer-owned under `as_child`         | event target supplied by the framework | no composed ref contract in the first Button adapter           | Declarative event handlers are sufficient for the current press/focus behavior. |
+| `LoadingIndicator` | no                                                                | adapter-owned                                                     | always structural, handle optional     | no composition                                                 | Structural only.                                                                |
+| `Content` wrapper  | no                                                                | adapter-owned unless folded into a documented `as_child` strategy | always structural, handle optional     | no composition unless root reassignment eliminates the wrapper | The content wrapper is not the interaction target.                              |
 
 ## 10. State Machine Boundary Rules
 
@@ -131,18 +196,18 @@ Controlled/uncontrolled switching is not supported after mount. `disabled` and `
 
 ## 11. Callback Payload Contract
 
-| Callback                                              | Payload source             | Payload shape                                                               | Timing                                                  | Cancelable? | Notes                                                           |
-| ----------------------------------------------------- | -------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------- | ----------- | --------------------------------------------------------------- |
-| activation / click callback when exposed by a wrapper | normalized adapter payload | `{ original_event?: framework event, is_keyboard: bool, is_loading: bool }` | after normalized machine transition to click/activation | no          | Native `<button>` Enter and click semantics must converge here. |
-| press-start / press-end callback when exposed         | normalized adapter payload | `{ pointer_type?: string, is_keyboard: bool }`                              | after `Press` / after `Release` respectively            | no          | Must reflect deduplicated native button behavior.               |
+| Callback                                          | Payload source             | Payload shape                  | Timing                                       | Cancelable? | Notes                                                      |
+| ------------------------------------------------- | -------------------------- | ------------------------------ | -------------------------------------------- | ----------- | ---------------------------------------------------------- |
+| `on_press_start` / `on_press_end` / `on_press_up` | normalized adapter payload | `ars_interactions::PressEvent` | after `Press` / after `Release` respectively | no          | Must reflect deduplicated native button behavior.          |
+| `on_press`                                        | normalized adapter payload | `ars_interactions::PressEvent` | after normalized click/activation handling   | no          | Native `<button>` Enter and click semantics converge here. |
+| `on_press_change`                                 | normalized adapter payload | `bool`                         | when pressed state enters or exits           | no          | Mirrors the normalized press lifecycle.                    |
 
 ## 12. Failure and Degradation Rules
 
-| Condition                                                                | Policy    | Notes                                                      |
-| ------------------------------------------------------------------------ | --------- | ---------------------------------------------------------- |
-| `as_child` receives zero or multiple children                            | fail fast | Root reassignment requires exactly one consumer child.     |
-| root node handle unavailable after mount in an interactive configuration | fail fast | Press/focus normalization depends on a concrete root node. |
-| browser-only activation details unavailable during SSR                   | no-op     | SSR renders structure only; no interactive behavior runs.  |
+| Condition                                              | Policy    | Notes                                                     |
+| ------------------------------------------------------ | --------- | --------------------------------------------------------- |
+| `as_child` receives zero or multiple children          | fail fast | Root reassignment requires exactly one consumer child.    |
+| browser-only activation details unavailable during SSR | no-op     | SSR renders structure only; no interactive behavior runs. |
 
 ## 13. Identity and Key Policy
 
@@ -153,7 +218,7 @@ Controlled/uncontrolled switching is not supported after mount. `disabled` and `
 ## 14. SSR and Client Boundary Rules
 
 - SSR must render the same `Root` / `LoadingIndicator?` / `Content` structure implied by the initial machine state.
-- The root node handle is server-safe absent and becomes required after mount for interaction logic.
+- No root node handle is required by the first Button adapter contract.
 - Pointer, focus, and keyboard normalization are client-only behaviors.
 - `as_child` must not change the server/client child count across hydration.
 
@@ -173,11 +238,11 @@ Controlled/uncontrolled switching is not supported after mount. `disabled` and `
 ## 17. Recommended Implementation Sequence
 
 1. Initialize the button machine and confirm the `Root`, `LoadingIndicator`, and `Content` structure.
-2. Establish the root ref strategy, including composed refs under `as_child`.
+2. Establish root attr derivation, including native-attr filtering under `as_child`.
 3. Derive root/loading/content attrs and render the documented structure.
 4. Wire controlled sync for `disabled` and `loading`.
 5. Normalize pointer, focus, click, and keyboard events.
-6. Add callback wiring, SSR guards, and cleanup for pointer-modality bookkeeping.
+6. Add press callback wiring, SSR guards, and cleanup for pointer-modality bookkeeping.
 
 ## 18. Anti-Patterns
 
@@ -212,7 +277,7 @@ Controlled/uncontrolled switching is not supported after mount. `disabled` and `
 
 ## 23. Framework-Specific Behavior
 
-Dioxus 0.7.x allows the adapter to keep root attrs in a memo and spread them into the rendered node. `as_child` requires an adapter-local vnode merge helper. Required contexts use `try_use_context::<T>().expect(...)`; optional ones use `try_use_context::<T>()`.
+Dioxus 0.7.x allows the adapter to keep root attrs in a memo and spread them into the rendered node. `ButtonAsChild` uses the existing explicit render callback contract instead of vnode mutation: the adapter passes `AsChildRenderProps { attrs }`, and the callback root spreads `..attrs`. Required contexts use `try_use_context::<T>().expect(...)`; optional ones use `try_use_context::<T>()`.
 
 ## 24. Canonical Implementation Sketch
 
@@ -239,7 +304,7 @@ pub fn Button(props: ButtonSketchProps) -> Element {
     let machine = use_machine::<button::Machine>(core_props);
     let root_attrs = machine.derive(|api| api.root_attrs());
     let loading_attrs = machine.derive(|api| api.loading_indicator_attrs());
-    let is_loading = machine.derive(|api| api.is_loading());
+    let is_loading = machine.derive(button::Api::is_loading);
     let mut last_pointer = use_signal(|| false);
 
     rsx! {
@@ -248,7 +313,7 @@ pub fn Button(props: ButtonSketchProps) -> Element {
             onpointerdown: move |ev| {
                 last_pointer.set(true);
                 machine.send.call(button::Event::Press);
-                if machine.with_api_snapshot(|api| api.should_prevent_focus_on_press()) {
+                if machine.with_api_snapshot(button::Api::should_prevent_focus_on_press) {
                     ev.prevent_default();
                 }
             },
@@ -302,22 +367,23 @@ on_cleanup(|| release_pointer_or_focus_bookkeeping());
 - When `loading=true`, the adapter must block native submit and reset activation without relying on HTML `disabled`.
 - Loading state must preserve accessibility exposure through core disabled semantics rather than removing the control from discovery.
 - `Root` must remain conceptually present under `as_child`; only the rendering target changes through root reassignment.
-- `Content` must remain a documented structural node even when the core content attr map is empty.
-- `LoadingIndicator` must stay structurally distinct and `aria-hidden` whenever it is rendered.
+- `Content` must remain a documented structural node for native `<button>` rendering.
+- `ButtonAsChild` reassigns `Root` only and does not render adapter-owned `Content` or `LoadingIndicator` wrappers.
+- `LoadingIndicator` must stay structurally distinct and expose core status/live attrs whenever it is rendered.
 - Callbacks must follow normalized press and activation semantics rather than raw DOM event order.
 
 ## 27. Accessibility and SSR Notes
 
-- `LoadingIndicator` is decorative and must remain `aria-hidden`.
+- `LoadingIndicator` exposes loading progress through `role="status"` and `aria-live="polite"` while rendered.
 - `Content` is part of the accessible name unless overridden by `aria-label` or `aria-labelledby`.
 - Loading uses `aria-disabled="true"` and `aria-busy="true"` instead of the HTML `disabled` attribute.
 - SSR must preserve stable IDs and initial loading state.
 
 ## 28. Parity Summary and Intentional Deviations
 
-Parity summary: full core prop, part, and event parity.
+Parity summary: native `Button` has full core prop, part, and event parity. `ButtonAsChild` has root attr parity only and intentionally omits native form props and press callbacks until shared as-child event forwarding exists.
 
-Intentional deviations: none. If an adapter-local `as_child` helper folds `Content` differently, that difference must remain purely structural and not delete the conceptual part.
+Intentional deviations: `ButtonAsChild` filters native-only button/form attrs because the callback API cannot prove the child root is a native `<button>`. The native `Button` remains the full form-capable path.
 
 ## 29. Test Scenarios
 

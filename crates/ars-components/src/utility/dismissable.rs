@@ -55,7 +55,7 @@ pub enum DismissReason {
 
     /// The user activated one of the visually-hidden dismiss buttons (or a
     /// wrapper invoked the programmatic adapter handle's `dismiss`,
-    /// e.g. `ars_leptos::dismissable::Handle::dismiss`).
+    /// e.g. `ars_leptos::utility::dismissable::Handle::dismiss`).
     DismissButton,
 }
 

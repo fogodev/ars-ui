@@ -14,9 +14,7 @@ pub mod as_child;
 mod attrs;
 mod callbacks;
 mod controlled;
-pub mod dismissable;
 mod ephemeral;
-pub mod error_boundary;
 mod event_mapping;
 mod hydration;
 mod id;
@@ -25,6 +23,7 @@ pub mod prelude;
 mod provider;
 mod safe_listener;
 mod use_machine;
+pub mod utility;
 
 #[cfg(not(feature = "ssr"))]
 pub use attrs::{

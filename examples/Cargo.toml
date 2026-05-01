@@ -1,0 +1,10 @@
+[workspace]
+members = [
+  "widgets-dioxus",
+  "widgets-leptos",
+  "widgets-dioxus-css",
+  "widgets-leptos-css",
+  "widgets-dioxus-tailwind",
+  "widgets-leptos-tailwind"
+]
+resolver = "3"

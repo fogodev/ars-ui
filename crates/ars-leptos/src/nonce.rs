@@ -38,12 +38,15 @@ pub fn use_nonce_css_context_provider() -> ArsNonceCssCtx {
     unreachable_pub,
     reason = "ArsNonceCssProvider is re-exported at the adapter crate root."
 )]
-pub fn ArsNonceCssProvider(nonce: String, children: Children) -> impl IntoView {
+pub fn ArsNonceCssProvider<T>(nonce: String, children: TypedChildren<T>) -> impl IntoView
+where
+    View<T>: IntoView,
+{
     use_nonce_css_context_provider();
 
     view! {
         <ArsNonceStyle nonce />
-        {children()}
+        {children.into_inner()()}
     }
 }
 
@@ -70,9 +73,7 @@ pub fn ArsNonceStyle(nonce: String) -> impl IntoView {
             .unwrap_or_default()
     };
 
-    view! {
-        <style nonce=nonce>{css_text}</style>
-    }
+    view! { <style nonce=nonce>{css_text}</style> }
 }
 
 /// Collects a CSS rule using the rule text as its stable key.

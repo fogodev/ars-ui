@@ -700,7 +700,7 @@ mod tests {
                             state_attr_service
                                 .lock()
                                 .expect("service lock should not be poisoned")
-                                .state()
+                                .state(),
                         )
                     }
                 >
@@ -712,7 +712,7 @@ mod tests {
                                 state_text_service
                                     .lock()
                                     .expect("service lock should not be poisoned")
-                                    .state()
+                                    .state(),
                             )
                         }}
                     </span>

@@ -16,6 +16,14 @@ members = [
     "crates/ars-test-harness-leptos",
     "xtask"
 ]
+exclude = [
+    "examples/widgets-leptos",
+    "examples/widgets-dioxus",
+    "examples/widgets-leptos-css",
+    "examples/widgets-dioxus-css",
+    "examples/widgets-leptos-tailwind",
+    "examples/widgets-dioxus-tailwind",
+]
 resolver = "3"
 
 [workspace.package]

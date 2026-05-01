@@ -40,14 +40,16 @@ pub struct Handle {
 }
 
 #[component]
-pub fn Region(
+pub fn Region<T>(
     props: dismissable::Props,
     #[prop(optional, into)] inside_boundaries: Option<Signal<Vec<String>>>,
     #[prop(optional, into)] dismiss_label: Option<Signal<String>>,
     #[prop(optional, into)] locale: Option<Signal<Locale>>,
     #[prop(optional)] messages: Option<dismissable::Messages>,
-    children: Children,
+    children: TypedChildren<T>,
 ) -> impl IntoView
+where
+    View<T>: IntoView
 ```
 
 `Handle` is intentionally `Copy`. Both fields live in the active Leptos
@@ -212,10 +214,10 @@ Dismissable state is primarily interaction-driven. Configuration props are gener
 
 ## 22. Shared Adapter Helper Notes
 
-| Helper concept                    | Required?   | Responsibility                                                                                                                                                                                                  | Reused by                                                      | Notes                                                                                                                                                      |
-| --------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| node-boundary registration helper | required    | `ars_dom::outside_interaction::target_is_inside_boundary` — walks DOM ancestors checking root containment, ancestor `id` matches, and `data-ars-portal-owner` ↔ overlay-stack portal ownership.                 | `dismissable`, overlays, `focus-scope`                         | IDs are insufficient once live-node containment is required; portal-owner walking is the documented path. See `spec/foundation/11-dom-utilities.md` §12.1. |
-| platform capability helper        | recommended | `ars_dom::outside_interaction::install_outside_interaction_listeners` — installs document `pointerdown`+`focusin` and root-scoped `keydown` listeners gated on `overlay_stack::is_topmost`; returns a teardown. | `dismissable`, `download-trigger`, `drop-zone`, `action-group` | Web wires real listeners; non-wasm targets return a no-op teardown so adapters call uniformly. See `spec/foundation/11-dom-utilities.md` §12.2.            |
+| Helper concept                    | Required?   | Responsibility                                                                                                                                                                                  | Reused by                                                      | Notes                                                                                                                                                      |
+| --------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| node-boundary registration helper | required    | `ars_dom::outside_interaction::target_is_inside_boundary` — walks DOM ancestors checking root containment, ancestor `id` matches, and `data-ars-portal-owner` ↔ overlay-stack portal ownership. | `dismissable`, overlays, `focus-scope`                         | IDs are insufficient once live-node containment is required; portal-owner walking is the documented path. See `spec/foundation/11-dom-utilities.md` §12.1. |
+| platform capability helper        | recommended | `ars_dom::outside_interaction::install_outside_interaction_listeners` — installs document `pointerdown`+`focusin`+`keydown` listeners gated on `overlay_stack::is_topmost`; returns a teardown. | `dismissable`, `download-trigger`, `drop-zone`, `action-group` | Web wires real listeners; non-wasm targets return a no-op teardown so adapters call uniformly. See `spec/foundation/11-dom-utilities.md` §12.2.            |
 
 ## 23. Framework-Specific Behavior
 
@@ -228,14 +230,17 @@ use ars_leptos::{attr_map_to_leptos, prelude::*};
 use leptos::{html, prelude::*, tachys::html::attribute::any_attribute::AnyAttribute};
 
 #[component]
-pub fn Region(
+pub fn Region<T>(
     props: dismissable::Props,
     #[prop(optional, into)] inside_boundaries: Option<Signal<Vec<String>>>,
     #[prop(optional, into)] dismiss_label: Option<Signal<String>>,
     #[prop(optional, into)] locale: Option<Signal<Locale>>,
     #[prop(optional)] messages: Option<dismissable::Messages>,
-    children: Children,
-) -> impl IntoView {
+    children: TypedChildren<T>,
+) -> impl IntoView
+where
+    View<T>: IntoView,
+{
     let root_ref = NodeRef::<html::Div>::new();
     let boundaries = inside_boundaries.unwrap_or_else(|| Signal::stored(Vec::new()));
 
@@ -280,7 +285,7 @@ pub fn Region(
     view! {
         <div {..root_attrs} node_ref=root_ref>
             <button {..leptos_attrs.clone()} on:click=move |_| { handle.dismiss.run(()); } />
-            {children()}
+            {children.into_inner()()}
             <button {..leptos_attrs} on:click=move |_| { handle.dismiss.run(()); } />
         </div>
     }
