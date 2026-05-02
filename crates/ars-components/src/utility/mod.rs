@@ -28,11 +28,19 @@ pub mod fieldset;
 /// Form machine.
 pub mod form;
 
+/// `FocusRing` component (stateless attribute mapper for keyboard-vs-pointer
+/// focus modality).
+pub mod focus_ring;
+
 /// Form submit machine.
 pub mod form_submit;
 
 /// `Heading` component (stateless heading-level mapper).
 pub mod heading;
+
+/// `Keyboard` component (stateless `<kbd>` shortcut renderer with
+/// platform-aware modifier mapping).
+pub mod keyboard;
 
 /// `Landmark` component (stateless ARIA landmark mapper).
 pub mod landmark;

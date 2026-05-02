@@ -170,7 +170,7 @@ pub struct FocusRingSketchProps {
 
 #[component]
 pub fn FocusRing(props: FocusRingSketchProps) -> Element {
-    let api = focus_ring::Api::new(focus_ring::Context { within: false, focus_visible: false }, focus_ring::Props::default());
+    let api = focus_ring::Api::new(focus_ring::Context { focus_visible: false }, focus_ring::Props::default());
     rsx! { span { ..api.root_attrs(), {props.children} } }
 }
 ```
