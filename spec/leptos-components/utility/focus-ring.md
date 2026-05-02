@@ -149,7 +149,7 @@ Leptos can derive focus-visible attrs reactively.
 ```rust
 #[component]
 pub fn FocusRing(children: Children) -> impl IntoView {
-    let api = focus_ring::Api::new(focus_ring::Context { within: false, focus_visible: false }, focus_ring::Props::default());
+    let api = focus_ring::Api::new(focus_ring::Context { focus_visible: false }, focus_ring::Props::default());
     view! { <span {..api.root_attrs()}>{children()}</span> }
 }
 ```

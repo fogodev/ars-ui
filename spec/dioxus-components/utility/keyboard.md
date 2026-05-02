@@ -24,6 +24,11 @@ pub struct KeyboardProps {
     pub platform_aware: bool,
     #[props(default = false)]
     pub is_mac: bool,
+    /// When `true`, the rendered `<kbd>` is purely decorative and the
+    /// agnostic core emits `aria-hidden="true"` on the root. See core
+    /// `keyboard::Props::decorative` for usage guidance.
+    #[props(default = false)]
+    pub decorative: bool,
     #[props(optional)]
     pub locale: Option<Locale>,
 }

@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/utility/focus_ring.rs
+expression: "snapshot_attrs(&Api::new(ctx_focus_visible(), default_props()).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-focus-visible",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "focus-ring",
+            ),
+        ),
+    ],
+    styles: [],
+}

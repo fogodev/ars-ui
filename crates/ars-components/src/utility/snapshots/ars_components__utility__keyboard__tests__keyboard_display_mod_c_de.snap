@@ -1,0 +1,5 @@
+---
+source: crates/ars-components/src/utility/keyboard.rs
+expression: "Api::new(&p).display_text(Some(&parse(\"de\")))"
+---
+Strg+C
