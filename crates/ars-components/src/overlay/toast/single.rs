@@ -523,7 +523,7 @@ impl ars_core::Machine for Machine {
     fn transition(
         state: &Self::State,
         event: &Self::Event,
-        _ctx: &Self::Context,
+        ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
@@ -542,13 +542,26 @@ impl ars_core::Machine for Machine {
             }
 
             // Resume — restart the timer using the recorded `remaining`.
-            (State::Paused, Event::Resume) => Some(
-                TransitionPlan::to(State::Visible)
-                    .apply(|ctx: &mut Context| {
-                        ctx.paused = false;
-                    })
-                    .with_effect(PendingEffect::named(Effect::DurationTimer)),
-            ),
+            //
+            // Persistent toasts (`duration: None`, typical for
+            // `Kind::Loading`) MUST NOT emit `Effect::DurationTimer` here.
+            // Adapters following the documented contract
+            // (`remaining.unwrap_or(duration)`) would otherwise either
+            // schedule a `set_timeout(None)` or auto-dismiss a toast that
+            // is supposed to stay until explicitly updated. This fires
+            // when manager-level `PauseAll`/`ResumeAll` cycles a
+            // persistent toast through `Paused → Visible`.
+            (State::Paused, Event::Resume) => {
+                let mut plan = TransitionPlan::to(State::Visible).apply(|ctx: &mut Context| {
+                    ctx.paused = false;
+                });
+
+                if ctx.duration.is_some() {
+                    plan = plan.with_effect(PendingEffect::named(Effect::DurationTimer));
+                }
+
+                Some(plan)
+            }
 
             // Auto-dismiss or manual dismiss → animate out.
             (State::Visible, Event::DurationExpired | Event::Dismiss)
@@ -1105,6 +1118,40 @@ mod tests {
             Some(Duration::from_millis(2_500))
         );
         assert_eq!(effect_names(&result), vec![Effect::DurationTimer]);
+    }
+
+    /// Regression test for the P1.B review finding: `Paused → Visible`
+    /// previously emitted `Effect::DurationTimer` unconditionally. A
+    /// persistent toast (`duration: None`, typical for `Kind::Loading`)
+    /// caught up in a manager-level `PauseAll` / `ResumeAll` cycle would
+    /// receive a bogus timer-restart intent. Adapters following the
+    /// documented contract (`remaining.unwrap_or(duration)`) would then
+    /// either auto-dismiss a toast that's supposed to stay until updated
+    /// or schedule a `set_timeout(None)`-equivalent.
+    #[test]
+    fn resume_persistent_toast_does_not_restart_timer() {
+        let mut service = fresh_service(Props {
+            duration: None,
+            kind: Kind::Loading,
+            ..test_props()
+        });
+
+        drop(service.take_initial_effects());
+        drop(service.send(Event::Pause {
+            remaining: Duration::ZERO,
+        }));
+
+        let result = service.send(Event::Resume);
+
+        assert_eq!(service.state(), &State::Visible);
+        assert!(!service.context().paused);
+        assert!(
+            !effect_names(&result).contains(&Effect::DurationTimer),
+            "persistent toasts (duration: None) MUST NOT emit DurationTimer on Resume"
+        );
+
+        // Stage flipped, but no timer-related effects.
+        assert!(result.pending_effects.is_empty());
     }
 
     #[test]

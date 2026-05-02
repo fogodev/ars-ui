@@ -1190,11 +1190,22 @@ fn assert_toast_send_result_invariants(
         );
     }
 
-    // Resume re-emits DurationTimer on every successful exit from Paused.
+    // Resume re-emits `DurationTimer` on a successful Paused → Visible
+    // transition **only when the toast has a finite duration**. Persistent
+    // toasts (`duration: None`, typical for `Kind::Loading`) deliberately
+    // skip the timer effect — emitting one would either schedule a
+    // `set_timeout(None)` or auto-dismiss a toast that's supposed to stay
+    // until explicit update / removal.
     if matches!(event, toast_single::Event::Resume) && result.state_changed {
         let names: Vec<_> = result.pending_effects.iter().map(|e| e.name).collect();
 
-        prop_assert!(names.contains(&toast_single::Effect::DurationTimer));
+        let has_duration = service.context().duration.is_some();
+
+        if has_duration {
+            prop_assert!(names.contains(&toast_single::Effect::DurationTimer));
+        } else {
+            prop_assert!(!names.contains(&toast_single::Effect::DurationTimer));
+        }
     }
 
     Ok(())

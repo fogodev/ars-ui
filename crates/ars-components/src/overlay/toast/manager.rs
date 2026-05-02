@@ -968,7 +968,9 @@ fn plan_add(ctx: &ManagerContext, config: Config) -> TransitionPlan<Machine> {
     {
         return match state {
             ExistingIdLocation::Tracked => plan_update(ctx, &explicit_id, config),
-            ExistingIdLocation::Queued => plan_replace_queued_by_id(&explicit_id, config),
+            ExistingIdLocation::Queued => {
+                plan_replace_queued_by_id(&explicit_id, config, ctx.default_durations)
+            }
         };
     }
 
@@ -977,7 +979,7 @@ fn plan_add(ctx: &ManagerContext, config: Config) -> TransitionPlan<Machine> {
     }
 
     if find_queued_dedup_match_index(ctx, &config).is_some() {
-        return plan_replace_queued(config);
+        return plan_replace_queued(config, ctx.default_durations);
     }
 
     let visible_count = ctx
@@ -1074,9 +1076,24 @@ fn locate_existing_id(ctx: &ManagerContext, id: &str) -> Option<ExistingIdLocati
     }
 }
 
+/// Fills `config.duration` from `default_durations.for_kind(kind)` when
+/// the caller left it unset. Called on every plan that writes a `Config`
+/// into `ctx.toasts` / `ctx.queued` so a user who builds a config with
+/// `Config::new(...)` (which leaves `duration: None`) doesn't silently
+/// flip an auto-dismissing toast into a persistent one.
+const fn fill_default_duration(config: &mut Config, default_durations: DefaultDurations) {
+    if config.duration.is_none() {
+        config.duration = default_durations.for_kind(config.kind);
+    }
+}
+
 /// Replaces a queued entry by its explicit id. Used by `plan_add` when the
 /// caller supplies an id that's already on a queued slot.
-fn plan_replace_queued_by_id(id: &str, config: Config) -> TransitionPlan<Machine> {
+fn plan_replace_queued_by_id(
+    id: &str,
+    config: Config,
+    default_durations: DefaultDurations,
+) -> TransitionPlan<Machine> {
     let id_for_apply = id.to_string();
     TransitionPlan::context_only(move |ctx: &mut ManagerContext| {
         if let Some(slot) = ctx
@@ -1091,12 +1108,17 @@ fn plan_replace_queued_by_id(id: &str, config: Config) -> TransitionPlan<Machine
 
             config.id = Some(id_for_apply.clone());
 
+            fill_default_duration(&mut config, default_durations);
+
             *slot = config;
         }
     })
 }
 
-fn plan_replace_queued(config: Config) -> TransitionPlan<Machine> {
+fn plan_replace_queued(
+    config: Config,
+    default_durations: DefaultDurations,
+) -> TransitionPlan<Machine> {
     // Replace the matching queued entry in place. No announcement effect
     // is scheduled because the queued config has not been admitted yet.
     TransitionPlan::context_only(move |ctx: &mut ManagerContext| {
@@ -1109,6 +1131,8 @@ fn plan_replace_queued(config: Config) -> TransitionPlan<Machine> {
 
             config.id = existing_id.or(config.id);
 
+            fill_default_duration(&mut config, default_durations);
+
             ctx.queued[index] = config;
         }
     })
@@ -1116,6 +1140,7 @@ fn plan_replace_queued(config: Config) -> TransitionPlan<Machine> {
 
 fn plan_update(ctx: &ManagerContext, id: &str, config: Config) -> TransitionPlan<Machine> {
     let kind = config.kind;
+    let default_durations = ctx.default_durations;
 
     let mut plan = TransitionPlan::context_only({
         let id = id.to_string();
@@ -1123,6 +1148,13 @@ fn plan_update(ctx: &ManagerContext, id: &str, config: Config) -> TransitionPlan
             let mut config = config;
 
             config.id = Some(id.clone());
+
+            // Apply the same `DefaultDurations` fallback `plan_add`
+            // applies. Without this, an `Update(id, Config::new(...))`
+            // (or a dedup-routed `Add` with `Config::new`, which leaves
+            // `duration: None`) would silently flip an auto-dismissing
+            // toast into a persistent one.
+            fill_default_duration(&mut config, default_durations);
 
             if let Some(entry) = ctx.toasts.iter_mut().find(|entry| entry.id == id) {
                 // Preserve the entry's current `stage`. If the entry was
@@ -1217,8 +1249,6 @@ fn plan_hide_queue_advance(ctx: &ManagerContext, id: String) -> TransitionPlan<M
         None
     };
 
-    let default_durations = ctx.default_durations;
-
     let mut plan = TransitionPlan::context_only(move |ctx: &mut ManagerContext| {
         ctx.toasts.retain(|entry| entry.id != id);
 
@@ -1235,17 +1265,17 @@ fn plan_hide_queue_advance(ctx: &ManagerContext, id: String) -> TransitionPlan<M
             .count();
 
         if visible_count < max_visible
-            && let Some(mut next) = ctx.queued.pop_front()
+            && let Some(next) = ctx.queued.pop_front()
         {
             let kind = next.kind;
 
-            if next.duration.is_none() {
-                // Defensive: `plan_add` already fills `duration` from
-                // `default_durations` before queueing, so this only fires
-                // when an `Update` re-introduced `duration: None` on a
-                // queued slot.
-                next.duration = default_durations.for_kind(kind);
-            }
+            // Invariant: every code path that pushes a `Config` into
+            // `ctx.queued` (`plan_add`, `plan_update`,
+            // `plan_replace_queued`, `plan_replace_queued_by_id`)
+            // applies `fill_default_duration` first, so a queued config
+            // either has `duration: Some(_)` or matches a kind whose
+            // default is `None` (currently only `Kind::Loading`). No
+            // promotion-time fallback is needed.
 
             // Invariant: `plan_add` and `plan_update` always set
             // `config.id = Some(...)` before pushing to `ctx.queued`, so
@@ -2456,6 +2486,95 @@ mod tests {
         assert!(result.pending_effects.is_empty());
     }
 
+    /// Regression test for the P1.A review finding: `plan_update` used
+    /// to write the incoming config directly without applying the
+    /// `DefaultDurations` fallback. An `Update(id, Config::new(...))` —
+    /// or any dedup-routed `Add` whose builder left `duration: None` —
+    /// silently flipped an auto-dismissing toast into a persistent one.
+    #[test]
+    fn update_with_unset_duration_falls_back_to_default() {
+        let mut service = fresh_service(test_props());
+        drop(service.send(Event::Add(add_config(Kind::Info, "loading"))));
+        let id = service.context().toasts[0].id.clone();
+        let original_duration = service.context().toasts[0].config.duration;
+        assert_eq!(original_duration, Some(Duration::from_secs(5)));
+
+        // `Config::new(...)` leaves `duration: None`.
+        drop(service.send(Event::Update(
+            id.clone(),
+            Config::new(Kind::Success, "done").description("ok"),
+        )));
+
+        let entry = service
+            .context()
+            .toasts
+            .iter()
+            .find(|e| e.id == id)
+            .expect("entry still tracked");
+
+        // Defaults were applied — toast still auto-dismisses.
+        assert_eq!(
+            entry.config.duration,
+            Some(Duration::from_secs(5)),
+            "Update with `duration: None` must fall back to \
+             `default_durations.for_kind(kind)` rather than silently \
+             turn the toast persistent"
+        );
+    }
+
+    /// P1.A regression sibling: an explicit `duration` on Update is NOT
+    /// overridden by the fallback. Only `None` is filled.
+    #[test]
+    fn update_preserves_explicit_duration() {
+        let mut service = fresh_service(test_props());
+        drop(service.send(Event::Add(add_config(Kind::Info, "x"))));
+        let id = service.context().toasts[0].id.clone();
+
+        let explicit = Some(Duration::from_secs(12));
+        drop(
+            service.send(Event::Update(
+                id.clone(),
+                Config::new(Kind::Info, "x")
+                    .description("body")
+                    .duration(explicit),
+            )),
+        );
+
+        let entry = service
+            .context()
+            .toasts
+            .iter()
+            .find(|e| e.id == id)
+            .expect("entry still tracked");
+
+        assert_eq!(
+            entry.config.duration, explicit,
+            "explicit duration on Update must NOT be overridden by the fallback"
+        );
+    }
+
+    /// P1.A regression: a dedup-routed `Add` (which internally goes
+    /// through `plan_update`) must not lose the default duration. Before
+    /// the fix, the second `Add` with `Config::new` would dedup to the
+    /// existing entry but leave `duration: None`.
+    #[test]
+    fn dedup_routed_add_keeps_default_duration() {
+        let mut service = fresh_service(test_props());
+        drop(service.send(Event::Add(add_config(Kind::Info, "same").deduplicate(true))));
+
+        // Second Add with same content → routes through `plan_update`
+        // via content-dedup. `add_config` returns a `Config::new`, so
+        // `duration` starts as `None`.
+        drop(service.send(Event::Add(add_config(Kind::Info, "same").deduplicate(true))));
+
+        assert_eq!(service.context().toasts.len(), 1);
+        assert_eq!(
+            service.context().toasts[0].config.duration,
+            Some(Duration::from_secs(5)),
+            "dedup-routed Update path must still fill the default duration"
+        );
+    }
+
     #[test]
     fn dedup_visible_resets_existing_instead_of_stacking() {
         let mut service = fresh_service(test_props());
@@ -3098,9 +3217,15 @@ mod tests {
         assert!(result.pending_effects.is_empty());
     }
 
+    /// `Update` no longer leaves `duration: None` on a queued slot —
+    /// `plan_update` applies `DefaultDurations::for_kind` before writing
+    /// to the slot (per the P1.A review fix). This test pins the new
+    /// contract: even an `Update` whose builder calls `.duration(None)`
+    /// does NOT leak a None duration through the queue. (The previous
+    /// contract relied on a promotion-time fallback in
+    /// `plan_hide_queue_advance` that's now genuinely unreachable.)
     #[test]
-    fn promote_re_fills_default_duration_when_update_cleared_it() {
-        // max_visible=1: live toast a, queued toast b (auto-id assigned).
+    fn update_on_queued_slot_fills_default_duration() {
         let mut service = fresh_service(Props {
             max_visible: 1,
             ..test_props()
@@ -3111,8 +3236,11 @@ mod tests {
 
         let queued_id = service.context().queued[0].id.clone().unwrap();
 
-        // Update the queued slot with `duration: None` — exercises the
-        // path where a queued slot lands without a default duration.
+        // Update the queued slot with explicit `duration: None`. Before
+        // the P1.A fix this would leak a None duration into the queue,
+        // breaking the auto-dismiss contract for the toast whenever it
+        // promotes. After the fix `plan_update` applies the default
+        // before writing the slot.
         drop(
             service.send(Event::Update(
                 queued_id.clone(),
@@ -3122,10 +3250,18 @@ mod tests {
             )),
         );
 
-        assert_eq!(service.context().queued[0].duration, None);
+        // Queue holds a fully-resolved config — no None leak.
+        assert_eq!(
+            service.context().queued[0].duration,
+            Some(Duration::from_secs(5)),
+            "Update must fill the default before writing to the queue"
+        );
+        assert_eq!(
+            service.context().queued[0].title.as_deref(),
+            Some("b-updated")
+        );
 
-        // Dismiss-and-advance the live toast → promote b. The defensive
-        // fallback at promotion fills `duration` from `default_durations`.
+        // After promotion the toast carries the same filled duration.
         let live_id = service.context().toasts[0].id.clone();
 
         drop(service.send(Event::Remove(live_id.clone())));
@@ -3133,12 +3269,8 @@ mod tests {
 
         let promoted = &service.context().toasts[0];
 
+        assert_eq!(promoted.config.duration, Some(Duration::from_secs(5)));
         assert_eq!(promoted.config.title.as_deref(), Some("b-updated"));
-        assert_eq!(
-            promoted.config.duration,
-            Some(Duration::from_secs(5)),
-            "promotion-time fallback must fill `default_durations.info` (5 s)"
-        );
     }
 
     #[test]
