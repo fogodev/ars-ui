@@ -1469,9 +1469,9 @@ mod tests {
 
         let api = default_service.connect(&|_| {});
 
-        assert!(!api.is_pressed());
-        assert!(!api.is_focus_visible());
-        assert!(!api.should_prevent_focus_on_press());
+        assert!(!Api::is_pressed(&api));
+        assert!(!Api::is_focus_visible(&api));
+        assert!(!Api::should_prevent_focus_on_press(&api));
 
         let mut service = service(test_props().prevent_focus_on_press(true));
 
@@ -1495,8 +1495,8 @@ mod tests {
 
         let api = idle.connect(&|_| {});
 
-        assert!(api.is_loading());
-        assert!(api.is_disabled());
+        assert!(Api::is_loading(&api));
+        assert!(Api::is_disabled(&api));
 
         let service = service(test_props().loading(true));
 
