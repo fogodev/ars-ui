@@ -1,0 +1,69 @@
+---
+source: crates/ars-components/src/data_display/avatar.rs
+expression: "snapshot_attrs(&errored.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "avatar",
+            ),
+        ),
+        (
+            Data(
+                "ars-shape",
+            ),
+            String(
+                "circle",
+            ),
+        ),
+        (
+            Data(
+                "ars-size",
+            ),
+            String(
+                "md",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "error",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Ada Lovelace",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "avatar-1",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "img",
+            ),
+        ),
+    ],
+    styles: [],
+}

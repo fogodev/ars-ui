@@ -1,5 +1,0 @@
-error: ComponentPart requires the first variant to be `Root`
- --> tests/ui/component_part_non_root.rs:6:5
-  |
-6 |     Trigger,
-  |     ^^^^^^^

@@ -15,6 +15,8 @@ This spec maps the core [`Avatar`](../../components/data-display/avatar.md) cont
 ## 2. Public Adapter API
 
 ```rust,no_check
+use core::time::Duration;
+
 #[component]
 pub fn Avatar(
     #[prop(optional)] id: Option<String>,
@@ -22,7 +24,7 @@ pub fn Avatar(
     name: String,
     #[prop(optional)] shape: Option<avatar::Shape>,
     #[prop(optional)] size: Option<avatar::Size>,
-    #[prop(optional)] fallback_delay: Option<u32>,
+    #[prop(optional)] fallback_delay: Option<Duration>,
     #[prop(optional)] locale: Option<Locale>,
     #[prop(optional)] messages: Option<avatar::Messages>,
     #[prop(optional)] fallback: Option<Children>,

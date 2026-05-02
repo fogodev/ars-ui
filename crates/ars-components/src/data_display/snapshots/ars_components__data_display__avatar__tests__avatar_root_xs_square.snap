@@ -1,0 +1,69 @@
+---
+source: crates/ars-components/src/data_display/avatar.rs
+expression: "snapshot_attrs(&service(props().size(Size::Xs).shape(Shape::Square)).connect(&|_|\n{}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "avatar",
+            ),
+        ),
+        (
+            Data(
+                "ars-shape",
+            ),
+            String(
+                "square",
+            ),
+        ),
+        (
+            Data(
+                "ars-size",
+            ),
+            String(
+                "xs",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "loading",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Ada Lovelace",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "avatar-1",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "img",
+            ),
+        ),
+    ],
+    styles: [],
+}
