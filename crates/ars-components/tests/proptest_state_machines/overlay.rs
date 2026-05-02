@@ -1535,6 +1535,30 @@ fn assert_toast_manager_send_result_invariants(
         all_ids
     );
 
+    // The announcement queue must hold at most one entry per toast id.
+    // `Update` is documented to **replace** the pending announcement
+    // for an id, not stack new ones on top — otherwise repeated
+    // updates between heartbeats would each fire their own
+    // `Announce*` effect for the same toast (round-9 regression).
+    let announce_ids: Vec<&str> = service
+        .context()
+        .announcement_queue
+        .iter()
+        .map(|(id, _)| id.as_str())
+        .collect();
+
+    let announce_unique = announce_ids
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+
+    prop_assert_eq!(
+        announce_ids.len(),
+        announce_unique.len(),
+        "announcement queue must hold at most one entry per toast id; got {:?}",
+        announce_ids
+    );
+
     // DrainAnnouncement on an empty queue is a state-preserving no-op.
     if matches!(event, toast_manager::Event::DrainAnnouncement { .. })
         && service.context().announcement_queue.is_empty()

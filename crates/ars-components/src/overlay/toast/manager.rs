@@ -1314,13 +1314,23 @@ fn plan_update(ctx: &ManagerContext, id: &str, config: Config) -> TransitionPlan
             plan = plan.with_effect(PendingEffect::named(Effect::ScheduleAnnouncement));
         }
 
-        // Push the new announcement onto the queue at the tail so the
-        // drain respects FIFO ordering relative to other adds.
+        // Replace any pending announcement for this id, then push the
+        // refreshed entry at the tail so the drain still respects FIFO
+        // ordering relative to *other* toasts. If we appended without
+        // removing first, multiple `Update`s before the next heartbeat
+        // would each enqueue a new tuple for the same id, and the drain
+        // would emit one `Announce*` effect per duplicate — producing
+        // repeated screen-reader output for what should be a single
+        // toast. Update is documented to *reset* the announcement
+        // entry, not stack new ones on top.
         let priority = kind.announce_priority();
 
         plan = plan.apply({
             let id = id.to_string();
             move |ctx: &mut ManagerContext| {
+                ctx.announcement_queue
+                    .retain(|(queued_id, _)| queued_id != &id);
+
                 ctx.announcement_queue.push_back((id, priority));
             }
         });
@@ -2614,15 +2624,100 @@ mod tests {
         // fires from `DrainAnnouncement`, never directly from `Update`.
         assert!(!effect_names(&result).contains(&Effect::AnnouncePolite));
 
-        // Two announcements queued: the original `Add` and this `Update`.
-        assert_eq!(service.context().announcement_queue.len(), 2);
-        assert!(
-            service
-                .context()
-                .announcement_queue
-                .iter()
-                .all(|(_, priority)| *priority == AnnouncePriority::Polite),
-            "both announcements should be polite (Info, then Success)"
+        // Update *replaces* the pending announcement for this id rather
+        // than stacking a second one — otherwise the heartbeat would
+        // emit two `Announce*` effects for a single toast (often with
+        // identical final content).
+        assert_eq!(service.context().announcement_queue.len(), 1);
+        let (queued_id, priority) = service.context().announcement_queue[0].clone();
+        assert_eq!(queued_id, id);
+        assert_eq!(
+            priority,
+            AnnouncePriority::Polite,
+            "Success kind announces politely"
+        );
+    }
+
+    #[test]
+    fn repeated_updates_do_not_stack_announcements() {
+        // Round-9 regression: multiple `Update`s before the heartbeat
+        // drains used to enqueue one tuple per call, so a single toast
+        // would be announced N times in rapid succession (typically
+        // with identical final content). The fix replaces the pending
+        // entry for that id on every Update; the queue must hold at
+        // most one entry per toast id at any time.
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "v1"))));
+
+        let id = service.context().toasts[0].id.clone();
+
+        // Five back-to-back updates without a heartbeat in between.
+        for n in 1..=5 {
+            drop(service.send(Event::Update(
+                id.clone(),
+                Config::new(Kind::Info, format!("v{n}")),
+            )));
+        }
+
+        assert_eq!(
+            service.context().announcement_queue.len(),
+            1,
+            "Update must replace the pending announcement, not stack new ones"
+        );
+        assert_eq!(service.context().announcement_queue[0].0, id);
+
+        // Drain the heartbeat once — exactly one Announce* effect, not
+        // five, so the screen reader speaks the toast once.
+        let result = service.send(Event::DrainAnnouncement { now_ms: 0 });
+
+        let announce_count = result
+            .pending_effects
+            .iter()
+            .filter(|e| matches!(e.name, Effect::AnnouncePolite | Effect::AnnounceAssertive))
+            .count();
+
+        assert_eq!(
+            announce_count, 1,
+            "queue with one entry must yield exactly one announce effect"
+        );
+        assert!(service.context().announcement_queue.is_empty());
+    }
+
+    #[test]
+    fn update_priority_change_replaces_old_priority_entry() {
+        // Subtler regression: priority can flip between Update calls
+        // (Info → Error). The replace-then-push must use the **new**
+        // priority, not leave a stale Polite entry behind that would
+        // route through the wrong live region.
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "loading"))));
+        let id = service.context().toasts[0].id.clone();
+
+        // Drain the initial announcement so the queue is empty.
+        drop(service.send(Event::DrainAnnouncement { now_ms: 0 }));
+        assert!(service.context().announcement_queue.is_empty());
+
+        // Two Updates: first Info (polite), then Error (assertive).
+        // The old polite entry must NOT survive into the assertive
+        // drain.
+        drop(service.send(Event::Update(
+            id.clone(),
+            Config::new(Kind::Info, "still loading"),
+        )));
+        drop(service.send(Event::Update(
+            id.clone(),
+            Config::new(Kind::Error, "failed"),
+        )));
+
+        assert_eq!(service.context().announcement_queue.len(), 1);
+        let (queued_id, priority) = service.context().announcement_queue[0].clone();
+        assert_eq!(queued_id, id);
+        assert_eq!(
+            priority,
+            AnnouncePriority::Assertive,
+            "the latest Update's priority wins"
         );
     }
 
@@ -2975,8 +3070,11 @@ mod tests {
         assert_eq!(service.context().toasts.len(), initial_len);
         assert_eq!(service.context().toasts[0].id, initial_id);
 
-        // Re-announces because Update fires on the matched entry.
-        assert!(service.context().announcement_queue.len() >= 2);
+        // Re-announces by *replacing* the pending entry for this id
+        // rather than stacking it, so the heartbeat doesn't emit a
+        // duplicate `Announce*` for the same toast.
+        assert_eq!(service.context().announcement_queue.len(), 1);
+        assert_eq!(service.context().announcement_queue[0].0, initial_id);
     }
 
     #[test]
