@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/data_display/avatar.rs
+expression: "snapshot_attrs(&errored.connect(&|_| {}).fallback_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-fallback",
+            ),
+            String(
+                "initials",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "fallback",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "avatar",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}

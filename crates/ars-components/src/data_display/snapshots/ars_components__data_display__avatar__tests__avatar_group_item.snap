@@ -1,0 +1,40 @@
+---
+source: crates/ars-components/src/data_display/avatar.rs
+expression: "snapshot_attrs(&GroupApi::new(GroupProps::new()).group_item_attrs(2))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-index",
+            ),
+            String(
+                "2",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "group-item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "avatar",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Custom(
+                "ars-avatar-group-index",
+            ),
+            "2",
+        ),
+    ],
+}

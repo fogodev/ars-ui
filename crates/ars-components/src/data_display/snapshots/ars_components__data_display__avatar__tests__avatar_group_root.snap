@@ -1,0 +1,68 @@
+---
+source: crates/ars-components/src/data_display/avatar.rs
+expression: "snapshot_attrs(&GroupApi::new(GroupProps::new().id(\"group-1\").size(Size::Lg).shape(Shape::Square).overlap(\"0.75rem\").aria_label(\"Team members\")).group_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "group",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "avatar",
+            ),
+        ),
+        (
+            Data(
+                "ars-shape",
+            ),
+            String(
+                "square",
+            ),
+        ),
+        (
+            Data(
+                "ars-size",
+            ),
+            String(
+                "lg",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Team members",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "group-1",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "group",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Custom(
+                "ars-avatar-group-overlap",
+            ),
+            "0.75rem",
+        ),
+    ],
+}

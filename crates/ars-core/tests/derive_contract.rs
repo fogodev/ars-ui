@@ -90,6 +90,13 @@ enum OrderedPart {
     Delta { id: String },
 }
 
+#[derive(ComponentPart)]
+#[scope = "group"]
+enum GroupPart {
+    Group,
+    GroupItem { index: usize },
+}
+
 #[test]
 fn has_id_derive_exposes_spec_contract() {
     let mut props = Props {
@@ -283,6 +290,17 @@ fn component_part_derive_preserves_declaration_order_in_all() {
             OrderedPart::Beta(String::new()),
             OrderedPart::Delta { id: String::new() },
         ]
+    );
+}
+
+#[test]
+fn component_part_derive_uses_first_unit_variant_as_root() {
+    assert_eq!(GroupPart::ROOT, GroupPart::Group);
+    assert_eq!(GroupPart::Group.name(), "group");
+    assert_eq!(GroupPart::GroupItem { index: 7 }.name(), "group-item");
+    assert_eq!(
+        GroupPart::all(),
+        vec![GroupPart::Group, GroupPart::GroupItem { index: 0 }]
     );
 }
 

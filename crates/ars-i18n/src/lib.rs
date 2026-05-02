@@ -83,7 +83,7 @@ pub use provider::Icu4xBackend;
 pub use provider::WebIntlBackend;
 pub use provider::{StubIntlBackend, default_backend};
 pub use relative_time::{NumericOption, RelativeTimeFormatter};
-pub use text::grapheme_count;
+pub use text::{grapheme_count, take_graphemes};
 pub use translate::Translate;
 pub use weekday::Weekday;
 

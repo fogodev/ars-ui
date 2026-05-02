@@ -1,0 +1,50 @@
+---
+source: crates/ars-components/src/data_display/avatar.rs
+expression: "snapshot_attrs(&loading.connect(&|_| {}).image_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "image",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "avatar",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Alt,
+            String(
+                "",
+            ),
+        ),
+        (
+            Src,
+            String(
+                "/avatar.png",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Display,
+            "none",
+        ),
+    ],
+}
