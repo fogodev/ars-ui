@@ -958,6 +958,20 @@ fn context_relevant_props_changed(old: &Props, new: &Props) -> bool {
 // ────────────────────────────────────────────────────────────────────
 
 fn plan_add(ctx: &ManagerContext, config: Config) -> TransitionPlan<Machine> {
+    // Explicit-id collision: if the caller supplied an `id` that's already
+    // in flight (visible / dismissing or queued), route the Add through
+    // `plan_update` / `plan_replace_queued_by_id` so addressing-by-id
+    // remains unambiguous. Two entries sharing an id would silently
+    // break `Update(id)` / `Remove(id)` first-match lookups.
+    if let Some(explicit_id) = config.id.clone()
+        && let Some(state) = locate_existing_id(ctx, &explicit_id)
+    {
+        return match state {
+            ExistingIdLocation::Tracked => plan_update(ctx, &explicit_id, config),
+            ExistingIdLocation::Queued => plan_replace_queued_by_id(&explicit_id, config),
+        };
+    }
+
     if let Some(existing_id) = find_visible_dedup_match(ctx, &config) {
         return plan_update(ctx, &existing_id, config);
     }
@@ -1038,6 +1052,50 @@ fn plan_add(ctx: &ManagerContext, config: Config) -> TransitionPlan<Machine> {
     plan
 }
 
+/// Where an existing entry with a given id currently lives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExistingIdLocation {
+    /// In `ctx.toasts` — either `Visible` or `Dismissing`.
+    Tracked,
+
+    /// In `ctx.queued`, awaiting admission.
+    Queued,
+}
+
+/// Locates an existing entry that already carries the supplied id. Used by
+/// `plan_add` to detect explicit-id collisions before pushing a new entry.
+fn locate_existing_id(ctx: &ManagerContext, id: &str) -> Option<ExistingIdLocation> {
+    if ctx.toasts.iter().any(|entry| entry.id == id) {
+        Some(ExistingIdLocation::Tracked)
+    } else if ctx.queued.iter().any(|cfg| cfg.id.as_deref() == Some(id)) {
+        Some(ExistingIdLocation::Queued)
+    } else {
+        None
+    }
+}
+
+/// Replaces a queued entry by its explicit id. Used by `plan_add` when the
+/// caller supplies an id that's already on a queued slot.
+fn plan_replace_queued_by_id(id: &str, config: Config) -> TransitionPlan<Machine> {
+    let id_for_apply = id.to_string();
+    TransitionPlan::context_only(move |ctx: &mut ManagerContext| {
+        if let Some(slot) = ctx
+            .queued
+            .iter_mut()
+            .find(|cfg| cfg.id.as_deref() == Some(id_for_apply.as_str()))
+        {
+            // Preserve the matched id verbatim so adapter-side bookkeeping
+            // (timers, callbacks already wired against this slot) stays
+            // intact.
+            let mut config = config;
+
+            config.id = Some(id_for_apply.clone());
+
+            *slot = config;
+        }
+    })
+}
+
 fn plan_replace_queued(config: Config) -> TransitionPlan<Machine> {
     // Replace the matching queued entry in place. No announcement effect
     // is scheduled because the queued config has not been admitted yet.
@@ -1067,8 +1125,16 @@ fn plan_update(ctx: &ManagerContext, id: &str, config: Config) -> TransitionPlan
             config.id = Some(id.clone());
 
             if let Some(entry) = ctx.toasts.iter_mut().find(|entry| entry.id == id) {
+                // Preserve the entry's current `stage`. If the entry was
+                // already `Dismissing` (e.g. an `Update` arrives in the
+                // window between `Remove(id)` and `HideQueueAdvance(id)`),
+                // forcing it back to `Visible` here would only revive it
+                // briefly before the pending advance removes it again,
+                // producing a confusing "popped back, then disappeared"
+                // animation. Updating the content is fine — it's just a
+                // configuration replacement — but the lifecycle stage is
+                // owned by the dismiss flow.
                 entry.config = config;
-                entry.stage = EntryStage::Visible;
             } else {
                 // Update on a queued entry: replace by id if present.
                 for queued in &mut ctx.queued {
@@ -1082,9 +1148,17 @@ fn plan_update(ctx: &ManagerContext, id: &str, config: Config) -> TransitionPlan
         }
     });
 
-    let exists = ctx.toasts.iter().any(|entry| entry.id == id);
+    // Only announce when the matched entry is `Visible`. A `Dismissing`
+    // entry is animating out, so re-announcing the updated content would
+    // be jarring — and the toast may disappear before the screen reader
+    // finishes speaking. Queued entries also do not announce until they
+    // are actually admitted.
+    let entry_visible = ctx
+        .toasts
+        .iter()
+        .any(|entry| entry.id == id && entry.stage == EntryStage::Visible);
 
-    if exists {
+    if entry_visible {
         // As in `plan_add`, announcements always flow through the queue
         // — the announce effect fires from `plan_drain_announcement`,
         // never directly from `Update`.
@@ -2152,6 +2226,234 @@ mod tests {
                 .all(|(_, priority)| *priority == AnnouncePriority::Polite),
             "both announcements should be polite (Info, then Success)"
         );
+    }
+
+    /// Regression test for the P1 review finding: a second `Add` that
+    /// supplies the same explicit id as a live entry must NOT push a
+    /// duplicate row. Two entries sharing an id silently break
+    /// `Update(id)` / `Remove(id)` first-match lookups (they would only
+    /// touch one of the two), leaving the other on screen indefinitely.
+    /// The fix routes the second `Add` through `plan_update`.
+    #[test]
+    fn add_with_duplicate_explicit_id_routes_to_update_for_live_entry() {
+        let mut service = fresh_service(test_props());
+
+        drop(
+            service.send(Event::Add(
+                Config::new(Kind::Info, "first")
+                    .id("custom-id")
+                    .description("body"),
+            )),
+        );
+        let initial_len = service.context().toasts.len();
+        assert_eq!(initial_len, 1);
+        assert_eq!(service.context().toasts[0].id, "custom-id");
+
+        // Same explicit id, different content. Should update, not stack.
+        let result = service.send(Event::Add(
+            Config::new(Kind::Success, "updated")
+                .id("custom-id")
+                .description("new body"),
+        ));
+
+        assert_eq!(
+            service.context().toasts.len(),
+            initial_len,
+            "duplicate explicit id must not push a second row"
+        );
+
+        let entry = &service.context().toasts[0];
+        assert_eq!(entry.id, "custom-id");
+        assert_eq!(entry.config.kind, Kind::Success);
+        assert_eq!(entry.config.title.as_deref(), Some("updated"));
+        assert_eq!(entry.config.description.as_deref(), Some("new body"));
+
+        // Update path emits no immediate announce (queue-only flow).
+        assert!(
+            !effect_names(&result).contains(&Effect::AnnouncePolite)
+                && !effect_names(&result).contains(&Effect::AnnounceAssertive)
+        );
+    }
+
+    /// Sibling P1 regression: same fix on the queued slot path.
+    #[test]
+    fn add_with_duplicate_explicit_id_replaces_queued_slot() {
+        let mut service = fresh_service(Props {
+            max_visible: 1,
+            ..test_props()
+        });
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "live"))));
+        drop(
+            service.send(Event::Add(
+                Config::new(Kind::Info, "queued-original")
+                    .id("queued-id")
+                    .description("body"),
+            )),
+        );
+
+        assert_eq!(service.context().queued.len(), 1);
+        assert_eq!(service.context().queued[0].id.as_deref(), Some("queued-id"));
+
+        // Same explicit id, different kind. Replaces the queued slot in
+        // place, preserving the id.
+        drop(
+            service.send(Event::Add(
+                Config::new(Kind::Success, "queued-updated")
+                    .id("queued-id")
+                    .description("body"),
+            )),
+        );
+
+        assert_eq!(
+            service.context().queued.len(),
+            1,
+            "duplicate explicit id must not append a queued duplicate"
+        );
+        assert_eq!(service.context().queued[0].kind, Kind::Success);
+        assert_eq!(
+            service.context().queued[0].title.as_deref(),
+            Some("queued-updated")
+        );
+        assert_eq!(service.context().queued[0].id.as_deref(), Some("queued-id"));
+    }
+
+    /// P1 corner case: explicit-id match takes priority over content-
+    /// based dedup. The id is the addressing contract; dedup-by-content
+    /// is a secondary optimization. Without the fix, a third `Add`
+    /// whose content matched an existing entry would route through
+    /// content-dedup → `plan_update("primary", ...)` and silently
+    /// overwrite the wrong toast. With the fix, the explicit-id match
+    /// fires first and updates `secondary` instead.
+    #[test]
+    fn add_with_duplicate_explicit_id_wins_over_content_dedup() {
+        let mut service = fresh_service(test_props());
+
+        // Two distinct entries with distinct content.
+        drop(
+            service.send(Event::Add(
+                Config::new(Kind::Info, "primary-content")
+                    .id("primary")
+                    .description("body"),
+            )),
+        );
+        drop(
+            service.send(Event::Add(
+                Config::new(Kind::Info, "secondary-content")
+                    .id("secondary")
+                    .description("body"),
+            )),
+        );
+
+        assert_eq!(service.context().toasts.len(), 2);
+
+        // Now `Add` again with `id="secondary"` carrying content that
+        // matches *primary* and `deduplicate=true`. Content-dedup would
+        // route to `primary`; the explicit-id match must win and route
+        // to `secondary` instead.
+        drop(
+            service.send(Event::Add(
+                Config::new(Kind::Success, "primary-content")
+                    .id("secondary")
+                    .description("body")
+                    .deduplicate(true),
+            )),
+        );
+
+        assert_eq!(service.context().toasts.len(), 2, "no new row was added");
+
+        let secondary = service
+            .context()
+            .toasts
+            .iter()
+            .find(|e| e.id == "secondary")
+            .expect("secondary id still present");
+        assert_eq!(
+            secondary.config.kind,
+            Kind::Success,
+            "secondary was updated (explicit-id match)"
+        );
+        assert_eq!(secondary.config.title.as_deref(), Some("primary-content"));
+
+        let primary = service
+            .context()
+            .toasts
+            .iter()
+            .find(|e| e.id == "primary")
+            .expect("primary id still present");
+        assert_eq!(
+            primary.config.kind,
+            Kind::Info,
+            "primary was untouched (content-dedup did NOT win)"
+        );
+        assert_eq!(primary.config.title.as_deref(), Some("primary-content"));
+    }
+
+    /// Regression test for the P2 review finding: `Update(id)` arriving
+    /// in the window between `Remove(id)` and `HideQueueAdvance(id)`
+    /// previously forced the entry's stage back to `Visible`, briefly
+    /// reviving the toast before the pending advance removed it again.
+    /// The fix preserves the existing stage so an in-flight dismiss
+    /// stays consistent.
+    #[test]
+    fn update_does_not_revive_dismissing_entry() {
+        let mut service = fresh_service(test_props());
+        drop(service.send(Event::Add(add_config(Kind::Info, "loading"))));
+        let id = service.context().toasts[0].id.clone();
+
+        // Mark Dismissing.
+        drop(service.send(Event::Remove(id.clone())));
+        assert_eq!(service.context().toasts[0].stage, EntryStage::Dismissing);
+
+        // Update arrives during the dismiss-animation window.
+        drop(service.send(Event::Update(
+            id.clone(),
+            Config::new(Kind::Success, "done").description("ok"),
+        )));
+
+        let entry = service
+            .context()
+            .toasts
+            .iter()
+            .find(|e| e.id == id)
+            .expect("entry still tracked");
+        assert_eq!(
+            entry.stage,
+            EntryStage::Dismissing,
+            "Update must NOT revive a Dismissing entry — the lifecycle is owned by the dismiss flow"
+        );
+        // The config IS replaced — adapters that want to reflect updated
+        // content during the exit animation can; the lifecycle just
+        // doesn't bounce back.
+        assert_eq!(entry.config.kind, Kind::Success);
+        assert_eq!(entry.config.title.as_deref(), Some("done"));
+    }
+
+    /// Sibling P2 fix: an `Update` on a Dismissing entry must NOT
+    /// announce. The toast is animating out — re-announcing the new
+    /// content would either talk over the screen reader's existing
+    /// announcement or be cut short when the toast disappears.
+    #[test]
+    fn update_on_dismissing_entry_does_not_announce() {
+        let mut service = fresh_service(test_props());
+        drop(service.send(Event::Add(add_config(Kind::Info, "x"))));
+        let id = service.context().toasts[0].id.clone();
+
+        // Mark Dismissing — `plan_remove` also drops the pending
+        // announcement for this id.
+        drop(service.send(Event::Remove(id.clone())));
+        assert!(service.context().announcement_queue.is_empty());
+
+        let result = service.send(Event::Update(
+            id,
+            Config::new(Kind::Success, "y").description("z"),
+        ));
+
+        assert!(
+            service.context().announcement_queue.is_empty(),
+            "Update on a Dismissing entry must not enqueue an announcement"
+        );
+        assert!(result.pending_effects.is_empty());
     }
 
     #[test]
