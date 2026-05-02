@@ -1459,6 +1459,15 @@ fn assert_toast_manager_send_result_invariants(
 
     prop_assert_eq!(ctx_paused, state_paused);
 
+    // pause_reasons is the source of truth: the manager is in Paused
+    // iff at least one pause reason is active. Verifying both
+    // directions catches any future arm that forgets to update one
+    // side of the (state, paused_all, pause_reasons) triple.
+    let reasons = service.context().pause_reasons;
+
+    prop_assert_eq!(reasons.any(), state_paused);
+    prop_assert_eq!(reasons.any(), ctx_paused);
+
     // Visible-toast count never exceeds the **historical** max_visible.
     // SyncProps deliberately preserves existing toasts when `max_visible`
     // shrinks at runtime — a UX choice (don't yank toasts out from under

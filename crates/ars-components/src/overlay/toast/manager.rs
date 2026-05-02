@@ -197,6 +197,41 @@ pub enum AnnouncePriority {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// PauseReasons
+// ────────────────────────────────────────────────────────────────────
+
+/// Independent sources that can pause every visible toast's auto-dismiss
+/// timer.
+///
+/// `State::Paused` is reached whenever **any** reason is active and is
+/// only cleared when **every** reason becomes inactive. This means a tab
+/// hide → tab show cycle that overlaps with a still-active hover/focus
+/// pause leaves the manager paused, instead of incorrectly resuming
+/// timers while the user is reading or interacting (spec §1.5 / §2 —
+/// pause sources are orthogonal).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PauseReasons {
+    /// Pause requested by [`Event::PauseAll`] (typically a hover/focus
+    /// over the region container, or programmatic pause from the
+    /// adapter). Cleared by [`Event::ResumeAll`].
+    pub interaction: bool,
+
+    /// Pause requested by [`Event::SetVisibility`]`(false)` — the page
+    /// became hidden via the Page Visibility API. Cleared by
+    /// [`Event::SetVisibility`]`(true)`.
+    pub visibility: bool,
+}
+
+impl PauseReasons {
+    /// Returns `true` if at least one pause source is currently active.
+    /// The manager is in [`State::Paused`] iff this returns `true`.
+    #[must_use]
+    pub const fn any(&self) -> bool {
+        self.interaction || self.visibility
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
 // EdgeOffsets / DefaultDurations / Config / ToastEntry
 // ────────────────────────────────────────────────────────────────────
 
@@ -520,7 +555,15 @@ pub struct ManagerContext {
     pub overlap: bool,
 
     /// Whether all timers are currently paused (mirrors `State::Paused`).
+    ///
+    /// Equivalent to `pause_reasons.any()` — kept as a denormalized
+    /// flag so adapters can read it without going through `pause_reasons`.
     pub paused_all: bool,
+
+    /// Per-source pause flags. The manager remains in [`State::Paused`]
+    /// while any reason is active, so a tab-hide / tab-show cycle no
+    /// longer cancels an in-progress hover/focus pause.
+    pub pause_reasons: PauseReasons,
 
     /// Resolved locale used for the region label and per-toast messages.
     pub locale: Locale,
@@ -795,6 +838,7 @@ impl ars_core::Machine for Machine {
                 offsets: props.offsets,
                 overlap: props.overlap,
                 paused_all: false,
+                pause_reasons: PauseReasons::default(),
                 locale: env.locale.clone(),
                 messages: messages.clone(),
                 next_id: 0,
@@ -818,24 +862,58 @@ impl ars_core::Machine for Machine {
             Event::HideQueueAdvance(id) => Some(plan_hide_queue_advance(ctx, id.clone())),
 
             Event::PauseAll => match state {
+                // Active → Paused: arm the interaction reason, emit the
+                // pause-all effect so adapters forward it to per-toast
+                // machines.
                 State::Active => Some(
                     TransitionPlan::to(State::Paused)
                         .apply(|ctx: &mut ManagerContext| {
+                            ctx.pause_reasons.interaction = true;
                             ctx.paused_all = true;
                         })
                         .with_effect(PendingEffect::named(Effect::PauseAllTimers)),
                 ),
-                State::Paused => None,
+                // Already paused for some other reason (most likely
+                // visibility). Just record the additional reason — no
+                // state change, no extra `PauseAllTimers` effect (timers
+                // are already paused). The flag matters on resume so a
+                // later `SetVisibility(true)` does not unpause us while
+                // interaction pause is still in force.
+                State::Paused => {
+                    if ctx.pause_reasons.interaction {
+                        None
+                    } else {
+                        Some(TransitionPlan::context_only(|ctx: &mut ManagerContext| {
+                            ctx.pause_reasons.interaction = true;
+                        }))
+                    }
+                }
             },
 
             Event::ResumeAll => match state {
-                State::Paused => Some(
-                    TransitionPlan::to(State::Active)
-                        .apply(|ctx: &mut ManagerContext| {
-                            ctx.paused_all = false;
-                        })
-                        .with_effect(PendingEffect::named(Effect::ResumeAllTimers)),
-                ),
+                State::Paused => {
+                    if !ctx.pause_reasons.interaction {
+                        // Interaction reason already cleared (or never
+                        // set); nothing to do.
+                        None
+                    } else if ctx.pause_reasons.visibility {
+                        // Clear interaction but stay paused — page is
+                        // still hidden, timers must not restart.
+                        Some(TransitionPlan::context_only(|ctx: &mut ManagerContext| {
+                            ctx.pause_reasons.interaction = false;
+                        }))
+                    } else {
+                        // Last reason removed — fully resume.
+                        Some(
+                            TransitionPlan::to(State::Active)
+                                .apply(|ctx: &mut ManagerContext| {
+                                    ctx.pause_reasons.interaction = false;
+                                    ctx.paused_all = false;
+                                })
+                                .with_effect(PendingEffect::named(Effect::ResumeAllTimers)),
+                        )
+                    }
+                }
                 State::Active => None,
             },
 
@@ -858,20 +936,56 @@ impl ars_core::Machine for Machine {
             Event::DrainAnnouncement { now_ms } => Some(plan_drain_announcement(ctx, *now_ms)),
 
             Event::SetVisibility(visible) => match (*visible, state) {
+                // Page hidden, manager active → pause for visibility.
                 (false, State::Active) => Some(
                     TransitionPlan::to(State::Paused)
                         .apply(|ctx: &mut ManagerContext| {
+                            ctx.pause_reasons.visibility = true;
                             ctx.paused_all = true;
                         })
                         .with_effect(PendingEffect::named(Effect::PauseAllTimers)),
                 ),
-                (true, State::Paused) => Some(
-                    TransitionPlan::to(State::Active)
-                        .apply(|ctx: &mut ManagerContext| {
-                            ctx.paused_all = false;
-                        })
-                        .with_effect(PendingEffect::named(Effect::ResumeAllTimers)),
-                ),
+                // Page hidden while interaction-paused: arm the
+                // visibility reason without re-emitting `PauseAllTimers`
+                // (timers are already paused). The flag matters when
+                // interaction pause later clears: we must stay paused.
+                (false, State::Paused) => {
+                    if ctx.pause_reasons.visibility {
+                        None
+                    } else {
+                        Some(TransitionPlan::context_only(|ctx: &mut ManagerContext| {
+                            ctx.pause_reasons.visibility = true;
+                        }))
+                    }
+                }
+                // Page visible again.
+                (true, State::Paused) => {
+                    if !ctx.pause_reasons.visibility {
+                        // Visibility reason already cleared (or never
+                        // set, e.g. tests sending `SetVisibility(true)`
+                        // while only interaction-paused) — nothing to do.
+                        None
+                    } else if ctx.pause_reasons.interaction {
+                        // Clear visibility but stay paused — user is
+                        // still hovering / focused; timers must not
+                        // restart yet.
+                        Some(TransitionPlan::context_only(|ctx: &mut ManagerContext| {
+                            ctx.pause_reasons.visibility = false;
+                        }))
+                    } else {
+                        // Last reason removed — fully resume.
+                        Some(
+                            TransitionPlan::to(State::Active)
+                                .apply(|ctx: &mut ManagerContext| {
+                                    ctx.pause_reasons.visibility = false;
+                                    ctx.paused_all = false;
+                                })
+                                .with_effect(PendingEffect::named(Effect::ResumeAllTimers)),
+                        )
+                    }
+                }
+                // Already in the requested visibility (e.g.
+                // `SetVisibility(true)` while Active) — noop.
                 _ => None,
             },
 
@@ -3035,6 +3149,226 @@ mod tests {
 
         assert!(!result.state_changed);
         assert!(result.pending_effects.is_empty());
+    }
+
+    // ── Cross-pause reason interactions ────────────────────────────
+
+    #[test]
+    fn visibility_cycle_during_interaction_pause_keeps_pause_alive() {
+        // Regression test for the round-5 review finding: pause source
+        // tracking. Hover/focus pauses; tab hides and re-shows; the
+        // toast must remain paused because the user is still
+        // interacting.
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::PauseAll));
+        assert_eq!(service.state(), &State::Paused);
+        assert!(service.context().pause_reasons.interaction);
+        assert!(!service.context().pause_reasons.visibility);
+
+        // Tab hides while still hovered. We're already paused → no
+        // extra `PauseAllTimers` (timers are already stopped); we just
+        // arm the visibility flag.
+        let hide = service.send(Event::SetVisibility(false));
+        assert_eq!(service.state(), &State::Paused);
+        assert!(service.context().pause_reasons.interaction);
+        assert!(service.context().pause_reasons.visibility);
+        assert!(!hide.state_changed);
+        assert!(hide.pending_effects.is_empty());
+
+        // Tab shows again — but interaction pause is still active. The
+        // manager must NOT unpause here: that would auto-dismiss
+        // toasts the user is still reading. Only the visibility flag
+        // clears; no `ResumeAllTimers` effect.
+        let show = service.send(Event::SetVisibility(true));
+        assert_eq!(
+            service.state(),
+            &State::Paused,
+            "interaction pause survives a tab hide/show cycle"
+        );
+        assert!(service.context().pause_reasons.interaction);
+        assert!(!service.context().pause_reasons.visibility);
+        assert!(service.context().paused_all);
+        assert!(!show.state_changed);
+        assert!(show.pending_effects.is_empty());
+
+        // Releasing the hover/focus is now the *last* reason; only
+        // here do timers actually resume.
+        let resume = service.send(Event::ResumeAll);
+        assert_eq!(service.state(), &State::Active);
+        assert!(!service.context().pause_reasons.any());
+        assert!(!service.context().paused_all);
+        assert_eq!(effect_names(&resume), vec![Effect::ResumeAllTimers]);
+    }
+
+    #[test]
+    fn interaction_pause_during_visibility_pause_keeps_pause_alive() {
+        // Symmetric case: tab is hidden first, user hovers a toast
+        // before the tab reappears (rare but possible — e.g. with a
+        // background tab brought back via keyboard shortcut over a
+        // sticky toast). Tab show alone must not resume.
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::SetVisibility(false)));
+        assert!(service.context().pause_reasons.visibility);
+        assert!(!service.context().pause_reasons.interaction);
+
+        // Interaction layered on top while still hidden — already
+        // paused, no extra `PauseAllTimers` effect.
+        let hover = service.send(Event::PauseAll);
+        assert_eq!(service.state(), &State::Paused);
+        assert!(service.context().pause_reasons.interaction);
+        assert!(service.context().pause_reasons.visibility);
+        assert!(!hover.state_changed);
+        assert!(hover.pending_effects.is_empty());
+
+        // Tab visible again, but hover still active → stay paused,
+        // no resume effect.
+        let show = service.send(Event::SetVisibility(true));
+        assert_eq!(service.state(), &State::Paused);
+        assert!(service.context().pause_reasons.interaction);
+        assert!(!service.context().pause_reasons.visibility);
+        assert!(service.context().paused_all);
+        assert!(!show.state_changed);
+        assert!(show.pending_effects.is_empty());
+
+        // Hover releases → resume.
+        let resume = service.send(Event::ResumeAll);
+        assert_eq!(service.state(), &State::Active);
+        assert!(!service.context().paused_all);
+        assert_eq!(effect_names(&resume), vec![Effect::ResumeAllTimers]);
+    }
+
+    #[test]
+    fn pause_all_when_already_visibility_paused_arms_interaction_flag() {
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::SetVisibility(false)));
+        assert!(!service.context().pause_reasons.interaction);
+
+        let result = service.send(Event::PauseAll);
+
+        // Already paused — no transition, no extra effect, but the
+        // interaction reason is now armed.
+        assert!(!result.state_changed);
+        assert!(result.pending_effects.is_empty());
+        assert!(service.context().pause_reasons.interaction);
+        assert!(service.context().pause_reasons.visibility);
+    }
+
+    #[test]
+    fn set_visibility_false_when_already_interaction_paused_arms_flag() {
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::PauseAll));
+        assert!(!service.context().pause_reasons.visibility);
+
+        let result = service.send(Event::SetVisibility(false));
+
+        assert!(!result.state_changed);
+        assert!(result.pending_effects.is_empty());
+        assert!(service.context().pause_reasons.interaction);
+        assert!(service.context().pause_reasons.visibility);
+    }
+
+    #[test]
+    fn resume_all_without_interaction_reason_is_noop_even_when_visibility_paused() {
+        // Adapter sends a stray `ResumeAll` (e.g. the user
+        // double-tapped Escape) while only the page-visibility pause
+        // is active. The interaction reason is not set, so there is
+        // nothing to clear and the manager must stay paused.
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::SetVisibility(false)));
+        let snapshot = service.context().pause_reasons;
+
+        let result = service.send(Event::ResumeAll);
+
+        assert!(!result.state_changed);
+        assert!(result.pending_effects.is_empty());
+        assert_eq!(service.state(), &State::Paused);
+        assert_eq!(service.context().pause_reasons, snapshot);
+    }
+
+    #[test]
+    fn set_visibility_true_without_visibility_reason_is_noop_when_interaction_paused() {
+        // Symmetric stray-event case: spurious `SetVisibility(true)`
+        // while only interaction-paused — visibility flag was never
+        // set, so the call is a noop and timers stay paused.
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::PauseAll));
+        let snapshot = service.context().pause_reasons;
+
+        let result = service.send(Event::SetVisibility(true));
+
+        assert!(!result.state_changed);
+        assert!(result.pending_effects.is_empty());
+        assert_eq!(service.state(), &State::Paused);
+        assert_eq!(service.context().pause_reasons, snapshot);
+    }
+
+    #[test]
+    fn visibility_pause_then_show_when_no_interaction_resumes() {
+        // Pure-visibility happy path: tab hidden then shown with no
+        // interaction pause overlapping → full resume.
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::SetVisibility(false)));
+        assert_eq!(service.state(), &State::Paused);
+
+        let show = service.send(Event::SetVisibility(true));
+
+        assert_eq!(service.state(), &State::Active);
+        assert!(!service.context().pause_reasons.any());
+        assert_eq!(effect_names(&show), vec![Effect::ResumeAllTimers]);
+    }
+
+    #[test]
+    fn pause_reasons_default_is_no_pause() {
+        let reasons = PauseReasons::default();
+        assert!(!reasons.any());
+        assert!(!reasons.interaction);
+        assert!(!reasons.visibility);
+    }
+
+    #[test]
+    fn resume_all_while_both_paused_clears_interaction_only() {
+        // Both reasons active. ResumeAll clears interaction but
+        // visibility-pause keeps the manager paused. No
+        // `ResumeAllTimers` effect (timers must stay paused).
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::PauseAll));
+        drop(service.send(Event::SetVisibility(false)));
+        assert!(service.context().pause_reasons.interaction);
+        assert!(service.context().pause_reasons.visibility);
+
+        let result = service.send(Event::ResumeAll);
+
+        assert_eq!(service.state(), &State::Paused);
+        assert!(!service.context().pause_reasons.interaction);
+        assert!(service.context().pause_reasons.visibility);
+        assert!(service.context().paused_all);
+        assert!(!result.state_changed);
+        assert!(result.pending_effects.is_empty());
+    }
+
+    #[test]
+    fn set_visibility_false_when_already_visibility_paused_is_noop() {
+        // Adapter sends a redundant `SetVisibility(false)` (e.g. two
+        // `visibilitychange` events in quick succession). Visibility
+        // flag is already set; nothing to update.
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::SetVisibility(false)));
+        let snapshot = service.context().pause_reasons;
+
+        let result = service.send(Event::SetVisibility(false));
+
+        assert!(!result.state_changed);
+        assert!(result.pending_effects.is_empty());
+        assert_eq!(service.context().pause_reasons, snapshot);
     }
 
     // ── Announcement queue / drain ─────────────────────────────────
