@@ -1502,6 +1502,39 @@ fn assert_toast_manager_send_result_invariants(
 
     prop_assert!(visible_count <= historical_max_visible);
 
+    // All toast ids — across both `ctx.toasts` and `ctx.queued` — must
+    // be globally unique. `Update(id)` and `Remove(id)` use first-match
+    // lookup, so a duplicate id silently makes those operations target
+    // the wrong entry. The auto-id resolver must skip past any slot
+    // already taken by an explicit caller-supplied id (round-8
+    // regression).
+    let mut all_ids: Vec<&str> = service
+        .context()
+        .toasts
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect();
+
+    all_ids.extend(
+        service
+            .context()
+            .queued
+            .iter()
+            .filter_map(|cfg| cfg.id.as_deref()),
+    );
+
+    let unique = all_ids
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+
+    prop_assert_eq!(
+        all_ids.len(),
+        unique.len(),
+        "tracked + queued toast ids must be globally unique; got {:?}",
+        all_ids
+    );
+
     // DrainAnnouncement on an empty queue is a state-preserving no-op.
     if matches!(event, toast_manager::Event::DrainAnnouncement { .. })
         && service.context().announcement_queue.is_empty()

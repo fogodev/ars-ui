@@ -1108,7 +1108,7 @@ fn plan_add(ctx: &ManagerContext, config: Config) -> TransitionPlan<Machine> {
     let deduplicate_all = ctx.deduplicate_all;
     let default_durations = ctx.default_durations;
 
-    let (new_id, kind) = (resolve_or_generate_id(ctx, &config), config.kind);
+    let ((new_id, advance_by), kind) = (resolve_or_generate_id(ctx, &config), config.kind);
 
     let mut plan = TransitionPlan::context_only(move |ctx: &mut ManagerContext| {
         let mut config = config;
@@ -1138,9 +1138,11 @@ fn plan_add(ctx: &ManagerContext, config: Config) -> TransitionPlan<Machine> {
             ctx.queued.push_back(config);
         }
 
-        // Always advance the id counter so the next auto-generated id is
-        // unique even if the caller supplied an explicit id this time.
-        ctx.next_id = ctx.next_id.saturating_add(1);
+        // Advance the id counter past any auto-id slots we consumed
+        // while probing for a non-colliding value. Explicit ids consume
+        // a single slot for monotonicity; auto ids consume `advance_by`
+        // slots (typically 1, more if collisions forced a skip).
+        ctx.next_id = ctx.next_id.saturating_add(advance_by);
 
         // Cap the queue at `max_visible * 32` to avoid unbounded growth
         // in pathological loops.
@@ -1511,20 +1513,62 @@ fn find_queued_dedup_match_index(ctx: &ManagerContext, config: &Config) -> Optio
     })
 }
 
-fn resolve_or_generate_id(ctx: &ManagerContext, config: &Config) -> String {
+/// Resolves the id for a [`Config`]. If the caller supplied one explicitly,
+/// it is returned as-is and `advance_by` is `1` (one slot consumed for
+/// counter monotonicity). Otherwise the function generates `toast-<n>`
+/// from `ctx.next_id`, **skipping any value that already collides** with
+/// a tracked (`ctx.toasts`) or queued (`ctx.queued`) entry — so a caller
+/// that adds an explicit `"toast-5"` cannot later be stomped on by an
+/// implicit add whose natural counter happens to reach 5.
+///
+/// `advance_by` tells `plan_add`'s apply closure how far to bump
+/// `ctx.next_id`: 1 for explicit ids, or the number of `toast-<n>` slots
+/// consumed by probing past collisions for auto-generated ids.
+fn resolve_or_generate_id(ctx: &ManagerContext, config: &Config) -> (String, u64) {
     if let Some(id) = config.id.as_ref() {
-        return id.clone();
+        return (id.clone(), 1);
     }
 
     // Format auto-generated ids as `toast-<n>` using `next_id + 1` so the
-    // first id is `toast-1` when `next_id` starts at 0.
+    // first id is `toast-1` when `next_id` starts at 0. If the natural
+    // counter lands on an id that's already tracked or queued (because
+    // a caller previously supplied that exact id explicitly), keep
+    // probing the next counter values until we find a free slot.
+    let mut offset = 1_u64;
+    loop {
+        let candidate = make_auto_id(ctx.next_id.saturating_add(offset));
+        if !auto_id_collides(ctx, &candidate) {
+            return (candidate, offset);
+        }
+        // Saturating add prevents the loop from wrapping if every slot
+        // up to u64::MAX is taken — practically unreachable, but keeps
+        // the function total.
+        let next = offset.saturating_add(1);
+        if next == offset {
+            // Saturated — return the last candidate even if it collides;
+            // the addressing-by-id ambiguity is unavoidable at this
+            // point, but the broader system will have hit OOM long
+            // before this branch is reachable.
+            return (candidate, offset);
+        }
+        offset = next;
+    }
+}
+
+/// Builds the auto-id string `toast-<n>` for a given counter value.
+fn make_auto_id(n: u64) -> String {
     let mut s = String::with_capacity(8);
-
     s.push_str("toast-");
-
-    push_decimal(&mut s, ctx.next_id.saturating_add(1));
-
+    push_decimal(&mut s, n);
     s
+}
+
+/// Returns `true` if any tracked or queued entry already carries `id`.
+/// Used by [`resolve_or_generate_id`] to skip auto-generated values that
+/// would collide with a previously-supplied explicit id.
+fn auto_id_collides(ctx: &ManagerContext, id: &str) -> bool {
+    ctx.toasts.iter().any(|entry| entry.id == id)
+        || ctx.queued.iter().any(|cfg| cfg.id.as_deref() == Some(id))
 }
 
 fn push_decimal(buf: &mut String, mut n: u64) {
@@ -2254,6 +2298,196 @@ mod tests {
         let entry_id = &service.context().toasts[0].id;
 
         assert!(entry_id.starts_with("toast-"));
+    }
+
+    #[test]
+    fn auto_id_skips_explicit_collision_in_tracked_entries() {
+        // Regression test for the round-8 review finding: an explicit
+        // `toast-1` that lands first must NOT be stomped on by the next
+        // implicit add, whose natural counter would otherwise produce
+        // the same `toast-1`. The auto-id probe must skip past the
+        // collision.
+        let mut service = fresh_service(test_props());
+
+        // Caller supplies the natural first auto-id explicitly. After
+        // this Add, `next_id` is 1 (advanced once for monotonicity), so
+        // the next implicit add would naturally try `toast-2`. Force
+        // a collision by also reserving `toast-2` explicitly.
+        let mut explicit_first = add_config(Kind::Info, "first");
+        explicit_first.id = Some("toast-1".to_string());
+        drop(service.send(Event::Add(explicit_first)));
+
+        let mut explicit_second = add_config(Kind::Info, "second");
+        explicit_second.id = Some("toast-2".to_string());
+        drop(service.send(Event::Add(explicit_second)));
+
+        // The next *implicit* add would naturally land on `toast-3`.
+        // Confirm the resolver didn't reuse `toast-1` or `toast-2`.
+        drop(service.send(Event::Add(add_config(Kind::Info, "auto-three"))));
+
+        let ids: Vec<&str> = service
+            .context()
+            .toasts
+            .iter()
+            .map(|e| e.id.as_str())
+            .collect();
+        let unique: std::collections::HashSet<_> = ids.iter().collect();
+        assert_eq!(
+            ids.len(),
+            unique.len(),
+            "every entry must have a unique id; got {ids:?}"
+        );
+        // Specifically: the auto-generated entry must not collide with
+        // either explicit id.
+        let auto_id = &service
+            .context()
+            .toasts
+            .iter()
+            .find(|e| e.config.title.as_deref() == Some("auto-three"))
+            .unwrap()
+            .id;
+        assert_ne!(auto_id, "toast-1");
+        assert_ne!(auto_id, "toast-2");
+    }
+
+    #[test]
+    fn auto_id_skips_collision_when_natural_counter_overlaps_with_explicit() {
+        // Tighter regression test: caller skips ahead with a high
+        // explicit id (`toast-3`), then several implicit adds happen.
+        // The natural counter walking from 1 would normally pass
+        // through `toast-3` and collide. The probe must hop over it.
+        let mut service = fresh_service(test_props());
+
+        let mut explicit = add_config(Kind::Info, "explicit");
+        explicit.id = Some("toast-3".to_string());
+        drop(service.send(Event::Add(explicit)));
+
+        // Three implicit adds. With the natural counter starting at
+        // toast-2 (next_id=1 after the explicit add advanced once),
+        // these would walk `toast-2, toast-3, toast-4` — but `toast-3`
+        // already exists.
+        for i in 0..3 {
+            drop(service.send(Event::Add(add_config(
+                Kind::Info,
+                Box::leak(format!("auto-{i}").into_boxed_str()),
+            ))));
+        }
+
+        let ids: Vec<&str> = service
+            .context()
+            .toasts
+            .iter()
+            .map(|e| e.id.as_str())
+            .collect();
+        let unique: std::collections::HashSet<_> = ids.iter().collect();
+        assert_eq!(
+            ids.len(),
+            unique.len(),
+            "every entry must have a unique id; got {ids:?}"
+        );
+        assert!(
+            ids.contains(&"toast-3"),
+            "the original explicit toast-3 must still be present"
+        );
+    }
+
+    #[test]
+    fn auto_id_skips_collision_with_queued_explicit_id() {
+        // The collision check must look at queued entries too — not
+        // just visible/dismissing — because `Update(id)` / `Remove(id)`
+        // first-match ambiguity would still bite once the queued entry
+        // is promoted.
+        let mut service = fresh_service(Props {
+            max_visible: 1,
+            ..test_props()
+        });
+
+        // First Add admits as visible (max_visible=1, queue empty).
+        let mut visible = add_config(Kind::Info, "visible");
+        visible.id = Some("visible".to_string());
+        drop(service.send(Event::Add(visible)));
+
+        // Second Add overflows into the queue with explicit id `toast-2`.
+        let mut queued = add_config(Kind::Info, "queued");
+        queued.id = Some("toast-2".to_string());
+        drop(service.send(Event::Add(queued)));
+
+        assert_eq!(service.context().toasts.len(), 1);
+        assert_eq!(service.context().queued.len(), 1);
+
+        // Now an implicit add. next_id=2, so natural candidate is
+        // `toast-3`. But our explicit queued id is `toast-2`, so we
+        // need to make sure the probe inspects queued entries too.
+        // Force the collision by adding more explicit reservations
+        // until natural counter would overlap one.
+        let mut blocker = add_config(Kind::Info, "blocker");
+        blocker.id = Some("toast-3".to_string());
+        drop(service.send(Event::Add(blocker)));
+
+        // next_id is now 3 → next implicit candidate would be `toast-4`,
+        // which is free. But what if we explicitly reserve `toast-4` too?
+        let mut blocker2 = add_config(Kind::Info, "blocker2");
+        blocker2.id = Some("toast-4".to_string());
+        drop(service.send(Event::Add(blocker2)));
+
+        // Implicit add — must skip both `toast-3` (queued) and
+        // `toast-4` (queued) and land on a free slot.
+        drop(service.send(Event::Add(add_config(Kind::Info, "auto"))));
+
+        let mut all_ids: Vec<&str> = service
+            .context()
+            .toasts
+            .iter()
+            .map(|e| e.id.as_str())
+            .collect();
+        all_ids.extend(
+            service
+                .context()
+                .queued
+                .iter()
+                .map(|c| c.id.as_deref().unwrap()),
+        );
+        let unique: std::collections::HashSet<_> = all_ids.iter().collect();
+        assert_eq!(
+            all_ids.len(),
+            unique.len(),
+            "tracked + queued ids must all be unique; got {all_ids:?}"
+        );
+    }
+
+    #[test]
+    fn auto_id_advances_counter_past_skipped_slots() {
+        // Subtler invariant: `ctx.next_id` must advance past skipped
+        // slots, otherwise the next call would re-do the same scan
+        // every time. Verify the counter monotonically advances.
+        let mut service = fresh_service(test_props());
+
+        let mut explicit = add_config(Kind::Info, "explicit");
+        explicit.id = Some("toast-2".to_string());
+        drop(service.send(Event::Add(explicit)));
+
+        let next_id_before = service.context().next_id;
+
+        // Implicit add — natural candidate is `toast-2` (next_id=1, +1
+        // = 2), which collides; probe should skip to `toast-3`.
+        drop(service.send(Event::Add(add_config(Kind::Info, "auto"))));
+
+        let auto_entry = service
+            .context()
+            .toasts
+            .iter()
+            .find(|e| e.config.title.as_deref() == Some("auto"))
+            .unwrap();
+        assert_eq!(auto_entry.id, "toast-3");
+
+        // next_id must have advanced by at least 2 (the offset that
+        // landed on toast-3 was 2: toast-2 collision + toast-3 free).
+        assert!(
+            service.context().next_id >= next_id_before.saturating_add(2),
+            "next_id must advance past skipped slots; was {}, now {}",
+            next_id_before,
+            service.context().next_id
+        );
     }
 
     #[test]
