@@ -846,6 +846,11 @@ impl ars_core::Machine for Machine {
                     for entry in &mut ctx.toasts {
                         entry.stage = EntryStage::Dismissing;
                     }
+
+                    // The user dismissed everything. Pending announcements
+                    // for content that's about to disappear would surface
+                    // as stale screen-reader output, so drop them.
+                    ctx.announcement_queue.clear();
                 })
                 .with_effect(PendingEffect::named(Effect::DismissAllToasts)),
             ),
@@ -1016,13 +1021,18 @@ fn plan_add(ctx: &ManagerContext, config: Config) -> TransitionPlan<Machine> {
     });
 
     if admit {
-        let announcement_was_empty = ctx.announcement_queue.is_empty();
-
-        plan = plan.with_effect(PendingEffect::named(announce_intent(kind)));
-
-        if announcement_was_empty {
+        // Announcements go through the queue exclusively — the actual
+        // `AnnouncePolite` / `AnnounceAssertive` effect fires from
+        // `plan_drain_announcement` once the adapter heartbeat ticks.
+        // Emitting the effect here as well would announce the same toast
+        // twice (immediately and again on the first drain).
+        if ctx.announcement_queue.is_empty() {
             plan = plan.with_effect(PendingEffect::named(Effect::ScheduleAnnouncement));
         }
+
+        // `kind` is only consumed inside the apply closure for the
+        // priority lookup — we no longer use it for an effect here.
+        let _ = kind;
     }
 
     plan
@@ -1075,16 +1085,15 @@ fn plan_update(ctx: &ManagerContext, id: &str, config: Config) -> TransitionPlan
     let exists = ctx.toasts.iter().any(|entry| entry.id == id);
 
     if exists {
-        let announcement_was_empty = ctx.announcement_queue.is_empty();
-
-        plan = plan.with_effect(PendingEffect::named(announce_intent(kind)));
-
-        if announcement_was_empty {
+        // As in `plan_add`, announcements always flow through the queue
+        // — the announce effect fires from `plan_drain_announcement`,
+        // never directly from `Update`.
+        if ctx.announcement_queue.is_empty() {
             plan = plan.with_effect(PendingEffect::named(Effect::ScheduleAnnouncement));
         }
 
-        // Push the new announcement onto the queue at the same point so
-        // the drain still respects FIFO ordering relative to other adds.
+        // Push the new announcement onto the queue at the tail so the
+        // drain respects FIFO ordering relative to other adds.
         let priority = kind.announce_priority();
 
         plan = plan.apply({
@@ -1108,6 +1117,12 @@ fn plan_remove(_ctx: &ManagerContext, id: String) -> TransitionPlan<Machine> {
             ctx.queued
                 .retain(|cfg| cfg.id.as_deref() != Some(id.as_str()));
         }
+
+        // Drop any pending announcement for this toast — the user
+        // dismissed it, so a stale "X appeared" announcement after the
+        // fact would just confuse the screen-reader user.
+        ctx.announcement_queue
+            .retain(|(queued_id, _)| queued_id != &id);
     })
 }
 
@@ -1132,6 +1147,12 @@ fn plan_hide_queue_advance(ctx: &ManagerContext, id: String) -> TransitionPlan<M
 
     let mut plan = TransitionPlan::context_only(move |ctx: &mut ManagerContext| {
         ctx.toasts.retain(|entry| entry.id != id);
+
+        // Drop any pending announcement for the toast we just removed —
+        // it disappeared from the visible list, so its queued
+        // announcement (if any) is stale.
+        ctx.announcement_queue
+            .retain(|(queued_id, _)| queued_id != &id);
 
         let visible_count = ctx
             .toasts
@@ -1171,12 +1192,13 @@ fn plan_hide_queue_advance(ctx: &ManagerContext, id: String) -> TransitionPlan<M
         }
     });
 
-    if let Some(kind) = promote_kind {
-        let announcement_was_empty = ctx.announcement_queue.is_empty();
-
-        plan = plan.with_effect(PendingEffect::named(announce_intent(kind)));
-
-        if announcement_was_empty {
+    if let Some(_kind) = promote_kind {
+        // The promoted toast is enqueued inside the apply closure above;
+        // the announce effect itself fires from `plan_drain_announcement`.
+        // Only schedule the heartbeat when the queue *was* empty — once
+        // the apply closure runs, it will no longer be empty for the
+        // duration of the drain cycle.
+        if ctx.announcement_queue.is_empty() {
             plan = plan.with_effect(PendingEffect::named(Effect::ScheduleAnnouncement));
         }
     }
@@ -1296,14 +1318,6 @@ fn push_decimal(buf: &mut String, mut n: u64) {
 
     for i in (0..len).rev() {
         buf.push(digits[i] as char);
-    }
-}
-
-const fn announce_intent(kind: Kind) -> Effect {
-    if kind.is_assertive() {
-        Effect::AnnounceAssertive
-    } else {
-        Effect::AnnouncePolite
     }
 }
 
@@ -1941,11 +1955,60 @@ mod tests {
         assert_eq!(service.context().toasts.len(), 1);
         assert_eq!(service.context().toasts[0].config.kind, Kind::Info);
         assert!(service.context().queued.is_empty());
-        assert_eq!(
-            effect_names(&result),
-            vec![Effect::AnnouncePolite, Effect::ScheduleAnnouncement]
-        );
+        // `Add` enqueues the announcement and schedules the heartbeat,
+        // but does NOT emit `AnnouncePolite` directly — see the
+        // `add_does_not_double_announce` regression test for the
+        // motivating bug. The announce effect fires from
+        // `DrainAnnouncement` once the adapter's heartbeat ticks.
+        assert_eq!(effect_names(&result), vec![Effect::ScheduleAnnouncement]);
         assert_eq!(service.context().announcement_queue.len(), 1);
+        assert_eq!(
+            service.context().announcement_queue[0].1,
+            AnnouncePriority::Polite
+        );
+    }
+
+    /// Regression test for the P1 review finding: every admitted toast
+    /// previously emitted `AnnouncePolite`/`AnnounceAssertive` *and*
+    /// enqueued itself, so the subsequent `DrainAnnouncement` produced
+    /// a second announce effect for the same toast (double-announce in
+    /// the live region).
+    #[test]
+    fn add_does_not_double_announce() {
+        let mut service = fresh_service(test_props());
+
+        let add_result = service.send(Event::Add(add_config(Kind::Info, "hello")));
+
+        // Admission emits no announce effect — only the heartbeat
+        // schedule.
+        assert!(
+            !effect_names(&add_result).contains(&Effect::AnnouncePolite),
+            "admission must not emit AnnouncePolite directly"
+        );
+        assert!(
+            !effect_names(&add_result).contains(&Effect::AnnounceAssertive),
+            "admission must not emit AnnounceAssertive directly"
+        );
+        assert!(effect_names(&add_result).contains(&Effect::ScheduleAnnouncement));
+        assert_eq!(service.context().announcement_queue.len(), 1);
+
+        // The adapter heartbeat fires DrainAnnouncement → ONE announce.
+        let drain_result = service.send(Event::DrainAnnouncement { now_ms: 0 });
+        let drain_effects = effect_names(&drain_result);
+        assert_eq!(
+            drain_effects
+                .iter()
+                .filter(|e| matches!(e, Effect::AnnouncePolite | Effect::AnnounceAssertive))
+                .count(),
+            1,
+            "drain emits exactly one announce for the queued toast"
+        );
+        assert!(service.context().announcement_queue.is_empty());
+
+        // Subsequent drains (within or beyond the gap) emit nothing —
+        // the toast is announced exactly once total.
+        let stale = service.send(Event::DrainAnnouncement { now_ms: 1_000 });
+        assert!(stale.pending_effects.is_empty());
     }
 
     #[test]
@@ -2002,7 +2065,18 @@ mod tests {
         assert_eq!(service.context().toasts.len(), 1);
         assert_eq!(service.context().queued.len(), 0);
         assert_eq!(service.context().toasts[0].config.kind, Kind::Error);
-        assert!(effect_names(&result).contains(&Effect::AnnounceAssertive));
+        // Promotion enqueues the announcement (assertive) but does NOT
+        // emit `AnnounceAssertive` directly — the announce effect fires
+        // from `DrainAnnouncement`. See `add_does_not_double_announce`
+        // for the motivating regression.
+        assert!(!effect_names(&result).contains(&Effect::AnnounceAssertive));
+        let announcement_queue = &service.context().announcement_queue;
+        assert!(
+            announcement_queue
+                .iter()
+                .any(|(_, priority)| *priority == AnnouncePriority::Assertive),
+            "the promoted error toast must be enqueued for an assertive announcement"
+        );
     }
 
     #[test]
@@ -2065,7 +2139,19 @@ mod tests {
 
         assert_eq!(entry.config.kind, Kind::Success);
         assert_eq!(entry.config.title.as_deref(), Some("done"));
-        assert!(effect_names(&result).contains(&Effect::AnnouncePolite));
+        // `Update` enqueues the announcement; the announce effect itself
+        // fires from `DrainAnnouncement`, never directly from `Update`.
+        assert!(!effect_names(&result).contains(&Effect::AnnouncePolite));
+        // Two announcements queued: the original `Add` and this `Update`.
+        assert_eq!(service.context().announcement_queue.len(), 2);
+        assert!(
+            service
+                .context()
+                .announcement_queue
+                .iter()
+                .all(|(_, priority)| *priority == AnnouncePriority::Polite),
+            "both announcements should be polite (Info, then Success)"
+        );
     }
 
     #[test]
@@ -2303,6 +2389,107 @@ mod tests {
         assert_eq!(service.context().toasts.len(), 1);
         assert_eq!(service.context().toasts[0].stage, EntryStage::Dismissing);
         assert_eq!(effect_names(&result), vec![Effect::DismissAllToasts]);
+    }
+
+    /// Regression test for the P2 review finding: `DismissAll` cleared
+    /// the admission queue and marked visible toasts as dismissing, but
+    /// it did NOT clear `announcement_queue`. Pending `DrainAnnouncement`
+    /// ticks would then announce content the user just dismissed —
+    /// stale screen-reader output for invisible toasts.
+    #[test]
+    fn dismiss_all_clears_announcement_queue() {
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "a"))));
+        drop(service.send(Event::Add(add_config(Kind::Error, "b"))));
+        drop(service.send(Event::Add(add_config(Kind::Success, "c"))));
+        assert_eq!(service.context().announcement_queue.len(), 3);
+
+        let result = service.send(Event::DismissAll);
+
+        assert_eq!(effect_names(&result), vec![Effect::DismissAllToasts]);
+        assert!(
+            service.context().announcement_queue.is_empty(),
+            "DismissAll must drop pending announcements so the screen reader \
+             does not announce dismissed content"
+        );
+
+        // A subsequent drain emits no announce effect — there's nothing
+        // left to announce.
+        let drain = service.send(Event::DrainAnnouncement { now_ms: 0 });
+        assert!(drain.pending_effects.is_empty());
+    }
+
+    /// Sibling fix for the P2 class — `Remove(id)` should drop any
+    /// pending announcement for that specific id, otherwise a fast
+    /// dismiss before the heartbeat fires would announce the toast
+    /// after the user removed it.
+    #[test]
+    fn remove_drops_pending_announcement_for_that_id() {
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "a"))));
+        drop(service.send(Event::Add(add_config(Kind::Info, "b"))));
+        let a_id = service.context().toasts[0].id.clone();
+        let b_id = service.context().toasts[1].id.clone();
+        assert_eq!(service.context().announcement_queue.len(), 2);
+
+        drop(service.send(Event::Remove(a_id.clone())));
+
+        // Only `b`'s announcement remains queued.
+        let queue_ids: Vec<&str> = service
+            .context()
+            .announcement_queue
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert_eq!(queue_ids, vec![b_id.as_str()]);
+        assert!(!queue_ids.contains(&a_id.as_str()));
+    }
+
+    /// `HideQueueAdvance` removes the toast from `ctx.toasts`; any
+    /// pending announcement for that id should disappear with it.
+    #[test]
+    fn hide_queue_advance_drops_pending_announcement_for_removed_id() {
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "a"))));
+        let a_id = service.context().toasts[0].id.clone();
+        assert_eq!(service.context().announcement_queue.len(), 1);
+
+        // Mark `a` Dismissing then advance — the toast leaves
+        // `ctx.toasts` and its pending announcement should leave
+        // `announcement_queue` together.
+        drop(service.send(Event::Remove(a_id.clone())));
+        // (Remove already drops the queued announcement for the id;
+        // re-Adding a fresh one tests the HideQueueAdvance path
+        // independently.)
+        drop(service.send(Event::Add(add_config(Kind::Info, "a-again"))));
+        let new_id = service.context().toasts[1].id.clone();
+        // New toast is queued for announcement.
+        assert!(
+            service
+                .context()
+                .announcement_queue
+                .iter()
+                .any(|(id, _)| id == &new_id)
+        );
+
+        drop(service.send(Event::HideQueueAdvance(new_id.clone())));
+
+        // The dismissing toast is gone from both lists.
+        assert!(
+            service.context().toasts.iter().all(|e| e.id != new_id),
+            "HideQueueAdvance removes the entry from ctx.toasts"
+        );
+        assert!(
+            service
+                .context()
+                .announcement_queue
+                .iter()
+                .all(|(id, _)| id != &new_id),
+            "HideQueueAdvance must also drop the pending announcement"
+        );
     }
 
     #[test]

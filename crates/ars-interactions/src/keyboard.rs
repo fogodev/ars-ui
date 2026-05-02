@@ -254,7 +254,7 @@ impl Hotkey {
 
 #[cfg(test)]
 mod tests {
-    use alloc::borrow::ToOwned;
+    use alloc::{borrow::ToOwned as _, string::String};
 
     use super::{ArsKeyboardEvent, KeyboardConfig, KeyboardEventData, KeyboardKey};
     use crate::keyboard::KeyboardKey as ReexportedKeyboardKey;
