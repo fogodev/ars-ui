@@ -168,6 +168,25 @@ pub enum Event {
     /// `Provider::remove_delay` elapsed when animations are skipped).
     /// Transitions to [`State::Dismissed`].
     AnimationComplete,
+
+    /// Reapply context-relevant fields from the latest [`Props`].
+    ///
+    /// Auto-emitted by [`Machine::on_props_changed`] whenever the consumer
+    /// passes a new `Props` value to `Service::set_props` — the typical
+    /// flow when a manager-level `Update(id, ...)` translates into a
+    /// `set_props` on the per-toast `Service` (e.g. a loading toast
+    /// converting to success/error). Without this, `Context::duration`,
+    /// `kind`, `title`, and `description` would stay frozen at their
+    /// init-time values; in particular a loading→success transition
+    /// would leave `ctx.duration: None`, so `Resume` (driven by manager
+    /// `PauseAll`/`ResumeAll`) would never re-emit
+    /// [`Effect::DurationTimer`] and the toast would never auto-dismiss.
+    ///
+    /// Resets [`Context::remaining`] to `None` whenever `duration`
+    /// changes — the recorded snapshot reflects the OLD duration's
+    /// elapsed time and would scramble the timer math under the new
+    /// value.
+    SyncProps,
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -607,6 +626,33 @@ impl ars_core::Machine for Machine {
                 }
             }
 
+            // Reapply context-backed prop fields. Valid in any state —
+            // adapters can update content while the toast is animating
+            // out (it's harmless: Dismissing/Dismissed are about
+            // lifecycle, not content). When `duration` actually changes,
+            // `remaining` is reset to `None` so the next `Resume` (or
+            // `initial_effects`-equivalent restart) starts the timer
+            // from the new full duration rather than scrambling the
+            // math with a snapshot that referred to the old duration.
+            (_, Event::SyncProps) => {
+                let title = props.title.clone();
+                let description = props.description.clone();
+                let kind = props.kind;
+                let duration = props.duration;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let duration_changed = ctx.duration != duration;
+
+                    ctx.title = title;
+                    ctx.description = description;
+                    ctx.kind = kind;
+                    ctx.duration = duration;
+
+                    if duration_changed {
+                        ctx.remaining = None;
+                    }
+                }))
+            }
+
             _ => None,
         }
     }
@@ -624,6 +670,40 @@ impl ars_core::Machine for Machine {
             send,
         }
     }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        // The toast id is baked into `Context::ids` at init and feeds
+        // every ARIA / `aria-labelledby` / `aria-describedby`
+        // relationship rendered by `Api`. Allowing it to change at
+        // runtime would silently break those relationships, so this
+        // panic catches the misuse early — the same convention used by
+        // Tooltip, Popover, and Dialog.
+        assert_eq!(
+            old.id, new.id,
+            "Toast id cannot change after initialization"
+        );
+
+        if context_relevant_props_changed(old, new) {
+            alloc::vec![Event::SyncProps]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+/// Returns `true` when any context-backed prop differs between `old` and
+/// `new`. Used by [`Machine::on_props_changed`] to decide whether to
+/// emit [`Event::SyncProps`].
+///
+/// `swipe_threshold` and `show_progress` are read directly from `props`
+/// at call time (in `transition` and `Api::progress_bar_attrs`
+/// respectively) so they are not mirrored on `Context` and do not need a
+/// sync event.
+fn context_relevant_props_changed(old: &Props, new: &Props) -> bool {
+    old.title != new.title
+        || old.description != new.description
+        || old.kind != new.kind
+        || old.duration != new.duration
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1152,6 +1232,189 @@ mod tests {
 
         // Stage flipped, but no timer-related effects.
         assert!(result.pending_effects.is_empty());
+    }
+
+    /// Regression test for the P1 review finding: per-toast `Context`
+    /// snapshotted `title`, `description`, `kind`, and `duration` from
+    /// `Props` only at `init`. If the adapter pushed a new `Props`
+    /// value via `Service::set_props` (the typical translation of a
+    /// manager-level `Update(id, ...)`), those `Context` fields stayed
+    /// frozen — so a loading toast converting to success/error would
+    /// keep `ctx.duration: None` and never auto-dismiss after Resume.
+    /// The fix: `on_props_changed` synthesizes `Event::SyncProps`,
+    /// which copies the four context-backed prop fields into `Context`.
+    #[test]
+    fn set_props_syncs_title_description_kind_and_duration() {
+        let mut service = fresh_service(Props {
+            duration: None,
+            kind: Kind::Loading,
+            title: Some("Saving".to_string()),
+            description: Some("loading body".to_string()),
+            ..test_props()
+        });
+
+        drop(service.take_initial_effects());
+
+        // Pre-condition: ctx mirrors the loading props.
+        assert_eq!(service.context().kind, Kind::Loading);
+        assert_eq!(service.context().duration, None);
+        assert_eq!(service.context().title.as_deref(), Some("Saving"));
+
+        // Loading → success conversion via `set_props`.
+        drop(service.set_props(Props {
+            duration: Some(Duration::from_secs(5)),
+            kind: Kind::Success,
+            title: Some("Saved".to_string()),
+            description: Some("Your changes were saved.".to_string()),
+            ..test_props()
+        }));
+
+        let ctx = service.context();
+
+        assert_eq!(ctx.kind, Kind::Success, "kind must mirror new props");
+        assert_eq!(
+            ctx.duration,
+            Some(Duration::from_secs(5)),
+            "duration must mirror new props"
+        );
+        assert_eq!(ctx.title.as_deref(), Some("Saved"));
+        assert_eq!(ctx.description.as_deref(), Some("Your changes were saved."));
+    }
+
+    /// Sibling P1 regression: a loading toast that converts to success
+    /// (`duration: None` → `Some(_)`) via `set_props` MUST emit
+    /// `DurationTimer` on the next `Resume`. Before the fix
+    /// `ctx.duration` stayed `None`, so the per-toast machine silently
+    /// dropped the timer-restart effect.
+    #[test]
+    fn loading_to_success_via_set_props_now_restarts_timer_on_resume() {
+        let mut service = fresh_service(Props {
+            duration: None,
+            kind: Kind::Loading,
+            ..test_props()
+        });
+
+        drop(service.take_initial_effects());
+
+        // Pause first (manager-level PauseAll equivalent). Persistent
+        // toasts ignore the timer, so cancel_effects is harmless.
+        drop(service.send(Event::Pause {
+            remaining: Duration::ZERO,
+        }));
+
+        // Convert to success via set_props.
+        drop(service.set_props(Props {
+            duration: Some(Duration::from_secs(5)),
+            kind: Kind::Success,
+            ..test_props()
+        }));
+
+        assert_eq!(
+            service.context().duration,
+            Some(Duration::from_secs(5)),
+            "SyncProps mirrored the new finite duration"
+        );
+
+        // Resume now emits DurationTimer because ctx.duration is finite.
+        let resume = service.send(Event::Resume);
+
+        assert!(
+            effect_names(&resume).contains(&Effect::DurationTimer),
+            "after loading→success conversion, Resume must emit DurationTimer"
+        );
+    }
+
+    /// `SyncProps` resets `remaining` whenever `duration` changes — the
+    /// recorded snapshot reflected the old duration's elapsed time and
+    /// would scramble timer math under the new value.
+    #[test]
+    fn set_props_resets_remaining_when_duration_changes() {
+        let mut service = fresh_service(test_props());
+
+        drop(service.take_initial_effects());
+
+        // Pause to record a remaining snapshot.
+        drop(service.send(Event::Pause {
+            remaining: Duration::from_millis(2_500),
+        }));
+
+        assert_eq!(
+            service.context().remaining,
+            Some(Duration::from_millis(2_500))
+        );
+
+        // set_props with a different duration → remaining MUST reset.
+        drop(service.set_props(Props {
+            duration: Some(Duration::from_secs(10)),
+            ..test_props()
+        }));
+
+        assert_eq!(
+            service.context().remaining,
+            None,
+            "remaining must reset when duration changes — the snapshot was for the old duration"
+        );
+        assert_eq!(service.context().duration, Some(Duration::from_secs(10)));
+    }
+
+    /// Symmetric: `SyncProps` preserves `remaining` when `duration` is
+    /// unchanged — only content fields (title/description/kind) move.
+    /// A pause snapshot mid-flight stays valid through a content edit.
+    #[test]
+    fn set_props_preserves_remaining_when_duration_unchanged() {
+        let mut service = fresh_service(test_props());
+
+        drop(service.take_initial_effects());
+
+        drop(service.send(Event::Pause {
+            remaining: Duration::from_millis(2_500),
+        }));
+
+        // set_props with same duration but different title.
+        drop(service.set_props(Props {
+            title: Some("New title".to_string()),
+            ..test_props()
+        }));
+
+        assert_eq!(
+            service.context().remaining,
+            Some(Duration::from_millis(2_500)),
+            "remaining stays put when duration is unchanged"
+        );
+        assert_eq!(service.context().title.as_deref(), Some("New title"));
+    }
+
+    /// Identical-Props `set_props` is a no-op: `on_props_changed`
+    /// returns an empty event list, so context isn't perturbed.
+    #[test]
+    fn set_props_with_identical_props_is_a_noop() {
+        let mut service = fresh_service(test_props());
+
+        drop(service.take_initial_effects());
+
+        let before_ctx = service.context().clone();
+        let result = service.set_props(test_props());
+
+        assert!(!result.context_changed);
+        assert!(!result.state_changed);
+        assert!(result.pending_effects.is_empty());
+        assert_eq!(service.context(), &before_ctx);
+    }
+
+    /// Workspace convention: ids are baked into `Context::ids` at init
+    /// and feed every ARIA relationship rendered by `Api`. Mutating
+    /// the id at runtime would silently break those relationships,
+    /// so `on_props_changed` panics. Mirrors Tooltip / Popover / Dialog.
+    #[test]
+    #[should_panic(expected = "Toast id cannot change after initialization")]
+    fn set_props_panics_when_id_changes() {
+        let mut service = fresh_service(test_props());
+        drop(service.take_initial_effects());
+
+        drop(service.set_props(Props {
+            id: "different-id".to_string(),
+            ..test_props()
+        }));
     }
 
     #[test]

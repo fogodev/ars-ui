@@ -879,11 +879,11 @@ fn assert_popover_send_result_invariants(
     // close-plan set. (Per `open_lifecycle_effects` /
     // `close_plan` in popover.rs.)
     if result.state_changed {
-        let names: Vec<popover::Effect> = result
+        let names = result
             .pending_effects
             .iter()
             .map(|effect| effect.name)
-            .collect();
+            .collect::<Vec<_>>();
 
         match service_resulting_state(before_state, result) {
             popover::State::Open => {
@@ -997,11 +997,11 @@ proptest! {
         // it boots into Closed, the buffer is empty. Assert this BEFORE
         // any step runs (the buffer is captured at construction).
         let initial_state = *service.state();
-        let initial_effects: Vec<popover::Effect> = service
+        let initial_effects = service
             .take_initial_effects()
             .into_iter()
             .map(|effect| effect.name)
-            .collect();
+            .collect::<Vec<_>>();
 
         match initial_state {
             popover::State::Open => {
@@ -1139,6 +1139,20 @@ fn arb_toast_event() -> impl Strategy<Value = toast_single::Event> {
         (-200.0f64..=200.0).prop_map(toast_single::Event::SwipeMove),
         (-2.0f64..=2.0, -200.0f64..=200.0)
             .prop_map(|(velocity, offset)| { toast_single::Event::SwipeEnd { velocity, offset } }),
+        Just(toast_single::Event::SyncProps),
+    ]
+}
+
+#[derive(Clone, Debug)]
+enum ToastSingleStep {
+    Send(toast_single::Event),
+    SetProps(toast_single::Props),
+}
+
+fn arb_toast_single_step() -> impl Strategy<Value = ToastSingleStep> {
+    prop_oneof![
+        arb_toast_event().prop_map(ToastSingleStep::Send),
+        arb_toast_props().prop_map(ToastSingleStep::SetProps),
     ]
 }
 
@@ -1197,7 +1211,11 @@ fn assert_toast_send_result_invariants(
     // `set_timeout(None)` or auto-dismiss a toast that's supposed to stay
     // until explicit update / removal.
     if matches!(event, toast_single::Event::Resume) && result.state_changed {
-        let names: Vec<_> = result.pending_effects.iter().map(|e| e.name).collect();
+        let names = result
+            .pending_effects
+            .iter()
+            .map(|e| e.name)
+            .collect::<Vec<_>>();
 
         let has_duration = service.context().duration.is_some();
 
@@ -1218,7 +1236,7 @@ proptest! {
     #[ignore = "proptest — nightly extended-proptest job"]
     fn proptest_toast_single_state_context_invariants_hold(
         props in arb_toast_props(),
-        events in prop::collection::vec(arb_toast_event(), 0..128),
+        steps in prop::collection::vec(arb_toast_single_step(), 0..128),
     ) {
         let mut service = Service::<toast_single::Machine>::new(
             props,
@@ -1228,11 +1246,11 @@ proptest! {
 
         // initial_effects emits Announce* always, plus DurationTimer when
         // duration is Some. Drained exactly once.
-        let initial: Vec<toast_single::Effect> = service
+        let initial = service
             .take_initial_effects()
             .into_iter()
             .map(|effect| effect.name)
-            .collect();
+            .collect::<Vec<_>>();
 
         let kind = service.context().kind;
 
@@ -1250,12 +1268,30 @@ proptest! {
 
         prop_assert!(service.take_initial_effects().is_empty());
 
-        for event in events {
-            let before_state = *service.state();
+        for step in steps {
+            match step {
+                ToastSingleStep::Send(event) => {
+                    let before_state = *service.state();
+                    let result = service.send(event);
 
-            let result = service.send(event);
+                    assert_toast_send_result_invariants(&service, event, before_state, &result)?;
+                }
 
-            assert_toast_send_result_invariants(&service, event, before_state, &result)?;
+                ToastSingleStep::SetProps(props) => {
+                    drop(service.set_props(props));
+
+                    // After set_props, context-backed prop fields must
+                    // mirror props (SyncProps reapplied them). The four
+                    // fields covered: title, description, kind, duration.
+                    let p = service.props();
+                    let c = service.context();
+
+                    prop_assert_eq!(&c.title, &p.title);
+                    prop_assert_eq!(&c.description, &p.description);
+                    prop_assert_eq!(c.kind, p.kind);
+                    prop_assert_eq!(c.duration, p.duration);
+                }
+            }
         }
     }
 }
