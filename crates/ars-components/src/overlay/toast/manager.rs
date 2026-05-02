@@ -2213,6 +2213,7 @@ mod tests {
         // The adapter heartbeat fires DrainAnnouncement → ONE announce.
         let drain_result = service.send(Event::DrainAnnouncement { now_ms: 0 });
         let drain_effects = effect_names(&drain_result);
+
         assert_eq!(
             drain_effects
                 .iter()
@@ -2226,6 +2227,7 @@ mod tests {
         // Subsequent drains (within or beyond the gap) emit nothing —
         // the toast is announced exactly once total.
         let stale = service.send(Event::DrainAnnouncement { now_ms: 1_000 });
+
         assert!(stale.pending_effects.is_empty());
     }
 
@@ -2288,7 +2290,9 @@ mod tests {
         // from `DrainAnnouncement`. See `add_does_not_double_announce`
         // for the motivating regression.
         assert!(!effect_names(&result).contains(&Effect::AnnounceAssertive));
+
         let announcement_queue = &service.context().announcement_queue;
+
         assert!(
             announcement_queue
                 .iter()
@@ -2357,9 +2361,11 @@ mod tests {
 
         assert_eq!(entry.config.kind, Kind::Success);
         assert_eq!(entry.config.title.as_deref(), Some("done"));
+
         // `Update` enqueues the announcement; the announce effect itself
         // fires from `DrainAnnouncement`, never directly from `Update`.
         assert!(!effect_names(&result).contains(&Effect::AnnouncePolite));
+
         // Two announcements queued: the original `Add` and this `Update`.
         assert_eq!(service.context().announcement_queue.len(), 2);
         assert!(
@@ -2390,6 +2396,7 @@ mod tests {
             )),
         );
         let initial_len = service.context().toasts.len();
+
         assert_eq!(initial_len, 1);
         assert_eq!(service.context().toasts[0].id, "custom-id");
 
@@ -2407,6 +2414,7 @@ mod tests {
         );
 
         let entry = &service.context().toasts[0];
+
         assert_eq!(entry.id, "custom-id");
         assert_eq!(entry.config.kind, Kind::Success);
         assert_eq!(entry.config.title.as_deref(), Some("updated"));
@@ -2542,11 +2550,14 @@ mod tests {
     #[test]
     fn update_does_not_revive_dismissing_entry() {
         let mut service = fresh_service(test_props());
+
         drop(service.send(Event::Add(add_config(Kind::Info, "loading"))));
+
         let id = service.context().toasts[0].id.clone();
 
         // Mark Dismissing.
         drop(service.send(Event::Remove(id.clone())));
+
         assert_eq!(service.context().toasts[0].stage, EntryStage::Dismissing);
 
         // Update arrives during the dismiss-animation window.
@@ -2561,11 +2572,13 @@ mod tests {
             .iter()
             .find(|e| e.id == id)
             .expect("entry still tracked");
+
         assert_eq!(
             entry.stage,
             EntryStage::Dismissing,
             "Update must NOT revive a Dismissing entry — the lifecycle is owned by the dismiss flow"
         );
+
         // The config IS replaced — adapters that want to reflect updated
         // content during the exit animation can; the lifecycle just
         // doesn't bounce back.
@@ -2580,12 +2593,15 @@ mod tests {
     #[test]
     fn update_on_dismissing_entry_does_not_announce() {
         let mut service = fresh_service(test_props());
+
         drop(service.send(Event::Add(add_config(Kind::Info, "x"))));
+
         let id = service.context().toasts[0].id.clone();
 
         // Mark Dismissing — `plan_remove` also drops the pending
         // announcement for this id.
         drop(service.send(Event::Remove(id.clone())));
+
         assert!(service.context().announcement_queue.is_empty());
 
         let result = service.send(Event::Update(
@@ -2608,9 +2624,12 @@ mod tests {
     #[test]
     fn update_with_unset_duration_falls_back_to_default() {
         let mut service = fresh_service(test_props());
+
         drop(service.send(Event::Add(add_config(Kind::Info, "loading"))));
+
         let id = service.context().toasts[0].id.clone();
         let original_duration = service.context().toasts[0].config.duration;
+
         assert_eq!(original_duration, Some(Duration::from_secs(5)));
 
         // `Config::new(...)` leaves `duration: None`.
@@ -2641,10 +2660,13 @@ mod tests {
     #[test]
     fn update_preserves_explicit_duration() {
         let mut service = fresh_service(test_props());
+
         drop(service.send(Event::Add(add_config(Kind::Info, "x"))));
+
         let id = service.context().toasts[0].id.clone();
 
         let explicit = Some(Duration::from_secs(12));
+
         drop(
             service.send(Event::Update(
                 id.clone(),
@@ -2674,6 +2696,7 @@ mod tests {
     #[test]
     fn dedup_routed_add_keeps_default_duration() {
         let mut service = fresh_service(test_props());
+
         drop(service.send(Event::Add(add_config(Kind::Info, "same").deduplicate(true))));
 
         // Second Add with same content → routes through `plan_update`

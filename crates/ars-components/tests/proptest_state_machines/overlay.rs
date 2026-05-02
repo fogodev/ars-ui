@@ -1192,6 +1192,25 @@ fn assert_toast_send_result_invariants(
 
     prop_assert_eq!(service.context().open, expected_open);
 
+    // `Context::paused` mirrors `State::Paused` exactly. This was the
+    // round-6 regression: dismissing from Paused used to leave
+    // `ctx.paused == true` while `state == Dismissing`. Asserting it
+    // every step here catches any future arm that desyncs the flag.
+    let expected_paused = matches!(service.state(), toast_single::State::Paused);
+
+    prop_assert_eq!(service.context().paused, expected_paused);
+
+    // Swipe state must not survive into Dismissing/Dismissed: those
+    // are exit-animation states where adapters style/position the
+    // toast based on the dismiss source, not on a half-finished drag.
+    if matches!(
+        service.state(),
+        toast_single::State::Dismissing | toast_single::State::Dismissed
+    ) {
+        prop_assert!(!service.context().swiping);
+        prop_assert_eq!(service.context().swipe_offset, 0.0);
+    }
+
     // Pause atomically records the remaining-time snapshot.
     if let toast_single::Event::Pause { remaining } = event
         && result.state_changed

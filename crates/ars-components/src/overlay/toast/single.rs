@@ -614,10 +614,10 @@ impl ars_core::Machine for Machine {
                 let threshold = props.swipe_threshold;
 
                 if velocity.abs() > 0.5 || offset.abs() > threshold {
-                    Some(dismiss_plan().apply(move |ctx: &mut Context| {
-                        ctx.swiping = false;
-                        ctx.swipe_offset = 0.0;
-                    }))
+                    // `dismiss_plan` already resets `swiping` /
+                    // `swipe_offset` (and `paused`, `open`); see its
+                    // doc comment.
+                    Some(dismiss_plan())
                 } else {
                     Some(TransitionPlan::context_only(|ctx: &mut Context| {
                         ctx.swiping = false;
@@ -714,10 +714,34 @@ fn context_relevant_props_changed(old: &Props, new: &Props) -> bool {
 /// Dismissing`. Cancels the running auto-dismiss timer, marks the toast
 /// closed for `Presence` composition, asks the adapter to run the exit
 /// animation, and notifies open-change listeners.
+///
+/// Every dismiss source converges through this helper (`Event::Dismiss`,
+/// `Event::DurationExpired`, swipe-end past threshold, manager-driven
+/// dismiss-all, …), so it is also the single point that resets context
+/// fields the source-specific arms might have set before:
+///
+/// * `ctx.paused` is forced to `false` because `State::Dismissing` is
+///   not a paused state — the `Context::paused` doc comment promises it
+///   mirrors `State::Paused`. Without this reset, dismissing from
+///   `State::Paused` would leave `ctx.paused == true` while
+///   `state == Dismissing`, and adapters/callbacks reading `ctx.paused`
+///   would apply stale pause behaviour during exit.
+///
+/// * `ctx.swiping` and `ctx.swipe_offset` are cleared because non-swipe
+///   dismiss paths (`Event::DurationExpired` while a drag is in
+///   progress, close-button dismiss, manager dismiss-all) bypass the
+///   `Event::SwipeEnd` arm that normally resets them. Leaving them set
+///   would keep swipe-specific positioning/styling active during the
+///   exit animation. The swipe-end dismiss arm continues to clear them
+///   itself before delegating to this plan; doing it again here is
+///   idempotent.
 fn dismiss_plan() -> TransitionPlan<Machine> {
     TransitionPlan::to(State::Dismissing)
         .apply(|ctx: &mut Context| {
             ctx.open = false;
+            ctx.paused = false;
+            ctx.swiping = false;
+            ctx.swipe_offset = 0.0;
         })
         .cancel_effect(Effect::DurationTimer)
         .with_effect(PendingEffect::named(Effect::ExitAnimation))
@@ -1654,6 +1678,109 @@ mod tests {
         assert!(service.context().swiping);
         assert_eq!(service.context().swipe_offset, 5.0);
         assert!(!result.state_changed);
+    }
+
+    // ── dismiss_plan context resets (round-6 regression) ────────────
+
+    #[test]
+    fn dismiss_from_paused_clears_paused_flag() {
+        // Regression: `Context::paused` is documented to mirror
+        // `State::Paused`, but `dismiss_plan` previously left it set
+        // when transitioning Paused → Dismissing, leaking stale pause
+        // semantics into adapter callbacks during the exit animation.
+        let mut service = fresh_service(test_props());
+
+        drop(service.take_initial_effects());
+        drop(service.send(Event::Pause {
+            remaining: Duration::from_millis(1_000),
+        }));
+        assert!(service.context().paused);
+
+        drop(service.send(Event::Dismiss));
+
+        assert_eq!(service.state(), &State::Dismissing);
+        assert!(
+            !service.context().paused,
+            "paused flag must mirror State::Paused, not survive into Dismissing"
+        );
+    }
+
+    #[test]
+    fn duration_expired_while_swiping_clears_swipe_state() {
+        // Regression: a duration-expired event arriving mid-swipe
+        // bypasses `Event::SwipeEnd`. Without `dismiss_plan` resetting
+        // swipe state, `ctx.swiping` / `ctx.swipe_offset` would stay
+        // armed during the exit animation and adapters would render a
+        // half-dragged toast as it animates out.
+        let mut service = fresh_service(test_props());
+
+        drop(service.take_initial_effects());
+        drop(service.send(Event::SwipeStart(12.0)));
+        drop(service.send(Event::SwipeMove(40.0)));
+        assert!(service.context().swiping);
+        assert_eq!(service.context().swipe_offset, 40.0);
+
+        drop(service.send(Event::DurationExpired));
+
+        assert_eq!(service.state(), &State::Dismissing);
+        assert!(
+            !service.context().swiping,
+            "swiping flag must clear when dismiss bypasses SwipeEnd"
+        );
+        assert_eq!(
+            service.context().swipe_offset,
+            0.0,
+            "swipe_offset must reset to 0 when dismiss bypasses SwipeEnd"
+        );
+    }
+
+    #[test]
+    fn close_trigger_dismiss_while_swiping_clears_swipe_state() {
+        // Same regression as `duration_expired_while_swiping_…` but for
+        // close-button driven dismiss: also bypasses `SwipeEnd`.
+        let mut service = fresh_service(test_props());
+
+        drop(service.take_initial_effects());
+        drop(service.send(Event::SwipeStart(0.0)));
+        drop(service.send(Event::SwipeMove(15.0)));
+        assert!(service.context().swiping);
+
+        drop(service.send(Event::Dismiss));
+
+        assert_eq!(service.state(), &State::Dismissing);
+        assert!(!service.context().swiping);
+        assert_eq!(service.context().swipe_offset, 0.0);
+    }
+
+    #[test]
+    fn dismiss_while_paused_and_swiping_clears_both() {
+        // Combined case: paused (hover) AND swiping mid-drag, then a
+        // close-button dismiss arrives. The single dismiss_plan helper
+        // must converge to clean context for adapters reading it
+        // during the exit animation.
+        let mut service = fresh_service(test_props());
+
+        drop(service.take_initial_effects());
+        drop(service.send(Event::Pause {
+            remaining: Duration::from_millis(2_000),
+        }));
+        drop(service.send(Event::SwipeStart(0.0)));
+        drop(service.send(Event::SwipeMove(25.0)));
+        assert!(service.context().paused);
+        assert!(service.context().swiping);
+
+        let result = service.send(Event::Dismiss);
+
+        assert_eq!(service.state(), &State::Dismissing);
+        assert!(!service.context().paused);
+        assert!(!service.context().swiping);
+        assert_eq!(service.context().swipe_offset, 0.0);
+        assert!(!service.context().open);
+        // Same dismiss-effects regardless of source state.
+        assert_eq!(
+            effect_names(&result),
+            vec![Effect::ExitAnimation, Effect::OpenChange]
+        );
     }
 
     // ── Api event helpers ───────────────────────────────────────────
