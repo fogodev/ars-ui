@@ -47,8 +47,9 @@ jobs:
           key: ${{ runner.os }}-cargo-nightly-a11y-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
-      - name: Install wasm-pack
-        run: cargo install wasm-pack --locked --version 0.14.0
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.14.0
       - name: Accessibility Audit
         run: |
           wasm-pack test --headless --chrome crates/ars-leptos --test axe
@@ -167,20 +168,23 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ~/.cargo/bin/cargo-mutants
             target
           # Key by package, not shard — every shard of the same crate
           # builds the same baseline, so they share the registry and
           # toolchain caches and only diverge on the per-shard scratch
-          # dirs that cargo-mutants manages internally.
+          # dirs that cargo-mutants manages internally. The cargo-mutants
+          # binary itself is no longer cached here — `taiki-e/install-action`
+          # downloads a pre-built release in seconds, so caching the
+          # `~/.cargo/bin/cargo-mutants` path bought us nothing useful.
           key: ${{ runner.os }}-cargo-nightly-mutants-${{ matrix.package }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
-      - name: Install cargo-mutants
-        # Pin to the version the scout run was validated against. Bump
-        # deliberately when upgrading and re-run the scout to confirm
-        # behaviour hasn't changed.
-        run: cargo install cargo-mutants --locked --version 27.0.0
+      # Pin to the version the scout run was validated against. Bump
+      # deliberately when upgrading and re-run the scout to confirm
+      # behaviour hasn't changed.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@27.0.0
       - name: Run mutation testing on ${{ matrix.name }}
         env:
           PACKAGE: ${{ matrix.package }}

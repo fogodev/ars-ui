@@ -22,10 +22,15 @@ jobs:
           components: rustfmt
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install leptosfmt
-        run: cargo install leptosfmt --locked --version 0.1.33
-      - name: Install dioxus-cli
-        run: cargo install dioxus-cli --locked --version 0.7.7
+      # `taiki-e/install-action` downloads pre-built binaries from each
+      # tool's GitHub Releases (via cargo-binstall under the hood for
+      # tools without a curated manifest). Replaces `cargo install …`
+      # which compiles dioxus-cli (huge dep tree) + leptosfmt from
+      # source on every cache miss — a multi-minute hit every time
+      # `Cargo.lock` or the rustc toolchain changes.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: leptosfmt@0.1.33,dioxus-cli@0.7.7
       - name: Formatting
         run: cargo xtask ci fmt
 
@@ -67,8 +72,7 @@ jobs:
       - uses: ./.github/actions/install-dioxus-desktop-deps
       - name: Unit Tests
         run: cargo xtest unit
-      - name: Install cargo-insta
-        run: cargo install cargo-insta --locked
+      - uses: taiki-e/install-action@cargo-insta
       - name: Snapshot Tests
         run: cargo insta test --unreferenced=reject
         env:
@@ -87,8 +91,10 @@ jobs:
           fetch-depth: 0
       - name: Check for snapshot changes
         id: snap-changes
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          SNAP_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.snap$' || true)
+          SNAP_FILES=$(git diff --name-only "origin/${BASE_REF}...HEAD" | grep '\.snap$' || true)
           if [ -n "$SNAP_FILES" ]; then
             echo "has_snaps=true" >> "$GITHUB_OUTPUT"
           fi
@@ -96,9 +102,11 @@ jobs:
         if: steps.snap-changes.outputs.has_snaps == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          BASE_REF: ${{ github.base_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          if ! git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q 'CHANGELOG'; then
-            if ! gh pr view ${{ github.event.pull_request.number }} --json labels -q '.labels[].name' | grep -q 'snapshot-reviewed'; then
+          if ! git diff --name-only "origin/${BASE_REF}...HEAD" | grep -q 'CHANGELOG'; then
+            if ! gh pr view "$PR_NUMBER" --json labels -q '.labels[].name' | grep -q 'snapshot-reviewed'; then
               echo "::error::PRs modifying .snap files must include a CHANGELOG entry or have the 'snapshot-reviewed' label"
               exit 1
             fi
@@ -114,8 +122,9 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - name: Install wasm-pack
-        run: cargo install wasm-pack --locked --version 0.14.0
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.14.0
       - name: I18n Browser Tests
         run: cargo xtest i18n-browser
 
@@ -129,8 +138,9 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - name: Install wasm-pack
-        run: cargo install wasm-pack --locked --version 0.14.0
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.14.0
       - name: DOM Browser Tests
         run: cargo xtest dom-browser
 
@@ -241,13 +251,17 @@ jobs:
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh 22
           sudo apt-get install -y clang-22 lld-22
-      - name: Install matching wasm-bindgen CLI
+      - name: Resolve wasm-bindgen version
+        id: wasm-bindgen-version
         run: |
           version="$(
             cargo metadata --format-version 1 |
               python3 -c 'import json, sys; print(next(pkg["version"] for pkg in json.load(sys.stdin)["packages"] if pkg["name"] == "wasm-bindgen"))'
           )"
-          cargo install wasm-bindgen-cli --locked --version "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@${{ steps.wasm-bindgen-version.outputs.version }}
       - name: Configure wasm coverage clang
         run: echo "WASM_COVERAGE_CLANG=/usr/bin/clang-22" >> "$GITHUB_ENV"
       - uses: ./.github/actions/install-dioxus-desktop-deps
