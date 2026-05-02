@@ -1431,8 +1431,22 @@ fn plan_drain_announcement(ctx: &ManagerContext, now_ms: u64) -> TransitionPlan<
         .last_announcement_at
         .is_none_or(|last| now_ms.saturating_sub(last) >= MIN_GAP_MS);
 
-    if !due || ctx.announcement_queue.is_empty() {
+    if ctx.announcement_queue.is_empty() {
+        // Nothing pending — true noop. Adapters that schedule the
+        // heartbeat as a one-shot have no work left to defer.
         return TransitionPlan::new();
+    }
+
+    if !due {
+        // Queue non-empty but the gap has not elapsed yet (timer
+        // jitter, an adapter that drains more aggressively than 500ms,
+        // or a truncated `now_ms`). Adapters implement
+        // `ScheduleAnnouncement` as a one-shot heartbeat trigger —
+        // without re-emitting it here the only reschedule signal is
+        // dropped and the queue never drains, so later toasts never
+        // reach screen readers.
+        return TransitionPlan::new()
+            .with_effect(PendingEffect::named(Effect::ScheduleAnnouncement));
     }
 
     // Assertive entries always drain first within the same heartbeat.
@@ -2961,6 +2975,7 @@ mod tests {
         drop(service.send(Event::Add(add_config(Kind::Info, "a"))));
         drop(service.send(Event::Add(add_config(Kind::Error, "b"))));
         drop(service.send(Event::Add(add_config(Kind::Success, "c"))));
+
         assert_eq!(service.context().announcement_queue.len(), 3);
 
         let result = service.send(Event::DismissAll);
@@ -2975,6 +2990,7 @@ mod tests {
         // A subsequent drain emits no announce effect — there's nothing
         // left to announce.
         let drain = service.send(Event::DrainAnnouncement { now_ms: 0 });
+
         assert!(drain.pending_effects.is_empty());
     }
 
@@ -2988,19 +3004,22 @@ mod tests {
 
         drop(service.send(Event::Add(add_config(Kind::Info, "a"))));
         drop(service.send(Event::Add(add_config(Kind::Info, "b"))));
+
         let a_id = service.context().toasts[0].id.clone();
         let b_id = service.context().toasts[1].id.clone();
+
         assert_eq!(service.context().announcement_queue.len(), 2);
 
         drop(service.send(Event::Remove(a_id.clone())));
 
         // Only `b`'s announcement remains queued.
-        let queue_ids: Vec<&str> = service
+        let queue_ids = service
             .context()
             .announcement_queue
             .iter()
             .map(|(id, _)| id.as_str())
-            .collect();
+            .collect::<Vec<_>>();
+
         assert_eq!(queue_ids, vec![b_id.as_str()]);
         assert!(!queue_ids.contains(&a_id.as_str()));
     }
@@ -3012,18 +3031,23 @@ mod tests {
         let mut service = fresh_service(test_props());
 
         drop(service.send(Event::Add(add_config(Kind::Info, "a"))));
+
         let a_id = service.context().toasts[0].id.clone();
+
         assert_eq!(service.context().announcement_queue.len(), 1);
 
         // Mark `a` Dismissing then advance — the toast leaves
         // `ctx.toasts` and its pending announcement should leave
         // `announcement_queue` together.
         drop(service.send(Event::Remove(a_id.clone())));
+
         // (Remove already drops the queued announcement for the id;
         // re-Adding a fresh one tests the HideQueueAdvance path
         // independently.)
         drop(service.send(Event::Add(add_config(Kind::Info, "a-again"))));
+
         let new_id = service.context().toasts[1].id.clone();
+
         // New toast is queued for announcement.
         assert!(
             service
@@ -3193,6 +3217,7 @@ mod tests {
         // extra `PauseAllTimers` (timers are already stopped); we just
         // arm the visibility flag.
         let hide = service.send(Event::SetVisibility(false));
+
         assert_eq!(service.state(), &State::Paused);
         assert!(service.context().pause_reasons.interaction);
         assert!(service.context().pause_reasons.visibility);
@@ -3204,6 +3229,7 @@ mod tests {
         // toasts the user is still reading. Only the visibility flag
         // clears; no `ResumeAllTimers` effect.
         let show = service.send(Event::SetVisibility(true));
+
         assert_eq!(
             service.state(),
             &State::Paused,
@@ -3218,6 +3244,7 @@ mod tests {
         // Releasing the hover/focus is now the *last* reason; only
         // here do timers actually resume.
         let resume = service.send(Event::ResumeAll);
+
         assert_eq!(service.state(), &State::Active);
         assert!(!service.context().pause_reasons.any());
         assert!(!service.context().paused_all);
@@ -3233,12 +3260,14 @@ mod tests {
         let mut service = fresh_service(test_props());
 
         drop(service.send(Event::SetVisibility(false)));
+
         assert!(service.context().pause_reasons.visibility);
         assert!(!service.context().pause_reasons.interaction);
 
         // Interaction layered on top while still hidden — already
         // paused, no extra `PauseAllTimers` effect.
         let hover = service.send(Event::PauseAll);
+
         assert_eq!(service.state(), &State::Paused);
         assert!(service.context().pause_reasons.interaction);
         assert!(service.context().pause_reasons.visibility);
@@ -3248,6 +3277,7 @@ mod tests {
         // Tab visible again, but hover still active → stay paused,
         // no resume effect.
         let show = service.send(Event::SetVisibility(true));
+
         assert_eq!(service.state(), &State::Paused);
         assert!(service.context().pause_reasons.interaction);
         assert!(!service.context().pause_reasons.visibility);
@@ -3257,6 +3287,7 @@ mod tests {
 
         // Hover releases → resume.
         let resume = service.send(Event::ResumeAll);
+
         assert_eq!(service.state(), &State::Active);
         assert!(!service.context().paused_all);
         assert_eq!(effect_names(&resume), vec![Effect::ResumeAllTimers]);
@@ -3267,6 +3298,7 @@ mod tests {
         let mut service = fresh_service(test_props());
 
         drop(service.send(Event::SetVisibility(false)));
+
         assert!(!service.context().pause_reasons.interaction);
 
         let result = service.send(Event::PauseAll);
@@ -3284,6 +3316,7 @@ mod tests {
         let mut service = fresh_service(test_props());
 
         drop(service.send(Event::PauseAll));
+
         assert!(!service.context().pause_reasons.visibility);
 
         let result = service.send(Event::SetVisibility(false));
@@ -3303,6 +3336,7 @@ mod tests {
         let mut service = fresh_service(test_props());
 
         drop(service.send(Event::SetVisibility(false)));
+
         let snapshot = service.context().pause_reasons;
 
         let result = service.send(Event::ResumeAll);
@@ -3321,6 +3355,7 @@ mod tests {
         let mut service = fresh_service(test_props());
 
         drop(service.send(Event::PauseAll));
+
         let snapshot = service.context().pause_reasons;
 
         let result = service.send(Event::SetVisibility(true));
@@ -3338,6 +3373,7 @@ mod tests {
         let mut service = fresh_service(test_props());
 
         drop(service.send(Event::SetVisibility(false)));
+
         assert_eq!(service.state(), &State::Paused);
 
         let show = service.send(Event::SetVisibility(true));
@@ -3350,6 +3386,7 @@ mod tests {
     #[test]
     fn pause_reasons_default_is_no_pause() {
         let reasons = PauseReasons::default();
+
         assert!(!reasons.any());
         assert!(!reasons.interaction);
         assert!(!reasons.visibility);
@@ -3364,6 +3401,7 @@ mod tests {
 
         drop(service.send(Event::PauseAll));
         drop(service.send(Event::SetVisibility(false)));
+
         assert!(service.context().pause_reasons.interaction);
         assert!(service.context().pause_reasons.visibility);
 
@@ -3385,6 +3423,7 @@ mod tests {
         let mut service = fresh_service(test_props());
 
         drop(service.send(Event::SetVisibility(false)));
+
         let snapshot = service.context().pause_reasons;
 
         let result = service.send(Event::SetVisibility(false));
@@ -3430,17 +3469,61 @@ mod tests {
 
         assert_eq!(service.context().announcement_queue.len(), 1);
 
-        // Second drain at t=200ms is blocked.
+        // Second drain at t=200ms is too early. No `Announce*` effect
+        // fires and the queue is unchanged, but the manager MUST
+        // re-emit `Effect::ScheduleAnnouncement` so the adapter — which
+        // implements the heartbeat as a one-shot — knows to schedule
+        // another tick. Without this the queue would never drain.
         let result = service.send(Event::DrainAnnouncement { now_ms: 200 });
 
-        assert!(result.pending_effects.is_empty());
+        assert_eq!(
+            effect_names(&result),
+            vec![Effect::ScheduleAnnouncement],
+            "early drain must re-arm the heartbeat instead of dropping it"
+        );
+        assert!(!result.context_changed);
         assert_eq!(service.context().announcement_queue.len(), 1);
 
         // At t=500ms it succeeds.
         let result = service.send(Event::DrainAnnouncement { now_ms: 500 });
 
-        assert!(!result.pending_effects.is_empty());
+        assert!(effect_names(&result).contains(&Effect::AnnouncePolite));
         assert!(service.context().announcement_queue.is_empty());
+    }
+
+    #[test]
+    fn drain_announcement_below_gap_with_queue_reschedules() {
+        // Regression test for the Codex finding: a `DrainAnnouncement`
+        // delivered before the 500ms gap, with a non-empty queue,
+        // must re-emit `ScheduleAnnouncement` (and only that). No
+        // pop, no clock advance, no `Announce*` effect.
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "a"))));
+        drop(service.send(Event::DrainAnnouncement { now_ms: 0 }));
+
+        // Now: queue empty? no — we added one toast which announces
+        // immediately on the heartbeat, so after t=0 queue is empty.
+        // Stage another announcement.
+        drop(service.send(Event::Add(add_config(Kind::Info, "b"))));
+
+        let queue_before = service.context().announcement_queue.clone();
+
+        let last_at_before = service.context().last_announcement_at;
+
+        assert!(!queue_before.is_empty());
+
+        let result = service.send(Event::DrainAnnouncement { now_ms: 100 });
+
+        assert_eq!(
+            effect_names(&result),
+            vec![Effect::ScheduleAnnouncement],
+            "early drain with non-empty queue must reschedule"
+        );
+        assert!(!result.context_changed);
+        assert!(!result.state_changed);
+        assert_eq!(service.context().announcement_queue, queue_before);
+        assert_eq!(service.context().last_announcement_at, last_at_before);
     }
 
     #[test]
@@ -3448,6 +3531,27 @@ mod tests {
         let mut service = fresh_service(test_props());
 
         let result = service.send(Event::DrainAnnouncement { now_ms: 0 });
+
+        assert!(!result.state_changed);
+        assert!(!result.context_changed);
+        assert!(result.pending_effects.is_empty());
+    }
+
+    #[test]
+    fn drain_announcement_below_gap_with_empty_queue_is_noop() {
+        // The other branch of the early-drain logic: when the queue
+        // is empty there is nothing to reschedule, so the early-drain
+        // signal should NOT fire `ScheduleAnnouncement` either. This
+        // keeps the heartbeat from looping forever after the queue
+        // has drained.
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "a"))));
+        drop(service.send(Event::DrainAnnouncement { now_ms: 0 }));
+
+        assert!(service.context().announcement_queue.is_empty());
+
+        let result = service.send(Event::DrainAnnouncement { now_ms: 200 });
 
         assert!(!result.state_changed);
         assert!(!result.context_changed);

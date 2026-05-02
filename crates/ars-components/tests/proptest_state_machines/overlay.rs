@@ -1509,6 +1509,36 @@ fn assert_toast_manager_send_result_invariants(
         prop_assert!(!result.state_changed);
     }
 
+    // DrainAnnouncement: the heartbeat signal must never be dropped
+    // while announcements remain pending. Adapters implement
+    // `ScheduleAnnouncement` as a one-shot trigger, so if the queue
+    // is non-empty after a drain attempt and no `Announce*` effect
+    // fired, then `ScheduleAnnouncement` must be emitted to keep the
+    // heartbeat alive (round-7 regression).
+    if matches!(event, toast_manager::Event::DrainAnnouncement { .. })
+        && !service.context().announcement_queue.is_empty()
+    {
+        let names = result
+            .pending_effects
+            .iter()
+            .map(|e| e.name)
+            .collect::<Vec<_>>();
+
+        let announced = names.iter().any(|n| {
+            matches!(
+                n,
+                toast_manager::Effect::AnnouncePolite | toast_manager::Effect::AnnounceAssertive
+            )
+        });
+
+        let rescheduled = names.contains(&toast_manager::Effect::ScheduleAnnouncement);
+
+        prop_assert!(
+            announced || rescheduled,
+            "DrainAnnouncement with non-empty queue must announce or reschedule, got effects: {names:?}",
+        );
+    }
+
     Ok(())
 }
 

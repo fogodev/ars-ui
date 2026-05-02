@@ -1126,11 +1126,11 @@ mod tests {
     fn initial_effects_emit_polite_announce_and_timer_for_info_with_duration() {
         let mut service = fresh_service(test_props());
 
-        let effects: Vec<Effect> = service
+        let effects = service
             .take_initial_effects()
             .into_iter()
             .map(|effect| effect.name)
-            .collect();
+            .collect::<Vec<_>>();
 
         assert_eq!(effects, vec![Effect::AnnouncePolite, Effect::DurationTimer]);
     }
@@ -1142,11 +1142,11 @@ mod tests {
             ..test_props()
         });
 
-        let effects: Vec<Effect> = service
+        let effects = service
             .take_initial_effects()
             .into_iter()
             .map(|effect| effect.name)
-            .collect();
+            .collect::<Vec<_>>();
 
         assert_eq!(
             effects,
@@ -1162,11 +1162,11 @@ mod tests {
             ..test_props()
         });
 
-        let effects: Vec<Effect> = service
+        let effects = service
             .take_initial_effects()
             .into_iter()
             .map(|effect| effect.name)
-            .collect();
+            .collect::<Vec<_>>();
 
         assert_eq!(effects, vec![Effect::AnnouncePolite]);
     }
