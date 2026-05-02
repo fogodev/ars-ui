@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/overlay/toast/manager.rs
+expression: snapshot_attrs(&api.root_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-paused",
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Data(
+                "ars-placement",
+            ),
+            String(
+                "bottom-end",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toast-provider",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "toaster",
+            ),
+        ),
+    ],
+    styles: [],
+}

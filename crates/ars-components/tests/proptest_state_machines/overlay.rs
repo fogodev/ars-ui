@@ -4,7 +4,9 @@ use ars_a11y::FocusTarget;
 use ars_components::overlay::{
     dialog, popover,
     positioning::{ArrowOffset, Offset, Placement, PositioningOptions, PositioningSnapshot},
-    presence, tooltip,
+    presence,
+    toast::{manager as toast_manager, single as toast_single},
+    tooltip,
 };
 use ars_core::{Direction, Env, SendResult, Service};
 use proptest::{prelude::*, test_runner::TestCaseResult};
@@ -877,11 +879,11 @@ fn assert_popover_send_result_invariants(
     // close-plan set. (Per `open_lifecycle_effects` /
     // `close_plan` in popover.rs.)
     if result.state_changed {
-        let names: Vec<popover::Effect> = result
+        let names = result
             .pending_effects
             .iter()
             .map(|effect| effect.name)
-            .collect();
+            .collect::<Vec<_>>();
 
         match service_resulting_state(before_state, result) {
             popover::State::Open => {
@@ -995,11 +997,11 @@ proptest! {
         // it boots into Closed, the buffer is empty. Assert this BEFORE
         // any step runs (the buffer is captured at construction).
         let initial_state = *service.state();
-        let initial_effects: Vec<popover::Effect> = service
+        let initial_effects = service
             .take_initial_effects()
             .into_iter()
             .map(|effect| effect.name)
-            .collect();
+            .collect::<Vec<_>>();
 
         match initial_state {
             popover::State::Open => {
@@ -1080,6 +1082,589 @@ proptest! {
             had_description |= service.context().description_id.is_some();
 
             assert_popover_state_context_invariants(&service)?;
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Toast (per-toast machine) proptest
+// ────────────────────────────────────────────────────────────────────
+
+const TOAST_SINGLE_EFFECTS: &[toast_single::Effect] = &[
+    toast_single::Effect::DurationTimer,
+    toast_single::Effect::ExitAnimation,
+    toast_single::Effect::AnnouncePolite,
+    toast_single::Effect::AnnounceAssertive,
+    toast_single::Effect::OpenChange,
+];
+
+fn arb_toast_kind() -> impl Strategy<Value = toast_single::Kind> {
+    prop_oneof![
+        Just(toast_single::Kind::Info),
+        Just(toast_single::Kind::Success),
+        Just(toast_single::Kind::Warning),
+        Just(toast_single::Kind::Error),
+        Just(toast_single::Kind::Loading),
+    ]
+}
+
+fn arb_toast_props() -> impl Strategy<Value = toast_single::Props> {
+    (
+        arb_toast_kind(),
+        prop::option::of(arb_duration(30_000)),
+        any::<bool>(),
+        10.0f64..=200.0,
+    )
+        .prop_map(
+            |(kind, duration, show_progress, swipe_threshold)| toast_single::Props {
+                id: "toast".to_string(),
+                title: Some("title".to_string()),
+                description: Some("body".to_string()),
+                kind,
+                duration,
+                show_progress,
+                swipe_threshold,
+            },
+        )
+}
+
+fn arb_toast_event() -> impl Strategy<Value = toast_single::Event> {
+    prop_oneof![
+        Just(toast_single::Event::Dismiss),
+        arb_duration(30_000).prop_map(|remaining| toast_single::Event::Pause { remaining }),
+        Just(toast_single::Event::Resume),
+        Just(toast_single::Event::DurationExpired),
+        Just(toast_single::Event::AnimationComplete),
+        (-200.0f64..=200.0).prop_map(toast_single::Event::SwipeStart),
+        (-200.0f64..=200.0).prop_map(toast_single::Event::SwipeMove),
+        (-2.0f64..=2.0, -200.0f64..=200.0)
+            .prop_map(|(velocity, offset)| { toast_single::Event::SwipeEnd { velocity, offset } }),
+        Just(toast_single::Event::SyncProps),
+    ]
+}
+
+#[derive(Clone, Debug)]
+enum ToastSingleStep {
+    Send(toast_single::Event),
+    SetProps(toast_single::Props),
+}
+
+fn arb_toast_single_step() -> impl Strategy<Value = ToastSingleStep> {
+    prop_oneof![
+        arb_toast_event().prop_map(ToastSingleStep::Send),
+        arb_toast_props().prop_map(ToastSingleStep::SetProps),
+    ]
+}
+
+fn assert_toast_send_result_invariants(
+    service: &Service<toast_single::Machine>,
+    event: toast_single::Event,
+    before_state: toast_single::State,
+    result: &SendResult<toast_single::Machine>,
+) -> TestCaseResult {
+    // Effect-name allow-list — every emitted name is one of the documented
+    // `toast::single::Effect` variants.
+    for effect in &result.pending_effects {
+        prop_assert!(
+            TOAST_SINGLE_EFFECTS.contains(&effect.name),
+            "unexpected effect name: {:?}",
+            effect.name
+        );
+
+        // Per-toast machine never emits typed metadata (all intents are
+        // name-only).
+        prop_assert!(effect.metadata.is_none());
+    }
+
+    // Dismissed is terminal — once we have entered it, no further event
+    // flips the state.
+    if matches!(before_state, toast_single::State::Dismissed) {
+        prop_assert!(!result.state_changed);
+        prop_assert_eq!(service.state(), &toast_single::State::Dismissed);
+    }
+
+    // Open mirrors state: only Visible and Paused are "open"; Dismissing
+    // and Dismissed have ctx.open == false.
+    let expected_open = matches!(
+        service.state(),
+        toast_single::State::Visible | toast_single::State::Paused
+    );
+
+    prop_assert_eq!(service.context().open, expected_open);
+
+    // `Context::paused` mirrors `State::Paused` exactly. This was the
+    // round-6 regression: dismissing from Paused used to leave
+    // `ctx.paused == true` while `state == Dismissing`. Asserting it
+    // every step here catches any future arm that desyncs the flag.
+    let expected_paused = matches!(service.state(), toast_single::State::Paused);
+
+    prop_assert_eq!(service.context().paused, expected_paused);
+
+    // Swipe state must not survive into Dismissing/Dismissed: those
+    // are exit-animation states where adapters style/position the
+    // toast based on the dismiss source, not on a half-finished drag.
+    if matches!(
+        service.state(),
+        toast_single::State::Dismissing | toast_single::State::Dismissed
+    ) {
+        prop_assert!(!service.context().swiping);
+        prop_assert_eq!(service.context().swipe_offset, 0.0);
+    }
+
+    // Pause atomically records the remaining-time snapshot.
+    if let toast_single::Event::Pause { remaining } = event
+        && result.state_changed
+    {
+        prop_assert_eq!(service.context().remaining, Some(remaining));
+        prop_assert!(
+            result
+                .cancel_effects
+                .contains(&toast_single::Effect::DurationTimer)
+        );
+    }
+
+    // Resume re-emits `DurationTimer` on a successful Paused → Visible
+    // transition **only when the toast has a finite duration**. Persistent
+    // toasts (`duration: None`, typical for `Kind::Loading`) deliberately
+    // skip the timer effect — emitting one would either schedule a
+    // `set_timeout(None)` or auto-dismiss a toast that's supposed to stay
+    // until explicit update / removal.
+    if matches!(event, toast_single::Event::Resume) && result.state_changed {
+        let names = result
+            .pending_effects
+            .iter()
+            .map(|e| e.name)
+            .collect::<Vec<_>>();
+
+        let has_duration = service.context().duration.is_some();
+
+        if has_duration {
+            prop_assert!(names.contains(&toast_single::Effect::DurationTimer));
+        } else {
+            prop_assert!(!names.contains(&toast_single::Effect::DurationTimer));
+        }
+    }
+
+    Ok(())
+}
+
+proptest! {
+    #![proptest_config(super::common::proptest_config())]
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_toast_single_state_context_invariants_hold(
+        props in arb_toast_props(),
+        steps in prop::collection::vec(arb_toast_single_step(), 0..128),
+    ) {
+        let mut service = Service::<toast_single::Machine>::new(
+            props,
+            &Env::default(),
+            &toast_single::Messages::default(),
+        );
+
+        // initial_effects emits Announce* always, plus DurationTimer when
+        // duration is Some. Drained exactly once.
+        let initial = service
+            .take_initial_effects()
+            .into_iter()
+            .map(|effect| effect.name)
+            .collect::<Vec<_>>();
+
+        let kind = service.context().kind;
+
+        let assertive = matches!(kind, toast_single::Kind::Warning | toast_single::Kind::Error);
+
+        if assertive {
+            prop_assert!(initial.contains(&toast_single::Effect::AnnounceAssertive));
+        } else {
+            prop_assert!(initial.contains(&toast_single::Effect::AnnouncePolite));
+        }
+
+        if service.context().duration.is_some() {
+            prop_assert!(initial.contains(&toast_single::Effect::DurationTimer));
+        }
+
+        prop_assert!(service.take_initial_effects().is_empty());
+
+        for step in steps {
+            match step {
+                ToastSingleStep::Send(event) => {
+                    let before_state = *service.state();
+                    let result = service.send(event);
+
+                    assert_toast_send_result_invariants(&service, event, before_state, &result)?;
+                }
+
+                ToastSingleStep::SetProps(props) => {
+                    drop(service.set_props(props));
+
+                    // After set_props, context-backed prop fields must
+                    // mirror props (SyncProps reapplied them). The four
+                    // fields covered: title, description, kind, duration.
+                    let p = service.props();
+                    let c = service.context();
+
+                    prop_assert_eq!(&c.title, &p.title);
+                    prop_assert_eq!(&c.description, &p.description);
+                    prop_assert_eq!(c.kind, p.kind);
+                    prop_assert_eq!(c.duration, p.duration);
+                }
+            }
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Toast manager proptest
+// ────────────────────────────────────────────────────────────────────
+
+const TOAST_MANAGER_EFFECTS: &[toast_manager::Effect] = &[
+    toast_manager::Effect::AnnouncePolite,
+    toast_manager::Effect::AnnounceAssertive,
+    toast_manager::Effect::ScheduleAnnouncement,
+    toast_manager::Effect::PauseAllTimers,
+    toast_manager::Effect::ResumeAllTimers,
+    toast_manager::Effect::DismissAllToasts,
+];
+
+fn arb_toast_placement() -> impl Strategy<Value = toast_manager::Placement> {
+    prop_oneof![
+        Just(toast_manager::Placement::TopStart),
+        Just(toast_manager::Placement::TopCenter),
+        Just(toast_manager::Placement::TopEnd),
+        Just(toast_manager::Placement::BottomStart),
+        Just(toast_manager::Placement::BottomCenter),
+        Just(toast_manager::Placement::BottomEnd),
+        Just(toast_manager::Placement::TopLeft),
+        Just(toast_manager::Placement::TopRight),
+        Just(toast_manager::Placement::BottomLeft),
+        Just(toast_manager::Placement::BottomRight),
+    ]
+}
+
+fn arb_hotkey() -> impl Strategy<Value = ars_interactions::Hotkey> {
+    use ars_interactions::{Hotkey, KeyboardKey};
+
+    let trigger = prop_oneof![
+        // Named-key trigger — exercise a couple of representative variants.
+        Just(KeyboardKey::F8).prop_map(Hotkey::named),
+        Just(KeyboardKey::Escape).prop_map(Hotkey::named),
+        Just(KeyboardKey::ArrowUp).prop_map(Hotkey::named),
+        // Char trigger — sample lowercase ASCII letters; matching is
+        // case-insensitive so we don't need both cases.
+        (0_u32..26).prop_map(|n| Hotkey::char(char::from(b'a' + (n as u8)))),
+    ];
+
+    (
+        trigger,
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+    )
+        .prop_map(|(hk, alt, ctrl, shift, meta)| {
+            let mut hk = hk;
+            if alt {
+                hk = hk.with_alt();
+            }
+            if ctrl {
+                hk = hk.with_ctrl();
+            }
+            if shift {
+                hk = hk.with_shift();
+            }
+            if meta {
+                hk = hk.with_meta();
+            }
+            hk
+        })
+}
+
+fn arb_toast_manager_props() -> impl Strategy<Value = toast_manager::Props> {
+    (
+        arb_toast_placement(),
+        1_usize..=5,
+        0.0f64..=32.0,
+        arb_duration(1_000),
+        any::<bool>(),
+        any::<bool>(),
+        prop::option::of(arb_hotkey()),
+    )
+        .prop_map(
+            |(placement, max_visible, gap, remove_delay, dedup_all, overlap, hotkey)| {
+                let mut props = toast_manager::Props::new()
+                    .id("toaster")
+                    .placement(placement)
+                    .max_visible(max_visible)
+                    .gap(gap)
+                    .remove_delay(remove_delay)
+                    .deduplicate_all(dedup_all)
+                    .overlap(overlap);
+                if let Some(hk) = hotkey {
+                    props = props.hotkey(hk);
+                }
+                props
+            },
+        )
+}
+
+fn arb_toast_config() -> impl Strategy<Value = toast_manager::Config> {
+    // Always leave `id` as `None` so the manager auto-generates monotonic
+    // ids. Random explicit ids would collide and let two entries share an
+    // id, which is a precondition violation rather than a bug under test.
+    (
+        arb_toast_kind(),
+        prop::option::of(arb_duration(10_000)),
+        any::<bool>(),
+        any::<bool>(),
+    )
+        .prop_map(|(kind, duration, dismissible, deduplicate)| {
+            let mut cfg = toast_manager::Config::new(kind, "title").description("body");
+
+            cfg.duration = duration;
+            cfg.dismissible = dismissible;
+            cfg.deduplicate = deduplicate;
+
+            cfg
+        })
+}
+
+fn arb_toast_manager_event() -> impl Strategy<Value = toast_manager::Event> {
+    prop_oneof![
+        arb_toast_config().prop_map(toast_manager::Event::Add),
+        Just(toast_manager::Event::PauseAll),
+        Just(toast_manager::Event::ResumeAll),
+        Just(toast_manager::Event::DismissAll),
+        (0_u64..=10_000).prop_map(|now_ms| toast_manager::Event::DrainAnnouncement { now_ms }),
+        any::<bool>().prop_map(toast_manager::Event::SetVisibility),
+        Just(toast_manager::Event::SyncProps),
+    ]
+}
+
+#[derive(Clone, Debug)]
+enum ToastManagerStep {
+    Send(toast_manager::Event),
+    SetProps(toast_manager::Props),
+}
+
+fn arb_toast_manager_step() -> impl Strategy<Value = ToastManagerStep> {
+    prop_oneof![
+        arb_toast_manager_event().prop_map(ToastManagerStep::Send),
+        arb_toast_manager_props().prop_map(ToastManagerStep::SetProps),
+    ]
+}
+
+fn assert_toast_manager_send_result_invariants(
+    service: &Service<toast_manager::Machine>,
+    event: &toast_manager::Event,
+    result: &SendResult<toast_manager::Machine>,
+    historical_max_visible: usize,
+) -> TestCaseResult {
+    for effect in &result.pending_effects {
+        prop_assert!(
+            TOAST_MANAGER_EFFECTS.contains(&effect.name),
+            "unexpected manager effect name: {:?}",
+            effect.name
+        );
+
+        prop_assert!(effect.metadata.is_none());
+    }
+
+    // paused_all flag mirrors State::Paused exactly.
+    let ctx_paused = service.context().paused_all;
+
+    let state_paused = matches!(service.state(), toast_manager::State::Paused);
+
+    prop_assert_eq!(ctx_paused, state_paused);
+
+    // pause_reasons is the source of truth: the manager is in Paused
+    // iff at least one pause reason is active. Verifying both
+    // directions catches any future arm that forgets to update one
+    // side of the (state, paused_all, pause_reasons) triple.
+    let reasons = service.context().pause_reasons;
+
+    prop_assert_eq!(reasons.any(), state_paused);
+    prop_assert_eq!(reasons.any(), ctx_paused);
+
+    // Visible-toast count never exceeds the **historical** max_visible.
+    // SyncProps deliberately preserves existing toasts when `max_visible`
+    // shrinks at runtime — a UX choice (don't yank toasts out from under
+    // a user just because a config knob moved). So the strict invariant
+    // is `visible_count <= max(max_visible at every prior moment)`,
+    // *not* `visible_count <= ctx.max_visible`.
+    let visible_count = service
+        .context()
+        .toasts
+        .iter()
+        .filter(|entry| entry.stage == toast_manager::EntryStage::Visible)
+        .count();
+
+    prop_assert!(visible_count <= historical_max_visible);
+
+    // All toast ids — across both `ctx.toasts` and `ctx.queued` — must
+    // be globally unique. `Update(id)` and `Remove(id)` use first-match
+    // lookup, so a duplicate id silently makes those operations target
+    // the wrong entry. The auto-id resolver must skip past any slot
+    // already taken by an explicit caller-supplied id (round-8
+    // regression).
+    let mut all_ids: Vec<&str> = service
+        .context()
+        .toasts
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect();
+
+    all_ids.extend(
+        service
+            .context()
+            .queued
+            .iter()
+            .filter_map(|cfg| cfg.id.as_deref()),
+    );
+
+    let unique = all_ids
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+
+    prop_assert_eq!(
+        all_ids.len(),
+        unique.len(),
+        "tracked + queued toast ids must be globally unique; got {:?}",
+        all_ids
+    );
+
+    // The announcement queue must hold at most one entry per toast id.
+    // `Update` is documented to **replace** the pending announcement
+    // for an id, not stack new ones on top — otherwise repeated
+    // updates between heartbeats would each fire their own
+    // `Announce*` effect for the same toast (round-9 regression).
+    let announce_ids: Vec<&str> = service
+        .context()
+        .announcement_queue
+        .iter()
+        .map(|(id, _)| id.as_str())
+        .collect();
+
+    let announce_unique = announce_ids
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+
+    prop_assert_eq!(
+        announce_ids.len(),
+        announce_unique.len(),
+        "announcement queue must hold at most one entry per toast id; got {:?}",
+        announce_ids
+    );
+
+    // Note: a strict "FIFO admission" invariant
+    // (`queue non-empty → occupied >= max_visible`) is *not*
+    // expressible here because `SyncProps` can grow `max_visible` at
+    // runtime without auto-promoting the existing backlog (promotion
+    // is gated on `HideQueueAdvance`). The round-10 P2 regression is
+    // covered directly by the `add_does_not_jump_queue_*` unit tests.
+
+    // DrainAnnouncement on an empty queue is a state-preserving no-op.
+    if matches!(event, toast_manager::Event::DrainAnnouncement { .. })
+        && service.context().announcement_queue.is_empty()
+    {
+        prop_assert!(!result.state_changed);
+    }
+
+    // DrainAnnouncement: the heartbeat signal must never be dropped
+    // while announcements remain pending. Adapters implement
+    // `ScheduleAnnouncement` as a one-shot trigger, so if the queue
+    // is non-empty after a drain attempt and no `Announce*` effect
+    // fired, then `ScheduleAnnouncement` must be emitted to keep the
+    // heartbeat alive (round-7 regression).
+    if matches!(event, toast_manager::Event::DrainAnnouncement { .. })
+        && !service.context().announcement_queue.is_empty()
+    {
+        let names = result
+            .pending_effects
+            .iter()
+            .map(|e| e.name)
+            .collect::<Vec<_>>();
+
+        let announced = names.iter().any(|n| {
+            matches!(
+                n,
+                toast_manager::Effect::AnnouncePolite | toast_manager::Effect::AnnounceAssertive
+            )
+        });
+
+        let rescheduled = names.contains(&toast_manager::Effect::ScheduleAnnouncement);
+
+        prop_assert!(
+            announced || rescheduled,
+            "DrainAnnouncement with non-empty queue must announce or reschedule, got effects: {names:?}",
+        );
+    }
+
+    Ok(())
+}
+
+proptest! {
+    #![proptest_config(super::common::proptest_config())]
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_toast_manager_state_context_invariants_hold(
+        props in arb_toast_manager_props(),
+        steps in prop::collection::vec(arb_toast_manager_step(), 0..128),
+    ) {
+        let mut service = Service::<toast_manager::Machine>::new(
+            props,
+            &Env::default(),
+            &toast_manager::Messages::default(),
+        );
+
+        // Manager has no initial effects today.
+        prop_assert!(service.take_initial_effects().is_empty());
+
+        // Track the historical maximum cap so SyncProps shrink doesn't
+        // retroactively violate the cap invariant on previously-admitted
+        // toasts.
+        let mut historical_max_visible = service.context().max_visible;
+
+        for step in steps {
+            match step {
+                ToastManagerStep::Send(event) => {
+                    let result = service.send(event.clone());
+
+                    assert_toast_manager_send_result_invariants(
+                        &service,
+                        &event,
+                        &result,
+                        historical_max_visible,
+                    )?;
+                }
+
+                ToastManagerStep::SetProps(props) => {
+                    drop(service.set_props(props));
+                    // After set_props, context-backed prop fields must
+                    // mirror props (SyncProps reapplied), with
+                    // `max_visible` clamped to ≥ 1.
+
+                    let p = service.props();
+
+                    let c = service.context();
+
+                    prop_assert_eq!(c.placement, p.placement);
+                    prop_assert_eq!(c.max_visible, p.max_visible.max(1));
+                    prop_assert_eq!(c.gap, p.gap);
+                    prop_assert_eq!(c.remove_delay, p.remove_delay);
+                    prop_assert_eq!(&c.default_durations, &p.default_durations);
+                    prop_assert_eq!(c.deduplicate_all, p.deduplicate_all);
+                    prop_assert_eq!(c.offsets, p.offsets);
+                    prop_assert_eq!(c.overlap, p.overlap);
+
+                    historical_max_visible =
+                        historical_max_visible.max(c.max_visible);
+                }
+            }
         }
     }
 }

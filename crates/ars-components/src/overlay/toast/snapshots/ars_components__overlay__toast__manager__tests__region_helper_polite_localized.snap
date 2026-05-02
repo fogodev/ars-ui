@@ -1,0 +1,63 @@
+---
+source: crates/ars-components/src/overlay/toast/manager.rs
+expression: "snapshot_attrs(&region_attrs(&messages, &env.locale, RegionPart::Polite))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-live",
+            ),
+            String(
+                "polite",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "region",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toast",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Notificaciones",
+            ),
+        ),
+        (
+            Aria(
+                Atomic,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "polite",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "status",
+            ),
+        ),
+    ],
+    styles: [],
+}

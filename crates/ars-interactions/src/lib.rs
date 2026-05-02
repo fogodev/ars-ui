@@ -46,7 +46,7 @@ pub use hover::{HoverConfig, HoverEvent, HoverEventType, HoverResult, HoverState
 pub use interact_outside::{
     InteractOutsideConfig, InteractOutsideEvent, InteractOutsideStandalone,
 };
-pub use keyboard::{ArsKeyboardEvent, KeyboardConfig, KeyboardEventData};
+pub use keyboard::{ArsKeyboardEvent, Hotkey, HotkeyTrigger, KeyboardConfig, KeyboardEventData};
 pub use long_press::{
     LongPressConfig, LongPressEvent, LongPressEventType, LongPressResult, LongPressState,
     use_long_press,
