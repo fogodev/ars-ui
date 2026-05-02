@@ -1,0 +1,9 @@
+[package]
+name = "widgets-dioxus-css"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+ars-dioxus = { path = "../../crates/ars-dioxus", features = ["web"] }
+dioxus = { version = "0.7", default-features = false, features = ["web", "launch"] }

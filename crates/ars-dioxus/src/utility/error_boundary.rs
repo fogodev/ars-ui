@@ -16,7 +16,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 pub use ars_components::utility::error_boundary::{Api, Messages, Part};
-use ars_i18n::Locale;
+use ars_i18n::{Locale, locales};
 pub use dioxus::CapturedError;
 use dioxus::prelude::*;
 
@@ -53,7 +53,7 @@ pub struct BoundaryProps {
     /// `Some`, the closure receives Dioxus's [`ErrorContext`] and is
     /// responsible for rendering its own UI; none of the canonical
     /// `data-ars-*` attributes are emitted in that branch.
-    #[props(optional)]
+    #[props(optional, into)]
     pub fallback: Option<FallbackHandler>,
 
     /// Optional telemetry hook fired once for each newly captured error
@@ -62,16 +62,22 @@ pub struct BoundaryProps {
     /// Fired before the fallback renders. Consumers can forward the
     /// [`CapturedError`] to monitoring services (Sentry, Datadog, ...).
     /// The same captured error is not replayed when the fallback re-renders.
-    #[props(optional)]
+    #[props(optional, into)]
     pub on_error: Option<EventHandler<CapturedError>>,
 
     /// Override the default [`Messages`] bundle.
     ///
     /// When `None`, the wrapper resolves the bundle from `ArsProvider`'s
-    /// `i18n_registries` for the active locale, falling back to
+    /// `i18n_registries` for the resolved locale, falling back to
     /// [`Messages::default`] (English `"A component encountered an error."`).
     #[props(optional)]
     pub messages: Option<Messages>,
+
+    /// Override the locale used to resolve and render the fallback heading.
+    ///
+    /// When `None`, the wrapper reads the locale from `ArsProvider`.
+    #[props(optional)]
+    pub locale: Option<Locale>,
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -84,8 +90,8 @@ pub struct BoundaryProps {
 /// The fallback is a `<div role="alert" data-ars-error="true">` containing
 /// a localized heading paragraph and a `<ul>` of `<li>` error entries —
 /// matching the Leptos adapter byte-for-byte. Optional props expose a
-/// custom fallback override, an `on_error` telemetry hook, and a
-/// `messages` bundle override.
+/// custom fallback override, an `on_error` telemetry hook, and `locale` /
+/// `messages` bundle overrides.
 ///
 /// See `spec/dioxus-components/utility/error-boundary.md` for the full
 /// adapter contract.
@@ -96,9 +102,10 @@ pub fn Boundary(props: BoundaryProps) -> Element {
         fallback,
         on_error,
         messages,
+        locale,
     } = props;
 
-    let resolved_locale = resolve_locale(None);
+    let resolved_locale = resolve_locale(locale.as_ref());
 
     let resolved_messages = use_messages(messages.as_ref(), Some(&resolved_locale));
 
@@ -152,7 +159,7 @@ fn should_emit_new_error(error: &CapturedError, seen_error: &mut Option<Captured
 /// ```ignore
 /// rsx! {
 ///     ErrorBoundary {
-///         handle_error: ars_dioxus::error_boundary::default_fallback,
+///         handle_error: ars_dioxus::utility::error_boundary::default_fallback,
 ///         ChildComponent {}
 ///     }
 /// }
@@ -176,15 +183,11 @@ fn should_emit_new_error(error: &CapturedError, seen_error: &mut Option<Captured
 pub fn default_fallback(ctx: ErrorContext) -> Element {
     let messages = Messages::default();
 
-    let locale = en_us_locale();
+    let locale = locales::en_us();
 
     let heading = (messages.message)(&locale);
 
     render_default_fallback(&ctx, &heading)
-}
-
-fn en_us_locale() -> Locale {
-    Locale::parse("en-US").expect("'en-US' is always a valid BCP-47 locale")
 }
 
 fn render_default_fallback(ctx: &ErrorContext, heading: &str) -> Element {

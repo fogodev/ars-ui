@@ -814,35 +814,41 @@ impl Debug for Api<'_> {
     }
 }
 
-impl<'a> Api<'a> {
+impl Api<'_> {
     /// Returns whether the button is in loading state.
     #[must_use]
-    pub const fn is_loading(&self) -> bool {
-        matches!(self.state, State::Loading) || self.ctx.loading
+    pub const fn is_loading(api: &Api<'_>) -> bool {
+        matches!(api.state, State::Loading) || api.ctx.loading
     }
 
     /// Returns whether the button is disabled for interaction.
     #[must_use]
-    pub const fn is_disabled(&self) -> bool {
-        self.ctx.disabled || self.ctx.loading
+    pub const fn is_disabled(api: &Api<'_>) -> bool {
+        api.ctx.disabled || api.ctx.loading
     }
 
     /// Returns whether focus should render as focus-visible.
     #[must_use]
-    pub const fn is_focus_visible(&self) -> bool {
-        self.ctx.focus_visible
+    pub const fn is_focus_visible(api: &Api<'_>) -> bool {
+        api.ctx.focus_visible
     }
 
     /// Returns whether the button is currently pressed.
     #[must_use]
-    pub const fn is_pressed(&self) -> bool {
-        self.ctx.pressed
+    pub const fn is_pressed(api: &Api<'_>) -> bool {
+        api.ctx.pressed
     }
 
     /// Returns whether adapters should suppress pointer-induced focus.
     #[must_use]
-    pub const fn should_prevent_focus_on_press(&self) -> bool {
-        self.props.prevent_focus_on_press
+    pub const fn should_prevent_focus_on_press(api: &Api<'_>) -> bool {
+        api.props.prevent_focus_on_press
+    }
+
+    /// Returns the configured native button type.
+    #[must_use]
+    pub const fn button_type(api: &Api<'_>) -> Type {
+        api.props.r#type
     }
 
     /// Dispatches a focus event.
@@ -885,7 +891,7 @@ impl<'a> Api<'a> {
             .set(HtmlAttr::Data("ars-variant"), self.props.variant.as_str())
             .set(HtmlAttr::Data("ars-size"), self.props.size.as_str());
 
-        if self.is_loading() {
+        if Self::is_loading(self) {
             attrs
                 .set_bool(HtmlAttr::Data("ars-loading"), true)
                 .set(HtmlAttr::Aria(AriaAttr::Disabled), "true")
@@ -964,7 +970,7 @@ impl<'a> Api<'a> {
 
         attrs.set(scope_attr, scope_val).set(part_attr, part_val);
 
-        if self.is_loading() {
+        if Self::is_loading(self) {
             attrs
                 .set_bool(HtmlAttr::Data("ars-loading"), true)
                 .set(HtmlAttr::Role, "status")
@@ -993,7 +999,11 @@ impl<'a> Api<'a> {
             .set(part_attr, part_val)
             .set(
                 HtmlAttr::Data("ars-loading"),
-                if self.is_loading() { "true" } else { "false" },
+                if Self::is_loading(self) {
+                    "true"
+                } else {
+                    "false"
+                },
             );
 
         attrs
@@ -1048,7 +1058,7 @@ mod tests {
 
     #[test]
     fn props_builder_chain_applies_each_setter() {
-        let safe = SafeUrl::new("/submit").expect("safe URL should validate");
+        let safe = SafeUrl::from_static("/submit");
         let props = Props::new()
             .id("button-1")
             .disabled(true)
@@ -1459,9 +1469,9 @@ mod tests {
 
         let api = default_service.connect(&|_| {});
 
-        assert!(!api.is_pressed());
-        assert!(!api.is_focus_visible());
-        assert!(!api.should_prevent_focus_on_press());
+        assert!(!Api::is_pressed(&api));
+        assert!(!Api::is_focus_visible(&api));
+        assert!(!Api::should_prevent_focus_on_press(&api));
 
         let mut service = service(test_props().prevent_focus_on_press(true));
 
@@ -1470,11 +1480,11 @@ mod tests {
 
         let api = service.connect(&|_| {});
 
-        assert!(api.is_pressed());
-        assert!(api.is_focus_visible());
-        assert!(api.should_prevent_focus_on_press());
-        assert!(!api.is_loading());
-        assert!(!api.is_disabled());
+        assert!(Api::is_pressed(&api));
+        assert!(Api::is_focus_visible(&api));
+        assert!(Api::should_prevent_focus_on_press(&api));
+        assert!(!Api::is_loading(&api));
+        assert!(!Api::is_disabled(&api));
     }
 
     #[test]
@@ -1485,15 +1495,15 @@ mod tests {
 
         let api = idle.connect(&|_| {});
 
-        assert!(api.is_loading());
-        assert!(api.is_disabled());
+        assert!(Api::is_loading(&api));
+        assert!(Api::is_disabled(&api));
 
         let service = service(test_props().loading(true));
 
         let api = service.connect(&|_| {});
 
-        assert!(api.is_loading());
-        assert!(api.is_disabled());
+        assert!(Api::is_loading(&api));
+        assert!(Api::is_disabled(&api));
     }
 
     #[test]
@@ -1653,7 +1663,7 @@ mod tests {
         // SafeUrl prevents unsafe construction through public builders. This
         // test verifies the output path still uses the shared sanitizer by
         // exercising a safe URL that sanitizer must preserve.
-        props.form_action = Some(SafeUrl::new("./submit").expect("safe URL should validate"));
+        props.form_action = Some(SafeUrl::from_static("./submit"));
 
         let attrs = service(props).connect(&|_| {}).root_attrs();
 

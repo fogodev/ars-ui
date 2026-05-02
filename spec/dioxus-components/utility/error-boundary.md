@@ -54,6 +54,10 @@ pub struct BoundaryProps {
     /// needs to inject custom wording.
     #[props(optional)]
     pub messages: Option<error_boundary::Messages>,
+
+    /// Explicit locale override used for fallback heading resolution.
+    #[props(optional)]
+    pub locale: Option<Locale>,
 }
 
 #[component]
@@ -77,8 +81,9 @@ namespace.
 
 ## 3. Mapping to Core Component Contract
 
-- **Props parity:** the four logical props from the core spec
-  (`children`, `fallback`, `on_error`, `messages`) map 1:1 to adapter
+- **Props parity:** the logical props from the core spec plus the adapter
+  heading overrides (`children`, `fallback`, `on_error`, `messages`,
+  `locale`) map 1:1 to adapter
   props. Dioxus props are declared in an explicit `#[derive(Props)]`
   struct per the
   [`feedback_dioxus_explicit_props.md`](../../../docs/feedback/feedback_dioxus_explicit_props.md)
@@ -94,12 +99,12 @@ namespace.
 
 ## 4. Part Mapping
 
-| Core part / structure | Required? | Adapter rendering target | Ownership     | Attr source             | Notes                                                                  |
-| --------------------- | --------- | ------------------------ | ------------- | ----------------------- | ---------------------------------------------------------------------- |
-| `Root`                | required  | `<div>` alert region     | adapter-owned | `api.root_attrs()`      | rendered only in the error-fallback branch                              |
-| `Message`             | required  | `<p>` heading            | adapter-owned | `api.message_attrs()`   | text is the resolved `Messages.message`                                |
-| `List`                | required  | `<ul>`                   | adapter-owned | `api.list_attrs()`      | always present in fallback                                              |
-| `Item`                | repeated  | `<li>`                   | adapter-owned | `api.item_attrs()`      | always exactly one entry on Dioxus (single-error `ErrorContext`)         |
+| Core part / structure | Required? | Adapter rendering target | Ownership     | Attr source           | Notes                                                            |
+| --------------------- | --------- | ------------------------ | ------------- | --------------------- | ---------------------------------------------------------------- |
+| `Root`                | required  | `<div>` alert region     | adapter-owned | `api.root_attrs()`    | rendered only in the error-fallback branch                       |
+| `Message`             | required  | `<p>` heading            | adapter-owned | `api.message_attrs()` | text is the resolved `Messages.message`                          |
+| `List`                | required  | `<ul>`                   | adapter-owned | `api.list_attrs()`    | always present in fallback                                       |
+| `Item`                | repeated  | `<li>`                   | adapter-owned | `api.item_attrs()`    | always exactly one entry on Dioxus (single-error `ErrorContext`) |
 
 ## 5. Locale and Messages Resolution
 
@@ -111,8 +116,9 @@ priority order:
    locale.
 3. `Messages::default()` (English `"A component encountered an error."`).
 
-The resolved `Locale` comes from `use_locale()` (from `ArsContext`). The
-final string is rendered into the `Message` part via `rsx!`.
+The resolved `Locale` comes from the explicit `locale` prop when provided,
+otherwise from `use_locale()` (from `ArsContext`). The final string is
+rendered into the `Message` part via `rsx!`.
 
 ## 6. Error Iteration
 
@@ -150,7 +156,7 @@ canonical `data-ars-*` attributes are emitted.
 
 When `fallback` is `None`, the adapter calls `default_fallback`, which is
 the same renderer used internally — guaranteeing that consumers who skip
-the wrapper (`ErrorBoundary { handle_error: ars_dioxus::error_boundary::default_fallback, … }`)
+the wrapper (`ErrorBoundary { handle_error: ars_dioxus::utility::error_boundary::default_fallback, … }`)
 get byte-identical markup.
 
 ## 8. Telemetry (`on_error`)

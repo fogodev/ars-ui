@@ -134,12 +134,19 @@ fn attr_value_to_leptos_attr(name: String, value: AttrValue) -> Option<LeptosAtt
         }
 
         AttrValue::ReactiveBool(f) => {
-            // Reactive booleans follow HTML presence/absence semantics:
-            // `true` renders the attribute with an empty value and `false`
-            // removes it. Consumers that need ARIA-style `"true"` / `"false"`
-            // literal values should use [`AttrValue::reactive`] with a closure
-            // that returns the desired string.
-            let closure = move || f().then(String::new);
+            // Reactive booleans follow HTML presence/absence semantics. ARIA
+            // boolean states use the literal `"true"` token instead of an empty
+            // string because assistive technology consumes the attribute value.
+            let is_aria = name.starts_with("aria-");
+            let closure = move || {
+                f().then(|| {
+                    if is_aria {
+                        String::from("true")
+                    } else {
+                        String::new()
+                    }
+                })
+            };
 
             Some(leptos::attr::custom::custom_attribute(name, closure).into_any_attr())
         }
@@ -148,7 +155,8 @@ fn attr_value_to_leptos_attr(name: String, value: AttrValue) -> Option<LeptosAtt
     }
 }
 
-fn string_attr(name: String, value: String) -> LeptosAttribute {
+/// Builds one literal custom Leptos attribute.
+pub(crate) fn string_attr(name: String, value: String) -> LeptosAttribute {
     use leptos::tachys::html::attribute::any_attribute::IntoAnyAttribute as _;
 
     leptos::attr::custom::custom_attribute(name, value).into_any_attr()
@@ -689,9 +697,7 @@ mod wasm_tests {
             let attrs = attr_map_to_leptos(map, &StyleStrategy::Inline, None).attrs;
 
             let mount_handle = leptos::mount::mount_to(parent.clone(), move || {
-                leptos::view! {
-                    <button id="reactive-attrs" {..attrs}></button>
-                }
+                leptos::view! { <button id="reactive-attrs" {..attrs}></button> }
             });
 
             let button = parent
@@ -954,13 +960,9 @@ mod wasm_tests {
 
                 let child = move || {
                     if show_second.get() {
-                        Either::Left(leptos::view! {
-                            <div id="second" node_ref=target></div>
-                        })
+                        Either::Left(leptos::view! { <div id="second" node_ref=target></div> })
                     } else {
-                        Either::Right(leptos::view! {
-                            <div id="first" node_ref=target></div>
-                        })
+                        Either::Right(leptos::view! { <div id="first" node_ref=target></div> })
                     }
                 };
 

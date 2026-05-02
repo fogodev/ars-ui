@@ -175,7 +175,7 @@ fn direction_from_locale(locale: &Locale) -> Direction {
     clippy::too_many_arguments,
     reason = "ArsProvider intentionally mirrors the documented provider surface."
 )]
-pub fn ArsProvider(
+pub fn ArsProvider<T>(
     #[prop(optional, into)] locale: Option<Signal<Locale>>,
     #[prop(optional, into)] direction: Option<Signal<Direction>>,
     #[prop(optional, into)] color_mode: Option<Signal<ColorMode>>,
@@ -188,8 +188,11 @@ pub fn ArsProvider(
     #[prop(optional)] intl_backend: Option<Arc<dyn IntlBackend>>,
     #[prop(optional)] i18n_registries: Option<Arc<I18nRegistries>>,
     #[prop(optional)] style_strategy: Option<StyleStrategy>,
-    children: Children,
-) -> impl IntoView {
+    children: TypedChildren<T>,
+) -> impl IntoView
+where
+    View<T>: IntoView,
+{
     let locale = locale.unwrap_or_else(|| Signal::stored(locales::en_us()));
 
     let direction =
@@ -241,8 +244,7 @@ pub fn ArsProvider(
 
     view! {
         <div dir=dir_attr>
-            {nonce.map(|nonce| view! { <ArsNonceStyle nonce=nonce /> })}
-            {children()}
+            {nonce.map(|nonce| view! { <ArsNonceStyle nonce=nonce /> })} {children.into_inner()()}
         </div>
     }
 }

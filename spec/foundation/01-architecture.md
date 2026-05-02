@@ -3432,6 +3432,8 @@ All URL-valued attributes (`HtmlAttr::Href`, `HtmlAttr::Action`,
 injection attacks such as `javascript:`, `data:`, or `vbscript:` schemes.
 
 ```rust
+use alloc::borrow::Cow;
+
 /// Check whether a URL is safe for use in `href`, `action`, or `formaction`
 /// attributes.
 ///
@@ -3441,24 +3443,84 @@ injection attacks such as `javascript:`, `data:`, or `vbscript:` schemes.
 pub fn is_safe_url(url: &str) -> bool {
     let trimmed = url.trim_start().as_bytes();
 
-    fn starts_with_ignore_case(haystack: &[u8], needle: &[u8]) -> bool {
-        haystack.len() >= needle.len()
-            && haystack[..needle.len()]
-                .iter()
-                .zip(needle)
-                .all(|(a, b)| a.to_ascii_lowercase() == *b)
+    is_safe_url_trimmed_bytes(trimmed)
+}
+
+const fn is_safe_url_bytes(url: &[u8]) -> bool {
+    let trimmed = trim_ascii_start(url);
+
+    is_safe_url_trimmed_bytes(trimmed)
+}
+
+const fn is_safe_url_trimmed_bytes(trimmed: &[u8]) -> bool {
+    if trimmed.is_empty() {
+        return true;
     }
 
-    starts_with_ignore_case(trimmed, b"http://")
+    if starts_with_ignore_case(trimmed, b"http://")
         || starts_with_ignore_case(trimmed, b"https://")
         || starts_with_ignore_case(trimmed, b"mailto:")
         || starts_with_ignore_case(trimmed, b"tel:")
-        || trimmed.first() == Some(&b'/')
-        || trimmed.first() == Some(&b'#')
-        || trimmed.first() == Some(&b'?')
+        || trimmed[0] == b'/'
+        || trimmed[0] == b'#'
+        || trimmed[0] == b'?'
         || starts_with_ignore_case(trimmed, b"./")
         || starts_with_ignore_case(trimmed, b"../")
-        || !trimmed.contains(&b':')
+    {
+        return true;
+    }
+
+    !contains_byte(trimmed, b':')
+}
+
+const fn trim_ascii_start(url: &[u8]) -> &[u8] {
+    let mut start = 0;
+
+    while start < url.len() && url[start].is_ascii_whitespace() {
+        start += 1;
+    }
+
+    url.split_at(start).1
+}
+
+const fn contains_byte(haystack: &[u8], needle: u8) -> bool {
+    let mut index = 0;
+
+    while index < haystack.len() {
+        if haystack[index] == needle {
+            return true;
+        }
+
+        index += 1;
+    }
+
+    false
+}
+
+const fn starts_with_ignore_case(haystack: &[u8], needle: &[u8]) -> bool {
+    if haystack.len() < needle.len() {
+        return false;
+    }
+
+    let mut index = 0;
+
+    while index < needle.len() {
+        if ascii_lowercase(haystack[index]) != needle[index] {
+            return false;
+        }
+
+        index += 1;
+    }
+
+    true
+}
+
+const fn ascii_lowercase(byte: u8) -> u8 {
+    if byte >= b'A' && byte <= b'Z' {
+        byte + 32
+    } else {
+        byte
+    }
 }
 
 /// Sanitize a URL, returning `"#"` for unsafe URLs.
@@ -3471,7 +3533,7 @@ pub fn sanitize_url(url: &str) -> &str {
 /// Components that store URLs in Props or Context should prefer `SafeUrl` over
 /// raw `String` so validation happens once at the boundary.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct SafeUrl(String);
+pub struct SafeUrl(Cow<'static, str>);
 
 impl SafeUrl {
     /// Create a new `SafeUrl`, returning `Err` when the URL uses a disallowed
@@ -3479,9 +3541,21 @@ impl SafeUrl {
     pub fn new(url: impl Into<String>) -> Result<Self, UnsafeUrlError> {
         let url = url.into();
         if is_safe_url(&url) {
-            Ok(Self(url))
+            Ok(Self(Cow::Owned(url)))
         } else {
             Err(UnsafeUrlError(url))
+        }
+    }
+
+    /// Create a new `SafeUrl` from a string literal or other static string.
+    ///
+    /// Invalid values fail during compile-time evaluation when this is used in
+    /// a `const` context; otherwise they panic at runtime.
+    pub const fn from_static(url: &'static str) -> Self {
+        if is_safe_url_bytes(url.as_bytes()) {
+            Self(Cow::Borrowed(url))
+        } else {
+            panic!("static URL uses an unsafe scheme")
         }
     }
 

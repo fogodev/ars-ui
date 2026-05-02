@@ -38,8 +38,9 @@ declared in adapter-native shapes (see `08-adapter-leptos.md` §17 and `09-adapt
 | `fallback` |          | Override the default fallback renderer. When `None`, the wrapper renders `default_fallback`.             |
 | `on_error` |          | Telemetry hook fired with each captured error so apps can ship to monitoring services (Sentry, …).       |
 | `messages` |          | Override the default `Messages` bundle. When `None`, the wrapper resolves from `ArsProvider` registries. |
+| `locale`   |          | Override the locale used for heading resolution. When `None`, the wrapper uses `ArsProvider` locale.     |
 
-`children` is the only required prop. The other three are optional escape hatches; passing
+`children` is the only required prop. The other props are optional escape hatches; passing
 nothing yields the canonical accessible default with a localized heading. The full Rust
 signatures live in the adapter specs because props in Dioxus and Leptos require
 framework-native types (`Element` vs `Children`, `Callback` vs `EventHandler`, `Errors`
@@ -228,12 +229,12 @@ framework's own `ErrorBoundary`:
 ```rust,no_check
 // Dioxus — usage shown inside an `rsx!` invocation:
 ErrorBoundary {
-    handle_error: ars_dioxus::error_boundary::default_fallback,
+    handle_error: ars_dioxus::utility::error_boundary::default_fallback,
     ChildComponent {}
 }
 
 // Leptos — usage shown inside a `view!` invocation:
-<ErrorBoundary fallback=ars_leptos::error_boundary::default_fallback>
+<ErrorBoundary fallback=ars_leptos::utility::error_boundary::default_fallback>
     <ChildComponent/>
 </ErrorBoundary>
 ```
@@ -249,8 +250,11 @@ Adapter wrappers resolve the bundle in this priority order, matching the
 `Dismissable` / `ArsProvider` convention:
 
 1. Explicit `messages` prop on the `Boundary` component.
-2. Bundle registered via `ArsProvider`'s `i18n_registries` for the active locale.
+2. Bundle registered via `ArsProvider`'s `i18n_registries` for the resolved locale.
 3. The framework-agnostic `Messages::default()` (English).
+
+The resolved locale is the explicit `locale` prop when provided, otherwise the
+locale from `ArsProvider`.
 
 The resolved heading is rendered into the `Message` part as plain text. The error
 strings rendered into each `Item` come from each `CapturedError`'s `Display`

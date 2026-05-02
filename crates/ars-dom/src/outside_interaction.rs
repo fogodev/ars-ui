@@ -232,7 +232,7 @@ pub fn install_outside_interaction_listeners(
     Box::new(|| {})
 }
 
-/// Installs document `pointerdown`+`focusin` and root-scoped `keydown`
+/// Installs document `pointerdown`+`focusin`+`keydown`
 /// listeners that fire `config`'s callbacks for outside interactions and
 /// Escape, gated on the overlay being topmost and the target being outside
 /// every registered boundary.
@@ -269,8 +269,8 @@ pub fn install_outside_interaction_listeners(
     let keydown = build_keydown_listener(Rc::clone(&shared));
 
     let pointer_target: EventTarget = document.clone().into();
-    let focus_target: EventTarget = document.into();
-    let keydown_target: EventTarget = root.clone().into();
+    let focus_target: EventTarget = document.clone().into();
+    let keydown_target: EventTarget = document.into();
 
     if pointer_target
         .add_event_listener_with_callback_and_bool(
@@ -297,7 +297,11 @@ pub fn install_outside_interaction_listeners(
     }
 
     if keydown_target
-        .add_event_listener_with_callback("keydown", keydown.as_ref().unchecked_ref())
+        .add_event_listener_with_callback_and_bool(
+            "keydown",
+            keydown.as_ref().unchecked_ref(),
+            true,
+        )
         .is_err()
     {
         drop(pointer_target.remove_event_listener_with_callback_and_bool(
@@ -382,10 +386,12 @@ impl InstalledListeners {
 
         if let Some(keydown) = self.keydown.into_inner() {
             drop(
-                self.keydown_target.remove_event_listener_with_callback(
-                    "keydown",
-                    keydown.as_ref().unchecked_ref(),
-                ),
+                self.keydown_target
+                    .remove_event_listener_with_callback_and_bool(
+                        "keydown",
+                        keydown.as_ref().unchecked_ref(),
+                        true,
+                    ),
             );
         }
     }
@@ -1109,7 +1115,7 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
-    fn escape_on_root_fires_when_topmost() {
+    fn escape_on_document_fires_when_topmost() {
         reset_overlay_stack();
 
         let root = append_div(&body(), "li-root-5");
@@ -1139,7 +1145,7 @@ mod wasm_tests {
             },
         );
 
-        dispatch_keydown_on(root.as_ref(), "Escape");
+        dispatch_keydown_on(body().as_ref(), "Escape");
 
         assert!(fired.load(Ordering::SeqCst));
 

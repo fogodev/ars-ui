@@ -8,14 +8,19 @@ pub(crate) mod feature_matrix;
 
 use std::{
     fmt::{self, Display},
-    fs, io,
+    fs,
+    io::{self, Read, Write},
     path::{Path, PathBuf},
-    process,
+    process::{self, Stdio},
 };
 
 use crate::{coverage, i18n, lint, manifest, spec, test};
 
 const MUTUAL_EXCLUSION_GUARD: &str = "features `icu4x` and `web-intl` are mutually exclusive";
+const LEPTOSFMT_VERSION: &str = "0.1.33";
+const LEPTOSFMT_BASE_INPUTS: &[&str] = &["crates/ars-leptos"];
+const DIOXUS_CLI_VERSION: &str = "0.7.7";
+const DIOXUSFMT_BASE_INPUTS: &[&str] = &["crates/ars-dioxus"];
 
 /// CI pipeline steps, matching the GitHub Actions job names.
 ///
@@ -25,6 +30,7 @@ const MUTUAL_EXCLUSION_GUARD: &str = "features `icu4x` and `web-intl` are mutual
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, clap::ValueEnum)]
 #[value(rename_all = "kebab-case")]
 pub enum Step {
+    /// `leptosfmt --check ...`, `dx fmt --check ...`, and
     /// `cargo +nightly fmt --all --check`
     Fmt,
 
@@ -220,6 +226,70 @@ pub fn run(steps: Vec<Step>, message_format: Option<&str>) -> Result<(), Error> 
     Ok(())
 }
 
+/// Format the workspace in place.
+///
+/// Runs `leptosfmt` over Leptos adapter/example code first so `view!`
+/// macro bodies and Tailwind class strings are normalized, runs `dx fmt`
+/// over Dioxus adapter/example code so `rsx!` macro bodies are normalized,
+/// then runs `cargo +nightly fmt --all` for the Rust workspace.
+///
+/// # Errors
+///
+/// Returns [`Error`] when a required formatter is missing or a formatter
+/// command exits non-zero.
+pub fn format_workspace() -> Result<(), Error> {
+    preflight_nightly()?;
+    preflight_leptosfmt()?;
+    preflight_dioxus_cli()?;
+
+    leptosfmt_format()?;
+    dioxusfmt(false)?;
+
+    cargo(Step::Fmt, &["+nightly", "fmt", "--all"])
+}
+
+/// Format a single Rust source buffer from stdin to stdout.
+///
+/// This is the rustfmt-compatible entrypoint used by editor integrations.
+/// It detects Leptos `view!` and Dioxus `rsx!` buffers and routes them
+/// through the framework formatter before returning formatted source on
+/// stdout.
+///
+/// # Errors
+///
+/// Returns [`Error`] if stdin cannot be read, a required formatter is
+/// missing, or the formatter exits non-zero.
+pub fn format_stdin() -> Result<(), Error> {
+    preflight_nightly()?;
+
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input).map_err(Error::Io)?;
+
+    if is_leptos_source(&input) {
+        preflight_leptosfmt()?;
+
+        let formatted = capture_command_stdout(
+            "leptosfmt",
+            &["--stdin", "--experimental-tailwind"],
+            input.as_bytes(),
+        )?;
+
+        format_stdin_with_command("rustfmt", &["+nightly", "--edition", "2024"], &formatted)
+    } else if is_dioxus_source(&input) {
+        preflight_dioxus_cli()?;
+
+        let formatted = capture_command_stdout("dx", &["fmt", "-f", "-"], input.as_bytes())?;
+
+        format_stdin_with_command("rustfmt", &["+nightly", "--edition", "2024"], &formatted)
+    } else {
+        format_stdin_with_command(
+            "rustfmt",
+            &["+nightly", "--edition", "2024"],
+            input.as_bytes(),
+        )
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Step resolution
 // ---------------------------------------------------------------------------
@@ -314,6 +384,11 @@ fn run_step(step: Step, message_format: Option<&str>) -> Result<(), Error> {
 
 fn run_fmt() -> Result<(), Error> {
     preflight_nightly()?;
+    preflight_leptosfmt()?;
+    preflight_dioxus_cli()?;
+
+    leptosfmt_check()?;
+    dioxusfmt(true)?;
 
     cargo(Step::Fmt, &["+nightly", "fmt", "--all", "--check"])
 }
@@ -739,6 +814,228 @@ pub(crate) fn cargo(step: Step, args: &[&str]) -> Result<(), Error> {
     }
 }
 
+/// Run `leptosfmt --check` over Leptos adapter and example code.
+fn leptosfmt_check() -> Result<(), Error> {
+    let inputs = leptosfmt_inputs()?;
+
+    let mut args = Vec::with_capacity(3 + inputs.len());
+
+    args.push("--check");
+    args.push("--experimental-tailwind");
+    args.push("--quiet");
+    args.extend(inputs.iter().map(String::as_str));
+
+    run_leptosfmt(&args)
+}
+
+/// Run `leptosfmt` over Leptos adapter and example code, mutating files.
+fn leptosfmt_format() -> Result<(), Error> {
+    let inputs = leptosfmt_inputs()?;
+
+    let mut args = Vec::with_capacity(2 + inputs.len());
+
+    args.push("--experimental-tailwind");
+    args.push("--quiet");
+    args.extend(inputs.iter().map(String::as_str));
+
+    run_leptosfmt(&args)
+}
+
+fn leptosfmt_inputs() -> Result<Vec<String>, Error> {
+    let mut inputs = LEPTOSFMT_BASE_INPUTS
+        .iter()
+        .map(|path| (*path).to_owned())
+        .collect::<Vec<_>>();
+
+    let examples_dir = Path::new("examples");
+
+    if examples_dir.exists() {
+        let mut leptos_examples = Vec::new();
+
+        for entry in fs::read_dir(examples_dir).map_err(Error::Io)? {
+            let entry = entry.map_err(Error::Io)?;
+
+            let file_type = entry.file_type().map_err(Error::Io)?;
+
+            if !file_type.is_dir() {
+                continue;
+            }
+
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+
+            if name.contains("leptos") {
+                leptos_examples.push(format!("examples/{name}"));
+            }
+        }
+
+        leptos_examples.sort();
+
+        inputs.extend(leptos_examples);
+    }
+
+    Ok(inputs)
+}
+
+fn dioxusfmt(check: bool) -> Result<(), Error> {
+    for file in dioxusfmt_files()? {
+        let mut args = Vec::with_capacity(3);
+
+        if check {
+            args.push("-c");
+        }
+
+        args.push("-f");
+        args.push(file.as_str());
+
+        run_dioxusfmt(&args)?;
+    }
+
+    Ok(())
+}
+
+fn dioxusfmt_files() -> Result<Vec<String>, Error> {
+    let mut files = Vec::new();
+
+    for input in DIOXUSFMT_BASE_INPUTS {
+        collect_rust_files(Path::new(input), &mut files)?;
+    }
+
+    let examples_dir = Path::new("examples");
+
+    if examples_dir.exists() {
+        for entry in fs::read_dir(examples_dir).map_err(Error::Io)? {
+            let entry = entry.map_err(Error::Io)?;
+
+            let file_type = entry.file_type().map_err(Error::Io)?;
+
+            if !file_type.is_dir() {
+                continue;
+            }
+
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+
+            if name.contains("dioxus") {
+                collect_rust_files(&entry.path(), &mut files)?;
+            }
+        }
+    }
+
+    files.sort();
+
+    Ok(files)
+}
+
+fn collect_rust_files(dir: &Path, files: &mut Vec<String>) -> Result<(), Error> {
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(dir).map_err(Error::Io)? {
+        let entry = entry.map_err(Error::Io)?;
+
+        let path = entry.path();
+
+        let file_type = entry.file_type().map_err(Error::Io)?;
+
+        if file_type.is_dir() {
+            collect_rust_files(&path, files)?;
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            files.push(path.to_string_lossy().replace('\\', "/"));
+        }
+    }
+
+    Ok(())
+}
+
+fn run_leptosfmt(args: &[&str]) -> Result<(), Error> {
+    let display_cmd = format!("leptosfmt {}", args.join(" "));
+
+    eprintln!("  > {display_cmd}");
+
+    let status = process::Command::new("leptosfmt")
+        .args(args)
+        .status()
+        .map_err(Error::Io)?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(Error::StepFailed {
+            step: Step::Fmt,
+            command: display_cmd,
+            code: status.code(),
+        })
+    }
+}
+
+fn run_dioxusfmt(args: &[&str]) -> Result<(), Error> {
+    let display_cmd = format!("dx fmt {}", args.join(" "));
+
+    eprintln!("  > {display_cmd}");
+
+    let status = process::Command::new("dx")
+        .arg("fmt")
+        .args(args)
+        .status()
+        .map_err(Error::Io)?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(Error::StepFailed {
+            step: Step::Fmt,
+            command: display_cmd,
+            code: status.code(),
+        })
+    }
+}
+
+fn is_leptos_source(input: &str) -> bool {
+    input.contains("view!") || input.contains("leptos::")
+}
+
+fn is_dioxus_source(input: &str) -> bool {
+    input.contains("rsx!") || input.contains("dioxus::")
+}
+
+fn format_stdin_with_command(program: &str, args: &[&str], input: &[u8]) -> Result<(), Error> {
+    let output = capture_command_stdout(program, args, input)?;
+
+    io::stdout().write_all(&output).map_err(Error::Io)
+}
+
+fn capture_command_stdout(program: &str, args: &[&str], input: &[u8]) -> Result<Vec<u8>, Error> {
+    let display_cmd = format!("{program} {}", args.join(" "));
+
+    let mut child = process::Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(Error::Io)?;
+
+    child
+        .stdin
+        .take()
+        .expect("formatter stdin should be piped")
+        .write_all(input)
+        .map_err(Error::Io)?;
+
+    let output = child.wait_with_output().map_err(Error::Io)?;
+
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err(Error::StepFailed {
+            step: Step::Fmt,
+            command: display_cmd,
+            code: output.status.code(),
+        })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Preflight checks
 // ---------------------------------------------------------------------------
@@ -747,8 +1044,8 @@ pub(crate) fn cargo(step: Step, args: &[&str]) -> Result<(), Error> {
 fn preflight_nightly() -> Result<(), Error> {
     let output = process::Command::new("rustup")
         .args(["run", "nightly", "rustc", "--version"])
-        .stdout(process::Stdio::null())
-        .stderr(process::Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .map_err(Error::Io)?;
 
@@ -762,12 +1059,52 @@ fn preflight_nightly() -> Result<(), Error> {
     Ok(())
 }
 
+/// Verify `leptosfmt` is installed.
+fn preflight_leptosfmt() -> Result<(), Error> {
+    let output = process::Command::new("leptosfmt")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(Error::Io)?;
+
+    if !output.success() {
+        return Err(Error::MissingTool {
+            tool: "leptosfmt".into(),
+            install_hint: format!("cargo install leptosfmt --locked --version {LEPTOSFMT_VERSION}"),
+        });
+    }
+
+    Ok(())
+}
+
+/// Verify `dioxus-cli` is installed.
+fn preflight_dioxus_cli() -> Result<(), Error> {
+    let output = process::Command::new("dx")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(Error::Io)?;
+
+    if !output.success() {
+        return Err(Error::MissingTool {
+            tool: "dioxus-cli".into(),
+            install_hint: format!(
+                "cargo install dioxus-cli --locked --version {DIOXUS_CLI_VERSION}"
+            ),
+        });
+    }
+
+    Ok(())
+}
+
 /// Verify `cargo-llvm-cov` is installed.
 fn preflight_llvm_cov() -> Result<(), Error> {
     let output = process::Command::new("cargo")
         .args(["llvm-cov", "--version"])
-        .stdout(process::Stdio::null())
-        .stderr(process::Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .map_err(Error::Io)?;
 
@@ -777,6 +1114,7 @@ fn preflight_llvm_cov() -> Result<(), Error> {
             install_hint: "cargo install cargo-llvm-cov --locked".into(),
         });
     }
+
     Ok(())
 }
 
@@ -784,8 +1122,8 @@ fn preflight_llvm_cov() -> Result<(), Error> {
 fn preflight_nextest() -> Result<(), Error> {
     let output = process::Command::new("cargo")
         .args(["nextest", "--version"])
-        .stdout(process::Stdio::null())
-        .stderr(process::Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .map_err(Error::Io)?;
 
@@ -795,6 +1133,7 @@ fn preflight_nextest() -> Result<(), Error> {
             install_hint: "cargo install cargo-nextest --locked".into(),
         });
     }
+
     Ok(())
 }
 

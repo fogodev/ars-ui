@@ -20,7 +20,11 @@ use std::{
 pub use ars_components::utility::error_boundary::{Api, Messages, Part};
 use ars_i18n::Locale;
 pub use leptos::error::Error as CapturedError;
-use leptos::{error::ErrorId, prelude::*, tachys::view::any_view::AnyView};
+use leptos::{
+    children::{TypedChildren, ViewFnOnce},
+    error::ErrorId,
+    prelude::*,
+};
 
 use crate::{
     attrs::attr_map_to_leptos_inline_attrs,
@@ -31,14 +35,47 @@ use crate::{
 // FallbackHandler
 // ────────────────────────────────────────────────────────────────────
 
-/// Adapter-side fallback handler.
+/// Adapter-side fallback handler for [`Boundary`].
 ///
-/// A thin alias over [`Callback<ArcRwSignal<Errors>, AnyView>`] so consumers
-/// can pass a closure directly to [`Boundary`]'s `fallback` prop without
-/// spelling out the generic parameters. The closure receives Leptos's
-/// reactive multi-error signal and returns any view as a type-erased
-/// [`AnyView`].
-pub type FallbackHandler = Callback<ArcRwSignal<Errors>, AnyView>;
+/// Consumers can pass a closure directly to [`Boundary`]'s `fallback` prop
+/// without spelling out this type. The closure receives Leptos's reactive
+/// multi-error signal and returns any typed Leptos view. The adapter erases
+/// that view only after the closure runs, matching Leptos's framework
+/// `ErrorBoundary` fallback contract.
+#[derive(Clone, Copy, Debug)]
+pub struct FallbackHandler(Callback<ArcRwSignal<Errors>, ViewFnOnce>);
+
+impl FallbackHandler {
+    /// Create a fallback handler from a typed view-producing closure.
+    #[must_use]
+    pub fn new<F, V>(fallback: F) -> Self
+    where
+        F: Fn(ArcRwSignal<Errors>) -> V + Send + Sync + 'static,
+        V: RenderHtml + Send + 'static,
+    {
+        Self(Callback::new(move |errors| {
+            let view = fallback(errors);
+
+            ViewFnOnce::from(move || view)
+        }))
+    }
+
+    /// Run the fallback handler with the current error signal.
+    #[must_use]
+    pub(crate) fn run(self, errors: ArcRwSignal<Errors>) -> ViewFnOnce {
+        self.0.run(errors)
+    }
+}
+
+impl<F, V> From<F> for FallbackHandler
+where
+    F: Fn(ArcRwSignal<Errors>) -> V + Send + Sync + 'static,
+    V: RenderHtml + Send + 'static,
+{
+    fn from(fallback: F) -> Self {
+        Self::new(fallback)
+    }
+}
 
 // ────────────────────────────────────────────────────────────────────
 // Boundary
@@ -50,32 +87,15 @@ pub type FallbackHandler = Callback<ArcRwSignal<Errors>, AnyView>;
 /// The fallback is a `<div role="alert" data-ars-error="true">` containing
 /// a localized heading paragraph and a `<ul>` of `<li>` error entries —
 /// matching the Dioxus adapter byte-for-byte. Optional props expose a
-/// custom fallback override, an `on_error` telemetry hook, and a
-/// `messages` bundle override.
+/// custom fallback override, an `on_error` telemetry hook, and locale /
+/// messages bundle overrides.
 ///
 /// # Heading capture
-///
-/// The heading string is resolved **once per `Boundary` render** (via
-/// `use_messages` + `resolve_locale`) and captured by-value into the
-/// fallback closure. If the surrounding `ArsProvider`'s locale signal
-/// changes between an error being caught and the fallback re-rendering
-/// without an outer re-render, the captured heading is stale until the
-/// `Boundary` itself re-renders. In practice this is invisible: locale
-/// changes typically swap the entire route subtree, which triggers a
-/// new `Boundary` render. Apps that need synchronous heading reactivity
-/// (e.g. a locale picker that mutates the signal in-place while the
-/// fallback is on screen) should pass a `messages` prop wrapped in a
-/// reactive view or render their own custom `fallback`.
 ///
 /// See `spec/leptos-components/utility/error-boundary.md` for the full
 /// adapter contract.
 #[component]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Leptos `#[component]` props must be owned; `messages` is passed by reference \
-              into `use_messages` once, but the macro signature requires it by value."
-)]
-pub fn Boundary(
+pub fn Boundary<T: 'static>(
     /// Optional override for the entire fallback closure. When `None`,
     /// the wrapper renders the canonical accessible default markup.
     #[prop(optional, into)]
@@ -90,35 +110,43 @@ pub fn Boundary(
 
     /// Override the default [`Messages`] bundle. When `None`, the wrapper
     /// resolves the bundle from `ArsProvider`'s `i18n_registries` for
-    /// the active locale, falling back to [`Messages::default`].
+    /// the resolved locale, falling back to [`Messages::default`].
     #[prop(optional)]
     messages: Option<Messages>,
 
+    /// Override the locale used to resolve and render the fallback heading.
+    /// When `None`, the wrapper reads the locale from `ArsProvider`.
+    #[prop(optional)]
+    locale: Option<Locale>,
+
     /// Subtree wrapped by the boundary.
-    children: Children,
-) -> impl IntoView {
-    let resolved_locale = resolve_locale(None);
-
-    let resolved_messages = use_messages(messages.as_ref(), Some(&resolved_locale));
-
-    let heading = (resolved_messages.message)(&resolved_locale);
-
-    let seen_errors = Arc::new(Mutex::new(HashMap::new()));
-
+    children: TypedChildren<T>,
+) -> impl IntoView
+where
+    View<T>: IntoView,
+{
     // The fallback closure must be `FnMut + Send + 'static`; capture the
     // resolved heading + optional callbacks by value and dispatch through
     // `run_fallback` so the on-error/custom-fallback/default-fallback
     // branching logic stays unit-testable in isolation from the
     // framework primitive.
-    let fallback_closure = move |errors: ArcRwSignal<Errors>| -> AnyView {
-        run_fallback(errors, on_error, fallback, heading.clone(), &seen_errors)
+    let seen_errors = Arc::new(Mutex::new(HashMap::new()));
+
+    let fallback_closure = move |errors: ArcRwSignal<Errors>| {
+        let resolved_locale = resolve_locale(locale.as_ref());
+        let resolved_messages = use_messages(messages.as_ref(), Some(&resolved_locale));
+
+        run_fallback(
+            errors,
+            on_error,
+            fallback,
+            (resolved_messages.message)(&resolved_locale),
+            &seen_errors,
+        )
+        .run()
     };
 
-    view! {
-        <ErrorBoundary fallback=fallback_closure>
-            {children()}
-        </ErrorBoundary>
-    }
+    view! { <ErrorBoundary fallback=fallback_closure>{children.into_inner()()}</ErrorBoundary> }
 }
 
 /// Internal dispatch helper for the [`Boundary`] fallback closure.
@@ -134,7 +162,7 @@ fn run_fallback(
     fallback: Option<FallbackHandler>,
     heading: String,
     seen_errors: &Mutex<HashMap<ErrorId, String>>,
-) -> AnyView {
+) -> ViewFnOnce {
     if let Some(handler) = on_error {
         let snapshot = errors.get().into_iter().collect::<Vec<_>>();
         let current_ids = snapshot
@@ -159,7 +187,7 @@ fn run_fallback(
     if let Some(custom) = fallback {
         custom.run(errors)
     } else {
-        render_default_fallback(errors, heading).into_any()
+        ViewFnOnce::from(move || render_default_fallback(errors, heading))
     }
 }
 
@@ -174,7 +202,7 @@ fn run_fallback(
 ///
 /// ```ignore
 /// view! {
-///     <ErrorBoundary fallback=ars_leptos::error_boundary::default_fallback>
+///     <ErrorBoundary fallback=ars_leptos::utility::error_boundary::default_fallback>
 ///         <ChildComponent/>
 ///     </ErrorBoundary>
 /// }
@@ -185,14 +213,14 @@ fn run_fallback(
 /// read any reactive context (it cannot — it is a plain function, not a
 /// component) and always falls back to English.
 #[must_use]
-pub fn default_fallback(errors: ArcRwSignal<Errors>) -> AnyView {
+pub fn default_fallback(errors: ArcRwSignal<Errors>) -> impl IntoView {
     let messages = Messages::default();
 
     let locale = en_us_locale();
 
     let heading = (messages.message)(&locale);
 
-    render_default_fallback(errors, heading).into_any()
+    render_default_fallback(errors, heading)
 }
 
 fn en_us_locale() -> Locale {
@@ -220,12 +248,16 @@ fn render_default_fallback(errors: ArcRwSignal<Errors>, heading: String) -> impl
         <div {..root_attrs}>
             <p {..message_attrs}>{heading}</p>
             <ul {..list_attrs}>
-                {snapshot.into_iter()
-                    .map(move |(_, e)| view! {
-                        <li {..attr_map_to_leptos_inline_attrs(api.item_attrs())}>{e.to_string()}</li>
+                {snapshot
+                    .into_iter()
+                    .map(move |(_, e)| {
+                        view! {
+                            <li {..attr_map_to_leptos_inline_attrs(
+                                api.item_attrs(),
+                            )}>{e.to_string()}</li>
+                        }
                     })
-                    .collect_view()
-                }
+                    .collect_view()}
             </ul>
         </div>
     }
@@ -318,7 +350,7 @@ mod tests {
             errors.insert(ErrorId::from(0usize), BoomError("ignored"));
 
             // The mere fact that this returns without panicking proves the
-            // None branch is exercised; the view itself is opaque AnyView.
+            // None branch is exercised; the view thunk itself is opaque.
             let _view = run_fallback(
                 ArcRwSignal::new(errors),
                 None,

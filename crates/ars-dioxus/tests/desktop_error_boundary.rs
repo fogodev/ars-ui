@@ -28,7 +28,7 @@ use ars_core::{
 };
 use ars_dioxus::{
     ArsContext, NullPlatform,
-    error_boundary::{self, Boundary},
+    utility::error_boundary::{self, Boundary},
 };
 use ars_i18n::{Direction, Locale, StubIntlBackend};
 use ars_test_harness_dioxus::desktop::DesktopHarness;

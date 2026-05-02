@@ -2998,8 +2998,8 @@ applies anywhere a component renders `HtmlAttr::Href`, `HtmlAttr::Action`, or
 registration helper** and the **platform capability helper**. Both live in
 `crates/ars-dom/src/outside_interaction.rs` and are consumed by `dismissable`
 and any overlay or focus-scope adapter that needs portal-aware containment
-checks plus the document `pointerdown` / `focusin` / root-scoped `keydown`
-listener triplet.
+checks plus the document `pointerdown` / `focusin` / `keydown` listener
+triplet.
 
 ### 12.1 Node-Boundary Registration Helper
 
@@ -3067,11 +3067,10 @@ pub fn install_outside_interaction_listeners(
 
 The web build:
 
-- attaches a document-scoped `pointerdown` (capture phase) and `focusin`
-  listener;
-- attaches a root-scoped `keydown` listener (per
-  `spec/foundation/05-interactions.md` §12.6, Escape on the root, not the
-  document, so a parent overlay never sees the same keystroke);
+- attaches document-scoped `pointerdown` (capture phase), `focusin`, and
+  `keydown` listeners. `keydown` is also capture-phase so the topmost
+  dismissable surface can consume Escape before ancestor/root/global
+  handlers see the same keystroke;
 - gates each listener on `overlay_stack::is_topmost(&overlay_id)`;
 - runs `target_is_inside_boundary` for the pointer / focus paths, calling
   the `on_pointer_outside` / `on_focus_outside` callback only when the

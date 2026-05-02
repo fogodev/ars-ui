@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+@source "./src/**/*.{rs,html,css}";
+
+@layer base {
+  body {
+    @apply m-0 bg-slate-100 text-slate-900 font-sans;
+  }
+}
+
+@layer components {
+  [data-ars-scope="button"][data-ars-part="root"] {
+    @apply inline-flex h-12 cursor-pointer items-center justify-center gap-2 rounded-lg px-4 font-semibold shadow-md shadow-slate-900/10 transition duration-150 ease-out hover:-translate-y-0.5 hover:shadow-lg hover:shadow-slate-900/15 focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-blue-500/35;
+  }
+
+  [data-ars-scope="button"][data-ars-part="root"][data-ars-size="sm"] {
+    @apply h-11 px-3;
+  }
+
+  [data-ars-scope="button"][data-ars-part="root"][data-ars-size="lg"] {
+    @apply h-13 px-5;
+  }
+
+  [data-ars-scope="button"][data-ars-part="root"][data-ars-size="icon"] {
+    @apply h-11 w-11 px-0;
+  }
+
+  [data-ars-variant="default"] {
+    @apply bg-zinc-950 text-white;
+  }
+
+  [data-ars-variant="primary"] {
+    @apply bg-blue-600 text-white;
+  }
+
+  [data-ars-variant="secondary"] {
+    @apply bg-slate-200 text-slate-950;
+  }
+
+  [data-ars-variant="destructive"] {
+    @apply bg-rose-600 text-white;
+  }
+
+  [data-ars-variant="outline"] {
+    @apply border border-slate-300 bg-white text-slate-950;
+  }
+
+  [data-ars-variant="ghost"] {
+    @apply bg-transparent text-slate-950 shadow-none hover:bg-slate-200/70;
+  }
+
+  [data-ars-variant="link"] {
+    @apply bg-transparent px-0 text-blue-600 underline shadow-none hover:text-blue-700;
+  }
+
+  [data-ars-scope="button"][data-ars-part="root"][data-ars-disabled],
+  [data-ars-scope="button"][data-ars-part="root"][aria-disabled="true"] {
+    @apply cursor-not-allowed opacity-50 shadow-none hover:translate-y-0 hover:shadow-none;
+  }
+
+  [data-ars-scope="button"][data-ars-part="root"][aria-busy="true"] {
+    @apply cursor-progress;
+  }
+
+  [data-ars-scope="button"][data-ars-part="loading-indicator"] {
+    @apply inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent;
+  }
+
+  [data-ars-scope="error-boundary"][data-ars-part="root"] {
+    @apply rounded-lg border border-rose-200 bg-rose-50 p-4 text-rose-950 shadow-sm shadow-rose-950/5;
+  }
+
+  [data-ars-scope="error-boundary"][data-ars-part="message"] {
+    @apply mb-2 font-bold;
+  }
+
+  [data-ars-scope="error-boundary"][data-ars-part="list"] {
+    @apply m-0 list-disc ps-5 text-sm;
+  }
+
+  [data-ars-scope="dismissable"][data-ars-part="root"] {
+    @apply rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-md shadow-blue-950/10 transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-blue-950/15;
+  }
+}

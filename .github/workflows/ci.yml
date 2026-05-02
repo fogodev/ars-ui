@@ -22,6 +22,10 @@ jobs:
           components: rustfmt
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install leptosfmt
+        run: cargo install leptosfmt --locked --version 0.1.33
+      - name: Install dioxus-cli
+        run: cargo install dioxus-cli --locked --version 0.7.7
       - name: Formatting
         run: cargo xtask ci fmt
 
