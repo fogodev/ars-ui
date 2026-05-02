@@ -1102,7 +1102,17 @@ fn plan_add(ctx: &ManagerContext, config: Config) -> TransitionPlan<Machine> {
         .filter(|entry| entry.stage == EntryStage::Visible)
         .count();
 
-    let admit = visible_count < ctx.max_visible;
+    // FIFO admission: a new Add never jumps the queue if there is
+    // already a backlog waiting. `visible_count < max_visible` alone
+    // is not enough because the visible count can dip below
+    // `max_visible` between `Remove` (which marks an entry
+    // `Dismissing`) and `HideQueueAdvance` (which removes it and
+    // promotes the next queued config). Without this guard a new
+    // toast would be admitted immediately while older queued entries
+    // wait their turn, reordering notifications and starving the
+    // backlog under sustained adds. With it, sustained pressure goes
+    // through the queue strictly in arrival order.
+    let admit = visible_count < ctx.max_visible && ctx.queued.is_empty();
 
     let max_visible = ctx.max_visible;
     let deduplicate_all = ctx.deduplicate_all;
@@ -2517,6 +2527,106 @@ mod tests {
         // Overflow must NOT enqueue an announcement until the toast actually
         // becomes visible.
         assert!(result.pending_effects.is_empty());
+    }
+
+    #[test]
+    fn add_does_not_jump_queue_during_remove_dismissing_window() {
+        // Round-10 P2 regression: between `Remove` (which marks the
+        // entry `Dismissing`) and `HideQueueAdvance` (which actually
+        // takes the slot back), `visible_count` dips below
+        // `max_visible` even though the dismissing entry is still
+        // animating out and a queued toast is waiting to take its
+        // place. Without the queue-emptiness guard, a brand-new Add
+        // arriving in that window would jump the queue and admit
+        // immediately, reordering notifications.
+        let mut service = fresh_service(Props {
+            max_visible: 1,
+            ..test_props()
+        });
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "first"))));
+        drop(service.send(Event::Add(add_config(Kind::Info, "second"))));
+
+        let first_id = service.context().toasts[0].id.clone();
+        assert_eq!(service.context().queued.len(), 1);
+
+        // Mark the live toast Dismissing — `HideQueueAdvance` has not
+        // yet fired. visible_count is now 0 (Dismissing doesn't count
+        // toward visible) and max_visible is 1, but the queue holds
+        // "second".
+        drop(service.send(Event::Remove(first_id)));
+
+        let visible_count = service
+            .context()
+            .toasts
+            .iter()
+            .filter(|e| e.stage == EntryStage::Visible)
+            .count();
+        assert_eq!(visible_count, 0);
+        assert_eq!(service.context().queued.len(), 1);
+
+        // A fresh Add must NOT bypass the queue: it goes to the tail.
+        drop(service.send(Event::Add(add_config(Kind::Info, "third"))));
+
+        assert_eq!(
+            service.context().queued.len(),
+            2,
+            "third must enqueue behind second, not jump the queue"
+        );
+        // Queue order: second, then third (FIFO).
+        let queued_titles: Vec<_> = service
+            .context()
+            .queued
+            .iter()
+            .map(|c| c.title.as_deref().unwrap())
+            .collect();
+        assert_eq!(queued_titles, vec!["second", "third"]);
+    }
+
+    #[test]
+    fn add_does_not_jump_queue_after_max_visible_increase() {
+        // Variation: if max_visible goes up (e.g., adapter raises the
+        // limit at runtime via SyncProps), already-queued toasts must
+        // be promoted before any new Add gets admitted. Otherwise a
+        // burst of new adds could starve a queued backlog.
+        let mut service = fresh_service(Props {
+            max_visible: 1,
+            ..test_props()
+        });
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "first"))));
+        drop(service.send(Event::Add(add_config(Kind::Info, "second"))));
+
+        assert_eq!(service.context().queued.len(), 1);
+
+        // Raise max_visible without promoting queued entries. (The
+        // shrink-tolerance contract in the SyncProps tests proves we
+        // never cull existing entries; growing leaves the queue
+        // alone too — promotion is a HideQueueAdvance event from the
+        // adapter, not something SyncProps does itself.)
+        drop(service.set_props(Props {
+            max_visible: 5,
+            ..test_props()
+        }));
+
+        // visible_count = 1, max_visible = 5, so naïve admission would
+        // let a new Add through — but the queue still holds an older
+        // entry. That older entry must come first.
+        drop(service.send(Event::Add(add_config(Kind::Info, "third"))));
+
+        assert_eq!(
+            service.context().queued.len(),
+            2,
+            "third must wait behind second"
+        );
+
+        let queued_titles: Vec<_> = service
+            .context()
+            .queued
+            .iter()
+            .map(|c| c.title.as_deref().unwrap())
+            .collect();
+        assert_eq!(queued_titles, vec!["second", "third"]);
     }
 
     #[test]

@@ -634,14 +634,32 @@ impl ars_core::Machine for Machine {
             // `initial_effects`-equivalent restart) starts the timer
             // from the new full duration rather than scrambling the
             // math with a snapshot that referred to the old duration.
+            //
+            // The promise-toast flow is the motivating case: a `Loading`
+            // toast starts with `duration: None` (persistent, no
+            // running timer); when the promise resolves the adapter
+            // calls `set_props` with `Kind::Success` and a finite
+            // duration. Without re-emitting `DurationTimer` from this
+            // arm the resolved toast would never auto-dismiss because
+            // no `Resume` follows — the toast was never paused. The
+            // dual case (finite → `None`) cancels any running timer so
+            // a toast switched to persistent doesn't keep its old
+            // countdown alive.
             (_, Event::SyncProps) => {
                 let title = props.title.clone();
                 let description = props.description.clone();
                 let kind = props.kind;
                 let duration = props.duration;
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let duration_changed = ctx.duration != duration;
 
+                let duration_changed = ctx.duration != duration;
+
+                let restart_timer =
+                    duration_changed && duration.is_some() && matches!(state, State::Visible);
+
+                let cancel_running_timer =
+                    duration_changed && duration.is_none() && matches!(state, State::Visible);
+
+                let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.title = title;
                     ctx.description = description;
                     ctx.kind = kind;
@@ -650,7 +668,20 @@ impl ars_core::Machine for Machine {
                     if duration_changed {
                         ctx.remaining = None;
                     }
-                }))
+                });
+
+                // When restarting, cancel first so the adapter's
+                // effect dispatcher doesn't end up with two live
+                // timers if the previous one had not fired yet.
+                if restart_timer || cancel_running_timer {
+                    plan = plan.cancel_effect(Effect::DurationTimer);
+                }
+
+                if restart_timer {
+                    plan = plan.with_effect(PendingEffect::named(Effect::DurationTimer));
+                }
+
+                Some(plan)
             }
 
             _ => None,
@@ -1310,6 +1341,153 @@ mod tests {
     /// `DurationTimer` on the next `Resume`. Before the fix
     /// `ctx.duration` stayed `None`, so the per-toast machine silently
     /// dropped the timer-restart effect.
+    #[test]
+    fn visible_loading_to_success_via_set_props_emits_duration_timer_immediately() {
+        // Round-10 regression: the canonical promise-toast flow has no
+        // intervening Pause/Resume. The user calls
+        // `toaster.success(promise_id, …)` while the loading toast is
+        // still `Visible`. Without re-emitting `DurationTimer` from
+        // SyncProps, the resolved toast would never auto-dismiss
+        // because no `Resume` follows.
+        let mut service = fresh_service(Props {
+            duration: None,
+            kind: Kind::Loading,
+            ..test_props()
+        });
+
+        drop(service.take_initial_effects());
+        assert_eq!(service.state(), &State::Visible);
+
+        let result = service.set_props(Props {
+            duration: Some(Duration::from_secs(5)),
+            kind: Kind::Success,
+            ..test_props()
+        });
+
+        assert_eq!(
+            service.context().duration,
+            Some(Duration::from_secs(5)),
+            "SyncProps mirrored the new finite duration"
+        );
+
+        let names: Vec<_> = result.pending_effects.iter().map(|e| e.name).collect();
+        assert!(
+            names.contains(&Effect::DurationTimer),
+            "Visible loading→success must emit DurationTimer immediately, got {names:?}"
+        );
+        // The cancel ensures any straggler from a prior duration is
+        // dropped before the new timer arms.
+        assert!(
+            result.cancel_effects.contains(&Effect::DurationTimer),
+            "the prior timer (if any) must be cancelled before re-arming"
+        );
+    }
+
+    #[test]
+    fn visible_finite_to_persistent_via_set_props_cancels_running_timer() {
+        // Symmetric case: a Visible toast with a running auto-dismiss
+        // timer is converted to persistent (`duration: None`). The
+        // running timer must be cancelled so the toast doesn't
+        // unexpectedly disappear after the old duration elapses.
+        let mut service = fresh_service(test_props());
+
+        drop(service.take_initial_effects());
+
+        let result = service.set_props(Props {
+            duration: None,
+            kind: Kind::Loading,
+            ..test_props()
+        });
+
+        let names: Vec<_> = result.pending_effects.iter().map(|e| e.name).collect();
+        assert!(
+            !names.contains(&Effect::DurationTimer),
+            "switching to persistent must NOT re-arm the timer; got {names:?}"
+        );
+        assert!(
+            result.cancel_effects.contains(&Effect::DurationTimer),
+            "the running timer must be cancelled when duration becomes None"
+        );
+        assert_eq!(service.context().duration, None);
+    }
+
+    #[test]
+    fn visible_finite_to_finite_via_set_props_restarts_timer() {
+        // Duration changes between two finite values while Visible —
+        // the existing timer is for the *old* duration, so it must be
+        // cancelled and a fresh one armed for the new value.
+        let mut service = fresh_service(Props {
+            duration: Some(Duration::from_secs(2)),
+            ..test_props()
+        });
+
+        drop(service.take_initial_effects());
+
+        let result = service.set_props(Props {
+            duration: Some(Duration::from_secs(10)),
+            ..test_props()
+        });
+
+        let names: Vec<_> = result.pending_effects.iter().map(|e| e.name).collect();
+        assert!(names.contains(&Effect::DurationTimer));
+        assert!(result.cancel_effects.contains(&Effect::DurationTimer));
+        assert_eq!(service.context().duration, Some(Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn paused_loading_to_success_does_not_emit_duration_timer_eagerly() {
+        // While Paused, SyncProps must NOT eagerly emit DurationTimer
+        // — the toast is paused and timers should only resume on the
+        // explicit `Resume` event. This guards against the fix
+        // accidentally firing the timer in the wrong state.
+        let mut service = fresh_service(Props {
+            duration: None,
+            kind: Kind::Loading,
+            ..test_props()
+        });
+
+        drop(service.take_initial_effects());
+        drop(service.send(Event::Pause {
+            remaining: Duration::ZERO,
+        }));
+        assert_eq!(service.state(), &State::Paused);
+
+        let result = service.set_props(Props {
+            duration: Some(Duration::from_secs(5)),
+            kind: Kind::Success,
+            ..test_props()
+        });
+
+        let names: Vec<_> = result.pending_effects.iter().map(|e| e.name).collect();
+        assert!(
+            !names.contains(&Effect::DurationTimer),
+            "Paused state must not eagerly arm the timer; got {names:?}"
+        );
+        // The earlier `loading_to_success_via_set_props_now_restarts_timer_on_resume`
+        // test still locks in that a subsequent Resume does fire it.
+    }
+
+    #[test]
+    fn dismissing_via_set_props_does_not_arm_timer() {
+        // SyncProps in Dismissing state must never arm a timer — the
+        // toast is animating out and a new timer would extend its
+        // lifetime past the exit animation.
+        let mut service = fresh_service(test_props());
+
+        drop(service.take_initial_effects());
+        drop(service.send(Event::Dismiss));
+        assert_eq!(service.state(), &State::Dismissing);
+
+        let result = service.set_props(Props {
+            duration: Some(Duration::from_secs(99)),
+            kind: Kind::Success,
+            ..test_props()
+        });
+
+        let names: Vec<_> = result.pending_effects.iter().map(|e| e.name).collect();
+        assert!(!names.contains(&Effect::DurationTimer));
+    }
+
     #[test]
     fn loading_to_success_via_set_props_now_restarts_timer_on_resume() {
         let mut service = fresh_service(Props {

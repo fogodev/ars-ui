@@ -1559,6 +1559,13 @@ fn assert_toast_manager_send_result_invariants(
         announce_ids
     );
 
+    // Note: a strict "FIFO admission" invariant
+    // (`queue non-empty → occupied >= max_visible`) is *not*
+    // expressible here because `SyncProps` can grow `max_visible` at
+    // runtime without auto-promoting the existing backlog (promotion
+    // is gated on `HideQueueAdvance`). The round-10 P2 regression is
+    // covered directly by the `add_does_not_jump_queue_*` unit tests.
+
     // DrainAnnouncement on an empty queue is a state-preserving no-op.
     if matches!(event, toast_manager::Event::DrainAnnouncement { .. })
         && service.context().announcement_queue.is_empty()
