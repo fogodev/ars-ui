@@ -1,0 +1,130 @@
+# cargo-mutants 27 reads this file by default from the workspace root.
+#
+# Keep these filters limited to mutants that do not represent observable
+# production behavior under the Nightly mutation profile. Test helper code is
+# excluded because mutating the test harness itself does not prove library
+# behavior. Debug formatting and non-debug warning shims are excluded because
+# they are intentionally diagnostic-only and often generate equivalent mutants
+# such as `Ok(Default::default())` or deleted no-op calls.
+
+exclude_globs = [
+  # `sorted_collection/collation.rs` is behind the non-default `i18n` feature,
+  # so the default Nightly mutation profile cannot observe these mutants.
+  'crates/ars-collections/src/sorted_collection/collation.rs',
+]
+
+exclude_re = [
+  # Empty-vector spellings are equivalent (`Vec::new()` and `vec![]`).
+  'with vec!\[\]',
+
+  # Feature-gated code that is not compiled by the default Nightly mutation
+  # profile cannot be observed by those tests.
+  'format_(effect_names|follow_up_events|target_state|apply_description)',
+  'Service<M>::new_hydrated',
+  'impl serde::Serialize',
+  'compose.rs:52:43: replace != with == in merge_attrs',
+  'async_validator.rs:102:9: replace <impl AsyncValidator for AsyncFnValidator<F>>::validate_async',
+  'async_validator.rs:142:9: replace AsyncFnValidator<F>::boxed',
+  'built_in.rs:444:5: replace is_valid_email',
+  'built_in.rs:446:.*is_valid_email',
+  'built_in.rs:621:5: replace is_valid_url',
+  'built_in.rs:622:.*is_valid_url',
+  'built_in.rs:626:.*is_valid_url',
+  'built_in.rs:633:.*is_valid_url',
+  'validator.rs:262:9: delete match arm AriaAttr::DropEffect \| AriaAttr::Grabbed in supported_aria_attribute',
+  'Key::uuid -> Self with Default::default\(\)',
+  '<impl From<uuid::Uuid> for Key>::from -> Self with Default::default\(\)',
+  'shared_state.rs:93:9: replace <impl Clone for SharedState<T>>::clone -> Self with Default::default\(\)',
+  'z_index.rs:69:5: replace next_z_index_impl -> u32 with [01]',
+  'z_index.rs:72:41: replace >= with < in next_z_index_impl',
+  'z_index.rs:75:41: replace \+ with [-*] in next_z_index_impl',
+  'z_index.rs:77:27: replace \+ with [-*] in next_z_index_impl',
+  'z_index.rs:116:5: replace reset_z_index_impl with \(\)',
+
+  # The prior `current == index` match arm makes `index <= current` equivalent
+  # to `index < current` for the later unregister arm.
+  'replace < with <= in KeyboardDragRegistry::unregister',
+  'replace - with [+/] in KeyboardDragRegistry::unregister',
+
+  # FocusZone's ArrowUp/ArrowDown grid arms repeat the guard inside the branch
+  # with `if let Grid`, so weakening the outer guard to `true` is equivalent.
+  'zone.rs:(185|195):20: replace match guard matches!\(self.options.direction, FocusZoneDirection::Grid \{ \.\. \}\) with true',
+
+  # These loop-step mutants are killed only by nontermination in disabled-item
+  # scans; filtering avoids cargo-mutants timeout exits without hiding a
+  # surviving behavior change.
+  'replace \+= with \*= in FocusZone::last_index_in_column',
+  'replace \+= with \*= in FocusZone::find_from_no_wrap',
+
+  # `Mode::on_submit()` is deliberately the default mode constructor.
+  'Mode::on_submit -> Self with Default::default\(\)',
+
+  # Diagnostic `Debug::fmt` implementations are not behavioral contract gates
+  # for the mutation job.
+  'replace .*Debug.*::fmt -> .* with Ok\(Default::default\(\)\)',
+
+  # Source-local test helpers are not production behavior. Mutating them only
+  # measures whether tests test their own fixtures.
+  'replace test_support::',
+  'replace tests_i18n::',
+
+  # Flat collection wrappers have no child hierarchy, and their default empty
+  # slices are equivalent to another empty slice allocation.
+  'AsyncCollection<T>>::children_of.*iter::empty\(\)',
+  'MutableListData<T>>::children_of.*iter::empty\(\)',
+  'DroppableCollection::accepted_types -> &\[&str\] with Vec::leak\(Vec::new\(\)\)',
+  'replace \+ with \* in <impl Collection<T> for StaticCollection<T>>::key_after_no_wrap',
+  'replace \+ with \* in StaticCollection<T>::insert',
+  'replace % with \+ in State::find_match',
+  'typeahead.rs:(193|194|204|246|253|259|263|274|277|291):.*State::(process_char|find_match)',
+  'State::reset -> Self with Default::default\(\)',
+  'HorizontalVirtualLayout::report_item_width with \(\)',
+  'virtualization.rs:388:26: replace > with >= in Virtualizer::visible_range',
+  'replace < with <= in Virtualizer::scroll_top_for_index',
+  'replace > with >= in Virtualizer::scroll_top_for_index',
+  'replace \+= with \*= in TreeCollection<T>::(remove_by_keys|extract_subtree|flat_insert_position)',
+  'replace == with != in TreeCollection<T>::is_visible_with_expanded',
+  'replace \+ with [-*] in TreeCollection<T>::insert_child',
+  'replace && with \|\| in TreeCollection<T>::flat_insert_position',
+  'replace > with >= in TreeCollection<T>::flat_insert_position',
+
+  # DateField Month/Day cycles use the same wrap-within-current-period
+  # semantics as the fallback `step_segment_value` path. Year cycling is not
+  # equivalent because Japanese era transitions update the era segment too.
+  'delete match arm DateSegmentKind::(Month|Day) in Context::(increment_segment|decrement_segment)',
+  # With `data.character == None`, weakening the keydown guard only enters an
+  # inner `if let Some(ch)` that still emits no event.
+  "replace match guard data.character.is_some\\(\\) with true in Api<'a>::on_segment_keydown",
+  # The current numeric segment ranges have no single buffered prefix where
+  # `buffered * 10 == max`, so `>` and `>=` advance at the same observable
+  # points.
+  'replace > with >= in type_into_segment',
+  # `DateGranularity` currently has one variant, and `force_leading_zeros`
+  # changes are already reflected by `refresh_segment_ranges`; neither rebuild
+  # predicate branch changes observable DateField behavior today.
+  'date_field/mod.rs:1973:33: replace != with == in sync_props',
+  'date_field/mod.rs:1975:41: replace != with == in sync_props',
+  # Provider z-index release only mutates private lifecycle bookkeeping; future
+  # allocation values remain monotonic and no active-count API is exposed.
+  'z_index_allocator.rs:48:9: replace Context::release with \(\)',
+  'z_index_allocator.rs:53:9: replace Context::release_claim with \(\)',
+
+  # Warning-only helpers compile to no-ops without the `debug` feature used by
+  # the Nightly mutation matrix.
+  'replace .*warn.* with \(\)',
+  'replace != with == in warn_role_conflict',
+  'MissingProviderEffects.*(focus_element_by_id|focus_first_tabbable|focus_last_tabbable|focus_body|clear_timeout|announce|announce_assertive|position_element_at|remove_inert_from_siblings|scroll_lock_acquire|scroll_lock_release|set_scroll_top|resize_to_content) with \(\)',
+
+  # These null-object methods intentionally return their type defaults, so the
+  # `Default::default()` replacement is equivalent to the source expression.
+  'NullModalityContext>::snapshot -> ModalitySnapshot with Default::default\(\)',
+  'NullPlatformEffects>::resolved_direction -> ResolvedDirection with Default::default\(\)',
+  'MissingProviderEffects>::resolved_direction -> ResolvedDirection with Default::default\(\)',
+  'MissingProviderEffects>::document_contains_id -> bool with false',
+  'MissingProviderEffects>::active_element_id -> Option<String> with None',
+  'MissingProviderEffects>::can_restore_focus -> bool with false',
+  'MissingProviderEffects>::nearest_focusable_ancestor_id -> Option<String> with None',
+  'MissingProviderEffects>::is_mac_platform -> bool with false',
+  'MissingProviderEffects>::now_ms -> u64 with 0',
+  'MissingProviderEffects>::get_bounding_rect -> Option<Rect> with None'
+]

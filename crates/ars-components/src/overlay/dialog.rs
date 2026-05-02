@@ -3014,6 +3014,29 @@ mod tests {
     }
 
     #[test]
+    fn on_props_changed_emits_sync_props_when_single_focus_target_changes() {
+        let initial_focus = Props {
+            initial_focus: Some(FocusTarget::First),
+            ..test_props()
+        };
+
+        assert_eq!(
+            Machine::on_props_changed(&test_props(), &initial_focus),
+            [Event::SyncProps]
+        );
+
+        let final_focus = Props {
+            final_focus: Some(FocusTarget::Last),
+            ..test_props()
+        };
+
+        assert_eq!(
+            Machine::on_props_changed(&test_props(), &final_focus),
+            [Event::SyncProps]
+        );
+    }
+
+    #[test]
     fn on_props_changed_emits_open_and_sync_props_together_when_both_change() {
         let old = test_props();
 

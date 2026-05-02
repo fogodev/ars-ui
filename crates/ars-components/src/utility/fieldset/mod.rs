@@ -949,6 +949,13 @@ mod tests {
     fn fieldset_getters_reflect_context() {
         let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
 
+        let api = service.connect(&|_| {});
+
+        assert!(!api.is_disabled());
+        assert!(!api.is_invalid());
+        assert!(!api.is_readonly());
+        assert!(api.errors().is_empty());
+
         drop(service.send(Event::SetDisabled(true)));
         drop(service.send(Event::SetReadonly(true)));
         drop(service.send(Event::SetErrors(vec![custom_error()])));

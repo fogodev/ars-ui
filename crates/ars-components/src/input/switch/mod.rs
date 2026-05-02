@@ -1637,6 +1637,7 @@ mod tests {
             .checked(true)
             .name("wifi")
             .form("settings")
+            .value("enabled")
             .label("Wi-Fi")
             .on_checked_change(|_| {})
             .uncontrolled()
@@ -1648,6 +1649,7 @@ mod tests {
         assert_eq!(props.checked, None);
         assert_eq!(props.name, None);
         assert_eq!(props.form, None);
+        assert_eq!(props.value, "enabled");
         assert_eq!(props.label, None);
         assert!(props.on_checked_change.is_none());
     }

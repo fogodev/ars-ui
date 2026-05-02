@@ -979,6 +979,11 @@ mod tests {
 
     #[test]
     fn api_reports_behavioral_props() {
+        let defaults = api(Props::new());
+
+        assert!(!defaults.disable_outside_pointer_events());
+        assert!(defaults.exclude_ids().is_empty());
+
         let api = api(Props::new()
             .disable_outside_pointer_events(true)
             .exclude_ids(["trigger", "portal"]));

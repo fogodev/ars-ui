@@ -1405,6 +1405,18 @@ mod tests {
     }
 
     #[test]
+    fn stale_set_loading_false_clears_loading_context_outside_loading_state() {
+        let mut service = service(test_props());
+
+        service.context_mut().loading = true;
+
+        send(&mut service, Event::SetLoading(false));
+
+        assert_eq!(*service.state(), State::Idle);
+        assert!(!service.context().loading);
+    }
+
+    #[test]
     fn set_disabled_true_clears_focused_and_pressed_context() {
         let mut service = service(test_props());
 
@@ -1453,6 +1465,14 @@ mod tests {
 
     #[test]
     fn api_state_helpers_reflect_context() {
+        let default_service = service(test_props());
+
+        let api = default_service.connect(&|_| {});
+
+        assert!(!api.is_pressed());
+        assert!(!api.is_focus_visible());
+        assert!(!api.should_prevent_focus_on_press());
+
         let mut service = service(test_props().prevent_focus_on_press(true));
 
         send(&mut service, Event::Focus { is_keyboard: true });
@@ -1469,6 +1489,15 @@ mod tests {
 
     #[test]
     fn api_loading_helpers_reflect_loading_state() {
+        let mut idle = service(test_props());
+
+        idle.context_mut().loading = true;
+
+        let api = idle.connect(&|_| {});
+
+        assert!(api.is_loading());
+        assert!(api.is_disabled());
+
         let service = service(test_props().loading(true));
 
         let api = service.connect(&|_| {});

@@ -3323,6 +3323,13 @@ mod tests {
         assert_eq!(value.as_str(), Some("owned"));
     }
 
+    #[test]
+    fn attr_value_none_compares_equal_only_to_none() {
+        assert_eq!(AttrValue::None, AttrValue::None);
+        assert_ne!(AttrValue::None, AttrValue::String(String::new()));
+        assert_ne!(AttrValue::None, AttrValue::Bool(false));
+    }
+
     /// `as_str` cannot return a borrow into a closure-produced
     /// `String` (the closure owns that allocation), so the reactive
     /// variants deliberately return `None`. Adapter conversions must

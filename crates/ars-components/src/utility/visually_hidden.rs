@@ -302,6 +302,11 @@ mod tests {
         assert!(api.as_child());
         assert!(api.is_focusable());
         assert_eq!(api.props(), &original);
+
+        let default = Api::new(default_props());
+
+        assert!(!default.as_child());
+        assert!(!default.is_focusable());
     }
 
     // ── Connect / API ──────────────────────────────────────────────

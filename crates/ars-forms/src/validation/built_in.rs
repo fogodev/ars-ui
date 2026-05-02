@@ -1113,6 +1113,14 @@ mod tests {
             error_code(validator.validate(&Value::Number(Some(4.0)), &Context::standalone("x"))),
             ErrorCode::Step(2.0)
         );
+
+        let fractional_base = StepValidator::new(0.5).with_base(0.2);
+
+        assert!(
+            fractional_base
+                .validate(&Value::Number(Some(0.7)), &Context::standalone("x"))
+                .is_ok()
+        );
     }
 
     #[test]
@@ -1123,6 +1131,34 @@ mod tests {
             validator
                 .validate(&Value::Number(Some(-55.2)), &Context::standalone("x"))
                 .is_ok()
+        );
+
+        assert!(
+            validator
+                .validate(&Value::Number(Some(0.3)), &Context::standalone("x"))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn step_tolerance_is_not_relaxed_past_one_unit_in_last_place() {
+        let validator = StepValidator::new(1.0);
+
+        assert!(
+            validator
+                .validate(
+                    &Value::Number(Some(f64::EPSILON * 16.0)),
+                    &Context::standalone("x")
+                )
+                .is_ok()
+        );
+
+        assert_eq!(
+            error_code(validator.validate(
+                &Value::Number(Some(f64::EPSILON * 1_000_000.0)),
+                &Context::standalone("x")
+            )),
+            ErrorCode::Step(1.0)
         );
     }
 
