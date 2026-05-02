@@ -6,6 +6,7 @@
 
 use alloc::string::String;
 
+use ars_core::KeyModifiers;
 /// Re-export of the canonical named-key enum from `ars-core`.
 ///
 /// [`KeyboardKey`] mirrors the W3C UI Events `KeyboardEvent` key Values (2025
@@ -83,6 +84,172 @@ pub enum ArsKeyboardEvent {
 
     /// A key was released.
     KeyUp(KeyboardEventData),
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Hotkey
+// ────────────────────────────────────────────────────────────────────
+
+/// Trigger half of a [`Hotkey`].
+///
+/// A hotkey's trigger is either a *named* (non-printable) key like `Enter`
+/// or `F8`, or a *printable character* like `'t'` for `Alt+T`. The two
+/// cases live in different fields on [`KeyboardEventData`]
+/// ([`KeyboardEventData::key`] vs [`KeyboardEventData::character`]) so the
+/// trigger is sum-typed to make matching unambiguous.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum HotkeyTrigger {
+    /// A named (non-printable) key — `Enter`, `Escape`, `F8`, `ArrowUp`,
+    /// etc. Matched against [`KeyboardEventData::key`].
+    Named(KeyboardKey),
+
+    /// A printable character — matched case-insensitively (ASCII) against
+    /// [`KeyboardEventData::character`]. Useful for chords like `Alt+T`
+    /// where the consumer wants the chord to fire regardless of whether
+    /// Caps Lock is on.
+    Char(char),
+}
+
+/// Keyboard chord declaration — a trigger key plus the modifier state
+/// required for the chord to match.
+///
+/// Use [`Hotkey::matches`] from a `keydown` listener to test whether a
+/// [`KeyboardEventData`] event satisfies this chord. Adapters MUST filter
+/// `event.repeat` and `event.is_composing` upstream — `matches` only
+/// compares modifier and trigger identity, by design.
+///
+/// # Example
+///
+/// ```
+/// use ars_interactions::keyboard::{Hotkey, KeyboardEventData, KeyboardKey};
+///
+/// let hk = Hotkey::char('t').with_alt();
+///
+/// let event = KeyboardEventData {
+///     key: KeyboardKey::Unidentified,
+///     character: Some('T'),
+///     code: "KeyT".to_owned(),
+///     shift_key: false,
+///     ctrl_key: false,
+///     alt_key: true,
+///     meta_key: false,
+///     repeat: false,
+///     is_composing: false,
+/// };
+///
+/// assert!(hk.matches(&event));
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Hotkey {
+    /// The trigger key.
+    pub trigger: HotkeyTrigger,
+
+    /// Modifier state that must match exactly. A hotkey of `Alt+T` does
+    /// **not** fire on `Alt+Shift+T` — modifier comparison is exact.
+    pub modifiers: KeyModifiers,
+}
+
+impl Hotkey {
+    /// Builds a hotkey for a named (non-printable) key with no modifiers.
+    #[must_use]
+    pub const fn named(key: KeyboardKey) -> Self {
+        Self {
+            trigger: HotkeyTrigger::Named(key),
+            modifiers: KeyModifiers {
+                shift: false,
+                ctrl: false,
+                alt: false,
+                meta: false,
+            },
+        }
+    }
+
+    /// Builds a hotkey for a printable character with no modifiers.
+    ///
+    /// Matching is case-insensitive over ASCII — `Hotkey::char('t')` and
+    /// `Hotkey::char('T')` both fire on the same physical key press.
+    /// Non-ASCII characters compare case-sensitively.
+    #[must_use]
+    pub const fn char(c: char) -> Self {
+        Self {
+            trigger: HotkeyTrigger::Char(c),
+            modifiers: KeyModifiers {
+                shift: false,
+                ctrl: false,
+                alt: false,
+                meta: false,
+            },
+        }
+    }
+
+    /// Replaces [`Self::modifiers`] with the supplied modifier state.
+    #[must_use]
+    pub const fn with_modifiers(mut self, modifiers: KeyModifiers) -> Self {
+        self.modifiers = modifiers;
+        self
+    }
+
+    /// Requires the Alt / Option modifier.
+    #[must_use]
+    pub const fn with_alt(mut self) -> Self {
+        self.modifiers.alt = true;
+        self
+    }
+
+    /// Requires the Ctrl modifier.
+    #[must_use]
+    pub const fn with_ctrl(mut self) -> Self {
+        self.modifiers.ctrl = true;
+        self
+    }
+
+    /// Requires the Shift modifier.
+    #[must_use]
+    pub const fn with_shift(mut self) -> Self {
+        self.modifiers.shift = true;
+        self
+    }
+
+    /// Requires the Meta / Cmd / Win modifier.
+    #[must_use]
+    pub const fn with_meta(mut self) -> Self {
+        self.modifiers.meta = true;
+        self
+    }
+
+    /// Returns `true` when the supplied event matches this hotkey.
+    ///
+    /// Modifier state must match **exactly** — declared modifiers must be
+    /// held and undeclared ones must NOT be held. The trigger must equal
+    /// the event's `key` (for [`HotkeyTrigger::Named`]) or
+    /// case-insensitively equal the event's `character`
+    /// (for [`HotkeyTrigger::Char`]).
+    ///
+    /// **Adapter responsibility:** filter out `event.repeat` and
+    /// `event.is_composing` *before* calling this — the predicate is
+    /// scoped to chord identity, not auto-repeat or IME policy.
+    #[must_use]
+    pub fn matches(&self, event: &KeyboardEventData) -> bool {
+        let modifiers_match = event.shift_key == self.modifiers.shift
+            && event.ctrl_key == self.modifiers.ctrl
+            && event.alt_key == self.modifiers.alt
+            && event.meta_key == self.modifiers.meta;
+
+        if !modifiers_match {
+            return false;
+        }
+
+        match self.trigger {
+            HotkeyTrigger::Named(key) => event.key == key,
+            HotkeyTrigger::Char(target) => {
+                if let Some(actual) = event.character {
+                    actual.eq_ignore_ascii_case(&target)
+                } else {
+                    false
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -258,5 +425,320 @@ mod tests {
         let key = ReexportedKeyboardKey::from_key_str("Enter");
 
         assert_eq!(key, KeyboardKey::Enter);
+    }
+
+    // ── Hotkey tests ───────────────────────────────────────────────
+
+    use ars_core::KeyModifiers;
+
+    use super::{Hotkey, HotkeyTrigger};
+
+    /// Builds a `KeyboardEventData` with sensible defaults so individual
+    /// tests can override only the field(s) they care about.
+    fn event(
+        key: KeyboardKey,
+        character: Option<char>,
+        shift: bool,
+        ctrl: bool,
+        alt: bool,
+        meta: bool,
+    ) -> KeyboardEventData {
+        KeyboardEventData {
+            key,
+            character,
+            code: String::new(),
+            shift_key: shift,
+            ctrl_key: ctrl,
+            alt_key: alt,
+            meta_key: meta,
+            repeat: false,
+            is_composing: false,
+        }
+    }
+
+    #[test]
+    fn named_constructor_has_no_modifiers() {
+        let hk = Hotkey::named(KeyboardKey::Escape);
+
+        assert_eq!(hk.trigger, HotkeyTrigger::Named(KeyboardKey::Escape));
+        assert_eq!(hk.modifiers, KeyModifiers::default());
+    }
+
+    #[test]
+    fn char_constructor_has_no_modifiers() {
+        let hk = Hotkey::char('t');
+
+        assert_eq!(hk.trigger, HotkeyTrigger::Char('t'));
+        assert_eq!(hk.modifiers, KeyModifiers::default());
+    }
+
+    #[test]
+    fn builder_methods_set_each_modifier_independently() {
+        let alt = Hotkey::char('t').with_alt();
+
+        assert!(alt.modifiers.alt);
+        assert!(!alt.modifiers.ctrl);
+        assert!(!alt.modifiers.shift);
+        assert!(!alt.modifiers.meta);
+
+        let ctrl = Hotkey::char('t').with_ctrl();
+
+        assert!(ctrl.modifiers.ctrl);
+        assert!(!ctrl.modifiers.alt);
+
+        let shift = Hotkey::char('t').with_shift();
+
+        assert!(shift.modifiers.shift);
+        assert!(!shift.modifiers.alt);
+
+        let meta = Hotkey::char('t').with_meta();
+
+        assert!(meta.modifiers.meta);
+        assert!(!meta.modifiers.alt);
+    }
+
+    #[test]
+    fn builder_methods_compose() {
+        let hk = Hotkey::char('s').with_meta().with_shift().with_alt();
+
+        assert!(hk.modifiers.alt);
+        assert!(hk.modifiers.shift);
+        assert!(hk.modifiers.meta);
+        assert!(!hk.modifiers.ctrl);
+    }
+
+    #[test]
+    fn with_modifiers_replaces_all_at_once() {
+        let mods = KeyModifiers {
+            shift: true,
+            ctrl: true,
+            alt: false,
+            meta: false,
+        };
+
+        let hk = Hotkey::char('t').with_alt().with_modifiers(mods);
+
+        assert_eq!(hk.modifiers, mods);
+
+        // `with_modifiers` REPLACES — the prior `.with_alt()` is overwritten.
+        assert!(!hk.modifiers.alt);
+    }
+
+    #[test]
+    fn matches_named_trigger_with_no_modifiers() {
+        let hk = Hotkey::named(KeyboardKey::F8);
+        let ev = event(KeyboardKey::F8, None, false, false, false, false);
+
+        assert!(hk.matches(&ev));
+    }
+
+    #[test]
+    fn matches_named_trigger_with_required_modifier() {
+        let hk = Hotkey::named(KeyboardKey::ArrowUp).with_alt();
+        let ev = event(KeyboardKey::ArrowUp, None, false, false, true, false);
+
+        assert!(hk.matches(&ev));
+    }
+
+    #[test]
+    fn named_trigger_does_not_match_when_key_differs() {
+        let hk = Hotkey::named(KeyboardKey::F8);
+        let ev = event(KeyboardKey::F7, None, false, false, false, false);
+
+        assert!(!hk.matches(&ev));
+    }
+
+    #[test]
+    fn matches_char_trigger_case_insensitively() {
+        let hk = Hotkey::char('t').with_alt();
+
+        // Lowercase event char.
+        assert!(hk.matches(&event(
+            KeyboardKey::Unidentified,
+            Some('t'),
+            false,
+            false,
+            true,
+            false,
+        )));
+
+        // Uppercase event char (Caps Lock or Shift held by user — but
+        // `Hotkey::char('t').with_alt()` declares NO Shift, so this
+        // event must NOT have Shift held to match).
+        assert!(hk.matches(&event(
+            KeyboardKey::Unidentified,
+            Some('T'),
+            false,
+            false,
+            true,
+            false,
+        )));
+    }
+
+    #[test]
+    fn char_trigger_does_not_match_when_character_missing() {
+        let hk = Hotkey::char('t').with_alt();
+        let ev = event(KeyboardKey::Unidentified, None, false, false, true, false);
+
+        assert!(!hk.matches(&ev));
+    }
+
+    #[test]
+    fn char_trigger_does_not_match_different_character() {
+        let hk = Hotkey::char('t').with_alt();
+        let ev = event(
+            KeyboardKey::Unidentified,
+            Some('a'),
+            false,
+            false,
+            true,
+            false,
+        );
+
+        assert!(!hk.matches(&ev));
+    }
+
+    #[test]
+    fn modifier_match_is_exact_superset_does_not_fire() {
+        // Hotkey is Alt+T; Alt+Shift+T must NOT match.
+        let hk = Hotkey::char('t').with_alt();
+        let ev = event(
+            KeyboardKey::Unidentified,
+            Some('t'),
+            true, // Shift held — undeclared
+            false,
+            true, // Alt held — declared
+            false,
+        );
+
+        assert!(!hk.matches(&ev));
+    }
+
+    #[test]
+    fn modifier_match_is_exact_subset_does_not_fire() {
+        // Hotkey is Alt+Ctrl+T; Alt+T alone must NOT match.
+        let hk = Hotkey::char('t').with_alt().with_ctrl();
+        let ev = event(
+            KeyboardKey::Unidentified,
+            Some('t'),
+            false,
+            false,
+            true,
+            false,
+        );
+
+        assert!(!hk.matches(&ev));
+    }
+
+    #[test]
+    fn each_modifier_position_must_match() {
+        // Build a hotkey requiring all four modifiers; flipping any one
+        // off must break the match.
+        let hk = Hotkey::char('k')
+            .with_alt()
+            .with_ctrl()
+            .with_shift()
+            .with_meta();
+
+        let all_held = event(KeyboardKey::Unidentified, Some('k'), true, true, true, true);
+
+        assert!(hk.matches(&all_held));
+
+        for mask in 0..4_u8 {
+            let mut ev = all_held.clone();
+
+            match mask {
+                0 => ev.shift_key = false,
+                1 => ev.ctrl_key = false,
+                2 => ev.alt_key = false,
+                3 => ev.meta_key = false,
+                _ => unreachable!(),
+            }
+
+            assert!(
+                !hk.matches(&ev),
+                "missing modifier #{mask} should break match"
+            );
+        }
+    }
+
+    #[test]
+    fn matches_ignores_repeat_and_is_composing_flags_directly() {
+        // Per the contract: matches() does NOT filter on repeat / is_composing.
+        // Adapters filter those upstream. The predicate fires either way
+        // when the chord matches.
+        let hk = Hotkey::named(KeyboardKey::F8);
+
+        let mut ev = event(KeyboardKey::F8, None, false, false, false, false);
+
+        ev.repeat = true;
+        ev.is_composing = true;
+
+        assert!(
+            hk.matches(&ev),
+            "Hotkey::matches must not filter repeat/is_composing — that is \
+             the adapter's responsibility"
+        );
+    }
+
+    #[test]
+    fn modifier_key_alone_can_be_a_named_trigger() {
+        // Edge case: pressing Alt by itself (no other key). The event
+        // fires with `key: KeyboardKey::Alt` and `alt_key: true` (W3C says
+        // the modifier flag is set on the event that toggled it). A user
+        // could plausibly want to bind "tap Alt alone" as a hotkey.
+        // The type allows it — we just need to verify behavior is sane.
+        let hk = Hotkey::named(KeyboardKey::Alt);
+
+        // Alt is the trigger AND Alt is held — the chord declares no
+        // modifiers, so this *won't* match because alt_key=true is undeclared.
+        let alt_pressed = event(KeyboardKey::Alt, None, false, false, true, false);
+
+        assert!(
+            !hk.matches(&alt_pressed),
+            "Hotkey::named(Alt) without `.with_alt()` does not match an event \
+             where Alt is held"
+        );
+
+        // To bind "Alt held + Alt is the trigger" the user must declare it:
+        let hk_with_alt = Hotkey::named(KeyboardKey::Alt).with_alt();
+
+        assert!(hk_with_alt.matches(&alt_pressed));
+    }
+
+    #[test]
+    fn hotkey_is_copy_and_eq() {
+        let a = Hotkey::char('t').with_alt();
+        let b = a;
+
+        assert_eq!(a, b);
+
+        let c = Hotkey::char('t').with_ctrl();
+
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn non_ascii_char_compares_case_sensitively() {
+        // `eq_ignore_ascii_case` only folds ASCII letters. Non-ASCII chars
+        // round-trip as-is.
+        let hk = Hotkey::char('ñ');
+
+        assert!(hk.matches(&event(
+            KeyboardKey::Unidentified,
+            Some('ñ'),
+            false,
+            false,
+            false,
+            false,
+        )));
+        assert!(!hk.matches(&event(
+            KeyboardKey::Unidentified,
+            Some('Ñ'),
+            false,
+            false,
+            false,
+            false,
+        )));
     }
 }

@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/overlay/toast/single.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).close_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "close-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toast",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Descartar",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

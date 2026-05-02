@@ -1,0 +1,63 @@
+---
+source: crates/ars-components/src/overlay/toast/manager.rs
+expression: snapshot_attrs(&api.region_attrs(true))
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-live",
+            ),
+            String(
+                "assertive",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "region",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toast",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Notifications",
+            ),
+        ),
+        (
+            Aria(
+                Atomic,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "assertive",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "alert",
+            ),
+        ),
+    ],
+    styles: [],
+}

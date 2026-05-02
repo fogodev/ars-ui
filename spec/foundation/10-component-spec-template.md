@@ -79,6 +79,8 @@ Sections are numbered sequentially with no gaps. If a conditional section is omi
   ### 3.3 Focus Management                   — CONDITIONAL: when focus is programmatically managed
   ### 3.4 Screen Reader Announcements        — CONDITIONAL: when live regions are used
 
+## N. Layering                               — REQUIRED (complex); RECOMMENDED (stateful, stateless)
+
 ## N. Internationalization                   — REQUIRED (stateful, complex); CONDITIONAL (stateless)
   ### N.1 Messages                           — CONDITIONAL: when translatable strings exist
   ### N.M [topic subsections]                — RTL, locale formatting, BiDi, etc.
@@ -280,7 +282,50 @@ REQUIRED for all tiers. Subsections:
 
 Additional subsections may be added for component-specific concerns (e.g., forced colors mode, virtual cursor containment, disabled element focus policy).
 
-### 4.4 Internationalization
+### 4.4 Layering (agnostic core ↔ adapter)
+
+REQUIRED for **complex** tier. RECOMMENDED for **stateful** and
+**stateless** tiers when the component has any non-trivial split between
+agnostic core (`ars-components`) and framework adapters (`ars-leptos`,
+`ars-dioxus`).
+
+The agnostic-core ↔ adapter line is the contract that lets a single
+state machine drive both Leptos and Dioxus without special-casing
+either. Spec readers — both human and machine-generated adapters — need
+to know which types live where so they can reason about reuse,
+ownership, and `Send + Sync` requirements.
+
+The Layering section MUST declare:
+
+1. **Agnostic-core types** — `Machine`, `Props`, `Context`, `Event`,
+   `Effect`, `Api`, `Part`, `Messages`, free functions returning
+   `AttrMap`, plus any data-only utilities (e.g., `ToastContent`,
+   `Promise<T, E>`, ZST factories like `Toaster`).
+2. **Adapter types** — handles holding `Box<dyn Fn(Event)>` or
+   framework-specific signal types, async runtime glue
+   (`spawn_local`/`spawn`), DOM/listener wiring (`pointerdown`,
+   `MutationObserver`, focus traps), and any types whose construction
+   depends on a `NodeRef`/`MountedData`/web-sys handle.
+
+The simplest acceptable form is a two-column table:
+
+| Layer           | Type / function                                         |
+| --------------- | ------------------------------------------------------- |
+| Agnostic core   | `Machine`, `Props`, `Context`, `Event`, `Effect`, `Api` |
+| Leptos / Dioxus | `use_machine_*`, `RegionRef`, `pointer_capture`         |
+
+For purely-agnostic stateless components (e.g. `VisuallyHidden`,
+`Separator`), a single sentence is sufficient — _"Everything in this
+spec lives in `ars-components`; adapters re-export the same types
+through their preludes."_
+
+When a behavior is **deliberately not implemented** in the agnostic
+core (e.g. promise-toast `spawn_local` glue, swipe pointer capture, real
+`set_timeout`), the Layering section MUST list it under "Adapter
+responsibilities" with one line per item explaining why the agnostic
+core cannot handle it.
+
+### 4.5 Internationalization
 
 REQUIRED for stateful/complex. CONDITIONAL for stateless (include only if i18n concerns exist).
 
@@ -302,7 +347,7 @@ When a component has no translatable strings and no locale-sensitive behavior, a
 
 > Label text is consumer-provided. `data-ars-state` values are stable API tokens, not localized. RTL: no special handling needed.
 
-### 4.5 Form Integration
+### 4.6 Form Integration
 
 CONDITIONAL — include when `forms` appears in the component's `foundation_deps`. Document:
 
@@ -313,7 +358,7 @@ CONDITIONAL — include when `forms` appears in the component's `foundation_deps
 - **Reset behavior**: what value the component resets to.
 - **Disabled/readonly propagation**: from form context per `07-forms.md` §15.
 
-### 4.6 Variant Sections (complex tier)
+### 4.7 Variant Sections (complex tier)
 
 Each variant or extension gets its own top-level `##` section. Only include subsections that the variant actually adds or changes:
 
@@ -376,6 +421,12 @@ the workspace lint policy without ad-hoc suppressions. Specifically:
 - [ ] Variant sections appear after all core sections
 - [ ] Each variant section only contains subsections for what it changes
 - [ ] Variant Messages follow the `MessageFn` pattern from `04-internationalization.md`
+- [ ] §Layering exists and declares which types live in agnostic core vs adapter, with explicit "Adapter responsibilities" entries for any deliberately-deferred behavior
+
+### Spec-Conformance Test (all tiers)
+
+- [ ] A test in `crates/<crate>/tests/spec_conformance.rs` (or `mod tests`) asserts the component's `Part` enum against the spec §Anatomy table — `Part::scope()`, `Part::all()` length, and the kebab-case names of every variant.
+- [ ] When `Part::all()` skips data-carrying variants (e.g. `Item { key }` whose names depend on runtime ids), the conformance test explicitly documents which variants are exercised through other channels (e.g. snapshot tests for the unit variants and a hand-rolled key-set test for the data-carrying ones).
 
 ### Form Components
 

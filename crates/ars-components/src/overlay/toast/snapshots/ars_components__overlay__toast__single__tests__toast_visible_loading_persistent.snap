@@ -1,0 +1,236 @@
+---
+source: crates/ars-components/src/overlay/toast/single.rs
+expression: "snapshot_api(&service.connect(&|_| {}))"
+---
+root:
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-kind",
+            ),
+            String(
+                "loading",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toast",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "visible",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "toast-title",
+            ),
+        ),
+        (
+            Aria(
+                DescribedBy,
+            ),
+            String(
+                "toast-description",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "toast",
+            ),
+        ),
+    ],
+    styles: [],
+}
+title:
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "title",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toast",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "toast-title",
+            ),
+        ),
+    ],
+    styles: [],
+}
+description:
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "description",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toast",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "toast-description",
+            ),
+        ),
+    ],
+    styles: [],
+}
+action_trigger:
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "action-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toast",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Undo deletion",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}
+close_trigger:
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "close-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toast",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Dismiss notification",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}
+progress_bar:
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "progress-bar",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toast",
+            ),
+        ),
+        (
+            Aria(
+                ValueMax,
+            ),
+            String(
+                "100",
+            ),
+        ),
+        (
+            Aria(
+                ValueMin,
+            ),
+            String(
+                "0",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "progressbar",
+            ),
+        ),
+    ],
+    styles: [],
+}
