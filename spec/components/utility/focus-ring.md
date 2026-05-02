@@ -19,45 +19,46 @@ references:
 
 ```rust
 /// Props for the `FocusRing` component.
-#[derive(Clone, Debug, PartialEq, Eq, HasId)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, HasId)]
 pub struct Props {
     /// Component instance ID.
     pub id: String,
-    /// Track focus-within rather than direct focus.
+    /// Track focus-within rather than direct focus. The adapter reads this
+    /// flag (NOT a duplicate on `Context`) to decide whether to wire
+    /// `focus`/`blur` or `focusin`/`focusout` listeners.
     pub within: bool,
-    /// Optional CSS class to apply when focused by any means.
+    /// Optional CSS class to apply when focused by any means. Adapter-only
+    /// hint; the agnostic-core attribute output is invariant under this
+    /// value.
     pub focus_class: Option<String>,
     /// Optional CSS class to apply only when focused by keyboard.
+    /// Adapter-only hint; the agnostic-core attribute output is invariant
+    /// under this value.
     pub focus_visible_class: Option<String>,
     /// When true, the focus ring is shown even on pointer-initiated focus.
     /// Text inputs conventionally show focus indicators regardless of input
-    /// method, since users need to know where they are typing.
+    /// method, since users need to know where they are typing. Adapter-only
+    /// hint that influences how the platform layer derives
+    /// `Context::focus_visible`; the agnostic-core attribute output is
+    /// invariant under this flag once `Context` has been resolved.
     /// Default: false.
     pub is_text_input: bool,
-}
-
-impl Default for Props {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            within: false,
-            focus_class: None,
-            focus_visible_class: None,
-            is_text_input: false,
-        }
-    }
 }
 ```
 
 ### 1.2 Connect / API
 
 ```rust
-/// The context for the `FocusRing` component.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The runtime context for the `FocusRing` component, supplied by the
+/// adapter from the shared modality tracker.
+///
+/// Carries only the resolved focus-visible state. `Props::within` is the
+/// single source of truth for whether the adapter should wire
+/// focus-within vs. focus listeners — duplicating it on `Context` would
+/// just create a chance for the two values to disagree.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Context {
-    /// When true, `focus_visible` is set when any descendant is focused (focus-within mode).
-    pub within: bool,
-    /// Whether focus-visible is active.
+    /// Whether focus-visible is currently active.
     pub focus_visible: bool,
 }
 
@@ -68,26 +69,37 @@ pub enum Part {
 }
 
 /// The API for the `FocusRing` component.
+#[derive(Clone, Debug)]
 pub struct Api {
     ctx: Context,
     props: Props,
 }
 
 impl Api {
-    pub fn new(ctx: Context, props: Props) -> Self {
+    pub const fn new(ctx: Context, props: Props) -> Self {
         Self { ctx, props }
     }
 
+    pub const fn props(&self) -> &Props { &self.props }
+    pub const fn context(&self) -> Context { self.ctx }
+    pub fn id(&self) -> &str { &self.props.id }
+    /// Reads from `Props::within` — the single source of truth for the
+    /// focus-within routing flag.
+    pub const fn within(&self) -> bool { self.props.within }
+    pub const fn focus_visible(&self) -> bool { self.ctx.focus_visible }
+    pub fn focus_class(&self) -> Option<&str> { self.props.focus_class.as_deref() }
+    pub fn focus_visible_class(&self) -> Option<&str> { self.props.focus_visible_class.as_deref() }
+    pub const fn is_text_input(&self) -> bool { self.props.is_text_input }
+
     /// Attributes applied to the element that should show the focus ring.
     pub fn root_attrs(&self) -> AttrMap {
-        let mut p = AttrMap::new();
+        let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
-        p.set(scope_attr, scope_val);
-        p.set(part_attr, part_val);
+        attrs.set(scope_attr, scope_val).set(part_attr, part_val);
         if self.ctx.focus_visible {
-            p.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
+            attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
         }
-        p
+        attrs
     }
 }
 
@@ -101,6 +113,11 @@ impl ConnectApi for Api {
     }
 }
 ```
+
+Adapter consumers may also construct `Props` through the chained-builder
+form (`Props::new().id("…").within(true).is_text_input(true)`), which
+mirrors the convention used by every other stateless utility in
+`crates/ars-components/src/utility/`.
 
 ## 2. Anatomy
 
@@ -194,14 +211,14 @@ Individual component focus handlers consult the shared modality context to deter
 
 ### 6.1 Props
 
-| Feature             | ars-ui                | React Aria       | Notes                                        |
-| ------------------- | --------------------- | ---------------- | -------------------------------------------- |
-| Within              | `within`              | `within`         | Both libraries support focus-within tracking |
-| Focus class         | `focus_class`         | --               | ars-ui addition                              |
-| Focus visible class | `focus_visible_class` | `focusRingClass` | Similar concept                              |
-| Auto-focus tracking | `auto_focus`          | `autoFocus`      | Both libraries                               |
+| Feature             | ars-ui                | React Aria       | Notes                                                               |
+| ------------------- | --------------------- | ---------------- | ------------------------------------------------------------------- |
+| Within              | `within`              | `within`         | Both libraries support focus-within tracking                        |
+| Focus class         | `focus_class`         | --               | ars-ui addition                                                     |
+| Focus visible class | `focus_visible_class` | `focusRingClass` | Similar concept                                                     |
+| Text-input mode     | `is_text_input`       | --               | ars-ui addition: keep ring visible for pointer focus on text inputs |
 
-**Gaps:** None.
+**Gaps:** None — auto-focus is the focused element's responsibility (HTML `autofocus`, or a sibling component), not FocusRing's, in either library.
 
 ### 6.2 Anatomy
 
