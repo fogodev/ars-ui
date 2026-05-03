@@ -1,0 +1,68 @@
+---
+source: crates/ars-components/src/navigation/tabs/tests.rs
+assertion_line: 139
+expression: "snapshot_attrs(&service.connect(&|_| {}).tab_attrs(&key(\"a\"), false))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "tab",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tabs",
+            ),
+        ),
+        (
+            Data(
+                "ars-selected",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Aria(
+                Selected,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Controls,
+            ),
+            String(
+                "tabs-panel-a",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "tabs-tab-a",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "tab",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

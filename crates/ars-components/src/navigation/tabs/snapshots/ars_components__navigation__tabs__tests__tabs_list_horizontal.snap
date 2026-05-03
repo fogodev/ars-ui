@@ -1,0 +1,46 @@
+---
+source: crates/ars-components/src/navigation/tabs/tests.rs
+assertion_line: 96
+expression: "snapshot_attrs(&service.connect(&|_| {}).list_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "list",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tabs",
+            ),
+        ),
+        (
+            Aria(
+                Orientation,
+            ),
+            String(
+                "horizontal",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "tabs-tablist",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "tablist",
+            ),
+        ),
+    ],
+    styles: [],
+}

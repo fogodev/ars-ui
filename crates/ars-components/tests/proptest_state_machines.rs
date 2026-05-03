@@ -20,6 +20,9 @@ mod data_display;
 #[path = "proptest_state_machines/layout.rs"]
 mod layout;
 
+#[path = "proptest_state_machines/navigation.rs"]
+mod navigation;
+
 #[path = "proptest_state_machines/overlay.rs"]
 mod overlay;
 

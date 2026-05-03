@@ -1,0 +1,40 @@
+---
+source: crates/ars-components/src/navigation/tabs/tests.rs
+assertion_line: 1155
+expression: "snapshot_attrs(&service.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-orientation",
+            ),
+            String(
+                "vertical",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tabs",
+            ),
+        ),
+        (
+            Dir,
+            String(
+                "rtl",
+            ),
+        ),
+    ],
+    styles: [],
+}

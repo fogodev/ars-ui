@@ -139,6 +139,19 @@ impl<F: Fn(u64, &str, &Locale) -> String + Send + Sync + 'static> From<F>
     }
 }
 
+/// `From` impl for `MessageFn<dyn Fn(&str, usize, usize, &Locale) -> String + Send + Sync>`.
+///
+/// Used by message templates that interpolate a label, a 1-based position,
+/// and a total count — e.g. `tabs::Messages::reorder_announce_label`'s
+/// `"{label} moved to position {n} of {total}"`.
+impl<F: Fn(&str, usize, usize, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(&str, usize, usize, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
 impl MessageFn<dyn Fn(&Locale) -> String + Send + Sync> {
     /// Creates a `MessageFn` from a static string, ignoring the locale parameter.
     ///
