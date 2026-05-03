@@ -20,6 +20,9 @@ pub mod date_time;
 /// Layout component machines.
 pub mod layout;
 
+/// Navigation component machines.
+pub mod navigation;
+
 /// Utility component machines.
 pub mod utility;
 

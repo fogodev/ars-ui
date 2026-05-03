@@ -126,5 +126,24 @@ exclude_re = [
   'MissingProviderEffects>::nearest_focusable_ancestor_id -> Option<String> with None',
   'MissingProviderEffects>::is_mac_platform -> bool with false',
   'MissingProviderEffects>::now_ms -> u64 with 0',
-  'MissingProviderEffects>::get_bounding_rect -> Option<Rect> with None'
+  'MissingProviderEffects>::get_bounding_rect -> Option<Rect> with None',
+
+  # Tabs `step_focus` checked-counter mutations and the Blur
+  # short-circuit are equivalent in every reachable state. Regex is
+  # line-number-agnostic so it survives source growth.
+  #
+  # - `+= → *=` on `checked` (loops forever on all-disabled, but with
+  #   the new `Focused → Idle` downgrade the all-disabled state
+  #   becomes unreachable from `step_focus`'s call sites).
+  # - `> → ==` and `> → >=` on `checked > total` bail on the same
+  #   iteration in every reachable input (loop advances by one per
+  #   iteration, `total` is the upper bound on distinct positions).
+  # - `&& → ||` in the Blur early-return only diverges when
+  #   `state == Focused && focused_tab.is_none()` — unreachable
+  #   because every Focused-producing transition sets focused_tab to
+  #   Some, and Blur clears both atomically.
+  'tabs/mod\.rs:\d+:\d+: replace \+= with \*= in step_focus',
+  'tabs/mod\.rs:\d+:\d+: replace > with == in step_focus',
+  'tabs/mod\.rs:\d+:\d+: replace > with >= in step_focus',
+  'tabs/mod\.rs:\d+:\d+: replace && with \|\| in <impl ars_core::Machine for Machine>::transition',
 ]

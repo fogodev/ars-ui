@@ -1,0 +1,76 @@
+---
+source: crates/ars-components/src/navigation/tabs/tests.rs
+assertion_line: 163
+expression: "snapshot_attrs(&api.tab_attrs(&key(\"a\"), true))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-focus-visible",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "tab",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tabs",
+            ),
+        ),
+        (
+            Data(
+                "ars-selected",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Aria(
+                Selected,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Controls,
+            ),
+            String(
+                "tabs-panel-a",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "tabs-tab-a",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "tab",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -174,6 +174,17 @@ pub struct Props {
 impl Default for Props { ... }
 ```
 
+**Fluent builder convention.** Every `Props` struct ships a fluent
+builder: `Props::new()` returns the default and one `#[must_use]`
+setter per field returns `Self` so consumers can chain
+`Props::new().id("x").value(Some(v))` instead of writing
+`..Props::default()` ceremony in struct-literal form. Setters take
+`impl Into<String>` for `id` and the bare type for everything else;
+they are `const fn` whenever the body permits it. Component specs
+can omit the setters from the §1.4 code block — readers should
+assume a fluent builder is present unless the spec explicitly opts
+out.
+
 **§1.5 Guards** (conditional) — Named boolean functions that gate transitions:
 
 ```rust

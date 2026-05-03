@@ -1,0 +1,34 @@
+---
+source: crates/ars-components/src/navigation/tabs/tests.rs
+assertion_line: 1181
+expression: "snapshot_attrs(&service.connect(&|_| {}).tab_indicator_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "tab-indicator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tabs",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}
