@@ -2849,6 +2849,75 @@ fn sync_props_replays_orientation_dir_loop_focus_activation_mode() {
 }
 
 #[test]
+fn sync_props_preserves_runtime_resolved_direction_when_props_dir_is_auto() {
+    // Adapter resolves `Props::dir == Auto` by dispatching
+    // `Event::SetDirection(Rtl)` after mount. A subsequent unrelated
+    // prop change must not clobber that resolution back to `Auto` —
+    // otherwise horizontal arrow handling silently regresses to LTR
+    // mapping for RTL users on every prop update.
+    let initial = Props {
+        dir: Direction::Auto,
+        ..test_props()
+    };
+
+    let mut service = service_with_tabs(initial.clone(), &[key("a"), key("b"), key("c")]);
+
+    let result = service.send(Event::SetDirection(Direction::Rtl));
+
+    assert!(result.context_changed);
+    assert_eq!(service.context().dir, Direction::Rtl);
+
+    let mut newly_disabled = BTreeSet::new();
+
+    newly_disabled.insert(key("c"));
+
+    service.set_props(Props {
+        disabled_keys: newly_disabled,
+        ..initial
+    });
+
+    assert_eq!(
+        service.context().dir,
+        Direction::Rtl,
+        "SyncProps must preserve the runtime-resolved direction when \
+         `Props::dir == Auto`"
+    );
+}
+
+#[test]
+fn sync_props_propagates_concrete_dir_change_over_resolved_value() {
+    // Symmetric to the `Auto`-preservation test: when the consumer
+    // *explicitly* changes `Props::dir` to a concrete value, that
+    // intent must win over any previous `SetDirection`-resolved
+    // value. Otherwise the consumer can never override a stale runtime
+    // resolution through props.
+    let initial = Props {
+        dir: Direction::Auto,
+        ..test_props()
+    };
+
+    let mut service = service_with_tabs(initial, &[key("a"), key("b")]);
+
+    let result = service.send(Event::SetDirection(Direction::Rtl));
+
+    assert!(result.context_changed);
+    assert_eq!(service.context().dir, Direction::Rtl);
+
+    service.set_props(Props {
+        dir: Direction::Ltr,
+        ..test_props()
+    });
+
+    assert_eq!(
+        service.context().dir,
+        Direction::Ltr,
+        "An explicit concrete `Props::dir` must propagate through \
+         SyncProps even when a prior SetDirection had resolved to a \
+         different value"
+    );
+}
+
+#[test]
 fn sync_props_rebuilds_disabled_tabs_and_snaps_value() {
     let mut service = service_with_tabs(test_props(), &[key("a"), key("b"), key("c")]);
 

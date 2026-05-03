@@ -1025,7 +1025,15 @@ fn sync_props_plan(state: &State, ctx: &Context, props: &Props) -> TransitionPla
     let apply = move |ctx: &mut Context| {
         ctx.orientation = orientation;
         ctx.activation_mode = activation_mode;
-        ctx.dir = dir;
+        // Preserve any runtime-resolved direction. The adapter dispatches
+        // `Event::SetDirection` after mount when `Props::dir == Auto`, and
+        // unrelated prop changes (e.g. `disabled_keys`) must not overwrite
+        // that resolution back to `Auto`. A concrete `props.dir` still wins
+        // because the consumer is expressing an explicit intent.
+        if dir != Direction::Auto {
+            ctx.dir = dir;
+        }
+
         ctx.loop_focus = loop_focus;
         ctx.disabled_tabs = disabled_keys;
 
