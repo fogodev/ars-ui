@@ -27,20 +27,20 @@ a tab on focus) and manual activation (selecting only on Enter/Space).
 
 ### 1.2 Events
 
-| Event                           | Payload            | Description                                                                                                                                                                                                                                                                                                                                                                                    |
-| ------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SelectTab(Key)`                | tab key            | Activate a tab and show its panel.                                                                                                                                                                                                                                                                                                                                                             |
-| `Focus(Key)`                    | `Key`              | A tab received DOM focus from outside the keyboard navigation flow (pointer, programmatic, screen-reader virtual cursor). Idempotent — re-firing for an already-focused tab is a no-op.                                                                                                                                                                                                        |
-| `Blur`                          | —                  | Focus left the tab list.                                                                                                                                                                                                                                                                                                                                                                       |
-| `FocusNext`                     | —                  | Move focus to the next non-disabled tab.                                                                                                                                                                                                                                                                                                                                                       |
-| `FocusPrev`                     | —                  | Move focus to the previous non-disabled tab.                                                                                                                                                                                                                                                                                                                                                   |
-| `FocusFirst`                    | —                  | Move focus to the first non-disabled tab.                                                                                                                                                                                                                                                                                                                                                      |
-| `FocusLast`                     | —                  | Move focus to the last non-disabled tab.                                                                                                                                                                                                                                                                                                                                                       |
-| `SetDirection(Direction)`       | resolved direction | Idempotent. Adapter dispatches once after mount when `Props::dir == Auto`.                                                                                                                                                                                                                                                                                                                     |
-| `SetTabs(Vec<TabRegistration>)` | tab registrations  | Bulk-replace the registered tab list. Adapter dispatches whenever its rendered tab triggers change. Duplicate keys deduped (first occurrence wins). Re-establishes selection invariant — see §1.5 `snap_value_to_valid_key`.                                                                                                                                                                   |
-| `SyncProps`                     | —                  | Re-apply context-backed prop fields (`orientation`, `activation_mode`, `dir`, `loop_focus`, `disabled_keys`) after a runtime prop change. Emitted by `Machine::on_props_changed`. `dir` is only re-applied when `Props::dir != Direction::Auto`, so an unrelated prop change cannot clobber a runtime-resolved direction installed via `Event::SetDirection`. Re-runs the selection invariant. |
-| `CloseTab(Key)`                 | tab key            | Pure notification (Closable variant — §5.3). Machine does not mutate `tabs` / `value`. Consumer applies the close via `SetTabs` / `SelectTab` after consulting `Api::can_close_tab` and `Api::successor_for_close`.                                                                                                                                                                            |
-| `ReorderTab { tab, new_index }` | `Key`, `usize`     | Pure notification (Reorderable variant — §6.3). Machine does not mutate `tabs`; consumer applies the reorder.                                                                                                                                                                                                                                                                                  |
+| Event                           | Payload           | Description                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SelectTab(Key)`                | tab key           | Activate a tab and show its panel.                                                                                                                                                                                                                                                                                                                                                   |
+| `Focus(Key)`                    | `Key`             | A tab received DOM focus from outside the keyboard navigation flow (pointer, programmatic, screen-reader virtual cursor). Idempotent — re-firing for an already-focused tab is a no-op.                                                                                                                                                                                              |
+| `Blur`                          | —                 | Focus left the tab list.                                                                                                                                                                                                                                                                                                                                                             |
+| `FocusNext`                     | —                 | Move focus to the next non-disabled tab.                                                                                                                                                                                                                                                                                                                                             |
+| `FocusPrev`                     | —                 | Move focus to the previous non-disabled tab.                                                                                                                                                                                                                                                                                                                                         |
+| `FocusFirst`                    | —                 | Move focus to the first non-disabled tab.                                                                                                                                                                                                                                                                                                                                            |
+| `FocusLast`                     | —                 | Move focus to the last non-disabled tab.                                                                                                                                                                                                                                                                                                                                             |
+| `SetDirection(Direction)`       | direction         | Replace `ctx.dir`. Idempotent. Adapter dispatches once after mount when `Props::dir == Auto`; `Machine::on_props_changed` also dispatches it whenever `Props::dir` changes between renders (including `Concrete → Auto`, signalling "please re-resolve").                                                                                                                            |
+| `SetTabs(Vec<TabRegistration>)` | tab registrations | Bulk-replace the registered tab list. Adapter dispatches whenever its rendered tab triggers change. Duplicate keys deduped (first occurrence wins). Re-establishes selection invariant — see §1.5 `snap_value_to_valid_key`.                                                                                                                                                         |
+| `SyncProps`                     | —                 | Re-apply context-backed non-`dir` prop fields (`orientation`, `activation_mode`, `loop_focus`, `disabled_keys`) after a runtime prop change. Emitted by `Machine::on_props_changed` when those fields differ. `dir` changes are emitted as a separate `Event::SetDirection` so an unrelated prop delta cannot clobber a runtime-resolved direction. Re-runs the selection invariant. |
+| `CloseTab(Key)`                 | tab key           | Pure notification (Closable variant — §5.3). Machine does not mutate `tabs` / `value`. Consumer applies the close via `SetTabs` / `SelectTab` after consulting `Api::can_close_tab` and `Api::successor_for_close`.                                                                                                                                                                  |
+| `ReorderTab { tab, new_index }` | `Key`, `usize`    | Pure notification (Reorderable variant — §6.3). Machine does not mutate `tabs`; consumer applies the reorder.                                                                                                                                                                                                                                                                        |
 
 `Focus(Key)` deliberately does NOT carry an `is_keyboard` bit: the
 `data-ars-focus-visible` attribute is a per-render concern derived from
@@ -254,10 +254,17 @@ pub enum Event {
     FocusFirst,
     /// Move focus to the last non-disabled tab.
     FocusLast,
-    /// Adapter sends this after mount to resolve `Direction::Auto` to a concrete
-    /// direction by querying the computed `direction` CSS property on the tablist
-    /// element via `platform.resolved_direction(&ids.part("tablist"))`. Idempotent —
-    /// sending the same direction twice produces no transition.
+    /// Replace `Context::dir` with the supplied `Direction`. Sources:
+    ///
+    /// - The adapter dispatches this after mount to resolve
+    ///   `Direction::Auto` to a concrete direction by querying the
+    ///   computed `direction` CSS property on the tablist element via
+    ///   `platform.resolved_direction(&ids.part("tablist"))`.
+    /// - `Machine::on_props_changed` dispatches this when `Props::dir`
+    ///   changes between renders (including `Concrete → Auto`, which the
+    ///   consumer uses to ask the adapter to re-resolve from the platform).
+    ///
+    /// Idempotent — sending the same direction twice produces no transition.
     SetDirection(Direction),
     /// Replace the registered tab list. Adapters dispatch whenever
     /// their rendered tab triggers change. Re-establishes the
@@ -452,21 +459,17 @@ impl ars_core::Machine for Machine {
             (_, Event::SyncProps) => {
                 let orientation = props.orientation;
                 let activation_mode = props.activation_mode;
-                let dir = props.dir;
                 let loop_focus = props.loop_focus;
                 let disabled_keys = props.disabled_keys.clone();
+                // `dir` is intentionally absent: prop-driven direction
+                // changes are routed through a separate `SetDirection`
+                // event so an unrelated prop delta cannot clobber a
+                // runtime-resolved direction, while explicit consumer
+                // changes (including `Concrete → Auto`) still propagate
+                // exactly once. See `Machine::on_props_changed` below.
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.orientation = orientation;
                     ctx.activation_mode = activation_mode;
-                    // Preserve any runtime-resolved direction the adapter
-                    // installed via `Event::SetDirection`. Only propagate
-                    // `props.dir` when the consumer expresses an explicit
-                    // concrete intent — `Direction::Auto` would otherwise
-                    // clobber the resolved value on every unrelated prop
-                    // change and break RTL keyboard handling.
-                    if dir != Direction::Auto {
-                        ctx.dir = dir;
-                    }
                     ctx.loop_focus = loop_focus;
                     ctx.disabled_tabs = disabled_keys;
                     snap_value_to_valid_key(ctx);
@@ -492,22 +495,38 @@ impl ars_core::Machine for Machine {
     }
 
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
-        if context_relevant_props_changed(old, new) {
-            vec![Event::SyncProps]
-        } else {
-            Vec::new()
+        let mut events = Vec::new();
+
+        // `dir` is handled by `SetDirection`, not `SyncProps`. This split
+        // lets the adapter resolve `Direction::Auto` once at mount via
+        // `SetDirection(Rtl|Ltr)` and have that resolution survive
+        // unrelated prop updates (e.g. `disabled_keys` deltas) — `SyncProps`
+        // no longer rewrites `ctx.dir`. Conversely, an explicit
+        // consumer-driven prop change to `dir` (including `Concrete → Auto`,
+        // which signals "please re-resolve") propagates exactly once
+        // through `SetDirection`. `SetDirection` itself is idempotent
+        // when the new value already matches `ctx.dir`, so emitting on
+        // every prop delta is safe.
+        if old.dir != new.dir {
+            events.push(Event::SetDirection(new.dir));
         }
+
+        if non_dir_context_props_changed(old, new) {
+            events.push(Event::SyncProps);
+        }
+
+        events
     }
 }
 
-/// Returns `true` when any context-backed non-`value` prop differs
-/// between `old` and `new`. The controlled-`value` path goes through
-/// `Bindable::sync_controlled` (the adapter's responsibility), not this
-/// trigger.
-fn context_relevant_props_changed(old: &Props, new: &Props) -> bool {
+/// Returns `true` when any context-backed non-`value`, non-`dir` prop
+/// differs between `old` and `new`. Used by `Machine::on_props_changed`
+/// to decide whether to emit `Event::SyncProps`. The controlled-`value`
+/// path goes through `Bindable::sync_controlled` (the adapter's
+/// responsibility); `dir` changes flow through `Event::SetDirection`.
+fn non_dir_context_props_changed(old: &Props, new: &Props) -> bool {
     old.orientation != new.orientation
         || old.activation_mode != new.activation_mode
-        || old.dir != new.dir
         || old.loop_focus != new.loop_focus
         || old.disabled_keys != new.disabled_keys
 }

@@ -2788,8 +2788,64 @@ fn on_props_changed_emits_sync_props_when_activation_mode_differs() {
 }
 
 #[test]
-fn on_props_changed_emits_sync_props_when_dir_differs() {
-    assert_sync_props_emitted_when(|p| p.dir = Direction::Rtl);
+fn on_props_changed_emits_set_direction_only_when_only_dir_differs() {
+    // Direction changes are routed through `Event::SetDirection` so a
+    // runtime-resolved direction can survive unrelated prop deltas while
+    // explicit consumer changes still propagate. A dir-only delta must
+    // emit exactly `[SetDirection(new.dir)]` — no `SyncProps`.
+    let old = test_props();
+    let new = Props {
+        dir: Direction::Rtl,
+        ..test_props()
+    };
+
+    let events = <Machine as MachineTrait>::on_props_changed(&old, &new);
+
+    assert_eq!(events.as_slice(), &[Event::SetDirection(Direction::Rtl)]);
+}
+
+#[test]
+fn on_props_changed_emits_set_direction_for_concrete_to_auto_transition() {
+    // `Concrete → Auto` is the consumer asking the adapter to re-resolve
+    // from the platform. The machine must propagate `Auto` so the
+    // adapter (which observes `ctx.dir == Auto`) knows to re-dispatch
+    // `SetDirection` with a freshly-queried concrete value.
+    let old = Props {
+        dir: Direction::Ltr,
+        ..test_props()
+    };
+    let new = Props {
+        dir: Direction::Auto,
+        ..test_props()
+    };
+
+    let events = <Machine as MachineTrait>::on_props_changed(&old, &new);
+
+    assert_eq!(events.as_slice(), &[Event::SetDirection(Direction::Auto)]);
+}
+
+#[test]
+fn on_props_changed_emits_set_direction_then_sync_props_when_dir_and_other_differ() {
+    // When both `dir` and a non-`dir` context prop change, both events
+    // fire in `[SetDirection, SyncProps]` order so the dir update lands
+    // before any state-flipping side effects in the SyncProps apply.
+    let old = test_props();
+    let mut newly_disabled = BTreeSet::new();
+
+    newly_disabled.insert(key("a"));
+
+    let new = Props {
+        dir: Direction::Rtl,
+        disabled_keys: newly_disabled,
+        ..test_props()
+    };
+
+    let events = <Machine as MachineTrait>::on_props_changed(&old, &new);
+
+    assert_eq!(
+        events.as_slice(),
+        &[Event::SetDirection(Direction::Rtl), Event::SyncProps]
+    );
 }
 
 #[test]
@@ -2915,6 +2971,70 @@ fn sync_props_propagates_concrete_dir_change_over_resolved_value() {
          SyncProps even when a prior SetDirection had resolved to a \
          different value"
     );
+}
+
+#[test]
+fn set_props_concrete_to_auto_propagates_through_to_context() {
+    // Codex P2 follow-up: if a consumer flips `Props::dir` from a
+    // concrete direction back to `Auto`, that signals "please re-resolve
+    // from the platform". Without routing through `SetDirection`, the
+    // old `if dir != Auto { ctx.dir = dir }` guard would have left
+    // `ctx.dir` pinned to the previous concrete value — RTL users would
+    // then see the wrong direction on locale/layout flips.
+    let initial = Props {
+        dir: Direction::Ltr,
+        ..test_props()
+    };
+
+    let mut service = service_with_tabs(initial, &[key("a"), key("b")]);
+
+    assert_eq!(service.context().dir, Direction::Ltr);
+
+    service.set_props(Props {
+        dir: Direction::Auto,
+        ..test_props()
+    });
+
+    assert_eq!(
+        service.context().dir,
+        Direction::Auto,
+        "`Concrete → Auto` must reach `ctx.dir` so the adapter can \
+         observe the request and re-dispatch `SetDirection` with a \
+         freshly-resolved concrete value"
+    );
+}
+
+#[test]
+fn set_props_dir_only_change_does_not_emit_sync_props_or_snap_value() {
+    // Direction-only changes route through `SetDirection`, not
+    // `SyncProps`. Selection invariants must therefore NOT re-run on a
+    // dir-only delta — `value` stays put, `tabs`/`disabled_tabs` stay
+    // put. (`SetDirection` is a pure context-only `dir` write.)
+    let mut disabled = BTreeSet::new();
+
+    disabled.insert(key("a"));
+
+    let initial = Props {
+        dir: Direction::Ltr,
+        disabled_keys: disabled,
+        ..test_props()
+    };
+
+    let mut service = service_with_tabs(initial.clone(), &[key("a"), key("b"), key("c")]);
+
+    let value_before = service.context().value.get().clone();
+    let tabs_before = service.context().tabs.clone();
+    let disabled_before = service.context().disabled_tabs.clone();
+
+    service.set_props(Props {
+        dir: Direction::Rtl,
+        ..initial
+    });
+
+    assert_eq!(service.context().dir, Direction::Rtl);
+    assert_eq!(service.context().value.get(), &value_before);
+    assert_eq!(service.context().tabs, tabs_before);
+    assert_eq!(service.context().disabled_tabs, disabled_before);
 }
 
 #[test]

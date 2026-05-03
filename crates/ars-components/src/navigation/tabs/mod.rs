@@ -110,11 +110,16 @@ pub enum Event {
     /// Move focus to the last non-disabled tab.
     FocusLast,
 
-    /// Adapter notification that the live `direction` CSS property has been
-    /// resolved on the tab list element. Replaces [`Context::dir`] with the
-    /// concrete value and is normally emitted once on mount when
-    /// [`Props::dir`] was [`Direction::Auto`]. Idempotent — sending the
-    /// same direction twice produces no transition.
+    /// Replace [`Context::dir`] with the supplied [`Direction`]. Sources:
+    ///
+    /// - The adapter dispatches this once on mount with the resolved
+    ///   concrete value when [`Props::dir`] was [`Direction::Auto`].
+    /// - [`Machine::on_props_changed`] dispatches this when [`Props::dir`]
+    ///   changes between renders (including `Concrete → Auto`, which the
+    ///   consumer uses to ask the adapter to re-resolve from the platform).
+    ///
+    /// Idempotent — sending the same direction twice produces no
+    /// transition.
     SetDirection(Direction),
 
     /// Replace the registered tab list. Adapters call this whenever their
@@ -127,14 +132,18 @@ pub enum Event {
 
     /// Re-apply context-backed [`Props`] fields after a prop change.
     /// Adapters dispatch this from [`Machine::on_props_changed`] when
-    /// any of `orientation`, `activation_mode`, `dir`, `loop_focus`, or
-    /// `disabled_keys` differs between old and new props. The transition
-    /// is context-only (no state change, no effects); subsequent
-    /// state-flipping transitions emit effects against the freshly-synced
-    /// context. After a `disabled_keys` change the transition also
-    /// re-runs the selection invariant — `value` / `focused_tab` snap
-    /// to the first non-disabled key when they now point at a disabled
-    /// tab.
+    /// any of `orientation`, `activation_mode`, `loop_focus`, or
+    /// `disabled_keys` differs between old and new props. After a
+    /// `disabled_keys` change the transition also re-runs the selection
+    /// invariant — `value` / `focused_tab` snap to the first non-disabled
+    /// key when they now point at a disabled tab. State downgrades from
+    /// [`State::Focused`] to [`State::Idle`] when the focused tab is no
+    /// longer registered or has just been disabled.
+    ///
+    /// `dir` is intentionally excluded — direction changes are dispatched
+    /// as [`Event::SetDirection`] by [`Machine::on_props_changed`] so
+    /// that an unrelated prop delta cannot clobber a runtime-resolved
+    /// direction installed via [`Event::SetDirection`].
     SyncProps,
 
     /// User asked to close the given tab. Closable variant (spec §5).
@@ -831,23 +840,38 @@ impl ars_core::Machine for Machine {
     }
 
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
-        if context_relevant_props_changed(old, new) {
-            alloc::vec![Event::SyncProps]
-        } else {
-            Vec::new()
+        let mut events = Vec::new();
+
+        // `dir` is handled by `SetDirection`, not `SyncProps`. This split
+        // lets the adapter resolve `Direction::Auto` once at mount via
+        // `SetDirection(Rtl|Ltr)` and have that resolution survive
+        // unrelated prop updates (e.g. `disabled_keys` deltas) — `SyncProps`
+        // no longer rewrites `ctx.dir`. Conversely, an explicit
+        // consumer-driven prop change to `dir` (including `Concrete →
+        // Auto`, which signals "please re-resolve") propagates exactly
+        // once through `SetDirection`. `SetDirection` itself is idempotent
+        // when the new value already matches `ctx.dir`, so we can emit
+        // unconditionally on prop deltas without thrashing.
+        if old.dir != new.dir {
+            events.push(Event::SetDirection(new.dir));
         }
+
+        if non_dir_context_props_changed(old, new) {
+            events.push(Event::SyncProps);
+        }
+
+        events
     }
 }
 
-/// Returns `true` when any context-backed non-`value` prop differs
-/// between `old` and `new`. Used by [`Machine::on_props_changed`] to
-/// decide whether to emit [`Event::SyncProps`]. The controlled-`value`
+/// Returns `true` when any context-backed non-`value`, non-`dir` prop
+/// differs between `old` and `new`. Used by [`Machine::on_props_changed`]
+/// to decide whether to emit [`Event::SyncProps`]. The controlled-`value`
 /// path goes through [`Bindable::sync_controlled`] (the adapter's
-/// responsibility), not this trigger.
-fn context_relevant_props_changed(old: &Props, new: &Props) -> bool {
+/// responsibility); `dir` changes flow through [`Event::SetDirection`].
+fn non_dir_context_props_changed(old: &Props, new: &Props) -> bool {
     old.orientation != new.orientation
         || old.activation_mode != new.activation_mode
-        || old.dir != new.dir
         || old.loop_focus != new.loop_focus
         || old.disabled_keys != new.disabled_keys
 }
@@ -1003,10 +1027,15 @@ fn set_tabs_plan(
 /// Builds the [`Event::SyncProps`] transition plan. Same `Focused →
 /// Idle` downgrade as [`set_tabs_plan`] when the new `disabled_keys`
 /// would render the focused tab disabled.
+///
+/// `dir` is intentionally absent: prop-driven direction changes are
+/// emitted as [`Event::SetDirection`] by [`Machine::on_props_changed`]
+/// so an unrelated prop delta (e.g. `disabled_keys`) cannot clobber a
+/// runtime-resolved direction, while an explicit `dir` change
+/// (including `Concrete → Auto`) still propagates exactly once.
 fn sync_props_plan(state: &State, ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
     let orientation = props.orientation;
     let activation_mode = props.activation_mode;
-    let dir = props.dir;
     let loop_focus = props.loop_focus;
     let disabled_keys = props.disabled_keys.clone();
 
@@ -1025,15 +1054,6 @@ fn sync_props_plan(state: &State, ctx: &Context, props: &Props) -> TransitionPla
     let apply = move |ctx: &mut Context| {
         ctx.orientation = orientation;
         ctx.activation_mode = activation_mode;
-        // Preserve any runtime-resolved direction. The adapter dispatches
-        // `Event::SetDirection` after mount when `Props::dir == Auto`, and
-        // unrelated prop changes (e.g. `disabled_keys`) must not overwrite
-        // that resolution back to `Auto`. A concrete `props.dir` still wins
-        // because the consumer is expressing an explicit intent.
-        if dir != Direction::Auto {
-            ctx.dir = dir;
-        }
-
         ctx.loop_focus = loop_focus;
         ctx.disabled_tabs = disabled_keys;
 
