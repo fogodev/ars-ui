@@ -1296,11 +1296,30 @@ impl Api<'_> {
     }
 
     /// Returns `true` when `tab_key` should anchor the roving tabindex
-    /// because no tab is currently selected. Used by [`tab_attrs`] to
-    /// keep the tablist reachable via natural `Tab` navigation when
-    /// `value == None`.
+    /// because no registered tab actually matches the current `value`.
+    /// Used by [`tab_attrs`] to keep the tablist reachable via natural
+    /// `Tab` navigation in both of the cases where `is_tab_selected`
+    /// returns `false` for every rendered tab:
+    ///
+    /// 1. `value == None` — uncontrolled or empty-list bootstrapping.
+    /// 2. `value == Some(stale_key)` in controlled mode — the parent
+    ///    component's controlled value points at a key that no longer
+    ///    exists in [`Context::tabs`] (a `SetTabs` removed it before
+    ///    the parent re-synced). [`Bindable::set`] only mutates the
+    ///    internal copy in this state, so the snap-to-first-non-disabled
+    ///    fallback inside `snap_value_to_valid_key` cannot rewrite
+    ///    `value.get()` and the ghost selection persists across
+    ///    renders. Without this fallback the tablist would render with
+    ///    no `tabindex="0"` anchor at all and be skipped by natural
+    ///    `Tab` navigation.
     fn is_tablist_focus_fallback(&self, tab_key: &Key) -> bool {
-        if self.ctx.value.get().is_some() {
+        let any_registered_tab_is_selected = self
+            .ctx
+            .tabs
+            .iter()
+            .any(|key| self.ctx.value.get().as_ref() == Some(key));
+
+        if any_registered_tab_is_selected {
             return false;
         }
 

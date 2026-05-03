@@ -1738,6 +1738,50 @@ fn is_tablist_focus_fallback_anchors_first_non_disabled_tab() {
 }
 
 #[test]
+fn is_tablist_focus_fallback_engages_when_controlled_value_points_at_unregistered_key() {
+    // P1 regression (Codex review on PR #641): when `value` is
+    // controlled to a key that isn't in `tabs` (parent hasn't synced
+    // its controlled state after a `SetTabs` removal), the snap inside
+    // `snap_value_to_valid_key` only mutates the internal copy and
+    // `value.get()` keeps returning the stale key. Previously the
+    // fallback bailed on `value.get().is_some()`, so no tab rendered
+    // with `tabindex="0"` and the tablist was unreachable via natural
+    // `Tab` navigation. Fix: bail only when a *registered* tab matches
+    // the value.
+    let service = service_with_tabs(
+        Props {
+            value: Some(Some(key("ghost"))),
+            ..test_props()
+        },
+        &[key("a"), key("b"), key("c")],
+    );
+
+    let api = service.connect(&|_| {});
+
+    // Sanity: controlled-stale value survives the SetTabs snap.
+    assert_eq!(api.selected_tab(), Some(&key("ghost")));
+
+    // Sanity: no registered tab is currently the selected one.
+    for k in [key("a"), key("b"), key("c")] {
+        assert!(!api.is_tab_selected(&k));
+    }
+
+    // First non-disabled registered tab anchors the roving tabindex.
+    assert_eq!(
+        api.tab_attrs(&key("a"), false).get(&HtmlAttr::TabIndex),
+        Some("0"),
+    );
+    assert_eq!(
+        api.tab_attrs(&key("b"), false).get(&HtmlAttr::TabIndex),
+        Some("-1"),
+    );
+    assert_eq!(
+        api.tab_attrs(&key("c"), false).get(&HtmlAttr::TabIndex),
+        Some("-1"),
+    );
+}
+
+#[test]
 fn is_tablist_focus_fallback_disabled_when_any_tab_is_selected() {
     // The fallback is "value is None" — when something is selected,
     // no tab should claim the fallback role.
