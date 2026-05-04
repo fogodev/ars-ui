@@ -297,4 +297,34 @@ mod tests {
             "unsafe URL scheme: \"javascript:alert(1)\""
         );
     }
+
+    #[test]
+    fn safe_url_accepts_scheme_with_no_trailing_content() {
+        assert!(is_safe_url("http://"));
+        assert!(is_safe_url("https://"));
+        assert!(is_safe_url("mailto:"));
+        assert!(is_safe_url("tel:"));
+        assert!(is_safe_url("./"));
+        assert!(is_safe_url("../"));
+    }
+
+    #[test]
+    fn safe_url_from_static_trims_leading_whitespace_then_validates_scheme() {
+        const SAFE: SafeUrl = SafeUrl::from_static("   tel:+15551234567");
+
+        assert_eq!(SAFE.as_str(), "   tel:+15551234567");
+    }
+
+    #[test]
+    fn safe_url_from_static_accepts_whitespace_only_input() {
+        const SAFE: SafeUrl = SafeUrl::from_static("   ");
+
+        assert_eq!(SAFE.as_str(), "   ");
+    }
+
+    #[test]
+    #[should_panic(expected = "static URL uses an unsafe scheme")]
+    fn safe_url_from_static_panics_when_whitespace_precedes_unsafe_scheme() {
+        drop(SafeUrl::from_static("   javascript:alert(1)"));
+    }
 }

@@ -4333,4 +4333,472 @@ mod tests {
             snapshot_attrs(&region_attrs(&messages, &env.locale, RegionPart::Assertive))
         );
     }
+
+    // ── PauseReasons ───────────────────────────────────────────────
+
+    #[test]
+    fn pause_reasons_any_returns_true_when_only_interaction_set() {
+        let reasons = PauseReasons {
+            interaction: true,
+            visibility: false,
+        };
+
+        assert!(reasons.any());
+    }
+
+    #[test]
+    fn pause_reasons_any_returns_true_when_only_visibility_set() {
+        let reasons = PauseReasons {
+            interaction: false,
+            visibility: true,
+        };
+
+        assert!(reasons.any());
+    }
+
+    // ── context_relevant_props_changed ─────────────────────────────
+
+    #[test]
+    fn context_relevant_props_changed_detects_only_remove_delay() {
+        let old = test_props();
+        let new = Props {
+            remove_delay: old.remove_delay + Duration::from_millis(50),
+            ..test_props()
+        };
+
+        assert!(context_relevant_props_changed(&old, &new));
+    }
+
+    #[test]
+    fn context_relevant_props_changed_detects_only_default_durations() {
+        let old = test_props();
+        let new = Props {
+            default_durations: DefaultDurations {
+                info: Duration::from_millis(123),
+                ..old.default_durations
+            },
+            ..test_props()
+        };
+
+        assert!(context_relevant_props_changed(&old, &new));
+    }
+
+    #[test]
+    fn context_relevant_props_changed_detects_only_deduplicate_all() {
+        let old = test_props();
+        let new = Props {
+            deduplicate_all: !old.deduplicate_all,
+            ..test_props()
+        };
+
+        assert!(context_relevant_props_changed(&old, &new));
+    }
+
+    #[test]
+    fn context_relevant_props_changed_detects_only_offsets() {
+        let old = test_props();
+        let new = Props {
+            offsets: EdgeOffsets {
+                top: old.offsets.top + 10.0,
+                ..old.offsets
+            },
+            ..test_props()
+        };
+
+        assert!(context_relevant_props_changed(&old, &new));
+    }
+
+    #[test]
+    fn context_relevant_props_changed_detects_only_overlap() {
+        let old = test_props();
+        let new = Props {
+            overlap: !old.overlap,
+            ..test_props()
+        };
+
+        assert!(context_relevant_props_changed(&old, &new));
+    }
+
+    // ── plan_add capacity boundary ─────────────────────────────────
+
+    #[test]
+    fn plan_add_caps_queue_at_max_visible_times_thirty_two() {
+        // queue_cap = max_visible.saturating_mul(32). With max_visible=1
+        // the cap is 32; the 34th queued config should be evicted at the
+        // front so the queue stays bounded at 32 entries.
+        let mut service = fresh_service(Props {
+            max_visible: 1,
+            ..test_props()
+        });
+
+        // First Add admits as visible.
+        drop(service.send(Event::Add(add_config(Kind::Info, "live"))));
+
+        // Push 32 queued entries to fill the cap exactly.
+        for i in 0..32 {
+            drop(service.send(Event::Add(add_config(
+                Kind::Info,
+                Box::leak(format!("queued-{i}").into_boxed_str()),
+            ))));
+        }
+
+        assert_eq!(service.context().queued.len(), 32);
+
+        // Pushing one more triggers the `len > queue_cap` branch and
+        // evicts the front entry.
+        drop(service.send(Event::Add(add_config(Kind::Info, "overflow"))));
+
+        assert_eq!(service.context().queued.len(), 32);
+        assert_ne!(
+            service.context().queued.front().unwrap().title.as_deref(),
+            Some("queued-0"),
+            "front entry must be evicted when the cap overflows"
+        );
+        assert_eq!(
+            service.context().queued.back().unwrap().title.as_deref(),
+            Some("overflow")
+        );
+    }
+
+    // ── plan_replace_queued ────────────────────────────────────────
+
+    #[test]
+    fn plan_replace_queued_overwrites_slot_with_new_duration() {
+        // A queued entry with an explicit duration is replaced by an
+        // Add with the same dedup keys but a different duration. The
+        // queued slot's duration must reflect the replacement value
+        // — empty `TransitionPlan::new()` would leave the slot intact.
+        let mut service = fresh_service(Props {
+            max_visible: 1,
+            deduplicate_all: true,
+            ..test_props()
+        });
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "live"))));
+
+        let mut queued = add_config(Kind::Info, "queued");
+
+        queued.duration = Some(Duration::from_secs(99));
+
+        drop(service.send(Event::Add(queued)));
+
+        assert_eq!(
+            service.context().queued[0].duration,
+            Some(Duration::from_secs(99))
+        );
+
+        // Replacement: same kind + title + description; default
+        // duration filled inside the closure to Info's default (5s).
+        drop(service.send(Event::Add(add_config(Kind::Info, "queued"))));
+
+        assert_eq!(service.context().queued.len(), 1);
+        assert_eq!(
+            service.context().queued[0].duration,
+            Some(Duration::from_secs(5)),
+            "the replacement Config's filled duration must overwrite the slot"
+        );
+    }
+
+    // ── plan_hide_queue_advance — outer filter / comparison ────────
+
+    #[test]
+    fn hide_queue_advance_promotes_queued_when_target_was_visible() {
+        // max_visible=1, target is Visible (HideQueueAdvance fired
+        // without a preceding Remove). The outer filter must exclude
+        // the target id so visible_after_remove == 0 < max_visible == 1
+        // and promote_kind is Some, scheduling an announcement.
+        let mut service = fresh_service(Props {
+            max_visible: 1,
+            ..test_props()
+        });
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "live"))));
+
+        let id_a = service.context().toasts[0].id.clone();
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "queued"))));
+
+        // Drain pending announcement so the schedule effect on the
+        // promotion path fires deterministically.
+        drop(service.send(Event::DrainAnnouncement { now_ms: 1_000 }));
+
+        assert!(service.context().announcement_queue.is_empty());
+
+        let result = service.send(Event::HideQueueAdvance(id_a));
+
+        assert_eq!(service.context().queued.len(), 0);
+        assert!(
+            effect_names(&result).contains(&Effect::ScheduleAnnouncement),
+            "promotion must schedule an announcement; got {:?}",
+            effect_names(&result),
+        );
+    }
+
+    #[test]
+    fn hide_queue_advance_unknown_id_with_queued_does_not_promote() {
+        // max_visible=1, 1 visible, 1 queued, HideQueueAdvance fired
+        // for an id that doesn't exist. visible_after_remove == 1 ==
+        // max_visible (the visible toast is counted because its id
+        // doesn't equal the unknown target). promote_kind must stay
+        // None — the boundary check is `<`, not `<=` or `==`.
+        let mut service = fresh_service(Props {
+            max_visible: 1,
+            ..test_props()
+        });
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "live"))));
+        drop(service.send(Event::Add(add_config(Kind::Info, "queued"))));
+
+        drop(service.send(Event::DrainAnnouncement { now_ms: 1_000 }));
+
+        assert!(service.context().announcement_queue.is_empty());
+
+        let result = service.send(Event::HideQueueAdvance("unknown".to_string()));
+
+        assert_eq!(service.context().queued.len(), 1);
+        assert!(
+            !effect_names(&result).contains(&Effect::ScheduleAnnouncement),
+            "no promotion must not schedule an announcement; got {:?}",
+            effect_names(&result),
+        );
+    }
+
+    // ── plan_hide_queue_advance — inner filter / comparison ────────
+
+    #[test]
+    fn hide_queue_advance_holds_queue_when_inner_visible_count_equals_capacity() {
+        // After the apply closure removes the dismissing target, the
+        // INNER filter counts Visible entries (not Dismissing) and
+        // compares against max_visible with a strict `<`. With two
+        // Visible toasts remaining at max_visible=2, the queued entry
+        // must NOT be promoted.
+        let mut service = fresh_service(Props {
+            max_visible: 2,
+            ..test_props()
+        });
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "a"))));
+        drop(service.send(Event::Add(add_config(Kind::Info, "b"))));
+
+        let id_a = service.context().toasts[0].id.clone();
+
+        // Mark `a` Dismissing — but admission cap allows another live
+        // toast because visible_count is now 1.
+        drop(service.send(Event::Remove(id_a.clone())));
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "c"))));
+        drop(service.send(Event::Add(add_config(Kind::Info, "d"))));
+
+        assert_eq!(service.context().queued.len(), 1);
+
+        // After HideQueueAdvance(a): retain drops `a`. ctx.toasts then
+        // has [b Visible, c Visible]. Inner filter Visible-count = 2,
+        // max_visible = 2, 2 < 2 is false → no promotion.
+        drop(service.send(Event::HideQueueAdvance(id_a)));
+
+        assert_eq!(
+            service.context().queued.len(),
+            1,
+            "queued entry must stay queued when visible_count equals max_visible"
+        );
+    }
+
+    // ── plan_drain_announcement length boundary ────────────────────
+
+    #[test]
+    fn drain_announcement_with_two_pending_reschedules_for_next_drain() {
+        // len > 1 at outer scope must reschedule the heartbeat so the
+        // remaining entries drain in subsequent ticks. Mutating the
+        // `>` to `<` would cause the second entry to never announce.
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "a"))));
+        drop(service.send(Event::Add(add_config(Kind::Info, "b"))));
+
+        assert_eq!(service.context().announcement_queue.len(), 2);
+
+        let result = service.send(Event::DrainAnnouncement { now_ms: 0 });
+
+        assert!(
+            effect_names(&result).contains(&Effect::ScheduleAnnouncement),
+            "two pending announcements must reschedule the heartbeat; got {:?}",
+            effect_names(&result),
+        );
+    }
+
+    #[test]
+    fn drain_announcement_with_one_pending_does_not_reschedule() {
+        // len == 1 at outer scope must NOT reschedule — the single
+        // pending announcement is consumed by this drain. Mutating
+        // `>` to `==` or `>=` would emit a stray reschedule effect.
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "only"))));
+
+        assert_eq!(service.context().announcement_queue.len(), 1);
+
+        let result = service.send(Event::DrainAnnouncement { now_ms: 0 });
+
+        assert!(
+            !effect_names(&result).contains(&Effect::ScheduleAnnouncement),
+            "single pending announcement must not reschedule; got {:?}",
+            effect_names(&result),
+        );
+        assert!(service.context().announcement_queue.is_empty());
+    }
+
+    // ── find_visible_dedup_match — all three fields ────────────────
+
+    #[test]
+    fn find_visible_dedup_match_requires_all_three_fields_to_match() {
+        // dedup_all on, one visible toast (Info, "first", "body").
+        // A new Add with a DIFFERENT kind+title but the SAME
+        // description must NOT dedup-match the visible entry — the
+        // `&&` chain joining kind/title/description must remain `&&`,
+        // not `||`. Original admits a second toast; mutant treats it
+        // as an update of the first.
+        let mut service = fresh_service(Props {
+            deduplicate_all: true,
+            ..test_props()
+        });
+
+        // First entry has the default "body" description from add_config.
+        drop(service.send(Event::Add(add_config(Kind::Info, "first"))));
+
+        // New config: different kind AND title, same description.
+        drop(service.send(Event::Add(add_config(Kind::Error, "different-title"))));
+
+        assert_eq!(
+            service.context().toasts.len(),
+            2,
+            "different kind+title must NOT dedup-match on description alone"
+        );
+    }
+
+    // ── find_queued_dedup_match_index — kind + title ───────────────
+
+    #[test]
+    fn find_queued_dedup_match_index_requires_kind_match() {
+        // Queue holds one entry (Info, "X", "body"). New Add with the
+        // same title and description but a different kind must NOT
+        // dedup-match in the queue — the `&&` between `kind` and
+        // `title` must remain `&&`, not `||`.
+        let mut service = fresh_service(Props {
+            max_visible: 1,
+            deduplicate_all: true,
+            ..test_props()
+        });
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "live"))));
+        drop(service.send(Event::Add(add_config(Kind::Info, "X"))));
+
+        assert_eq!(service.context().queued.len(), 1);
+
+        // Different kind, same title + description.
+        drop(service.send(Event::Add(add_config(Kind::Error, "X"))));
+
+        assert_eq!(
+            service.context().queued.len(),
+            2,
+            "different kind must NOT dedup-match on title+description alone"
+        );
+    }
+
+    #[test]
+    fn find_queued_dedup_match_index_requires_title_match() {
+        // Queue holds one entry (Info, "X", "body"). New Add with the
+        // same kind and description but a different title must NOT
+        // dedup-match — the `&&` between `title` and `description`
+        // must remain `&&`, not `||`.
+        let mut service = fresh_service(Props {
+            max_visible: 1,
+            deduplicate_all: true,
+            ..test_props()
+        });
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "live"))));
+        drop(service.send(Event::Add(add_config(Kind::Info, "X"))));
+
+        assert_eq!(service.context().queued.len(), 1);
+
+        // Same kind + description, different title.
+        drop(service.send(Event::Add(add_config(Kind::Info, "Y"))));
+
+        assert_eq!(
+            service.context().queued.len(),
+            2,
+            "different title must NOT dedup-match on kind+description alone"
+        );
+    }
+
+    // ── Api accessors — positive content assertions ────────────────
+
+    #[test]
+    fn api_visible_ids_returns_inserted_ids_in_order() {
+        let mut service = fresh_service(test_props());
+
+        let mut a = add_config(Kind::Info, "a");
+
+        a.id = Some("alpha".to_string());
+
+        drop(service.send(Event::Add(a)));
+
+        let mut b = add_config(Kind::Info, "b");
+
+        b.id = Some("beta".to_string());
+
+        drop(service.send(Event::Add(b)));
+
+        let api = service.connect(&|_| {});
+        let ids = api.visible_ids();
+
+        assert_eq!(ids, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn api_queued_len_returns_actual_queue_length() {
+        let mut service = fresh_service(Props {
+            max_visible: 1,
+            ..test_props()
+        });
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "live"))));
+        drop(service.send(Event::Add(add_config(Kind::Info, "q1"))));
+        drop(service.send(Event::Add(add_config(Kind::Info, "q2"))));
+        drop(service.send(Event::Add(add_config(Kind::Info, "q3"))));
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.queued_len(), 3);
+    }
+
+    #[test]
+    fn api_announcement_backlog_returns_actual_queue_length() {
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::Add(add_config(Kind::Info, "a"))));
+        drop(service.send(Event::Add(add_config(Kind::Info, "b"))));
+        drop(service.send(Event::Add(add_config(Kind::Info, "c"))));
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.announcement_backlog(), 3);
+    }
+
+    #[test]
+    fn api_part_attrs_root_matches_root_attrs() {
+        // ConnectApi::part_attrs(Part::Root) must return the same map
+        // as Api::root_attrs() — substituting Default::default() (an
+        // empty map) would drop scope, part, placement, and paused
+        // attributes that adapters depend on.
+        let service = fresh_service(test_props());
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.part_attrs(Part::Root), api.root_attrs());
+        assert!(
+            api.part_attrs(Part::Root).iter().count() > 0,
+            "Root attrs map must not be empty"
+        );
+    }
 }
