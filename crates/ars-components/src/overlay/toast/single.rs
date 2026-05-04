@@ -1468,6 +1468,56 @@ mod tests {
     }
 
     #[test]
+    fn set_props_with_only_description_change_updates_context() {
+        let mut service = fresh_service(Props {
+            description: Some("first".to_string()),
+            ..test_props()
+        });
+
+        drop(service.take_initial_effects());
+
+        drop(service.set_props(Props {
+            description: Some("second".to_string()),
+            ..test_props()
+        }));
+
+        assert_eq!(service.context().description.as_deref(), Some("second"));
+    }
+
+    #[test]
+    fn set_props_unchanged_duration_in_visible_does_not_cancel_timer() {
+        let mut service = fresh_service(Props {
+            duration: None,
+            kind: Kind::Loading,
+            title: Some("first".to_string()),
+            ..test_props()
+        });
+
+        drop(service.take_initial_effects());
+
+        let result = service.set_props(Props {
+            duration: None,
+            kind: Kind::Loading,
+            title: Some("second".to_string()),
+            ..test_props()
+        });
+
+        assert_eq!(service.context().title.as_deref(), Some("second"));
+        assert!(
+            !result.cancel_effects.contains(&Effect::DurationTimer),
+            "no duration change must not cancel the timer; got {:?}",
+            result.cancel_effects
+        );
+
+        let names: Vec<_> = result.pending_effects.iter().map(|e| e.name).collect();
+
+        assert!(
+            !names.contains(&Effect::DurationTimer),
+            "no duration change must not arm a timer; got {names:?}"
+        );
+    }
+
+    #[test]
     fn dismissing_via_set_props_does_not_arm_timer() {
         // SyncProps in Dismissing state must never arm a timer — the
         // toast is animating out and a new timer would extend its
@@ -1476,6 +1526,7 @@ mod tests {
 
         drop(service.take_initial_effects());
         drop(service.send(Event::Dismiss));
+
         assert_eq!(service.state(), &State::Dismissing);
 
         let result = service.set_props(Props {
@@ -1485,6 +1536,7 @@ mod tests {
         });
 
         let names: Vec<_> = result.pending_effects.iter().map(|e| e.name).collect();
+
         assert!(!names.contains(&Effect::DurationTimer));
     }
 
@@ -1595,6 +1647,7 @@ mod tests {
         drop(service.take_initial_effects());
 
         let before_ctx = service.context().clone();
+
         let result = service.set_props(test_props());
 
         assert!(!result.context_changed);
@@ -1611,6 +1664,7 @@ mod tests {
     #[should_panic(expected = "Toast id cannot change after initialization")]
     fn set_props_panics_when_id_changes() {
         let mut service = fresh_service(test_props());
+
         drop(service.take_initial_effects());
 
         drop(service.set_props(Props {
@@ -1858,6 +1912,39 @@ mod tests {
         assert!(!result.state_changed);
     }
 
+    #[test]
+    fn swipe_end_at_velocity_boundary_does_not_dismiss() {
+        let mut service = fresh_service(test_props());
+
+        drop(service.take_initial_effects());
+        drop(service.send(Event::SwipeStart(0.0)));
+
+        let result = service.send(Event::SwipeEnd {
+            velocity: 0.5,
+            offset: 0.0,
+        });
+
+        assert_eq!(service.state(), &State::Visible);
+        assert!(result.pending_effects.is_empty());
+    }
+
+    #[test]
+    fn swipe_end_at_offset_boundary_does_not_dismiss() {
+        let mut service = fresh_service(test_props());
+
+        drop(service.take_initial_effects());
+        drop(service.send(Event::SwipeStart(0.0)));
+        drop(service.send(Event::SwipeMove(DEFAULT_SWIPE_THRESHOLD)));
+
+        let result = service.send(Event::SwipeEnd {
+            velocity: 0.0,
+            offset: DEFAULT_SWIPE_THRESHOLD,
+        });
+
+        assert_eq!(service.state(), &State::Visible);
+        assert!(result.pending_effects.is_empty());
+    }
+
     // ── dismiss_plan context resets (round-6 regression) ────────────
 
     #[test]
@@ -1872,6 +1959,7 @@ mod tests {
         drop(service.send(Event::Pause {
             remaining: Duration::from_millis(1_000),
         }));
+
         assert!(service.context().paused);
 
         drop(service.send(Event::Dismiss));
@@ -1895,6 +1983,7 @@ mod tests {
         drop(service.take_initial_effects());
         drop(service.send(Event::SwipeStart(12.0)));
         drop(service.send(Event::SwipeMove(40.0)));
+
         assert!(service.context().swiping);
         assert_eq!(service.context().swipe_offset, 40.0);
 
@@ -1921,6 +2010,7 @@ mod tests {
         drop(service.take_initial_effects());
         drop(service.send(Event::SwipeStart(0.0)));
         drop(service.send(Event::SwipeMove(15.0)));
+
         assert!(service.context().swiping);
 
         drop(service.send(Event::Dismiss));
@@ -1944,6 +2034,7 @@ mod tests {
         }));
         drop(service.send(Event::SwipeStart(0.0)));
         drop(service.send(Event::SwipeMove(25.0)));
+
         assert!(service.context().paused);
         assert!(service.context().swiping);
 
@@ -1954,6 +2045,7 @@ mod tests {
         assert!(!service.context().swiping);
         assert_eq!(service.context().swipe_offset, 0.0);
         assert!(!service.context().open);
+
         // Same dismiss-effects regardless of source state.
         assert_eq!(
             effect_names(&result),
