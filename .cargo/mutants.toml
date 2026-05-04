@@ -136,9 +136,15 @@ exclude_re = [
   'replace > with >= in type_into_segment',
   # `DateGranularity` currently has one variant, and `force_leading_zeros`
   # changes are already reflected by `refresh_segment_ranges`; neither rebuild
-  # predicate branch changes observable DateField behavior today. Regex is
-  # line-number-agnostic so the skip survives unrelated edits to `mod.rs`.
-  'date_field/mod\.rs:\d+:\d+: replace != with == in sync_props',
+  # predicate branch changes observable DateField behavior today. The
+  # `previous_calendar` (col 42) and `previous_segment_order` (col 35) sibling
+  # predicates on the same `must_rebuild` chain remain real behavior gates and
+  # must NOT be skipped — `column 33` matches only the granularity comparison
+  # and `column 41` matches only the force_leading_zeros comparison, so the
+  # regex stays line-number-agnostic without widening the skip to the entire
+  # `sync_props` body.
+  'date_field/mod\.rs:\d+:33: replace != with == in sync_props',
+  'date_field/mod\.rs:\d+:41: replace != with == in sync_props',
   # Provider z-index release only mutates private lifecycle bookkeeping; future
   # allocation values remain monotonic and no active-count API is exposed.
   'z_index_allocator.rs:48:9: replace Context::release with \(\)',
