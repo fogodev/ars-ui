@@ -1,0 +1,9 @@
+{
+    "enabled": true,
+    "strategy_options": {
+        "summarize": {
+            "enabled": true
+        }
+    },
+    "telemetry": false
+}
