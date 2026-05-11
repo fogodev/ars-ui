@@ -1,0 +1,85 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "0f7c7213c13b",
+  "session_id": "da052e33-5516-4b1c-b667-6e62298a2ad4",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-11T15:47:35.742099Z",
+  "branch": "t3code/f95d2521",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".github/workflows/ci.yml",
+    ".github/workflows/nightly.yml"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "78efad609bb5",
+  "token_usage": {
+    "input_tokens": 2,
+    "cache_creation_tokens": 37615,
+    "cache_read_tokens": 0,
+    "output_tokens": 86,
+    "api_call_count": 1
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "summary": {
+    "intent": "Upgrade the actions/upload-artifact GitHub Actions step from v4 to v7 in both CI and nightly workflow files.",
+    "outcome": "Successfully bumped actions/upload-artifact from v4 to v7 in ci.yml and nightly.yml.",
+    "learnings": {
+      "repo": [
+        "The repo uses actions/upload-artifact in at least two workflow files: .github/workflows/ci.yml (coverage diagnostics) and .github/workflows/nightly.yml (mutation reports)."
+      ],
+      "code": [
+        {
+          "path": ".github/workflows/ci.yml",
+          "line": 272,
+          "end_line": 272,
+          "finding": "upload-artifact step is under the coverage diagnostics job, triggered on failure."
+        },
+        {
+          "path": ".github/workflows/nightly.yml",
+          "line": 206,
+          "end_line": 206,
+          "finding": "upload-artifact step is under the mutation report job, triggered always (if: always())."
+        }
+      ],
+      "workflow": [
+        "GitHub Actions artifact version bumps should be applied consistently across all workflow files in a repo."
+      ]
+    },
+    "friction": [],
+    "open_items": [
+      "Check if actions/upload-artifact@v4 is used in any other workflow files in the repo that were not included in this patch."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-11T15:47:24.644915Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 2,
+    "total_committed": 0,
+    "total_lines_changed": 2,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 2,
+      "user_lines_removed": 2,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".github/workflows/ci.yml": 1,
+        ".github/workflows/nightly.yml": 1
+      },
+      "user_removed_per_file": {
+        ".github/workflows/ci.yml": 1,
+        ".github/workflows/nightly.yml": 1
+      }
+    }
+  ]
+}

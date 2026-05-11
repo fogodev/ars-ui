@@ -1,0 +1,40 @@
+You write concise git commit messages.
+Return a JSON object with keys: subject, body.
+Rules:
+- subject must be imperative, <= 72 chars, and no trailing period
+- body can be empty string or short bullet points
+- capture the primary user-visible or developer-visible change
+
+Branch: t3code/f95d2521
+
+Staged files:
+M	.github/workflows/ci.yml
+M	.github/workflows/nightly.yml
+
+Staged patch:
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 5aa73272..04dad337 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -269,7 +269,7 @@ jobs:
+         run: cargo xtask ci coverage
+       - name: Upload coverage diagnostics
+         if: failure()
+-        uses: actions/upload-artifact@v4
++        uses: actions/upload-artifact@v7
+         with:
+           name: coverage-diagnostics
+           path: |
+diff --git a/.github/workflows/nightly.yml b/.github/workflows/nightly.yml
+index 93618f3c..63b9ae5e 100644
+--- a/.github/workflows/nightly.yml
++++ b/.github/workflows/nightly.yml
+@@ -203,7 +203,7 @@ jobs:
+       # passing run are valuable feedback for follow-up tightening.
+       - name: Upload mutation report
+         if: always()
+-        uses: actions/upload-artifact@v4
++        uses: actions/upload-artifact@v7
+         with:
+           name: mutants-${{ matrix.name }}
+           path: mutants.out/mutants.out/
