@@ -65,31 +65,61 @@ use crate::{
 /// The adapter uses this label for accessible close-button names and
 /// reorder announcements. The default trigger rendering also uses this
 /// label unless [`Tab::trigger`] supplies richer visual content.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TabLabel {
-    text: String,
+#[derive(Clone)]
+pub enum TabLabel {
+    /// A fixed semantic label.
+    Static(String),
+
+    /// A provider-backed label resolved during render.
+    Translated(Arc<dyn Fn() -> String>),
 }
 
 impl TabLabel {
     /// Builds a static label.
     #[must_use]
     pub fn static_text(text: impl Into<String>) -> Self {
-        Self { text: text.into() }
+        Self::Static(text.into())
     }
 
     /// Builds a provider-backed translated label for the current render.
     #[must_use]
-    pub fn translated<T: Translate + 'static>(message: T) -> Self {
-        Self {
-            text: crate::provider::t(message),
-        }
+    pub fn translated<T: Clone + Translate + 'static>(message: T) -> Self {
+        Self::Translated(Arc::new(move || crate::provider::t(message.clone())))
     }
 
     /// Resolves the label text for this render.
     #[must_use]
-    pub fn resolve(&self) -> &str {
-        &self.text
+    pub fn resolve(&self) -> String {
+        match self {
+            Self::Static(text) => text.clone(),
+            Self::Translated(resolve) => resolve(),
+        }
     }
+}
+
+impl Debug for TabLabel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("TabLabel").field(&self.resolve()).finish()
+    }
+}
+
+impl PartialEq for TabLabel {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Static(left), Self::Static(right)) => left == right,
+            (Self::Translated(left), Self::Translated(right)) => Arc::ptr_eq(left, right),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for TabLabel {}
+
+#[component]
+fn TabLabelText(label_text: TabLabel) -> Element {
+    let text = label_text.resolve();
+
+    rsx! { "{text}" }
 }
 
 /// Per-tab render data consumed by the [`Tabs`] component.
@@ -136,11 +166,12 @@ impl<K: TabKey> Tab<K> {
     #[must_use]
     pub fn new_static(key: K, label_text: impl Into<String>, panel: Element) -> Self {
         let label_text = TabLabel::static_text(label_text);
-        let resolved_label = label_text.resolve().to_owned();
 
         Self {
             key,
-            label: rsx! { "{resolved_label}" },
+            label: rsx! {
+                TabLabelText { label_text: label_text.clone() }
+            },
             label_text,
             panel,
             disabled: false,
@@ -212,11 +243,12 @@ where
     #[must_use]
     pub fn new(key: K, panel: Element) -> Self {
         let label_text = TabLabel::translated(key);
-        let resolved_label = label_text.resolve().to_owned();
 
         Self {
             key,
-            label: rsx! { "{resolved_label}" },
+            label: rsx! {
+                TabLabelText { label_text: label_text.clone() }
+            },
             label_text,
             panel,
             disabled: false,
@@ -604,19 +636,27 @@ fn owned_tabs_for_render<K: TabKey>(
 ) -> Vec<Tab<K>> {
     let latest_prop_keys = latest_tabs.iter().map(|tab| tab.key).collect::<Vec<_>>();
 
+    let current_keys = current_tabs
+        .iter()
+        .map(|tab| tab.key)
+        .collect::<BTreeSet<_>>();
+
+    let previous_prop_keys_set = previous_prop_keys.iter().copied().collect::<BTreeSet<_>>();
+
     if latest_prop_keys != previous_prop_keys {
-        return latest_tabs.to_vec();
+        return latest_tabs
+            .iter()
+            .filter(|latest| {
+                current_keys.contains(&latest.key) || !previous_prop_keys_set.contains(&latest.key)
+            })
+            .cloned()
+            .collect();
     }
 
     let latest_keys = latest_tabs
         .iter()
         .map(|tab| tab.key)
         .collect::<BTreeSet<_>>();
-    let current_keys = current_tabs
-        .iter()
-        .map(|tab| tab.key)
-        .collect::<BTreeSet<_>>();
-    let previous_prop_keys = previous_prop_keys.iter().copied().collect::<BTreeSet<_>>();
 
     let mut rendered = current_tabs
         .iter()
@@ -633,7 +673,7 @@ fn owned_tabs_for_render<K: TabKey>(
         latest_tabs
             .iter()
             .filter(|latest| {
-                !current_keys.contains(&latest.key) && !previous_prop_keys.contains(&latest.key)
+                !current_keys.contains(&latest.key) && !previous_prop_keys_set.contains(&latest.key)
             })
             .cloned(),
     );
@@ -1011,7 +1051,7 @@ fn render_tab_button<K: TabKey>(
         let key = key.clone();
         let config = (*config).clone();
         let modality = Arc::clone(modality);
-        let label_text = tab.label_text.resolve().to_owned();
+        let label_text = tab.label_text.resolve();
         move |event: dioxus::prelude::Event<KeyboardData>| {
             handle_tab_keydown(
                 &event,
@@ -1083,7 +1123,7 @@ fn render_tab_button<K: TabKey>(
 
     let close_button = if can_close {
         let close_attrs = attr_map_to_dioxus_inline_attrs(machine.with_api_snapshot({
-            let label_text = tab.label_text.resolve().to_owned();
+            let label_text = tab.label_text.resolve();
             move |api| {
                 let mut attrs = api.close_trigger_attrs(&label_text);
 
@@ -1097,6 +1137,7 @@ fn render_tab_button<K: TabKey>(
             span {
                 onclick: {
                     let key = key.clone();
+                    let tabs_meta = config.tabs_meta.clone();
                     move |event: dioxus::prelude::Event<MouseData>| {
                         event.prevent_default();
                         event.stop_propagation();
@@ -1106,9 +1147,11 @@ fn render_tab_button<K: TabKey>(
                             machine,
                             send,
                             on_close_tab,
+                            on_value_change,
                             typed_key,
                             &key,
                             successor.as_ref().map(|(successor_key, _)| successor_key.clone()),
+                            &tabs_meta,
                             owned_tabs_store,
                             disallow_empty_selection,
                         );
@@ -1428,11 +1471,13 @@ fn handle_tab_keydown<K: TabKey>(
             machine,
             send,
             on_close_tab,
+            on_value_change,
             typed_key,
             key,
             successor
                 .as_ref()
                 .map(|(successor_key, _)| successor_key.clone()),
+            &config.tabs_meta,
             owned_tabs_store,
             disallow_empty_selection,
         );
@@ -1661,15 +1706,19 @@ fn emit_close_request<K: TabKey>(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
     send: EventHandler<Event>,
     on_close_tab: Option<EventHandler<K>>,
+    on_value_change: Option<EventHandler<Option<K>>>,
     typed_key: K,
     key: &Key,
     successor: Option<Key>,
+    tabs_meta: &[TabMeta<K>],
     owned_tabs_store: Option<Store<Vec<Tab<K>>>>,
     disallow_empty_selection: bool,
 ) {
     if !machine.with_api_snapshot(|api| api.can_close_tab(key)) {
         return;
     }
+
+    let was_selected = machine.with_api_snapshot(|api| api.selected_tab() == Some(key));
 
     send.call(Event::CloseTab(key.clone()));
 
@@ -1680,7 +1729,13 @@ fn emit_close_request<K: TabKey>(
     close_owned_tab(owned_tabs_store, key, disallow_empty_selection);
 
     if let Some(successor) = successor {
-        machine.send.call(Event::SelectTab(successor));
+        machine.send.call(Event::SelectTab(successor.clone()));
+
+        if was_selected && let Some(callback) = on_value_change {
+            callback.call(typed_key_for_key(tabs_meta, &successor));
+        }
+    } else if was_selected && let Some(callback) = on_value_change {
+        callback.call(None);
     }
 }
 
@@ -1918,7 +1973,10 @@ mod tests {
                 .iter()
                 .map(|tab| (tab.key, tab.label_text.resolve()))
                 .collect::<Vec<_>>(),
-            vec![("second", "New second"), ("first", "New first")]
+            vec![
+                ("second", "New second".to_owned()),
+                ("first", "New first".to_owned())
+            ]
         );
     }
 
@@ -1945,9 +2003,9 @@ mod tests {
                 .map(|tab| (tab.key, tab.label_text.resolve()))
                 .collect::<Vec<_>>(),
             vec![
-                ("third", "New third"),
-                ("second", "New second"),
-                ("first", "New first")
+                ("third", "New third".to_owned()),
+                ("second", "New second".to_owned()),
+                ("first", "New first".to_owned())
             ]
         );
     }
@@ -1970,7 +2028,10 @@ mod tests {
                 .iter()
                 .map(|tab| (tab.key, tab.label_text.resolve()))
                 .collect::<Vec<_>>(),
-            vec![("first", "New first"), ("third", "New third")]
+            vec![
+                ("first", "New first".to_owned()),
+                ("third", "New third".to_owned())
+            ]
         );
         assert!(
             owned_tab_keys_changed(&current, &rendered),
@@ -1995,7 +2056,37 @@ mod tests {
                 .iter()
                 .map(|tab| (tab.key, tab.label_text.resolve()))
                 .collect::<Vec<_>>(),
-            vec![("first", "New first"), ("third", "New third")]
+            vec![
+                ("first", "New first".to_owned()),
+                ("third", "New third".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn owned_tabs_for_render_keeps_adapter_closed_rows_closed_when_parent_adds_and_reorders() {
+        let current = vec![tab("first", "Old first"), tab("third", "Old third")];
+        let latest = vec![
+            tab("third", "New third"),
+            tab("second", "New second"),
+            tab("first", "New first"),
+            tab("fourth", "New fourth"),
+        ];
+
+        let previous_prop_keys = ["first", "second", "third"];
+
+        let rendered = owned_tabs_for_render(&current, &latest, &previous_prop_keys);
+
+        assert_eq!(
+            rendered
+                .iter()
+                .map(|tab| (tab.key, tab.label_text.resolve()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("third", "New third".to_owned()),
+                ("first", "New first".to_owned()),
+                ("fourth", "New fourth".to_owned())
+            ]
         );
     }
 

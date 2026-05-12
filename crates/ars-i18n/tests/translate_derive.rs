@@ -30,6 +30,9 @@ enum InventoryText {
         zh_Hant_TW = "Traditional script"
     )]
     ScriptRegion,
+
+    #[translate(en = "Press {{ to open and }} to close")]
+    EscapedBracesOnly,
 }
 
 #[test]
@@ -118,6 +121,14 @@ fn translate_derive_normalizes_locale_identifiers_with_script_and_region() {
     assert_eq!(
         InventoryText::ScriptRegion.translate(&language, &StubIntlBackend),
         "Script"
+    );
+}
+
+#[test]
+fn translate_derive_formats_escaped_braces_without_placeholders() {
+    assert_eq!(
+        InventoryText::EscapedBracesOnly.translate(&locales::en_us(), &StubIntlBackend),
+        "Press { to open and } to close"
     );
 }
 

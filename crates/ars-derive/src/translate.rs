@@ -432,7 +432,7 @@ fn message_expr(i18n_path: &TokenStream, message: &LitStr, fields: &[Ident]) -> 
         .collect::<Vec<_>>();
 
     if used_fields.is_empty() {
-        quote!(#i18n_path::__private::String::from(#message))
+        quote!(#i18n_path::__private::format!(#message))
     } else {
         let _ = fields;
 
@@ -654,6 +654,13 @@ mod tests {
         assert_eq!(
             placeholders(&message).expect("valid placeholder"),
             ["count"]
+        );
+
+        let brace_only = LitStr::new("Press {{ to open and }} to close", Span::call_site());
+
+        assert_eq!(
+            placeholders(&brace_only).expect("escaped braces should not be placeholders"),
+            Vec::<String>::new()
         );
 
         let unclosed = LitStr::new("{count items", Span::call_site());

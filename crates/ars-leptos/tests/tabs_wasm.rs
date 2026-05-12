@@ -1065,6 +1065,7 @@ async fn inline_array_close_trigger_removes_owned_tab() {
 #[wasm_bindgen_test(async)]
 async fn keyboard_close_removing_selected_tab_focuses_successor() {
     let owner = Owner::new();
+    let selected = Arc::new(Mutex::new(Vec::<Option<&'static str>>::new()));
 
     let (mount_handle, parent) = owner.with(|| {
         let parent = container();
@@ -1082,15 +1083,24 @@ async fn keyboard_close_removing_selected_tab_focuses_successor() {
         );
         let tabs_for_close = store.tabs();
 
-        let mount_handle = mount_to(parent.clone(), move || {
-            view! {
-                <Tabs
-                    default_value="first"
-                    tabs=store.tabs()
-                    on_close_tab=Callback::new(move |key: &'static str| {
-                        tabs_for_close.write().retain(|tab| tab.key != key);
-                    })
-                />
+        let mount_handle = mount_to(parent.clone(), {
+            let selected = Arc::clone(&selected);
+            move || {
+                view! {
+                    <Tabs
+                        default_value="first"
+                        tabs=store.tabs()
+                        on_close_tab=Callback::new(move |key: &'static str| {
+                            tabs_for_close.write().retain(|tab| tab.key != key);
+                        })
+                        on_value_change=Callback::new(move |key| {
+                            selected
+                                .lock()
+                                .expect("selected callback log should not be poisoned")
+                                .push(key);
+                        })
+                    />
+                }
             }
         });
 
@@ -1118,6 +1128,14 @@ async fn keyboard_close_removing_selected_tab_focuses_successor() {
         active_element_text(),
         "Second",
         "keyboard close should keep DOM focus on the successor tab"
+    );
+    assert_eq!(
+        selected
+            .lock()
+            .expect("selected callback log should not be poisoned")
+            .as_slice(),
+        &[Some("second")],
+        "closing the selected tab must notify controlled parents about successor selection"
     );
 
     drop(mount_handle);

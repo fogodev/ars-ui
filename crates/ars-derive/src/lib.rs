@@ -62,7 +62,7 @@ pub fn derive_has_id(input: TokenStream) -> TokenStream {
 ///
 /// - The input must be an enum.
 /// - The enum must have exactly one `#[scope = "..."]` helper attribute.
-/// - The enum must contain a `Root` variant. `Root` becomes
+/// - The enum's first variant must be a unit variant. That variant becomes
 ///   `ars_core::ComponentPart::ROOT`.
 /// - Unit, tuple, and struct variants are supported. Variants with fields
 ///   receive generated `Clone`, `Debug`, `PartialEq`, `Eq`, and `Hash`

@@ -1102,9 +1102,11 @@ fn render_tab_button<K: TabKey>(
                                 machine,
                                 send,
                                 on_close_tab,
+                                on_value_change,
                                 typed_key,
                                 &key,
                                 successor.as_ref().map(|(successor_key, _)| successor_key.clone()),
+                                config,
                                 owned_tabs_field,
                                 disallow_empty_selection,
                             );
@@ -1462,11 +1464,13 @@ fn handle_tab_keydown<K: TabKey>(
             machine,
             send,
             on_close_tab,
+            on_value_change,
             typed_key,
             key,
             successor
                 .as_ref()
                 .map(|(successor_key, _)| successor_key.clone()),
+            config,
             owned_tabs_field,
             disallow_empty_selection,
         );
@@ -1703,15 +1707,19 @@ fn emit_close_request<K: TabKey>(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
     send: Callback<Event>,
     on_close_tab: Option<Callback<K>>,
+    on_value_change: Option<Callback<Option<K>>>,
     typed_key: K,
     key: &Key,
     successor: Option<Key>,
+    config: StoredValue<TabsConfig<K>>,
     owned_tabs_field: Option<Field<Vec<Tab<K>>>>,
     disallow_empty_selection: bool,
 ) {
     if !machine.with_api_snapshot(|api| api.can_close_tab(key)) {
         return;
     }
+
+    let was_selected = machine.with_api_snapshot(|api| api.selected_tab() == Some(key));
 
     send.run(Event::CloseTab(key.clone()));
 
@@ -1722,7 +1730,15 @@ fn emit_close_request<K: TabKey>(
     close_owned_tab(owned_tabs_field, key, disallow_empty_selection);
 
     if let Some(successor) = successor {
-        machine.send.run(Event::SelectTab(successor));
+        machine.send.run(Event::SelectTab(successor.clone()));
+
+        if was_selected && let Some(callback) = on_value_change {
+            let tabs_meta = config.with_value(|cfg| cfg.tabs_meta.get_untracked());
+
+            callback.run(typed_key_for_key(&tabs_meta, &successor));
+        }
+    } else if was_selected && let Some(callback) = on_value_change {
+        callback.run(None);
     }
 }
 

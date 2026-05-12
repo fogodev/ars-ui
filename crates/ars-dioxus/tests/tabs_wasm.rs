@@ -24,12 +24,13 @@ use ars_collections::Key;
 use ars_components::navigation::tabs;
 use ars_core::{HtmlAttr, PlatformEffects, SafeUrl};
 use ars_dioxus::{
-    ArsProvider, DioxusPlatform, DragData, FilePickerOptions, PlatformDragEvent,
+    ArsProvider, DioxusPlatform, DragData, FilePickerOptions, PlatformDragEvent, TabKey, Translate,
     default_dioxus_platform,
     dioxus_stores::use_store,
     navigation::tabs::{ActivationMode, ReadStore, ReorderEvent, Tab, TabLabel, Tabs, TabsSource},
 };
 use ars_forms::field::FileRef;
+use ars_i18n::locales;
 use dioxus::{
     dioxus_core::{NoOpMutations, ScopeId},
     events::MountedData,
@@ -42,6 +43,17 @@ wasm_bindgen_test_configure!(run_in_browser);
 
 type TestTab = Tab<&'static str>;
 type TestReorderEvent = ReorderEvent<&'static str>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, TabKey, Translate)]
+#[tab_key(ordinal)]
+#[translate(fallback = "en")]
+enum LocalizedTab {
+    #[translate(en = "Overview", pt_BR = "Visão geral")]
+    Overview,
+
+    #[translate(en = "Details", pt_BR = "Detalhes")]
+    Details,
+}
 
 #[wasm_bindgen_test]
 fn web_tab_public_builders_and_debug_paths_are_covered() {
@@ -461,6 +473,59 @@ fn close_mutates_store_probe() -> Element {
 }
 
 #[derive(Clone)]
+struct CloseValueChangeProbeProps {
+    selected: Arc<Mutex<Vec<Option<&'static str>>>>,
+}
+
+impl PartialEq for CloseValueChangeProbeProps {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.selected, &other.selected)
+    }
+}
+
+#[expect(
+    non_snake_case,
+    reason = "Dioxus component roots use PascalCase names in rsx call sites"
+)]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Dioxus root props are moved into the component function"
+)]
+fn CloseValueChangeProbe(props: CloseValueChangeProbeProps) -> Element {
+    let mut tabs = use_store(|| {
+        three_tabs()
+            .into_iter()
+            .map(|tab| {
+                if tab.key == "first" {
+                    tab.closable(true)
+                } else {
+                    tab
+                }
+            })
+            .collect::<Vec<_>>()
+    });
+
+    rsx! {
+        Tabs {
+            default_value: "first",
+            tabs: ReadStore::from(tabs),
+            on_close_tab: move |key: &'static str| {
+                tabs.write().retain(|tab| tab.key != key);
+            },
+            on_value_change: Callback::new({
+                let selected = Arc::clone(&props.selected);
+                move |key| {
+                    selected
+                        .lock()
+                        .expect("selected callback log should not be poisoned")
+                        .push(key);
+                }
+            }),
+        }
+    }
+}
+
+#[derive(Clone)]
 struct SingleCloseProbeProps {
     closed: Arc<Mutex<Vec<&'static str>>>,
 }
@@ -604,6 +669,29 @@ fn inline_owned_close_probe() -> Element {
                     p { "Panel three" }
                 }),
             ],
+        }
+    }
+}
+
+fn translated_owned_tabs_probe() -> Element {
+    let mut locale = use_signal(locales::en_us);
+    let onclick = move |_| locale.set(locales::br());
+
+    rsx! {
+        ArsProvider { locale,
+            button { id: "switch-locale", onclick, "pt-BR" }
+            Tabs {
+                default_value: LocalizedTab::Overview,
+                tabs: [
+                    Tab::new(LocalizedTab::Overview, rsx! {
+                        p { "Overview panel" }
+                    })
+                        .closable(true),
+                    Tab::new(LocalizedTab::Details, rsx! {
+                        p { "Details panel" }
+                    }),
+                ],
+            }
         }
     }
 }
@@ -1599,6 +1687,61 @@ async fn web_inline_array_close_trigger_removes_owned_tab() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn web_translated_owned_tab_labels_update_when_locale_changes() {
+    let parent = container();
+    let dom = VirtualDom::new(translated_owned_tabs_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert_eq!(
+        tab_at(&parent, 0).text_content().unwrap_or_default(),
+        "Overview"
+    );
+    assert_eq!(
+        parent
+            .query_selector(r#"[data-ars-part="tab-close-trigger"]"#)
+            .expect("query should succeed")
+            .expect("close trigger should exist")
+            .get_attribute("aria-label")
+            .as_deref(),
+        Some("Close Overview")
+    );
+
+    click(
+        &parent
+            .query_selector("#switch-locale")
+            .expect("query should succeed")
+            .expect("locale button should render")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("button is HtmlElement"),
+    );
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        tab_at(&parent, 0).text_content().unwrap_or_default(),
+        "Visão geral",
+        "default translated tab triggers should track provider locale"
+    );
+    assert_eq!(
+        parent
+            .query_selector(r#"[data-ars-part="tab-close-trigger"]"#)
+            .expect("query should succeed")
+            .expect("close trigger should exist")
+            .get_attribute("aria-label")
+            .as_deref(),
+        Some("Close Visão geral"),
+        "close trigger labels should resolve the current translated tab label"
+    );
+}
+
+#[wasm_bindgen_test(async)]
 async fn web_inline_array_owned_tabs_refresh_existing_panel_content() {
     let parent = container();
     let dom = VirtualDom::new(inline_owned_panel_state_probe);
@@ -1796,7 +1939,13 @@ async fn web_inline_array_owned_tabs_adopt_parent_reorders() {
 #[wasm_bindgen_test(async)]
 async fn web_keyboard_close_removing_selected_tab_focuses_successor() {
     let parent = container();
-    let dom = VirtualDom::new(close_mutates_store_probe);
+    let selected = Arc::new(Mutex::new(Vec::<Option<&'static str>>::new()));
+    let dom = VirtualDom::new_with_props(
+        CloseValueChangeProbe,
+        CloseValueChangeProbeProps {
+            selected: Arc::clone(&selected),
+        },
+    );
 
     dioxus_web::launch::launch_virtual_dom(
         dom,
@@ -1825,6 +1974,14 @@ async fn web_keyboard_close_removing_selected_tab_focuses_successor() {
         active_element_text(),
         "Second",
         "keyboard close should keep DOM focus on the successor tab"
+    );
+    assert_eq!(
+        selected
+            .lock()
+            .expect("selected callback log should not be poisoned")
+            .as_slice(),
+        &[Some("second")],
+        "closing the selected tab must notify controlled parents about successor selection"
     );
 }
 
