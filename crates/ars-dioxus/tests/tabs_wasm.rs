@@ -2874,6 +2874,53 @@ async fn web_focus_visible_tracks_keyboard_and_pointer_modality() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn web_manual_roving_focus_updates_focus_visible_without_selection_change() {
+    let parent = container();
+
+    fn app() -> Element {
+        rsx! {
+            ArsProvider {
+                Tabs {
+                    default_value: "first",
+                    activation_mode: ActivationMode::Manual,
+                    tabs: ReadStore::from(use_store(three_tabs)),
+                }
+            }
+        }
+    }
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    let first = tab_at(&parent, 0);
+
+    first.focus().expect("focus should succeed");
+
+    dispatch_keydown(&first, "ArrowRight", false);
+
+    animation_frame_turn().await;
+
+    let second = tab_at(&parent, 1);
+
+    assert_eq!(
+        selected_tab_text(&parent),
+        "First",
+        "manual arrow navigation should move focus without selecting the next tab"
+    );
+    assert!(
+        has_focus_visible(&second),
+        "focused manual tab should rerender data-ars-focus-visible without a selection-driven render"
+    );
+}
+
+#[wasm_bindgen_test(async)]
 async fn web_keyboard_focus_dispatch_uses_mounted_data_platform() {
     let parent = container();
     let focused = Arc::new(Mutex::new(0_usize));

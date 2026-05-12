@@ -9,7 +9,9 @@
 use std::sync::{Arc, Mutex};
 
 use ars_collections::Key;
-use ars_core::{Direction, PlatformEffects, Rect, ResolvedDirection, SafeUrl, TimerHandle};
+use ars_core::{
+    Direction, Orientation, PlatformEffects, Rect, ResolvedDirection, SafeUrl, TimerHandle,
+};
 use ars_leptos::{
     ArsProvider,
     navigation::tabs::{ActivationMode, Field, ReorderEvent, Tab, TabLabel, Tabs, TabsSource},
@@ -2122,13 +2124,7 @@ async fn automatic_hotkeys_skip_disabled_tabs_and_support_vertical_axis() {
         ];
 
         let mount_handle = mount_to(parent.clone(), move || {
-            view! {
-                <Tabs
-                    default_value="first"
-                    tabs=store_field(tabs)
-                    orientation=ars_leptos::prelude::Orientation::Vertical
-                />
-            }
+            view! { <Tabs default_value="first" tabs=store_field(tabs) orientation=Orientation::Vertical /> }
         });
 
         (mount_handle, parent)
@@ -3660,6 +3656,52 @@ async fn auto_direction_updates_rendered_root_dir() {
             .as_deref(),
         Some("ltr"),
         "dir=auto should render the resolved concrete direction after setup"
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
+async fn signal_backed_orientation_updates_keyboard_navigation() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent, set_orientation) = owner.with(|| {
+        let parent = container();
+
+        let (orientation, set_orientation) = signal(Orientation::Horizontal);
+
+        let orientation_signal: Signal<Orientation> = orientation.into();
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <Tabs
+                    default_value="first"
+                    tabs=store_field(three_tabs())
+                    orientation=orientation_signal
+                />
+            }
+        });
+
+        (mount_handle, parent, set_orientation)
+    });
+
+    leptos::task::tick().await;
+
+    set_orientation.set(Orientation::Vertical);
+
+    leptos::task::tick().await;
+
+    let first = tab_at(&parent, 0);
+
+    first.focus().expect("focus should succeed");
+    dispatch_keydown(&first, "ArrowDown", false);
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        selected_tab_text(&parent),
+        "Second",
+        "a signal-backed orientation prop should update arrow-key handling"
     );
 
     drop(mount_handle);

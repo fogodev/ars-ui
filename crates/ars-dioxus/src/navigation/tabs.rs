@@ -521,6 +521,7 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
 
     let reorder_status = use_signal(String::new);
     let drag_source = use_signal(|| None::<Key>);
+    let modality_revision = use_signal(|| 0_u64);
 
     let ever_selected = use_lazy_mount_tracking(machine);
 
@@ -548,6 +549,7 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
                                 &config,
                                 reorder_status,
                                 drag_source,
+                                modality_revision,
                                 tab_nodes,
                                 &modality,
                                 on_value_change,
@@ -609,7 +611,7 @@ fn use_tabs_store<K: TabKey>(tabs: &TabsSource<K>) -> TabsStoreSetup<K> {
                 owned_tabs_for_render(&owned_tabs_store.read(), latest_tabs, &previous_prop_keys);
             let latest_prop_keys = latest_tabs.iter().map(|tab| tab.key).collect::<Vec<_>>();
 
-            if owned_tab_keys_changed(&owned_tabs_store.read(), &reconciled) {
+            if owned_tabs_changed(&owned_tabs_store.read(), &reconciled) {
                 owned_tabs_store.write().clone_from(&reconciled);
             }
 
@@ -681,12 +683,8 @@ fn owned_tabs_for_render<K: TabKey>(
     rendered
 }
 
-fn owned_tab_keys_changed<K: TabKey>(current_tabs: &[Tab<K>], next_tabs: &[Tab<K>]) -> bool {
-    current_tabs.len() != next_tabs.len()
-        || current_tabs
-            .iter()
-            .zip(next_tabs)
-            .any(|(current, next)| current.key != next.key)
+fn owned_tabs_changed<K: TabKey>(current_tabs: &[Tab<K>], next_tabs: &[Tab<K>]) -> bool {
+    current_tabs != next_tabs
 }
 
 #[expect(
@@ -988,6 +986,7 @@ fn render_tab_button<K: TabKey>(
     config: &TabsConfig<K>,
     reorder_status: Signal<String>,
     drag_source: Signal<Option<Key>>,
+    mut modality_revision: Signal<u64>,
     mut tab_nodes: Signal<BTreeMap<Key, Rc<MountedData>>>,
     modality: &Arc<dyn ModalityContext>,
     on_value_change: Option<EventHandler<Option<K>>>,
@@ -1001,13 +1000,18 @@ fn render_tab_button<K: TabKey>(
     let key = typed_key.into_key();
     let vdom_key = dioxus_vdom_key(&key);
 
-    // Modality is read per render — `data-ars-focus-visible` reflects
-    // whether the most recent input was a keyboard interaction.
-    let is_keyboard = !modality.had_pointer_interaction();
-    let tab_attrs = attr_map_to_dioxus_inline_attrs(machine.with_api_snapshot({
+    let tab_attrs = machine.derive({
         let key = key.clone();
-        move |api| api.tab_attrs(&key, is_keyboard)
-    }));
+        let modality = Arc::clone(modality);
+
+        move |api| {
+            modality_revision();
+
+            attr_map_to_dioxus_inline_attrs(
+                api.tab_attrs(&key, !modality.had_pointer_interaction()),
+            )
+        }
+    });
 
     let label = tab.label;
 
@@ -1033,6 +1037,7 @@ fn render_tab_button<K: TabKey>(
             let data = event.data();
 
             modality.on_pointer_down(pointer_type_from_dioxus(&data.pointer_type()));
+            modality_revision += 1;
         }
     };
 
@@ -1053,6 +1058,8 @@ fn render_tab_button<K: TabKey>(
         let modality = Arc::clone(modality);
         let label_text = tab.label_text.resolve();
         move |event: dioxus::prelude::Event<KeyboardData>| {
+            modality_revision += 1;
+
             handle_tab_keydown(
                 &event,
                 &key,
@@ -1190,7 +1197,7 @@ fn render_tab_button<K: TabKey>(
                     }
                 },
                 draggable: "{draggable}",
-                ..tab_attrs,
+                ..tab_attrs(),
                 {label}
                 {close_button}
             }
@@ -1216,7 +1223,7 @@ fn render_tab_button<K: TabKey>(
                     }
                 },
                 draggable: "{draggable}",
-                ..tab_attrs,
+                ..tab_attrs(),
                 {label}
                 {close_button}
             }
@@ -2034,7 +2041,7 @@ mod tests {
             ]
         );
         assert!(
-            owned_tab_keys_changed(&current, &rendered),
+            owned_tabs_changed(&current, &rendered),
             "internal owned store must be synchronized before close/reorder indices are applied"
         );
     }
@@ -2060,6 +2067,20 @@ mod tests {
                 ("first", "New first".to_owned()),
                 ("third", "New third".to_owned())
             ]
+        );
+    }
+
+    #[test]
+    fn owned_tabs_changed_tracks_non_key_row_updates() {
+        let current = vec![tab("first", "First"), tab("second", "Second")];
+        let rendered = vec![
+            tab("first", "First"),
+            tab("second", "Second").disabled(true).closable(true),
+        ];
+
+        assert!(
+            owned_tabs_changed(&current, &rendered),
+            "same-key row metadata changes must refresh the owned store"
         );
     }
 

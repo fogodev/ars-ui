@@ -284,15 +284,15 @@ struct TabsConfig<K: TabKey> {
 }
 
 struct TabsOptions<K: TabKey> {
-    orientation: Orientation,
-    activation_mode: ActivationMode,
-    dir: Direction,
-    loop_focus: bool,
-    disallow_empty_selection: bool,
-    lazy_mount: bool,
-    unmount_on_exit: bool,
-    disabled_keys: BTreeSet<K>,
-    reorderable: bool,
+    orientation: Signal<Orientation>,
+    activation_mode: Signal<ActivationMode>,
+    dir: Signal<Direction>,
+    loop_focus: Signal<bool>,
+    disallow_empty_selection: Signal<bool>,
+    lazy_mount: Signal<bool>,
+    unmount_on_exit: Signal<bool>,
+    disabled_keys: Signal<BTreeSet<K>>,
+    reorderable: Signal<bool>,
 }
 
 struct TabsReactiveSetup<K: TabKey> {
@@ -415,41 +415,41 @@ pub fn Tabs<K: TabKey>(
     tabs: TabsSource<K>,
 
     /// Layout orientation. Defaults to `Horizontal`.
-    #[prop(optional)]
-    orientation: Option<Orientation>,
+    #[prop(optional, into)]
+    orientation: Option<Signal<Orientation>>,
 
     /// How keyboard focus interacts with selection.
-    #[prop(optional)]
-    activation_mode: Option<ActivationMode>,
+    #[prop(optional, into)]
+    activation_mode: Option<Signal<ActivationMode>>,
 
     /// Text direction.
-    #[prop(optional)]
-    dir: Option<Direction>,
+    #[prop(optional, into)]
+    dir: Option<Signal<Direction>>,
 
     /// When `true`, arrow-key focus wraps from last to first.
-    #[prop(optional)]
-    loop_focus: Option<bool>,
+    #[prop(optional, into)]
+    loop_focus: Option<Signal<bool>>,
 
     /// When `true` the only remaining tab cannot be closed.
-    #[prop(optional)]
-    disallow_empty_selection: Option<bool>,
+    #[prop(optional, into)]
+    disallow_empty_selection: Option<Signal<bool>>,
 
     /// When `true`, panels are not rendered until first selected.
-    #[prop(optional)]
-    lazy_mount: Option<bool>,
+    #[prop(optional, into)]
+    lazy_mount: Option<Signal<bool>>,
 
     /// When `true`, panels are removed from the DOM when their tab is
     /// deselected.
-    #[prop(optional)]
-    unmount_on_exit: Option<bool>,
+    #[prop(optional, into)]
+    unmount_on_exit: Option<Signal<bool>>,
 
     /// Set of disabled tab keys merged with each row's `Tab::disabled`.
-    #[prop(optional)]
-    disabled_keys: Option<BTreeSet<K>>,
+    #[prop(optional, into)]
+    disabled_keys: Option<Signal<BTreeSet<K>>>,
 
     /// When `true`, Ctrl+Arrow reorders tabs.
-    #[prop(optional)]
-    reorderable: Option<bool>,
+    #[prop(optional, into)]
+    reorderable: Option<Signal<bool>>,
 
     /// Called after a user action commits a new selected key.
     #[prop(optional)]
@@ -509,6 +509,10 @@ pub fn Tabs<K: TabKey>(
     let root_attrs = tabs_root_attrs(machine);
     let list_attrs = tabs_list_attrs(machine, tabs_field);
 
+    #[cfg(not(feature = "ssr"))]
+    setup_config_sync(&options, config);
+    #[cfg(feature = "ssr")]
+    let _ = &config;
     setup_auto_direction_effect(options.dir, machine, config, Arc::clone(&platform));
 
     let indicator_revision = RwSignal::new(0_u64);
@@ -516,7 +520,7 @@ pub fn Tabs<K: TabKey>(
     let (tab_indicator_attrs, indicator_style) =
         setup_tab_indicator(machine, Arc::clone(&platform), indicator_revision);
 
-    let disallow_empty_selection = options.disallow_empty_selection;
+    let disallow_empty_selection = options.disallow_empty_selection.get_untracked();
     let lazy_mount = options.lazy_mount;
     let unmount_on_exit = options.unmount_on_exit;
     let reorderable = options.reorderable;
@@ -562,18 +566,15 @@ pub fn Tabs<K: TabKey>(
             </div>
             <For each=each_panels key=|tab| tab.key.into_key() children=render_panel />
             {children.map(|c| c())}
-            {reorderable
-                .then(|| {
-                    view! {
-                        <div
-                            aria-live="polite"
-                            aria-atomic="true"
-                            style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;"
-                        >
-                            {reorder_status}
-                        </div>
-                    }
-                })}
+            <Show when=move || reorderable.get()>
+                <div
+                    aria-live="polite"
+                    aria-atomic="true"
+                    style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;"
+                >
+                    {reorder_status}
+                </div>
+            </Show>
         </div>
     }
 }
@@ -583,26 +584,26 @@ pub fn Tabs<K: TabKey>(
     reason = "normalizes the public Tabs component props into one internal options struct"
 )]
 fn normalize_tabs_options<K: TabKey>(
-    orientation: Option<Orientation>,
-    activation_mode: Option<ActivationMode>,
-    dir: Option<Direction>,
-    loop_focus: Option<bool>,
-    disallow_empty_selection: Option<bool>,
-    lazy_mount: Option<bool>,
-    unmount_on_exit: Option<bool>,
-    disabled_keys: Option<BTreeSet<K>>,
-    reorderable: Option<bool>,
+    orientation: Option<Signal<Orientation>>,
+    activation_mode: Option<Signal<ActivationMode>>,
+    dir: Option<Signal<Direction>>,
+    loop_focus: Option<Signal<bool>>,
+    disallow_empty_selection: Option<Signal<bool>>,
+    lazy_mount: Option<Signal<bool>>,
+    unmount_on_exit: Option<Signal<bool>>,
+    disabled_keys: Option<Signal<BTreeSet<K>>>,
+    reorderable: Option<Signal<bool>>,
 ) -> TabsOptions<K> {
     TabsOptions {
-        orientation: orientation.unwrap_or(Orientation::Horizontal),
-        activation_mode: activation_mode.unwrap_or_default(),
-        dir: dir.unwrap_or(Direction::Ltr),
-        loop_focus: loop_focus.unwrap_or(true),
-        disallow_empty_selection: disallow_empty_selection.unwrap_or(false),
-        lazy_mount: lazy_mount.unwrap_or(false),
-        unmount_on_exit: unmount_on_exit.unwrap_or(false),
-        disabled_keys: disabled_keys.unwrap_or_default(),
-        reorderable: reorderable.unwrap_or(false),
+        orientation: orientation.unwrap_or_else(|| Signal::from(Orientation::Horizontal)),
+        activation_mode: activation_mode.unwrap_or_else(|| Signal::from(ActivationMode::default())),
+        dir: dir.unwrap_or_else(|| Signal::from(Direction::Ltr)),
+        loop_focus: loop_focus.unwrap_or_else(|| Signal::from(true)),
+        disallow_empty_selection: disallow_empty_selection.unwrap_or_else(|| Signal::from(false)),
+        lazy_mount: lazy_mount.unwrap_or_else(|| Signal::from(false)),
+        unmount_on_exit: unmount_on_exit.unwrap_or_else(|| Signal::from(false)),
+        disabled_keys: disabled_keys.unwrap_or_else(|| Signal::from(BTreeSet::new())),
+        reorderable: reorderable.unwrap_or_else(|| Signal::from(false)),
     }
 }
 
@@ -615,15 +616,15 @@ fn setup_tabs_reactivity<K: TabKey>(
 ) -> TabsReactiveSetup<K> {
     let (tabs_field, owned_tabs_field) = tabs.into_field();
 
-    let tabs_meta = tabs_meta_memo(tabs_field, options.disabled_keys.clone());
+    let tabs_meta = tabs_meta_memo(tabs_field, options.disabled_keys);
 
     let registrations = tabs_registrations(tabs_meta);
 
     let config = StoredValue::new(TabsConfig {
-        orientation: options.orientation,
-        dir: options.dir,
-        activation_mode: options.activation_mode,
-        reorderable: options.reorderable,
+        orientation: options.orientation.get_untracked(),
+        dir: options.dir.get_untracked(),
+        activation_mode: options.activation_mode.get_untracked(),
+        reorderable: options.reorderable.get_untracked(),
         tabs_meta,
     });
 
@@ -640,9 +641,11 @@ fn setup_tabs_reactivity<K: TabKey>(
 
 fn tabs_meta_memo<K: TabKey>(
     tabs: Field<Vec<Tab<K>>>,
-    extra_disabled: BTreeSet<K>,
+    extra_disabled: Signal<BTreeSet<K>>,
 ) -> Memo<Vec<TabMeta<K>>> {
     Memo::new(move |_| {
+        let extra_disabled = extra_disabled.get();
+
         tabs.read()
             .iter()
             .map(|t| {
@@ -670,30 +673,48 @@ fn tabs_props_signal<K: TabKey>(
     tabs: Field<Vec<Tab<K>>>,
     options: &TabsOptions<K>,
 ) -> Signal<Props> {
-    let initial_disabled =
-        aggregate_disabled_keys_from_tabs_untracked(tabs, &options.disabled_keys);
+    let disabled_keys = options.disabled_keys;
+    let initial_disabled = disabled_keys
+        .with_untracked(|extra| aggregate_disabled_keys_from_tabs_untracked(tabs, extra));
 
     let base_props = Props::new()
         .id(id)
         .default_value(Some(default_value.into_key()))
-        .orientation(options.orientation)
-        .activation_mode(options.activation_mode)
-        .dir(options.dir)
-        .loop_focus(options.loop_focus)
-        .disallow_empty_selection(options.disallow_empty_selection)
-        .lazy_mount(options.lazy_mount)
-        .unmount_on_exit(options.unmount_on_exit)
+        .orientation(options.orientation.get_untracked())
+        .activation_mode(options.activation_mode.get_untracked())
+        .dir(options.dir.get_untracked())
+        .loop_focus(options.loop_focus.get_untracked())
+        .disallow_empty_selection(options.disallow_empty_selection.get_untracked())
+        .lazy_mount(options.lazy_mount.get_untracked())
+        .unmount_on_exit(options.unmount_on_exit.get_untracked())
         .disabled_keys(initial_disabled)
-        .reorderable(options.reorderable);
+        .reorderable(options.reorderable.get_untracked());
 
     let props_for_signal = base_props.clone();
 
-    let disabled_keys = options.disabled_keys.clone();
+    let orientation = options.orientation;
+    let activation_mode = options.activation_mode;
+    let dir = options.dir;
+    let loop_focus = options.loop_focus;
+    let disallow_empty_selection = options.disallow_empty_selection;
+    let lazy_mount = options.lazy_mount;
+    let unmount_on_exit = options.unmount_on_exit;
+    let reorderable = options.reorderable;
 
     Signal::derive(move || {
         let mut props = props_for_signal.clone();
 
-        props.disabled_keys = aggregate_disabled_keys_from_tabs(tabs, &disabled_keys);
+        props.orientation = orientation.get();
+        props.activation_mode = activation_mode.get();
+        props.dir = dir.get();
+        props.loop_focus = loop_focus.get();
+        props.disallow_empty_selection = disallow_empty_selection.get();
+        props.lazy_mount = lazy_mount.get();
+        props.unmount_on_exit = unmount_on_exit.get();
+        props.reorderable = reorderable.get();
+        disabled_keys.with(|extra| {
+            props.disabled_keys = aggregate_disabled_keys_from_tabs(tabs, extra);
+        });
 
         if let Some(value_signal) = value {
             props.value = Some(value_signal.get().map(TabKey::into_key));
@@ -722,6 +743,23 @@ fn register_tabs(
 
     #[cfg(feature = "ssr")]
     let _ = registrations;
+}
+
+#[cfg(not(feature = "ssr"))]
+fn setup_config_sync<K: TabKey>(options: &TabsOptions<K>, config: StoredValue<TabsConfig<K>>) {
+    let orientation = options.orientation;
+    let activation_mode = options.activation_mode;
+    let dir = options.dir;
+    let reorderable = options.reorderable;
+
+    Effect::new(move |_| {
+        config.update_value(|cfg| {
+            cfg.orientation = orientation.get();
+            cfg.activation_mode = activation_mode.get();
+            cfg.dir = dir.get();
+            cfg.reorderable = reorderable.get();
+        });
+    });
 }
 
 fn setup_focus_dispatch(
@@ -857,7 +895,7 @@ fn tab_id_from_api(api: &tabs::Api<'_>, key: &Key) -> Option<String> {
 }
 
 fn setup_auto_direction_effect<K: TabKey>(
-    dir: Direction,
+    dir: Signal<Direction>,
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
     config: StoredValue<TabsConfig<K>>,
     platform: Arc<dyn PlatformEffects>,
@@ -866,7 +904,7 @@ fn setup_auto_direction_effect<K: TabKey>(
     drop((dir, machine, config, platform));
 
     #[cfg(not(feature = "ssr"))]
-    if dir == Direction::Auto {
+    {
         let list_id =
             machine.with_api_snapshot(|api| api.list_attrs().get(&HtmlAttr::Id).map(String::from));
 
@@ -874,6 +912,10 @@ fn setup_auto_direction_effect<K: TabKey>(
             let send = machine.send;
 
             Effect::new(move |_| {
+                if dir.get() != Direction::Auto {
+                    return;
+                }
+
                 let resolved = Direction::from(platform.resolved_direction(&list_id));
 
                 send.run(Event::SetDirection(resolved));
@@ -1512,8 +1554,8 @@ fn selected_close_successor(
 fn render_tab_panel<K: TabKey>(
     tab: Tab<K>,
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
-    lazy_mount: bool,
-    unmount_on_exit: bool,
+    lazy_mount: Signal<bool>,
+    unmount_on_exit: Signal<bool>,
     ever_selected: RwSignal<BTreeSet<Key>>,
 ) -> impl IntoView + use<K> {
     let key_for_attrs = tab.key.into_key();
@@ -1535,8 +1577,12 @@ fn render_tab_panel<K: TabKey>(
 
         let already_selected = ever_selected.with(|set| set.contains(&key_for_panel));
 
-        let should_render =
-            should_render_panel_body(is_selected, already_selected, lazy_mount, unmount_on_exit);
+        let should_render = should_render_panel_body(
+            is_selected,
+            already_selected,
+            lazy_mount.get(),
+            unmount_on_exit.get(),
+        );
 
         if should_render {
             Some(panel_view.run())
@@ -2096,39 +2142,48 @@ mod tests {
             None, None, None, None, None, None, None, None, None,
         );
 
-        assert_eq!(defaults.orientation, Orientation::Horizontal);
-        assert_eq!(defaults.activation_mode, ActivationMode::Automatic);
-        assert_eq!(defaults.dir, Direction::Ltr);
-        assert!(defaults.loop_focus);
-        assert!(!defaults.disallow_empty_selection);
-        assert!(!defaults.lazy_mount);
-        assert!(!defaults.unmount_on_exit);
-        assert!(defaults.disabled_keys.is_empty());
-        assert!(!defaults.reorderable);
+        assert_eq!(
+            defaults.orientation.get_untracked(),
+            Orientation::Horizontal
+        );
+        assert_eq!(
+            defaults.activation_mode.get_untracked(),
+            ActivationMode::Automatic
+        );
+        assert_eq!(defaults.dir.get_untracked(), Direction::Ltr);
+        assert!(defaults.loop_focus.get_untracked());
+        assert!(!defaults.disallow_empty_selection.get_untracked());
+        assert!(!defaults.lazy_mount.get_untracked());
+        assert!(!defaults.unmount_on_exit.get_untracked());
+        assert!(defaults.disabled_keys.get_untracked().is_empty());
+        assert!(!defaults.reorderable.get_untracked());
 
         let disabled_keys = BTreeSet::from(["second"]);
 
         let overrides = normalize_tabs_options(
-            Some(Orientation::Vertical),
-            Some(ActivationMode::Manual),
-            Some(Direction::Rtl),
-            Some(false),
-            Some(true),
-            Some(true),
-            Some(true),
-            Some(disabled_keys.clone()),
-            Some(true),
+            Some(Signal::from(Orientation::Vertical)),
+            Some(Signal::from(ActivationMode::Manual)),
+            Some(Signal::from(Direction::Rtl)),
+            Some(Signal::from(false)),
+            Some(Signal::from(true)),
+            Some(Signal::from(true)),
+            Some(Signal::from(true)),
+            Some(Signal::from(disabled_keys.clone())),
+            Some(Signal::from(true)),
         );
 
-        assert_eq!(overrides.orientation, Orientation::Vertical);
-        assert_eq!(overrides.activation_mode, ActivationMode::Manual);
-        assert_eq!(overrides.dir, Direction::Rtl);
-        assert!(!overrides.loop_focus);
-        assert!(overrides.disallow_empty_selection);
-        assert!(overrides.lazy_mount);
-        assert!(overrides.unmount_on_exit);
-        assert_eq!(overrides.disabled_keys, disabled_keys);
-        assert!(overrides.reorderable);
+        assert_eq!(overrides.orientation.get_untracked(), Orientation::Vertical);
+        assert_eq!(
+            overrides.activation_mode.get_untracked(),
+            ActivationMode::Manual
+        );
+        assert_eq!(overrides.dir.get_untracked(), Direction::Rtl);
+        assert!(!overrides.loop_focus.get_untracked());
+        assert!(overrides.disallow_empty_selection.get_untracked());
+        assert!(overrides.lazy_mount.get_untracked());
+        assert!(overrides.unmount_on_exit.get_untracked());
+        assert_eq!(overrides.disabled_keys.get_untracked(), disabled_keys);
+        assert!(overrides.reorderable.get_untracked());
     }
 
     #[test]
@@ -2142,7 +2197,8 @@ mod tests {
                 tab("third", "Third"),
             ]));
 
-            let meta = tabs_meta_memo(field, BTreeSet::from(["third"])).get_untracked();
+            let meta =
+                tabs_meta_memo(field, Signal::from(BTreeSet::from(["third"]))).get_untracked();
 
             assert_eq!(
                 meta.iter()
@@ -2177,15 +2233,15 @@ mod tests {
             ]));
 
             let options = normalize_tabs_options(
-                Some(Orientation::Vertical),
-                Some(ActivationMode::Manual),
-                Some(Direction::Rtl),
-                Some(false),
-                Some(true),
-                Some(true),
-                Some(true),
-                Some(BTreeSet::from(["first"])),
-                Some(true),
+                Some(Signal::from(Orientation::Vertical)),
+                Some(Signal::from(ActivationMode::Manual)),
+                Some(Signal::from(Direction::Rtl)),
+                Some(Signal::from(false)),
+                Some(Signal::from(true)),
+                Some(Signal::from(true)),
+                Some(Signal::from(true)),
+                Some(Signal::from(BTreeSet::from(["first"]))),
+                Some(Signal::from(true)),
             );
 
             let props_signal = tabs_props_signal(

@@ -29,9 +29,12 @@ pub(crate) fn maybe_spawn_chromedriver(webdriver_url: &str) -> Result<Option<Chi
     let child = quiet_spawn(&mut command)
         .map_err(|error| Error::Command(format!("failed to spawn ChromeDriver: {error}")))?;
 
-    wait_for_tcp(addr, Duration::from_secs(15), "ChromeDriver")?;
-
-    Ok(Some(ChildGuard { child }))
+    Ok(Some(wait_for_tcp_with_child_guard(
+        child,
+        addr,
+        Duration::from_secs(15),
+        "ChromeDriver",
+    )?))
 }
 
 pub(crate) fn webdriver_url(explicit: Option<String>) -> String {
@@ -72,6 +75,19 @@ pub(crate) fn wait_for_tcp(addr: SocketAddr, timeout: Duration, label: &str) -> 
     )))
 }
 
+fn wait_for_tcp_with_child_guard(
+    child: Child,
+    addr: SocketAddr,
+    timeout: Duration,
+    label: &str,
+) -> Result<ChildGuard, Error> {
+    let guard = ChildGuard { child };
+
+    wait_for_tcp(addr, timeout, label)?;
+
+    Ok(guard)
+}
+
 pub(crate) fn quiet_spawn(command: &mut Command) -> std::io::Result<Child> {
     command
         .stdin(Stdio::null())
@@ -94,5 +110,54 @@ impl Drop for ChildGuard {
     fn drop(&mut self) {
         drop(self.child.kill());
         drop(self.child.wait());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn guarded_tcp_wait_kills_child_on_timeout() {
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg("while true; do sleep 1; done")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("test child should spawn");
+
+        let pid = child.id().to_string();
+
+        let addr = SocketAddr::from(([127, 0, 0, 1], 9));
+
+        let result =
+            wait_for_tcp_with_child_guard(child, addr, Duration::from_millis(1), "test child");
+
+        assert!(matches!(result, Err(Error::Timeout(_))));
+
+        for _ in 0..20 {
+            if !process_exists(&pid) {
+                return;
+            }
+
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        panic!("child process was still alive after guarded timeout");
+    }
+
+    #[cfg(unix)]
+    fn process_exists(pid: &str) -> bool {
+        Command::new("kill")
+            .arg("-0")
+            .arg(pid)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
     }
 }
