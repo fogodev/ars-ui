@@ -921,7 +921,7 @@ fn render_tab_button<K: TabKey>(
                 event.prevent_default();
             }
 
-            select_and_emit_value_change(machine, send, key.clone(), on_value_change, &config);
+            select_and_emit_value_change(machine, send, &key, on_value_change, &config);
         }
     };
 
@@ -1330,7 +1330,7 @@ fn handle_tab_keydown<K: TabKey>(
     {
         event.prevent_default();
 
-        select_and_emit_value_change(machine, send, key.clone(), on_value_change, config);
+        select_and_emit_value_change(machine, send, key, on_value_change, config);
     } else if matches!(data.key, KeyboardKey::Delete | KeyboardKey::Backspace)
         && is_closable
         && !data.repeat
@@ -1513,7 +1513,7 @@ fn tab_element_id(
 fn select_and_emit_value_change<K: TabKey>(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
     send: EventHandler<Event>,
-    key: Key,
+    key: &Key,
     on_value_change: Option<EventHandler<Option<K>>>,
     config: &TabsConfig<K>,
 ) {
@@ -1523,16 +1523,24 @@ fn select_and_emit_value_change<K: TabKey>(
 
     let after = machine.with_api_snapshot(|api| api.selected_tab().cloned());
 
+    let Some(callback) = on_value_change else {
+        return;
+    };
+
     let emitted = if before != after {
-        after
-    } else if before.as_ref() != Some(&key) {
-        Some(key)
+        Some(after.and_then(|key| typed_key_for_key(&config.tabs_meta, &key)))
+    } else if before.as_ref() != Some(key) {
+        config
+            .tabs_meta
+            .iter()
+            .find(|tab| tab.key == *key && !tab.disabled)
+            .map(|tab| Some(tab.typed_key))
     } else {
         return;
     };
 
-    if let Some(callback) = on_value_change {
-        callback.call(emitted.and_then(|key| typed_key_for_key(&config.tabs_meta, &key)));
+    if let Some(emitted) = emitted {
+        callback.call(emitted);
     }
 }
 

@@ -1535,7 +1535,10 @@ fn focus_and_emit_value_change<K: TabKey>(
 
 #[cfg(all(not(feature = "ssr"), target_arch = "wasm32"))]
 fn focus_tab_node(tab_nodes: TabNodeRegistry, key: &Key) -> bool {
-    let Some(element) = tab_nodes.with_value(|nodes| nodes.get(key).cloned()) else {
+    let Some(element) = tab_nodes
+        .try_with_value(|nodes| nodes.get(key).cloned())
+        .flatten()
+    else {
         return false;
     };
 
@@ -1608,18 +1611,25 @@ fn select_and_emit_value_change<K: TabKey>(
 
     let after = machine.with_api_snapshot(|api| api.selected_tab().cloned());
 
+    let Some(callback) = on_value_change else {
+        return;
+    };
+
+    let tabs_meta = config.with_value(|cfg| cfg.tabs_meta.get_untracked());
+
     let emitted = if before != after {
-        after
+        Some(after.and_then(|key| typed_key_for_key(&tabs_meta, &key)))
     } else if before.as_ref() != Some(key) {
-        Some(key.clone())
+        tabs_meta
+            .iter()
+            .find(|tab| tab.key == *key && !tab.disabled)
+            .map(|tab| Some(tab.typed_key))
     } else {
         return;
     };
 
-    if let Some(callback) = on_value_change {
-        let tabs_meta = config.with_value(|cfg| cfg.tabs_meta.get_untracked());
-
-        callback.run(emitted.and_then(|key| typed_key_for_key(&tabs_meta, &key)));
+    if let Some(emitted) = emitted {
+        callback.run(emitted);
     }
 }
 

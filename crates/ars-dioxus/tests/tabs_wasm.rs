@@ -611,11 +611,14 @@ fn inline_owned_panel_state_probe() -> Element {
 struct DisabledInteractionProbeProps {
     closed: Arc<Mutex<Vec<&'static str>>>,
     reordered: Arc<Mutex<Vec<TestReorderEvent>>>,
+    selected: Arc<Mutex<Vec<Option<&'static str>>>>,
 }
 
 impl PartialEq for DisabledInteractionProbeProps {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.closed, &other.closed) && Arc::ptr_eq(&self.reordered, &other.reordered)
+        Arc::ptr_eq(&self.closed, &other.closed)
+            && Arc::ptr_eq(&self.reordered, &other.reordered)
+            && Arc::ptr_eq(&self.selected, &other.selected)
     }
 }
 
@@ -651,6 +654,7 @@ fn disabled_interaction_probe(props: DisabledInteractionProbeProps) -> Element {
 
     let closed = Arc::clone(&props.closed);
     let reordered = Arc::clone(&props.reordered);
+    let selected = Arc::clone(&props.selected);
 
     rsx! {
         Tabs {
@@ -669,6 +673,12 @@ fn disabled_interaction_probe(props: DisabledInteractionProbeProps) -> Element {
                     .expect("reorder callback log should not be poisoned")
                     .push(event);
                 true
+            }),
+            on_value_change: Callback::new(move |key| {
+                selected
+                    .lock()
+                    .expect("selected callback log should not be poisoned")
+                    .push(key);
             }),
         }
     }
@@ -2513,11 +2523,13 @@ async fn web_disabled_tabs_ignore_direct_click_close_key_and_reorder_shortcut() 
     let parent = container();
     let closed = Arc::new(Mutex::new(Vec::<&'static str>::new()));
     let reordered = Arc::new(Mutex::new(Vec::<TestReorderEvent>::new()));
+    let selected = Arc::new(Mutex::new(Vec::<Option<&'static str>>::new()));
     let dom = VirtualDom::new_with_props(
         disabled_interaction_probe,
         DisabledInteractionProbeProps {
             closed: Arc::clone(&closed),
             reordered: Arc::clone(&reordered),
+            selected: Arc::clone(&selected),
         },
     );
 
@@ -2573,6 +2585,13 @@ async fn web_disabled_tabs_ignore_direct_click_close_key_and_reorder_shortcut() 
             .expect("reorder callback log should not be poisoned")
             .is_empty(),
         "disabled tabs must not emit reorder requests"
+    );
+    assert!(
+        selected
+            .lock()
+            .expect("selected callback log should not be poisoned")
+            .is_empty(),
+        "disabled tabs must not emit value-change requests"
     );
 }
 

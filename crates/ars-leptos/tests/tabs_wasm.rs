@@ -2839,6 +2839,7 @@ async fn disabled_tabs_ignore_direct_click_close_key_and_reorder_shortcut() {
     let owner = Owner::new();
     let closed = Arc::new(Mutex::new(Vec::<&'static str>::new()));
     let reordered = Arc::new(Mutex::new(Vec::<TestReorderEvent>::new()));
+    let selected = Arc::new(Mutex::new(Vec::<Option<&'static str>>::new()));
 
     let (mount_handle, parent) = owner.with(|| {
         let parent = container();
@@ -2869,6 +2870,7 @@ async fn disabled_tabs_ignore_direct_click_close_key_and_reorder_shortcut() {
         let mount_handle = mount_to(parent.clone(), {
             let closed = Arc::clone(&closed);
             let reordered = Arc::clone(&reordered);
+            let selected = Arc::clone(&selected);
             move || {
                 view! {
                     <Tabs
@@ -2892,6 +2894,15 @@ async fn disabled_tabs_ignore_direct_click_close_key_and_reorder_shortcut() {
                                     .expect("reorder callback log should not be poisoned")
                                     .push(event);
                                 true
+                            }
+                        })
+                        on_value_change=Callback::new({
+                            let selected = Arc::clone(&selected);
+                            move |key| {
+                                selected
+                                    .lock()
+                                    .expect("selected callback log should not be poisoned")
+                                    .push(key);
                             }
                         })
                     />
@@ -2949,6 +2960,13 @@ async fn disabled_tabs_ignore_direct_click_close_key_and_reorder_shortcut() {
             .expect("reorder callback log should not be poisoned")
             .is_empty(),
         "disabled tabs must not emit reorder requests"
+    );
+    assert!(
+        selected
+            .lock()
+            .expect("selected callback log should not be poisoned")
+            .is_empty(),
+        "disabled tabs must not emit value-change requests"
     );
 
     drop(mount_handle);
