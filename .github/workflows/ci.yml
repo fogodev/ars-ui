@@ -30,7 +30,7 @@ jobs:
       # `Cargo.lock` or the rustc toolchain changes.
       - uses: taiki-e/install-action@v2
         with:
-          tool: leptosfmt@0.1.33,dioxus-cli@0.7.7
+          tool: leptosfmt@0.1.33,dioxus-cli@0.7.9
       - name: Formatting
         run: cargo xtask ci fmt
 

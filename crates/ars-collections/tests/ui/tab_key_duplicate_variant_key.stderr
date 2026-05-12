@@ -1,0 +1,5 @@
+error: TabKey variant keys must be unique
+ --> tests/ui/tab_key_duplicate_variant_key.rs:7:21
+  |
+7 |     #[tab_key(str = "profile")]
+  |                     ^^^^^^^^^

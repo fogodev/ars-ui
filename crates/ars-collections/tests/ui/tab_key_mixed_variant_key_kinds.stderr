@@ -1,0 +1,6 @@
+error: TabKey per-variant keys must all use the same kind; do not mix int, str, and uuid keys in one enum
+ --> tests/ui/tab_key_mixed_variant_key_kinds.rs:7:5
+  |
+7 | /     #[tab_key(int = 42)]
+8 | |     Billing,
+  | |___________^

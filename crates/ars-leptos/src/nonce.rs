@@ -38,7 +38,10 @@ pub fn use_nonce_css_context_provider() -> ArsNonceCssCtx {
     unreachable_pub,
     reason = "ArsNonceCssProvider is re-exported at the adapter crate root."
 )]
-pub fn ArsNonceCssProvider<T>(nonce: String, children: TypedChildren<T>) -> impl IntoView
+pub fn ArsNonceCssProvider<T>(
+    #[prop(into)] nonce: Oco<'static, str>,
+    children: TypedChildren<T>,
+) -> impl IntoView
 where
     View<T>: IntoView,
 {
@@ -56,7 +59,7 @@ where
     unreachable_pub,
     reason = "ArsNonceStyle is re-exported at the adapter crate root."
 )]
-pub fn ArsNonceStyle(nonce: String) -> impl IntoView {
+pub fn ArsNonceStyle(#[prop(into)] nonce: Oco<'static, str>) -> impl IntoView {
     let rules = use_context::<ArsNonceCssCtx>().map(|context| context.rules);
 
     let css_text = move || {
@@ -373,7 +376,7 @@ mod tests {
             provide_context(ArsNonceCssCtx { rules });
 
             let _view = ArsNonceStyle(ArsNonceStyleProps {
-                nonce: String::from("nonce-123"),
+                nonce: "nonce-123".into(),
             });
 
             append_nonce_css(String::from(".one { color: red; }"));

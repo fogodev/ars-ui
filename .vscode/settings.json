@@ -1,4 +1,5 @@
 {
+    "dioxus.formatOnSave": "disabled",
     "files.associations": {
         "**/tailwind.css": "tailwindcss"
     },

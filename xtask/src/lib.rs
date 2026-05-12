@@ -2,6 +2,7 @@
 
 pub mod ci;
 pub mod coverage;
+pub mod e2e;
 pub mod examples;
 pub(crate) mod i18n;
 pub mod lint;

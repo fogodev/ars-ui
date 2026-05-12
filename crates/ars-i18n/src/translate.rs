@@ -15,6 +15,11 @@ use crate::{IntlBackend, Locale};
 /// Implementations should match on locale first, keep English as the fallback
 /// arm, and use the provided internationalization backend for locale-sensitive
 /// formatting when needed.
+///
+/// Prefer `#[derive(Translate)]` for static labels and simple named-field
+/// interpolation. Implement this trait manually when a message needs CLDR
+/// plural categories, locale-aware number/date/currency formatting, or other
+/// advanced message selection.
 pub trait Translate {
     /// Produces the localized text for this value.
     fn translate(&self, locale: &Locale, intl: &dyn IntlBackend) -> String;

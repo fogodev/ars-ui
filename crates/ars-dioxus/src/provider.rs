@@ -457,6 +457,24 @@ pub fn use_modality_context() -> Arc<dyn ModalityContext> {
     )
 }
 
+/// Resolves the shared [`PlatformEffects`] handle from provider context.
+///
+/// Components that need to issue platform calls (DOM focus, scroll lock,
+/// timers) read this handle instead of going through `web_sys` directly,
+/// so unit tests and SSR substitute [`NullPlatformEffects`] without
+/// rebuilding the component.
+#[must_use]
+pub fn use_platform_effects() -> Arc<dyn PlatformEffects> {
+    try_use_context::<ArsContext>().map_or_else(
+        || -> Arc<dyn PlatformEffects> {
+            warn_missing_provider("use_platform_effects");
+
+            Arc::new(ars_core::MissingProviderEffects)
+        },
+        |ctx| -> Arc<dyn PlatformEffects> { Arc::clone(&ctx.platform) },
+    )
+}
+
 /// Resolves per-component messages from override, provider registry, or defaults.
 #[must_use]
 pub fn use_messages<M: ars_core::ComponentMessages + Send + Sync + 'static>(

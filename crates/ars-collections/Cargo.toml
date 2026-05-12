@@ -15,19 +15,25 @@ uuid    = ["dep:uuid"]
 serde   = ["dep:serde", "indexmap/serde", "uuid?/serde"]
 
 [dependencies]
-ars-a11y = { path = "../ars-a11y", default-features = false }
-ars-core = { path = "../ars-core", default-features = false }
-ars-i18n = { path = "../ars-i18n", optional = true }
+ars-a11y         = { path = "../ars-a11y", default-features = false }
+ars-core         = { path = "../ars-core", default-features = false }
+ars-derive       = { path = "../ars-derive" }
+ars-i18n         = { path = "../ars-i18n", optional = true }
 ars-interactions = { path = "../ars-interactions", default-features = false, optional = true }
-hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }
-icu      = { version = "2.2", default-features = false, features = ["compiled_data"], optional = true }
-indexmap = { version = "2", default-features = false }
-serde    = { version = "1", default-features = false, features = ["alloc", "derive"], optional = true }
-uuid     = { version = "1", default-features = false, optional = true }
+hashbrown        = { version = "0.17", default-features = false, features = ["default-hasher"] }
+icu              = { version = "2.2", default-features = false, features = ["compiled_data"], optional = true }
+indexmap         = { version = "2", default-features = false }
+serde            = { version = "1", default-features = false, features = ["alloc", "derive"], optional = true }
+uuid             = { version = "1", default-features = false, optional = true }
 
 [dev-dependencies]
-ars-interactions = { path = "../ars-interactions", default-features = false, features = ["test-support"] }
-serde_json       = "1"
+serde_json = "1"
+trybuild   = "1"
+
+[dev-dependencies.ars-interactions]
+path             = "../ars-interactions"
+default-features = false
+features         = ["test-support"]
 
 [lints]
 workspace = true

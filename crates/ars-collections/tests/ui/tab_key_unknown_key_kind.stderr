@@ -1,0 +1,5 @@
+error: unknown TabKey variant key kind; use int, str, or uuid
+ --> tests/ui/tab_key_unknown_key_kind.rs:5:15
+  |
+5 |     #[tab_key(slug = "profile")]
+  |               ^^^^

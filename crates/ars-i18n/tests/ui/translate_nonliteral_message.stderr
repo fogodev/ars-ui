@@ -1,0 +1,5 @@
+error: Translate messages must be string literals
+ --> tests/ui/translate_nonliteral_message.rs:8:17
+  |
+8 |     #[translate(en = HELLO)]
+  |                 ^^^^^^^^^^

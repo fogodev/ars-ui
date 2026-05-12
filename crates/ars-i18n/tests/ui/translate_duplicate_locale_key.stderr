@@ -1,0 +1,5 @@
+error: Translate duplicate locale `en`
+ --> tests/ui/translate_duplicate_locale_key.rs:7:26
+  |
+7 |     #[translate(locale = "en", text = "Hi")]
+  |                          ^^^^

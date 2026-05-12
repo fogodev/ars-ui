@@ -1,0 +1,5 @@
+error: TabKey discriminants must be non-negative integer literals that fit in u64
+ --> tests/ui/tab_key_discriminant_overflow.rs:6:15
+  |
+6 |     Profile = 18446744073709551616,
+  |               ^^^^^^^^^^^^^^^^^^^^

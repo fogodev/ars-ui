@@ -39,7 +39,7 @@ use alloc::{
 };
 use core::fmt::{self, Debug};
 
-use ars_collections::Key;
+use ars_collections::{Key, TabKey};
 use ars_core::{
     AriaAttr, AttrMap, Bindable, ComponentIds, ComponentMessages, ComponentPart, ConnectApi,
     Direction, Env, HtmlAttr, KeyboardKey, Locale, MessageFn, Orientation, PendingEffect,
@@ -169,6 +169,19 @@ pub enum Event {
         /// The target zero-based index in the tab list.
         new_index: usize,
     },
+
+    /// Push a new controlled value into [`Context::value`] via
+    /// [`Bindable::sync_controlled`].
+    ///
+    /// Adapters dispatch this from [`Machine::on_props_changed`] when
+    /// [`Props::value`] changes between renders. The transition reapplies
+    /// the selection invariant (snapping the focused tab if the new
+    /// controlled key is disabled or unregistered) and downgrades
+    /// `Focused → Idle` when the snap clears the focused tab.
+    ///
+    /// `None` clears the controlled override; the next [`Bindable::get`]
+    /// returns the internal value (typically [`Props::default_value`]).
+    SyncControlledValue(Option<Key>),
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -226,6 +239,156 @@ impl TabRegistration {
             closable: true,
         }
     }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Adapter metadata helpers
+// ────────────────────────────────────────────────────────────────────
+
+/// Framework-agnostic metadata for one rendered adapter tab row.
+///
+/// Adapters keep the actual trigger and panel render values in their own
+/// `Tab` structs (`ViewFn` for Leptos, `Element` for Dioxus), but both
+/// adapters need the same semantic row data to register tabs, aggregate
+/// disabled keys, look typed keys back up from internal [`Key`] values, and
+/// plan drag reorders. This type centralizes that shared, DOM-free slice.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TabMeta<K: TabKey> {
+    /// Typed tab identifier supplied by the adapter user.
+    pub typed_key: K,
+
+    /// Internal machine key derived from [`typed_key`](Self::typed_key).
+    pub key: Key,
+
+    /// Resolved semantic label used for close-button names and reorder
+    /// announcements.
+    pub label_text: String,
+
+    /// Whether the tab renders a close affordance and accepts close
+    /// keyboard shortcuts.
+    pub closable: bool,
+
+    /// Whether the tab is disabled after merging per-row and prop-level
+    /// disabled state.
+    pub disabled: bool,
+}
+
+impl<K: TabKey> TabMeta<K> {
+    /// Builds metadata for one adapter-rendered tab row.
+    #[must_use]
+    pub fn new(
+        typed_key: K,
+        label_text: impl Into<String>,
+        closable: bool,
+        disabled: bool,
+    ) -> Self {
+        Self {
+            typed_key,
+            key: typed_key.into_key(),
+            label_text: label_text.into(),
+            closable,
+            disabled,
+        }
+    }
+}
+
+/// Adapter-level reorder callback payload.
+///
+/// The payload is typed with the public adapter key rather than the
+/// internal [`Key`] so consumers using enum-backed tabs cannot accidentally
+/// mix key domains in their callback handling.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ReorderEvent<K: TabKey> {
+    /// Tab being moved.
+    pub key: K,
+
+    /// Current zero-based index before the consumer applies the reorder.
+    pub old_index: usize,
+
+    /// Requested zero-based index after the reorder.
+    pub new_index: usize,
+}
+
+impl<K: TabKey> Debug for ReorderEvent<K> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReorderEvent")
+            .field("key", &self.key.into_key())
+            .field("old_index", &self.old_index)
+            .field("new_index", &self.new_index)
+            .finish()
+    }
+}
+
+/// Fully-resolved plan for a drag reorder between two rendered tab rows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReorderPlan<K: TabKey> {
+    /// Typed callback payload to send before committing the reorder.
+    pub event: ReorderEvent<K>,
+
+    /// Semantic label of the moved tab, used for the live announcement.
+    pub label_text: String,
+
+    /// Total number of registered tabs at the time of the reorder.
+    pub total: usize,
+}
+
+/// Builds the registration list dispatched to the agnostic core.
+#[must_use]
+pub fn registrations_from_meta<K: TabKey>(meta: &[TabMeta<K>]) -> Vec<TabRegistration> {
+    meta.iter()
+        .map(|tab| TabRegistration {
+            key: tab.key.clone(),
+            closable: tab.closable,
+        })
+        .collect()
+}
+
+/// Builds the disabled-key set from a metadata snapshot.
+#[must_use]
+pub fn disabled_keys_from_meta<K: TabKey>(meta: &[TabMeta<K>]) -> BTreeSet<Key> {
+    meta.iter()
+        .filter(|tab| tab.disabled)
+        .map(|tab| tab.key.clone())
+        .collect()
+}
+
+/// Finds the typed adapter key for an internal machine key.
+#[must_use]
+pub fn typed_key_for_key<K: TabKey>(meta: &[TabMeta<K>], key: &Key) -> Option<K> {
+    meta.iter()
+        .find(|tab| tab.key == *key)
+        .map(|tab| tab.typed_key)
+}
+
+/// Builds a drag reorder plan from rendered source and target keys.
+///
+/// Disabled rows cannot be dragged and cannot receive drops, so this
+/// returns `None` when either endpoint is disabled or missing.
+#[must_use]
+pub fn drag_reorder_plan<K: TabKey>(
+    meta: &[TabMeta<K>],
+    source_key: &Key,
+    target_key: &Key,
+) -> Option<ReorderPlan<K>> {
+    let old_index = meta
+        .iter()
+        .position(|tab| tab.key == *source_key && !tab.disabled)?;
+
+    let new_index = meta
+        .iter()
+        .position(|tab| tab.key == *target_key && !tab.disabled)?;
+
+    let moved = meta.get(old_index)?;
+
+    Some(ReorderPlan {
+        event: ReorderEvent {
+            key: moved.typed_key,
+            old_index,
+            new_index,
+        },
+        label_text: moved.label_text.clone(),
+        total: meta.len(),
+    })
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -822,6 +985,12 @@ impl ars_core::Machine for Machine {
 
             // ── ReorderTab — pure notification (§6.3) ────────────────
             (_, Event::ReorderTab { .. }) => Some(TransitionPlan::context_only(|_| {})),
+
+            // ── SyncControlledValue — push controlled value into the
+            // ── Bindable and re-apply the selection invariant. ──────
+            (_, Event::SyncControlledValue(value)) => {
+                Some(sync_controlled_value_plan(state, ctx, value.clone()))
+            }
         }
     }
 
@@ -858,6 +1027,16 @@ impl ars_core::Machine for Machine {
 
         if non_dir_context_props_changed(old, new) {
             events.push(Event::SyncProps);
+        }
+
+        // The controlled-`value` Bindable is reflected into [`Context::value`]
+        // via `Bindable::sync_controlled`. Detecting the prop delta here and
+        // emitting [`Event::SyncControlledValue`] is the only path the agnostic
+        // core offers for adapters to push controlled-value updates into
+        // `Context` (the Bindable lives behind `&mut Context`, which only a
+        // transition plan can mutate).
+        if old.value != new.value {
+            events.push(Event::SyncControlledValue(new.value.clone().flatten()));
         }
 
         events
@@ -1068,6 +1247,45 @@ fn sync_props_plan(state: &State, ctx: &Context, props: &Props) -> TransitionPla
     }
 }
 
+/// Builds the [`Event::SyncControlledValue`] transition plan. Calls
+/// [`Bindable::sync_controlled`] with the new controlled value, then
+/// re-applies the selection invariant. Same `Focused → Idle` downgrade
+/// as [`set_tabs_plan`] when the new controlled key would render the
+/// focused tab disabled or unregistered.
+fn sync_controlled_value_plan(
+    state: &State,
+    ctx: &Context,
+    value: Option<Key>,
+) -> TransitionPlan<Machine> {
+    let downgrade_to_idle = match state {
+        State::Idle => false,
+
+        State::Focused { tab } => {
+            let still_present = ctx.tabs.iter().any(|key| key == tab);
+
+            let still_enabled = !ctx.disabled_tabs.contains(tab);
+
+            !(still_present && still_enabled)
+        }
+    };
+
+    let apply = move |ctx: &mut Context| {
+        // Wrap in `Some` because the outer `Option` of
+        // `Bindable<Option<Key>>::sync_controlled` distinguishes
+        // controlled (`Some`) from uncontrolled (`None`); switching
+        // controlled → uncontrolled is forbidden by the spec.
+        ctx.value.sync_controlled(Some(value));
+
+        snap_focused_tab_to_valid_key(ctx);
+    };
+
+    if downgrade_to_idle {
+        TransitionPlan::to(State::Idle).apply(apply)
+    } else {
+        TransitionPlan::context_only(apply)
+    }
+}
+
 /// Re-establishes the selection invariant after `tabs` changes:
 ///
 /// 1. If `value` already points at a valid (registered, non-disabled)
@@ -1104,17 +1322,22 @@ fn snap_focused_tab_to_valid_key(ctx: &mut Context) {
     }
 }
 
-/// Picks the successor tab when removing the tab at `position` from
-/// `tabs`. Prefers the next tab; falls back to the previous tab when the
-/// removed tab was last; returns `None` when `tabs` had only one element.
-fn pick_successor(tabs: &[Key], position: usize) -> Option<Key> {
-    if position + 1 < tabs.len() {
-        Some(tabs[position + 1].clone())
-    } else if position > 0 {
-        Some(tabs[position - 1].clone())
-    } else {
-        None
-    }
+/// Picks the enabled successor tab when removing the tab at `position`.
+/// Prefers the next enabled tab; falls back to the previous enabled tab
+/// when no later enabled tab exists.
+fn pick_successor(ctx: &Context, position: usize) -> Option<Key> {
+    ctx.tabs
+        .iter()
+        .skip(position + 1)
+        .find(|key| !is_disabled(ctx, key))
+        .cloned()
+        .or_else(|| {
+            ctx.tabs[..position]
+                .iter()
+                .rev()
+                .find(|key| !is_disabled(ctx, key))
+                .cloned()
+        })
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1193,10 +1416,11 @@ impl Api<'_> {
     /// Returns the deterministic successor key when closing `tab_key`,
     /// matching spec §5.3:
     ///
-    /// - Prefers the next tab in DOM order.
-    /// - Falls back to the previous tab when `tab_key` is last.
+    /// - Prefers the next enabled tab in DOM order.
+    /// - Falls back to the previous enabled tab when no later enabled tab
+    ///   exists.
     /// - Returns `None` when `tab_key` is not in the list, or when the
-    ///   list will be empty after the close.
+    ///   list will have no enabled tabs after the close.
     ///
     /// Consumers call this from their `CloseTab` handler to drive
     /// selection follow-up (typically dispatching
@@ -1205,7 +1429,7 @@ impl Api<'_> {
     pub fn successor_for_close(&self, tab_key: &Key) -> Option<Key> {
         let position = self.ctx.tabs.iter().position(|key| key == tab_key)?;
 
-        pick_successor(&self.ctx.tabs, position)
+        pick_successor(self.ctx, position)
     }
 
     /// Attributes for the outer root wrapper element.
@@ -1403,7 +1627,7 @@ impl Api<'_> {
             };
 
             if let Some(step) = reorder_axis_match {
-                if let Some(new_index) = self.next_reorder_index(tab_key, step) {
+                if let Some(new_index) = self.next_reorder_index_step(tab_key, step) {
                     (self.send)(Event::ReorderTab {
                         tab: tab_key.clone(),
                         new_index,
@@ -1437,10 +1661,50 @@ impl Api<'_> {
     }
 
     /// Computes the new index for a `Ctrl+Arrow` reorder dispatch.
+    ///
+    /// `forward = true` increases the index (Ctrl+ArrowRight in horizontal
+    /// LTR, Ctrl+ArrowDown in vertical); `forward = false` decreases.
+    /// Direction-naive — RTL does not swap this; see spec §6.4.
+    ///
     /// Disabled tabs are not reorderable — returns `None` when
     /// `tab_key` is disabled. Otherwise returns `None` when the move
     /// would push the tab past either end (clamped, no event emitted).
-    fn next_reorder_index(&self, tab_key: &Key, step: ReorderStep) -> Option<usize> {
+    ///
+    /// Adapters call this from their keyboard handler to compute the
+    /// new index passed to [`Event::ReorderTab`], so the clamp / disable
+    /// guard logic stays single-sourced in the agnostic core.
+    #[must_use]
+    pub fn next_reorder_index(&self, tab_key: &Key, forward: bool) -> Option<usize> {
+        self.next_reorder_index_step(
+            tab_key,
+            if forward {
+                ReorderStep::Next
+            } else {
+                ReorderStep::Prev
+            },
+        )
+    }
+
+    /// Builds the localized `LiveAnnouncer` announcement string for a
+    /// committed keyboard reorder via [`Messages::reorder_announce_label`].
+    ///
+    /// Adapters call this instead of hardcoding the English template, so
+    /// consumer-supplied localization templates flow through.
+    /// `new_position` is the **1-based** position the tab moved to;
+    /// `total` is the current tab count after the reorder commits.
+    #[must_use]
+    pub fn reorder_announcement(
+        &self,
+        tab_label: &str,
+        new_position: usize,
+        total: usize,
+    ) -> String {
+        (self.ctx.messages.reorder_announce_label)(tab_label, new_position, total, &self.ctx.locale)
+    }
+
+    /// Internal `next_reorder_index` implementation taking the typed
+    /// [`ReorderStep`] used by [`Api::on_tab_keydown`].
+    fn next_reorder_index_step(&self, tab_key: &Key, step: ReorderStep) -> Option<usize> {
         if is_disabled(self.ctx, tab_key) {
             return None;
         }

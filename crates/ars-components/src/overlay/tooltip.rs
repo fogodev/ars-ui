@@ -409,6 +409,10 @@ impl ars_core::Machine for Machine {
         )
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "tooltip transition table keeps state/event behavior in one auditable match"
+    )]
     fn transition(
         state: &Self::State,
         event: &Self::Event,

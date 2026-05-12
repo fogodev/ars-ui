@@ -1,0 +1,5 @@
+error: TabKey uuid keys must be canonical UUID string literals
+ --> tests/ui/tab_key_invalid_uuid.rs:5:22
+  |
+5 |     #[tab_key(uuid = "not-a-uuid")]
+  |                      ^^^^^^^^^^^^

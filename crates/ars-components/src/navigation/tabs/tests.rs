@@ -108,6 +108,15 @@ fn effect_names(result: &SendResult<Machine>) -> Vec<Effect> {
     result.pending_effects.iter().map(|e| e.name).collect()
 }
 
+fn meta(
+    key: &'static str,
+    label_text: &str,
+    closable: bool,
+    disabled: bool,
+) -> TabMeta<&'static str> {
+    TabMeta::new(key, label_text, closable, disabled)
+}
+
 // ────────────────────────────────────────────────────────────────────
 // 1. Tab list role and orientation
 // ────────────────────────────────────────────────────────────────────
@@ -1081,6 +1090,19 @@ fn successor_for_close_falls_back_to_previous_when_last() {
     let api = service.connect(&|_| {});
 
     assert_eq!(api.successor_for_close(&key("c")), Some(key("b")));
+}
+
+#[test]
+fn successor_for_close_skips_disabled_tabs() {
+    let mut props = test_props();
+
+    props.disabled_keys = BTreeSet::from([key("c")]);
+
+    let service = service_with_tabs(props, &[key("a"), key("b"), key("c")]);
+
+    let api = service.connect(&|_| {});
+
+    assert_eq!(api.successor_for_close(&key("b")), Some(key("a")));
 }
 
 #[test]
@@ -3088,4 +3110,76 @@ fn reorder_skips_disabled_tabs() {
         recorder.borrow().is_empty(),
         "Ctrl+Arrow on a disabled tab is a no-op"
     );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Adapter metadata helpers
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn tab_meta_builds_registration_and_disabled_snapshots() {
+    let rows = vec![
+        meta("overview", "Overview", false, false),
+        meta("closable", "Closable", true, false),
+        meta("disabled", "Disabled", false, true),
+    ];
+
+    assert_eq!(
+        registrations_from_meta(&rows),
+        vec![
+            TabRegistration::new(key("overview")),
+            TabRegistration::closable(key("closable")),
+            TabRegistration::new(key("disabled")),
+        ]
+    );
+
+    assert_eq!(
+        disabled_keys_from_meta(&rows),
+        BTreeSet::from([key("disabled")])
+    );
+}
+
+#[test]
+fn tab_meta_typed_key_lookup_round_trips_adapter_key() {
+    let rows = vec![
+        meta("overview", "Overview", false, false),
+        meta("keyboard", "Keyboard", false, false),
+    ];
+
+    assert_eq!(typed_key_for_key(&rows, &key("keyboard")), Some("keyboard"));
+    assert_eq!(typed_key_for_key(&rows, &key("missing")), None);
+}
+
+#[test]
+fn tab_meta_drag_reorder_plan_skips_disabled_and_returns_announcement_data() {
+    let rows = vec![
+        meta("overview", "Overview", false, false),
+        meta("disabled", "Disabled", false, true),
+        meta("closable", "Closable", true, false),
+    ];
+
+    assert_eq!(
+        drag_reorder_plan(&rows, &key("disabled"), &key("closable")),
+        None,
+        "disabled source tabs are not reorderable"
+    );
+    assert_eq!(
+        drag_reorder_plan(&rows, &key("overview"), &key("disabled")),
+        None,
+        "disabled target tabs are not reorder destinations"
+    );
+
+    let plan = drag_reorder_plan(&rows, &key("overview"), &key("closable"))
+        .expect("enabled source and target should build a reorder plan");
+
+    assert_eq!(
+        plan.event,
+        ReorderEvent {
+            key: "overview",
+            old_index: 0,
+            new_index: 2,
+        }
+    );
+    assert_eq!(plan.label_text, "Overview");
+    assert_eq!(plan.total, 3);
 }

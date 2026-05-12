@@ -1,0 +1,5 @@
+error: TabKey variant keys must be unique
+ --> tests/ui/tab_key_duplicate_uuid.rs:7:22
+  |
+7 |     #[tab_key(uuid = "018f9b58-8f3d-7c8b-9d71-000000000000")]
+  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -1,0 +1,5 @@
+error: Translate explicit text attributes must include locale = "..."
+ --> tests/ui/translate_explicit_text_without_locale.rs:6:24
+  |
+6 |     #[translate(text = "Hello")]
+  |                        ^^^^^^^

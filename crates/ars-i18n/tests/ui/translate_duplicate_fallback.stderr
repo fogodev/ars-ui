@@ -1,0 +1,5 @@
+error: Translate accepts only one fallback locale
+ --> tests/ui/translate_duplicate_fallback.rs:4:30
+  |
+4 | #[translate(fallback = "en", fallback = "pt")]
+  |                              ^^^^^^^^^^^^^^^

@@ -129,13 +129,9 @@ pub fn list() -> String {
 /// Returns an error when the example is unknown or the underlying server exits
 /// unsuccessfully.
 pub fn serve(name: &str, port: Option<u16>, open: bool, hot_reload: bool) -> Result<(), String> {
-    let example = resolve(name)?;
-
-    let status = match example.framework {
-        Framework::Leptos => serve_leptos(example.path, port, open),
-        Framework::Dioxus => serve_dioxus(example.path, port, open, hot_reload),
-    }
-    .map_err(|err| format!("failed to start {name}: {err}"))?;
+    let status = server_command(name, port, open, hot_reload)?
+        .status()
+        .map_err(|err| format!("failed to start {name}: {err}"))?;
 
     if status.success() {
         Ok(())
@@ -144,14 +140,61 @@ pub fn serve(name: &str, port: Option<u16>, open: bool, hot_reload: bool) -> Res
     }
 }
 
-fn serve_leptos(
-    path: &str,
+/// Runs a Dioxus desktop example.
+///
+/// # Errors
+///
+/// Returns an error when the example is unknown, is not a Dioxus example, or
+/// the underlying desktop process exits unsuccessfully.
+pub fn serve_desktop(name: &str, hot_reload: bool) -> Result<(), String> {
+    let status = desktop_command(name, hot_reload)?
+        .status()
+        .map_err(|err| format!("failed to start {name} in desktop mode: {err}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("{name} desktop mode exited with status {status}"))
+    }
+}
+
+/// Builds the dev-server command for a browser example.
+///
+/// The returned command is not spawned. Callers that need to manage the
+/// process lifetime can override stdio or environment variables before
+/// spawning it.
+///
+/// # Errors
+///
+/// Returns an error when the example name is unknown or the command cannot be
+/// constructed from the current workspace.
+pub fn server_command(
+    name: &str,
     port: Option<u16>,
     open: bool,
-) -> Result<std::process::ExitStatus, String> {
-    leptos_command(path, port, open)?
-        .status()
-        .map_err(|err| err.to_string())
+    hot_reload: bool,
+) -> Result<Command, String> {
+    let example = resolve(name)?;
+
+    match example.framework {
+        Framework::Leptos => leptos_command(example.path, port, open),
+        Framework::Dioxus => dioxus_command(example.path, port, open, hot_reload),
+    }
+}
+
+/// Builds the desktop command for a Dioxus example.
+///
+/// # Errors
+///
+/// Returns an error when the example name is unknown or does not use Dioxus.
+pub fn desktop_command(name: &str, hot_reload: bool) -> Result<Command, String> {
+    let example = resolve(name)?;
+
+    if example.framework != Framework::Dioxus {
+        return Err(format!("{name} is not a Dioxus example"));
+    }
+
+    dioxus_desktop_command(example.path, hot_reload)
 }
 
 fn leptos_command(path: &str, port: Option<u16>, open: bool) -> Result<Command, String> {
@@ -176,17 +219,6 @@ fn leptos_command(path: &str, port: Option<u16>, open: bool) -> Result<Command, 
         .stderr(Stdio::inherit());
 
     Ok(command)
-}
-
-fn serve_dioxus(
-    path: &str,
-    port: Option<u16>,
-    open: bool,
-    hot_reload: bool,
-) -> Result<std::process::ExitStatus, String> {
-    dioxus_command(path, port, open, hot_reload)?
-        .status()
-        .map_err(|err| err.to_string())
 }
 
 fn dioxus_command(
@@ -224,6 +256,28 @@ fn dioxus_command(
     Ok(command)
 }
 
+fn dioxus_desktop_command(path: &str, hot_reload: bool) -> Result<Command, String> {
+    let mut command = Command::new("dx");
+
+    let target_dir = std::env::current_dir()
+        .map_err(|err| err.to_string())?
+        .join("target/examples");
+
+    command
+        .arg("serve")
+        .arg("--desktop")
+        .arg("--hot-reload")
+        .arg(hot_reload.to_string())
+        .env("CARGO_TARGET_DIR", target_dir)
+        .env_remove("NO_COLOR")
+        .current_dir(Path::new(path))
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+
+    Ok(command)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,6 +301,22 @@ mod tests {
                 .windows(2)
                 .any(|window| window == ["--interactive", "false"]),
             "Dioxus serve must not disable interactive stdin shortcuts"
+        );
+    }
+
+    #[test]
+    fn dioxus_desktop_command_runs_tailwind_example_in_desktop_mode() {
+        let command =
+            desktop_command("widgets-dioxus-tailwind", false).expect("command should build");
+
+        assert_eq!(command.get_program().to_string_lossy(), "dx");
+        assert_eq!(
+            command.get_current_dir(),
+            Some(Path::new("examples/widgets-dioxus-tailwind"))
+        );
+        assert_eq!(
+            args(&command),
+            ["serve", "--desktop", "--hot-reload", "false"]
         );
     }
 }

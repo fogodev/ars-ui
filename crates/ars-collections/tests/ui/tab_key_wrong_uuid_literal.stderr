@@ -1,0 +1,5 @@
+error: TabKey uuid keys must be string literals
+ --> tests/ui/tab_key_wrong_uuid_literal.rs:5:22
+  |
+5 |     #[tab_key(uuid = 1)]
+  |                      ^

@@ -6,7 +6,7 @@
 
 use ars_components::utility::button::{self, Api};
 pub use ars_components::utility::button::{
-    FormEncType, FormMethod, FormTarget, Size, Type, Variant,
+    FormEncType, FormMethod, FormTarget, Messages, Size, Type, Variant,
 };
 use ars_core::{AriaAttr, AttrMap, AttrValue, HtmlAttr, KeyModifiers, PointerType, SharedFlag};
 pub use ars_core::{SafeUrl, UnsafeUrlError};
@@ -616,8 +616,7 @@ mod tests {
     use super::*;
 
     fn api_for(props: button::Props) -> bool {
-        let service =
-            Service::<button::Machine>::new(props, &Env::default(), &button::Messages::default());
+        let service = Service::<button::Machine>::new(props, &Env::default(), &Messages::default());
 
         let api = service.connect(&|_| {});
 
@@ -764,7 +763,7 @@ mod tests {
                 .form_no_validate(true)
                 .auto_focus(true),
             &Env::default(),
-            &button::Messages::default(),
+            &Messages::default(),
         );
 
         let api = service.connect(&|_| {});

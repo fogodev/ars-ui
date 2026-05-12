@@ -27,20 +27,21 @@ a tab on focus) and manual activation (selecting only on Enter/Space).
 
 ### 1.2 Events
 
-| Event                           | Payload           | Description                                                                                                                                                                                                                                                                                                                                                                          |
-| ------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `SelectTab(Key)`                | tab key           | Activate a tab and show its panel.                                                                                                                                                                                                                                                                                                                                                   |
-| `Focus(Key)`                    | `Key`             | A tab received DOM focus from outside the keyboard navigation flow (pointer, programmatic, screen-reader virtual cursor). Idempotent — re-firing for an already-focused tab is a no-op.                                                                                                                                                                                              |
-| `Blur`                          | —                 | Focus left the tab list.                                                                                                                                                                                                                                                                                                                                                             |
-| `FocusNext`                     | —                 | Move focus to the next non-disabled tab.                                                                                                                                                                                                                                                                                                                                             |
-| `FocusPrev`                     | —                 | Move focus to the previous non-disabled tab.                                                                                                                                                                                                                                                                                                                                         |
-| `FocusFirst`                    | —                 | Move focus to the first non-disabled tab.                                                                                                                                                                                                                                                                                                                                            |
-| `FocusLast`                     | —                 | Move focus to the last non-disabled tab.                                                                                                                                                                                                                                                                                                                                             |
-| `SetDirection(Direction)`       | direction         | Replace `ctx.dir`. Idempotent. Adapter dispatches once after mount when `Props::dir == Auto`; `Machine::on_props_changed` also dispatches it whenever `Props::dir` changes between renders (including `Concrete → Auto`, signalling "please re-resolve").                                                                                                                            |
-| `SetTabs(Vec<TabRegistration>)` | tab registrations | Bulk-replace the registered tab list. Adapter dispatches whenever its rendered tab triggers change. Duplicate keys deduped (first occurrence wins). Re-establishes selection invariant — see §1.5 `snap_value_to_valid_key`.                                                                                                                                                         |
-| `SyncProps`                     | —                 | Re-apply context-backed non-`dir` prop fields (`orientation`, `activation_mode`, `loop_focus`, `disabled_keys`) after a runtime prop change. Emitted by `Machine::on_props_changed` when those fields differ. `dir` changes are emitted as a separate `Event::SetDirection` so an unrelated prop delta cannot clobber a runtime-resolved direction. Re-runs the selection invariant. |
-| `CloseTab(Key)`                 | tab key           | Pure notification (Closable variant — §5.3). Machine does not mutate `tabs` / `value`. Consumer applies the close via `SetTabs` / `SelectTab` after consulting `Api::can_close_tab` and `Api::successor_for_close`.                                                                                                                                                                  |
-| `ReorderTab { tab, new_index }` | `Key`, `usize`    | Pure notification (Reorderable variant — §6.3). Machine does not mutate `tabs`; consumer applies the reorder.                                                                                                                                                                                                                                                                        |
+| Event                              | Payload           | Description                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ---------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SelectTab(Key)`                   | tab key           | Activate a tab and show its panel.                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `Focus(Key)`                       | `Key`             | A tab received DOM focus from outside the keyboard navigation flow (pointer, programmatic, screen-reader virtual cursor). Idempotent — re-firing for an already-focused tab is a no-op.                                                                                                                                                                                                                                                                   |
+| `Blur`                             | —                 | Focus left the tab list.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `FocusNext`                        | —                 | Move focus to the next non-disabled tab.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `FocusPrev`                        | —                 | Move focus to the previous non-disabled tab.                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `FocusFirst`                       | —                 | Move focus to the first non-disabled tab.                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `FocusLast`                        | —                 | Move focus to the last non-disabled tab.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `SetDirection(Direction)`          | direction         | Replace `ctx.dir`. Idempotent. Adapter dispatches once after mount when `Props::dir == Auto`; `Machine::on_props_changed` also dispatches it whenever `Props::dir` changes between renders (including `Concrete → Auto`, signalling "please re-resolve").                                                                                                                                                                                                 |
+| `SetTabs(Vec<TabRegistration>)`    | tab registrations | Bulk-replace the registered tab list. Adapter dispatches whenever its rendered tab triggers change. Duplicate keys deduped (first occurrence wins). Re-establishes selection invariant — see §1.5 `snap_value_to_valid_key`.                                                                                                                                                                                                                              |
+| `SyncProps`                        | —                 | Re-apply context-backed non-`dir` prop fields (`orientation`, `activation_mode`, `loop_focus`, `disabled_keys`) after a runtime prop change. Emitted by `Machine::on_props_changed` when those fields differ. `dir` changes are emitted as a separate `Event::SetDirection` so an unrelated prop delta cannot clobber a runtime-resolved direction. Re-runs the selection invariant.                                                                      |
+| `CloseTab(Key)`                    | tab key           | Pure notification (Closable variant — §5.3). Machine does not mutate `tabs` / `value`. Consumer applies the close via `SetTabs` / `SelectTab` after consulting `Api::can_close_tab` and `Api::successor_for_close`.                                                                                                                                                                                                                                       |
+| `ReorderTab { tab, new_index }`    | `Key`, `usize`    | Pure notification (Reorderable variant — §6.3). Machine does not mutate `tabs`; consumer applies the reorder.                                                                                                                                                                                                                                                                                                                                             |
+| `SyncControlledValue(Option<Key>)` | controlled key    | Push the parent's controlled `Props::value` into `ctx.value` via `Bindable::sync_controlled`. Emitted by `Machine::on_props_changed` when `Props::value` differs between renders. Re-runs the selection invariant; `Focused → Idle` downgrade fires when the new controlled key is disabled or unregistered. The outer `Option` (controlled vs. uncontrolled) is fixed at mount per spec §1.5; this event only adjusts the inner `Option<Key>` selection. |
 
 `Focus(Key)` deliberately does NOT carry an `is_keyboard` bit: the
 `data-ars-focus-visible` attribute is a per-render concern derived from
@@ -482,6 +483,18 @@ impl ars_core::Machine for Machine {
 
             // ── ReorderTab — pure notification (§6.3) ────────────────────────
             (_, Event::ReorderTab { .. }) => Some(TransitionPlan::context_only(|_| {})),
+
+            // ── SyncControlledValue — push controlled value through Bindable ─
+            (_, Event::SyncControlledValue(value)) => {
+                let value = value.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    // Outer `Some(...)` because the Bindable's
+                    // controlled-vs-uncontrolled distinction is fixed
+                    // at mount; we only update the inner `Option<Key>`.
+                    ctx.value.sync_controlled(Some(value));
+                    snap_focused_tab_to_valid_key(ctx);
+                }))
+            }
         }
     }
 
@@ -515,6 +528,15 @@ impl ars_core::Machine for Machine {
             events.push(Event::SyncProps);
         }
 
+        // Controlled-value updates flow through `SyncControlledValue` so
+        // that `Bindable::sync_controlled` runs inside a transition plan
+        // (the only place `&mut Context` is reachable). `value` outer
+        // `Option` distinguishes controlled-vs-uncontrolled and is fixed
+        // at mount; only the inner `Option<Key>` changes propagate here.
+        if old.value != new.value {
+            events.push(Event::SyncControlledValue(new.value.clone().flatten()));
+        }
+
         events
     }
 }
@@ -522,8 +544,9 @@ impl ars_core::Machine for Machine {
 /// Returns `true` when any context-backed non-`value`, non-`dir` prop
 /// differs between `old` and `new`. Used by `Machine::on_props_changed`
 /// to decide whether to emit `Event::SyncProps`. The controlled-`value`
-/// path goes through `Bindable::sync_controlled` (the adapter's
-/// responsibility); `dir` changes flow through `Event::SetDirection`.
+/// path goes through `Event::SyncControlledValue` (which calls
+/// `Bindable::sync_controlled` in its transition plan); `dir` changes
+/// flow through `Event::SetDirection`.
 fn non_dir_context_props_changed(old: &Props, new: &Props) -> bool {
     old.orientation != new.orientation
         || old.activation_mode != new.activation_mode
@@ -606,12 +629,24 @@ fn snap_focused_tab_to_valid_key(ctx: &mut Context) {
 }
 
 /// Picks the successor tab when removing the tab at `position` from
-/// `tabs`. Used by `Api::successor_for_close` (the consumer-facing
-/// helper for the close-tab successor algorithm).
-fn pick_successor(tabs: &[Key], position: usize) -> Option<Key> {
-    if position + 1 < tabs.len() { Some(tabs[position + 1].clone()) }
-    else if position > 0         { Some(tabs[position - 1].clone()) }
-    else                         { None }
+/// `tabs`. Disabled tabs are skipped so closing the selected tab never
+/// hands focus or selection to an inert tab. Used by
+/// `Api::successor_for_close` (the consumer-facing helper for the
+/// close-tab successor algorithm).
+fn pick_successor(ctx: &Context, position: usize) -> Option<Key> {
+    ctx.tabs
+        .iter()
+        .skip(position + 1)
+        .find(|key| !is_disabled(ctx, key))
+        .cloned()
+        .or_else(|| {
+            ctx.tabs
+                .iter()
+                .take(position)
+                .rev()
+                .find(|key| !is_disabled(ctx, key))
+                .cloned()
+        })
 }
 ```
 
@@ -675,13 +710,14 @@ impl<'a> Api<'a> {
 
     /// Returns the deterministic successor when closing `tab_key`:
     ///
-    /// - Prefers the next tab in DOM order.
-    /// - Falls back to the previous tab when `tab_key` is last.
+    /// - Prefers the next enabled tab in DOM order.
+    /// - Falls back to the previous enabled tab when no enabled tab
+    ///   follows `tab_key`.
     /// - Returns `None` when `tab_key` is not in the list, or when the
-    ///   list will be empty after the close.
+    ///   list has no other enabled tab after the close.
     pub fn successor_for_close(&self, tab_key: &Key) -> Option<Key> {
         let position = self.ctx.tabs.iter().position(|k| k == tab_key)?;
-        pick_successor(&self.ctx.tabs, position)
+        pick_successor(self.ctx, position)
     }
 
     /// Attrs for the outer root wrapper element.
@@ -913,20 +949,43 @@ impl<'a> Api<'a> {
     }
 }
 
-#[derive(Clone, Copy)]
-enum ReorderStep { Next, Prev }
-
 impl<'a> Api<'a> {
     /// Disabled tabs are not reorderable — returns `None` for them.
-    /// Otherwise clamps at both ends.
-    fn next_reorder_index(&self, tab_key: &Key, step: ReorderStep) -> Option<usize> {
+    /// Otherwise clamps at both ends. `forward = true` increases the
+    /// index (Ctrl+ArrowRight in horizontal LTR, Ctrl+ArrowDown in
+    /// vertical); `forward = false` decreases. Direction-naive — RTL
+    /// does not swap this; see §6.4.
+    ///
+    /// Adapters call this from their keyboard handler so the clamp /
+    /// disable guard logic stays single-sourced in the agnostic core.
+    pub fn next_reorder_index(&self, tab_key: &Key, forward: bool) -> Option<usize> {
         if self.ctx.disabled_tabs.contains(tab_key) { return None; }
         let position = self.ctx.tabs.iter().position(|k| k == tab_key)?;
         let total = self.ctx.tabs.len();
-        match step {
-            ReorderStep::Next => if position + 1 < total { Some(position + 1) } else { None },
-            ReorderStep::Prev => if position > 0 { Some(position - 1) } else { None },
+        if forward {
+            if position + 1 < total { Some(position + 1) } else { None }
+        } else if position > 0 {
+            Some(position - 1)
+        } else {
+            None
         }
+    }
+
+    /// Builds the localized `LiveAnnouncer` announcement string for a
+    /// committed keyboard reorder via [`Messages::reorder_announce_label`].
+    ///
+    /// Adapters call this instead of hardcoding the English template, so
+    /// consumer-supplied localization flows through. `new_position` is
+    /// 1-based.
+    pub fn reorder_announcement(
+        &self,
+        tab_label: &str,
+        new_position: usize,
+        total: usize,
+    ) -> String {
+        (self.ctx.messages.reorder_announce_label)(
+            tab_label, new_position, total, &self.ctx.locale,
+        )
     }
 }
 
@@ -970,13 +1029,13 @@ Tabs
 └── Panel (×N)             role="tabpanel"
 ```
 
-| Part        | Element    | Key Attributes                                                                                                                                                                                                             |
-| ----------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Root`      | `<div>`    | `data-ars-scope="tabs"`, `data-ars-part="root"`, `data-ars-orientation`, `dir`                                                                                                                                             |
-| `List`      | `<div>`    | `data-ars-scope="tabs"`, `data-ars-part="list"`, `id="{props.id}-tablist"` (= `ids.part("tablist")`), `role="tablist"`, `aria-orientation`                                                                                 |
-| `Tab`       | `<button>` | `data-ars-scope="tabs"`, `data-ars-part="tab"`, `id="{props.id}-tab-{tab_key}"` (= `ids.item("tab", &tab_key)`), `role="tab"`, `aria-selected`, `aria-controls`, `tabindex`, `data-ars-selected`, `data-ars-focus-visible` |
-| `Indicator` | `<span>`   | `data-ars-scope="tabs"`, `data-ars-part="tab-indicator"`, `aria-hidden="true"`                                                                                                                                             |
-| `Panel`     | `<div>`    | `data-ars-scope="tabs"`, `data-ars-part="panel"`, `id="{props.id}-panel-{tab_key}"` (= `ids.item("panel", &tab_key)`), `role="tabpanel"`, `aria-labelledby`, `tabindex="0"`                                                |
+| Part        | Element                                                                                           | Key Attributes                                                                                                                                                                                                             |
+| ----------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Root`      | `<div>`                                                                                           | `data-ars-scope="tabs"`, `data-ars-part="root"`, `data-ars-orientation`, `dir`                                                                                                                                             |
+| `List`      | `<div>`                                                                                           | `data-ars-scope="tabs"`, `data-ars-part="list"`, `id="{props.id}-tablist"` (= `ids.part("tablist")`), `role="tablist"`, `aria-orientation`                                                                                 |
+| `Tab`       | adapter-owned focus target (`<a>` for link tabs; otherwise a role-backed element such as `<div>`) | `data-ars-scope="tabs"`, `data-ars-part="tab"`, `id="{props.id}-tab-{tab_key}"` (= `ids.item("tab", &tab_key)`), `role="tab"`, `aria-selected`, `aria-controls`, `tabindex`, `data-ars-selected`, `data-ars-focus-visible` |
+| `Indicator` | `<span>`                                                                                          | `data-ars-scope="tabs"`, `data-ars-part="tab-indicator"`, `aria-hidden="true"`                                                                                                                                             |
+| `Panel`     | `<div>`                                                                                           | `data-ars-scope="tabs"`, `data-ars-part="panel"`, `id="{props.id}-panel-{tab_key}"` (= `ids.item("panel", &tab_key)`), `role="tabpanel"`, `aria-labelledby`, `tabindex="0"`                                                |
 
 Every DOM `id` flows from the single `Context::ids: ComponentIds` base
 so `aria-controls` / `aria-labelledby` wiring is computed in one place
@@ -1064,9 +1123,11 @@ Tabs listed in `disabled_keys` (or `disabled_tabs` in `Context`) are
 - Disabled tabs render with `aria-disabled="true"` and emit
   `data-ars-disabled`.
 - The HTML `disabled` attribute is **not** set, so disabled tabs stay
-  in the natural focus order for screen-reader discoverability via
-  Tab — selected tabs are still primary focus targets via the roving
-  `tabindex="0"`.
+  programmatically focusable and discoverable through tablist arrow
+  navigation semantics. They do not become native disabled controls.
+  Natural browser Tab traversal still follows the roving tabindex
+  invariant: only the current roving tab has `tabindex="0"` and inactive
+  tabs, disabled or not, have `tabindex="-1"`.
 - A disabled tab that somehow already has focus (e.g. it was disabled
   while focused) still receives `data-ars-focus-visible` styling when
   the adapter's `focus_visible` parameter is `true`. Disabled tabs do
@@ -1126,9 +1187,47 @@ pub struct TabRegistration {
 ```
 
 The agnostic core stores the registered closable keys in
-`Context::closable_tabs: BTreeSet<Key>`. There is no `TabDef` struct in
+`Context::closable_tabs: BTreeSet<Key>`. There is no `Tab` struct in
 this crate — labels are a render concern owned by the adapter /
 consumer, not the agnostic core.
+
+Adapters that render framework-specific tab rows still share a pure
+semantic row snapshot in the agnostic crate. This snapshot carries only
+DOM-free data that both adapters need for registration, disabled-key
+aggregation, typed callback payloads, and drag reorder planning:
+
+```rust
+pub struct TabMeta<K: TabKey> {
+    pub typed_key: K,
+    pub key: Key,
+    pub label_text: String,
+    pub closable: bool,
+    pub disabled: bool,
+}
+
+impl<K: TabKey> TabMeta<K> {
+    pub fn new(
+        typed_key: K,
+        label_text: impl Into<String>,
+        closable: bool,
+        disabled: bool,
+    ) -> Self;
+}
+```
+
+The helper functions are part of the core component contract, not
+adapter-local implementation detail:
+
+```rust
+pub fn registrations_from_meta<K: TabKey>(meta: &[TabMeta<K>]) -> Vec<TabRegistration>;
+
+pub fn disabled_keys_from_meta<K: TabKey>(meta: &[TabMeta<K>]) -> BTreeSet<Key>;
+
+pub fn typed_key_for_key<K: TabKey>(meta: &[TabMeta<K>], key: &Key) -> Option<K>;
+```
+
+Framework adapters may still derive the `TabMeta` slice from reactive
+framework state, but they should not duplicate these pure conversions.
 
 ### 5.2 Additional Event
 
@@ -1152,8 +1251,9 @@ dialog) without leaving the machine in an inconsistent intermediate
 state. The deterministic successor algorithm is exposed as
 `Api::successor_for_close(&Key) -> Option<Key>`:
 
-- Prefers the next tab in DOM order.
-- Falls back to the previous tab when the closing tab is last.
+- Prefers the next enabled tab in DOM order.
+- Falls back to the previous enabled tab when no enabled tab follows the
+  closing tab.
 - Returns `None` when the closing tab is the only tab (the consumer
   should refuse the close when `Props::disallow_empty_selection` is
   `true` — `Api::can_close_tab(&Key) -> bool` packages this guard).
@@ -1168,20 +1268,25 @@ cleared the only tab without a successor), `Event::SetTabs` /
 ```text
 Tab
 ├── Label
-└── TabCloseTrigger  (<button>; data-ars-part="tab-close-trigger")
+└── TabCloseTrigger  (non-roving nested control; data-ars-part="tab-close-trigger")
 ```
 
-| Part              | Element    | Key Attributes                                                                                                            |
-| ----------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `TabCloseTrigger` | `<button>` | `data-ars-part="tab-close-trigger"`, `type="button"`, `aria-label=Messages.close_tab_label({tab label})`, `tabindex="-1"` |
+| Part              | Element                                                                                          | Key Attributes                                                                                                                                                |
+| ----------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TabCloseTrigger` | Non-tabbable adapter-owned element; avoid nested native controls when rendered inside a tab root | `data-ars-part="tab-close-trigger"`, `type="button"` when the element is a native button, `aria-label=Messages.close_tab_label({tab label})`, `tabindex="-1"` |
 
 The kebab-cased `data-ars-part` value is `"tab-close-trigger"` —
 matching the part variant `Part::TabCloseTrigger`. Using the
 `tab-`-prefixed token avoids visual collisions with Dialog's /
 Popover's `close-trigger` data-attribute when downstream stylesheets
-write scope-agnostic selectors. The `type="button"` attribute
-inhibits accidental form submission when the tabs render inside a
-`<form>` element.
+write scope-agnostic selectors. When the close trigger is rendered as a
+native `<button>`, the `type="button"` attribute inhibits accidental
+form submission when the tabs render inside a `<form>` element. When the
+tab root itself is an interactive role-backed element, adapters should
+render the close trigger as a non-native nested element and keep close
+activation on the tab's Delete / Backspace path plus pointer activation
+on the close trigger. This avoids invalid nested interactive controls
+while preserving the close affordance and accessible label.
 
 ### 5.5 Messages
 
@@ -1249,8 +1354,9 @@ enum (see §1.5).
   entirely in the framework adapter using its native drag
   infrastructure (`web_sys::DragEvent` + `Element::set_draggable` for
   the web). The agnostic core does not model drag state at all. On
-  drop, the adapter dispatches `Event::ReorderTab` with the dragged
-  tab key and computed new index.
+  drop, the adapter computes a drag reorder plan from the current
+  `TabMeta<K>` slice, then dispatches `Event::ReorderTab` with the
+  dragged tab key and computed new index.
 - **Keyboard**: `Ctrl+ArrowRight` / `Ctrl+ArrowLeft` (horizontal) or
   `Ctrl+ArrowDown` / `Ctrl+ArrowUp` (vertical) move the focused tab
   one position in that direction along the orientation axis. The
@@ -1289,9 +1395,38 @@ direction.
   via LiveAnnouncer using the
   `Messages::reorder_announce_label(label, new_position, total, locale)`
   template (default: `"{label} moved to position {n} of {total}"`).
-  The agnostic core does not invoke the LiveAnnouncer itself —
-  announcing is an adapter concern — but the message function is on
-  `Messages` so consumers localize a single source of truth.
+
+The shared reorder callback and drag-planning payloads are:
+
+```rust
+pub struct ReorderEvent<K: TabKey> {
+    pub key: K,
+    pub old_index: usize,
+    pub new_index: usize,
+}
+
+pub struct ReorderPlan<K: TabKey> {
+    pub event: ReorderEvent<K>,
+    pub label_text: String,
+    pub total: usize,
+}
+
+pub fn drag_reorder_plan<K: TabKey>(
+    meta: &[TabMeta<K>],
+    source_key: &Key,
+    target_key: &Key,
+) -> Option<ReorderPlan<K>>;
+```
+
+`drag_reorder_plan` returns `None` when either endpoint is missing or
+disabled. The returned `label_text` and `total` are the semantic data
+used by adapters to announce the committed reorder. The returned
+`ReorderEvent<K>` is typed with the public tab key enum so consumers do
+not handle internal `Key` values in reorder callbacks.
+
+The agnostic core does not invoke the LiveAnnouncer itself —
+announcing is an adapter concern — but the message function is on
+`Messages` so consumers localize a single source of truth.
 
 ## 7. Library Parity
 

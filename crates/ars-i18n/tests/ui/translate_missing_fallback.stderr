@@ -1,0 +1,6 @@
+error: Translate variant `Profile` must define fallback locale `en`
+ --> tests/ui/translate_missing_fallback.rs:6:5
+  |
+6 | /     #[translate(pt = "Perfil")]
+7 | |     Profile,
+  | |___________^

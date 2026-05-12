@@ -1,0 +1,5 @@
+error: Translate message has unmatched `}`
+ --> tests/ui/translate_unmatched_closing_brace.rs:6:22
+  |
+6 |     #[translate(en = "count} items")]
+  |                      ^^^^^^^^^^^^^^

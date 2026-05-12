@@ -1,0 +1,6 @@
+error: Translate can only be derived for enums
+ --> tests/ui/translate_on_struct.rs:4:1
+  |
+4 | / #[translate(fallback = "en")]
+5 | | struct Text;
+  | |____________^

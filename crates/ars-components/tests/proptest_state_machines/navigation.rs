@@ -434,4 +434,48 @@ proptest! {
             prop_assert_ne!(next, &target);
         }
     }
+
+    /// Reorder index arithmetic is single-sourced in the agnostic API
+    /// used by both keyboard handlers and drag/drop adapters: unregistered
+    /// and disabled tabs cannot move, edge moves clamp to `None`, and all
+    /// valid moves advance by exactly one DOM index.
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_next_reorder_index_matches_registered_non_disabled_bounds(
+        registrations in prop::collection::vec(arb_tab_registration(), 1..6),
+        disabled_keys in arb_disabled_keys(),
+        target in arb_key(),
+    ) {
+        let mut service = Service::<Machine>::new(
+            Props {
+                id: "tabs".to_string(),
+                reorderable: true,
+                disabled_keys,
+                ..Props::default()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(service.send(Event::SetTabs(registrations)));
+
+        let ctx = service.context();
+
+        let index = ctx.tabs.iter().position(|key| key == &target);
+
+        let is_disabled = ctx.disabled_tabs.contains(&target);
+
+        let expected_next = index
+            .filter(|_| !is_disabled)
+            .and_then(|position| (position + 1 < ctx.tabs.len()).then_some(position + 1));
+
+        let expected_prev = index
+            .filter(|_| !is_disabled)
+            .and_then(|position| position.checked_sub(1));
+
+        let api = service.connect(&|_| {});
+
+        prop_assert_eq!(api.next_reorder_index(&target, true), expected_next);
+        prop_assert_eq!(api.next_reorder_index(&target, false), expected_prev);
+    }
 }

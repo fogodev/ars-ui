@@ -1,0 +1,5 @@
+error: TabKey variant key values must be literals
+ --> tests/ui/tab_key_nonliteral_value.rs:7:15
+  |
+7 |     #[tab_key(int = PROFILE)]
+  |               ^^^^^^^^^^^^^

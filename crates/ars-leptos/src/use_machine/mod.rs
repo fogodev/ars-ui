@@ -272,7 +272,7 @@ where
     M::Event: Send + Sync + 'static,
     M::Messages: Send + Sync + 'static,
 {
-    let initial_props = props_signal.get();
+    let initial_props = props_signal.get_untracked();
 
     use_machine_with_reactive_props_inner::<M>(props_signal, initial_props, None)
 }
@@ -290,7 +290,7 @@ where
     M::Event: Send + Sync + 'static,
     M::Messages: Send + Sync + 'static,
 {
-    let initial_props = props_with_snapshot_id::<M>(props_signal.get(), &snapshot);
+    let initial_props = props_with_snapshot_id::<M>(props_signal.get_untracked(), &snapshot);
 
     use_machine_with_reactive_props_inner::<M>(props_signal, initial_props, Some(snapshot.state))
 }

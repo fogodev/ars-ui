@@ -45,8 +45,9 @@
 //! implementors inside this crate need it, keep it as a regular import.
 
 // -- User-facing traits --
-pub use ars_core::{SafeUrl, UnsafeUrlError};
-pub use ars_i18n::{Direction, Locale, Orientation, ResolvedDirection, Translate};
+pub use ars_collections::{Key, TabKey};
+pub use ars_core::{I18nRegistries, MessageFn, MessagesRegistry, SafeUrl, UnsafeUrlError};
+pub use ars_i18n::{Direction, IntlBackend, Locale, Orientation, ResolvedDirection, Translate};
 
 // -- Component modules --
 //
@@ -61,6 +62,7 @@ pub use ars_i18n::{Direction, Locale, Orientation, ResolvedDirection, Translate}
 // `DismissReason`, …) and the Dioxus-side wrappers (`Handle`, `Region`,
 // `RegionProps`, `use_dismissable`).
 pub use crate::as_child;
+pub use crate::navigation::{self, tabs};
 // The `error_boundary` adapter module exposes the `ArsErrorBoundary`
 // wrapper component spec'd at
 // `spec/foundation/09-adapter-dioxus.md` §21. End users reach it as

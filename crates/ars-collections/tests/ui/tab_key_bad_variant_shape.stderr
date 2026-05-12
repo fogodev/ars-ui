@@ -1,0 +1,5 @@
+error: TabKey variant key must be #[tab_key(int = 42)], #[tab_key(str = "profile")], or #[tab_key(uuid = "018f9b58-8f3d-7c8b-9d71-000000000000")]
+ --> tests/ui/tab_key_bad_variant_shape.rs:5:5
+  |
+5 |     #[tab_key(int)]
+  |     ^^^^^^^^^^^^^^^

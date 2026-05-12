@@ -1251,6 +1251,7 @@ fn schedule_style_detection(state: &Rc<RefCell<AnimationEndState>>, element: &El
     }
 }
 
+#[expect(clippy::too_many_lines, reason = "verbose setup code")]
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn run_style_detection(state: &Rc<RefCell<AnimationEndState>>, element: &Element) {
     if state.borrow().completed {

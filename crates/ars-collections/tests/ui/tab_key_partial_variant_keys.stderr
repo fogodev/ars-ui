@@ -1,0 +1,5 @@
+error: TabKey requires every variant to have #[tab_key(int = ...)], #[tab_key(str = ...)], or #[tab_key(uuid = ...)] when no enum-level strategy is set
+ --> tests/ui/tab_key_partial_variant_keys.rs:7:5
+  |
+7 |     Billing,
+  |     ^^^^^^^

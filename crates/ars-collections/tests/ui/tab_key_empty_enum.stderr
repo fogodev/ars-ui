@@ -1,0 +1,5 @@
+error: TabKey requires at least one enum variant
+ --> tests/ui/tab_key_empty_enum.rs:4:1
+  |
+4 | enum BadTab {}
+  | ^^^^^^^^^^^^^^

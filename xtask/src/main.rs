@@ -3,7 +3,7 @@
 use std::{env, path::PathBuf, process, sync};
 
 use clap::{Parser, Subcommand};
-use xtask::{ci, coverage, examples, lint, manifest, mcp, spec, test};
+use xtask::{ci, coverage, e2e, examples, lint, manifest, mcp, spec, test};
 
 /// ars-ui workspace task runner.
 #[derive(Parser)]
@@ -69,6 +69,12 @@ enum Command {
     Examples {
         #[command(subcommand)]
         cmd: ExamplesCommand,
+    },
+
+    /// Run browser E2E harnesses.
+    E2e {
+        #[command(subcommand)]
+        cmd: E2eCommand,
     },
 
     /// Repository testing policy lints.
@@ -224,6 +230,74 @@ enum ExamplesCommand {
         /// Whether Dioxus examples should enable CLI hot reload.
         #[arg(long, default_value_t = false, default_missing_value = "true", num_args = 0..=1)]
         hot_reload: bool,
+    },
+
+    /// Run one Dioxus example in desktop mode.
+    Desktop {
+        /// Dioxus example name, such as "widgets-dioxus-tailwind".
+        name: String,
+
+        /// Whether Dioxus should enable CLI hot reload.
+        #[arg(long, default_value_t = false, default_missing_value = "true", num_args = 0..=1)]
+        hot_reload: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum E2eCommand {
+    /// Run all navigation component E2E harnesses against a widget example.
+    Navigation {
+        /// Adapter example to exercise.
+        #[arg(long, value_enum, default_value_t = e2e::Adapter::Leptos)]
+        adapter: e2e::Adapter,
+
+        /// Port for the example server.
+        #[arg(long)]
+        port: Option<u16>,
+
+        /// `WebDriver` endpoint. Defaults to `WEBDRIVER_URL` or local `ChromeDriver`
+        /// on port 9515.
+        #[arg(long)]
+        webdriver_url: Option<String>,
+
+        /// Use an already-running example server instead of spawning one.
+        #[arg(long)]
+        no_server: bool,
+
+        /// Run Chrome with a visible browser window.
+        #[arg(long)]
+        headed: bool,
+    },
+
+    /// Run all utility component E2E harnesses against a widget example.
+    Utility {
+        /// Adapter example to exercise.
+        #[arg(long, value_enum, default_value_t = e2e::Adapter::Leptos)]
+        adapter: e2e::Adapter,
+
+        /// Port for the example server.
+        #[arg(long)]
+        port: Option<u16>,
+
+        /// `WebDriver` endpoint. Defaults to `WEBDRIVER_URL` or local `ChromeDriver`
+        /// on port 9515.
+        #[arg(long)]
+        webdriver_url: Option<String>,
+
+        /// Use an already-running example server instead of spawning one.
+        #[arg(long)]
+        no_server: bool,
+
+        /// Run Chrome with a visible browser window.
+        #[arg(long)]
+        headed: bool,
+    },
+
+    /// Run Dioxus desktop-mode E2E smoke checks.
+    Desktop {
+        /// Dioxus desktop example to exercise.
+        #[arg(long, value_enum, default_value_t = e2e::DesktopExample::DioxusTailwind)]
+        example: e2e::DesktopExample,
     },
 }
 
@@ -385,6 +459,10 @@ fn discover_spec_root() -> manifest::SpecRoot {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "xtask CLI dispatch keeps command routing visible in one match"
+)]
 fn main() {
     let cli = Cli::parse();
 
@@ -396,6 +474,7 @@ fn main() {
         } => {
             if let Err(e) = ci::run(steps, message_format.as_deref()) {
                 eprintln!("error: {e}");
+
                 process::exit(1);
             }
         }
@@ -419,6 +498,7 @@ fn main() {
         Command::Clippy { message_format } => {
             if let Err(e) = ci::clippy_workspace(message_format.as_deref(), false) {
                 eprintln!("error: {e}");
+
                 process::exit(1);
             }
         }
@@ -469,6 +549,7 @@ fn main() {
                 Ok(output) => print!("{output}"),
                 Err(e) => {
                     eprintln!("{e}");
+
                     process::exit(1);
                 }
             }
@@ -514,6 +595,7 @@ fn main() {
                 Ok(output) => print!("{output}"),
                 Err(e) => {
                     eprintln!("{e}");
+
                     process::exit(1);
                 }
             }
@@ -524,6 +606,7 @@ fn main() {
             let result = match cmd {
                 ExamplesCommand::List => {
                     print!("{}", examples::list());
+
                     Ok(())
                 }
 
@@ -533,10 +616,56 @@ fn main() {
                     open,
                     hot_reload,
                 } => examples::serve(&name, port, open, hot_reload),
+
+                ExamplesCommand::Desktop { name, hot_reload } => {
+                    examples::serve_desktop(&name, hot_reload)
+                }
             };
 
             if let Err(e) = result {
                 eprintln!("error: {e}");
+
+                process::exit(1);
+            }
+        }
+
+        // ── E2E ───────────────────────────────────────────────────────
+        Command::E2e { cmd } => {
+            let result = match cmd {
+                E2eCommand::Navigation {
+                    adapter,
+                    port,
+                    webdriver_url,
+                    no_server,
+                    headed,
+                } => e2e::run_navigation(&e2e::Options {
+                    adapter,
+                    port,
+                    webdriver_url,
+                    no_server,
+                    headless: !headed,
+                }),
+
+                E2eCommand::Utility {
+                    adapter,
+                    port,
+                    webdriver_url,
+                    no_server,
+                    headed,
+                } => e2e::run_utility(&e2e::Options {
+                    adapter,
+                    port,
+                    webdriver_url,
+                    no_server,
+                    headless: !headed,
+                }),
+
+                E2eCommand::Desktop { example } => e2e::run_desktop(example),
+            };
+
+            if let Err(e) = result {
+                eprintln!("error: {e}");
+
                 process::exit(1);
             }
         }
@@ -559,6 +688,7 @@ fn main() {
 
             if let Err(e) = test::run(stage) {
                 eprintln!("error: {e}");
+
                 process::exit(1);
             }
         }
@@ -589,6 +719,7 @@ fn main() {
                         && text.contains("error(s) found:")
                     {
                         print!("{text}");
+
                         process::exit(1);
                     }
 
@@ -653,6 +784,7 @@ fn main() {
                 Ok(output) => print!("{output}"),
                 Err(e) => {
                     eprintln!("error: {e}");
+
                     process::exit(1);
                 }
             }

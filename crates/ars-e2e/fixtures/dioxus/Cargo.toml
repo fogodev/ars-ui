@@ -1,0 +1,15 @@
+[package]
+name    = "ars-e2e-fixture-dioxus"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+default = ["web"]
+web     = ["ars-dioxus/web", "dioxus/web"]
+
+[dependencies]
+ars-dioxus = { path = "../../../ars-dioxus" }
+dioxus     = { version = "0.7", default-features = false, features = ["launch"] }

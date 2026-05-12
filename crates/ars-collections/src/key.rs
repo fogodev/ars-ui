@@ -127,6 +127,98 @@ impl Key {
     }
 }
 
+/// Converts a typed tab identifier into the internal collection [`Key`].
+///
+/// `TabKey` is intended for fieldless application enums that identify
+/// tabs without stringly values at call sites. Framework adapters keep
+/// their internal machines on [`Key`], while public tab rows can accept
+/// user-defined enums that implement this trait.
+///
+/// Prefer `#[derive(TabKey)]` with explicit keys. The derive macro is
+/// re-exported from this crate and from the framework adapter preludes, so
+/// applications can import the trait, key type, and derive from whichever
+/// public facade they already depend on:
+///
+/// - `#[tab_key(ordinal)]` for declaration-order integer keys when the
+///   identity is local and non-persisted.
+/// - `#[tab_key(discriminant)]` for stable explicit integer keys.
+/// - per-variant `#[tab_key(int = ...)]`, `#[tab_key(str = "...")]`, or
+///   `#[tab_key(uuid = "...")]` keys when the stable value should live next
+///   to each variant.
+///
+/// # Example
+///
+/// ```
+/// use ars_collections::{Key, TabKey};
+///
+/// #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, TabKey)]
+/// #[tab_key(discriminant)]
+/// enum SettingsTab {
+///     General = 1,
+///     Billing = 2,
+/// }
+///
+/// assert_eq!(SettingsTab::General.into_key(), Key::int(1));
+/// assert_eq!(Key::from(SettingsTab::Billing), Key::int(2));
+/// ```
+///
+/// Per-variant string keys are useful when the key is part of a public or
+/// persisted contract:
+///
+/// ```
+/// use ars_collections::{Key, TabKey};
+///
+/// #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, TabKey)]
+/// enum ProfileTab {
+///     #[tab_key(str = "overview")]
+///     Overview,
+///     #[tab_key(str = "security")]
+///     Security,
+/// }
+///
+/// assert_eq!(ProfileTab::Security.into_key(), Key::str("security"));
+/// ```
+///
+/// The derive requires a fieldless enum. Use `#[tab_key(ordinal)]` only when
+/// declaration order is acceptable identity; use `#[tab_key(discriminant)]`
+/// or per-variant keys when keys must remain stable after variants are
+/// reordered. Per-variant keys must all use the same key kind within one enum.
+pub trait TabKey: Copy + Eq + Ord + Send + Sync + 'static {
+    /// Converts this typed tab identifier into an internal key.
+    fn into_key(self) -> Key;
+}
+
+impl TabKey for &'static str {
+    fn into_key(self) -> Key {
+        Key::str(self)
+    }
+}
+
+impl TabKey for u64 {
+    fn into_key(self) -> Key {
+        Key::int(self)
+    }
+}
+
+impl TabKey for u32 {
+    fn into_key(self) -> Key {
+        Key::int(u64::from(self))
+    }
+}
+
+impl TabKey for usize {
+    fn into_key(self) -> Key {
+        Key::int(self as u64)
+    }
+}
+
+#[cfg(feature = "uuid")]
+impl TabKey for uuid::Uuid {
+    fn into_key(self) -> Key {
+        Key::uuid(self)
+    }
+}
+
 impl From<&str> for Key {
     fn from(s: &str) -> Self {
         Key::String(s.into())

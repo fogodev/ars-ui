@@ -7,9 +7,10 @@
 use std::{
     ffi::OsStr,
     fmt::{self, Display},
-    io::{self, Write},
-    process::{self, Output},
+    io::{self, Read, Write},
+    process::{self, Stdio},
     sync::OnceLock,
+    thread,
 };
 
 use regex::Regex;
@@ -491,8 +492,8 @@ fn run_owned_invocations(invocations: &[OwnedInvocation]) -> Result<StageResult,
 fn preflight_nextest() -> Result<(), Error> {
     let status = process::Command::new("cargo")
         .args(["nextest", "--version"])
-        .stdout(process::Stdio::null())
-        .stderr(process::Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .map_err(Error::Io)?;
 
@@ -509,8 +510,8 @@ fn preflight_nextest() -> Result<(), Error> {
 fn preflight_wasm_pack() -> Result<(), Error> {
     let status = process::Command::new("wasm-pack")
         .arg("--version")
-        .stdout(process::Stdio::null())
-        .stderr(process::Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .map_err(Error::Io)?;
 
@@ -630,9 +631,7 @@ fn run_nextest_command(label: &str, args: &[&str]) -> Result<CommandResult, Erro
 
     let display = format!("{command:?}");
 
-    let output = command.output().map_err(Error::Io)?;
-
-    print_output(&output)?;
+    let output = run_streaming_process(command)?;
 
     let combined = format!(
         "{}{}",
@@ -642,8 +641,8 @@ fn run_nextest_command(label: &str, args: &[&str]) -> Result<CommandResult, Erro
 
     Ok(CommandResult {
         command: display,
-        code: output.status.code(),
-        success: output.status.success(),
+        code: output.code,
+        success: output.success,
         summary: parse_nextest_summary(&combined),
         output: combined,
     })
@@ -658,9 +657,7 @@ fn run_shell_command(label: &str, program: &str, args: &[&str]) -> Result<Comman
 
     let display = format!("{command:?}");
 
-    let output = command.output().map_err(Error::Io)?;
-
-    print_output(&output)?;
+    let output = run_streaming_process(command)?;
 
     let combined = format!(
         "{}{}",
@@ -670,8 +667,8 @@ fn run_shell_command(label: &str, program: &str, args: &[&str]) -> Result<Comman
 
     Ok(CommandResult {
         command: display,
-        code: output.status.code(),
-        success: output.status.success(),
+        code: output.code,
+        success: output.success,
         summary: if program == "wasm-pack" {
             parse_wasm_pack_summary(&combined)
         } else {
@@ -697,12 +694,69 @@ const fn should_force_color_output(
     no_color.is_none() && cargo_term_color.is_none()
 }
 
-fn print_output(output: &Output) -> Result<(), Error> {
-    io::stdout().write_all(&output.stdout).map_err(Error::Io)?;
+fn run_streaming_process(mut command: process::Command) -> Result<CommandOutput, Error> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-    io::stderr().write_all(&output.stderr).map_err(Error::Io)?;
+    let mut child = command.spawn().map_err(Error::Io)?;
 
-    Ok(())
+    let stdout = child.stdout.take().ok_or_else(|| {
+        Error::Io(io::Error::other(
+            "failed to capture child process stdout pipe",
+        ))
+    })?;
+
+    let stderr = child.stderr.take().ok_or_else(|| {
+        Error::Io(io::Error::other(
+            "failed to capture child process stderr pipe",
+        ))
+    })?;
+
+    let stdout_thread = thread::spawn(move || tee_reader(stdout, io::stdout()));
+    let stderr_thread = thread::spawn(move || tee_reader(stderr, io::stderr()));
+
+    let status = child.wait().map_err(Error::Io)?;
+
+    let stdout = stdout_thread
+        .join()
+        .map_err(|_| Error::Io(io::Error::other("stdout reader thread panicked")))?
+        .map_err(Error::Io)?;
+
+    let stderr = stderr_thread
+        .join()
+        .map_err(|_| Error::Io(io::Error::other("stderr reader thread panicked")))?
+        .map_err(Error::Io)?;
+
+    Ok(CommandOutput {
+        stdout,
+        stderr,
+        code: status.code(),
+        success: status.success(),
+    })
+}
+
+fn tee_reader<R, W>(mut reader: R, mut writer: W) -> io::Result<Vec<u8>>
+where
+    R: Read,
+    W: Write,
+{
+    let mut captured = Vec::new();
+    let mut buffer = [0; 8192];
+
+    loop {
+        let read = reader.read(&mut buffer)?;
+
+        if read == 0 {
+            break;
+        }
+
+        writer.write_all(&buffer[..read])?;
+
+        writer.flush()?;
+
+        captured.extend_from_slice(&buffer[..read]);
+    }
+
+    Ok(captured)
 }
 
 fn format_failure(label: &str, command: &str, code: Option<i32>) -> String {
@@ -785,6 +839,14 @@ struct CommandResult {
     success: bool,
     output: String,
     summary: Summary,
+}
+
+#[derive(Debug, Default)]
+struct CommandOutput {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    code: Option<i32>,
+    success: bool,
 }
 
 #[cfg(test)]

@@ -10,6 +10,15 @@
 //! - [`EphemeralRef`] — borrow wrapper preventing signal storage of borrowed APIs
 //! - [`use_stable_id`] — hook-slot-stable generated ID allocation
 
+extern crate self as ars_dioxus;
+
+/// Hidden re-exports used by proc macros that resolve through this adapter
+/// facade.
+#[doc(hidden)]
+pub mod __private {
+    pub use ars_i18n::__private::*;
+}
+
 pub mod as_child;
 mod attrs;
 mod callbacks;
@@ -17,6 +26,7 @@ mod ephemeral;
 mod event_mapping;
 mod hydration;
 mod id;
+pub mod navigation;
 mod nonce;
 mod platform;
 pub mod prelude;
@@ -25,6 +35,9 @@ mod safe_listener;
 mod use_machine;
 pub mod utility;
 
+pub use ars_collections::{Key, TabKey};
+pub use ars_core::{I18nRegistries, MessageFn, MessagesRegistry};
+pub use ars_i18n::{IntlBackend, Locale, Translate};
 #[cfg(feature = "web")]
 pub use attrs::{
     CssomStyleHandle, apply_styles_cssom, use_cssom_styles, use_cssom_styles_from_attrs,
@@ -33,6 +46,7 @@ pub use attrs::{
     DioxusAttrResult, attr_map_to_dioxus, attr_map_to_dioxus_inline_attrs, use_style_strategy,
 };
 pub use callbacks::{emit, emit_map};
+pub use dioxus_stores;
 pub use ephemeral::EphemeralRef;
 pub use event_mapping::dioxus_key_to_keyboard_key;
 #[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
@@ -61,7 +75,8 @@ pub use platform::{
 };
 pub use provider::{
     ArsContext, ArsProvider, ArsProviderProps, resolve_locale, t, use_intl_backend, use_locale,
-    use_messages, use_modality_context, use_number_formatter, warn_missing_provider,
+    use_messages, use_modality_context, use_number_formatter, use_platform_effects,
+    warn_missing_provider,
 };
 #[cfg(feature = "web")]
 pub use safe_listener::{
@@ -85,4 +100,14 @@ pub struct AdapterCapabilities {
 
     /// `true` if server-side rendering is enabled.
     pub ssr: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn dioxus_stores_is_reexported_for_tabs_consumers() {
+        use crate::dioxus_stores as adapter_dioxus_stores;
+
+        let _ = core::any::type_name::<adapter_dioxus_stores::Store<()>>();
+    }
 }

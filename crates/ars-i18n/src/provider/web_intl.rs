@@ -627,7 +627,7 @@ impl IntlBackend for WebIntlBackend {
         // wrap the wrong calendar in release builds (only guarded by
         // `debug_assert`). The bridge eliminates that footgun.
         if date.calendar != CalendarSystem::Gregorian {
-            return bridge_convert(date, target).unwrap_or_else(|| date.clone());
+            return fallback_convert(date, target);
         }
 
         let locales = Array::of1(&JsValue::from_str("en-US"));
@@ -758,7 +758,7 @@ impl IntlBackend for WebIntlBackend {
         }
 
         let (Some(month_nz), Some(day_nz)) = (NonZero::new(month), NonZero::new(day)) else {
-            return date.clone();
+            return fallback_convert(date, target);
         };
 
         // Map the browser's long era label back to the CLDR era code
@@ -804,7 +804,7 @@ impl IntlBackend for WebIntlBackend {
                         display_name: label.to_string(),
                     })
                 } else {
-                    return bridge_convert(date, target).unwrap_or_else(|| date.clone());
+                    return fallback_convert(date, target);
                 }
             } else {
                 default_era_for(target)
@@ -1163,6 +1163,13 @@ fn part_value(parts: &Array, part_type: &str) -> Option<String> {
     None
 }
 
+/// Runs the shared ICU4X calendar-arithmetic bridge, falling back to
+/// the unchanged source only when the bridge cannot represent the
+/// requested conversion.
+fn fallback_convert(date: &CalendarDate, target: CalendarSystem) -> CalendarDate {
+    bridge_convert(date, target).unwrap_or_else(|| date.clone())
+}
+
 /// Converts a browser-emitted era long label into its canonical CLDR
 /// era code.
 ///
@@ -1178,38 +1185,6 @@ fn part_value(parts: &Array, part_type: &str) -> Option<String> {
 /// labels (`Heisei`, `Reiwa`, `Meiji`, CE/BCE for Gregorian, `AH` for
 /// Hijri, etc.) round-trip through the function unchanged apart from
 /// the lowercasing.
-/// Runs the shared ICU4X calendar-arithmetic bridge on `date` and
-/// converts it into `target`. Returns `None` when the bridge rejects
-/// the source (e.g., invalid era/year/month/day combination) so the
-/// caller can fall back to `date.clone()` rather than fabricate a
-/// result.
-///
-/// The `calendar::internal` module is compiled whenever either the
-/// `icu4x` or `web-intl` feature is on (see `calendar.rs`), so this
-/// path is always available under the same feature gate as the
-/// provider itself.
-///
-/// Used in two places in [`WebIntlBackend::convert_date`]:
-/// - Non-Gregorian sources (the browser path only relabels Gregorian
-///   instants, so it cannot convert a non-Gregorian source directly).
-/// - Gregorian sources whose browser era label falls outside the
-///   [`era_code_for_calendar`] allow-list (Japanese historical eras
-///   like `Kansei`, `Meiwa`, `Bunsei`, `Tenpō`, etc.).
-pub(crate) fn bridge_convert(date: &CalendarDate, target: CalendarSystem) -> Option<CalendarDate> {
-    let internal = crate::calendar::internal::CalendarDate::try_from(date).ok()?;
-
-    let converted = internal.to_calendar(target);
-    let iso = converted.inner.to_calendar(icu::calendar::Iso);
-
-    build_from_iso_parts(
-        target,
-        iso.year().era_year_or_related_iso(),
-        iso.month().ordinal,
-        iso.day_of_month().0,
-    )
-    .ok()
-}
-
 pub(crate) fn canonical_era_code(label: &str) -> String {
     let mut buf = String::with_capacity(label.len());
 
@@ -1229,6 +1204,36 @@ pub(crate) fn canonical_era_code(label: &str) -> String {
     }
 
     buf
+}
+
+/// Runs the shared ICU4X calendar-arithmetic bridge on `date` and
+/// converts it into `target`. Returns `None` when the bridge rejects
+/// the source (e.g., invalid era/year/month/day combination) so the
+/// caller can fall back to `date.clone()` rather than fabricate a
+/// result.
+///
+/// The `calendar::internal` module is compiled whenever either the
+/// `icu4x` or `web-intl` feature is on (see `calendar.rs`), so this
+/// path is always available under the same feature gate as the
+/// provider itself.
+///
+/// Used by [`WebIntlBackend::convert_date`] when the browser cannot
+/// safely produce a target-calendar date from `Intl.DateTimeFormat`
+/// parts, including non-Gregorian sources, unmapped target era labels,
+/// and engines that omit or rename expected date parts.
+pub(crate) fn bridge_convert(date: &CalendarDate, target: CalendarSystem) -> Option<CalendarDate> {
+    let internal = crate::calendar::internal::CalendarDate::try_from(date).ok()?;
+
+    let converted = internal.to_calendar(target);
+    let iso = converted.inner.to_calendar(icu::calendar::Iso);
+
+    build_from_iso_parts(
+        target,
+        iso.year().era_year_or_related_iso(),
+        iso.month().ordinal,
+        iso.day_of_month().0,
+    )
+    .ok()
 }
 
 /// Maps a browser-emitted `era: "long"` label onto the CLDR era code

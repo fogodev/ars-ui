@@ -1,0 +1,5 @@
+error: Translate accepts only one crate path override
+ --> tests/ui/translate_duplicate_crate.rs:4:48
+  |
+4 | #[translate(fallback = "en", crate = ars_i18n, crate = ars_i18n)]
+  |                                                ^^^^^^^^^^^^^^^^

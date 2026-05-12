@@ -1,0 +1,15 @@
+[application]
+name             = "ars-e2e-fixture-dioxus"
+default_platform = "web"
+asset_dir        = "public"
+
+[web.app]
+title = "ars-ui Dioxus E2E Fixture"
+
+[web.resource]
+style  = ["./style.css"]
+script = []
+
+[web.resource.dev]
+style  = ["./style.css"]
+script = []

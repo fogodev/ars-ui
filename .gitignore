@@ -9,6 +9,7 @@ examples/target/
 examples/*/dist/
 examples/*/assets/tailwind.css
 examples/*/public/tailwind.css
+crates/ars-e2e/fixtures/*/dist/
 
 # Coverage artifacts
 lcov.info
