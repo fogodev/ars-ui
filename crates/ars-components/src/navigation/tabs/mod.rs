@@ -179,8 +179,9 @@ pub enum Event {
     /// controlled key is disabled or unregistered) and downgrades
     /// `Focused → Idle` when the snap clears the focused tab.
     ///
-    /// `None` clears the controlled override; the next [`Bindable::get`]
-    /// returns the internal value (typically [`Props::default_value`]).
+    /// `None` is the controlled "no tab selected" value. It does not switch
+    /// the instance into uncontrolled mode; controlled/uncontrolled mode is
+    /// fixed by [`Props::value`] at mount.
     SyncControlledValue(Option<Key>),
 }
 
@@ -1035,8 +1036,10 @@ impl ars_core::Machine for Machine {
         // core offers for adapters to push controlled-value updates into
         // `Context` (the Bindable lives behind `&mut Context`, which only a
         // transition plan can mutate).
-        if old.value != new.value {
-            events.push(Event::SyncControlledValue(new.value.clone().flatten()));
+        if let (Some(old_value), Some(new_value)) = (&old.value, &new.value)
+            && old_value != new_value
+        {
+            events.push(Event::SyncControlledValue(new_value.clone()));
         }
 
         events
@@ -1273,8 +1276,9 @@ fn sync_controlled_value_plan(
         // Wrap in `Some` because the outer `Option` of
         // `Bindable<Option<Key>>::sync_controlled` distinguishes
         // controlled (`Some`) from uncontrolled (`None`); switching
-        // controlled → uncontrolled is forbidden by the spec.
-        ctx.value.sync_controlled(Some(value));
+        // controlled ↔ uncontrolled after mount is forbidden by the spec.
+        ctx.value
+            .sync_controlled(Some(valid_controlled_value(ctx, value)));
 
         snap_focused_tab_to_valid_key(ctx);
     };
@@ -1304,9 +1308,23 @@ fn snap_value_to_valid_key(ctx: &mut Context) {
         return;
     }
 
-    let next = ctx.tabs.iter().find(|key| !is_disabled(ctx, key)).cloned();
+    ctx.value.set(first_enabled_tab(ctx));
+}
 
-    ctx.value.set(next);
+/// Normalizes a controlled value update against the current registration and
+/// disabled state. Explicit controlled `None` stays `None`; invalid keys snap
+/// to the first enabled tab, matching the selection invariant.
+fn valid_controlled_value(ctx: &Context, value: Option<Key>) -> Option<Key> {
+    match value {
+        Some(key) if is_registered(ctx, &key) && !is_disabled(ctx, &key) => Some(key),
+        Some(_) => first_enabled_tab(ctx),
+        None => None,
+    }
+}
+
+/// Returns the first registered, enabled tab in DOM order.
+fn first_enabled_tab(ctx: &Context) -> Option<Key> {
+    ctx.tabs.iter().find(|key| !is_disabled(ctx, key)).cloned()
 }
 
 /// Re-establishes the focus invariant after `tabs` changes: `focused_tab`
@@ -1393,8 +1411,8 @@ impl Api<'_> {
     /// Returns `false` when:
     /// - `tab_key` is not registered in [`Context::tabs`] (nothing to
     ///   close), OR
-    /// - [`Props::disallow_empty_selection`] is `true` AND `tab_key`
-    ///   is the only tab in the list.
+    /// - [`Props::disallow_empty_selection`] is `true` AND closing
+    ///   `tab_key` would leave no enabled successor tab selected.
     ///
     /// Otherwise returns `true`. Consumers gate their close handler on
     /// this method so a programmatic close attempt against an
@@ -1410,7 +1428,7 @@ impl Api<'_> {
             return true;
         }
 
-        self.ctx.tabs.len() > 1
+        self.successor_for_close(tab_key).is_some()
     }
 
     /// Returns the deterministic successor key when closing `tab_key`,

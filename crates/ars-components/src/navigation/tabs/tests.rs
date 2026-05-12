@@ -1164,6 +1164,23 @@ fn can_close_tab_allowed_when_more_than_one_tab_with_disallow_empty_selection() 
 }
 
 #[test]
+fn can_close_tab_blocked_when_close_would_leave_only_disabled_tabs() {
+    let service = service_with_tabs(
+        Props {
+            disallow_empty_selection: true,
+            disabled_keys: BTreeSet::from([key("b"), key("c")]),
+            ..test_props()
+        },
+        &[key("a"), key("b"), key("c")],
+    );
+
+    let api = service.connect(&|_| {});
+
+    assert_eq!(api.successor_for_close(&key("a")), None);
+    assert!(!api.can_close_tab(&key("a")));
+}
+
+#[test]
 fn delete_key_emits_close_tab_for_closable_tab() {
     let service = service_with_registrations(
         test_props(),
@@ -2908,6 +2925,46 @@ fn on_props_changed_no_event_when_only_non_context_props_differ() {
 }
 
 #[test]
+fn on_props_changed_syncs_value_only_when_both_renders_are_controlled() {
+    let old = Props {
+        value: Some(Some(key("a"))),
+        ..test_props()
+    };
+    let new = Props {
+        value: Some(Some(key("b"))),
+        ..test_props()
+    };
+
+    let events = <Machine as MachineTrait>::on_props_changed(&old, &new);
+
+    assert_eq!(
+        events.as_slice(),
+        &[Event::SyncControlledValue(Some(key("b")))]
+    );
+}
+
+#[test]
+fn on_props_changed_ignores_controlled_mode_changes_after_mount() {
+    let controlled = Props {
+        value: Some(Some(key("a"))),
+        ..test_props()
+    };
+    let uncontrolled = Props {
+        value: None,
+        ..test_props()
+    };
+
+    assert!(
+        <Machine as MachineTrait>::on_props_changed(&controlled, &uncontrolled).is_empty(),
+        "controlled -> uncontrolled is a mode change, not a controlled value update"
+    );
+    assert!(
+        <Machine as MachineTrait>::on_props_changed(&uncontrolled, &controlled).is_empty(),
+        "uncontrolled -> controlled is a mode change, not a controlled value update"
+    );
+}
+
+#[test]
 fn sync_props_replays_orientation_dir_loop_focus_activation_mode() {
     let mut service = service_with_tabs(test_props(), &[key("a"), key("b")]);
 
@@ -3076,6 +3133,46 @@ fn sync_props_rebuilds_disabled_tabs_and_snaps_value() {
     // first non-disabled tab `b`.
     assert!(service.context().disabled_tabs.contains(&key("a")));
     assert_eq!(service.context().value.get().as_ref(), Some(&key("b")));
+}
+
+#[test]
+fn sync_controlled_value_snaps_unregistered_keys_to_first_enabled_tab() {
+    let mut service = service_with_tabs(
+        Props {
+            value: Some(Some(key("a"))),
+            ..test_props()
+        },
+        &[key("a"), key("b")],
+    );
+
+    service.set_props(Props {
+        value: Some(Some(key("ghost"))),
+        ..test_props()
+    });
+
+    assert_eq!(service.context().value.get().as_ref(), Some(&key("a")));
+    assert!(service.context().value.is_controlled());
+}
+
+#[test]
+fn sync_controlled_value_snaps_disabled_keys_to_first_enabled_tab() {
+    let mut service = service_with_tabs(
+        Props {
+            value: Some(Some(key("a"))),
+            disabled_keys: BTreeSet::from([key("c")]),
+            ..test_props()
+        },
+        &[key("a"), key("b"), key("c")],
+    );
+
+    service.set_props(Props {
+        value: Some(Some(key("c"))),
+        disabled_keys: BTreeSet::from([key("c")]),
+        ..test_props()
+    });
+
+    assert_eq!(service.context().value.get().as_ref(), Some(&key("a")));
+    assert!(service.context().value.is_controlled());
 }
 
 // ────────────────────────────────────────────────────────────────────

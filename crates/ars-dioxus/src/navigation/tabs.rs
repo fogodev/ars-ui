@@ -953,6 +953,7 @@ fn render_tab_button<K: TabKey>(
 ) -> Element {
     let typed_key = tab.key;
     let key = typed_key.into_key();
+    let vdom_key = dioxus_vdom_key(&key);
 
     // Modality is read per render — `data-ars-focus-visible` reflects
     // whether the most recent input was a keyboard interaction.
@@ -1121,6 +1122,7 @@ fn render_tab_button<K: TabKey>(
     if let Some(href) = link {
         rsx! {
             a {
+                key: "{vdom_key}",
                 href: "{href}",
                 onclick: on_click,
                 onfocus: on_focus,
@@ -1147,6 +1149,7 @@ fn render_tab_button<K: TabKey>(
     } else {
         rsx! {
             div {
+                key: "{vdom_key}",
                 onclick: on_click,
                 onfocus: on_focus,
                 onblur: on_blur,
@@ -1472,17 +1475,20 @@ fn render_tab_panel<K: TabKey>(
     unmount_on_exit: bool,
     ever_selected: Signal<BTreeSet<Key>>,
 ) -> Element {
+    let key = tab.key.into_key();
+    let vdom_key = dioxus_vdom_key(&key);
+
     let panel_attrs = attr_map_to_dioxus_inline_attrs(machine.with_api_snapshot({
-        let key = tab.key.into_key();
+        let key = key.clone();
         move |api| api.panel_attrs(&key, None)
     }));
 
     let is_selected = machine.with_api_snapshot({
-        let key = tab.key.into_key();
+        let key = key.clone();
         move |api| api.is_tab_selected(&key)
     });
 
-    let already_selected = ever_selected.read().contains(&tab.key.into_key());
+    let already_selected = ever_selected.read().contains(&key);
 
     let should_render_body = if unmount_on_exit {
         is_selected
@@ -1499,7 +1505,7 @@ fn render_tab_panel<K: TabKey>(
     };
 
     rsx! {
-        div { ..panel_attrs,{panel_body} }
+        div { key: "{vdom_key}", ..panel_attrs, {panel_body} }
     }
 }
 
@@ -1718,6 +1724,15 @@ fn bump_indicator_revision(indicator_revision: &mut Signal<u64>) {
     };
 
     indicator_revision.set(next);
+}
+
+fn dioxus_vdom_key(key: &Key) -> String {
+    match key {
+        Key::Int(value) => format!("int:{value}"),
+        Key::String(value) => format!("str:{value}"),
+        #[cfg(feature = "uuid")]
+        Key::Uuid(value) => format!("uuid:{value}"),
+    }
 }
 
 #[derive(Clone)]
@@ -1944,6 +1959,12 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![("first", "New first"), ("third", "New third")]
         );
+    }
+
+    #[test]
+    fn dioxus_vdom_key_includes_key_variant() {
+        assert_eq!(dioxus_vdom_key(&Key::Int(1)), "int:1");
+        assert_eq!(dioxus_vdom_key(&Key::str("1")), "str:1");
     }
 
     #[test]

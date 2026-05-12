@@ -654,6 +654,41 @@ fn inline_owned_panel_state_probe() -> Element {
     unused_qualifications,
     reason = "rsx! macro expansion currently reports event-handler attribute names as redundant qualifications"
 )]
+#[component]
+fn LocalPanelState(id: &'static str, initial: &'static str) -> Element {
+    let mut status = use_signal_sync(|| initial.to_owned());
+    let updated = format!("{initial}-updated");
+
+    rsx! {
+        button { id: "update-{id}", onclick: move |_| status.set(updated.clone()), "Update" }
+        p { id, "{status}" }
+    }
+}
+
+fn inline_owned_panel_key_probe() -> Element {
+    rsx! {
+        Tabs {
+            default_value: "first",
+            tabs: [
+                Tab::new_with_label("first", "First", rsx! { "First" }, rsx! {
+                    LocalPanelState { id: "first-panel-state", initial: "first" }
+                }),
+                Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
+                    LocalPanelState { id: "second-panel-state", initial: "second" }
+                }),
+                Tab::new_with_label("third", "Third", rsx! { "Third" }, rsx! {
+                    LocalPanelState { id: "third-panel-state", initial: "third" }
+                }),
+            ],
+            reorderable: true,
+        }
+    }
+}
+
+#[expect(
+    unused_qualifications,
+    reason = "rsx! macro expansion currently reports event-handler attribute names as redundant qualifications"
+)]
 fn inline_owned_dynamic_add_probe() -> Element {
     let mut show_third = use_signal(|| false);
 
@@ -1532,6 +1567,67 @@ async fn web_inline_array_owned_tabs_refresh_existing_panel_content() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn web_inline_array_reorder_preserves_panel_state_by_tab_key() {
+    let parent = container();
+    let dom = VirtualDom::new(inline_owned_panel_key_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    click(
+        &parent
+            .query_selector("#update-first-panel-state")
+            .expect("query should succeed")
+            .expect("first panel update button should exist")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("button is HtmlElement"),
+    );
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        parent
+            .query_selector("#first-panel-state")
+            .expect("query should succeed")
+            .expect("first panel state should exist")
+            .text_content()
+            .unwrap_or_default(),
+        "first-updated"
+    );
+
+    let first = tab_at(&parent, 0);
+    let third = tab_at(&parent, 2);
+
+    first.focus().expect("focus should succeed");
+
+    dispatch_drag_event(&first, "dragstart");
+    dispatch_drag_event(&third, "drop");
+
+    deferred_focus_turn().await;
+
+    assert_eq!(
+        selected_tab_text(&parent),
+        "First",
+        "owned reorder should preserve selected tab identity"
+    );
+    assert_eq!(
+        parent
+            .query_selector("#first-panel-state")
+            .expect("query should succeed")
+            .expect("first panel state should still exist after reorder")
+            .text_content()
+            .unwrap_or_default(),
+        "first-updated",
+        "panel component state should follow the tab key rather than the old panel index"
+    );
+}
+
+#[wasm_bindgen_test(async)]
 async fn web_inline_array_owned_tabs_append_new_parent_rows() {
     let parent = container();
     let dom = VirtualDom::new(inline_owned_dynamic_add_probe);
@@ -1737,11 +1833,13 @@ async fn web_inline_array_drag_and_drop_reorders_owned_tabs() {
         .dyn_into::<web_sys::HtmlElement>()
         .expect("third tab is HtmlElement");
 
+    first.focus().expect("focus should succeed");
+
     dispatch_drag_event(&first, "dragstart");
 
     let drop = dispatch_drag_event(&third, "drop");
 
-    animation_frame_turn().await;
+    deferred_focus_turn().await;
 
     assert!(
         drop.default_prevented(),
@@ -1760,6 +1858,11 @@ async fn web_inline_array_drag_and_drop_reorders_owned_tabs() {
             .unwrap_or_default(),
         "First",
         "inline array tabs should reorder through the adapter-owned store"
+    );
+    assert_eq!(
+        active_element_text(),
+        "First",
+        "inline owned reorder should keep focus on the moved logical tab"
     );
 }
 
