@@ -6,7 +6,10 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU32, Ordering},
+};
 
 use ars_collections::Key;
 use ars_core::{
@@ -203,6 +206,135 @@ impl PlatformEffects for FocusByIdProbePlatform {
     }
 }
 
+struct MeasurementProbePlatform {
+    calls: Arc<AtomicU32>,
+}
+
+impl PlatformEffects for MeasurementProbePlatform {
+    fn focus_element_by_id(&self, id: &str) {
+        ars_dom::WebPlatformEffects.focus_element_by_id(id);
+    }
+
+    fn focus_first_tabbable(&self, container_id: &str) {
+        ars_dom::WebPlatformEffects.focus_first_tabbable(container_id);
+    }
+
+    fn focus_last_tabbable(&self, container_id: &str) {
+        ars_dom::WebPlatformEffects.focus_last_tabbable(container_id);
+    }
+
+    fn tabbable_element_ids(&self, container_id: &str) -> Vec<String> {
+        ars_dom::WebPlatformEffects.tabbable_element_ids(container_id)
+    }
+
+    fn focus_body(&self) {
+        ars_dom::WebPlatformEffects.focus_body();
+    }
+
+    fn set_timeout(&self, delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
+        ars_dom::WebPlatformEffects.set_timeout(delay_ms, callback)
+    }
+
+    fn clear_timeout(&self, handle: TimerHandle) {
+        ars_dom::WebPlatformEffects.clear_timeout(handle);
+    }
+
+    fn announce(&self, message: &str) {
+        ars_dom::WebPlatformEffects.announce(message);
+    }
+
+    fn announce_assertive(&self, message: &str) {
+        ars_dom::WebPlatformEffects.announce_assertive(message);
+    }
+
+    fn position_element_at(&self, id: &str, x: f64, y: f64) {
+        ars_dom::WebPlatformEffects.position_element_at(id, x, y);
+    }
+
+    fn resolved_direction(&self, id: &str) -> ResolvedDirection {
+        ars_dom::WebPlatformEffects.resolved_direction(id)
+    }
+
+    fn set_background_inert(&self, portal_root_id: &str) -> Box<dyn FnOnce()> {
+        ars_dom::WebPlatformEffects.set_background_inert(portal_root_id)
+    }
+
+    fn remove_inert_from_siblings(&self, portal_id: &str) {
+        ars_dom::WebPlatformEffects.remove_inert_from_siblings(portal_id);
+    }
+
+    fn scroll_lock_acquire(&self) {
+        ars_dom::WebPlatformEffects.scroll_lock_acquire();
+    }
+
+    fn scroll_lock_release(&self) {
+        ars_dom::WebPlatformEffects.scroll_lock_release();
+    }
+
+    fn document_contains_id(&self, id: &str) -> bool {
+        ars_dom::WebPlatformEffects.document_contains_id(id)
+    }
+
+    fn track_pointer_drag(
+        &self,
+        on_move: Box<dyn Fn(f64, f64)>,
+        on_up: Box<dyn FnOnce()>,
+    ) -> Box<dyn FnOnce()> {
+        ars_dom::WebPlatformEffects.track_pointer_drag(on_move, on_up)
+    }
+
+    fn active_element_id(&self) -> Option<String> {
+        ars_dom::WebPlatformEffects.active_element_id()
+    }
+
+    fn attach_focus_trap(&self, container_id: &str, on_escape: Box<dyn Fn()>) -> Box<dyn FnOnce()> {
+        ars_dom::WebPlatformEffects.attach_focus_trap(container_id, on_escape)
+    }
+
+    fn can_restore_focus(&self, id: &str) -> bool {
+        ars_dom::WebPlatformEffects.can_restore_focus(id)
+    }
+
+    fn nearest_focusable_ancestor_id(&self, id: &str) -> Option<String> {
+        ars_dom::WebPlatformEffects.nearest_focusable_ancestor_id(id)
+    }
+
+    fn set_scroll_top(&self, container_id: &str, scroll_top: f64) {
+        ars_dom::WebPlatformEffects.set_scroll_top(container_id, scroll_top);
+    }
+
+    fn resize_to_content(&self, id: &str, max_height: Option<&str>) {
+        ars_dom::WebPlatformEffects.resize_to_content(id, max_height);
+    }
+
+    fn on_reduced_motion_change(&self, callback: Box<dyn Fn(bool)>) -> Box<dyn FnOnce()> {
+        ars_dom::WebPlatformEffects.on_reduced_motion_change(callback)
+    }
+
+    fn is_mac_platform(&self) -> bool {
+        ars_dom::WebPlatformEffects.is_mac_platform()
+    }
+
+    fn now_ms(&self) -> u64 {
+        ars_dom::WebPlatformEffects.now_ms()
+    }
+
+    fn get_bounding_rect(&self, _id: &str) -> Option<Rect> {
+        let call = f64::from(self.calls.fetch_add(1, Ordering::SeqCst));
+
+        Some(Rect {
+            x: call,
+            y: 0.0,
+            width: 100.0 + call,
+            height: 18.0,
+        })
+    }
+
+    fn on_animation_end(&self, id: &str, callback: Box<dyn FnOnce()>) -> Box<dyn FnOnce()> {
+        ars_dom::WebPlatformEffects.on_animation_end(id, callback)
+    }
+}
+
 fn store_field(tabs: Vec<TestTab>) -> Field<Vec<TestTab>> {
     Store::new(TabsTestState { tabs }).tabs().into()
 }
@@ -231,6 +363,30 @@ fn container() -> web_sys::HtmlElement {
     element
         .dyn_into::<web_sys::HtmlElement>()
         .expect("container should be an HtmlElement")
+}
+
+fn add_indicator_measurement_styles(parent: &web_sys::HtmlElement) {
+    let style = document()
+        .create_element("style")
+        .expect("style element should be created");
+
+    style.set_text_content(Some(
+        r#"
+            [data-ars-part="list"] {
+                display: inline-flex !important;
+                align-items: center !important;
+            }
+
+            [data-ars-part="tab"] {
+                display: inline-flex !important;
+                width: auto !important;
+            }
+        "#,
+    ));
+
+    parent
+        .append_child(&style)
+        .expect("indicator measurement style should append");
 }
 
 async fn animation_frame_turn() {
@@ -990,6 +1146,84 @@ async fn close_request_respects_disallow_empty_selection_for_external_store() {
             .expect("close callback log should not be poisoned")
             .is_empty(),
         "blocked close requests must not call on_close_tab"
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
+async fn close_request_reads_disallow_empty_selection_at_close_time_for_owned_tabs() {
+    let owner = Owner::new();
+    let closed = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+
+    let (mount_handle, parent, set_disallow_empty_selection) = owner.with(|| {
+        let parent = container();
+        let (disallow_empty_selection, set_disallow_empty_selection) = signal(true);
+        let disallow_empty_selection: Signal<bool> = disallow_empty_selection.into();
+        let closed = Arc::clone(&closed);
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <Tabs
+                    default_value="only"
+                    tabs=[
+                        Tab::new_with_label(
+                                "only",
+                                "Only",
+                                ViewFn::from(|| view! { "Only" }),
+                                ViewFn::from(|| view! { <p>"Only panel"</p> }),
+                            )
+                            .closable(true),
+                    ]
+                    disallow_empty_selection=disallow_empty_selection
+                    on_close_tab=Callback::new({
+                        let closed = Arc::clone(&closed);
+                        move |key: &'static str| {
+                            closed
+                                .lock()
+                                .expect("close callback log should not be poisoned")
+                                .push(key);
+                        }
+                    })
+                />
+            }
+        });
+
+        (mount_handle, parent, set_disallow_empty_selection)
+    });
+
+    leptos::task::tick().await;
+
+    set_disallow_empty_selection.set(false);
+
+    leptos::task::tick().await;
+
+    let close = parent
+        .query_selector(r#"[data-ars-part="tab-close-trigger"]"#)
+        .expect("query should succeed")
+        .expect("close trigger should render")
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("close trigger is HtmlElement");
+
+    click(&close);
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        first_with_data_part(&parent, "list")
+            .query_selector_all(r#"[role="tab"]"#)
+            .expect("query should succeed")
+            .length(),
+        0,
+        "the owned-store close guard should use the current disallow_empty_selection value"
+    );
+    assert_eq!(
+        closed
+            .lock()
+            .expect("close callback log should not be poisoned")
+            .as_slice(),
+        ["only"],
+        "allowed owned closes should still emit the close callback"
     );
 
     drop(mount_handle);
@@ -1801,6 +2035,8 @@ async fn indicator_style_tracks_selected_tab_measurement() {
             )
             .expect("style should set");
 
+        add_indicator_measurement_styles(&parent);
+
         let mount_handle = mount_to(parent.clone(), move || {
             view! {
                 <ArsProvider platform=Arc::new(ars_dom::WebPlatformEffects)>
@@ -1835,9 +2071,13 @@ async fn indicator_style_tracks_selected_tab_measurement() {
 #[wasm_bindgen_test(async)]
 async fn indicator_style_refreshes_after_owned_reorder_of_selected_tab() {
     let owner = Owner::new();
+    let measurement_calls = Arc::new(AtomicU32::new(0));
 
     let (mount_handle, parent) = owner.with(|| {
         let parent = container();
+        let platform: Arc<dyn PlatformEffects> = Arc::new(MeasurementProbePlatform {
+            calls: Arc::clone(&measurement_calls),
+        });
 
         parent
             .set_attribute(
@@ -1846,9 +2086,11 @@ async fn indicator_style_refreshes_after_owned_reorder_of_selected_tab() {
             )
             .expect("style should set");
 
+        add_indicator_measurement_styles(&parent);
+
         let mount_handle = mount_to(parent.clone(), move || {
             view! {
-                <ArsProvider platform=Arc::new(ars_dom::WebPlatformEffects)>
+                <ArsProvider platform>
                     <Tabs default_value="first" tabs=three_tabs() reorderable=true />
                 </ArsProvider>
             }
@@ -1873,6 +2115,69 @@ async fn indicator_style_refreshes_after_owned_reorder_of_selected_tab() {
     assert!(
         before != after && after.contains("--ars-indicator-left:"),
         "committed selected-tab reorder should refresh indicator measurement: before={before:?}, after={after:?}"
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
+async fn indicator_style_refreshes_after_selected_tab_label_changes() {
+    let owner = Owner::new();
+    let measurement_calls = Arc::new(AtomicU32::new(0));
+
+    let (mount_handle, parent, tabs_for_update) = owner.with(|| {
+        let parent = container();
+        let platform: Arc<dyn PlatformEffects> = Arc::new(MeasurementProbePlatform {
+            calls: Arc::clone(&measurement_calls),
+        });
+
+        parent
+            .set_attribute(
+                "style",
+                "position: relative; display: block; width: 500px; height: 200px;",
+            )
+            .expect("style should set");
+        add_indicator_measurement_styles(&parent);
+
+        let store = store_handle(three_tabs());
+
+        let tabs_for_update = store.tabs();
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <ArsProvider platform>
+                    <Tabs default_value="first" tabs=store.tabs() />
+                </ArsProvider>
+            }
+        });
+
+        (mount_handle, parent, tabs_for_update)
+    });
+
+    leptos::task::tick().await;
+
+    animation_frame_turn().await;
+
+    let indicator = first_with_data_part(&parent, "tab-indicator");
+
+    let before = indicator.get_attribute("style").unwrap_or_default();
+
+    tabs_for_update.write()[0] = Tab::new_with_label(
+        "first",
+        "First selected tab with longer label",
+        ViewFn::from(|| view! { "First selected tab with longer label" }),
+        ViewFn::from(|| view! { <p>"Panel one"</p> }),
+    );
+
+    leptos::task::tick().await;
+
+    animation_frame_turn().await;
+
+    let after = indicator.get_attribute("style").unwrap_or_default();
+
+    assert!(
+        before != after && after.contains("--ars-indicator-width:"),
+        "selected-tab label changes should refresh indicator measurement: before={before:?}, after={after:?}"
     );
 
     drop(mount_handle);
@@ -3691,6 +3996,21 @@ async fn signal_backed_orientation_updates_keyboard_navigation() {
 
     leptos::task::tick().await;
 
+    assert_eq!(
+        first_with_data_part(&parent, "root")
+            .get_attribute("data-ars-orientation")
+            .as_deref(),
+        Some("vertical"),
+        "root orientation attrs should track signal-backed orientation"
+    );
+    assert_eq!(
+        first_with_data_part(&parent, "list")
+            .get_attribute("aria-orientation")
+            .as_deref(),
+        Some("vertical"),
+        "list orientation attrs should track signal-backed orientation"
+    );
+
     let first = tab_at(&parent, 0);
 
     first.focus().expect("focus should succeed");
@@ -3702,6 +4022,43 @@ async fn signal_backed_orientation_updates_keyboard_navigation() {
         selected_tab_text(&parent),
         "Second",
         "a signal-backed orientation prop should update arrow-key handling"
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
+async fn signal_backed_reorderable_updates_draggable_tabs() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent, set_reorderable) = owner.with(|| {
+        let parent = container();
+        let (reorderable, set_reorderable) = signal(false);
+        let reorderable: Signal<bool> = reorderable.into();
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! { <Tabs default_value="first" tabs=store_field(three_tabs()) reorderable=reorderable /> }
+        });
+
+        (mount_handle, parent, set_reorderable)
+    });
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        tab_at(&parent, 0).get_attribute("draggable").as_deref(),
+        Some("false"),
+        "tabs should not advertise drag affordance before reorderable is enabled"
+    );
+
+    set_reorderable.set(true);
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        tab_at(&parent, 0).get_attribute("draggable").as_deref(),
+        Some("true"),
+        "draggable attrs should track signal-backed reorderable"
     );
 
     drop(mount_handle);

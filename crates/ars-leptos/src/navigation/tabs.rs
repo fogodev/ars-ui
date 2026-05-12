@@ -517,10 +517,16 @@ pub fn Tabs<K: TabKey>(
 
     let indicator_revision = RwSignal::new(0_u64);
 
-    let (tab_indicator_attrs, indicator_style) =
-        setup_tab_indicator(machine, Arc::clone(&platform), indicator_revision);
+    let tabs_meta = config.with_value(|cfg| cfg.tabs_meta);
 
-    let disallow_empty_selection = options.disallow_empty_selection.get_untracked();
+    let (tab_indicator_attrs, indicator_style) = setup_tab_indicator(
+        machine,
+        Arc::clone(&platform),
+        indicator_revision,
+        tabs_meta,
+    );
+
+    let disallow_empty_selection = options.disallow_empty_selection;
     let lazy_mount = options.lazy_mount;
     let unmount_on_exit = options.unmount_on_exit;
     let reorderable = options.reorderable;
@@ -549,6 +555,7 @@ pub fn Tabs<K: TabKey>(
                 on_reorder,
                 owned_tabs_field,
                 disallow_empty_selection,
+                reorderable,
                 indicator_revision,
             )
         }
@@ -856,7 +863,19 @@ fn tabs_root_attrs(
             .unwrap_or_default()
     });
 
-    attrs.set(HtmlAttr::Dir, AttrValue::reactive(move || dir.get()));
+    let orientation = machine.derive(|api| {
+        api.root_attrs()
+            .get(&HtmlAttr::Data("ars-orientation"))
+            .map(str::to_owned)
+            .unwrap_or_default()
+    });
+
+    attrs
+        .set(HtmlAttr::Dir, AttrValue::reactive(move || dir.get()))
+        .set(
+            HtmlAttr::Data("ars-orientation"),
+            AttrValue::reactive(move || orientation.get()),
+        );
 
     attr_map_to_leptos_inline_attrs(attrs)
 }
@@ -879,11 +898,22 @@ fn tabs_list_attrs<K: TabKey>(
             .collect::<Vec<_>>()
             .join(" ")
     });
+    let orientation = machine.derive(|api| {
+        api.list_attrs()
+            .get(&HtmlAttr::Aria(AriaAttr::Orientation))
+            .map(str::to_owned)
+            .unwrap_or_default()
+    });
 
-    attrs.set(
-        HtmlAttr::Aria(AriaAttr::Owns),
-        AttrValue::reactive(move || owns.get()),
-    );
+    attrs
+        .set(
+            HtmlAttr::Aria(AriaAttr::Owns),
+            AttrValue::reactive(move || owns.get()),
+        )
+        .set(
+            HtmlAttr::Aria(AriaAttr::Orientation),
+            AttrValue::reactive(move || orientation.get()),
+        );
 
     attr_map_to_leptos_inline_attrs(attrs)
 }
@@ -932,10 +962,11 @@ fn setup_auto_direction_effect<K: TabKey>(
     clippy::redundant_closure_for_method_calls,
     reason = "method-pointer form fails HRTB inference for Api::*_attrs"
 )]
-fn setup_tab_indicator(
+fn setup_tab_indicator<K: TabKey>(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
     platform: Arc<dyn PlatformEffects>,
     indicator_revision: RwSignal<u64>,
+    tabs_meta: Memo<Vec<TabMeta<K>>>,
 ) -> (Vec<crate::LeptosAttribute>, RwSignal<String>) {
     let attrs =
         attr_map_to_leptos_inline_attrs(machine.with_api_snapshot(|api| api.tab_indicator_attrs()));
@@ -943,7 +974,7 @@ fn setup_tab_indicator(
     let style = RwSignal::new(String::new());
 
     #[cfg(feature = "ssr")]
-    drop((platform, indicator_revision));
+    drop((platform, indicator_revision, tabs_meta));
 
     #[cfg(not(feature = "ssr"))]
     {
@@ -951,6 +982,7 @@ fn setup_tab_indicator(
 
         Effect::new(move |_| {
             selected_for_indicator.track();
+            tabs_meta.track();
             indicator_revision.track();
             style.set(indicator_measurement_style(machine, platform.as_ref()));
         });
@@ -985,7 +1017,8 @@ fn render_tab_button<K: TabKey>(
     on_close_tab: Option<Callback<K>>,
     on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
     owned_tabs_field: Option<Field<Vec<Tab<K>>>>,
-    disallow_empty_selection: bool,
+    disallow_empty_selection: Signal<bool>,
+    reorderable: Signal<bool>,
     indicator_revision: RwSignal<u64>,
 ) -> impl IntoView + use<K> {
     let typed_key = tab.key;
@@ -1059,7 +1092,7 @@ fn render_tab_button<K: TabKey>(
         }
     };
 
-    let is_draggable = move || config.with_value(|cfg| cfg.reorderable).to_string();
+    let is_draggable = move || reorderable.get().to_string();
 
     let on_dragstart = {
         let key = key.clone();
@@ -1349,7 +1382,7 @@ fn handle_tab_keydown<K: TabKey>(
     modality: &Arc<dyn ModalityContext>,
     tab_nodes: TabNodeRegistry,
     owned_tabs_field: Option<Field<Vec<Tab<K>>>>,
-    disallow_empty_selection: bool,
+    disallow_empty_selection: Signal<bool>,
     indicator_revision: RwSignal<u64>,
 ) {
     let data = keyboard_event_data(event);
@@ -1759,7 +1792,7 @@ fn emit_close_request<K: TabKey>(
     successor: Option<Key>,
     config: StoredValue<TabsConfig<K>>,
     owned_tabs_field: Option<Field<Vec<Tab<K>>>>,
-    disallow_empty_selection: bool,
+    disallow_empty_selection: Signal<bool>,
 ) {
     if !machine.with_api_snapshot(|api| api.can_close_tab(key)) {
         return;
@@ -1773,7 +1806,11 @@ fn emit_close_request<K: TabKey>(
         callback.run(typed_key);
     }
 
-    close_owned_tab(owned_tabs_field, key, disallow_empty_selection);
+    close_owned_tab(
+        owned_tabs_field,
+        key,
+        disallow_empty_selection.get_untracked(),
+    );
 
     if let Some(successor) = successor {
         machine.send.run(Event::SelectTab(successor.clone()));

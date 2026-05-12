@@ -194,6 +194,30 @@ fn container() -> web_sys::HtmlElement {
         .expect("container should be an HtmlElement")
 }
 
+fn add_indicator_measurement_styles(parent: &web_sys::HtmlElement) {
+    let style = document()
+        .create_element("style")
+        .expect("style element should be created");
+
+    style.set_text_content(Some(
+        r#"
+            [data-ars-part="list"] {
+                display: inline-flex !important;
+                align-items: center !important;
+            }
+
+            [data-ars-part="tab"] {
+                display: inline-flex !important;
+                width: auto !important;
+            }
+        "#,
+    ));
+
+    parent
+        .append_child(&style)
+        .expect("indicator measurement style should append");
+}
+
 async fn animation_frame_turn() {
     let promise = js_sys::Promise::new(&mut |resolve, _reject| {
         let callback = wasm_bindgen::closure::Closure::once_into_js({
@@ -676,9 +700,10 @@ fn inline_owned_close_probe() -> Element {
 fn translated_owned_tabs_probe() -> Element {
     let mut locale = use_signal(locales::en_us);
     let onclick = move |_| locale.set(locales::br());
+    let platform: Arc<dyn PlatformEffects> = Arc::new(ars_dom::WebPlatformEffects);
 
     rsx! {
-        ArsProvider { locale,
+        ArsProvider { locale, platform: Some(platform),
             button { id: "switch-locale", onclick, "pt-BR" }
             Tabs {
                 default_value: LocalizedTab::Overview,
@@ -1689,6 +1714,16 @@ async fn web_inline_array_close_trigger_removes_owned_tab() {
 #[wasm_bindgen_test(async)]
 async fn web_translated_owned_tab_labels_update_when_locale_changes() {
     let parent = container();
+
+    parent
+        .set_attribute(
+            "style",
+            "position: relative; display: block; width: 500px; height: 200px;",
+        )
+        .expect("style should set");
+
+    add_indicator_measurement_styles(&parent);
+
     let dom = VirtualDom::new(translated_owned_tabs_probe);
 
     dioxus_web::launch::launch_virtual_dom(
@@ -1712,6 +1747,10 @@ async fn web_translated_owned_tab_labels_update_when_locale_changes() {
             .as_deref(),
         Some("Close Overview")
     );
+
+    let indicator = first_with_data_part(&parent, "tab-indicator");
+
+    let indicator_before = indicator.get_attribute("style").unwrap_or_default();
 
     click(
         &parent
@@ -1738,6 +1777,13 @@ async fn web_translated_owned_tab_labels_update_when_locale_changes() {
             .as_deref(),
         Some("Close Visão geral"),
         "close trigger labels should resolve the current translated tab label"
+    );
+
+    let indicator_after = indicator.get_attribute("style").unwrap_or_default();
+
+    assert!(
+        indicator_before != indicator_after && indicator_after.contains("--ars-indicator-width:"),
+        "translated selected-tab label changes should refresh indicator measurement: before={indicator_before:?}, after={indicator_after:?}"
     );
 }
 

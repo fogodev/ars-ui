@@ -532,7 +532,16 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
 
     let tab_indicator_attrs = tabs_indicator_attrs(machine);
 
-    let indicator_revision = use_signal(|| 0_u64);
+    let mut indicator_revision = use_signal(|| 0_u64);
+
+    let mut indicator_signature = use_signal(String::new);
+
+    sync_indicator_signature(
+        &mut indicator_signature,
+        &mut indicator_revision,
+        &config.tabs_meta,
+    );
+
     let indicator_style = use_indicator_style(machine, &platform, indicator_revision);
 
     rsx! {
@@ -1802,6 +1811,35 @@ fn bump_indicator_revision(indicator_revision: &mut Signal<u64>) {
     };
 
     indicator_revision.set(next);
+}
+
+fn sync_indicator_signature<K: TabKey>(
+    signature: &mut Signal<String>,
+    indicator_revision: &mut Signal<u64>,
+    tabs_meta: &[TabMeta<K>],
+) {
+    let next = tabs_meta_indicator_signature(tabs_meta);
+
+    if signature.peek().as_str() != next {
+        signature.set(next);
+        bump_indicator_revision(indicator_revision);
+    }
+}
+
+fn tabs_meta_indicator_signature<K: TabKey>(tabs_meta: &[TabMeta<K>]) -> String {
+    tabs_meta
+        .iter()
+        .map(|meta| {
+            format!(
+                "{}:{}:{}:{}",
+                dioxus_vdom_key(&meta.key),
+                meta.label_text,
+                meta.closable,
+                meta.disabled
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 fn dioxus_vdom_key(key: &Key) -> String {
