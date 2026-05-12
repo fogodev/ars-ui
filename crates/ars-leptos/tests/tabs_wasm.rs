@@ -9,7 +9,7 @@
 use std::sync::{Arc, Mutex};
 
 use ars_collections::Key;
-use ars_core::{PlatformEffects, Rect, ResolvedDirection, SafeUrl, TimerHandle};
+use ars_core::{Direction, PlatformEffects, Rect, ResolvedDirection, SafeUrl, TimerHandle};
 use ars_leptos::{
     ArsProvider,
     navigation::tabs::{ActivationMode, Field, ReorderEvent, Tab, TabLabel, Tabs, TabsSource},
@@ -785,20 +785,26 @@ async fn inline_array_close_trigger_removes_owned_tab() {
         let mount_handle = mount_to(parent.clone(), move || {
             view! {
                 <Tabs
-                    default_value="first"
+                    default_value="second"
                     tabs=[
                         Tab::new_with_label(
-                                "first",
-                                "First",
-                                ViewFn::from(|| view! { "First" }),
-                                ViewFn::from(|| view! { <p>"Panel one"</p> }),
+                            "first",
+                            "First",
+                            ViewFn::from(|| view! { "First" }),
+                            ViewFn::from(|| view! { <p>"Panel one"</p> }),
+                        ),
+                        Tab::new_with_label(
+                                "second",
+                                "Second",
+                                ViewFn::from(|| view! { "Second" }),
+                                ViewFn::from(|| view! { <p>"Panel two"</p> }),
                             )
                             .closable(true),
                         Tab::new_with_label(
-                            "second",
-                            "Second",
-                            ViewFn::from(|| view! { "Second" }),
-                            ViewFn::from(|| view! { <p>"Panel two"</p> }),
+                            "third",
+                            "Third",
+                            ViewFn::from(|| view! { "Third" }),
+                            ViewFn::from(|| view! { <p>"Panel three"</p> }),
                         ),
                     ]
                 />
@@ -826,12 +832,12 @@ async fn inline_array_close_trigger_removes_owned_tab() {
             .query_selector_all(r#"[role="tab"]"#)
             .expect("query should succeed")
             .length(),
-        1,
+        2,
         "inline array tabs should remove through the adapter-owned store"
     );
     assert_eq!(
         selected_tab_text(&parent),
-        "Second",
+        "Third",
         "closing the selected owned tab should select the successor"
     );
 
@@ -2921,6 +2927,13 @@ async fn disabled_tabs_ignore_direct_click_close_key_and_reorder_shortcut() {
         disabled_second.get_attribute("aria-disabled").as_deref(),
         Some("true")
     );
+    assert!(
+        disabled_second
+            .query_selector(r#"[data-ars-part="tab-close-trigger"]"#)
+            .expect("query should succeed")
+            .is_none(),
+        "disabled closable tabs must not render an active close trigger"
+    );
 
     click(&disabled_second);
 
@@ -3067,6 +3080,15 @@ async fn store_pop_removes_tab_at_runtime_via_set_tabs_redispatch() {
         after_pop_count, 2,
         "store.pop() must reduce the rendered tab list to 2"
     );
+    assert_eq!(
+        tablist
+            .get_attribute("aria-owns")
+            .unwrap_or_default()
+            .split_whitespace()
+            .count(),
+        2,
+        "aria-owns must track the live tab order after store.pop()"
+    );
 
     // The first tab is still selected because it was never popped.
     let selected = tablist
@@ -3119,6 +3141,15 @@ async fn store_push_adds_tab_at_runtime_via_set_tabs_redispatch() {
         .length();
 
     assert_eq!(count, 4, "store.push() must add a tab without remounting");
+    assert_eq!(
+        tablist
+            .get_attribute("aria-owns")
+            .unwrap_or_default()
+            .split_whitespace()
+            .count(),
+        4,
+        "aria-owns must track added tabs after store.push()"
+    );
 
     drop(mount_handle);
 }
@@ -3219,6 +3250,88 @@ async fn store_closable_toggle_redispatches_set_tabs() {
     assert!(
         close_btn.is_some(),
         "closable=true must surface a close trigger after store mutation"
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
+async fn store_disabled_toggle_updates_tab_accessibility_attrs() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent, store) = owner.with(|| {
+        let parent = container();
+        let store = store_handle(three_tabs());
+        let field: Field<Vec<TestTab>> = store.tabs().into();
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! { <Tabs default_value="first" tabs=field /> }
+        });
+
+        (mount_handle, parent, store)
+    });
+
+    leptos::task::tick().await;
+
+    let second = tab_at(&parent, 1);
+
+    assert_eq!(second.get_attribute("aria-disabled"), None);
+    assert_eq!(second.get_attribute("data-ars-disabled"), None);
+
+    owner.with(|| {
+        let field = store.tabs();
+        let mut tabs = field.write();
+
+        tabs[1] = Tab::new_with_label(
+            "second",
+            "Second",
+            ViewFn::from(|| view! { "Second" }),
+            ViewFn::from(|| view! { <p>"Panel two"</p> }),
+        )
+        .disabled(true);
+    });
+
+    leptos::task::tick().await;
+
+    let second = tab_at(&parent, 1);
+
+    assert_eq!(
+        second.get_attribute("aria-disabled").as_deref(),
+        Some("true"),
+        "aria-disabled must update when the backing store disables a tab"
+    );
+    assert_eq!(
+        second.get_attribute("data-ars-disabled").as_deref(),
+        Some(""),
+        "data-ars-disabled must update when the backing store disables a tab"
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
+async fn auto_direction_updates_rendered_root_dir() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent) = owner.with(|| {
+        let parent = container();
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! { <Tabs default_value="first" tabs=store_field(three_tabs()) dir=Direction::Auto /> }
+        });
+
+        (mount_handle, parent)
+    });
+
+    leptos::task::tick().await;
+    leptos::task::tick().await;
+
+    assert_eq!(
+        first_with_data_part(&parent, "root")
+            .get_attribute("dir")
+            .as_deref(),
+        Some("ltr"),
+        "dir=auto should render the resolved concrete direction after setup"
     );
 
     drop(mount_handle);

@@ -806,33 +806,51 @@ fn setup_lazy_mount_tracking(
 fn tabs_root_attrs(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
 ) -> Vec<crate::LeptosAttribute> {
-    attr_map_to_leptos_inline_attrs(machine.with_api_snapshot(|api| api.root_attrs()))
+    let mut attrs = machine.with_api_snapshot(|api| api.root_attrs());
+
+    let dir = machine.derive(|api| {
+        api.root_attrs()
+            .get(&HtmlAttr::Dir)
+            .map(str::to_owned)
+            .unwrap_or_default()
+    });
+
+    attrs.set(HtmlAttr::Dir, AttrValue::reactive(move || dir.get()));
+
+    attr_map_to_leptos_inline_attrs(attrs)
 }
 
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "method-pointer form fails HRTB inference for Api::list_attrs"
+)]
 fn tabs_list_attrs<K: TabKey>(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
     tabs_field: Field<Vec<Tab<K>>>,
 ) -> Vec<crate::LeptosAttribute> {
-    attr_map_to_leptos_inline_attrs(machine.with_api_snapshot(|api| {
-        let mut attrs = api.list_attrs();
+    let mut attrs = machine.with_api_snapshot(|api| api.list_attrs());
 
-        let owns = tabs_field
-            .read_untracked()
+    let owns = machine.derive(move |api| {
+        tabs_field
+            .read()
             .iter()
-            .filter_map(|tab| {
-                api.tab_attrs(&tab.key.into_key(), false)
-                    .get(&HtmlAttr::Id)
-                    .map(String::from)
-            })
+            .filter_map(|tab| tab_id_from_api(api, &tab.key.into_key()))
             .collect::<Vec<_>>()
-            .join(" ");
+            .join(" ")
+    });
 
-        if !owns.is_empty() {
-            attrs.set(HtmlAttr::Aria(AriaAttr::Owns), owns);
-        }
+    attrs.set(
+        HtmlAttr::Aria(AriaAttr::Owns),
+        AttrValue::reactive(move || owns.get()),
+    );
 
-        attrs
-    }))
+    attr_map_to_leptos_inline_attrs(attrs)
+}
+
+fn tab_id_from_api(api: &tabs::Api<'_>, key: &Key) -> Option<String> {
+    api.tab_attrs(key, false)
+        .get(&HtmlAttr::Id)
+        .map(String::from)
 }
 
 fn setup_auto_direction_effect<K: TabKey>(
@@ -913,7 +931,7 @@ fn render_tab_button<K: TabKey>(
     config: StoredValue<TabsConfig<K>>,
     reorder_status: RwSignal<String>,
     drag_source: RwSignal<Option<Key>>,
-    tabs_field: Field<Vec<Tab<K>>>,
+    _tabs_field: Field<Vec<Tab<K>>>,
     tab_nodes: TabNodeRegistry,
     modality: &Arc<dyn ModalityContext>,
     on_value_change: Option<Callback<Option<K>>>,
@@ -925,8 +943,12 @@ fn render_tab_button<K: TabKey>(
     let typed_key = tab.key;
     let key = typed_key.into_key();
 
-    let tab_attrs =
-        attr_map_to_leptos_inline_attrs(reactive_tab_attrs(machine, &key, Arc::clone(modality)));
+    let tab_attrs = attr_map_to_leptos_inline_attrs(reactive_tab_attrs(
+        machine,
+        &key,
+        Arc::clone(modality),
+        config,
+    ));
 
     let label = tab.label;
     let link = tab.link;
@@ -1036,10 +1058,12 @@ fn render_tab_button<K: TabKey>(
         let label_text = tab.label_text.clone();
 
         move || {
-            let is_closable = tabs_field
-                .read()
-                .iter()
-                .any(|t| t.key.into_key() == key && t.closable);
+            let is_closable = config.with_value(|cfg| {
+                cfg.tabs_meta
+                    .get()
+                    .iter()
+                    .any(|meta| meta.key == key && meta.closable && !meta.disabled)
+            });
 
             if !is_closable {
                 return None;
@@ -1064,14 +1088,20 @@ fn render_tab_button<K: TabKey>(
                         let key = key.clone();
                         move |event: web_sys::MouseEvent| {
                             event.stop_propagation();
+                            let successor = selected_close_successor(machine, &key);
                             emit_close_request(
+                                machine,
                                 send,
                                 on_close_tab,
                                 typed_key,
                                 &key,
+                                successor.as_ref().map(|(successor_key, _)| successor_key.clone()),
                                 owned_tabs_field,
                                 disallow_empty_selection,
                             );
+                            if let Some((successor_key, element_id)) = successor {
+                                defer_focus_tab_node_or_id(tab_nodes, successor_key, element_id);
+                            }
                         }
                     }
                 ></span>
@@ -1426,10 +1456,14 @@ fn handle_tab_keydown<K: TabKey>(
         };
 
         emit_close_request(
+            machine,
             send,
             on_close_tab,
             typed_key,
             key,
+            successor
+                .as_ref()
+                .map(|(successor_key, _)| successor_key.clone()),
             owned_tabs_field,
             disallow_empty_selection,
         );
@@ -1447,6 +1481,21 @@ fn pointer_type_from_leptos(pointer_type: &str) -> PointerType {
         "pen" => PointerType::Pen,
         _ => PointerType::Virtual,
     }
+}
+
+fn selected_close_successor(
+    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
+    key: &Key,
+) -> Option<(Key, String)> {
+    machine.with_api_snapshot(|api| {
+        if api.selected_tab() != Some(key) {
+            return None;
+        }
+
+        api.successor_for_close(key).and_then(|successor_key| {
+            tab_id_from_api(api, &successor_key).map(|id| (successor_key, id))
+        })
+    })
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1633,11 +1682,17 @@ fn select_and_emit_value_change<K: TabKey>(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "close requests need machine dispatch, callbacks, key metadata, and owned-store context"
+)]
 fn emit_close_request<K: TabKey>(
+    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
     send: Callback<Event>,
     on_close_tab: Option<Callback<K>>,
     typed_key: K,
     key: &Key,
+    successor: Option<Key>,
     owned_tabs_field: Option<Field<Vec<Tab<K>>>>,
     disallow_empty_selection: bool,
 ) {
@@ -1648,6 +1703,10 @@ fn emit_close_request<K: TabKey>(
     }
 
     close_owned_tab(owned_tabs_field, key, disallow_empty_selection);
+
+    if let Some(successor) = successor {
+        machine.send.run(Event::SelectTab(successor));
+    }
 }
 
 fn close_owned_tab<K: TabKey>(
@@ -1759,10 +1818,11 @@ fn parse_direction_token(token: &str) -> Direction {
 /// internally guards on `tab_key == ctx.focused_tab`, so non-focused
 /// tabs never render `data-ars-focus-visible` even when modality is
 /// "keyboard."
-fn reactive_tab_attrs(
+fn reactive_tab_attrs<K: TabKey>(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
     key: &Key,
     modality: Arc<dyn ModalityContext>,
+    config: StoredValue<TabsConfig<K>>,
 ) -> AttrMap {
     let memo = machine.derive({
         let key = key.clone();
@@ -1805,6 +1865,26 @@ fn reactive_tab_attrs(
                         false
                     }
                 })
+            }),
+        );
+    }
+
+    for &dynamic_key in &[
+        HtmlAttr::Data("ars-disabled"),
+        HtmlAttr::Aria(AriaAttr::Disabled),
+    ] {
+        attrs.set(
+            dynamic_key,
+            AttrValue::reactive_bool({
+                let key = key.clone();
+                move || {
+                    config.with_value(|cfg| {
+                        cfg.tabs_meta
+                            .get()
+                            .iter()
+                            .any(|meta| meta.key == key && meta.disabled)
+                    })
+                }
             }),
         );
     }

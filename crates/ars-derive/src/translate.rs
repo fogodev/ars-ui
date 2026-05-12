@@ -416,8 +416,10 @@ fn placeholders(message: &LitStr) -> syn::Result<Vec<String>> {
 fn message_expr(i18n_path: &TokenStream, message: &LitStr, fields: &[Ident]) -> TokenStream {
     let used_fields = placeholders(message).expect("message placeholders validated");
 
+    let mut seen_fields = BTreeSet::new();
     let used_fields = used_fields
         .iter()
+        .filter(|field| seen_fields.insert((*field).clone()))
         .map(|field| Ident::new(field, message.span()))
         .collect::<Vec<_>>();
 

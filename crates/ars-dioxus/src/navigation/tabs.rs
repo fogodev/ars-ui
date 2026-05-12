@@ -908,7 +908,7 @@ fn render_tab_button<K: TabKey>(
     }));
 
     let label = tab.label;
-    let closable = tab.closable;
+
     let link = tab.link;
 
     let prevent_default_on_click = link.is_some();
@@ -1012,7 +1012,12 @@ fn render_tab_button<K: TabKey>(
         }
     };
 
-    let close_button = if closable {
+    let can_close = config
+        .tabs_meta
+        .iter()
+        .any(|meta| meta.key == key && meta.closable && !meta.disabled);
+
+    let close_button = if can_close {
         let close_attrs = attr_map_to_dioxus_inline_attrs(machine.with_api_snapshot({
             let label_text = tab.label_text.resolve().to_owned();
             move |api| {
@@ -1030,15 +1035,22 @@ fn render_tab_button<K: TabKey>(
                     let key = key.clone();
                     move |event: dioxus::prelude::Event<MouseData>| {
                         event.stop_propagation();
+                        let successor = selected_close_successor(machine, &key);
 
                         emit_close_request(
+                            machine,
                             send,
                             on_close_tab,
                             typed_key,
                             &key,
+                            successor.as_ref().map(|(successor_key, _)| successor_key.clone()),
                             owned_tabs_store,
                             disallow_empty_selection,
                         );
+
+                        if let Some((_successor_key, element_id)) = successor {
+                            defer_focus_tab_element_by_id(element_id);
+                        }
                     }
                 },
                 ..close_attrs,
@@ -1338,28 +1350,26 @@ fn handle_tab_keydown<K: TabKey>(
     {
         event.prevent_default();
 
-        let successor_id = machine.with_api_snapshot(|api| {
-            api.successor_for_close(key).and_then(|successor| {
-                api.tab_attrs(&successor, false)
-                    .get(&HtmlAttr::Id)
-                    .map(String::from)
-            })
-        });
+        let successor = selected_close_successor(machine, key);
 
         let Some(typed_key) = typed_key_for_key(&config.tabs_meta, key) else {
             return;
         };
 
         emit_close_request(
+            machine,
             send,
             on_close_tab,
             typed_key,
             key,
+            successor
+                .as_ref()
+                .map(|(successor_key, _)| successor_key.clone()),
             owned_tabs_store,
             disallow_empty_selection,
         );
 
-        if let Some(element_id) = successor_id {
+        if let Some((_successor_key, element_id)) = successor {
             defer_focus_tab_element_by_id(element_id);
         }
     }
@@ -1372,6 +1382,24 @@ fn pointer_type_from_dioxus(pointer_type: &str) -> PointerType {
         "pen" => PointerType::Pen,
         _ => PointerType::Virtual,
     }
+}
+
+fn selected_close_successor(
+    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
+    key: &Key,
+) -> Option<(Key, String)> {
+    machine.with_api_snapshot(|api| {
+        if api.selected_tab() != Some(key) {
+            return None;
+        }
+
+        api.successor_for_close(key).and_then(|successor_key| {
+            api.tab_attrs(&successor_key, false)
+                .get(&HtmlAttr::Id)
+                .map(String::from)
+                .map(|id| (successor_key, id))
+        })
+    })
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1544,11 +1572,17 @@ fn select_and_emit_value_change<K: TabKey>(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "close requests need machine dispatch, callbacks, key metadata, and owned-store context"
+)]
 fn emit_close_request<K: TabKey>(
+    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
     send: EventHandler<Event>,
     on_close_tab: Option<EventHandler<K>>,
     typed_key: K,
     key: &Key,
+    successor: Option<Key>,
     owned_tabs_store: Option<Store<Vec<Tab<K>>>>,
     disallow_empty_selection: bool,
 ) {
@@ -1559,6 +1593,10 @@ fn emit_close_request<K: TabKey>(
     }
 
     close_owned_tab(owned_tabs_store, key, disallow_empty_selection);
+
+    if let Some(successor) = successor {
+        machine.send.call(Event::SelectTab(successor));
+    }
 }
 
 fn close_owned_tab<K: TabKey>(

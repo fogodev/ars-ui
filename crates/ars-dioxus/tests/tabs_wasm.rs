@@ -551,14 +551,17 @@ fn close_key_probe(props: CloseKeyProbeProps) -> Element {
 fn inline_owned_close_probe() -> Element {
     rsx! {
         Tabs {
-            default_value: "first",
+            default_value: "second",
             tabs: [
                 Tab::new_with_label("first", "First", rsx! { "First" }, rsx! {
                     p { "Panel one" }
-                })
-                    .closable(true),
+                }),
                 Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
                     p { "Panel two" }
+                })
+                    .closable(true),
+                Tab::new_with_label("third", "Third", rsx! { "Third" }, rsx! {
+                    p { "Panel three" }
                 }),
             ],
         }
@@ -1221,12 +1224,12 @@ async fn web_inline_array_close_trigger_removes_owned_tab() {
             .query_selector_all(r#"[role="tab"]"#)
             .expect("query should succeed")
             .length(),
-        1,
+        2,
         "inline array tabs should remove through the adapter-owned store"
     );
     assert_eq!(
         selected_tab_text(&parent),
-        "Second",
+        "Third",
         "closing the selected owned tab should select the successor"
     );
 }
@@ -2546,6 +2549,13 @@ async fn web_disabled_tabs_ignore_direct_click_close_key_and_reorder_shortcut() 
     assert_eq!(
         disabled_second.get_attribute("aria-disabled").as_deref(),
         Some("true")
+    );
+    assert!(
+        disabled_second
+            .query_selector(r#"[data-ars-part="tab-close-trigger"]"#)
+            .expect("query should succeed")
+            .is_none(),
+        "disabled closable tabs must not render an active close trigger"
     );
 
     click(&disabled_second);

@@ -14,6 +14,9 @@ enum InventoryText {
     #[translate(en = "Hello, {name}")]
     Greeting { name: String },
 
+    #[translate(en = "{name}, meet {name}")]
+    RepeatedPlaceholder { name: String },
+
     #[translate(locale = "en", text = "Color")]
     #[translate(locale = "pt_BR", text = "Cor")]
     ExplicitLocaleText,
@@ -54,6 +57,17 @@ fn translate_derive_falls_back_to_configured_locale() {
         }
         .translate(&locales::fr(), &StubIntlBackend),
         "Hello, Ada"
+    );
+}
+
+#[test]
+fn translate_derive_allows_repeated_placeholders() {
+    assert_eq!(
+        InventoryText::RepeatedPlaceholder {
+            name: String::from("Ada")
+        }
+        .translate(&locales::en_us(), &StubIntlBackend),
+        "Ada, meet Ada"
     );
 }
 
