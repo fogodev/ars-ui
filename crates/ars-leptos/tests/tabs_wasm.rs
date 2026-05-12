@@ -1800,6 +1800,21 @@ async fn drag_and_drop_ignores_missing_same_or_disabled_targets() {
         "drop on a disabled target should fall through"
     );
 
+    dispatch_drag_event(&first, "dragstart");
+    dispatch_drag_event(&first, "dragend");
+
+    let canceled_dragover = dispatch_drag_event(&third, "dragover");
+    let canceled_drop = dispatch_drag_event(&third, "drop");
+
+    assert!(
+        !canceled_dragover.default_prevented(),
+        "dragover should fall through after dragend clears the source tab"
+    );
+    assert!(
+        !canceled_drop.default_prevented(),
+        "drop should fall through after dragend clears the source tab"
+    );
+
     assert!(
         reordered
             .lock()
@@ -4078,13 +4093,34 @@ async fn signal_backed_orientation_updates_keyboard_navigation() {
 async fn signal_backed_reorderable_updates_draggable_tabs() {
     let owner = Owner::new();
 
+    let reordered = Arc::new(Mutex::new(Vec::<TestReorderEvent>::new()));
+
     let (mount_handle, parent, set_reorderable) = owner.with(|| {
         let parent = container();
         let (reorderable, set_reorderable) = signal(false);
         let reorderable: Signal<bool> = reorderable.into();
 
-        let mount_handle = mount_to(parent.clone(), move || {
-            view! { <Tabs default_value="first" tabs=store_field(three_tabs()) reorderable=reorderable /> }
+        let mount_handle = mount_to(parent.clone(), {
+            let reordered = Arc::clone(&reordered);
+            move || {
+                view! {
+                    <Tabs
+                        default_value="first"
+                        tabs=store_field(three_tabs())
+                        reorderable
+                        on_reorder=Callback::new({
+                            let reordered = Arc::clone(&reordered);
+                            move |event| {
+                                reordered
+                                    .lock()
+                                    .expect("reorder callback log should not be poisoned")
+                                    .push(event);
+                                true
+                            }
+                        })
+                    />
+                }
+            }
         });
 
         (mount_handle, parent, set_reorderable)
@@ -4118,6 +4154,45 @@ async fn signal_backed_reorderable_updates_draggable_tabs() {
             .as_deref(),
         Some("draggable tab"),
         "drag roledescription should track signal-backed reorderable"
+    );
+
+    let first = tab_at(&parent, 0);
+    let third = tab_at(&parent, 2);
+
+    dispatch_drag_event(&first, "dragstart");
+
+    set_reorderable.set(false);
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        tab_at(&parent, 0).get_attribute("draggable").as_deref(),
+        Some("false"),
+        "draggable attr should turn off when reorderable turns off"
+    );
+    assert_eq!(
+        tab_at(&parent, 0).get_attribute("aria-roledescription"),
+        None,
+        "drag roledescription should be removed when reorderable turns off"
+    );
+
+    let stale_dragover = dispatch_drag_event(&third, "dragover");
+    let stale_drop = dispatch_drag_event(&third, "drop");
+
+    assert!(
+        !stale_dragover.default_prevented(),
+        "dragover should not accept a stale source after reorderable turns off"
+    );
+    assert!(
+        !stale_drop.default_prevented(),
+        "drop should not reorder after reorderable turns off"
+    );
+    assert!(
+        reordered
+            .lock()
+            .expect("reorder callback log should not be poisoned")
+            .is_empty(),
+        "turning reorderable off must block stale drag sources"
     );
 
     drop(mount_handle);

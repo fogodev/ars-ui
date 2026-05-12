@@ -36,8 +36,8 @@ pub use ars_components::navigation::tabs::{
     ReorderEvent, State,
 };
 use ars_core::{
-    AriaAttr, Direction, HtmlAttr, KeyModifiers, ModalityContext, Orientation, PlatformEffects,
-    PointerType, SafeUrl,
+    AriaAttr, AttrValue, Direction, HtmlAttr, KeyModifiers, ModalityContext, Orientation,
+    PlatformEffects, PointerType, SafeUrl,
 };
 use ars_i18n::Translate;
 use ars_interactions::{KeyboardEventData, KeyboardKey};
@@ -522,6 +522,11 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
     let reorder_status = use_signal(String::new);
     let drag_source = use_signal(|| None::<Key>);
     let modality_revision = use_signal(|| 0_u64);
+    let mut reorderable_signal = use_signal(|| reorderable);
+
+    if *reorderable_signal.peek() != reorderable {
+        reorderable_signal.set(reorderable);
+    }
 
     let ever_selected = use_lazy_mount_tracking(machine);
 
@@ -544,6 +549,10 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
 
     let indicator_style = use_indicator_style(machine, &platform, indicator_revision);
 
+    let selected_tab = machine.derive(|api| api.selected_tab().cloned());
+
+    let selected_key = selected_tab();
+
     rsx! {
         div {..root_attrs(),
             div {..list_attrs,
@@ -559,6 +568,7 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
                                 reorder_status,
                                 drag_source,
                                 modality_revision,
+                                reorderable_signal,
                                 tab_nodes,
                                 &modality,
                                 on_value_change,
@@ -582,6 +592,7 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
                             lazy_mount,
                             unmount_on_exit,
                             ever_selected,
+                            selected_key.as_ref(),
                         )
                     })
             }
@@ -953,20 +964,28 @@ fn use_auto_direction_sync(
     dir: Direction,
     platform: &Arc<dyn PlatformEffects>,
 ) {
-    let list_id = (dir == Direction::Auto)
-        .then(|| {
-            machine.with_api_snapshot(|api| api.list_attrs().get(&HtmlAttr::Id).map(String::from))
-        })
-        .flatten();
+    let mut dir_signal = use_signal(|| dir);
+
+    if *dir_signal.peek() != dir {
+        dir_signal.set(dir);
+    }
 
     let platform = Arc::clone(platform);
 
     use_effect(move || {
-        if let Some(list_id) = &list_id {
-            let resolved = Direction::from(platform.resolved_direction(list_id));
-
-            machine.send.call(Event::SetDirection(resolved));
+        if dir_signal() != Direction::Auto {
+            return;
         }
+
+        let Some(list_id) =
+            machine.with_api_snapshot(|api| api.list_attrs().get(&HtmlAttr::Id).map(String::from))
+        else {
+            return;
+        };
+
+        let resolved = Direction::from(platform.resolved_direction(&list_id));
+
+        machine.send.call(Event::SetDirection(resolved));
     });
 }
 
@@ -1023,6 +1042,7 @@ fn render_tab_button<K: TabKey>(
     reorder_status: Signal<String>,
     drag_source: Signal<Option<Key>>,
     mut modality_revision: Signal<u64>,
+    reorderable_signal: Signal<bool>,
     mut tab_nodes: Signal<BTreeMap<Key, Rc<MountedData>>>,
     modality: &Arc<dyn ModalityContext>,
     on_value_change: Option<EventHandler<Option<K>>>,
@@ -1042,10 +1062,20 @@ fn render_tab_button<K: TabKey>(
 
         move |api| {
             modality_revision();
+            let is_reorderable = reorderable_signal();
 
-            attr_map_to_dioxus_inline_attrs(
-                api.tab_attrs(&key, !modality.had_pointer_interaction()),
-            )
+            let mut attrs = api.tab_attrs(&key, !modality.had_pointer_interaction());
+
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::RoleDescription),
+                if is_reorderable {
+                    AttrValue::from("draggable tab")
+                } else {
+                    AttrValue::None
+                },
+            );
+
+            attr_map_to_dioxus_inline_attrs(attrs)
         }
     });
 
@@ -1126,6 +1156,14 @@ fn render_tab_button<K: TabKey>(
             if config.reorderable {
                 drag_source.set(Some(key.clone()));
             }
+        }
+    };
+
+    let on_dragend = {
+        let mut drag_source = drag_source;
+
+        move |_event: dioxus::prelude::Event<DragData>| {
+            drag_source.set(None);
         }
     };
 
@@ -1224,6 +1262,7 @@ fn render_tab_button<K: TabKey>(
                 ondragstart: on_dragstart,
                 ondragover: on_dragover,
                 ondrop: on_drop,
+                ondragend: on_dragend,
                 onmounted: {
                     let key = key.clone();
                     move |event: dioxus::prelude::Event<MountedData>| {
@@ -1250,6 +1289,7 @@ fn render_tab_button<K: TabKey>(
                 ondragstart: on_dragstart,
                 ondragover: on_dragover,
                 ondrop: on_drop,
+                ondragend: on_dragend,
                 onmounted: {
                     let key = key.clone();
                     move |event: dioxus::prelude::Event<MountedData>| {
@@ -1272,6 +1312,10 @@ fn can_accept_drag<K: TabKey>(
     drag_source: Signal<Option<Key>>,
     target_key: &Key,
 ) -> bool {
+    if !config.reorderable {
+        return false;
+    }
+
     let Some(source_key) = drag_source.peek().clone() else {
         return false;
     };
@@ -1296,6 +1340,12 @@ fn handle_tab_drop<K: TabKey>(
     owned_tabs_store: Option<Store<Vec<Tab<K>>>>,
     mut indicator_revision: Signal<u64>,
 ) {
+    if !config.reorderable {
+        drag_source.set(None);
+
+        return;
+    }
+
     let Some(source_key) = drag_source.peek().clone() else {
         return;
     };
@@ -1568,24 +1618,35 @@ fn render_tab_panel<K: TabKey>(
     lazy_mount: bool,
     unmount_on_exit: bool,
     ever_selected: Signal<BTreeSet<Key>>,
+    selected_key: Option<&Key>,
 ) -> Element {
     let key = tab.key.into_key();
     let vdom_key = dioxus_vdom_key(&key);
 
-    let panel_attrs = attr_map_to_dioxus_inline_attrs(machine.with_api_snapshot({
-        let key = key.clone();
-        move |api| api.panel_attrs(&key, None)
-    }));
+    let selected_key_for_attrs = selected_key.cloned();
 
-    let is_selected = machine.with_api_snapshot({
+    let panel_attrs = machine.with_api_snapshot({
         let key = key.clone();
-        move |api| api.is_tab_selected(&key)
+        move |api| {
+            let mut attrs = api.panel_attrs(&key, None);
+            let is_selected = selected_key_for_attrs.as_ref() == Some(&key);
+
+            attrs
+                .set_bool(HtmlAttr::Data("ars-selected"), is_selected)
+                .set_bool(HtmlAttr::Hidden, !is_selected);
+
+            attr_map_to_dioxus_inline_attrs(attrs)
+        }
     });
 
     let already_selected = ever_selected.read().contains(&key);
 
-    let should_render_body =
-        should_render_panel_body(is_selected, already_selected, lazy_mount, unmount_on_exit);
+    let should_render_body = should_render_panel_body(
+        selected_key == Some(&key),
+        already_selected,
+        lazy_mount,
+        unmount_on_exit,
+    );
 
     let panel_body = if should_render_body {
         tab.panel

@@ -1110,6 +1110,10 @@ fn render_tab_button<K: TabKey>(
         }
     };
 
+    let on_dragend = move |_event: web_sys::DragEvent| {
+        drag_source.set(None);
+    };
+
     let on_dragover = {
         let key = key.clone();
         move |event: web_sys::DragEvent| {
@@ -1217,6 +1221,7 @@ fn render_tab_button<K: TabKey>(
                 on:dragstart=on_dragstart
                 on:dragover=on_dragover
                 on:drop=on_drop
+                on:dragend=on_dragend
                 draggable=is_draggable
             >
                 {move || label.run()}
@@ -1237,6 +1242,7 @@ fn render_tab_button<K: TabKey>(
                 on:dragstart=on_dragstart
                 on:dragover=on_dragover
                 on:drop=on_drop
+                on:dragend=on_dragend
                 draggable=is_draggable
             >
                 {move || label.run()}
@@ -1297,6 +1303,10 @@ fn can_accept_drag<K: TabKey>(
     drag_source: RwSignal<Option<Key>>,
     target_key: &Key,
 ) -> bool {
+    if !config.with_value(|cfg| cfg.reorderable) {
+        return false;
+    }
+
     let Some(source_key) = drag_source.get_untracked() else {
         return false;
     };
@@ -1324,6 +1334,12 @@ fn handle_tab_drop<K: TabKey>(
     owned_tabs_field: Option<Field<Vec<Tab<K>>>>,
     indicator_revision: RwSignal<u64>,
 ) {
+    if !config.with_value(|cfg| cfg.reorderable) {
+        drag_source.set(None);
+
+        return;
+    }
+
     let Some(source_key) = drag_source.get_untracked() else {
         return;
     };

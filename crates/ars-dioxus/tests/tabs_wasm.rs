@@ -22,7 +22,9 @@ use std::{
 
 use ars_collections::Key;
 use ars_components::navigation::tabs;
-use ars_core::{HtmlAttr, PlatformEffects, SafeUrl};
+use ars_core::{
+    Direction, HtmlAttr, NullPlatformEffects, PlatformEffects, Rect, SafeUrl, TimerHandle,
+};
 use ars_dioxus::{
     ArsProvider, DioxusPlatform, DragData, FilePickerOptions, PlatformDragEvent, TabKey, Translate,
     default_dioxus_platform,
@@ -30,7 +32,7 @@ use ars_dioxus::{
     navigation::tabs::{ActivationMode, ReadStore, ReorderEvent, Tab, TabLabel, Tabs, TabsSource},
 };
 use ars_forms::field::FileRef;
-use ars_i18n::locales;
+use ars_i18n::{ResolvedDirection, locales};
 use dioxus::{
     dioxus_core::{NoOpMutations, ScopeId},
     events::MountedData,
@@ -340,6 +342,15 @@ fn first_with_data_part(parent: &web_sys::HtmlElement, part: &str) -> web_sys::H
         .expect("element should be HtmlElement")
 }
 
+fn first_with_id(parent: &web_sys::HtmlElement, id: &str) -> web_sys::HtmlElement {
+    parent
+        .query_selector(&format!("#{id}"))
+        .expect("query should succeed")
+        .unwrap_or_else(|| panic!("missing #{id} in subtree"))
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("element should be HtmlElement")
+}
+
 fn selected_tab_text(parent: &web_sys::HtmlElement) -> String {
     parent
         .query_selector(r#"[role="tab"][aria-selected="true"]"#)
@@ -371,6 +382,127 @@ fn active_element_text() -> String {
 
 fn has_focus_visible(tab: &web_sys::HtmlElement) -> bool {
     tab.has_attribute("data-ars-focus-visible")
+}
+
+#[derive(Debug)]
+struct RtlDirectionPlatform;
+
+impl PlatformEffects for RtlDirectionPlatform {
+    fn focus_element_by_id(&self, id: &str) {
+        NullPlatformEffects.focus_element_by_id(id);
+    }
+
+    fn focus_first_tabbable(&self, container_id: &str) {
+        NullPlatformEffects.focus_first_tabbable(container_id);
+    }
+
+    fn focus_last_tabbable(&self, container_id: &str) {
+        NullPlatformEffects.focus_last_tabbable(container_id);
+    }
+
+    fn tabbable_element_ids(&self, container_id: &str) -> Vec<String> {
+        NullPlatformEffects.tabbable_element_ids(container_id)
+    }
+
+    fn focus_body(&self) {
+        NullPlatformEffects.focus_body();
+    }
+
+    fn set_timeout(&self, delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
+        NullPlatformEffects.set_timeout(delay_ms, callback)
+    }
+
+    fn clear_timeout(&self, handle: TimerHandle) {
+        NullPlatformEffects.clear_timeout(handle);
+    }
+
+    fn announce(&self, message: &str) {
+        NullPlatformEffects.announce(message);
+    }
+
+    fn announce_assertive(&self, message: &str) {
+        NullPlatformEffects.announce_assertive(message);
+    }
+
+    fn position_element_at(&self, id: &str, x: f64, y: f64) {
+        NullPlatformEffects.position_element_at(id, x, y);
+    }
+
+    fn resolved_direction(&self, _id: &str) -> ResolvedDirection {
+        ResolvedDirection::Rtl
+    }
+
+    fn set_background_inert(&self, portal_root_id: &str) -> Box<dyn FnOnce()> {
+        NullPlatformEffects.set_background_inert(portal_root_id)
+    }
+
+    fn remove_inert_from_siblings(&self, portal_id: &str) {
+        NullPlatformEffects.remove_inert_from_siblings(portal_id);
+    }
+
+    fn scroll_lock_acquire(&self) {
+        NullPlatformEffects.scroll_lock_acquire();
+    }
+
+    fn scroll_lock_release(&self) {
+        NullPlatformEffects.scroll_lock_release();
+    }
+
+    fn document_contains_id(&self, id: &str) -> bool {
+        NullPlatformEffects.document_contains_id(id)
+    }
+
+    fn track_pointer_drag(
+        &self,
+        on_move: Box<dyn Fn(f64, f64)>,
+        on_up: Box<dyn FnOnce()>,
+    ) -> Box<dyn FnOnce()> {
+        NullPlatformEffects.track_pointer_drag(on_move, on_up)
+    }
+
+    fn active_element_id(&self) -> Option<String> {
+        NullPlatformEffects.active_element_id()
+    }
+
+    fn attach_focus_trap(&self, container_id: &str, on_escape: Box<dyn Fn()>) -> Box<dyn FnOnce()> {
+        NullPlatformEffects.attach_focus_trap(container_id, on_escape)
+    }
+
+    fn can_restore_focus(&self, id: &str) -> bool {
+        NullPlatformEffects.can_restore_focus(id)
+    }
+
+    fn nearest_focusable_ancestor_id(&self, id: &str) -> Option<String> {
+        NullPlatformEffects.nearest_focusable_ancestor_id(id)
+    }
+
+    fn set_scroll_top(&self, container_id: &str, scroll_top: f64) {
+        NullPlatformEffects.set_scroll_top(container_id, scroll_top);
+    }
+
+    fn resize_to_content(&self, id: &str, max_height: Option<&str>) {
+        NullPlatformEffects.resize_to_content(id, max_height);
+    }
+
+    fn on_reduced_motion_change(&self, callback: Box<dyn Fn(bool)>) -> Box<dyn FnOnce()> {
+        NullPlatformEffects.on_reduced_motion_change(callback)
+    }
+
+    fn is_mac_platform(&self) -> bool {
+        NullPlatformEffects.is_mac_platform()
+    }
+
+    fn now_ms(&self) -> u64 {
+        NullPlatformEffects.now_ms()
+    }
+
+    fn get_bounding_rect(&self, id: &str) -> Option<Rect> {
+        NullPlatformEffects.get_bounding_rect(id)
+    }
+
+    fn on_animation_end(&self, id: &str, callback: Box<dyn FnOnce()>) -> Box<dyn FnOnce()> {
+        NullPlatformEffects.on_animation_end(id, callback)
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -623,6 +755,74 @@ fn drag_reorder_probe(props: DragReorderProbeProps) -> Element {
                 tabs.insert(event.new_index, tab);
                 true
             }),
+        }
+    }
+}
+
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Dioxus root props are moved into the component function"
+)]
+#[expect(
+    unused_qualifications,
+    reason = "rsx! macro expansion currently reports event-handler attribute names as redundant qualifications"
+)]
+fn dynamic_reorderable_probe(props: DragReorderProbeProps) -> Element {
+    let mut tabs = use_store(three_tabs);
+    let mut reorderable = use_signal(|| false);
+    let reordered = Arc::clone(&props.reordered);
+    let enable_reorder = move |_| reorderable.set(true);
+    let disable_reorder = move |_| reorderable.set(false);
+
+    rsx! {
+        button { id: "enable-reorder", onclick: enable_reorder, "enable" }
+        button { id: "disable-reorder", onclick: disable_reorder, "disable" }
+        Tabs {
+            default_value: "first",
+            tabs: ReadStore::from(tabs),
+            reorderable: reorderable(),
+            on_reorder: Callback::new(move |event: TestReorderEvent| {
+                reordered
+                    .lock()
+                    .expect("reorder callback log should not be poisoned")
+                    .push(event.clone());
+                let mut tabs = tabs.write();
+                let tab = tabs.remove(event.old_index);
+                tabs.insert(event.new_index, tab);
+                true
+            }),
+        }
+    }
+}
+
+#[expect(
+    unused_qualifications,
+    reason = "rsx! macro expansion currently reports event-handler attribute names as redundant qualifications"
+)]
+fn auto_direction_toggle_probe() -> Element {
+    let mut dir = use_signal(|| Direction::Ltr);
+    let set_auto_dir = move |_| dir.set(Direction::Auto);
+    let platform: Arc<dyn PlatformEffects> = Arc::new(RtlDirectionPlatform);
+
+    rsx! {
+        ArsProvider { platform: Some(platform),
+            button { id: "set-auto-dir", onclick: set_auto_dir, "auto" }
+            Tabs {
+                default_value: "first",
+                tabs: ReadStore::from(use_store(three_tabs)),
+                dir: dir(),
+            }
+        }
+    }
+}
+
+fn unmounting_panel_probe() -> Element {
+    rsx! {
+        Tabs {
+            default_value: "first",
+            tabs: ReadStore::from(use_store(three_tabs)),
+            lazy_mount: true,
+            unmount_on_exit: true,
         }
     }
 }
@@ -2132,6 +2332,132 @@ async fn web_drag_and_drop_reorders_tabs_through_callback() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn web_dragend_clears_tab_drag_source() {
+    let parent = container();
+    let reordered = Arc::new(Mutex::new(Vec::<TestReorderEvent>::new()));
+    let dom = VirtualDom::new_with_props(
+        drag_reorder_probe,
+        DragReorderProbeProps {
+            reordered: Arc::clone(&reordered),
+        },
+    );
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    let first = tab_at(&parent, 0);
+    let third = tab_at(&parent, 2);
+
+    dispatch_drag_event(&first, "dragstart");
+    dispatch_drag_event(&first, "dragend");
+
+    let dragover = dispatch_drag_event(&third, "dragover");
+    let drop = dispatch_drag_event(&third, "drop");
+
+    assert!(
+        !dragover.default_prevented(),
+        "dragover should fall through after the tab drag source is cleared"
+    );
+    assert!(
+        !drop.default_prevented(),
+        "drop should fall through after the tab drag source is cleared"
+    );
+    assert!(
+        reordered
+            .lock()
+            .expect("reorder callback log should not be poisoned")
+            .is_empty(),
+        "dragend cancellation must not leave a stale source for a later drop"
+    );
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_signal_backed_reorderable_updates_attrs_and_blocks_stale_drop() {
+    let parent = container();
+    let reordered = Arc::new(Mutex::new(Vec::<TestReorderEvent>::new()));
+    let dom = VirtualDom::new_with_props(
+        dynamic_reorderable_probe,
+        DragReorderProbeProps {
+            reordered: Arc::clone(&reordered),
+        },
+    );
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert_eq!(
+        tab_at(&parent, 0).get_attribute("draggable").as_deref(),
+        Some("false")
+    );
+    assert_eq!(
+        tab_at(&parent, 0).get_attribute("aria-roledescription"),
+        None
+    );
+
+    first_with_id(&parent, "enable-reorder").click();
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        tab_at(&parent, 0).get_attribute("draggable").as_deref(),
+        Some("true")
+    );
+    assert_eq!(
+        tab_at(&parent, 0)
+            .get_attribute("aria-roledescription")
+            .as_deref(),
+        Some("draggable tab")
+    );
+
+    let first = tab_at(&parent, 0);
+    let third = tab_at(&parent, 2);
+
+    dispatch_drag_event(&first, "dragstart");
+
+    first_with_id(&parent, "disable-reorder").click();
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        tab_at(&parent, 0).get_attribute("draggable").as_deref(),
+        Some("false")
+    );
+    assert_eq!(
+        tab_at(&parent, 0).get_attribute("aria-roledescription"),
+        None
+    );
+
+    let dragover = dispatch_drag_event(&third, "dragover");
+    let drop = dispatch_drag_event(&third, "drop");
+
+    assert!(
+        !dragover.default_prevented(),
+        "dragover should not accept a stale source after reorderable turns off"
+    );
+    assert!(
+        !drop.default_prevented(),
+        "drop should not reorder after reorderable turns off"
+    );
+    assert!(
+        reordered
+            .lock()
+            .expect("reorder callback log should not be poisoned")
+            .is_empty(),
+        "turning reorderable off must block stale drag sources"
+    );
+}
+
+#[wasm_bindgen_test(async)]
 async fn web_inline_array_drag_and_drop_reorders_owned_tabs() {
     let parent = container();
     let dom = VirtualDom::new(inline_owned_reorder_probe);
@@ -2192,6 +2518,79 @@ async fn web_inline_array_drag_and_drop_reorders_owned_tabs() {
         active_element_text(),
         "First",
         "inline owned reorder should keep focus on the moved logical tab"
+    );
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_panel_attrs_react_to_selection_changes() {
+    let parent = container();
+    let dom = VirtualDom::new(unmounting_panel_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert_eq!(
+        parent
+            .query_selector(r#"[role="tabpanel"]:not([hidden])"#)
+            .expect("query should succeed")
+            .expect("selected panel should exist")
+            .text_content()
+            .unwrap_or_default(),
+        "Panel one"
+    );
+
+    tab_at(&parent, 1).click();
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        parent
+            .query_selector(r#"[role="tabpanel"]:not([hidden])"#)
+            .expect("query should succeed")
+            .expect("selected panel should exist")
+            .text_content()
+            .unwrap_or_default(),
+        "Panel two",
+        "panel hidden state and unmount_on_exit body should update with tab selection"
+    );
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_auto_direction_resolves_after_prop_changes() {
+    let parent = container();
+    let dom = VirtualDom::new(auto_direction_toggle_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert_eq!(
+        first_with_data_part(&parent, "root")
+            .get_attribute("dir")
+            .as_deref(),
+        Some("ltr")
+    );
+
+    first_with_id(&parent, "set-auto-dir").click();
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert_eq!(
+        first_with_data_part(&parent, "root")
+            .get_attribute("dir")
+            .as_deref(),
+        Some("rtl"),
+        "dir=auto should resolve again when the Dioxus prop changes after mount"
     );
 }
 
