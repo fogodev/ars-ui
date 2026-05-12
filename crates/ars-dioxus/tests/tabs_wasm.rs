@@ -746,6 +746,75 @@ fn inline_owned_dynamic_add_probe() -> Element {
     }
 }
 
+#[expect(
+    unused_qualifications,
+    reason = "rsx! macro expansion currently reports event-handler attribute names as redundant qualifications"
+)]
+fn inline_owned_parent_reorder_probe() -> Element {
+    let mut reversed = use_signal(|| false);
+
+    let tabs = if reversed() {
+        vec![
+            Tab::new_with_label(
+                "third",
+                "Third",
+                rsx! { "Third" },
+                rsx! {
+                    p { "Panel three" }
+                },
+            ),
+            Tab::new_with_label(
+                "second",
+                "Second",
+                rsx! { "Second" },
+                rsx! {
+                    p { "Panel two" }
+                },
+            ),
+            Tab::new_with_label(
+                "first",
+                "First",
+                rsx! { "First" },
+                rsx! {
+                    p { "Panel one" }
+                },
+            ),
+        ]
+    } else {
+        vec![
+            Tab::new_with_label(
+                "first",
+                "First",
+                rsx! { "First" },
+                rsx! {
+                    p { "Panel one" }
+                },
+            ),
+            Tab::new_with_label(
+                "second",
+                "Second",
+                rsx! { "Second" },
+                rsx! {
+                    p { "Panel two" }
+                },
+            ),
+            Tab::new_with_label(
+                "third",
+                "Third",
+                rsx! { "Third" },
+                rsx! {
+                    p { "Panel three" }
+                },
+            ),
+        ]
+    };
+
+    rsx! {
+        button { id: "reverse-owned-tabs", onclick: move |_| reversed.set(true), "Reverse" }
+        Tabs { default_value: "first", tabs }
+    }
+}
+
 fn inline_owned_indicator_reorder_probe() -> Element {
     let platform: Arc<dyn PlatformEffects> = Arc::new(ars_dom::WebPlatformEffects);
 
@@ -1664,6 +1733,63 @@ async fn web_inline_array_owned_tabs_append_new_parent_rows() {
         tab_at(&parent, 2).text_content().unwrap_or_default(),
         "Third",
         "adapter-owned tabs should append newly supplied parent rows"
+    );
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_inline_array_owned_tabs_adopt_parent_reorders() {
+    let parent = container();
+    let dom = VirtualDom::new(inline_owned_parent_reorder_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert_eq!(
+        tab_at(&parent, 0).text_content().unwrap_or_default(),
+        "First"
+    );
+    assert_eq!(
+        tab_at(&parent, 1).text_content().unwrap_or_default(),
+        "Second"
+    );
+    assert_eq!(
+        tab_at(&parent, 2).text_content().unwrap_or_default(),
+        "Third"
+    );
+
+    click(
+        &parent
+            .query_selector("#reverse-owned-tabs")
+            .expect("query should succeed")
+            .expect("reverse button should render")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("button is HtmlElement"),
+    );
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        tab_at(&parent, 0).text_content().unwrap_or_default(),
+        "Third",
+        "owned inline tabs must adopt parent-supplied order changes"
+    );
+    assert_eq!(
+        tab_at(&parent, 1).text_content().unwrap_or_default(),
+        "Second"
+    );
+    assert_eq!(
+        tab_at(&parent, 2).text_content().unwrap_or_default(),
+        "First"
+    );
+    assert_eq!(
+        selected_tab_text(&parent),
+        "First",
+        "parent reorders should preserve selected tab identity"
     );
 }
 

@@ -1452,14 +1452,7 @@ fn handle_tab_keydown<K: TabKey>(
     {
         event.prevent_default();
 
-        let successor = machine.with_api_snapshot(|api| {
-            api.successor_for_close(key).and_then(|successor_key| {
-                api.tab_attrs(&successor_key, false)
-                    .get(&HtmlAttr::Id)
-                    .map(String::from)
-                    .map(|id| (successor_key, id))
-            })
-        });
+        let successor = selected_close_successor(machine, key);
 
         let Some(typed_key) = typed_key_for_key(&tabs_meta, key) else {
             return;
@@ -1538,13 +1531,8 @@ fn render_tab_panel<K: TabKey>(
 
         let already_selected = ever_selected.with(|set| set.contains(&key_for_panel));
 
-        let should_render = if unmount_on_exit {
-            is_selected
-        } else if lazy_mount {
-            already_selected
-        } else {
-            true
-        };
+        let should_render =
+            should_render_panel_body(is_selected, already_selected, lazy_mount, unmount_on_exit);
 
         if should_render {
             Some(panel_view.run())
@@ -1554,6 +1542,21 @@ fn render_tab_panel<K: TabKey>(
     };
 
     view! { <div {..panel_attrs}>{panel_body}</div> }
+}
+
+const fn should_render_panel_body(
+    is_selected: bool,
+    already_selected: bool,
+    lazy_mount: bool,
+    unmount_on_exit: bool,
+) -> bool {
+    if unmount_on_exit {
+        is_selected
+    } else if lazy_mount {
+        is_selected || already_selected
+    } else {
+        true
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -2226,6 +2229,16 @@ mod tests {
                 BTreeSet::from([key("second"), key("third")])
             );
         });
+    }
+
+    #[test]
+    fn should_render_panel_body_mounts_newly_selected_lazy_panel_immediately() {
+        assert!(should_render_panel_body(true, false, true, false));
+        assert!(should_render_panel_body(false, true, true, false));
+        assert!(!should_render_panel_body(false, false, true, false));
+        assert!(should_render_panel_body(true, false, true, true));
+        assert!(!should_render_panel_body(false, true, true, true));
+        assert!(should_render_panel_body(false, false, false, false));
     }
 
     #[test]

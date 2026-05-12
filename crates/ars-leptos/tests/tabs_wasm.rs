@@ -853,6 +853,73 @@ async fn close_callback_can_remove_tab_from_store() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn keyboard_close_of_focused_unselected_tab_preserves_manual_selection() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent) = owner.with(|| {
+        let parent = container();
+
+        let store = store_handle(
+            three_tabs()
+                .into_iter()
+                .map(|tab| {
+                    if tab.key == "second" {
+                        tab.closable(true)
+                    } else {
+                        tab
+                    }
+                })
+                .collect(),
+        );
+
+        let tabs_for_close = store.tabs();
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <Tabs
+                    default_value="first"
+                    tabs=store.tabs()
+                    activation_mode=ActivationMode::Manual
+                    on_close_tab=Callback::new(move |key: &'static str| {
+                        tabs_for_close.write().retain(|tab| tab.key != key);
+                    })
+                />
+            }
+        });
+
+        (mount_handle, parent)
+    });
+
+    leptos::task::tick().await;
+
+    let second_tab = tab_at(&parent, 1);
+
+    second_tab.focus().expect("focus should succeed");
+
+    dispatch_keydown(&second_tab, "Delete", false);
+
+    leptos::task::tick().await;
+
+    let tablist = first_with_data_part(&parent, "list");
+
+    assert_eq!(
+        tablist
+            .query_selector_all(r#"[role="tab"]"#)
+            .expect("query should succeed")
+            .length(),
+        2,
+        "close callback should remove the focused unselected tab"
+    );
+    assert_eq!(
+        selected_tab_text(&parent),
+        "First",
+        "closing a focused unselected tab in manual mode must preserve selection"
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
 async fn close_request_respects_disallow_empty_selection_for_external_store() {
     let owner = Owner::new();
     let closed = Arc::new(Mutex::new(Vec::<&'static str>::new()));

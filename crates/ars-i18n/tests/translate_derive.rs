@@ -11,6 +11,9 @@ enum InventoryText {
     #[translate(en = "{count} items", pt_BR = "{count} itens")]
     ItemCount { count: usize },
 
+    #[translate(en = "Count", pt = "Contagem", pt_BR = "Contagem brasileira")]
+    ExplicitBaseLanguage,
+
     #[translate(en = "Hello, {name}")]
     Greeting { name: String },
 
@@ -44,8 +47,18 @@ fn translate_derive_falls_back_to_language_before_fallback_locale() {
     let locale = Locale::parse("pt-PT").expect("locale should parse");
 
     assert_eq!(
+        InventoryText::ExplicitBaseLanguage.translate(&locale, &StubIntlBackend),
+        "Contagem"
+    );
+}
+
+#[test]
+fn translate_derive_does_not_fallback_to_regional_locale_for_language_match() {
+    let locale = Locale::parse("pt-PT").expect("locale should parse");
+
+    assert_eq!(
         InventoryText::ItemCount { count: 3 }.translate(&locale, &StubIntlBackend),
-        "3 itens"
+        "3 items"
     );
 }
 
@@ -104,7 +117,7 @@ fn translate_derive_normalizes_locale_identifiers_with_script_and_region() {
     );
     assert_eq!(
         InventoryText::ScriptRegion.translate(&language, &StubIntlBackend),
-        "Traditional script"
+        "Script"
     );
 }
 

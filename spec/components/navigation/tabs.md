@@ -169,7 +169,10 @@ pub struct Props {
     /// remaining tab so consumers refuse the close. Default `false`.
     pub disallow_empty_selection: bool,
     /// When true, tab panels are not mounted until their tab is first selected.
-    /// Reduces initial DOM size for tabs with heavy content. Default: false.
+    /// Reduces initial DOM size for tabs with heavy content. With
+    /// `unmount_on_exit = false`, adapters render the newly selected panel body
+    /// immediately and keep previously selected panel bodies mounted.
+    /// Default: false.
     pub lazy_mount: bool,
     /// When true, tab panels are removed from the DOM when their tab is deselected.
     /// Works with Presence for exit animations. Default: false.
@@ -204,6 +207,12 @@ impl Default for Props {
     }
 }
 ```
+
+Adapters that accept an inline adapter-owned tab list still treat the parent-provided key sequence
+as the authoritative shape for that render. Internal adapter state may preserve runtime reorder and
+close effects while the parent supplies the same key sequence, but if the parent changes the owned
+list's keys or order, the adapter MUST adopt the parent list before deriving registrations, panels,
+and roving order.
 
 ### 1.5 Full Machine Implementation
 
@@ -1062,6 +1071,12 @@ CSS property via
 `PlatformEffects::resolved_direction(&ids.part("tablist"))` before
 dispatching `Event::SetDirection`.
 
+Panel elements remain present so `aria-controls` targets are stable. Panel body rendering follows
+the mount policy from `Props`: when `unmount_on_exit` is `true`, only the selected panel body
+renders; when `lazy_mount` is `true` and `unmount_on_exit` is `false`, the selected panel body and
+any previously selected panel bodies render; otherwise every panel body renders. A newly selected
+lazy panel MUST render its body in the same adapter render that marks it selected.
+
 ### 2.1 Indicator Part
 
 The `tabs::Indicator` part provides an animated sliding selection highlight, identical to
@@ -1275,6 +1290,10 @@ state. The deterministic successor algorithm is exposed as
   (the consumer should refuse the close when
   `Props::disallow_empty_selection` is `true` —
   `Api::can_close_tab(&Key) -> bool` packages this guard).
+
+The successor helper is selection-relevant only when the closed tab is the selected tab. In manual
+activation mode a user may focus an unselected tab; closing that focused unselected tab MUST preserve
+the current selection instead of selecting the close successor.
 
 When a `Bindable<Option<Key>>` `value` ends up empty (the consumer
 cleared the only tab without a successor), `Event::SetTabs` /

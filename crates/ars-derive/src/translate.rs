@@ -370,6 +370,10 @@ fn placeholders(message: &LitStr) -> syn::Result<Vec<String>> {
     while let Some((start, ch)) = chars.next() {
         match ch {
             '{' => {
+                if chars.next_if(|(_, inner)| *inner == '{').is_some() {
+                    continue;
+                }
+
                 let mut name = String::new();
                 let mut closed = false;
 
@@ -401,6 +405,10 @@ fn placeholders(message: &LitStr) -> syn::Result<Vec<String>> {
                 placeholders.push(name);
             }
             '}' => {
+                if chars.next_if(|(_, inner)| *inner == '}').is_some() {
+                    continue;
+                }
+
                 return Err(syn::Error::new_spanned(
                     message,
                     "Translate message has unmatched `}`",
@@ -437,14 +445,12 @@ fn language_fallbacks(translations: &BTreeMap<String, LitStr>) -> Vec<(String, L
     let mut fallbacks = Vec::new();
 
     for (locale, message) in translations {
-        let language = locale
-            .split('-')
-            .next()
-            .expect("locale normalization always leaves at least one segment")
-            .to_string();
+        if locale.contains('-') {
+            continue;
+        }
 
-        if seen.insert(language.clone()) {
-            fallbacks.push((language, message.clone()));
+        if seen.insert(locale.clone()) {
+            fallbacks.push((locale.clone(), message.clone()));
         }
     }
 
@@ -643,7 +649,7 @@ mod tests {
 
         assert!(non_ident.to_string().contains("must be identifiers"));
 
-        let message = LitStr::new("{count} items", Span::call_site());
+        let message = LitStr::new("{count} items with {{literal}} braces", Span::call_site());
 
         assert_eq!(
             placeholders(&message).expect("valid placeholder"),
@@ -666,7 +672,7 @@ mod tests {
     }
 
     #[test]
-    fn language_fallbacks_keep_first_locale_per_language() {
+    fn language_fallbacks_only_use_explicit_base_language_messages() {
         let mut translations = BTreeMap::new();
 
         translations.insert("en".to_string(), LitStr::new("English", Span::call_site()));
@@ -681,10 +687,9 @@ mod tests {
 
         let fallbacks = language_fallbacks(&translations);
 
-        assert_eq!(fallbacks.len(), 2);
+        assert_eq!(fallbacks.len(), 1);
         assert_eq!(fallbacks[0].0, "en");
         assert_eq!(fallbacks[0].1.value(), "English");
-        assert_eq!(fallbacks[1].0, "pt");
     }
 
     #[test]

@@ -602,6 +602,12 @@ fn owned_tabs_for_render<K: TabKey>(
     latest_tabs: &[Tab<K>],
     previous_prop_keys: &[K],
 ) -> Vec<Tab<K>> {
+    let latest_prop_keys = latest_tabs.iter().map(|tab| tab.key).collect::<Vec<_>>();
+
+    if latest_prop_keys != previous_prop_keys {
+        return latest_tabs.to_vec();
+    }
+
     let latest_keys = latest_tabs
         .iter()
         .map(|tab| tab.key)
@@ -1490,13 +1496,8 @@ fn render_tab_panel<K: TabKey>(
 
     let already_selected = ever_selected.read().contains(&key);
 
-    let should_render_body = if unmount_on_exit {
-        is_selected
-    } else if lazy_mount {
-        already_selected
-    } else {
-        true
-    };
+    let should_render_body =
+        should_render_panel_body(is_selected, already_selected, lazy_mount, unmount_on_exit);
 
     let panel_body = if should_render_body {
         tab.panel
@@ -1506,6 +1507,21 @@ fn render_tab_panel<K: TabKey>(
 
     rsx! {
         div { key: "{vdom_key}", ..panel_attrs, {panel_body} }
+    }
+}
+
+const fn should_render_panel_body(
+    is_selected: bool,
+    already_selected: bool,
+    lazy_mount: bool,
+    unmount_on_exit: bool,
+) -> bool {
+    if unmount_on_exit {
+        is_selected
+    } else if lazy_mount {
+        is_selected || already_selected
+    } else {
+        true
     }
 }
 
@@ -1891,11 +1907,7 @@ mod tests {
     #[test]
     fn owned_tabs_for_render_preserves_runtime_order_with_latest_rows() {
         let current = vec![tab("second", "Old second"), tab("first", "Old first")];
-        let latest = vec![
-            tab("first", "New first"),
-            tab("second", "New second"),
-            tab("third", "New third"),
-        ];
+        let latest = vec![tab("first", "New first"), tab("second", "New second")];
 
         let previous_prop_keys = ["first", "second"];
 
@@ -1906,10 +1918,36 @@ mod tests {
                 .iter()
                 .map(|tab| (tab.key, tab.label_text.resolve()))
                 .collect::<Vec<_>>(),
+            vec![("second", "New second"), ("first", "New first")]
+        );
+    }
+
+    #[test]
+    fn owned_tabs_for_render_adopts_parent_prop_reorders() {
+        let current = vec![
+            tab("second", "Old second"),
+            tab("first", "Old first"),
+            tab("third", "Old third"),
+        ];
+        let latest = vec![
+            tab("third", "New third"),
+            tab("second", "New second"),
+            tab("first", "New first"),
+        ];
+
+        let previous_prop_keys = ["first", "second", "third"];
+
+        let rendered = owned_tabs_for_render(&current, &latest, &previous_prop_keys);
+
+        assert_eq!(
+            rendered
+                .iter()
+                .map(|tab| (tab.key, tab.label_text.resolve()))
+                .collect::<Vec<_>>(),
             vec![
+                ("third", "New third"),
                 ("second", "New second"),
-                ("first", "New first"),
-                ("third", "New third")
+                ("first", "New first")
             ]
         );
     }
@@ -1959,6 +1997,16 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![("first", "New first"), ("third", "New third")]
         );
+    }
+
+    #[test]
+    fn should_render_panel_body_mounts_newly_selected_lazy_panel_immediately() {
+        assert!(should_render_panel_body(true, false, true, false));
+        assert!(should_render_panel_body(false, true, true, false));
+        assert!(!should_render_panel_body(false, false, true, false));
+        assert!(should_render_panel_body(true, false, true, true));
+        assert!(!should_render_panel_body(false, true, true, true));
+        assert!(should_render_panel_body(false, false, false, false));
     }
 
     #[test]

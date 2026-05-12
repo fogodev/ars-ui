@@ -2679,8 +2679,14 @@ The fallback locale is also a validation contract: every variant MUST provide a 
 that locale. At runtime the generated implementation resolves text in this order:
 
 1. exact locale match using the active locale's BCP 47 tag, e.g. `pt-BR`;
-2. language fallback using the active locale's language subtag, e.g. `pt`;
+2. language fallback using the active locale's language subtag, e.g. `pt`, but only when the
+   variant explicitly declares a base-language message for that subtag;
 3. the enum-level fallback locale.
+
+Regional or script-specific messages do not synthesize a base-language fallback. For example,
+`#[translate(pt_BR = "Perfil")]` matches `pt-BR`, but a request for `pt-PT` falls through to the
+enum fallback unless the same variant also declares `pt = "Perfil"`. This avoids silently serving
+country-specific copy to another locale that shares only the language subtag.
 
 Locale helper keys in compact attributes use Rust identifiers. Because Rust identifiers cannot
 contain `-`, `_` is normalized to BCP 47 separators: `pt_BR` becomes `pt-BR`, `en_US` becomes
@@ -2700,7 +2706,8 @@ enum SettingsText {
 ```
 
 Named-field variants may use `{field}` placeholders. Placeholder values are formatted with
-`Display` through Rust's `format!` machinery:
+`Display` through Rust's `format!` machinery. Escaped Rust format braces (`{{` and `}}`) are
+accepted as literal braces and are not treated as placeholders:
 
 ```rust
 use ars_i18n::Translate;
@@ -2708,7 +2715,7 @@ use ars_i18n::Translate;
 #[derive(Clone, Debug, Translate)]
 #[translate(fallback = "en")]
 enum InventoryText {
-    #[translate(en = "{count} items", pt_BR = "{count} itens")]
+    #[translate(en = "{count} items {{estimated}}", pt_BR = "{count} itens {{estimado}}")]
     ItemCount { count: usize },
 }
 ```
