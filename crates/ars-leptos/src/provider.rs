@@ -388,7 +388,7 @@ where
 pub fn resolve_locale(adapter_props_locale: Option<&Locale>) -> Locale {
     adapter_props_locale
         .cloned()
-        .unwrap_or_else(|| use_locale().get_untracked())
+        .unwrap_or_else(|| use_locale().get())
 }
 
 /// Resolves per-component messages from override, provider registry, or defaults.
@@ -710,6 +710,27 @@ mod tests {
 
             assert_eq!(resolve_locale(Some(&override_locale)).to_bcp47(), "pt-BR");
             assert_eq!(resolve_locale(None).to_bcp47(), "fr-FR");
+        });
+    }
+
+    #[test]
+    fn resolve_locale_tracks_provider_locale_in_reactive_context() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let (context, locale_signal) = reactive_test_context(
+                Locale::parse("fr-FR").expect("locale should parse"),
+                Arc::new(StubIntlBackend),
+            );
+
+            crate::provide_ars_context(context);
+
+            let resolved = Memo::new(move |_| resolve_locale(None).to_bcp47());
+
+            assert_eq!(resolved.get(), "fr-FR");
+
+            locale_signal.set(Locale::parse("pt-BR").expect("locale should parse"));
+
+            assert_eq!(resolved.get(), "pt-BR");
         });
     }
 

@@ -84,7 +84,8 @@ pub fn desktop_build_command(options: &Options) -> Command {
 
     command
         .arg("build")
-        .arg("--desktop")
+        .arg("--platform")
+        .arg("desktop")
         .arg("--package")
         .arg(options.example.package())
         .arg("--no-default-features")
@@ -132,7 +133,8 @@ mod tests {
             args(&command),
             [
                 "build",
-                "--desktop",
+                "--platform",
+                "desktop",
                 "--package",
                 "widgets-dioxus",
                 "--no-default-features",

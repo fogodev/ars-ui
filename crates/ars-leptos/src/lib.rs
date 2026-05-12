@@ -35,6 +35,8 @@ mod safe_listener;
 mod use_machine;
 pub mod utility;
 
+#[cfg(feature = "uuid")]
+pub use ars_collections::uuid;
 pub use ars_collections::{Key, TabKey};
 pub use ars_core::{I18nRegistries, MessageFn, MessagesRegistry};
 pub use ars_i18n::{IntlBackend, Locale, Translate};

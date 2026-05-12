@@ -511,8 +511,10 @@ pub fn Tabs<K: TabKey>(
 
     setup_auto_direction_effect(options.dir, machine, config, Arc::clone(&platform));
 
+    let indicator_revision = RwSignal::new(0_u64);
+
     let (tab_indicator_attrs, indicator_style) =
-        setup_tab_indicator(machine, Arc::clone(&platform));
+        setup_tab_indicator(machine, Arc::clone(&platform), indicator_revision);
 
     let disallow_empty_selection = options.disallow_empty_selection;
     let lazy_mount = options.lazy_mount;
@@ -543,6 +545,7 @@ pub fn Tabs<K: TabKey>(
                 on_reorder,
                 owned_tabs_field,
                 disallow_empty_selection,
+                indicator_revision,
             )
         }
     };
@@ -890,6 +893,7 @@ fn setup_auto_direction_effect<K: TabKey>(
 fn setup_tab_indicator(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
     platform: Arc<dyn PlatformEffects>,
+    indicator_revision: RwSignal<u64>,
 ) -> (Vec<crate::LeptosAttribute>, RwSignal<String>) {
     let attrs =
         attr_map_to_leptos_inline_attrs(machine.with_api_snapshot(|api| api.tab_indicator_attrs()));
@@ -897,7 +901,7 @@ fn setup_tab_indicator(
     let style = RwSignal::new(String::new());
 
     #[cfg(feature = "ssr")]
-    drop(platform);
+    drop((platform, indicator_revision));
 
     #[cfg(not(feature = "ssr"))]
     {
@@ -905,6 +909,7 @@ fn setup_tab_indicator(
 
         Effect::new(move |_| {
             selected_for_indicator.track();
+            indicator_revision.track();
             style.set(indicator_measurement_style(machine, platform.as_ref()));
         });
     }
@@ -939,6 +944,7 @@ fn render_tab_button<K: TabKey>(
     on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
     owned_tabs_field: Option<Field<Vec<Tab<K>>>>,
     disallow_empty_selection: bool,
+    indicator_revision: RwSignal<u64>,
 ) -> impl IntoView + use<K> {
     let typed_key = tab.key;
     let key = typed_key.into_key();
@@ -1006,6 +1012,7 @@ fn render_tab_button<K: TabKey>(
                 tab_nodes,
                 owned_tabs_field,
                 disallow_empty_selection,
+                indicator_revision,
             );
         }
     };
@@ -1044,6 +1051,7 @@ fn render_tab_button<K: TabKey>(
                 tab_nodes,
                 on_reorder,
                 owned_tabs_field,
+                indicator_revision,
             );
         }
     };
@@ -1087,6 +1095,7 @@ fn render_tab_button<K: TabKey>(
                     on:click={
                         let key = key.clone();
                         move |event: web_sys::MouseEvent| {
+                            event.prevent_default();
                             event.stop_propagation();
                             let successor = selected_close_successor(machine, &key);
                             emit_close_request(
@@ -1227,6 +1236,7 @@ fn handle_tab_drop<K: TabKey>(
     tab_nodes: TabNodeRegistry,
     on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
     owned_tabs_field: Option<Field<Vec<Tab<K>>>>,
+    indicator_revision: RwSignal<u64>,
 ) {
     let Some(source_key) = drag_source.get_untracked() else {
         return;
@@ -1249,16 +1259,14 @@ fn handle_tab_drop<K: TabKey>(
 
     event.prevent_default();
 
-    if on_reorder
-        .as_ref()
-        .is_some_and(|callback| !callback.run(reorder_event.clone()))
-    {
+    let Some(external_reorder_committed) = external_reorder_committed(on_reorder, &reorder_event)
+    else {
         return;
-    }
+    };
 
     let focus_key = source_key.clone();
 
-    if !reorder_owned_tab(owned_tabs_field, &reorder_event) {
+    if !reorder_owned_tab(owned_tabs_field, &reorder_event, external_reorder_committed) {
         return;
     }
 
@@ -1276,6 +1284,7 @@ fn handle_tab_drop<K: TabKey>(
     });
 
     reorder_status.set(announcement);
+    bump_indicator_revision(indicator_revision);
 }
 
 #[expect(
@@ -1297,6 +1306,7 @@ fn handle_tab_keydown<K: TabKey>(
     tab_nodes: TabNodeRegistry,
     owned_tabs_field: Option<Field<Vec<Tab<K>>>>,
     disallow_empty_selection: bool,
+    indicator_revision: RwSignal<u64>,
 ) {
     let data = keyboard_event_data(event);
     modality.on_key_down(
@@ -1362,14 +1372,13 @@ fn handle_tab_keydown<K: TabKey>(
 
                 event.prevent_default();
 
-                if on_reorder
-                    .as_ref()
-                    .is_some_and(|callback| !callback.run(reorder_event.clone()))
-                {
+                let Some(external_reorder_committed) =
+                    external_reorder_committed(on_reorder, &reorder_event)
+                else {
                     return;
-                }
+                };
 
-                if reorder_owned_tab(owned_tabs_field, &reorder_event) {
+                if reorder_owned_tab(owned_tabs_field, &reorder_event, external_reorder_committed) {
                     send.run(Event::ReorderTab {
                         tab: key.clone(),
                         new_index,
@@ -1380,6 +1389,7 @@ fn handle_tab_keydown<K: TabKey>(
                     }
 
                     reorder_status.set(announcement);
+                    bump_indicator_revision(indicator_revision);
                 }
             }
 
@@ -1696,6 +1706,10 @@ fn emit_close_request<K: TabKey>(
     owned_tabs_field: Option<Field<Vec<Tab<K>>>>,
     disallow_empty_selection: bool,
 ) {
+    if !machine.with_api_snapshot(|api| api.can_close_tab(key)) {
+        return;
+    }
+
     send.run(Event::CloseTab(key.clone()));
 
     if let Some(callback) = on_close_tab {
@@ -1730,9 +1744,10 @@ fn close_owned_tab<K: TabKey>(
 fn reorder_owned_tab<K: TabKey>(
     owned_tabs_field: Option<Field<Vec<Tab<K>>>>,
     event: &ReorderEvent<K>,
+    external_reorder_committed: bool,
 ) -> bool {
     let Some(tabs_field) = owned_tabs_field else {
-        return true;
+        return external_reorder_committed;
     };
 
     let mut tabs = tabs_field.write();
@@ -1746,6 +1761,19 @@ fn reorder_owned_tab<K: TabKey>(
     tabs.insert(event.new_index, tab);
 
     true
+}
+
+fn external_reorder_committed<K: TabKey>(
+    on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
+    event: &ReorderEvent<K>,
+) -> Option<bool> {
+    on_reorder.map_or(Some(false), |callback| {
+        callback.run(event.clone()).then_some(true)
+    })
+}
+
+fn bump_indicator_revision(indicator_revision: RwSignal<u64>) {
+    indicator_revision.update(|revision| *revision = revision.wrapping_add(1));
 }
 
 #[cfg(not(feature = "ssr"))]

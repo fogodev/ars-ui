@@ -61,7 +61,6 @@ doc_markdown                       = "warn"
 match_same_arms                    = "warn"
 implicit_clone                     = "warn"
 trivially_copy_pass_by_ref         = "warn"
-too_many_lines                     = "warn"
 
 # Pedantic picks (useful, not exhausting)
 needless_continue        = "warn"

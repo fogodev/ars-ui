@@ -34,6 +34,7 @@ web = [
   "dep:wasm-bindgen-futures",
   "dep:js-sys"
 ]
+uuid = ["ars-collections/uuid"]
 # Pre-compiled CLDR data via ICU4X. Default backend on native targets and the
 # server-side rendering path. Use `--no-default-features --features web,ars-i18n/web-intl`
 # to swap icu4x for the browser-native Intl API on wasm32 builds.

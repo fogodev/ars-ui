@@ -69,4 +69,4 @@ pub use crate::navigation::{self, tabs};
 // `error_boundary::ArsErrorBoundary` after `use ars_dioxus::prelude::*;`.
 pub use crate::utility::{self, button, dismissable, error_boundary};
 // -- User-facing helpers --
-pub use crate::{t, use_number_formatter};
+pub use crate::{Translatable, t, use_number_formatter};

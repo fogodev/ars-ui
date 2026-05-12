@@ -35,6 +35,8 @@ mod safe_listener;
 mod use_machine;
 pub mod utility;
 
+#[cfg(feature = "uuid")]
+pub use ars_collections::uuid;
 pub use ars_collections::{Key, TabKey};
 pub use ars_core::{I18nRegistries, MessageFn, MessagesRegistry};
 pub use ars_i18n::{IntlBackend, Locale, Translate};
@@ -74,8 +76,8 @@ pub use platform::{
     default_dioxus_platform, use_platform,
 };
 pub use provider::{
-    ArsContext, ArsProvider, ArsProviderProps, resolve_locale, t, use_intl_backend, use_locale,
-    use_messages, use_modality_context, use_number_formatter, use_platform_effects,
+    ArsContext, ArsProvider, ArsProviderProps, Translatable, resolve_locale, t, use_intl_backend,
+    use_locale, use_messages, use_modality_context, use_number_formatter, use_platform_effects,
     warn_missing_provider,
 };
 #[cfg(feature = "web")]

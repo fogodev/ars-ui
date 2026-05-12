@@ -79,7 +79,7 @@ impl TabLabel {
 
     /// Builds a provider-backed translated label for the current render.
     #[must_use]
-    pub fn translated<T: Translate>(message: T) -> Self {
+    pub fn translated<T: Translate + 'static>(message: T) -> Self {
         Self {
             text: crate::provider::t(message),
         }
@@ -499,7 +499,8 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
 
     let tab_indicator_attrs = tabs_indicator_attrs(machine);
 
-    let indicator_style = use_indicator_style(machine, &platform);
+    let indicator_revision = use_signal(|| 0_u64);
+    let indicator_style = use_indicator_style(machine, &platform, indicator_revision);
 
     rsx! {
         div {..root_attrs(),
@@ -522,6 +523,7 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
                                 on_reorder,
                                 owned_tabs_store,
                                 disallow_empty_selection,
+                                indicator_revision,
                             )
                         })
                 }
@@ -559,13 +561,32 @@ fn use_tabs_store<K: TabKey>(tabs: &TabsSource<K>) -> TabsStoreSetup<K> {
         TabsSource::Store(_) => Vec::new(),
     };
 
-    let owned_tabs_store = use_store(move || owned_initial_tabs);
+    let mut owned_tabs_store = use_store(move || owned_initial_tabs);
+    let mut owned_prop_keys = use_signal(|| {
+        if let TabsSource::Owned(tabs) = tabs {
+            tabs.iter().map(|tab| tab.key).collect()
+        } else {
+            Vec::new()
+        }
+    });
 
     let (tabs, owned_tabs_store) = match tabs {
-        TabsSource::Owned(latest_tabs) => (
-            owned_tabs_for_render(&owned_tabs_store.read(), latest_tabs),
-            Some(owned_tabs_store),
-        ),
+        TabsSource::Owned(latest_tabs) => {
+            let previous_prop_keys = owned_prop_keys.peek().clone();
+            let reconciled =
+                owned_tabs_for_render(&owned_tabs_store.read(), latest_tabs, &previous_prop_keys);
+            let latest_prop_keys = latest_tabs.iter().map(|tab| tab.key).collect::<Vec<_>>();
+
+            if owned_tab_keys_changed(&owned_tabs_store.read(), &reconciled) {
+                owned_tabs_store.write().clone_from(&reconciled);
+            }
+
+            if *owned_prop_keys.peek() != latest_prop_keys {
+                owned_prop_keys.set(latest_prop_keys);
+            }
+
+            (reconciled, Some(owned_tabs_store))
+        }
 
         TabsSource::Store(tabs) => (tabs.read().clone(), None),
     };
@@ -579,16 +600,47 @@ fn use_tabs_store<K: TabKey>(tabs: &TabsSource<K>) -> TabsStoreSetup<K> {
 fn owned_tabs_for_render<K: TabKey>(
     current_tabs: &[Tab<K>],
     latest_tabs: &[Tab<K>],
+    previous_prop_keys: &[K],
 ) -> Vec<Tab<K>> {
-    current_tabs
+    let latest_keys = latest_tabs
         .iter()
+        .map(|tab| tab.key)
+        .collect::<BTreeSet<_>>();
+    let current_keys = current_tabs
+        .iter()
+        .map(|tab| tab.key)
+        .collect::<BTreeSet<_>>();
+    let previous_prop_keys = previous_prop_keys.iter().copied().collect::<BTreeSet<_>>();
+
+    let mut rendered = current_tabs
+        .iter()
+        .filter(|current| latest_keys.contains(&current.key))
         .filter_map(|current| {
             latest_tabs
                 .iter()
                 .find(|latest| latest.key == current.key)
                 .cloned()
         })
-        .collect()
+        .collect::<Vec<_>>();
+
+    rendered.extend(
+        latest_tabs
+            .iter()
+            .filter(|latest| {
+                !current_keys.contains(&latest.key) && !previous_prop_keys.contains(&latest.key)
+            })
+            .cloned(),
+    );
+
+    rendered
+}
+
+fn owned_tab_keys_changed<K: TabKey>(current_tabs: &[Tab<K>], next_tabs: &[Tab<K>]) -> bool {
+    current_tabs.len() != next_tabs.len()
+        || current_tabs
+            .iter()
+            .zip(next_tabs)
+            .any(|(current, next)| current.key != next.key)
 }
 
 #[expect(
@@ -847,6 +899,7 @@ fn tabs_indicator_attrs(
 fn use_indicator_style(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
     platform: &Arc<dyn PlatformEffects>,
+    indicator_revision: Signal<u64>,
 ) -> Signal<String> {
     let mut indicator_style = use_signal(String::new);
 
@@ -857,6 +910,7 @@ fn use_indicator_style(
         move || {
             // Just to trigger the effect when selection changes; the actual measurement happens
             drop(selected_memo());
+            let _ = indicator_revision();
 
             indicator_style.set(indicator_measurement_style(machine, platform.as_ref()));
         }
@@ -895,6 +949,7 @@ fn render_tab_button<K: TabKey>(
     on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
     owned_tabs_store: Option<Store<Vec<Tab<K>>>>,
     disallow_empty_selection: bool,
+    indicator_revision: Signal<u64>,
 ) -> Element {
     let typed_key = tab.key;
     let key = typed_key.into_key();
@@ -965,6 +1020,7 @@ fn render_tab_button<K: TabKey>(
                 &modality,
                 owned_tabs_store,
                 disallow_empty_selection,
+                indicator_revision,
             );
         }
     };
@@ -1008,6 +1064,7 @@ fn render_tab_button<K: TabKey>(
                 reorder_status,
                 on_reorder,
                 owned_tabs_store,
+                indicator_revision,
             );
         }
     };
@@ -1034,6 +1091,7 @@ fn render_tab_button<K: TabKey>(
                 onclick: {
                     let key = key.clone();
                     move |event: dioxus::prelude::Event<MouseData>| {
+                        event.prevent_default();
                         event.stop_propagation();
                         let successor = selected_close_successor(machine, &key);
 
@@ -1141,6 +1199,7 @@ fn handle_tab_drop<K: TabKey>(
     mut reorder_status: Signal<String>,
     on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
     owned_tabs_store: Option<Store<Vec<Tab<K>>>>,
+    mut indicator_revision: Signal<u64>,
 ) {
     let Some(source_key) = drag_source.peek().clone() else {
         return;
@@ -1161,16 +1220,14 @@ fn handle_tab_drop<K: TabKey>(
 
     event.prevent_default();
 
-    if on_reorder
-        .as_ref()
-        .is_some_and(|callback| !callback.call(reorder_event.clone()))
-    {
+    let Some(external_reorder_committed) = external_reorder_committed(on_reorder, &reorder_event)
+    else {
         return;
-    }
+    };
 
     let focus_key = source_key.clone();
 
-    if !reorder_owned_tab(owned_tabs_store, &reorder_event) {
+    if !reorder_owned_tab(owned_tabs_store, &reorder_event, external_reorder_committed) {
         return;
     }
 
@@ -1188,6 +1245,7 @@ fn handle_tab_drop<K: TabKey>(
     });
 
     reorder_status.set(announcement);
+    bump_indicator_revision(&mut indicator_revision);
 }
 
 #[expect(
@@ -1208,6 +1266,7 @@ fn handle_tab_keydown<K: TabKey>(
     modality: &Arc<dyn ModalityContext>,
     owned_tabs_store: Option<Store<Vec<Tab<K>>>>,
     disallow_empty_selection: bool,
+    mut indicator_revision: Signal<u64>,
 ) {
     let data = keyboard_event_data(event);
 
@@ -1270,14 +1329,13 @@ fn handle_tab_keydown<K: TabKey>(
 
                 event.prevent_default();
 
-                if on_reorder
-                    .as_ref()
-                    .is_some_and(|callback| !callback.call(reorder_event.clone()))
-                {
+                let Some(external_reorder_committed) =
+                    external_reorder_committed(on_reorder, &reorder_event)
+                else {
                     return;
-                }
+                };
 
-                if reorder_owned_tab(owned_tabs_store, &reorder_event) {
+                if reorder_owned_tab(owned_tabs_store, &reorder_event, external_reorder_committed) {
                     send.call(Event::ReorderTab {
                         tab: key.clone(),
                         new_index,
@@ -1288,6 +1346,7 @@ fn handle_tab_keydown<K: TabKey>(
                     }
 
                     reorder_status.set(announcement);
+                    bump_indicator_revision(&mut indicator_revision);
                 }
             }
 
@@ -1586,6 +1645,10 @@ fn emit_close_request<K: TabKey>(
     owned_tabs_store: Option<Store<Vec<Tab<K>>>>,
     disallow_empty_selection: bool,
 ) {
+    if !machine.with_api_snapshot(|api| api.can_close_tab(key)) {
+        return;
+    }
+
     send.call(Event::CloseTab(key.clone()));
 
     if let Some(callback) = on_close_tab {
@@ -1620,9 +1683,10 @@ fn close_owned_tab<K: TabKey>(
 fn reorder_owned_tab<K: TabKey>(
     owned_tabs_store: Option<Store<Vec<Tab<K>>>>,
     event: &ReorderEvent<K>,
+    external_reorder_committed: bool,
 ) -> bool {
     let Some(mut tabs_store) = owned_tabs_store else {
-        return true;
+        return external_reorder_committed;
     };
 
     let mut tabs = tabs_store.write();
@@ -1636,6 +1700,24 @@ fn reorder_owned_tab<K: TabKey>(
     tabs.insert(event.new_index, tab);
 
     true
+}
+
+fn external_reorder_committed<K: TabKey>(
+    on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
+    event: &ReorderEvent<K>,
+) -> Option<bool> {
+    on_reorder.map_or(Some(false), |callback| {
+        callback.call(event.clone()).then_some(true)
+    })
+}
+
+fn bump_indicator_revision(indicator_revision: &mut Signal<u64>) {
+    let next = {
+        let revision = indicator_revision.peek();
+        revision.wrapping_add(1)
+    };
+
+    indicator_revision.set(next);
 }
 
 #[derive(Clone)]
@@ -1800,14 +1882,67 @@ mod tests {
             tab("third", "New third"),
         ];
 
-        let rendered = owned_tabs_for_render(&current, &latest);
+        let previous_prop_keys = ["first", "second"];
+
+        let rendered = owned_tabs_for_render(&current, &latest, &previous_prop_keys);
 
         assert_eq!(
             rendered
                 .iter()
                 .map(|tab| (tab.key, tab.label_text.resolve()))
                 .collect::<Vec<_>>(),
-            vec![("second", "New second"), ("first", "New first")]
+            vec![
+                ("second", "New second"),
+                ("first", "New first"),
+                ("third", "New third")
+            ]
+        );
+    }
+
+    #[test]
+    fn owned_tabs_for_render_drops_removed_rows_before_index_based_mutation() {
+        let current = vec![
+            tab("first", "Old first"),
+            tab("second", "Old second"),
+            tab("third", "Old third"),
+        ];
+        let latest = vec![tab("first", "New first"), tab("third", "New third")];
+
+        let previous_prop_keys = ["first", "second", "third"];
+
+        let rendered = owned_tabs_for_render(&current, &latest, &previous_prop_keys);
+
+        assert_eq!(
+            rendered
+                .iter()
+                .map(|tab| (tab.key, tab.label_text.resolve()))
+                .collect::<Vec<_>>(),
+            vec![("first", "New first"), ("third", "New third")]
+        );
+        assert!(
+            owned_tab_keys_changed(&current, &rendered),
+            "internal owned store must be synchronized before close/reorder indices are applied"
+        );
+    }
+
+    #[test]
+    fn owned_tabs_for_render_does_not_readd_adapter_closed_rows() {
+        let current = vec![tab("first", "Old first"), tab("third", "Old third")];
+        let latest = vec![
+            tab("first", "New first"),
+            tab("second", "New second"),
+            tab("third", "New third"),
+        ];
+        let previous_prop_keys = ["first", "second", "third"];
+
+        let rendered = owned_tabs_for_render(&current, &latest, &previous_prop_keys);
+
+        assert_eq!(
+            rendered
+                .iter()
+                .map(|tab| (tab.key, tab.label_text.resolve()))
+                .collect::<Vec<_>>(),
+            vec![("first", "New first"), ("third", "New third")]
         );
     }
 

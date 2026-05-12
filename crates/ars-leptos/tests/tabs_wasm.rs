@@ -495,6 +495,83 @@ async fn link_click_prevents_default_and_emits_value_change() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn linked_close_trigger_click_prevents_default_navigation() {
+    let owner = Owner::new();
+    let closed = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+
+    let (mount_handle, parent) = owner.with(|| {
+        let parent = container();
+
+        let link_tabs = vec![
+            Tab::new_with_label(
+                "home",
+                "Home",
+                ViewFn::from(|| view! { "Home" }),
+                ViewFn::from(|| view! { <p>"Home panel"</p> }),
+            )
+            .link(SafeUrl::from_static("/home"))
+            .closable(true),
+            Tab::new_with_label(
+                "settings",
+                "Settings",
+                ViewFn::from(|| view! { "Settings" }),
+                ViewFn::from(|| view! { <p>"Settings panel"</p> }),
+            ),
+        ];
+
+        let mount_handle = mount_to(parent.clone(), {
+            let closed = Arc::clone(&closed);
+            move || {
+                view! {
+                    <Tabs
+                        default_value="settings"
+                        tabs=store_field(link_tabs)
+                        on_close_tab=Callback::new({
+                            let closed = Arc::clone(&closed);
+                            move |key| {
+                                closed
+                                    .lock()
+                                    .expect("close callback log should not be poisoned")
+                                    .push(key);
+                            }
+                        })
+                    />
+                }
+            }
+        });
+
+        (mount_handle, parent)
+    });
+
+    leptos::task::tick().await;
+
+    let close = parent
+        .query_selector(r#"a[role="tab"][href="/home"] [data-ars-part="tab-close-trigger"]"#)
+        .expect("query should succeed")
+        .expect("linked close trigger should render")
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("close trigger is HtmlElement");
+
+    let event = cancelable_click(&close);
+
+    leptos::task::tick().await;
+
+    assert!(
+        event.default_prevented(),
+        "linked close trigger click should cancel browser navigation"
+    );
+    assert_eq!(
+        closed
+            .lock()
+            .expect("close callback log should not be poisoned")
+            .as_slice(),
+        &["home"]
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
 async fn manual_link_tabs_activate_from_keyboard_without_browser_navigation() {
     let owner = Owner::new();
 
@@ -770,6 +847,80 @@ async fn close_callback_can_remove_tab_from_store() {
             .length(),
         2,
         "close callback should be able to mutate the tab store"
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
+async fn close_request_respects_disallow_empty_selection_for_external_store() {
+    let owner = Owner::new();
+    let closed = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+
+    let (mount_handle, parent) = owner.with(|| {
+        let parent = container();
+        let store = store_handle(vec![
+            Tab::new_with_label(
+                "only",
+                "Only",
+                ViewFn::from(|| view! { "Only" }),
+                ViewFn::from(|| view! { <p>"Only panel"</p> }),
+            )
+            .closable(true),
+        ]);
+        let tabs_for_close = store.tabs();
+        let closed = Arc::clone(&closed);
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <Tabs
+                    default_value="only"
+                    tabs=store.tabs()
+                    disallow_empty_selection=true
+                    on_close_tab=Callback::new({
+                        let closed = Arc::clone(&closed);
+                        move |key: &'static str| {
+                            closed
+                                .lock()
+                                .expect("close callback log should not be poisoned")
+                                .push(key);
+                            tabs_for_close.write().retain(|tab| tab.key != key);
+                        }
+                    })
+                />
+            }
+        });
+
+        (mount_handle, parent)
+    });
+
+    leptos::task::tick().await;
+
+    let close = parent
+        .query_selector(r#"[data-ars-part="tab-close-trigger"]"#)
+        .expect("query should succeed")
+        .expect("close trigger should render")
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("close trigger is HtmlElement");
+
+    click(&close);
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        first_with_data_part(&parent, "list")
+            .query_selector_all(r#"[role="tab"]"#)
+            .expect("query should succeed")
+            .length(),
+        1,
+        "external close callback must not remove the final tab"
+    );
+    assert!(
+        closed
+            .lock()
+            .expect("close callback log should not be poisoned")
+            .is_empty(),
+        "blocked close requests must not call on_close_tab"
     );
 
     drop(mount_handle);
@@ -1504,6 +1655,52 @@ async fn reorder_veto_suppresses_core_event_and_live_announcement() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn external_store_reorder_without_callback_does_not_announce_commit() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent) = owner.with(|| {
+        let parent = container();
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! { <Tabs default_value="first" tabs=store_field(three_tabs()) reorderable=true /> }
+        });
+
+        (mount_handle, parent)
+    });
+
+    leptos::task::tick().await;
+
+    let tablist = first_with_data_part(&parent, "list");
+    let first = tab_at(&parent, 0);
+    let live_region = parent
+        .query_selector(r#"[aria-live="polite"]"#)
+        .expect("query should succeed")
+        .expect("live region should render when reorderable");
+
+    dispatch_keydown(&first, "ArrowRight", true);
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        tablist
+            .query_selector(r#"[role="tab"]"#)
+            .expect("query should succeed")
+            .expect("first tab should still render")
+            .text_content()
+            .unwrap_or_default(),
+        "First",
+        "external stores without on_reorder must not report a committed DOM reorder"
+    );
+    assert_eq!(
+        live_region.text_content().unwrap_or_default(),
+        "",
+        "uncommitted external reorders must not announce a move"
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
 async fn indicator_style_tracks_selected_tab_measurement() {
     let owner = Owner::new();
 
@@ -1543,6 +1740,52 @@ async fn indicator_style_tracks_selected_tab_measurement() {
     assert!(
         style.contains("--ars-indicator-height:"),
         "indicator style should contain measured height: {style}"
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
+async fn indicator_style_refreshes_after_owned_reorder_of_selected_tab() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent) = owner.with(|| {
+        let parent = container();
+
+        parent
+            .set_attribute(
+                "style",
+                "position: relative; display: block; width: 400px; height: 200px;",
+            )
+            .expect("style should set");
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <ArsProvider platform=Arc::new(ars_dom::WebPlatformEffects)>
+                    <Tabs default_value="first" tabs=three_tabs() reorderable=true />
+                </ArsProvider>
+            }
+        });
+
+        (mount_handle, parent)
+    });
+
+    leptos::task::tick().await;
+    animation_frame_turn().await;
+
+    let indicator = first_with_data_part(&parent, "tab-indicator");
+    let before = indicator.get_attribute("style").unwrap_or_default();
+
+    dispatch_keydown(&tab_at(&parent, 0), "ArrowRight", true);
+
+    leptos::task::tick().await;
+    animation_frame_turn().await;
+
+    let after = indicator.get_attribute("style").unwrap_or_default();
+
+    assert!(
+        before != after && after.contains("--ars-indicator-left:"),
+        "committed selected-tab reorder should refresh indicator measurement: before={before:?}, after={after:?}"
     );
 
     drop(mount_handle);
@@ -2463,7 +2706,7 @@ async fn ctrl_arrow_announces_reorder_in_polite_live_region() {
         let parent = container();
 
         let mount_handle = mount_to(parent.clone(), move || {
-            view! { <Tabs default_value="first" tabs=store_field(three_tabs()) reorderable=true /> }
+            view! { <Tabs default_value="first" tabs=three_tabs() reorderable=true /> }
         });
 
         (mount_handle, parent)

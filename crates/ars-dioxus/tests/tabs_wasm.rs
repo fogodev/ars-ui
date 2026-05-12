@@ -461,6 +461,46 @@ fn close_mutates_store_probe() -> Element {
 }
 
 #[derive(Clone)]
+struct SingleCloseProbeProps {
+    closed: Arc<Mutex<Vec<&'static str>>>,
+}
+
+impl PartialEq for SingleCloseProbeProps {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.closed, &other.closed)
+    }
+}
+
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Dioxus root props are moved into the component function"
+)]
+fn single_close_disallow_empty_probe(props: SingleCloseProbeProps) -> Element {
+    let mut tabs = use_store(|| {
+        vec![
+            Tab::new_with_label("only", "Only", rsx! { "Only" }, rsx! { p { "Only panel" } })
+                .closable(true),
+        ]
+    });
+    let closed = Arc::clone(&props.closed);
+
+    rsx! {
+        Tabs {
+            default_value: "only",
+            tabs: ReadStore::from(tabs),
+            disallow_empty_selection: true,
+            on_close_tab: Callback::new(move |key| {
+                closed
+                    .lock()
+                    .expect("close callback log should not be poisoned")
+                    .push(key);
+                tabs.write().retain(|tab| tab.key != key);
+            }),
+        }
+    }
+}
+
+#[derive(Clone)]
 struct DragReorderProbeProps {
     reordered: Arc<Mutex<Vec<TestReorderEvent>>>,
 }
@@ -606,6 +646,101 @@ fn inline_owned_panel_state_probe() -> Element {
                     p { "Panel two" }
                 }),
             ],
+        }
+    }
+}
+
+#[expect(
+    unused_qualifications,
+    reason = "rsx! macro expansion currently reports event-handler attribute names as redundant qualifications"
+)]
+fn inline_owned_dynamic_add_probe() -> Element {
+    let mut show_third = use_signal(|| false);
+
+    let tabs = if show_third() {
+        vec![
+            Tab::new_with_label(
+                "first",
+                "First",
+                rsx! { "First" },
+                rsx! {
+                    p { "Panel one" }
+                },
+            ),
+            Tab::new_with_label(
+                "second",
+                "Second",
+                rsx! { "Second" },
+                rsx! {
+                    p { "Panel two" }
+                },
+            ),
+            Tab::new_with_label(
+                "third",
+                "Third",
+                rsx! { "Third" },
+                rsx! {
+                    p { "Panel three" }
+                },
+            ),
+        ]
+    } else {
+        vec![
+            Tab::new_with_label(
+                "first",
+                "First",
+                rsx! { "First" },
+                rsx! {
+                    p { "Panel one" }
+                },
+            ),
+            Tab::new_with_label(
+                "second",
+                "Second",
+                rsx! { "Second" },
+                rsx! {
+                    p { "Panel two" }
+                },
+            ),
+        ]
+    };
+
+    rsx! {
+        button { id: "add-owned-tab", onclick: move |_| show_third.set(true), "Add" }
+        Tabs { default_value: "first", tabs }
+    }
+}
+
+fn inline_owned_indicator_reorder_probe() -> Element {
+    let platform: Arc<dyn PlatformEffects> = Arc::new(ars_dom::WebPlatformEffects);
+
+    rsx! {
+        ArsProvider { platform: Some(platform),
+            Tabs {
+                default_value: "first",
+                tabs: [
+                    Tab::new_with_label("first", "First", rsx! { "First" }, rsx! {
+                        p { "Panel one" }
+                    }),
+                    Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
+                        p { "Panel two" }
+                    }),
+                    Tab::new_with_label("third", "Third", rsx! { "Third" }, rsx! {
+                        p { "Panel three" }
+                    }),
+                ],
+                reorderable: true,
+            }
+        }
+    }
+}
+
+fn external_reorder_without_callback_probe() -> Element {
+    rsx! {
+        Tabs {
+            default_value: "first",
+            tabs: ReadStore::from(use_store(three_tabs)),
+            reorderable: true,
         }
     }
 }
@@ -878,6 +1013,47 @@ fn link_callback_probe(props: LinkCallbackProbeProps) -> Element {
     }
 }
 
+#[derive(Clone)]
+struct LinkCloseProbeProps {
+    closed: Rc<RefCell<Vec<&'static str>>>,
+}
+
+impl PartialEq for LinkCloseProbeProps {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.closed, &other.closed)
+    }
+}
+
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Dioxus root props are moved into the component function"
+)]
+fn link_close_probe(props: LinkCloseProbeProps) -> Element {
+    let tabs = use_store(|| {
+        vec![
+            Tab::new_with_label("home", "Home", rsx! { "Home" }, rsx! { p { "Home panel" } })
+                .link(SafeUrl::from_static("/home"))
+                .closable(true),
+            Tab::new_with_label(
+                "settings",
+                "Settings",
+                rsx! { "Settings" },
+                rsx! { p { "Settings panel" } },
+            ),
+        ]
+    });
+
+    let closed = Rc::clone(&props.closed);
+
+    rsx! {
+        Tabs {
+            default_value: "settings",
+            tabs: ReadStore::from(tabs),
+            on_close_tab: move |key| closed.borrow_mut().push(key),
+        }
+    }
+}
+
 #[expect(
     clippy::needless_pass_by_value,
     reason = "Dioxus root props are moved into the component function"
@@ -943,6 +1119,43 @@ async fn web_link_click_prevents_default_and_emits_value_change() {
         "link tab click should be canceled so browser navigation does not run"
     );
     assert_eq!(selected.borrow().as_slice(), &[Some("home")]);
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_linked_close_trigger_click_prevents_default_navigation() {
+    let parent = container();
+    let closed = Rc::new(RefCell::new(Vec::<&'static str>::new()));
+    let dom = VirtualDom::new_with_props(
+        link_close_probe,
+        LinkCloseProbeProps {
+            closed: Rc::clone(&closed),
+        },
+    );
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    let close = parent
+        .query_selector(r#"a[role="tab"][href="/home"] [data-ars-part="tab-close-trigger"]"#)
+        .expect("query should succeed")
+        .expect("linked close trigger should render")
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("close trigger is HtmlElement");
+
+    let event = cancelable_click(&close);
+
+    animation_frame_turn().await;
+
+    assert!(
+        event.default_prevented(),
+        "linked close trigger click should cancel browser navigation"
+    );
+    assert_eq!(closed.borrow().as_slice(), &["home"]);
 }
 
 #[wasm_bindgen_test(async)]
@@ -1196,6 +1409,53 @@ async fn web_close_callback_can_remove_tab_from_store() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn web_close_request_respects_disallow_empty_selection_for_external_store() {
+    let parent = container();
+    let closed = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+    let dom = VirtualDom::new_with_props(
+        single_close_disallow_empty_probe,
+        SingleCloseProbeProps {
+            closed: Arc::clone(&closed),
+        },
+    );
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    let close = parent
+        .query_selector(r#"[data-ars-part="tab-close-trigger"]"#)
+        .expect("query should succeed")
+        .expect("close trigger should render")
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("close trigger is HtmlElement");
+
+    click(&close);
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        first_with_data_part(&parent, "list")
+            .query_selector_all(r#"[role="tab"]"#)
+            .expect("query should succeed")
+            .length(),
+        1,
+        "external close callback must not remove the final tab"
+    );
+    assert!(
+        closed
+            .lock()
+            .expect("close callback log should not be poisoned")
+            .is_empty(),
+        "blocked close requests must not call on_close_tab"
+    );
+}
+
+#[wasm_bindgen_test(async)]
 async fn web_inline_array_close_trigger_removes_owned_tab() {
     let parent = container();
     let dom = VirtualDom::new(inline_owned_close_probe);
@@ -1268,6 +1528,46 @@ async fn web_inline_array_owned_tabs_refresh_existing_panel_content() {
     assert_eq!(
         status, "updated",
         "owned inline tabs must refresh existing panel content when parent Dioxus state changes"
+    );
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_inline_array_owned_tabs_append_new_parent_rows() {
+    let parent = container();
+    let dom = VirtualDom::new(inline_owned_dynamic_add_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert_eq!(
+        first_with_data_part(&parent, "list")
+            .query_selector_all(r#"[role="tab"]"#)
+            .expect("query should succeed")
+            .length(),
+        2,
+        "dynamic owned probe should start with two tabs"
+    );
+
+    click(
+        &parent
+            .query_selector("#add-owned-tab")
+            .expect("query should succeed")
+            .expect("add button should render")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("button is HtmlElement"),
+    );
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        tab_at(&parent, 2).text_content().unwrap_or_default(),
+        "Third",
+        "adapter-owned tabs should append newly supplied parent rows"
     );
 }
 
@@ -1665,6 +1965,43 @@ async fn web_indicator_style_tracks_selected_tab_measurement() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn web_indicator_style_refreshes_after_owned_reorder_of_selected_tab() {
+    let parent = container();
+
+    parent
+        .set_attribute(
+            "style",
+            "position: relative; display: block; width: 400px; height: 200px;",
+        )
+        .expect("style should set");
+
+    let dom = VirtualDom::new(inline_owned_indicator_reorder_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    let indicator = first_with_data_part(&parent, "tab-indicator");
+    let before = indicator.get_attribute("style").unwrap_or_default();
+
+    dispatch_keydown(&tab_at(&parent, 0), "ArrowRight", true);
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    let after = indicator.get_attribute("style").unwrap_or_default();
+
+    assert!(
+        before != after && after.contains("--ars-indicator-left:"),
+        "committed selected-tab reorder should refresh indicator measurement: before={before:?}, after={after:?}"
+    );
+}
+
+#[wasm_bindgen_test(async)]
 async fn web_indicator_style_degrades_to_empty_without_geometry() {
     let parent = container();
 
@@ -1753,6 +2090,47 @@ async fn web_reorder_veto_suppresses_live_announcement() {
         .expect("live region should render when reorderable");
 
     assert_eq!(live_region.text_content().unwrap_or_default(), "");
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_external_store_reorder_without_callback_does_not_announce_commit() {
+    let parent = container();
+    let dom = VirtualDom::new(external_reorder_without_callback_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    let tablist = first_with_data_part(&parent, "list");
+    let first = tab_at(&parent, 0);
+    let live_region = parent
+        .query_selector(r#"[aria-live="polite"]"#)
+        .expect("query should succeed")
+        .expect("live region should render when reorderable");
+
+    dispatch_keydown(&first, "ArrowRight", true);
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        tablist
+            .query_selector(r#"[role="tab"]"#)
+            .expect("query should succeed")
+            .expect("first tab should still render")
+            .text_content()
+            .unwrap_or_default(),
+        "First",
+        "external stores without on_reorder must not report a committed DOM reorder"
+    );
+    assert_eq!(
+        live_region.text_content().unwrap_or_default(),
+        "",
+        "uncommitted external reorders must not announce a move"
+    );
 }
 
 #[wasm_bindgen_test(async)]

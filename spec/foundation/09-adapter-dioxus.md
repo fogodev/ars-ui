@@ -2910,6 +2910,40 @@ fn use_messages<M: ComponentMessages + Send + Sync + 'static>(
 ```rust
 use ars_i18n::Translate;
 
+/// Input accepted by `t()` for Dioxus translation.
+///
+/// Static values are translated during the current render. Signal-backed values
+/// are read through Dioxus reactivity so the component re-renders when the
+/// message value changes.
+pub enum Translatable<T>
+where
+    T: Translate + 'static,
+{
+    /// A fixed translatable message value.
+    Static(T),
+
+    /// A reactive translatable message value.
+    Signal(Signal<T>),
+}
+
+impl<T> From<T> for Translatable<T>
+where
+    T: Translate + 'static,
+{
+    fn from(value: T) -> Self {
+        Self::Static(value)
+    }
+}
+
+impl<T> From<Signal<T>> for Translatable<T>
+where
+    T: Translate + 'static,
+{
+    fn from(value: Signal<T>) -> Self {
+        Self::Signal(value)
+    }
+}
+
 /// Resolve a user-defined `Translate` enum variant into a text string for rendering.
 ///
 /// Reads the current locale and ICU provider from `ArsProvider` context via
@@ -2917,11 +2951,14 @@ use ars_i18n::Translate;
 /// When locale changes, the component re-renders and `t()` produces the new
 /// string (component-level reactivity — standard Dioxus model).
 ///
-/// Included in `ars_dioxus::prelude`.
+/// Included in `ars_dioxus::prelude` together with `Translatable`.
 ///
 /// See `04-internationalization.md` §7.4 for the `Translate` trait definition
 /// and §7.5 for the `t()` function contract.
-pub fn t<T: Translate>(msg: T) -> String {
+pub fn t<T>(msg: impl Into<Translatable<T>>) -> String
+where
+    T: Translate + 'static,
+{
     try_use_context::<ArsContext>()
         .map(|ctx| msg.translate(&ctx.locale.read(), &*ctx.intl_backend))
         .unwrap_or_else(|| {
