@@ -504,6 +504,8 @@ pub fn Tabs<K: TabKey>(
 
     let drag_source = RwSignal::new(None::<Key>);
 
+    let modality_revision = RwSignal::new(0_u64);
+
     let ever_selected = setup_lazy_mount_tracking(machine);
 
     let root_attrs = tabs_root_attrs(machine);
@@ -547,6 +549,7 @@ pub fn Tabs<K: TabKey>(
                 config,
                 reorder_status,
                 drag_source,
+                modality_revision,
                 tabs_field,
                 tab_nodes,
                 &modality,
@@ -1010,6 +1013,7 @@ fn render_tab_button<K: TabKey>(
     config: StoredValue<TabsConfig<K>>,
     reorder_status: RwSignal<String>,
     drag_source: RwSignal<Option<Key>>,
+    modality_revision: RwSignal<u64>,
     _tabs_field: Field<Vec<Tab<K>>>,
     tab_nodes: TabNodeRegistry,
     modality: &Arc<dyn ModalityContext>,
@@ -1028,6 +1032,7 @@ fn render_tab_button<K: TabKey>(
         machine,
         &key,
         Arc::clone(modality),
+        modality_revision,
         config,
     ));
 
@@ -1051,6 +1056,7 @@ fn render_tab_button<K: TabKey>(
         let modality = Arc::clone(modality);
         move |event: web_sys::PointerEvent| {
             modality.on_pointer_down(pointer_type_from_leptos(&event.pointer_type()));
+            bump_revision(modality_revision);
         }
     };
 
@@ -1071,6 +1077,7 @@ fn render_tab_button<K: TabKey>(
         let modality = Arc::clone(modality);
         move |event: web_sys::KeyboardEvent| {
             let label_text = label_text.resolve();
+            bump_revision(modality_revision);
 
             handle_tab_keydown(
                 &event,
@@ -1201,6 +1208,7 @@ fn render_tab_button<K: TabKey>(
                 {..tab_attrs}
                 node_ref=tab_anchor_node_ref(tab_nodes, key.clone())
                 href=href.as_str().to_string()
+                aria-roledescription=move || reorderable.get().then_some("draggable tab")
                 on:click=on_click
                 on:focus=on_focus
                 on:blur=on_blur
@@ -1220,6 +1228,7 @@ fn render_tab_button<K: TabKey>(
             <div
                 {..tab_attrs}
                 node_ref=tab_div_node_ref(tab_nodes, key.clone())
+                aria-roledescription=move || reorderable.get().then_some("draggable tab")
                 on:click=on_click
                 on:focus=on_focus
                 on:blur=on_blur
@@ -1361,7 +1370,7 @@ fn handle_tab_drop<K: TabKey>(
     });
 
     reorder_status.set(announcement);
-    bump_indicator_revision(indicator_revision);
+    bump_revision(indicator_revision);
 }
 
 #[expect(
@@ -1466,7 +1475,7 @@ fn handle_tab_keydown<K: TabKey>(
                     }
 
                     reorder_status.set(announcement);
-                    bump_indicator_revision(indicator_revision);
+                    bump_revision(indicator_revision);
                 }
             }
 
@@ -1874,8 +1883,8 @@ fn external_reorder_committed<K: TabKey>(
     })
 }
 
-fn bump_indicator_revision(indicator_revision: RwSignal<u64>) {
-    indicator_revision.update(|revision| *revision = revision.wrapping_add(1));
+fn bump_revision(revision_signal: RwSignal<u64>) {
+    revision_signal.update(|revision| *revision = revision.wrapping_add(1));
 }
 
 #[cfg(not(feature = "ssr"))]
@@ -1952,17 +1961,25 @@ fn reactive_tab_attrs<K: TabKey>(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
     key: &Key,
     modality: Arc<dyn ModalityContext>,
+    modality_revision: RwSignal<u64>,
     config: StoredValue<TabsConfig<K>>,
 ) -> AttrMap {
     let memo = machine.derive({
         let key = key.clone();
         move |api| {
+            modality_revision.track();
             let is_keyboard = !modality.had_pointer_interaction();
             api.tab_attrs(&key, is_keyboard)
         }
     });
 
     let mut attrs = memo.get_untracked();
+
+    // `reorderable` is an adapter-live signal, so the rendered
+    // roledescription is attached directly in `render_tab_button`.
+    // Avoid also spreading the core snapshot value here, which would
+    // produce duplicate static/dynamic attributes.
+    attrs.set(HtmlAttr::Aria(AriaAttr::RoleDescription), AttrValue::None);
 
     // Reactive string attributes (always present, value changes).
     for &dynamic_key in &[HtmlAttr::Aria(AriaAttr::Selected), HtmlAttr::TabIndex] {

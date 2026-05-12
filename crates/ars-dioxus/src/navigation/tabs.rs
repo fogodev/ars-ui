@@ -693,7 +693,34 @@ fn owned_tabs_for_render<K: TabKey>(
 }
 
 fn owned_tabs_changed<K: TabKey>(current_tabs: &[Tab<K>], next_tabs: &[Tab<K>]) -> bool {
-    current_tabs != next_tabs
+    !tabs_are_equivalent_for_owned_store(current_tabs, next_tabs)
+}
+
+fn tabs_are_equivalent_for_owned_store<K: TabKey>(
+    current_tabs: &[Tab<K>],
+    next_tabs: &[Tab<K>],
+) -> bool {
+    current_tabs.len() == next_tabs.len()
+        && current_tabs
+            .iter()
+            .zip(next_tabs)
+            .all(|(current, next)| tabs_are_equivalent_for_owned_store_row(current, next))
+}
+
+fn tabs_are_equivalent_for_owned_store_row<K: TabKey>(current: &Tab<K>, next: &Tab<K>) -> bool {
+    current.key == next.key
+        && tab_labels_are_equivalent_for_owned_store(&current.label_text, &next.label_text)
+        && current.disabled == next.disabled
+        && current.closable == next.closable
+        && current.link == next.link
+}
+
+fn tab_labels_are_equivalent_for_owned_store(current: &TabLabel, next: &TabLabel) -> bool {
+    match (current, next) {
+        (TabLabel::Static(current), TabLabel::Static(next)) => current == next,
+        (TabLabel::Translated(_), TabLabel::Translated(_)) => true,
+        _ => false,
+    }
 }
 
 #[expect(
@@ -2119,6 +2146,36 @@ mod tests {
         assert!(
             owned_tabs_changed(&current, &rendered),
             "same-key row metadata changes must refresh the owned store"
+        );
+    }
+
+    #[test]
+    fn owned_tabs_changed_ignores_translated_label_resolver_identity() {
+        let current = vec![
+            Tab {
+                label_text: TabLabel::Translated(Arc::new(|| "First".to_owned())),
+                ..tab("first", "First")
+            },
+            Tab {
+                label_text: TabLabel::Translated(Arc::new(|| "Second".to_owned())),
+                ..tab("second", "Second")
+            },
+        ];
+
+        let rendered = vec![
+            Tab {
+                label_text: TabLabel::Translated(Arc::new(|| "First".to_owned())),
+                ..tab("first", "First")
+            },
+            Tab {
+                label_text: TabLabel::Translated(Arc::new(|| "Second".to_owned())),
+                ..tab("second", "Second")
+            },
+        ];
+
+        assert!(
+            !owned_tabs_changed(&current, &rendered),
+            "translated tabs should not resync the owned store just because render built fresh resolver closures"
         );
     }
 

@@ -2778,6 +2778,53 @@ async fn focus_visible_tracks_keyboard_and_pointer_modality() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn pointerdown_on_focused_tab_clears_focus_visible_without_selection_change() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent) = owner.with(|| {
+        let parent = container();
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <ArsProvider>
+                    <Tabs default_value="first" tabs=store_field(three_tabs()) />
+                </ArsProvider>
+            }
+        });
+
+        (mount_handle, parent)
+    });
+
+    leptos::task::tick().await;
+
+    let first = tab_at(&parent, 0);
+
+    first.focus().expect("focus should succeed");
+
+    dispatch_keydown(&first, "ArrowRight", false);
+
+    leptos::task::tick().await;
+
+    let second = tab_at(&parent, 1);
+
+    assert!(
+        has_focus_visible(&second),
+        "keyboard navigation should make the focused tab focus-visible"
+    );
+
+    dispatch_pointerdown(&second, "mouse");
+
+    leptos::task::tick().await;
+
+    assert!(
+        !has_focus_visible(&second),
+        "pointerdown on the already focused tab should clear stale focus-visible state"
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
 async fn keyboard_focus_dispatch_prefers_node_ref_over_id_platform_focus() {
     let owner = Owner::new();
 
@@ -4050,6 +4097,11 @@ async fn signal_backed_reorderable_updates_draggable_tabs() {
         Some("false"),
         "tabs should not advertise drag affordance before reorderable is enabled"
     );
+    assert_eq!(
+        tab_at(&parent, 0).get_attribute("aria-roledescription"),
+        None,
+        "tabs should not expose a drag roledescription before reorderable is enabled"
+    );
 
     set_reorderable.set(true);
 
@@ -4059,6 +4111,13 @@ async fn signal_backed_reorderable_updates_draggable_tabs() {
         tab_at(&parent, 0).get_attribute("draggable").as_deref(),
         Some("true"),
         "draggable attrs should track signal-backed reorderable"
+    );
+    assert_eq!(
+        tab_at(&parent, 0)
+            .get_attribute("aria-roledescription")
+            .as_deref(),
+        Some("draggable tab"),
+        "drag roledescription should track signal-backed reorderable"
     );
 
     drop(mount_handle);
