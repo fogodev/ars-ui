@@ -1919,6 +1919,28 @@ async fn web_store_mutations_update_tabs_without_remounting() {
         4
     );
 
+    let fourth = tab_at(&parent, 3);
+    assert_eq!(fourth.text_content().unwrap_or_default(), "Fourth");
+    assert!(
+        fourth.get_attribute("id").is_some(),
+        "pushed tab should receive the core tab id"
+    );
+    assert_eq!(
+        fourth.get_attribute("aria-selected").as_deref(),
+        Some("false")
+    );
+    assert_eq!(fourth.get_attribute("tabindex").as_deref(), Some("-1"));
+    let fourth_panel_id = fourth
+        .get_attribute("aria-controls")
+        .expect("pushed tab should control a panel");
+    assert!(
+        parent
+            .query_selector(&format!("#{fourth_panel_id}"))
+            .expect("query should succeed")
+            .is_some(),
+        "pushed tab should point to a rendered panel"
+    );
+
     click(
         &parent
             .query_selector("#pop-tab")

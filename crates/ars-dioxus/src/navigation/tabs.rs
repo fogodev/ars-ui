@@ -1041,33 +1041,56 @@ fn use_tab_attrs_by_key<K: TabKey>(
     modality_revision: Signal<u64>,
     reorderable_signal: Signal<bool>,
 ) -> Memo<BTreeMap<Key, Vec<Attribute>>> {
-    let tab_keys = tabs_meta
+    let next_tab_keys = tabs_meta
         .iter()
         .map(|meta| meta.key.clone())
         .collect::<Vec<_>>();
+    let mut tab_keys = use_signal(|| next_tab_keys.clone());
+
+    if *tab_keys.peek() != next_tab_keys {
+        tab_keys.set(next_tab_keys);
+    }
 
     machine.derive(move |api| {
         modality_revision();
         let is_reorderable = reorderable_signal();
+        let tab_keys = tab_keys();
 
         tab_keys
             .iter()
             .map(|key| {
-                let mut attrs = api.tab_attrs(key, !modality.had_pointer_interaction());
-
-                attrs.set(
-                    HtmlAttr::Aria(AriaAttr::RoleDescription),
-                    if is_reorderable {
-                        AttrValue::from("draggable tab")
-                    } else {
-                        AttrValue::None
-                    },
-                );
-
-                (key.clone(), attr_map_to_dioxus_inline_attrs(attrs))
+                (
+                    key.clone(),
+                    dioxus_tab_attrs(
+                        api,
+                        key,
+                        !modality.had_pointer_interaction(),
+                        is_reorderable,
+                    ),
+                )
             })
             .collect()
     })
+}
+
+fn dioxus_tab_attrs(
+    api: &tabs::Api<'_>,
+    key: &Key,
+    focus_visible: bool,
+    is_reorderable: bool,
+) -> Vec<Attribute> {
+    let mut attrs = api.tab_attrs(key, focus_visible);
+
+    attrs.set(
+        HtmlAttr::Aria(AriaAttr::RoleDescription),
+        if is_reorderable {
+            AttrValue::from("draggable tab")
+        } else {
+            AttrValue::None
+        },
+    );
+
+    attr_map_to_dioxus_inline_attrs(attrs)
 }
 
 fn use_indicator_style(
@@ -1150,7 +1173,16 @@ fn render_tab_button<K: TabKey>(
     let owned_render_tabs = owned_render_tabs.cloned();
 
     let mut attrs_by_key = tab_attrs_by_key();
-    let tab_attrs = attrs_by_key.remove(&key).unwrap_or_default();
+    let tab_attrs = attrs_by_key.remove(&key).unwrap_or_else(|| {
+        machine.with_api_snapshot(|api| {
+            dioxus_tab_attrs(
+                api,
+                &key,
+                !modality.had_pointer_interaction(),
+                config.reorderable,
+            )
+        })
+    });
 
     let label = tab.label;
 
