@@ -1,0 +1,5 @@
+error: TabKey can only be derived for fieldless enums with unit variants
+ --> tests/ui/tab_key_payload_variant.rs:7:5
+  |
+7 |     Billing(u8),
+  |     ^^^^^^^^^^^

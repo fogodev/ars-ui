@@ -24,6 +24,7 @@ ssr = [
 ]
 web = [
   "dioxus/web",
+  "dioxus/mounted",
   "dep:ars-dom",
   "ars-dom/web",
   "ars-core/ssr",
@@ -33,6 +34,7 @@ web = [
   "dep:wasm-bindgen-futures",
   "dep:js-sys"
 ]
+uuid = ["ars-collections/uuid", "ars-components/uuid"]
 # Pre-compiled CLDR data via ICU4X. Default backend on native targets and the
 # server-side rendering path. Use `--no-default-features --features web,ars-i18n/web-intl`
 # to swap icu4x for the browser-native Intl API on wasm32 builds.
@@ -47,6 +49,7 @@ ars-dom              = { path = "../ars-dom", optional = true, default-features 
 ars-forms            = { path = "../ars-forms" }
 ars-i18n             = { path = "../ars-i18n", default-features = false }
 ars-interactions     = { path = "../ars-interactions" }
+dioxus-stores        = { version = "0.7", default-features = false, features = ["macro"] }
 log                  = { version = "0.4", default-features = false, optional = true }
 arboard              = { version = "3", optional = true }
 uuid                 = { version = "1", default-features = false, features = ["v4"], optional = true }
@@ -82,7 +85,9 @@ features = [
   "HtmlCollection",
   "HtmlElement",
   "KeyboardEvent",
+  "KeyboardEventInit",
   "MouseEvent",
+  "MouseEventInit",
   "Navigator",
   "Node",
   "NodeList",
@@ -97,7 +102,10 @@ js-sys               = "0.3"
 wasm-bindgen         = "0.2"
 wasm-bindgen-futures = "0.4"
 wasm-bindgen-test    = "0.3"
-web-sys              = { version = "0.3", features = ["EventInit", "KeyboardEventInit", "PointerEventInit"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies.web-sys]
+version  = "0.3"
+features = ["DragEvent", "DragEventInit", "EventInit", "KeyboardEventInit", "PointerEventInit"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 ars-test-harness-dioxus = { path = "../ars-test-harness-dioxus" }

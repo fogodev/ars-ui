@@ -1,0 +1,5 @@
+error: TabKey discriminants must be non-negative integer literals
+ --> tests/ui/tab_key_discriminant_nonliteral.rs:9:15
+  |
+9 |     Profile = PROFILE,
+  |               ^^^^^^^

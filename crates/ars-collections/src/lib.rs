@@ -56,6 +56,7 @@
 #![warn(clippy::std_instead_of_core)]
 
 extern crate alloc;
+extern crate self as ars_collections;
 
 /// Localizable announcement message helpers for collection mutations.
 pub mod announcements;
@@ -96,6 +97,7 @@ pub mod virtual_layout;
 pub mod virtualization;
 
 pub use announcements::{CollectionChangeAnnouncement, CollectionMessages};
+pub use ars_derive::TabKey;
 pub use async_collection::{AsyncCollection, AsyncLoadingState};
 pub use async_loader::{AsyncLoader, CollectionError, LoadResult};
 pub use builder::CollectionBuilder;
@@ -106,7 +108,7 @@ pub use dnd::{
     DndAnnouncements, DraggableCollection, DropPosition, DroppableCollection,
 };
 pub use filtered_collection::FilteredCollection;
-pub use key::Key;
+pub use key::{Key, TabKey};
 pub use mutable::{CollectionChange, MutableListData, MutableTreeData};
 pub use node::{Node, NodeType};
 pub use selection::{DisabledBehavior, OnAction};
@@ -115,6 +117,8 @@ pub use sorted_collection::{CollationSupport, CollationTarget, CollatorCache};
 pub use sorted_collection::{SortDescriptor, SortDirection, SortedCollection};
 pub use static_collection::StaticCollection;
 pub use tree_collection::{TreeCollection, TreeItemConfig};
+#[cfg(feature = "uuid")]
+pub use uuid;
 pub use virtual_layout::{HorizontalVirtualLayout, VirtualLayout};
 pub use virtualization::{
     LayoutStrategy, RtlScrollMode, ScrollAlign, Virtualizer, normalize_scroll_left_rtl,

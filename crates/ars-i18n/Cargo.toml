@@ -8,6 +8,7 @@ repository.workspace   = true
 rust-version.workspace = true
 
 [dependencies]
+ars-derive           = { path = "../ars-derive" }
 core_maths           = { version = "0.1", default-features = false }
 fixed_decimal        = { version = "0.7", default-features = false, features = ["ryu"] }
 icu                  = { version = "2.2", default-features = false }
@@ -27,6 +28,9 @@ web-intl = ["dep:js-sys", "dep:wasm-bindgen", "temporal_rs/sys"]
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
+
+[dev-dependencies]
+trybuild = "1"
 
 [lints]
 workspace = true

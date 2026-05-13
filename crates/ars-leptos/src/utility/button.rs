@@ -6,7 +6,7 @@
 
 use ars_components::utility::button::{self, Api};
 pub use ars_components::utility::button::{
-    FormEncType, FormMethod, FormTarget, Size, Type, Variant,
+    FormEncType, FormMethod, FormTarget, Messages, Size, Type, Variant,
 };
 use ars_core::{AriaAttr, AttrMap, AttrValue, HtmlAttr, KeyModifiers, PointerType, SharedFlag};
 pub use ars_core::{SafeUrl, UnsafeUrlError};
@@ -32,10 +32,10 @@ fn content_attrs(api: &Api<'_>) -> AttrMap {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct UserRootAttrs {
-    class: Option<String>,
-    style: Option<String>,
-    aria_label: Option<String>,
-    aria_labelledby: Option<String>,
+    class: Option<Oco<'static, str>>,
+    style: Option<Oco<'static, str>>,
+    aria_label: Option<Oco<'static, str>>,
+    aria_labelledby: Option<Oco<'static, str>>,
 }
 
 /// Leptos Button component rendered as a native `<button>` root.
@@ -43,7 +43,7 @@ struct UserRootAttrs {
 pub fn Button<T>(
     /// Optional component instance ID.
     #[prop(optional, into)]
-    id: Option<String>,
+    id: Option<Oco<'static, str>>,
 
     /// Whether the button is disabled.
     #[prop(optional, into)]
@@ -67,15 +67,15 @@ pub fn Button<T>(
 
     /// Associated form owner ID.
     #[prop(optional, into)]
-    form: Option<String>,
+    form: Option<Oco<'static, str>>,
 
     /// Submitted form name.
     #[prop(optional, into)]
-    name: Option<String>,
+    name: Option<Oco<'static, str>>,
 
     /// Submitted form value.
     #[prop(optional, into)]
-    value: Option<String>,
+    value: Option<Oco<'static, str>>,
 
     /// Form action override.
     #[prop(optional, into)]
@@ -111,19 +111,19 @@ pub fn Button<T>(
 
     /// Consumer class tokens appended to the root.
     #[prop(optional, into)]
-    class: Option<String>,
+    class: Option<Oco<'static, str>>,
 
     /// Consumer inline style text applied to the root.
     #[prop(optional, into)]
-    style: Option<String>,
+    style: Option<Oco<'static, str>>,
 
     /// Accessible label applied to the root.
     #[prop(optional, into)]
-    aria_label: Option<String>,
+    aria_label: Option<Oco<'static, str>>,
 
     /// Accessible label relationship applied to the root.
     #[prop(optional, into)]
-    aria_labelledby: Option<String>,
+    aria_labelledby: Option<Oco<'static, str>>,
 
     /// Fires when a press starts.
     #[prop(optional)]
@@ -151,7 +151,7 @@ pub fn Button<T>(
 where
     View<T>: IntoView,
 {
-    let id = id.unwrap_or_else(|| use_id("button"));
+    let id = id.map_or_else(|| use_id("button"), Oco::into_owned);
 
     let mut props = button::Props::new()
         .id(&id)
@@ -164,15 +164,15 @@ where
         .prevent_focus_on_press(prevent_focus_on_press);
 
     if let Some(form) = form {
-        props = props.form(form);
+        props = props.form(form.into_owned());
     }
 
     if let Some(name) = name {
-        props = props.name(name);
+        props = props.name(name.into_owned());
     }
 
     if let Some(value) = value {
-        props = props.value(value);
+        props = props.value(value.into_owned());
     }
 
     if let Some(form_action) = form_action {
@@ -312,7 +312,7 @@ where
 pub fn ButtonAsChild<T>(
     /// Optional component instance ID.
     #[prop(optional, into)]
-    id: Option<String>,
+    id: Option<Oco<'static, str>>,
 
     /// Whether the button is disabled.
     #[prop(optional, into)]
@@ -336,19 +336,19 @@ pub fn ButtonAsChild<T>(
 
     /// Consumer class tokens appended to the root.
     #[prop(optional, into)]
-    class: Option<String>,
+    class: Option<Oco<'static, str>>,
 
     /// Consumer inline style text applied to the root.
     #[prop(optional, into)]
-    style: Option<String>,
+    style: Option<Oco<'static, str>>,
 
     /// Accessible label applied to the root.
     #[prop(optional, into)]
-    aria_label: Option<String>,
+    aria_label: Option<Oco<'static, str>>,
 
     /// Accessible label relationship applied to the root.
     #[prop(optional, into)]
-    aria_labelledby: Option<String>,
+    aria_labelledby: Option<Oco<'static, str>>,
 
     /// Typed child root that receives Button root attrs.
     children: TypedChildren<T>,
@@ -357,7 +357,7 @@ where
     View<T>: AddAnyAttr,
     <View<T> as AddAnyAttr>::Output<Vec<LeptosAttribute>>: IntoView,
 {
-    let id = id.unwrap_or_else(|| use_id("button"));
+    let id = id.map_or_else(|| use_id("button"), Oco::into_owned);
 
     children.into_inner()().add_any_attr(
         AsChildAttrs::from(leptos_root_attrs(
@@ -427,7 +427,7 @@ fn leptos_root_attrs(
     let mut leptos_attrs = attr_map_to_leptos_inline_attrs(attrs);
 
     if let Some(style) = user_attrs.style {
-        leptos_attrs.push(string_attr(String::from("style"), style));
+        leptos_attrs.push(string_attr(String::from("style"), style.into_owned()));
     }
 
     leptos_attrs
@@ -453,15 +453,15 @@ fn leptos_content_attrs(machine: crate::UseMachineReturn<button::Machine>) -> Ve
 
 fn apply_user_root_attrs(attrs: &mut AttrMap, user_attrs: &UserRootAttrs) {
     if let Some(class) = &user_attrs.class {
-        attrs.set(HtmlAttr::Class, class);
+        attrs.set(HtmlAttr::Class, class.as_str());
     }
 
     if let Some(label) = &user_attrs.aria_label {
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), label.as_str());
     }
 
     if let Some(labelledby) = &user_attrs.aria_labelledby {
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), labelledby);
+        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), labelledby.as_str());
     }
 }
 
@@ -654,8 +654,7 @@ mod tests {
     use super::*;
 
     fn api_for(props: button::Props) -> bool {
-        let service =
-            Service::<button::Machine>::new(props, &Env::default(), &button::Messages::default());
+        let service = Service::<button::Machine>::new(props, &Env::default(), &Messages::default());
 
         let api = service.connect(&|_| {});
 
@@ -788,7 +787,7 @@ mod tests {
                 .form_no_validate(true)
                 .auto_focus(true),
             &Env::default(),
-            &button::Messages::default(),
+            &Messages::default(),
         );
 
         let api = service.connect(&|_| {});
@@ -798,10 +797,10 @@ mod tests {
         apply_user_root_attrs(
             &mut attrs,
             &UserRootAttrs {
-                class: Some(String::from("app-button")),
+                class: Some("app-button".into()),
                 style: None,
-                aria_label: Some(String::from("Save account")),
-                aria_labelledby: Some(String::from("save-label")),
+                aria_label: Some("Save account".into()),
+                aria_labelledby: Some("save-label".into()),
             },
         );
 

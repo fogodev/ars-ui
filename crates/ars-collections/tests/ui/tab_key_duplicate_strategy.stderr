@@ -1,0 +1,5 @@
+error: TabKey accepts only one enum-level strategy
+ --> tests/ui/tab_key_duplicate_strategy.rs:4:20
+  |
+4 | #[tab_key(ordinal, discriminant)]
+  |                    ^^^^^^^^^^^^

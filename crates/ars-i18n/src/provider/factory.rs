@@ -10,10 +10,10 @@ use crate::IntlBackend;
 ///
 /// Precedence matches spec §9.5.3:
 ///
-/// 1. The `icu4x` feature returns an [`Icu4xBackend`](super::Icu4xBackend)
+/// 1. The `icu4x` feature returns an `Icu4xBackend`
 ///    with full CLDR data.
 /// 2. On `wasm32` targets with the `web-intl` feature (and without `icu4x`),
-///    returns a [`WebIntlBackend`](super::WebIntlBackend) that delegates
+///    returns a `WebIntlBackend` that delegates
 ///    to the browser.
 /// 3. Otherwise returns the [`StubIntlBackend`](super::StubIntlBackend).
 #[must_use]

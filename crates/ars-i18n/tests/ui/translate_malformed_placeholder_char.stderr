@@ -1,0 +1,5 @@
+error: Translate placeholders must use Rust field identifiers like {count}
+ --> tests/ui/translate_malformed_placeholder_char.rs:6:22
+  |
+6 |     #[translate(en = "{count:n} items")]
+  |                      ^^^^^^^^^^^^^^^^^

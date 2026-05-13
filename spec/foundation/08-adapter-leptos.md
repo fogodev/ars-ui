@@ -2488,28 +2488,96 @@ pub fn use_messages<M: ComponentMessages + Send + Sync + 'static>(
 
 ```rust
 use ars_i18n::Translate;
+use leptos::prelude::*;
 
-/// Resolve a user-defined `Translate` enum variant into a reactive text node.
+/// Input accepted by `t()` for reactive translation.
+///
+/// Static values are stored once, while Leptos signals keep tracking their
+/// current message value. This keeps static and reactive message call sites
+/// equally direct while avoiding ambiguous `Into<Signal<T>>` inference.
+pub enum Translatable<T>
+where
+    T: Translate + Send + Sync + 'static,
+{
+    /// A fixed translatable message value.
+    Static(T),
+
+    /// A reactive translatable message value.
+    Signal(Signal<T>),
+}
+
+impl<T> From<T> for Translatable<T>
+where
+    T: Translate + Send + Sync + 'static,
+{
+    fn from(value: T) -> Self {
+        Self::Static(value)
+    }
+}
+
+impl<T> From<Signal<T>> for Translatable<T>
+where
+    T: Translate + Send + Sync + 'static,
+{
+    fn from(value: Signal<T>) -> Self {
+        Self::Signal(value)
+    }
+}
+
+impl<T> From<ReadSignal<T>> for Translatable<T>
+where
+    T: Translate + Send + Sync + 'static,
+{
+    fn from(value: ReadSignal<T>) -> Self {
+        Self::Signal(value.into())
+    }
+}
+
+impl<T> From<RwSignal<T>> for Translatable<T>
+where
+    T: Translate + Send + Sync + 'static,
+{
+    fn from(value: RwSignal<T>) -> Self {
+        Self::Signal(value.into())
+    }
+}
+
+impl<T> From<Memo<T>> for Translatable<T>
+where
+    T: Translate + Send + Sync + 'static,
+{
+    fn from(value: Memo<T>) -> Self {
+        Self::Signal(value.into())
+    }
+}
+
+/// Resolve user-defined `Translate` text into a reactive string.
 ///
 /// Reads the current locale and ICU provider from `ArsProvider` context,
-/// then returns a reactive closure that calls `msg.translate()`. The closure
-/// subscribes to the locale signal — when locale changes, only the text node
-/// re-evaluates (fine-grained reactivity).
+/// then returns a `Signal<String>` that calls `msg.translate()`. The signal
+/// subscribes to both the locale signal and to the message signal when a
+/// reactive message is passed, so changing locale or message value updates
+/// only consumers of the translated string (fine-grained reactivity).
 ///
-/// Included in `ars_leptos::prelude`.
+/// Included in `ars_leptos::prelude` together with `Translatable`.
 ///
 /// See `04-internationalization.md` §7.4 for the `Translate` trait definition
 /// and §7.5 for the `t()` function contract.
 #[inline]
 #[must_use]
-pub fn t<T: Translate + Send + Sync + 'static>(msg: T) -> impl IntoView {
+pub fn t<T>(msg: impl Into<Translatable<T>>) -> Signal<String>
+where
+    T: Translate + Send + Sync + 'static,
+{
     let locale = use_locale();
     let intl_backend = use_intl_backend();
-    move || msg.translate(&locale.get(), &*intl_backend)
+    let msg = msg.into().into_signal();
+
+    Signal::derive(move || msg.with(|msg| msg.translate(&locale.get(), &*intl_backend)))
 }
 ```
 
-**Prelude export:** `pub use crate::i18n::t;`
+**Prelude export:** `pub use crate::{Translatable, t};`
 
 ---
 

@@ -1,0 +1,6 @@
+error: Translate derive supports only unit variants and variants with named fields
+ --> tests/ui/translate_tuple_variant.rs:6:5
+  |
+6 | /     #[translate(en = "{count} items")]
+7 | |     Count(usize),
+  | |________________^

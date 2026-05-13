@@ -457,6 +457,24 @@ pub fn use_modality_context() -> Arc<dyn ModalityContext> {
     )
 }
 
+/// Resolves the shared [`PlatformEffects`] handle from provider context.
+///
+/// Components that need to issue platform calls (DOM focus, scroll lock,
+/// timers) read this handle instead of going through `web_sys` directly,
+/// so unit tests and SSR substitute [`NullPlatformEffects`] without
+/// rebuilding the component.
+#[must_use]
+pub fn use_platform_effects() -> Arc<dyn PlatformEffects> {
+    try_use_context::<ArsContext>().map_or_else(
+        || -> Arc<dyn PlatformEffects> {
+            warn_missing_provider("use_platform_effects");
+
+            Arc::new(ars_core::MissingProviderEffects)
+        },
+        |ctx| -> Arc<dyn PlatformEffects> { Arc::clone(&ctx.platform) },
+    )
+}
+
 /// Resolves per-component messages from override, provider registry, or defaults.
 #[must_use]
 pub fn use_messages<M: ars_core::ComponentMessages + Send + Sync + 'static>(
@@ -473,13 +491,61 @@ pub fn use_messages<M: ars_core::ComponentMessages + Send + Sync + 'static>(
     core_resolve_messages(adapter_props_messages, registries.as_ref(), &locale)
 }
 
+/// Input accepted by [`t`] for Dioxus translation.
+///
+/// Static values are translated during the current render. Signal-backed values
+/// are read through Dioxus reactivity so the component re-renders when the
+/// message value changes.
+#[derive(Debug)]
+pub enum Translatable<T>
+where
+    T: Translate + 'static,
+{
+    /// A fixed translatable message value.
+    Static(T),
+
+    /// A reactive translatable message value.
+    Signal(Signal<T>),
+}
+
+impl<T> From<T> for Translatable<T>
+where
+    T: Translate + 'static,
+{
+    fn from(value: T) -> Self {
+        Self::Static(value)
+    }
+}
+
+impl<T> From<Signal<T>> for Translatable<T>
+where
+    T: Translate + 'static,
+{
+    fn from(value: Signal<T>) -> Self {
+        Self::Signal(value)
+    }
+}
+
+impl<T> Translatable<T>
+where
+    T: Translate + 'static,
+{
+    fn translate(&self, locale: &Locale, intl_backend: &dyn IntlBackend) -> String {
+        match self {
+            Self::Static(msg) => msg.translate(locale, intl_backend),
+            Self::Signal(msg) => msg.read().translate(locale, intl_backend),
+        }
+    }
+}
+
 /// Resolves application-owned translatable text into a Dioxus string.
 #[must_use]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "t() consumes the translatable enum into the render call."
-)]
-pub fn t<T: Translate>(msg: T) -> String {
+pub fn t<T>(msg: impl Into<Translatable<T>>) -> String
+where
+    T: Translate + 'static,
+{
+    let msg = msg.into();
+
     try_use_context::<ArsContext>().map_or_else(
         || {
             warn_missing_provider("t");

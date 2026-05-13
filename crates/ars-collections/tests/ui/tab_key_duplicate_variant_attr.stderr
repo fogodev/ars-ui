@@ -1,0 +1,5 @@
+error: TabKey accepts only one #[tab_key(...)] key attribute per variant
+ --> tests/ui/tab_key_duplicate_variant_attr.rs:6:5
+  |
+6 |     #[tab_key(int = 2)]
+  |     ^^^^^^^^^^^^^^^^^^^

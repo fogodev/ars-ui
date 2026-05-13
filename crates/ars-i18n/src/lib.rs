@@ -40,6 +40,7 @@ mod text;
 mod translate;
 mod weekday;
 
+pub use ars_derive::Translate;
 pub use bidi::{IsolateDirection, isolate_text_safe};
 pub use calendar::{
     Buddhist, CalendarConversionError, CalendarDate, CalendarDateFields, CalendarDateTime,
@@ -86,6 +87,13 @@ pub use relative_time::{NumericOption, RelativeTimeFormatter};
 pub use text::{grapheme_count, take_graphemes};
 pub use translate::Translate;
 pub use weekday::Weekday;
+
+/// Hidden re-exports used by proc macros to stay hygienic without forcing
+/// downstream crates to import `alloc`.
+#[doc(hidden)]
+pub mod __private {
+    pub use alloc::{format, string::String};
+}
 
 /// Text and layout direction.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

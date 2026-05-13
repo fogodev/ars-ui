@@ -244,7 +244,11 @@ where
 
     view! {
         <div dir=dir_attr>
-            {nonce.map(|nonce| view! { <ArsNonceStyle nonce=nonce /> })} {children.into_inner()()}
+            {nonce
+                .map(|nonce| {
+                    let nonce = Oco::from(nonce);
+                    view! { <ArsNonceStyle nonce /> }
+                })} {children.into_inner()()}
         </div>
     }
 }
@@ -297,6 +301,24 @@ pub fn use_modality_context() -> Arc<dyn ModalityContext> {
             Arc::new(DefaultModalityContext::new())
         },
         |ctx| -> Arc<dyn ModalityContext> { Arc::clone(&ctx.modality) },
+    )
+}
+
+/// Resolves the shared [`PlatformEffects`] handle from provider context.
+///
+/// Components that need to issue platform calls (DOM focus, scroll lock,
+/// timers) read this handle instead of going through `web_sys` directly,
+/// so unit tests and SSR substitute [`NullPlatformEffects`] without
+/// rebuilding the component.
+#[must_use]
+pub fn use_platform_effects() -> Arc<dyn PlatformEffects> {
+    current_ars_context().map_or_else(
+        || -> Arc<dyn PlatformEffects> {
+            warn_missing_provider("use_platform_effects");
+
+            Arc::new(ars_core::MissingProviderEffects)
+        },
+        |ctx| -> Arc<dyn PlatformEffects> { Arc::clone(&ctx.platform) },
     )
 }
 
@@ -385,19 +407,97 @@ pub fn use_messages<M: ars_core::ComponentMessages + Send + Sync + 'static>(
     core_resolve_messages(adapter_props_messages, registries.as_ref(), &locale)
 }
 
-fn translated_text<T: Translate + Send + Sync + 'static>(msg: T) -> impl Fn() -> String {
+/// Input accepted by [`t`] for reactive translation.
+///
+/// Static values are stored once, while Leptos signals keep tracking their
+/// current message value. This avoids exposing consumers to Leptos'
+/// lower-level conversion-marker traits while preserving the same call-site
+/// ergonomics for static and reactive messages.
+#[derive(Debug)]
+pub enum Translatable<T>
+where
+    T: Translate + Send + Sync + 'static,
+{
+    /// A fixed translatable message value.
+    Static(T),
+
+    /// A reactive translatable message value.
+    Signal(Signal<T>),
+}
+
+impl<T> From<T> for Translatable<T>
+where
+    T: Translate + Send + Sync + 'static,
+{
+    fn from(value: T) -> Self {
+        Self::Static(value)
+    }
+}
+
+impl<T> From<Signal<T>> for Translatable<T>
+where
+    T: Translate + Send + Sync + 'static,
+{
+    fn from(value: Signal<T>) -> Self {
+        Self::Signal(value)
+    }
+}
+
+impl<T> From<ReadSignal<T>> for Translatable<T>
+where
+    T: Translate + Send + Sync + 'static,
+{
+    fn from(value: ReadSignal<T>) -> Self {
+        Self::Signal(value.into())
+    }
+}
+
+impl<T> From<RwSignal<T>> for Translatable<T>
+where
+    T: Translate + Send + Sync + 'static,
+{
+    fn from(value: RwSignal<T>) -> Self {
+        Self::Signal(value.into())
+    }
+}
+
+impl<T> From<Memo<T>> for Translatable<T>
+where
+    T: Translate + Send + Sync + 'static,
+{
+    fn from(value: Memo<T>) -> Self {
+        Self::Signal(value.into())
+    }
+}
+
+impl<T> Translatable<T>
+where
+    T: Translate + Send + Sync + 'static,
+{
+    fn into_signal(self) -> Signal<T> {
+        match self {
+            Self::Static(value) => Signal::stored(value),
+            Self::Signal(value) => value,
+        }
+    }
+}
+
+fn translated_text<T: Translate + Send + Sync + 'static>(msg: Signal<T>) -> Signal<String> {
     let locale = use_locale();
 
     let intl_backend = use_intl_backend();
 
-    move || msg.translate(&locale.get(), &*intl_backend)
+    Signal::derive(move || msg.with(|msg| msg.translate(&locale.get(), &*intl_backend)))
 }
 
 /// Resolves application-owned translatable text into a reactive text node.
 #[inline]
 #[must_use]
-pub fn t<T: Translate + Send + Sync + 'static>(msg: T) -> impl IntoView {
-    translated_text(msg)
+pub fn t<T>(msg: impl Into<Translatable<T>>) -> Signal<String>
+where
+    T: Translate + Send + Sync + 'static,
+{
+    translated_text(msg.into().into_signal())
 }
 
 #[cfg(test)]
@@ -435,13 +535,16 @@ mod tests {
     #[derive(Clone, Debug, PartialEq, Eq)]
     enum AppText {
         Greeting,
+        Farewell,
     }
 
     impl Translate for AppText {
         fn translate(&self, locale: &Locale, _intl: &dyn IntlBackend) -> String {
-            match locale.language() {
-                "es" => String::from("Hola"),
-                _ => String::from("Hello"),
+            match (self, locale.language()) {
+                (Self::Greeting, "es") => String::from("Hola"),
+                (Self::Greeting, _) => String::from("Hello"),
+                (Self::Farewell, "es") => String::from("Adios"),
+                (Self::Farewell, _) => String::from("Goodbye"),
             }
         }
     }
@@ -611,6 +714,27 @@ mod tests {
     }
 
     #[test]
+    fn resolve_locale_tracks_provider_locale_in_reactive_context() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let (context, locale_signal) = reactive_test_context(
+                Locale::parse("fr-FR").expect("locale should parse"),
+                Arc::new(StubIntlBackend),
+            );
+
+            crate::provide_ars_context(context);
+
+            let resolved = Memo::new(move |_| resolve_locale(None).to_bcp47());
+
+            assert_eq!(resolved.get(), "fr-FR");
+
+            locale_signal.set(Locale::parse("pt-BR").expect("locale should parse"));
+
+            assert_eq!(resolved.get(), "pt-BR");
+        });
+    }
+
+    #[test]
     fn current_ars_context_round_trips_through_leptos_context() {
         let owner = Owner::new();
         owner.with(|| {
@@ -745,13 +869,52 @@ mod tests {
 
             crate::provide_ars_context(context);
 
-            let text = translated_text(AppText::Greeting);
+            let text = translated_text(Signal::stored(AppText::Greeting));
 
-            assert_eq!(text(), "Hello");
+            assert_eq!(text.get(), "Hello");
 
             locale_signal.set(Locale::parse("es-ES").expect("locale should parse"));
 
-            assert_eq!(text(), "Hola");
+            assert_eq!(text.get(), "Hola");
+        });
+    }
+
+    #[test]
+    fn t_accepts_static_messages_and_tracks_provider_locale() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let (context, locale_signal) =
+                reactive_test_context(locales::en_us(), Arc::new(TestIntlBackend));
+
+            crate::provide_ars_context(context);
+
+            let text = t(AppText::Greeting);
+
+            assert_eq!(text.get(), "Hello");
+
+            locale_signal.set(Locale::parse("es-ES").expect("locale should parse"));
+
+            assert_eq!(text.get(), "Hola");
+        });
+    }
+
+    #[test]
+    fn t_accepts_message_signals_and_tracks_message_changes() {
+        let owner = Owner::new();
+        owner.with(|| {
+            crate::provide_ars_context(test_context_with_defaults(
+                locales::en_us(),
+                Arc::new(TestIntlBackend),
+            ));
+
+            let message = RwSignal::new(AppText::Greeting);
+            let text = t(message);
+
+            assert_eq!(text.get(), "Hello");
+
+            message.set(AppText::Farewell);
+
+            assert_eq!(text.get(), "Goodbye");
         });
     }
 
@@ -845,7 +1008,7 @@ mod tests {
                 Arc::new(StubIntlBackend),
             ));
 
-            drop(t(AppText::Greeting));
+            let _ = t(AppText::Greeting);
 
             use crate::prelude::use_number_formatter as prelude_use_number_formatter;
 
@@ -1038,15 +1201,15 @@ mod wasm_tests {
 
             crate::provide_ars_context(context);
 
-            let text = translated_text(AppText::Greeting);
+            let text = translated_text(Signal::stored(AppText::Greeting));
 
-            assert_eq!(text(), "Hello");
+            assert_eq!(text.get(), "Hello");
 
             locale_signal.set(Locale::parse("es-ES").expect("locale should parse"));
 
-            assert_eq!(text(), "Hola");
+            assert_eq!(text.get(), "Hola");
 
-            drop(t(AppText::Greeting));
+            let _ = t(AppText::Greeting);
         });
     }
 
@@ -1133,9 +1296,12 @@ mod wasm_tests {
 
             assert_eq!(modality.snapshot(), ars_core::ModalitySnapshot::default());
             assert_eq!((resolved.label)(&locale), "Default");
-            assert_eq!(translated_text(AppText::Greeting)(), "Hello");
+            assert_eq!(
+                translated_text(Signal::stored(AppText::Greeting)).get(),
+                "Hello"
+            );
 
-            drop(t(AppText::Greeting));
+            let _ = t(AppText::Greeting);
         });
     }
 

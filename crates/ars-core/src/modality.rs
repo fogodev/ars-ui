@@ -353,6 +353,10 @@ impl KeyboardKey {
     /// Unrecognized values, including printable character keys, map to
     /// [`KeyboardKey::Unidentified`].
     #[must_use]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "W3C named-key registry parser is an exhaustive spelling table"
+    )]
     pub fn from_key_str(value: &str) -> Self {
         match value {
             " " | "Space" => Self::Space,
@@ -647,6 +651,10 @@ impl KeyboardKey {
 
     /// Returns the canonical W3C key string for this named key.
     #[must_use]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "W3C named-key registry serializer is an exhaustive spelling table"
+    )]
     pub const fn as_w3c_str(self) -> &'static str {
         match self {
             Self::Unidentified => "Unidentified",
@@ -1124,6 +1132,10 @@ mod tests {
     use super::*;
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "round-trip test covers the complete W3C named-key registry table"
+    )]
     fn keyboard_key_round_trips_across_w3c_registry() {
         let cases = [
             (KeyboardKey::Unidentified, "Unidentified"),

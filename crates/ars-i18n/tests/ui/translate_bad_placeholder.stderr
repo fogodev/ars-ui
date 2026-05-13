@@ -1,0 +1,5 @@
+error: Translate message for variant `Count` locale `en` references unknown field `count`
+ --> tests/ui/translate_bad_placeholder.rs:6:22
+  |
+6 |     #[translate(en = "{count} items")]
+  |                      ^^^^^^^^^^^^^^^

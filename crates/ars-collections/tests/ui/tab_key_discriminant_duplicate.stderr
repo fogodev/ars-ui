@@ -1,0 +1,15 @@
+error: TabKey discriminants must be unique
+ --> tests/ui/tab_key_discriminant_duplicate.rs:7:15
+  |
+7 |     Billing = 1,
+  |               ^
+
+error[E0081]: discriminant value `1` assigned more than once
+ --> tests/ui/tab_key_discriminant_duplicate.rs:5:1
+  |
+5 | enum BadTab {
+  | ^^^^^^^^^^^
+6 |     Profile = 1,
+  |               - `1` assigned here
+7 |     Billing = 1,
+  |               - `1` assigned here

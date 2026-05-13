@@ -1,0 +1,5 @@
+error: TabKey accepts only one crate path override
+ --> tests/ui/tab_key_duplicate_crate.rs:4:36
+  |
+4 | #[tab_key(crate = ars_collections, crate = ars_collections)]
+  |                                    ^^^^^^^^^^^^^^^^^^^^^^^

@@ -1689,6 +1689,10 @@ pub enum CssProperty {
 }
 
 impl Display for CssProperty {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive CSS property spelling table is clearer as one match"
+    )]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let property = match self {
             Self::Custom(name) => return write!(f, "--{name}"),
@@ -2551,6 +2555,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive attribute spelling coverage is intentionally table-driven"
+    )]
     fn html_attr_static_name_covers_full_variant_table() {
         let cases = [
             (HtmlAttr::AccessKey, "accesskey"),
@@ -2811,6 +2819,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive CSS property spelling coverage is intentionally table-driven"
+    )]
     fn css_property_display_matches_css_spelling() {
         let cases = [
             (CssProperty::BoxSizing, "box-sizing"),

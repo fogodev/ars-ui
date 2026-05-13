@@ -1,0 +1,8 @@
+error: TabKey can only be derived for enums
+ --> tests/ui/tab_key_on_struct.rs:4:1
+  |
+4 | / #[tab_key(ordinal)]
+5 | | struct SettingsTab {
+6 | |     profile: bool,
+7 | | }
+  | |_^

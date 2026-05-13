@@ -10,6 +10,15 @@
 //! - [`EphemeralRef`] — borrow wrapper preventing signal storage of borrowed APIs
 //! - [`use_id`] — hydration-safe deterministic ID generation
 
+extern crate self as ars_leptos;
+
+/// Hidden re-exports used by proc macros that resolve through this adapter
+/// facade.
+#[doc(hidden)]
+pub mod __private {
+    pub use ars_i18n::__private::*;
+}
+
 pub mod as_child;
 mod attrs;
 mod callbacks;
@@ -18,6 +27,7 @@ mod ephemeral;
 mod event_mapping;
 mod hydration;
 mod id;
+pub mod navigation;
 mod nonce;
 pub mod prelude;
 mod provider;
@@ -25,6 +35,11 @@ mod safe_listener;
 mod use_machine;
 pub mod utility;
 
+#[cfg(feature = "uuid")]
+pub use ars_collections::uuid;
+pub use ars_collections::{Key, TabKey};
+pub use ars_core::{I18nRegistries, MessageFn, MessagesRegistry};
+pub use ars_i18n::{IntlBackend, Locale, Translate};
 #[cfg(not(feature = "ssr"))]
 pub use attrs::{
     CssomStyleHandle, apply_styles_cssom, use_cssom_styles, use_cssom_styles_from_attrs,
@@ -54,9 +69,11 @@ pub use nonce::{
     use_nonce_css_context_provider, use_nonce_css_from_attrs, use_nonce_css_rule,
 };
 pub use provider::{
-    ArsContext, ArsProvider, provide_ars_context, resolve_locale, t, use_intl_backend, use_locale,
-    use_messages, use_modality_context, use_number_formatter, warn_missing_provider,
+    ArsContext, ArsProvider, Translatable, provide_ars_context, resolve_locale, t,
+    use_intl_backend, use_locale, use_messages, use_modality_context, use_number_formatter,
+    use_platform_effects, warn_missing_provider,
 };
+pub use reactive_stores;
 pub use safe_listener::{
     SafeEventListener, SafeEventListenerOptions, use_safe_event_listener, use_safe_event_listeners,
 };
@@ -75,4 +92,14 @@ pub struct AdapterCapabilities {
 
     /// `true` if client-side hydration of server-rendered markup is enabled.
     pub hydrate: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn reactive_stores_is_reexported_for_tabs_consumers() {
+        use crate::reactive_stores as adapter_reactive_stores;
+
+        let _ = core::any::type_name::<adapter_reactive_stores::Store<()>>();
+    }
 }

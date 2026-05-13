@@ -1,0 +1,5 @@
+error: unknown Translate enum option; use fallback = "en" or crate = path
+ --> tests/ui/translate_unknown_enum_option.rs:4:30
+  |
+4 | #[translate(fallback = "en", domain = "widgets")]
+  |                              ^^^^^^

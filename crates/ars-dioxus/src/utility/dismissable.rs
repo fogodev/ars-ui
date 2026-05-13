@@ -803,6 +803,61 @@ mod wasm_tests {
         container.remove();
     }
 
+    fn visible_status_fixture() -> Element {
+        let status = use_signal_sync(|| String::from("initial"));
+        let props = Props::new().on_dismiss(move |reason| {
+            *status
+                .try_write_unchecked()
+                .expect("status signal should be writable") = format!("{reason:?}");
+        });
+
+        rsx! {
+            Region { props,
+                span { "content" }
+            }
+            p { id: "dismiss-status", "{status}" }
+        }
+    }
+
+    #[wasm_bindgen_test]
+    async fn dismiss_button_click_updates_visible_dioxus_state_on_wasm() {
+        let container = with_container();
+
+        let dom = VirtualDom::new(visible_status_fixture);
+
+        dioxus_web::launch::launch_virtual_dom(
+            dom,
+            dioxus_web::Config::new().rootelement(container.clone()),
+        );
+
+        flush().await;
+
+        let button = container
+            .query_selector("button[data-ars-part='dismiss-button']")
+            .expect("query_selector should succeed")
+            .expect("at least one dismiss button must exist");
+
+        let html_button: web_sys::HtmlElement = button.unchecked_into();
+
+        html_button.click();
+
+        flush().await;
+
+        let status = container
+            .query_selector("#dismiss-status")
+            .expect("query_selector should succeed")
+            .expect("status element must exist")
+            .text_content()
+            .expect("status element must expose text content");
+
+        assert_eq!(
+            status, "DismissButton",
+            "dismiss button activation must update Dioxus-visible state through on_dismiss",
+        );
+
+        container.remove();
+    }
+
     // Escape and outside-pointerdown wasm tests are intentionally
     // omitted from this initial Dioxus wasm test pass — under
     // `dioxus_web::launch_virtual_dom`, the document `pointerdown` /

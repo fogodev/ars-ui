@@ -13,6 +13,7 @@ debug   = ["dep:log", "ars-core/debug", "ars-dom/debug", "ars-interactions/debug
 ssr     = ["leptos/ssr", "ars-dom/ssr", "ars-core/ssr", "ars-core/serde", "dep:serde", "dep:serde_json"]
 hydrate = ["leptos/hydrate", "ars-core/ssr", "ars-core/serde"]
 csr     = ["leptos/csr"]
+uuid    = ["ars-collections/uuid", "ars-components/uuid"]
 # Pre-compiled CLDR data via ICU4X. Default backend on native targets and the
 # server-side rendering path. Use `--no-default-features --features csr,ars-i18n/web-intl`
 # to swap icu4x for the browser-native Intl API on wasm32 builds.
@@ -29,6 +30,7 @@ ars-i18n         = { path = "../ars-i18n", default-features = false }
 ars-interactions = { path = "../ars-interactions" }
 leptos           = { version = "0.8", default-features = false }
 log              = { version = "0.4", default-features = false, optional = true }
+reactive_stores  = { version = "0.4", default-features = false }
 serde            = { version = "1", default-features = false, features = ["alloc", "derive"], optional = true }
 serde_json       = { version = "1", optional = true }
 
@@ -37,7 +39,17 @@ js-sys               = "0.3"
 wasm-bindgen         = "0.2"
 wasm-bindgen-futures = "0.4"
 wasm-bindgen-test    = "0.3"
-web-sys              = { version = "0.3", features = ["EventInit", "KeyboardEventInit", "PointerEventInit"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies.web-sys]
+version = "0.3"
+features = [
+  "DragEvent",
+  "DragEventInit",
+  "EventInit",
+  "KeyboardEventInit",
+  "MouseEventInit",
+  "PointerEventInit"
+]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 insta    = { version = "1", features = ["yaml"] }

@@ -1,0 +1,5 @@
+error: TabKey #[tab_key(discriminant)] requires every variant to have an explicit non-negative integer literal discriminant
+ --> tests/ui/tab_key_discriminant_missing.rs:7:5
+  |
+7 |     Billing,
+  |     ^^^^^^^

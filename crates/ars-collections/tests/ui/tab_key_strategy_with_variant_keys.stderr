@@ -1,0 +1,5 @@
+error: TabKey enum-level strategies cannot be mixed with per-variant #[tab_key(... = ...)] attributes
+ --> tests/ui/tab_key_strategy_with_variant_keys.rs:6:5
+  |
+6 |     #[tab_key(str = "profile")]
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^

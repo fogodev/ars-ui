@@ -4834,13 +4834,15 @@ pub enum Part {
 **Input requirements:**
 
 - The enum must have `#[scope = "kebab-case-name"]` attribute.
-- The first variant MUST be `Root` and MUST be a unit variant.
+- The first variant MUST be a unit variant and is treated as the root part.
+  It does not need to be named `Root`; scoped anatomy enums may use a more
+  semantic root variant such as `Group` for `GroupPart`.
 - Variants may be unit variants or carry data fields.
 - All field types must implement `Default` (used by `all()` to generate representative instances).
 
 **Generated implementation:**
 
-- `const ROOT: Self = Self::Root` — first variant (always a unit variant).
+- `const ROOT: Self = Self::<first_variant>` — first variant (always a unit variant).
 - `fn scope() -> &'static str` — returns the `#[scope]` value.
 - `fn name(&self) -> &'static str` — PascalCase → kebab-case conversion
   (e.g., `ItemGroupLabel` → `"item-group-label"`). For data-carrying variants,

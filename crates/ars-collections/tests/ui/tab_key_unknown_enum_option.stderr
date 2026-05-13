@@ -1,0 +1,5 @@
+error: unknown TabKey option; use ordinal, discriminant, or crate = path
+ --> tests/ui/tab_key_unknown_enum_option.rs:4:11
+  |
+4 | #[tab_key(stable)]
+  |           ^^^^^^

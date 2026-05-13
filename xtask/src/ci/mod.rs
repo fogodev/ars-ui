@@ -19,7 +19,7 @@ use crate::{coverage, i18n, lint, manifest, spec, test};
 const MUTUAL_EXCLUSION_GUARD: &str = "features `icu4x` and `web-intl` are mutually exclusive";
 const LEPTOSFMT_VERSION: &str = "0.1.33";
 const LEPTOSFMT_BASE_INPUTS: &[&str] = &["crates/ars-leptos"];
-const DIOXUS_CLI_VERSION: &str = "0.7.7";
+const DIOXUS_CLI_VERSION: &str = "0.7.9";
 const DIOXUSFMT_BASE_INPUTS: &[&str] = &["crates/ars-dioxus"];
 
 /// CI pipeline steps, matching the GitHub Actions job names.

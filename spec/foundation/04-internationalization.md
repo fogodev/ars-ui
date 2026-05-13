@@ -2624,8 +2624,11 @@ registries.register(MessagesRegistry::new(select::Messages::default())
 
 The `ComponentMessages` system (§7.1–7.3) handles translations for **library component** text.
 For **application-level** text — page titles, custom labels, descriptions, user-facing copy — users
-implement the `Translate` trait on their own enums and use the `t()` function from the adapter
-prelude to render them reactively in views.
+define one enum per translation domain, derive `Translate` for static labels and simple
+interpolation, and use the `t()` function from the adapter prelude to resolve those messages
+reactively in views or other string-typed APIs. Manual `Translate` implementations remain the
+advanced path for plural selection, locale-aware number/date/currency formatting, gender/select
+rules, and any other message that needs CLDR data or custom formatting logic.
 
 #### 7.4.1 The `Translate` Trait
 
@@ -2647,34 +2650,158 @@ pub trait Translate {
 }
 ```
 
-#### 7.4.2 Conventions
+`Translate` and its derive macro are re-exported by `ars-i18n`, `ars-leptos`, and `ars-dioxus`.
+Application code that depends on a single adapter crate can therefore use
+`ars_leptos::prelude::*` or `ars_dioxus::prelude::*` without adding a direct `ars-i18n`
+dependency. The derive resolves generated paths through the available public facade crate:
+`ars-i18n`, `ars-leptos`, or `ars-dioxus`.
 
-- **One enum per page/domain/feature** (e.g., `Inventory`, `Checkout`, `AdminDashboard`) — not one giant enum for the whole app.
-- **Unit variants** for static text, **data-carrying variants** for parameterized text (plurals, interpolation, formatted values).
-- **Match on locale first, then on `self`** — this groups all strings for the same language together, making it easy to review and maintain a single language at a time.
-- **Always include a fallback arm** (`_` → English) as the last locale match arm.
-- Use `ars_i18n::select_plural()` for plural-aware variants.
-- Use `ars_i18n::number::Formatter` / `DateFormatter` within `translate()` for locale-aware number and date formatting.
-- The `intl` parameter provides access to calendar data, plural rules, and other CLDR data needed inside `translate()`.
+#### 7.4.2 Derive Macro
 
-#### 7.4.3 Worked Example
+`#[derive(Translate)]` is the default path for application text. It supports enums with unit
+variants and named-field variants. Every enum MUST declare a fallback locale:
 
 ```rust
-use ars_i18n::{Translate, Locale, IntlBackend, PluralCategory, PluralRuleType};
+use ars_i18n::Translate;
+
+#[derive(Clone, Debug, Translate)]
+#[translate(fallback = "en")]
+enum SettingsText {
+    #[translate(en = "Profile", pt_BR = "Perfil")]
+    Profile,
+
+    #[translate(en = "{count} items", pt_BR = "{count} itens")]
+    ItemCount { count: usize },
+}
+```
+
+The fallback locale is also a validation contract: every variant MUST provide a translation for
+that locale. At runtime the generated implementation resolves text in this order:
+
+1. exact locale match using the active locale's BCP 47 language identifier with Unicode/runtime
+   extensions stripped, e.g. `pt-BR-u-ca-gregory` first checks `pt-BR`;
+2. language fallback using the active locale's language subtag, e.g. `pt`, but only when the
+   variant explicitly declares a base-language message for that subtag;
+3. the enum-level fallback locale.
+
+Regional or script-specific messages do not synthesize a base-language fallback. For example,
+`#[translate(pt_BR = "Perfil")]` matches `pt-BR`, but a request for `pt-PT` falls through to the
+enum fallback unless the same variant also declares `pt = "Perfil"`. This avoids silently serving
+country-specific copy to another locale that shares only the language subtag.
+
+Locale helper keys in compact attributes use Rust identifiers. Because Rust identifiers cannot
+contain `-`, `_` is normalized to BCP 47 separators: `pt_BR` becomes `pt-BR`, `en_US` becomes
+`en-US`, scripts are title-cased, and regions are upper-cased. Locale tags that are awkward or
+impossible as Rust identifiers use the explicit form:
+
+```rust
+use ars_i18n::Translate;
+
+#[derive(Clone, Debug, Translate)]
+#[translate(fallback = "en")]
+enum SettingsText {
+    #[translate(locale = "sr-Latn-RS", text = "Profil")]
+    #[translate(en = "Profile")]
+    Profile,
+}
+```
+
+Named-field variants may use `{field}` placeholders. Placeholder values are formatted with
+`Display` through Rust's `format!` machinery. Escaped Rust format braces (`{{` and `}}`) are
+accepted as literal braces and are not treated as placeholders:
+
+```rust
+use ars_i18n::Translate;
+
+#[derive(Clone, Debug, Translate)]
+#[translate(fallback = "en")]
+enum InventoryText {
+    #[translate(en = "{count} items {{estimated}}", pt_BR = "{count} itens {{estimado}}")]
+    ItemCount { count: usize },
+}
+```
+
+This interpolation is intentionally simple. It does not choose plural categories, format numbers
+with locale rules, or evaluate ICU MessageFormat syntax. Use a manual `Translate` implementation
+for those cases.
+
+The derive rejects these cases with targeted compile errors:
+
+- deriving on a struct or union;
+- missing enum-level `#[translate(fallback = "...")]`;
+- variants without any `#[translate(...)]` message;
+- variants missing the configured fallback locale;
+- duplicate normalized locale keys on one variant;
+- tuple variants;
+- placeholders that do not match named fields;
+- malformed or unmatched placeholders;
+- ambiguous facade resolution when both adapters are direct dependencies.
+
+When a consuming crate depends on both adapters or uses renamed dependencies, add an explicit
+facade path:
+
+```rust
+#[derive(Clone, Debug, Translate)]
+#[translate(fallback = "en", crate = ars_leptos)]
+enum SettingsText {
+    #[translate(en = "Profile")]
+    Profile,
+}
+```
+
+#### 7.4.3 Conventions
+
+- **One enum per page/domain/feature** (e.g., `Inventory`, `Checkout`, `AdminDashboard`) — not one giant enum for the whole app.
+- **Derive first** for static text and simple interpolation. This keeps labels type-safe,
+  localizable, and close to the enum that names the UI state.
+- **Unit variants** for static text, **named-field variants** for interpolated values, and
+  manual `Translate` implementations for plural, select, or formatted values.
+- **Always include a fallback locale** on derived enums and a fallback arm on manual
+  implementations.
+- In manual implementations, **match on locale first, then on `self`** — this groups all strings
+  for the same language together, making it easy to review and maintain a single language at a
+  time.
+- In manual implementations, use `ars_i18n::select_plural()` for plural-aware variants.
+- In manual implementations, use `ars_i18n::number::Formatter` / `DateFormatter` within
+  `translate()` for locale-aware number and date formatting.
+- The `intl` parameter provides access to calendar data, plural rules, and other CLDR data needed
+  inside manual `translate()` implementations.
+
+#### 7.4.4 Worked Example
+
+```rust
+use ars_i18n::Translate;
 
 /// All translatable text for the inventory page.
+#[derive(Clone, Debug, Translate)]
+#[translate(fallback = "en")]
 enum Inventory {
+    #[translate(en = "Inventory", es = "Inventario", fr = "Inventaire")]
     Title,
+
+    #[translate(en = "Welcome!", es = "¡Bienvenido!", fr = "Bienvenue !")]
     Welcome,
+
+    #[translate(en = "{count} items", es = "{count} elementos", fr = "{count} éléments")]
+    ItemCount { count: usize },
+}
+```
+
+Manual implementation is required when the message needs plural selection or locale-aware
+formatting:
+
+```rust
+use ars_i18n::{IntlBackend, Locale, PluralCategory, PluralRuleType, Translate};
+
+/// Plural-aware inventory text.
+enum InventoryPlural {
     ItemCount { count: usize },
 }
 
-impl Translate for Inventory {
+impl Translate for InventoryPlural {
     fn translate(&self, locale: &Locale, intl: &dyn IntlBackend) -> String {
         match locale.language().as_str() {
             "es" => match self {
-                Self::Title => "Inventario".into(),
-                Self::Welcome => "¡Bienvenido!".into(),
                 Self::ItemCount { count } => {
                     let cat = ars_i18n::select_plural(
                         locale, *count as f64, PluralRuleType::Cardinal,
@@ -2686,8 +2813,6 @@ impl Translate for Inventory {
                 }
             },
             "fr" => match self {
-                Self::Title => "Inventaire".into(),
-                Self::Welcome => "Bienvenue !".into(),
                 Self::ItemCount { count } => {
                     let cat = ars_i18n::select_plural(
                         locale, *count as f64, PluralRuleType::Cardinal,
@@ -2699,8 +2824,6 @@ impl Translate for Inventory {
                 }
             },
             _ => match self { // English fallback
-                Self::Title => "Inventory".into(),
-                Self::Welcome => "Welcome!".into(),
                 Self::ItemCount { count } => {
                     let cat = ars_i18n::select_plural(
                         locale, *count as f64, PluralRuleType::Cardinal,
@@ -2720,12 +2843,17 @@ impl Translate for Inventory {
 
 ```rust
 use ars_leptos::prelude::*; // t() is in the prelude
+use leptos::prelude::*;
 
-fn InventoryPage(item_count: usize) -> impl IntoView {
+fn InventoryPage(item_count: RwSignal<usize>) -> impl IntoView {
+    let item_count_text = Signal::derive(move || Inventory::ItemCount {
+        count: item_count.get(),
+    });
+
     view! {
         <h1>{t(Inventory::Title)}</h1>
         <p>{t(Inventory::Welcome)}</p>
-        <span>{t(Inventory::ItemCount { count: item_count })}</span>
+        <span>{t(item_count_text)}</span>
     }
 }
 ```
@@ -2744,7 +2872,7 @@ fn InventoryPage(item_count: usize) -> Element {
 }
 ```
 
-#### 7.4.4 Multiple Domains
+#### 7.4.5 Multiple Domains
 
 Users can define multiple enums for different parts of their application. Each enum is a
 self-contained translation domain:
@@ -2758,7 +2886,7 @@ There is no registration step — unlike `ComponentMessages` which uses `I18nReg
 `Translate` enums are resolved directly via `t()` at render time. The `t()` function
 reads locale and intl backend from `ArsProvider` context and calls `translate()` immediately.
 
-#### 7.4.5 Relationship to ComponentMessages
+#### 7.4.6 Relationship to ComponentMessages
 
 | System                                 | Purpose                                                          | Resolution                                                     |
 | -------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------- |
@@ -2772,13 +2900,15 @@ and do not interact — users never register `Translate` enums in `I18nRegistrie
 
 The `t()` function is the adapter-specific bridge between `Translate` enums and the
 framework's reactive rendering system. It reads locale and intl backend from `ArsProvider`
-context and produces a reactive text node.
+context and produces translated text. Adapters MUST support static message values. Adapters
+with first-class reactive values SHOULD also accept reactive message values so parameterized
+messages can update without hand-written locale plumbing.
 
 ```rust,no_check
-/// Resolve a `Translate` value into a reactive text node for rendering.
+/// Resolve a `Translate` value into translated text for rendering or string props.
 ///
 /// Reads the current locale and intl backend from `ArsProvider` context,
-/// calls `msg.translate()`, and returns a framework-specific reactive view
+/// calls `msg.translate()`, and returns framework-specific translated text
 /// that updates when the locale changes.
 ///
 /// Included in `ars_leptos::prelude` and `ars_dioxus::prelude`.
@@ -2791,16 +2921,19 @@ context and produces a reactive text node.
 ///
 /// # Reactivity
 ///
-/// - **Leptos:** Returns a reactive closure. The closure subscribes to the
-///   locale signal; when locale changes, only the text node re-evaluates
-///   (fine-grained reactivity).
+/// - **Leptos:** Returns `Signal<String>`. The signal subscribes to locale
+///   and to the message signal when a reactive message is passed; when either
+///   changes, only consumers of the translated string re-evaluate
+///   (fine-grained reactivity). Static messages and `Signal<T>` /
+///   `ReadSignal<T>` / `RwSignal<T>` / `Memo<T>` message sources are accepted.
 /// - **Dioxus:** Returns a `String` evaluated during render. The `Signal::read()`
 ///   call inside `t()` subscribes the calling component to locale changes;
 ///   when locale changes, the component re-renders and `t()` produces the
 ///   new string (component-level reactivity).
 #[inline]
 #[must_use]
-pub fn t<T: Translate>(msg: T) -> /* adapter-specific return type */;
+pub fn t<T: Translate>(msg: /* adapter-specific static or reactive message input */)
+    -> /* adapter-specific translated text output */;
 ```
 
 Each adapter provides its own `t()` implementation — see §10.1 (Leptos) and §10.2 (Dioxus)
@@ -3054,6 +3187,7 @@ impl StringCollator {
 ```toml
 # ars-i18n/Cargo.toml
 [dependencies]
+ars-derive = { path = "../ars-derive" }
 icu = { version = "2.1", default-features = false }
 icu_experimental = { version = "0.4", default-features = false }
 fixed_decimal = { version = "0.7", default-features = false, features = ["ryu"] }
@@ -3068,10 +3202,14 @@ default = ["std", "icu4x"]
 std = ["temporal_rs/sys-local"]
 icu4x = ["icu/compiled_data", "icu_experimental/compiled_data", "temporal_rs/compiled_data"]
 web-intl = ["dep:wasm-bindgen", "dep:js-sys", "temporal_rs/sys"]
+
+[dev-dependencies]
+trybuild = "1"
 ```
 
 The dependency split is now deliberate:
 
+- `ars-derive` owns the `Translate` derive macro and is re-exported by `ars-i18n`.
 - `temporal_rs` owns calendar math, parsing, conversion, and zoned date-time behavior
 - ICU4X owns locale data, formatting, week metadata, collation, segmentation, and related i18n services
 - `web-intl` remains the browser formatting backend, but public calendar arithmetic is no longer implemented by browser `Intl`
@@ -3329,3 +3467,6 @@ It may use ICU4X data for formatting, week info, and locale preferences, but cal
 #### 9.5.3 Web Intl provider
 
 `WebIntlBackend` is the browser-facing formatting backend for `wasm32` builds. It may normalize browser `Intl` output back into ars-i18n's public era and month-code model, but it does not redefine the public calendar contract.
+Because browser `Intl.DateTimeFormat` formats JavaScript `Date` instants through a Gregorian source instant, `WebIntlBackend` must not reinterpret non-Gregorian `CalendarDate` fields as Gregorian date parts before conversion.
+When the source calendar is non-Gregorian, or when browser date parts are missing, renamed, ambiguous, or cannot rebuild a valid target-calendar `CalendarDate`, the provider must fall back to the shared Rust calendar conversion bridge.
+Only after both browser normalization and the shared bridge fail may the provider return the original source date unchanged.

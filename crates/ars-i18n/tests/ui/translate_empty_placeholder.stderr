@@ -1,0 +1,5 @@
+error: Translate message has malformed placeholder starting at byte 0
+ --> tests/ui/translate_empty_placeholder.rs:6:22
+  |
+6 |     #[translate(en = "{} items")]
+  |                      ^^^^^^^^^^
