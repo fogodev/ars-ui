@@ -721,8 +721,16 @@ async fn linked_close_trigger_click_prevents_default_navigation() {
 
     leptos::task::tick().await;
 
+    assert!(
+        parent
+            .query_selector(r#"a[role="tab"][href="/home"] [data-ars-part="tab-close-trigger"]"#)
+            .expect("nested close query should succeed")
+            .is_none(),
+        "linked close trigger must not be nested inside the anchor tab"
+    );
+
     let close = parent
-        .query_selector(r#"a[role="tab"][href="/home"] [data-ars-part="tab-close-trigger"]"#)
+        .query_selector(r#"a[role="tab"][href="/home"] + [data-ars-part="tab-close-trigger"]"#)
         .expect("query should succeed")
         .expect("linked close trigger should render")
         .dyn_into::<web_sys::HtmlElement>()

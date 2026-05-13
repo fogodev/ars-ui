@@ -141,6 +141,48 @@ impl DioxusPlatform for MountedFocusProbePlatform {
     }
 }
 
+struct FailingMountedFocusProbePlatform {
+    focused: Arc<Mutex<usize>>,
+    inner: Arc<dyn DioxusPlatform>,
+}
+
+impl DioxusPlatform for FailingMountedFocusProbePlatform {
+    fn focus_mounted_element(
+        &self,
+        _element: Rc<MountedData>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
+        *self
+            .focused
+            .lock()
+            .expect("focus counter lock should succeed") += 1;
+
+        Box::pin(async { Err(String::from("stale mounted data")) })
+    }
+
+    fn set_clipboard(&self, text: &str) -> Pin<Box<dyn Future<Output = Result<(), String>>>> {
+        self.inner.set_clipboard(text)
+    }
+
+    fn open_file_picker(
+        &self,
+        options: FilePickerOptions,
+    ) -> Pin<Box<dyn Future<Output = Vec<FileRef>>>> {
+        self.inner.open_file_picker(options)
+    }
+
+    fn monotonic_now(&self) -> Duration {
+        self.inner.monotonic_now()
+    }
+
+    fn new_id(&self) -> String {
+        self.inner.new_id()
+    }
+
+    fn create_drag_data(&self, event: PlatformDragEvent<'_>) -> Option<DragData> {
+        self.inner.create_drag_data(event)
+    }
+}
+
 #[derive(Clone)]
 struct MountedFocusProbeProps {
     dioxus_platform: Arc<dyn DioxusPlatform>,
@@ -1672,7 +1714,7 @@ async fn web_linked_close_trigger_click_prevents_default_navigation() {
     animation_frame_turn().await;
 
     let close = parent
-        .query_selector(r#"a[role="tab"][href="/home"] [data-ars-part="tab-close-trigger"]"#)
+        .query_selector(r#"a[role="tab"][href="/home"] + [data-ars-part="tab-close-trigger"]"#)
         .expect("query should succeed")
         .expect("linked close trigger should render")
         .dyn_into::<web_sys::HtmlElement>()
@@ -1687,6 +1729,41 @@ async fn web_linked_close_trigger_click_prevents_default_navigation() {
         "linked close trigger click should cancel browser navigation"
     );
     assert_eq!(closed.borrow().as_slice(), &["home"]);
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_linked_close_trigger_renders_outside_anchor() {
+    let parent = container();
+    let closed = Rc::new(RefCell::new(Vec::<&'static str>::new()));
+    let dom = VirtualDom::new_with_props(
+        link_close_probe,
+        LinkCloseProbeProps {
+            closed: Rc::clone(&closed),
+        },
+    );
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert!(
+        parent
+            .query_selector(r#"a[role="tab"][href="/home"] [data-ars-part="tab-close-trigger"]"#)
+            .expect("nested close query should succeed")
+            .is_none(),
+        "linked close trigger must not be nested inside the anchor tab"
+    );
+    assert!(
+        parent
+            .query_selector(r#"a[role="tab"][href="/home"] + [data-ars-part="tab-close-trigger"]"#)
+            .expect("sibling close query should succeed")
+            .is_some(),
+        "linked close trigger should render as a sibling after the anchor tab"
+    );
 }
 
 #[wasm_bindgen_test(async)]
@@ -3641,6 +3718,48 @@ async fn web_keyboard_focus_dispatch_uses_mounted_data_platform() {
         "keyboard roving focus should route through Dioxus MountedData focus"
     );
     assert_eq!(active_element_text(), "Second");
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_keyboard_focus_dispatch_falls_back_when_mounted_data_focus_fails() {
+    let parent = container();
+    let focused = Arc::new(Mutex::new(0_usize));
+    let dioxus_platform: Arc<dyn DioxusPlatform> = Arc::new(FailingMountedFocusProbePlatform {
+        focused: Arc::clone(&focused),
+        inner: default_dioxus_platform(),
+    });
+
+    let dom = VirtualDom::new_with_props(
+        mounted_focus_probe,
+        MountedFocusProbeProps { dioxus_platform },
+    );
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    let first = tab_at(&parent, 0);
+
+    first.focus().expect("focus should succeed");
+
+    dispatch_keydown(&first, "ArrowRight", false);
+
+    deferred_focus_turn().await;
+
+    assert_eq!(
+        *focused.lock().expect("focus counter lock should succeed"),
+        1,
+        "keyboard roving focus should try Dioxus MountedData focus first"
+    );
+    assert_eq!(
+        active_element_text(),
+        "Second",
+        "failed MountedData focus should fall back to DOM id focus"
+    );
 }
 
 #[wasm_bindgen_test(async)]

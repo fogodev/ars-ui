@@ -1283,25 +1283,27 @@ fn render_tab_button<K: TabKey>(
     if let Some(href) = link {
         let fallback_label = tab.clone();
         Either::Left(view! {
-            <a
-                {..tab_attrs}
-                node_ref=tab_anchor_node_ref(tab_nodes, key.clone())
-                href=href.as_str().to_string()
-                aria-roledescription=move || reorderable.get().then_some("draggable tab")
-                on:click=on_click
-                on:focus=on_focus
-                on:blur=on_blur
-                on:keydown=on_keydown
-                on:pointerdown=on_pointerdown
-                on:dragstart=on_dragstart
-                on:dragover=on_dragover
-                on:drop=on_drop
-                on:dragend=on_dragend
-                draggable=is_draggable
-            >
-                {move || current_tab_by_key(tabs_field, typed_key, &fallback_label).label.run()}
+            <>
+                <a
+                    {..tab_attrs}
+                    node_ref=tab_anchor_node_ref(tab_nodes, key.clone())
+                    href=href.as_str().to_string()
+                    aria-roledescription=move || reorderable.get().then_some("draggable tab")
+                    on:click=on_click
+                    on:focus=on_focus
+                    on:blur=on_blur
+                    on:keydown=on_keydown
+                    on:pointerdown=on_pointerdown
+                    on:dragstart=on_dragstart
+                    on:dragover=on_dragover
+                    on:drop=on_drop
+                    on:dragend=on_dragend
+                    draggable=is_draggable
+                >
+                    {move || current_tab_by_key(tabs_field, typed_key, &fallback_label).label.run()}
+                </a>
                 {close_button}
-            </a>
+            </>
         })
     } else {
         let fallback_label = tab.clone();

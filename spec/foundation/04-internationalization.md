@@ -2678,7 +2678,8 @@ enum SettingsText {
 The fallback locale is also a validation contract: every variant MUST provide a translation for
 that locale. At runtime the generated implementation resolves text in this order:
 
-1. exact locale match using the active locale's BCP 47 tag, e.g. `pt-BR`;
+1. exact locale match using the active locale's BCP 47 language identifier with Unicode/runtime
+   extensions stripped, e.g. `pt-BR-u-ca-gregory` first checks `pt-BR`;
 2. language fallback using the active locale's language subtag, e.g. `pt`, but only when the
    variant explicitly declares a base-language message for that subtag;
 3. the enum-level fallback locale.

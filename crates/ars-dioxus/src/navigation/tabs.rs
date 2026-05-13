@@ -1331,29 +1331,30 @@ fn render_tab_button<K: TabKey>(
 
     if let Some(href) = link {
         rsx! {
-            a {
-                key: "{vdom_key}",
-                href: "{href}",
-                onclick: on_click,
-                onfocus: on_focus,
-                onblur: on_blur,
-                onkeydown: on_keydown,
-                onpointerdown: on_pointerdown,
-                ondragstart: on_dragstart,
-                ondragover: on_dragover,
-                ondrop: on_drop,
-                ondragend: on_dragend,
-                onmounted: {
-                    let key = key.clone();
-                    move |event: dioxus::prelude::Event<MountedData>| {
-                        tab_nodes
-                            .write()
-                            .insert(key.clone(), event.data());
-                    }
-                },
-                draggable: "{draggable}",
-                ..tab_attrs,
-                {label}
+            Fragment { key: "{vdom_key}",
+                a {
+                    href: "{href}",
+                    onclick: on_click,
+                    onfocus: on_focus,
+                    onblur: on_blur,
+                    onkeydown: on_keydown,
+                    onpointerdown: on_pointerdown,
+                    ondragstart: on_dragstart,
+                    ondragover: on_dragover,
+                    ondrop: on_drop,
+                    ondragend: on_dragend,
+                    onmounted: {
+                        let key = key.clone();
+                        move |event: dioxus::prelude::Event<MountedData>| {
+                            tab_nodes
+                                .write()
+                                .insert(key.clone(), event.data());
+                        }
+                    },
+                    draggable: "{draggable}",
+                    ..tab_attrs,
+                    {label}
+                }
                 {close_button}
             }
         }
@@ -1854,8 +1855,15 @@ fn focus_tab_element(
     let element = tab_nodes.peek().get(key).cloned();
 
     if let Some(element) = element {
+        let fallback_id = fallback_id.to_owned();
         spawn(async move {
-            drop(dioxus_platform.focus_mounted_element(element).await);
+            if dioxus_platform
+                .focus_mounted_element(element)
+                .await
+                .is_err()
+            {
+                focus_tab_element_by_id(&fallback_id);
+            }
         });
     } else {
         focus_tab_element_by_id(fallback_id);

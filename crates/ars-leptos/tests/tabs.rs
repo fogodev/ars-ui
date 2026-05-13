@@ -537,6 +537,37 @@ fn closable_tab_renders_close_trigger_with_label() {
 }
 
 #[test]
+fn closable_link_tab_renders_close_trigger_outside_anchor() {
+    use ars_core::SafeUrl;
+
+    let link_tabs = vec![
+        Tab::new_with_label(
+            "home",
+            "Home",
+            ViewFn::from(|| view! { "Home" }),
+            ViewFn::from(|| view! { <p>"Home content"</p> }),
+        )
+        .link(SafeUrl::from_static("/home"))
+        .closable(true),
+    ];
+
+    let html = render(|| view! { <Tabs default_value="home" tabs=store_tabs(link_tabs) /> });
+
+    assert!(
+        html.contains(r#"<a"#) && html.contains(r#"href="/home""#),
+        "missing linked tab anchor: {html}"
+    );
+    assert!(
+        html.contains(r#"</a><button"#),
+        "close trigger should be a sibling after the linked tab anchor: {html}"
+    );
+    assert!(
+        !html.contains(r#"data-ars-part="tab-close-trigger"></button></a>"#),
+        "close trigger must not be nested inside the linked tab anchor: {html}"
+    );
+}
+
+#[test]
 fn reorderable_tabs_get_role_description_and_live_region() {
     let html = render(|| {
         view! { <Tabs default_value="first" tabs=store_tabs(three_tabs()) reorderable=true /> }

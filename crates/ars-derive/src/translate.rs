@@ -41,7 +41,8 @@ pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                 locale: &#i18n_path::Locale,
                 _intl: &dyn #i18n_path::IntlBackend,
             ) -> #i18n_path::__private::String {
-                let __ars_translate_exact = locale.to_bcp47();
+                let __ars_translate_exact = locale.language_identifier().to_string();
+
                 let __ars_translate_language = locale.language();
 
                 match self {

@@ -46,6 +46,16 @@ fn translate_derive_uses_exact_locale_when_available() {
 }
 
 #[test]
+fn translate_derive_uses_exact_locale_without_unicode_extensions() {
+    let locale = Locale::parse("pt-BR-u-ca-gregory").expect("locale should parse");
+
+    assert_eq!(
+        InventoryText::Title.translate(&locale, &StubIntlBackend),
+        "Inventario"
+    );
+}
+
+#[test]
 fn translate_derive_falls_back_to_language_before_fallback_locale() {
     let locale = Locale::parse("pt-PT").expect("locale should parse");
 
