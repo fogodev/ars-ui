@@ -13,8 +13,10 @@ use std::sync::{
 
 use ars_collections::Key;
 use ars_core::{
-    Direction, Orientation, PlatformEffects, Rect, ResolvedDirection, SafeUrl, TimerHandle,
+    Direction, I18nRegistries, MessageFn, MessagesRegistry, Orientation, PlatformEffects, Rect,
+    ResolvedDirection, SafeUrl, TimerHandle,
 };
+use ars_i18n::locales;
 use ars_leptos::{
     ArsProvider,
     navigation::tabs::{ActivationMode, Field, ReorderEvent, Tab, TabLabel, Tabs, TabsSource},
@@ -3408,6 +3410,7 @@ async fn closable_tab_dispatches_close_on_delete_key() {
         .dyn_into::<web_sys::HtmlElement>()
         .expect("close trigger is HtmlElement");
 
+    assert_eq!(close_trigger.tag_name(), "BUTTON");
     assert_eq!(
         close_trigger.get_attribute("tabindex").as_deref(),
         Some("-1"),
@@ -4027,6 +4030,72 @@ fn reorder_announcement_uses_messages_template() {
         announcement, "CUSTOM Inbox @ 2/3",
         "Api::reorder_announcement must route through Messages template"
     );
+}
+
+#[wasm_bindgen_test(async)]
+async fn close_label_uses_live_provider_messages_after_locale_changes() {
+    let parent = container();
+
+    let locale = RwSignal::new(locales::en_us());
+
+    let mut registries = I18nRegistries::new();
+
+    registries.register(
+        MessagesRegistry::new(ars_components::navigation::tabs::Messages::default()).register(
+            "pt-BR",
+            ars_components::navigation::tabs::Messages {
+                close_tab_label: MessageFn::new(|label: &str, _locale: &ars_core::Locale| {
+                    format!("Fechar {label}")
+                }),
+                ..ars_components::navigation::tabs::Messages::default()
+            },
+        ),
+    );
+
+    let mount_handle = mount_to(parent.clone(), move || {
+        view! {
+            <ArsProvider
+                locale=locale
+                direction=Direction::Ltr
+                i18n_registries=Arc::new(registries)
+            >
+                <Tabs
+                    default_value="overview"
+                    tabs=[
+                        Tab::new_static(
+                                "overview",
+                                "Overview",
+                                || view! { <p>"Overview panel"</p> },
+                            )
+                            .closable(true),
+                        Tab::new_static("details", "Details", || view! { <p>"Details panel"</p> }),
+                    ]
+                />
+            </ArsProvider>
+        }
+    });
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        first_with_data_part(&parent, "tab-close-trigger")
+            .get_attribute("aria-label")
+            .as_deref(),
+        Some("Close Overview")
+    );
+
+    locale.set(locales::br());
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        first_with_data_part(&parent, "tab-close-trigger")
+            .get_attribute("aria-label")
+            .as_deref(),
+        Some("Fechar Overview")
+    );
+
+    drop(mount_handle);
 }
 
 #[wasm_bindgen_test(async)]

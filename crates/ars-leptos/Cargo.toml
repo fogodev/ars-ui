@@ -13,7 +13,7 @@ debug   = ["dep:log", "ars-core/debug", "ars-dom/debug", "ars-interactions/debug
 ssr     = ["leptos/ssr", "ars-dom/ssr", "ars-core/ssr", "ars-core/serde", "dep:serde", "dep:serde_json"]
 hydrate = ["leptos/hydrate", "ars-core/ssr", "ars-core/serde"]
 csr     = ["leptos/csr"]
-uuid    = ["ars-collections/uuid"]
+uuid    = ["ars-collections/uuid", "ars-components/uuid"]
 # Pre-compiled CLDR data via ICU4X. Default backend on native targets and the
 # server-side rendering path. Use `--no-default-features --features csr,ars-i18n/web-intl`
 # to swap icu4x for the browser-native Intl API on wasm32 builds.

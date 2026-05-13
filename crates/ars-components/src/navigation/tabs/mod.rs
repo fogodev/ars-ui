@@ -37,7 +37,7 @@ use alloc::{
     string::{String, ToString as _},
     vec::Vec,
 };
-use core::fmt::{self, Debug};
+use core::fmt::{self, Debug, Write as _};
 
 use ars_collections::{Key, TabKey};
 use ars_core::{
@@ -78,7 +78,7 @@ pub enum State {
 /// Includes the base events from spec §1.2, the tab-list registration
 /// events, the `CloseTab` event from the Closable variant (§5.2), and the
 /// `ReorderTab` event from the Reorderable variant (§6.2).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     /// Activate a tab and reveal its associated panel. Disabled tabs and
     /// re-selecting the already-active tab are guarded out by
@@ -145,6 +145,22 @@ pub enum Event {
     /// that an unrelated prop delta cannot clobber a runtime-resolved
     /// direction installed via [`Event::SetDirection`].
     SyncProps,
+
+    /// Re-resolve provider-backed locale and message bundle data after the
+    /// surrounding adapter provider changes.
+    ///
+    /// The machine is created once, but adapters may render inside an
+    /// `ArsProvider` whose locale signal changes at runtime. Close-button
+    /// labels and reorder announcements read from [`Context::messages`] /
+    /// [`Context::locale`], so adapters dispatch this event whenever the live
+    /// provider messages differ from the machine's current snapshot.
+    SyncMessages {
+        /// Active provider locale.
+        locale: Locale,
+
+        /// Localized tab messages for `locale`.
+        messages: Messages,
+    },
 
     /// User asked to close the given tab. Closable variant (spec §5).
     ///
@@ -683,10 +699,9 @@ pub struct Context {
     pub closable_tabs: BTreeSet<Key>,
 
     /// Hydration-stable IDs derived from [`Props::id`]. The tab list's
-    /// DOM id is `ids.part("tablist")`; the per-tab DOM id is
-    /// `ids.item("tab", &tab_key)`; the per-panel DOM id is
-    /// `ids.item("panel", &tab_key)`. ARIA wiring (`aria-controls`,
-    /// `aria-labelledby`) reads from the same `item(...)` lookup so
+    /// DOM id is `ids.part("tablist")`; per-tab and per-panel IDs are
+    /// derived from DOM-safe key tokens via the connect API. ARIA wiring
+    /// (`aria-controls`, `aria-labelledby`) reads from the same helpers so
     /// adapters never duplicate ID derivation logic.
     pub ids: ComponentIds,
 
@@ -725,8 +740,7 @@ pub enum Part {
     Tab {
         /// The key identifying this tab. The DOM `id` of the trigger
         /// and the matching `aria-controls` panel target are derived
-        /// from [`Context::ids`] via `ids.item("tab", &tab_key)` and
-        /// `ids.item("panel", &tab_key)` respectively.
+        /// from [`Context::ids`] via a DOM-safe token for this key.
         tab_key: Key,
     },
 
@@ -736,8 +750,7 @@ pub enum Part {
     /// A tab panel (`role="tabpanel"`) associated with a tab trigger.
     Panel {
         /// The key of the tab that controls this panel. The DOM `id`
-        /// is derived from [`Context::ids`] via
-        /// `ids.item("panel", &tab_key)`.
+        /// is derived from [`Context::ids`] via a DOM-safe token for this key.
         tab_key: Key,
 
         /// Optional fallback `aria-label` used when the corresponding tab
@@ -980,6 +993,23 @@ impl ars_core::Machine for Machine {
             // SetTabs when the rebuild renders the focused tab
             // disabled.
             (_, Event::SyncProps) => Some(sync_props_plan(state, ctx, props)),
+
+            // ── SyncMessages ────────────────────────────────────────
+            (_, Event::SyncMessages { locale, messages }) => {
+                if ctx.locale == *locale && ctx.messages == *messages {
+                    return None;
+                }
+
+                Some(TransitionPlan::context_only({
+                    let locale = locale.clone();
+                    let messages = messages.clone();
+
+                    move |ctx: &mut Context| {
+                        ctx.locale = locale;
+                        ctx.messages = messages;
+                    }
+                }))
+            }
 
             // ── CloseTab — pure notification (§5.3) ──────────────────
             (_, Event::CloseTab(_)) => Some(TransitionPlan::context_only(|_| {})),
@@ -1239,7 +1269,7 @@ fn sync_props_plan(state: &State, ctx: &Context, props: &Props) -> TransitionPla
         ctx.loop_focus = loop_focus;
         ctx.disabled_tabs = disabled_keys;
 
-        snap_value_to_valid_key(ctx);
+        normalize_selection_after_context_change(ctx);
         snap_focused_tab_to_valid_key(ctx);
     };
 
@@ -1309,6 +1339,23 @@ fn snap_value_to_valid_key(ctx: &mut Context) {
     }
 
     ctx.value.set(first_enabled_tab(ctx));
+}
+
+/// Normalizes selection after context-owned validity inputs change.
+///
+/// For uncontrolled tabs this mutates the internal value. For controlled tabs
+/// it also normalizes the controlled slot because [`Bindable::set`] alone
+/// cannot change what [`Bindable::get`] returns while the parent-controlled
+/// value is still present.
+fn normalize_selection_after_context_change(ctx: &mut Context) {
+    if ctx.value.is_controlled() {
+        let current = ctx.value.get().clone();
+
+        ctx.value
+            .sync_controlled(Some(valid_controlled_value(ctx, current)));
+    } else {
+        snap_value_to_valid_key(ctx);
+    }
 }
 
 /// Normalizes a controlled value update against the current registration and
@@ -1390,13 +1437,17 @@ impl Api<'_> {
     /// active (empty list).
     #[must_use]
     pub fn selected_tab(&self) -> Option<&Key> {
-        self.ctx.value.get().as_ref()
+        self.ctx
+            .value
+            .get()
+            .as_ref()
+            .filter(|key| !is_disabled(self.ctx, key))
     }
 
     /// Returns `true` when `tab_key` is the selected tab.
     #[must_use]
     pub fn is_tab_selected(&self, tab_key: &Key) -> bool {
-        self.ctx.value.get().as_ref() == Some(tab_key)
+        self.ctx.value.get().as_ref() == Some(tab_key) && !is_disabled(self.ctx, tab_key)
     }
 
     /// Returns the tab key that currently has keyboard focus, if any.
@@ -1495,11 +1546,10 @@ impl Api<'_> {
 
     /// Attributes for an individual tab trigger.
     ///
-    /// `tab_key` is the unique key for this tab. The DOM `id` is
-    /// derived as `Context::ids.item("tab", &tab_key)` and the
-    /// `aria-controls` target as `Context::ids.item("panel", &tab_key)`
-    /// — both come from the single [`ComponentIds`] base so consumers
-    /// never thread an extra `panel_id` argument through.
+    /// `tab_key` is the unique key for this tab. The DOM `id` and
+    /// `aria-controls` target are derived from a DOM-safe token for this key;
+    /// both come from the single [`ComponentIds`] base so consumers never
+    /// thread an extra `panel_id` argument through.
     ///
     /// `focus_visible` is the keyboard-modality bit. Adapters can pass
     /// `modality.is_keyboard()` for **every** tab — the method
@@ -1527,14 +1577,14 @@ impl Api<'_> {
         let is_roving_anchor = is_selected || self.is_tablist_focus_fallback(tab_key);
 
         attrs
-            .set(HtmlAttr::Id, self.ctx.ids.item("tab", tab_key))
+            .set(HtmlAttr::Id, tab_dom_id(&self.ctx.ids, tab_key))
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Role, "tab")
             .set(HtmlAttr::Aria(AriaAttr::Selected), bool_token(is_selected))
             .set(
                 HtmlAttr::Aria(AriaAttr::Controls),
-                self.ctx.ids.item("panel", tab_key),
+                panel_dom_id(&self.ctx.ids, tab_key),
             )
             // Roving tabindex: the selected tab (or, when nothing is
             // selected, the first non-disabled tab) participates in the
@@ -1583,11 +1633,8 @@ impl Api<'_> {
     ///    no `tabindex="0"` anchor at all and be skipped by natural
     ///    `Tab` navigation.
     fn is_tablist_focus_fallback(&self, tab_key: &Key) -> bool {
-        let any_registered_tab_is_selected = self
-            .ctx
-            .tabs
-            .iter()
-            .any(|key| self.ctx.value.get().as_ref() == Some(key));
+        let any_registered_tab_is_selected =
+            self.ctx.tabs.iter().any(|key| self.is_tab_selected(key));
 
         if any_registered_tab_is_selected {
             return false;
@@ -1772,11 +1819,10 @@ impl Api<'_> {
 
     /// Attributes for a tab panel.
     ///
-    /// `tab_key` identifies the associated tab. The DOM `id` is
-    /// derived as `Context::ids.item("panel", &tab_key)` and the
-    /// `aria-labelledby` target as `Context::ids.item("tab", &tab_key)`
-    /// — same base IDs that `tab_attrs` uses, so the wiring is
-    /// guaranteed consistent.
+    /// `tab_key` identifies the associated tab. The DOM `id` and
+    /// `aria-labelledby` target are derived from the same DOM-safe key token
+    /// that `tab_attrs` uses, so arbitrary string keys cannot create invalid
+    /// IDREFs and the wiring remains guaranteed consistent.
     ///
     /// `tab_label` is an optional explicit label rendered as
     /// `aria-label` on the panel when the corresponding tab trigger
@@ -1793,13 +1839,13 @@ impl Api<'_> {
         let is_selected = self.is_tab_selected(tab_key);
 
         attrs
-            .set(HtmlAttr::Id, self.ctx.ids.item("panel", tab_key))
+            .set(HtmlAttr::Id, panel_dom_id(&self.ctx.ids, tab_key))
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Role, "tabpanel")
             .set(
                 HtmlAttr::Aria(AriaAttr::LabelledBy),
-                self.ctx.ids.item("tab", tab_key),
+                tab_dom_id(&self.ctx.ids, tab_key),
             )
             // Panels are programmatically focusable when visible so
             // keyboard users can `Tab` from a focused tab into the
@@ -1893,6 +1939,31 @@ const fn orientation_token(orientation: Orientation) -> &'static str {
 /// boolean attribute.
 const fn bool_token(value: bool) -> &'static str {
     if value { "true" } else { "false" }
+}
+
+fn tab_dom_id(ids: &ComponentIds, key: &Key) -> String {
+    ids.item("tab", &dom_safe_key_token(key))
+}
+
+fn panel_dom_id(ids: &ComponentIds, key: &Key) -> String {
+    ids.item("panel", &dom_safe_key_token(key))
+}
+
+fn dom_safe_key_token(key: &Key) -> String {
+    match key {
+        Key::Int(value) => format!("i-{value}"),
+        #[cfg(feature = "uuid")]
+        Key::Uuid(value) => format!("u-{value}"),
+        Key::String(value) => {
+            let mut token = String::from("s-");
+
+            for byte in value.as_bytes() {
+                write!(token, "{byte:02x}").expect("writing to a String cannot fail");
+            }
+
+            token
+        }
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────

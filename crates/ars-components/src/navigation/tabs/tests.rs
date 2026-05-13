@@ -12,6 +12,7 @@ use alloc::{
 use core::cell::RefCell;
 
 use ars_core::{Machine as MachineTrait, MessageFn, SendResult, Service};
+use ars_i18n::locales;
 use insta::assert_snapshot;
 
 use super::*;
@@ -230,6 +231,103 @@ fn panel_attrs_with_label_fallback() {
                 .connect(&|_| {})
                 .panel_attrs(&key("a"), Some("Inbox"))
         )
+    );
+}
+
+#[test]
+fn tab_and_panel_ids_use_dom_safe_tokens_for_string_keys() {
+    let service = service_with_tabs(
+        Props {
+            id: "tabs-root".to_string(),
+            default_value: Some(key("user settings")),
+            ..Props::default()
+        },
+        &[key("user settings")],
+    );
+
+    let api = service.connect(&|_| {});
+
+    let tab_attrs = api.tab_attrs(&key("user settings"), false);
+
+    let panel_attrs = api.panel_attrs(&key("user settings"), None);
+
+    let tab_id = tab_attrs.get(&HtmlAttr::Id).expect("tab id should render");
+
+    let panel_id = panel_attrs
+        .get(&HtmlAttr::Id)
+        .expect("panel id should render");
+
+    assert!(!tab_id.chars().any(char::is_whitespace), "{tab_id}");
+    assert!(!panel_id.chars().any(char::is_whitespace), "{panel_id}");
+    assert_eq!(
+        tab_attrs.get(&HtmlAttr::Aria(AriaAttr::Controls)),
+        Some(panel_id)
+    );
+    assert_eq!(
+        panel_attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
+        Some(tab_id)
+    );
+    assert_eq!(tab_id, "tabs-root-tab-s-757365722073657474696e6773");
+    assert_eq!(panel_id, "tabs-root-panel-s-757365722073657474696e6773");
+}
+
+#[test]
+fn dom_safe_tokens_distinguish_string_and_int_keys() {
+    let service = service_with_tabs(
+        Props {
+            id: "tabs-root".to_string(),
+            default_value: Some(Key::str("42")),
+            ..Props::default()
+        },
+        &[Key::str("42"), Key::int(42)],
+    );
+
+    let api = service.connect(&|_| {});
+
+    let string_id = api
+        .tab_attrs(&Key::str("42"), false)
+        .get(&HtmlAttr::Id)
+        .map(str::to_string);
+
+    let int_id = api
+        .tab_attrs(&Key::int(42), false)
+        .get(&HtmlAttr::Id)
+        .map(str::to_string);
+
+    assert_eq!(string_id.as_deref(), Some("tabs-root-tab-s-3432"));
+    assert_eq!(int_id.as_deref(), Some("tabs-root-tab-i-42"));
+    assert_ne!(string_id, int_id);
+}
+
+#[cfg(feature = "uuid")]
+#[test]
+fn dom_safe_tokens_handle_uuid_keys() {
+    use core::str::FromStr;
+
+    let uuid = ars_collections::uuid::Uuid::from_str("018f9b58-8f3d-7c8b-9d71-000000000001")
+        .expect("test uuid should parse");
+
+    let key = Key::uuid(uuid);
+
+    let service = service_with_tabs(
+        Props {
+            id: "tabs-root".to_string(),
+            default_value: Some(key.clone()),
+            ..Props::default()
+        },
+        core::slice::from_ref(&key),
+    );
+
+    let api = service.connect(&|_| {});
+
+    let tab_id = api
+        .tab_attrs(&key, false)
+        .get(&HtmlAttr::Id)
+        .map(str::to_string);
+
+    assert_eq!(
+        tab_id.as_deref(),
+        Some("tabs-root-tab-u-018f9b58-8f3d-7c8b-9d71-000000000001")
     );
 }
 
@@ -929,6 +1027,70 @@ fn close_trigger_custom_messages_label() {
     assert_snapshot!(
         "tabs_close_trigger_custom_label",
         snapshot_attrs(&service.connect(&|_| {}).close_trigger_attrs("Drafts"))
+    );
+}
+
+#[test]
+fn sync_messages_refreshes_close_label_and_reorder_announcement() {
+    let messages = Messages {
+        close_tab_label: MessageFn::new(|label: &str, locale: &Locale| {
+            format!("Close {label} [{}]", locale.to_bcp47())
+        }),
+        reorder_announce_label: MessageFn::new(
+            |label: &str, position: usize, total: usize, locale: &Locale| {
+                format!("{label} moved {position}/{total} [{}]", locale.to_bcp47())
+            },
+        ),
+    };
+
+    let mut service = Service::<Machine>::new(test_props(), &Env::default(), &messages);
+
+    drop(service.send(Event::SetTabs(vec![
+        TabRegistration::new(key("a")),
+        TabRegistration::new(key("b")),
+    ])));
+
+    let api = service.connect(&|_| {});
+
+    assert_eq!(
+        api.close_trigger_attrs("Inbox")
+            .get(&HtmlAttr::Aria(AriaAttr::Label)),
+        Some("Close Inbox [en-US]")
+    );
+    assert_eq!(
+        api.reorder_announcement("Inbox", 2, 3),
+        "Inbox moved 2/3 [en-US]"
+    );
+
+    let messages = Messages {
+        close_tab_label: MessageFn::new(|label: &str, locale: &Locale| {
+            format!("Fechar {label} [{}]", locale.to_bcp47())
+        }),
+        reorder_announce_label: MessageFn::new(
+            |label: &str, position: usize, total: usize, locale: &Locale| {
+                format!(
+                    "{label} movida para {position} de {total} [{}]",
+                    locale.to_bcp47()
+                )
+            },
+        ),
+    };
+
+    drop(service.send(Event::SyncMessages {
+        locale: locales::br(),
+        messages,
+    }));
+
+    let api = service.connect(&|_| {});
+
+    assert_eq!(
+        api.close_trigger_attrs("Entrada")
+            .get(&HtmlAttr::Aria(AriaAttr::Label)),
+        Some("Fechar Entrada [pt-BR]")
+    );
+    assert_eq!(
+        api.reorder_announcement("Entrada", 1, 3),
+        "Entrada movida para 1 de 3 [pt-BR]"
     );
 }
 
@@ -2331,7 +2493,10 @@ fn init_controlled_value_overrides_default() {
         &[key("a"), key("b")],
     );
 
-    assert_eq!(service.context().value.get().as_ref(), Some(&key("b")));
+    let api = service.connect(&|_| {});
+
+    assert!(!api.is_tab_selected(&key("a")));
+    assert!(api.is_tab_selected(&key("b")));
     assert!(service.context().value.is_controlled());
 }
 
@@ -3172,6 +3337,26 @@ fn sync_controlled_value_snaps_disabled_keys_to_first_enabled_tab() {
     });
 
     assert_eq!(service.context().value.get().as_ref(), Some(&key("a")));
+    assert!(service.context().value.is_controlled());
+}
+
+#[test]
+fn sync_props_normalizes_controlled_value_when_current_tab_becomes_disabled() {
+    let mut service = service_with_tabs(
+        Props {
+            value: Some(Some(key("a"))),
+            ..test_props()
+        },
+        &[key("a"), key("b")],
+    );
+
+    service.set_props(Props {
+        value: Some(Some(key("a"))),
+        disabled_keys: BTreeSet::from([key("a")]),
+        ..test_props()
+    });
+
+    assert_eq!(service.context().value.get().as_ref(), Some(&key("b")));
     assert!(service.context().value.is_controlled());
 }
 

@@ -39,6 +39,7 @@ a tab on focus) and manual activation (selecting only on Enter/Space).
 | `SetDirection(Direction)`          | direction         | Replace `ctx.dir`. Idempotent. Adapter dispatches once after mount when `Props::dir == Auto`; `Machine::on_props_changed` also dispatches it whenever `Props::dir` changes between renders (including `Concrete → Auto`, signalling "please re-resolve").                                                                                                                                                          |
 | `SetTabs(Vec<TabRegistration>)`    | tab registrations | Bulk-replace the registered tab list. Adapter dispatches whenever its rendered tab triggers change. Duplicate keys deduped (first occurrence wins). Re-establishes selection invariant — see §1.5 `snap_value_to_valid_key`.                                                                                                                                                                                       |
 | `SyncProps`                        | —                 | Re-apply context-backed non-`dir` prop fields (`orientation`, `activation_mode`, `loop_focus`, `disabled_keys`) after a runtime prop change. Emitted by `Machine::on_props_changed` when those fields differ. `dir` changes are emitted as a separate `Event::SetDirection` so an unrelated prop delta cannot clobber a runtime-resolved direction. Re-runs the selection invariant.                               |
+| `SyncMessages`                     | locale/messages   | Re-apply provider-backed locale and localized `Messages` after an adapter provider locale or message registry change. Close-button labels and reorder announcements read from this live snapshot.                                                                                                                                                                                                                  |
 | `CloseTab(Key)`                    | tab key           | Pure notification (Closable variant — §5.3). Machine does not mutate `tabs` / `value`. Consumer applies the close via `SetTabs` / `SelectTab` after consulting `Api::can_close_tab` and `Api::successor_for_close`.                                                                                                                                                                                                |
 | `ReorderTab { tab, new_index }`    | `Key`, `usize`    | Pure notification (Reorderable variant — §6.3). Machine does not mutate `tabs`; consumer applies the reorder.                                                                                                                                                                                                                                                                                                      |
 | `SyncControlledValue(Option<Key>)` | controlled key    | Push the parent's controlled inner `Props::value` into `ctx.value` via `Bindable::sync_controlled`. Emitted by `Machine::on_props_changed` only when both old and new props are controlled and the inner value differs. Re-runs the selection invariant; disabled or unregistered keys snap to the first enabled registered tab. The outer `Option` (controlled vs. uncontrolled) is fixed at mount per spec §1.5. |
@@ -85,20 +86,20 @@ pub struct Context {
     /// dispatching `Event::CloseTab`.
     pub closable_tabs: BTreeSet<Key>,
     /// Hydration-stable IDs derived from `Props::id`. The tab list's
-    /// DOM id is `ids.part("tablist")`; per-tab DOM id is
-    /// `ids.item("tab", &tab_key)`; per-panel DOM id is
-    /// `ids.item("panel", &tab_key)`. ARIA wiring (`aria-controls`,
-    /// `aria-labelledby`) reads from the same `item(...)` lookup so
-    /// adapters never duplicate ID derivation logic. Matches the
-    /// workspace `ComponentIds` convention used by Dialog, Field,
-    /// Fieldset, etc.
+    /// DOM id is `ids.part("tablist")`; per-tab and per-panel DOM IDs
+    /// are derived from a DOM-safe token for each `Key` variant
+    /// (`Int`, `String`, and feature-enabled `Uuid`). ARIA wiring
+    /// (`aria-controls`, `aria-labelledby`) reads from the same helpers
+    /// so arbitrary string or UUID keys cannot produce invalid IDREFs.
     pub ids: ComponentIds,
     /// Registered tab keys in DOM order. Adapter-driven via
     /// `Event::SetTabs`; consumers never mutate directly.
     pub tabs: Vec<Key>,
-    /// The resolved locale for this component instance.
+    /// The resolved locale for this component instance. Adapters refresh
+    /// this with `Event::SyncMessages` when provider locale changes.
     pub locale: Locale,
-    /// Resolved messages for accessibility labels.
+    /// Resolved messages for accessibility labels. Adapters refresh this
+    /// with `Event::SyncMessages` when provider messages change.
     pub messages: Messages,
 }
 
@@ -1055,17 +1056,20 @@ Tabs
 └── Panel (×N)             role="tabpanel"
 ```
 
-| Part        | Element                                                                                           | Key Attributes                                                                                                                                                                                                             |
-| ----------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Root`      | `<div>`                                                                                           | `data-ars-scope="tabs"`, `data-ars-part="root"`, `data-ars-orientation`, `dir`                                                                                                                                             |
-| `List`      | `<div>`                                                                                           | `data-ars-scope="tabs"`, `data-ars-part="list"`, `id="{props.id}-tablist"` (= `ids.part("tablist")`), `role="tablist"`, `aria-orientation`                                                                                 |
-| `Tab`       | adapter-owned focus target (`<a>` for link tabs; otherwise a role-backed element such as `<div>`) | `data-ars-scope="tabs"`, `data-ars-part="tab"`, `id="{props.id}-tab-{tab_key}"` (= `ids.item("tab", &tab_key)`), `role="tab"`, `aria-selected`, `aria-controls`, `tabindex`, `data-ars-selected`, `data-ars-focus-visible` |
-| `Indicator` | `<span>`                                                                                          | `data-ars-scope="tabs"`, `data-ars-part="tab-indicator"`, `aria-hidden="true"`                                                                                                                                             |
-| `Panel`     | `<div>`                                                                                           | `data-ars-scope="tabs"`, `data-ars-part="panel"`, `id="{props.id}-panel-{tab_key}"` (= `ids.item("panel", &tab_key)`), `role="tabpanel"`, `aria-labelledby`, `tabindex="0"`                                                |
+| Part        | Element                                                                                           | Key Attributes                                                                                                                                                                       |
+| ----------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Root`      | `<div>`                                                                                           | `data-ars-scope="tabs"`, `data-ars-part="root"`, `data-ars-orientation`, `dir`                                                                                                       |
+| `List`      | `<div>`                                                                                           | `data-ars-scope="tabs"`, `data-ars-part="list"`, `id="{props.id}-tablist"` (= `ids.part("tablist")`), `role="tablist"`, `aria-orientation`                                           |
+| `Tab`       | adapter-owned focus target (`<a>` for link tabs; otherwise a role-backed element such as `<div>`) | `data-ars-scope="tabs"`, `data-ars-part="tab"`, DOM-safe key-derived `id`, `role="tab"`, `aria-selected`, `aria-controls`, `tabindex`, `data-ars-selected`, `data-ars-focus-visible` |
+| `Indicator` | `<span>`                                                                                          | `data-ars-scope="tabs"`, `data-ars-part="tab-indicator"`, `aria-hidden="true"`                                                                                                       |
+| `Panel`     | `<div>`                                                                                           | `data-ars-scope="tabs"`, `data-ars-part="panel"`, DOM-safe key-derived `id`, `role="tabpanel"`, `aria-labelledby`, `tabindex="0"`                                                    |
 
 Every DOM `id` flows from the single `Context::ids: ComponentIds` base
-so `aria-controls` / `aria-labelledby` wiring is computed in one place
-and survives multi-instance pages without collision. The `List`
+and keyed tab/panel IDs first convert `Key` values into DOM-safe tokens.
+Integer keys use an integer-prefixed token, UUID keys use a UUID-prefixed
+token when the collection `uuid` feature is enabled, and string keys use a
+byte-encoded token so whitespace or punctuation in public string keys cannot
+break `aria-controls` / `aria-labelledby` IDREF parsing. The `List`
 element's explicit `id` lets adapters resolve the live `direction`
 CSS property via
 `PlatformEffects::resolved_direction(&ids.part("tablist"))` before
@@ -1185,6 +1189,11 @@ Tabs listed in `disabled_keys` (or `disabled_tabs` in `Context`) are
 | `End`                         | Move focus (and select, if automatic) to last tab.                              |
 | `Enter` / `Space`             | In manual mode: select the focused tab.                                         |
 | `Tab`                         | Move focus out of the tab list into the active panel.                           |
+
+When `ActivationMode::Automatic` lets a `Focus` event commit a new selected
+value, adapters MUST emit the same public value-change callback they emit for
+arrow-key selection. This keeps controlled tabs synchronized when natural
+browser `Tab` focus enters the roving tab stop.
 
 > **RTL Handling**: Horizontal keyboard navigation follows the canonical RTL matrix defined in `03-accessibility.md` section "Canonical RTL Keyboard Navigation Matrix". In RTL, ArrowRight moves to the previous tab and ArrowLeft moves to the next tab.
 
@@ -1308,22 +1317,18 @@ Tab
 └── TabCloseTrigger  (non-roving nested control; data-ars-part="tab-close-trigger")
 ```
 
-| Part              | Element                                                                                          | Key Attributes                                                                                                                                                |
-| ----------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TabCloseTrigger` | Non-tabbable adapter-owned element; avoid nested native controls when rendered inside a tab root | `data-ars-part="tab-close-trigger"`, `type="button"` when the element is a native button, `aria-label=Messages.close_tab_label({tab label})`, `tabindex="-1"` |
+| Part              | Element                                      | Key Attributes                                                                                                            |
+| ----------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `TabCloseTrigger` | Non-tabbable adapter-owned native `<button>` | `data-ars-part="tab-close-trigger"`, `type="button"`, `aria-label=Messages.close_tab_label({tab label})`, `tabindex="-1"` |
 
 The kebab-cased `data-ars-part` value is `"tab-close-trigger"` —
 matching the part variant `Part::TabCloseTrigger`. Using the
 `tab-`-prefixed token avoids visual collisions with Dialog's /
 Popover's `close-trigger` data-attribute when downstream stylesheets
-write scope-agnostic selectors. When the close trigger is rendered as a
-native `<button>`, the `type="button"` attribute inhibits accidental
-form submission when the tabs render inside a `<form>` element. When the
-tab root itself is an interactive role-backed element, adapters should
-render the close trigger as a non-native nested element and keep close
-activation on the tab's Delete / Backspace path plus pointer activation
-on the close trigger. This avoids invalid nested interactive controls
-while preserving the close affordance and accessible label.
+write scope-agnostic selectors. The close trigger renders as a native
+`<button type="button">` so assistive technology receives a real button
+control and forms do not submit accidentally when tabs render inside a
+`<form>` element.
 
 ### 5.5 Messages
 

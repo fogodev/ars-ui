@@ -1,6 +1,5 @@
 ---
 source: crates/ars-components/src/navigation/tabs/tests.rs
-assertion_line: 2047
 expression: "snapshot_attrs(&service.connect(&|_| {}).panel_attrs(&key(\"a\"), None))"
 ---
 AttrMap {
@@ -34,13 +33,13 @@ AttrMap {
                 LabelledBy,
             ),
             String(
-                "tabs-tab-a",
+                "tabs-tab-s-61",
             ),
         ),
         (
             Id,
             String(
-                "tabs-panel-a",
+                "tabs-panel-s-61",
             ),
         ),
         (

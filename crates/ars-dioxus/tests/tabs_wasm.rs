@@ -23,8 +23,8 @@ use std::{
 use ars_collections::Key;
 use ars_components::navigation::tabs;
 use ars_core::{
-    Direction, HtmlAttr, NullPlatformEffects, Orientation, PlatformEffects, Rect, SafeUrl,
-    TimerHandle,
+    Direction, HtmlAttr, I18nRegistries, MessageFn, MessagesRegistry, NullPlatformEffects,
+    Orientation, PlatformEffects, Rect, SafeUrl, TimerHandle,
 };
 use ars_dioxus::{
     ArsProvider, DioxusPlatform, DragData, FilePickerOptions, PlatformDragEvent, TabKey, Translate,
@@ -907,9 +907,27 @@ fn translated_owned_tabs_probe() -> Element {
     let mut locale = use_signal(locales::en_us);
     let onclick = move |_| locale.set(locales::br());
     let platform: Arc<dyn PlatformEffects> = Arc::new(ars_dom::WebPlatformEffects);
+    let mut registries = I18nRegistries::new();
+
+    registries.register(MessagesRegistry::new(tabs::Messages::default()).register(
+        "pt-BR",
+        tabs::Messages {
+            close_tab_label: MessageFn::new(|label: &str, _locale: &ars_core::Locale| {
+                format!("Fechar {label}")
+            }),
+            reorder_announce_label: MessageFn::new(
+                |label: &str, position: usize, total: usize, _locale: &ars_core::Locale| {
+                    format!("{label} movida para a posição {position} de {total}")
+                },
+            ),
+        },
+    ));
 
     rsx! {
-        ArsProvider { locale, platform: Some(platform),
+        ArsProvider {
+            locale,
+            platform: Some(platform),
+            i18n_registries: Some(Arc::new(registries)),
             button { id: "switch-locale", onclick, "pt-BR" }
             Tabs {
                 default_value: LocalizedTab::Overview,
@@ -2024,8 +2042,8 @@ async fn web_translated_owned_tab_labels_update_when_locale_changes() {
             .expect("close trigger should exist")
             .get_attribute("aria-label")
             .as_deref(),
-        Some("Close Visão geral"),
-        "close trigger labels should resolve the current translated tab label"
+        Some("Fechar Visão geral"),
+        "close trigger labels should resolve live provider messages and translated tab text"
     );
 
     let indicator_after = indicator.get_attribute("style").unwrap_or_default();
@@ -3668,6 +3686,7 @@ async fn web_closable_tab_dispatches_close_on_delete_and_backspace() {
 
     let close_trigger = first_with_data_part(&parent, "tab-close-trigger");
 
+    assert_eq!(close_trigger.tag_name(), "BUTTON");
     assert_eq!(
         close_trigger.get_attribute("tabindex").as_deref(),
         Some("-1"),

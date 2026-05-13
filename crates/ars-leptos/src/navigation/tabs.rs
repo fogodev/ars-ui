@@ -51,7 +51,7 @@ use crate::{
     attrs::attr_map_to_leptos_inline_attrs,
     event_mapping::leptos_key_to_keyboard_key,
     id::use_id,
-    provider::{use_modality_context, use_platform_effects},
+    provider::{current_ars_context, use_locale, use_modality_context, use_platform_effects},
     use_machine::use_machine_with_reactive_props,
 };
 
@@ -86,7 +86,7 @@ impl TabLabel {
     where
         T: Translate + Send + Sync + 'static,
     {
-        let locale = crate::provider::use_locale();
+        let locale = use_locale();
         let intl_backend = crate::provider::use_intl_backend();
 
         Self::Dynamic(Arc::new(move || {
@@ -281,6 +281,7 @@ struct TabsConfig<K: TabKey> {
     /// doesn't need a reactive subscription on the meta itself; the
     /// memo reflects the current store state regardless.
     tabs_meta: Memo<Vec<TabMeta<K>>>,
+    messages_revision: RwSignal<u64>,
 }
 
 struct TabsOptions<K: TabKey> {
@@ -495,6 +496,7 @@ pub fn Tabs<K: TabKey>(
 
     let machine = use_machine_with_reactive_props::<tabs::Machine>(props_signal);
 
+    setup_messages_sync(machine, config);
     register_tabs(machine, registrations);
 
     let tab_nodes = StoredValue::new_local(BTreeMap::<Key, web_sys::HtmlElement>::new());
@@ -636,6 +638,7 @@ fn setup_tabs_reactivity<K: TabKey>(
         activation_mode: options.activation_mode.get_untracked(),
         reorderable: options.reorderable.get_untracked(),
         tabs_meta,
+        messages_revision: RwSignal::new(0),
     });
 
     let props_signal = tabs_props_signal(id, default_value, value, tabs_field, options);
@@ -753,6 +756,45 @@ fn register_tabs(
 
     #[cfg(feature = "ssr")]
     let _ = registrations;
+}
+
+fn setup_messages_sync<K: TabKey>(
+    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
+    config: StoredValue<TabsConfig<K>>,
+) {
+    let locale = use_locale();
+
+    let registries = current_ars_context().map_or_else(
+        || Arc::new(ars_core::I18nRegistries::new()),
+        |ctx| Arc::clone(&ctx.i18n_registries),
+    );
+
+    let previous = StoredValue::new(None::<(ars_core::Locale, Messages)>);
+
+    let sync = move |locale: ars_core::Locale| {
+        let messages = ars_core::resolve_messages::<Messages>(None, registries.as_ref(), &locale);
+
+        let next = (locale, messages);
+
+        let changed = previous.with_value(|previous| previous.as_ref() != Some(&next));
+
+        if changed {
+            previous.set_value(Some(next.clone()));
+            machine.send.run(Event::SyncMessages {
+                locale: next.0,
+                messages: next.1,
+            });
+            config.with_value(|cfg| cfg.messages_revision.update(|revision| *revision += 1));
+        }
+    };
+
+    sync(locale.get_untracked());
+
+    Effect::watch(
+        move || locale.get(),
+        move |locale, _old, _| sync(locale.clone()),
+        false,
+    );
 }
 
 #[cfg(not(feature = "ssr"))]
@@ -1071,7 +1113,7 @@ fn render_tab_button<K: TabKey>(
     let on_focus = {
         let key = key.clone();
         move |_event: web_sys::FocusEvent| {
-            send.run(Event::Focus(key.clone()));
+            focus_event_and_emit_value_change(machine, send, &key, on_value_change, config);
         }
     };
 
@@ -1161,6 +1203,8 @@ fn render_tab_button<K: TabKey>(
 
         move || {
             let is_closable = config.with_value(|cfg| {
+                cfg.messages_revision.get();
+
                 cfg.tabs_meta
                     .get()
                     .iter()
@@ -1184,7 +1228,7 @@ fn render_tab_button<K: TabKey>(
                 }));
 
             Some(view! {
-                <span
+                <button
                     {..close_attrs}
                     on:click={
                         let key = key.clone();
@@ -1209,7 +1253,7 @@ fn render_tab_button<K: TabKey>(
                             }
                         }
                     }
-                ></span>
+                ></button>
             })
         }
     };
@@ -1702,6 +1746,40 @@ fn focus_and_emit_value_change<K: TabKey>(
         focused
     } else {
         after
+    };
+
+    if let Some(callback) = on_value_change {
+        let tabs_meta = config.with_value(|cfg| cfg.tabs_meta.get_untracked());
+
+        callback.run(emitted.and_then(|key| typed_key_for_key(&tabs_meta, &key)));
+    }
+}
+
+fn focus_event_and_emit_value_change<K: TabKey>(
+    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
+    send: Callback<Event>,
+    key: &Key,
+    on_value_change: Option<Callback<Option<K>>>,
+    config: StoredValue<TabsConfig<K>>,
+) {
+    let before_selected = machine.with_api_snapshot(|api| api.selected_tab().cloned());
+    let before_focused = machine.with_api_snapshot(|api| api.focused_tab().cloned());
+
+    send.run(Event::Focus(key.clone()));
+
+    if before_focused.as_ref() == Some(key) {
+        return;
+    }
+
+    let after_selected = machine.with_api_snapshot(|api| api.selected_tab().cloned());
+    let after_focused = machine.with_api_snapshot(|api| api.focused_tab().cloned());
+
+    let emitted = if before_selected != after_selected {
+        after_selected
+    } else if before_selected.is_none() && after_focused.as_ref() == Some(key) {
+        after_focused
+    } else {
+        return;
     };
 
     if let Some(callback) = on_value_change {

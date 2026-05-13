@@ -57,7 +57,7 @@ use crate::{
     event_mapping::dioxus_key_to_keyboard_key,
     id::use_stable_id,
     platform::{DioxusPlatform, use_platform},
-    provider::{use_modality_context, use_platform_effects},
+    provider::{use_locale, use_messages, use_modality_context, use_platform_effects},
     use_machine::use_machine_with_reactive_props,
 };
 
@@ -517,6 +517,7 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
 
     let machine = use_tabs_machine(core_props);
 
+    use_tabs_messages_sync(machine);
     use_tabs_registration(machine, registrations);
 
     let tab_nodes = use_signal(BTreeMap::<Key, Rc<MountedData>>::new);
@@ -859,6 +860,23 @@ fn use_tabs_machine(core_props: Props) -> crate::use_machine::UseMachineReturn<t
     use_machine_with_reactive_props::<tabs::Machine>(props_signal)
 }
 
+fn use_tabs_messages_sync(machine: crate::use_machine::UseMachineReturn<tabs::Machine>) {
+    let locale = use_locale()();
+    let messages = use_messages::<Messages>(None, Some(&locale));
+
+    let mut previous = use_signal(|| None::<(ars_core::Locale, Messages)>);
+
+    let next = (locale, messages);
+
+    if previous.peek().as_ref() != Some(&next) {
+        machine.send.call(Event::SyncMessages {
+            locale: next.0.clone(),
+            messages: next.1.clone(),
+        });
+        previous.set(Some(next));
+    }
+}
+
 fn use_tabs_registration(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
     registrations: Vec<tabs::TabRegistration>,
@@ -1130,8 +1148,9 @@ fn render_tab_button<K: TabKey>(
 
     let on_focus = {
         let key = key.clone();
+        let config = (*config).clone();
         move |_event: dioxus::prelude::Event<FocusData>| {
-            send.call(Event::Focus(key.clone()));
+            focus_event_and_emit_value_change(machine, send, &key, on_value_change, &config);
         }
     };
 
@@ -1236,7 +1255,7 @@ fn render_tab_button<K: TabKey>(
         }));
 
         rsx! {
-            span {
+            button {
                 onclick: {
                     let key = key.clone();
                     let tabs_meta = config.tabs_meta.clone();
@@ -1722,6 +1741,38 @@ fn focus_and_emit_value_change<K: TabKey>(
         focused
     } else {
         after
+    };
+
+    if let Some(callback) = on_value_change {
+        callback.call(emitted.and_then(|key| typed_key_for_key(&config.tabs_meta, &key)));
+    }
+}
+
+fn focus_event_and_emit_value_change<K: TabKey>(
+    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
+    send: EventHandler<Event>,
+    key: &Key,
+    on_value_change: Option<EventHandler<Option<K>>>,
+    config: &TabsConfig<K>,
+) {
+    let before_selected = machine.with_api_snapshot(|api| api.selected_tab().cloned());
+    let before_focused = machine.with_api_snapshot(|api| api.focused_tab().cloned());
+
+    send.call(Event::Focus(key.clone()));
+
+    if before_focused.as_ref() == Some(key) {
+        return;
+    }
+
+    let after_selected = machine.with_api_snapshot(|api| api.selected_tab().cloned());
+    let after_focused = machine.with_api_snapshot(|api| api.focused_tab().cloned());
+
+    let emitted = if before_selected != after_selected {
+        after_selected
+    } else if before_selected.is_none() && after_focused.as_ref() == Some(key) {
+        after_focused
+    } else {
+        return;
     };
 
     if let Some(callback) = on_value_change {
