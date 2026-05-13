@@ -1028,7 +1028,7 @@ fn inline_owned_panel_close_after_refresh_probe() -> Element {
                 Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
                     p { "Panel two" }
                 })
-                .closable(true),
+                    .closable(true),
             ],
         }
     }

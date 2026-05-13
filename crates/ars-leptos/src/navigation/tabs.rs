@@ -582,7 +582,11 @@ pub fn Tabs<K: TabKey>(
     view! {
         <div {..root_attrs}>
             <div {..list_attrs}>
-                <For each=each_tabs key=|tab| (tab.key.into_key(), tab.link.is_some()) children=render_button />
+                <For
+                    each=each_tabs
+                    key=|tab| (tab.key.into_key(), tab.link.is_some())
+                    children=render_button
+                />
                 <span {..tab_indicator_attrs} style=indicator_style></span>
             </div>
             <For each=each_panels key=|tab| tab.key.into_key() children=render_panel />
