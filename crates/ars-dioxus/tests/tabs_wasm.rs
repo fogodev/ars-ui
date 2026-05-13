@@ -23,7 +23,8 @@ use std::{
 use ars_collections::Key;
 use ars_components::navigation::tabs;
 use ars_core::{
-    Direction, HtmlAttr, NullPlatformEffects, PlatformEffects, Rect, SafeUrl, TimerHandle,
+    Direction, HtmlAttr, NullPlatformEffects, Orientation, PlatformEffects, Rect, SafeUrl,
+    TimerHandle,
 };
 use ars_dioxus::{
     ArsProvider, DioxusPlatform, DragData, FilePickerOptions, PlatformDragEvent, TabKey, Translate,
@@ -206,6 +207,11 @@ fn add_indicator_measurement_styles(parent: &web_sys::HtmlElement) {
             [data-ars-part="list"] {
                 display: inline-flex !important;
                 align-items: center !important;
+            }
+
+            [data-ars-part="list"][aria-orientation="vertical"] {
+                flex-direction: column !important;
+                align-items: flex-start !important;
             }
 
             [data-ars-part="tab"] {
@@ -1315,7 +1321,7 @@ fn vertical_disabled_hotkeys_probe() -> Element {
         Tabs {
             default_value: "first",
             tabs: ReadStore::from(tabs),
-            orientation: ars_dioxus::prelude::Orientation::Vertical,
+            orientation: Orientation::Vertical,
         }
     }
 }
@@ -1338,6 +1344,49 @@ fn indicator_probe() -> Element {
             Tabs {
                 default_value: "first",
                 tabs: ReadStore::from(use_store(three_tabs)),
+            }
+        }
+    }
+}
+
+#[expect(
+    unused_qualifications,
+    reason = "rsx! macro expansion currently reports event-handler attribute names as redundant qualifications"
+)]
+fn dynamic_orientation_indicator_probe() -> Element {
+    let platform: Arc<dyn PlatformEffects> = Arc::new(ars_dom::WebPlatformEffects);
+    let mut orientation = use_signal(|| Orientation::Horizontal);
+    let set_vertical = move |_| orientation.set(Orientation::Vertical);
+
+    rsx! {
+        ArsProvider { platform: Some(platform),
+            button { id: "set-vertical", onclick: set_vertical, "vertical" }
+            Tabs {
+                default_value: "second",
+                tabs: ReadStore::from(use_store(three_tabs)),
+                orientation: orientation(),
+            }
+        }
+    }
+}
+
+fn visual_trigger_resize_probe() -> Element {
+    let platform: Arc<dyn PlatformEffects> = Arc::new(ars_dom::WebPlatformEffects);
+
+    rsx! {
+        ArsProvider { platform: Some(platform),
+            Tabs {
+                default_value: "first",
+                tabs: [
+                    Tab::new_with_label("first", "First", rsx! {
+                        span { "First" }
+                    }, rsx! {
+                        p { "Panel one" }
+                    }),
+                    Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
+                        p { "Panel two" }
+                    }),
+                ],
             }
         }
     }
@@ -2829,6 +2878,89 @@ async fn web_indicator_style_refreshes_after_owned_reorder_of_selected_tab() {
     assert!(
         before != after && after.contains("--ars-indicator-left:"),
         "committed selected-tab reorder should refresh indicator measurement: before={before:?}, after={after:?}"
+    );
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_indicator_style_refreshes_after_signal_backed_orientation_changes() {
+    let parent = container();
+
+    parent
+        .set_attribute(
+            "style",
+            "position: relative; display: block; width: 500px; height: 300px;",
+        )
+        .expect("style should set");
+
+    add_indicator_measurement_styles(&parent);
+
+    let dom = VirtualDom::new(dynamic_orientation_indicator_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    let indicator = first_with_data_part(&parent, "tab-indicator");
+
+    let before = indicator.get_attribute("style").unwrap_or_default();
+
+    first_with_id(&parent, "set-vertical").click();
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    let after = indicator.get_attribute("style").unwrap_or_default();
+
+    assert!(
+        before != after && after.contains("--ars-indicator-top:"),
+        "signal-backed orientation changes should remeasure indicator layout: before={before:?}, after={after:?}"
+    );
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_indicator_style_refreshes_after_selected_trigger_visual_content_resizes() {
+    let parent = container();
+
+    parent
+        .set_attribute(
+            "style",
+            "position: relative; display: block; width: 600px; height: 240px;",
+        )
+        .expect("style should set");
+    add_indicator_measurement_styles(&parent);
+
+    let dom = VirtualDom::new(visual_trigger_resize_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    let indicator = first_with_data_part(&parent, "tab-indicator");
+    let before = indicator.get_attribute("style").unwrap_or_default();
+
+    tab_at(&parent, 0)
+        .query_selector("span")
+        .expect("selected trigger query should run")
+        .expect("selected trigger should contain visual label")
+        .set_text_content(Some("First label expanded by custom visual content"));
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    let after = indicator.get_attribute("style").unwrap_or_default();
+
+    assert!(
+        before != after && after.contains("--ars-indicator-width:"),
+        "selected trigger visual-only size changes should remeasure indicator layout: before={before:?}, after={after:?}"
     );
 }
 

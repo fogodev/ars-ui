@@ -10,6 +10,8 @@
 //! See `spec/dioxus-components/navigation/tabs.md` for the full adapter
 //! contract.
 
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+use std::cell::{Cell, RefCell};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug},
@@ -45,7 +47,10 @@ use dioxus::{events::MountedData, prelude::*};
 pub use dioxus_stores::ReadStore;
 use dioxus_stores::{Store, use_store};
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-use wasm_bindgen::JsCast;
+use wasm_bindgen::{JsCast, closure::Closure};
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+type IndicatorAutoUpdateCleanup = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
 
 use crate::{
     attrs::attr_map_to_dioxus_inline_attrs,
@@ -1004,16 +1009,32 @@ fn use_indicator_style(
 
     let selected_memo = machine.derive(|api| api.selected_tab().cloned());
 
+    let layout_memo = machine.derive(indicator_layout_signature);
+
+    let auto_update_cleanup = use_hook(|| CopyValue::new(None::<Box<dyn FnOnce()>>));
+
     use_effect({
         let platform = Arc::clone(platform);
         move || {
             // Just to trigger the effect when selection changes; the actual measurement happens
             drop(selected_memo());
+
+            drop(layout_memo());
+
             let _ = indicator_revision();
 
             indicator_style.set(indicator_measurement_style(machine, platform.as_ref()));
+
+            setup_indicator_auto_update(
+                machine,
+                Arc::clone(&platform),
+                indicator_style,
+                auto_update_cleanup,
+            );
         }
     });
+
+    use_drop(move || clear_indicator_auto_update(auto_update_cleanup));
 
     indicator_style
 }
@@ -1739,8 +1760,8 @@ fn focus_tab_element(
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn defer_focus_tab_element_by_id(id: String) {
-    let callback = wasm_bindgen::closure::Closure::once_into_js(move || {
-        let callback = wasm_bindgen::closure::Closure::once_into_js(move || {
+    let callback = Closure::once_into_js(move || {
+        let callback = Closure::once_into_js(move || {
             focus_tab_element_by_id(&id);
         });
 
@@ -1939,6 +1960,192 @@ fn dioxus_vdom_key(key: &Key) -> String {
     }
 }
 
+fn indicator_layout_signature(api: &tabs::Api<'_>) -> String {
+    let root_attrs = api.root_attrs();
+    let list_attrs = api.list_attrs();
+
+    let root_dir = root_attrs.get(&HtmlAttr::Dir).unwrap_or_default();
+
+    let orientation = list_attrs
+        .get(&HtmlAttr::Aria(AriaAttr::Orientation))
+        .unwrap_or_default();
+
+    format!("{root_dir}:{orientation}")
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn setup_indicator_auto_update(
+    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
+    platform: Arc<dyn PlatformEffects>,
+    _indicator_style: Signal<String>,
+    mut cleanup_store: CopyValue<Option<Box<dyn FnOnce()>>>,
+) {
+    clear_indicator_auto_update(cleanup_store);
+
+    let active = Rc::new(Cell::new(true));
+    let installed_cleanup = Rc::new(RefCell::new(None::<Box<dyn FnOnce()>>));
+
+    cleanup_store.set(Some(Box::new({
+        let active = Rc::clone(&active);
+        let installed_cleanup = Rc::clone(&installed_cleanup);
+        move || {
+            active.set(false);
+
+            if let Some(cleanup) = installed_cleanup.borrow_mut().take() {
+                cleanup();
+            }
+        }
+    })));
+
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+
+    let callback = Closure::once_into_js(move || {
+        if !active.get() {
+            return;
+        }
+
+        install_indicator_auto_update(machine, platform, &installed_cleanup);
+    });
+
+    drop(window.request_animation_frame(callback.unchecked_ref()));
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn install_indicator_auto_update(
+    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
+    platform: Arc<dyn PlatformEffects>,
+    installed_cleanup: &IndicatorAutoUpdateCleanup,
+) {
+    let Some((list_id, tab_id)) = indicator_element_ids(machine) else {
+        return;
+    };
+
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+
+    let (Some(list), Some(tab)) = (
+        document.get_element_by_id(&list_id),
+        document.get_element_by_id(&tab_id),
+    ) else {
+        return;
+    };
+
+    let list_for_indicator = list.clone();
+    let cleanup = observe_indicator_geometry(&tab, &list, move || {
+        let Some(indicator) = list_for_indicator
+            .query_selector(r#"[data-ars-part="tab-indicator"]"#)
+            .ok()
+            .flatten()
+        else {
+            return;
+        };
+
+        let style = indicator_measurement_style(machine, platform.as_ref());
+
+        if style.is_empty() {
+            drop(indicator.remove_attribute("style"));
+        } else {
+            drop(indicator.set_attribute("style", &style));
+        }
+    });
+
+    *installed_cleanup.borrow_mut() = Some(cleanup);
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn observe_indicator_geometry(
+    anchor: &web_sys::Element,
+    list: &web_sys::Element,
+    update: impl Fn() + 'static,
+) -> Box<dyn FnOnce()> {
+    let update = Rc::new(update);
+
+    let resize_cb = Closure::wrap(Box::new({
+        let update = Rc::clone(&update);
+        move |_entries: js_sys::Array, _observer: web_sys::ResizeObserver| {
+            update();
+        }
+    })
+        as Box<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>);
+
+    let resize_observer = web_sys::ResizeObserver::new(resize_cb.as_ref().unchecked_ref()).ok();
+
+    if let Some(resize_observer) = resize_observer.as_ref() {
+        resize_observer.observe(anchor);
+        resize_observer.observe(list);
+    }
+
+    let mutation_cb = Closure::wrap(Box::new({
+        let update = Rc::clone(&update);
+        move |_entries: js_sys::Array, _observer: web_sys::MutationObserver| {
+            update();
+        }
+    })
+        as Box<dyn FnMut(js_sys::Array, web_sys::MutationObserver)>);
+
+    let mutation_observer =
+        web_sys::MutationObserver::new(mutation_cb.as_ref().unchecked_ref()).ok();
+
+    if let Some(mutation_observer) = mutation_observer.as_ref() {
+        let anchor_opts = web_sys::MutationObserverInit::new();
+        anchor_opts.set_attributes(true);
+        anchor_opts.set_child_list(true);
+        anchor_opts.set_character_data(true);
+        anchor_opts.set_subtree(true);
+        anchor_opts.set_attribute_filter(&js_sys::Array::of2(
+            &wasm_bindgen::JsValue::from_str("class"),
+            &wasm_bindgen::JsValue::from_str("style"),
+        ));
+
+        drop(mutation_observer.observe_with_options(anchor, &anchor_opts));
+
+        let list_opts = web_sys::MutationObserverInit::new();
+        list_opts.set_attributes(true);
+        list_opts.set_attribute_filter(&js_sys::Array::of2(
+            &wasm_bindgen::JsValue::from_str("class"),
+            &wasm_bindgen::JsValue::from_str("style"),
+        ));
+
+        drop(mutation_observer.observe_with_options(list, &list_opts));
+    }
+
+    update();
+
+    Box::new(move || {
+        if let Some(resize_observer) = resize_observer {
+            resize_observer.disconnect();
+        }
+
+        if let Some(mutation_observer) = mutation_observer {
+            mutation_observer.disconnect();
+        }
+
+        drop(resize_cb);
+        drop(mutation_cb);
+    })
+}
+
+#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+fn setup_indicator_auto_update(
+    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
+    platform: Arc<dyn PlatformEffects>,
+    indicator_style: Signal<String>,
+    cleanup_store: CopyValue<Option<Box<dyn FnOnce()>>>,
+) {
+    drop((machine, platform, indicator_style, cleanup_store));
+}
+
+fn clear_indicator_auto_update(mut cleanup_store: CopyValue<Option<Box<dyn FnOnce()>>>) {
+    if let Ok(mut cleanup) = cleanup_store.try_write()
+        && let Some(cleanup) = cleanup.take()
+    {
+        cleanup();
+    }
+}
+
 #[derive(Clone)]
 struct TabsConfig<K: TabKey> {
     orientation: Orientation,
@@ -1952,18 +2159,7 @@ fn indicator_measurement_style(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
     platform: &dyn PlatformEffects,
 ) -> String {
-    let Some((list_id, tab_id)) = machine.with_api_snapshot(|api| {
-        let selected = api.selected_tab()?;
-
-        let list_id = api.list_attrs().get(&HtmlAttr::Id).map(String::from)?;
-
-        let tab_id = api
-            .tab_attrs(selected, false)
-            .get(&HtmlAttr::Id)
-            .map(String::from)?;
-
-        Some((list_id, tab_id))
-    }) else {
+    let Some((list_id, tab_id)) = indicator_element_ids(machine) else {
         return String::new();
     };
 
@@ -1981,6 +2177,23 @@ fn indicator_measurement_style(
         tab.width,
         tab.height
     )
+}
+
+fn indicator_element_ids(
+    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
+) -> Option<(String, String)> {
+    machine.with_api_snapshot(|api| {
+        let selected = api.selected_tab()?;
+
+        let list_id = api.list_attrs().get(&HtmlAttr::Id).map(String::from)?;
+
+        let tab_id = api
+            .tab_attrs(selected, false)
+            .get(&HtmlAttr::Id)
+            .map(String::from)?;
+
+        Some((list_id, tab_id))
+    })
 }
 
 fn effective_direction(

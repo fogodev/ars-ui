@@ -377,6 +377,11 @@ fn add_indicator_measurement_styles(parent: &web_sys::HtmlElement) {
                 align-items: center !important;
             }
 
+            [data-ars-part="list"][aria-orientation="vertical"] {
+                flex-direction: column !important;
+                align-items: flex-start !important;
+            }
+
             [data-ars-part="tab"] {
                 display: inline-flex !important;
                 width: auto !important;
@@ -2193,6 +2198,144 @@ async fn indicator_style_refreshes_after_selected_tab_label_changes() {
     assert!(
         before != after && after.contains("--ars-indicator-width:"),
         "selected-tab label changes should refresh indicator measurement: before={before:?}, after={after:?}"
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
+async fn indicator_style_refreshes_after_signal_backed_orientation_changes() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent, set_orientation) = owner.with(|| {
+        let parent = container();
+
+        parent
+            .set_attribute(
+                "style",
+                "position: relative; display: block; width: 500px; height: 300px;",
+            )
+            .expect("style should set");
+
+        add_indicator_measurement_styles(&parent);
+
+        let (orientation, set_orientation) = signal(Orientation::Horizontal);
+
+        let orientation: Signal<Orientation> = orientation.into();
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <ArsProvider platform=Arc::new(ars_dom::WebPlatformEffects)>
+                    <Tabs default_value="second" tabs=store_field(three_tabs()) orientation />
+                </ArsProvider>
+            }
+        });
+
+        (mount_handle, parent, set_orientation)
+    });
+
+    leptos::task::tick().await;
+
+    animation_frame_turn().await;
+
+    let indicator = first_with_data_part(&parent, "tab-indicator");
+
+    let before = indicator.get_attribute("style").unwrap_or_default();
+
+    set_orientation.set(Orientation::Vertical);
+
+    leptos::task::tick().await;
+
+    animation_frame_turn().await;
+
+    let after = indicator.get_attribute("style").unwrap_or_default();
+
+    assert!(
+        before != after && after.contains("--ars-indicator-top:"),
+        "signal-backed orientation changes should remeasure indicator layout: before={before:?}, after={after:?}"
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
+async fn indicator_style_refreshes_after_selected_trigger_visual_content_resizes() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent, set_expanded) = owner.with(|| {
+        let parent = container();
+
+        parent
+            .set_attribute(
+                "style",
+                "position: relative; display: block; width: 600px; height: 240px;",
+            )
+            .expect("style should set");
+
+        add_indicator_measurement_styles(&parent);
+
+        let (expanded, set_expanded) = signal(false);
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            let trigger = ViewFn::from(move || {
+                view! {
+                    <span>
+                        {move || {
+                            if expanded.get() {
+                                "First trigger with expanded visual count 100"
+                            } else {
+                                "First"
+                            }
+                        }}
+                    </span>
+                }
+            });
+
+            let tabs = vec![
+                Tab::new_with_label(
+                    "first",
+                    "First",
+                    trigger,
+                    ViewFn::from(|| view! { <p>"Panel one"</p> }),
+                ),
+                Tab::new_with_label(
+                    "second",
+                    "Second",
+                    ViewFn::from(|| view! { "Second" }),
+                    ViewFn::from(|| view! { <p>"Panel two"</p> }),
+                ),
+            ];
+
+            view! {
+                <ArsProvider platform=Arc::new(ars_dom::WebPlatformEffects)>
+                    <Tabs default_value="first" tabs />
+                </ArsProvider>
+            }
+        });
+
+        (mount_handle, parent, set_expanded)
+    });
+
+    leptos::task::tick().await;
+
+    animation_frame_turn().await;
+
+    let indicator = first_with_data_part(&parent, "tab-indicator");
+
+    let before = indicator.get_attribute("style").unwrap_or_default();
+
+    set_expanded.set(true);
+
+    leptos::task::tick().await;
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    let after = indicator.get_attribute("style").unwrap_or_default();
+
+    assert!(
+        before != after && after.contains("--ars-indicator-width:"),
+        "selected trigger visual-only size changes should remeasure indicator layout: before={before:?}, after={after:?}"
     );
 
     drop(mount_handle);
