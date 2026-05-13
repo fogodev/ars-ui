@@ -222,7 +222,7 @@ fn typed_enum_tab_keys_render_without_string_keys_at_call_site() {
 
     assert!(html.contains("Beta panel"));
     assert!(html.contains(r#"aria-selected="true""#));
-    assert!(html.contains("-panel-1"));
+    assert!(html.contains("-panel-i-1"));
 }
 
 #[test]
@@ -401,8 +401,8 @@ fn aria_controls_links_tab_to_panel_via_component_ids() {
     );
 
     assert!(
-        html.contains("-panel-first"),
-        "expected panel id ending with -panel-first: {html}"
+        html.contains("-panel-s-6669727374"),
+        "expected panel id ending with the encoded first key: {html}"
     );
 }
 

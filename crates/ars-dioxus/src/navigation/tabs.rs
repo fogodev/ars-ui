@@ -523,7 +523,7 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
     let tab_nodes = use_signal(BTreeMap::<Key, Rc<MountedData>>::new);
 
     let send_with_focus_pulse =
-        use_focus_dispatch(machine, &id, Arc::clone(&dioxus_platform), tab_nodes);
+        use_focus_dispatch(machine, Arc::clone(&dioxus_platform), tab_nodes);
 
     let reorder_status = use_signal(String::new);
     let drag_source = use_signal(|| None::<Key>);
@@ -892,15 +892,12 @@ fn use_tabs_registration(
 
 fn use_focus_dispatch(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
-    id: &str,
     dioxus_platform: Arc<dyn DioxusPlatform>,
     tab_nodes: Signal<BTreeMap<Key, Rc<MountedData>>>,
 ) -> EventHandler<Event> {
     let mut focus_pulse = use_signal(|| 0_u64);
 
     let focused_tab_key = machine.derive(|api| api.focused_tab().cloned());
-
-    let id_for_focus = id.to_owned();
 
     use_effect(move || {
         if focus_pulse() == 0 {
@@ -911,7 +908,9 @@ fn use_focus_dispatch(
             return;
         };
 
-        let element_id = format!("{id_for_focus}-tab-{key}");
+        let Some(element_id) = machine.with_api_snapshot(|api| tab_id_from_api(api, &key)) else {
+            return;
+        };
 
         focus_tab_element(tab_nodes, &key, &element_id, Arc::clone(&dioxus_platform));
     });
@@ -955,6 +954,12 @@ fn tabs_root_attrs(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
 ) -> Memo<Vec<Attribute>> {
     machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.root_attrs()))
+}
+
+fn tab_id_from_api(api: &tabs::Api<'_>, key: &Key) -> Option<String> {
+    api.tab_attrs(key, false)
+        .get(&HtmlAttr::Id)
+        .map(String::from)
 }
 
 fn tabs_list_attrs<K: TabKey>(

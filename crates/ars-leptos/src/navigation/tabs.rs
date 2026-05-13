@@ -500,7 +500,7 @@ pub fn Tabs<K: TabKey>(
     register_tabs(machine, registrations);
 
     let tab_nodes = StoredValue::new_local(BTreeMap::<Key, web_sys::HtmlElement>::new());
-    let send_with_focus_pulse = setup_focus_dispatch(machine, &id, &platform, tab_nodes);
+    let send_with_focus_pulse = setup_focus_dispatch(machine, &platform, tab_nodes);
 
     let reorder_status = RwSignal::new(String::new());
 
@@ -790,6 +790,7 @@ fn setup_messages_sync<K: TabKey>(
 
     sync(locale.get_untracked());
 
+    #[cfg(not(feature = "ssr"))]
     Effect::watch(
         move || locale.get(),
         move |locale, _old, _| sync(locale.clone()),
@@ -816,7 +817,6 @@ fn setup_config_sync<K: TabKey>(options: &TabsOptions<K>, config: StoredValue<Ta
 
 fn setup_focus_dispatch(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
-    id: &str,
     platform: &Arc<dyn PlatformEffects>,
     tab_nodes: TabNodeRegistry,
 ) -> Callback<Event> {
@@ -826,7 +826,6 @@ fn setup_focus_dispatch(
 
     #[cfg(not(feature = "ssr"))]
     {
-        let id_for_focus = id.to_owned();
         let platform = Arc::clone(platform);
 
         Effect::new(move |_| {
@@ -836,11 +835,14 @@ fn setup_focus_dispatch(
                 return;
             };
 
-            let element_id = format!("{id_for_focus}-tab-{key}");
-
             if focus_tab_node(tab_nodes, &key) {
                 return;
             }
+
+            let Some(element_id) = machine.with_api_snapshot(|api| tab_id_from_api(api, &key))
+            else {
+                return;
+            };
 
             platform.focus_element_by_id(&element_id);
             focus_tab_element_by_id(&element_id);
@@ -849,7 +851,7 @@ fn setup_focus_dispatch(
 
     #[cfg(feature = "ssr")]
     {
-        let _ = (id, platform, focused_tab_key, tab_nodes);
+        let _ = (platform, focused_tab_key, tab_nodes);
     }
 
     Callback::new(move |event: Event| {
