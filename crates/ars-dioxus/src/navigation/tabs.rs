@@ -559,6 +559,16 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
 
     let selected_key = selected_tab();
 
+    let owned_render_tabs = owned_tabs_store.map(|_| Rc::new(tabs.clone()));
+
+    let tab_attrs_by_key = use_tab_attrs_by_key(
+        machine,
+        &config.tabs_meta,
+        Arc::clone(&modality),
+        modality_revision,
+        reorderable_signal,
+    );
+
     rsx! {
         div {..root_attrs(),
             div {..list_attrs,
@@ -574,13 +584,14 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
                                 reorder_status,
                                 drag_source,
                                 modality_revision,
-                                reorderable_signal,
+                                tab_attrs_by_key,
                                 tab_nodes,
                                 &modality,
                                 on_value_change,
                                 on_close_tab,
                                 on_reorder,
                                 owned_tabs_store,
+                                owned_render_tabs.as_ref(),
                                 disallow_empty_selection,
                                 indicator_revision,
                             )
@@ -1023,6 +1034,42 @@ fn tabs_indicator_attrs(
     machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.tab_indicator_attrs()))
 }
 
+fn use_tab_attrs_by_key<K: TabKey>(
+    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
+    tabs_meta: &[TabMeta<K>],
+    modality: Arc<dyn ModalityContext>,
+    modality_revision: Signal<u64>,
+    reorderable_signal: Signal<bool>,
+) -> Memo<BTreeMap<Key, Vec<Attribute>>> {
+    let tab_keys = tabs_meta
+        .iter()
+        .map(|meta| meta.key.clone())
+        .collect::<Vec<_>>();
+
+    machine.derive(move |api| {
+        modality_revision();
+        let is_reorderable = reorderable_signal();
+
+        tab_keys
+            .iter()
+            .map(|key| {
+                let mut attrs = api.tab_attrs(key, !modality.had_pointer_interaction());
+
+                attrs.set(
+                    HtmlAttr::Aria(AriaAttr::RoleDescription),
+                    if is_reorderable {
+                        AttrValue::from("draggable tab")
+                    } else {
+                        AttrValue::None
+                    },
+                );
+
+                (key.clone(), attr_map_to_dioxus_inline_attrs(attrs))
+            })
+            .collect()
+    })
+}
+
 fn use_indicator_style(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
     platform: &Arc<dyn PlatformEffects>,
@@ -1086,42 +1133,24 @@ fn render_tab_button<K: TabKey>(
     reorder_status: Signal<String>,
     drag_source: Signal<Option<Key>>,
     mut modality_revision: Signal<u64>,
-    reorderable_signal: Signal<bool>,
+    tab_attrs_by_key: Memo<BTreeMap<Key, Vec<Attribute>>>,
     mut tab_nodes: Signal<BTreeMap<Key, Rc<MountedData>>>,
     modality: &Arc<dyn ModalityContext>,
     on_value_change: Option<EventHandler<Option<K>>>,
     on_close_tab: Option<EventHandler<K>>,
     on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
     owned_tabs_store: Option<Store<Vec<Tab<K>>>>,
+    owned_render_tabs: Option<&Rc<Vec<Tab<K>>>>,
     disallow_empty_selection: bool,
     indicator_revision: Signal<u64>,
 ) -> Element {
     let typed_key = tab.key;
     let key = typed_key.into_key();
     let vdom_key = dioxus_vdom_key(&key);
+    let owned_render_tabs = owned_render_tabs.cloned();
 
-    let tab_attrs = machine.derive({
-        let key = key.clone();
-        let modality = Arc::clone(modality);
-
-        move |api| {
-            modality_revision();
-            let is_reorderable = reorderable_signal();
-
-            let mut attrs = api.tab_attrs(&key, !modality.had_pointer_interaction());
-
-            attrs.set(
-                HtmlAttr::Aria(AriaAttr::RoleDescription),
-                if is_reorderable {
-                    AttrValue::from("draggable tab")
-                } else {
-                    AttrValue::None
-                },
-            );
-
-            attr_map_to_dioxus_inline_attrs(attrs)
-        }
-    });
+    let mut attrs_by_key = tab_attrs_by_key();
+    let tab_attrs = attrs_by_key.remove(&key).unwrap_or_default();
 
     let label = tab.label;
 
@@ -1168,6 +1197,7 @@ fn render_tab_button<K: TabKey>(
         let config = (*config).clone();
         let modality = Arc::clone(modality);
         let label_text = tab.label_text.resolve();
+        let owned_render_tabs = owned_render_tabs.clone();
         move |event: dioxus::prelude::Event<KeyboardData>| {
             modality_revision += 1;
 
@@ -1184,6 +1214,7 @@ fn render_tab_button<K: TabKey>(
                 on_reorder,
                 &modality,
                 owned_tabs_store,
+                owned_render_tabs.as_deref().map(Vec::as_slice),
                 disallow_empty_selection,
                 indicator_revision,
             );
@@ -1225,6 +1256,7 @@ fn render_tab_button<K: TabKey>(
     let on_drop = {
         let key = key.clone();
         let config = (*config).clone();
+        let owned_render_tabs = owned_render_tabs.clone();
 
         move |event: dioxus::prelude::Event<DragData>| {
             handle_tab_drop(
@@ -1237,6 +1269,7 @@ fn render_tab_button<K: TabKey>(
                 reorder_status,
                 on_reorder,
                 owned_tabs_store,
+                owned_render_tabs.as_deref().map(Vec::as_slice),
                 indicator_revision,
             );
         }
@@ -1264,6 +1297,7 @@ fn render_tab_button<K: TabKey>(
                 onclick: {
                     let key = key.clone();
                     let tabs_meta = config.tabs_meta.clone();
+                    let owned_render_tabs = owned_render_tabs.clone();
                     move |event: dioxus::prelude::Event<MouseData>| {
                         event.prevent_default();
                         event.stop_propagation();
@@ -1279,6 +1313,7 @@ fn render_tab_button<K: TabKey>(
                             successor.as_ref().map(|(successor_key, _)| successor_key.clone()),
                             &tabs_meta,
                             owned_tabs_store,
+                            owned_render_tabs.as_deref().map(Vec::as_slice),
                             disallow_empty_selection,
                         );
 
@@ -1317,7 +1352,7 @@ fn render_tab_button<K: TabKey>(
                     }
                 },
                 draggable: "{draggable}",
-                ..tab_attrs(),
+                ..tab_attrs,
                 {label}
                 {close_button}
             }
@@ -1344,7 +1379,7 @@ fn render_tab_button<K: TabKey>(
                     }
                 },
                 draggable: "{draggable}",
-                ..tab_attrs(),
+                ..tab_attrs,
                 {label}
                 {close_button}
             }
@@ -1383,6 +1418,7 @@ fn handle_tab_drop<K: TabKey>(
     mut reorder_status: Signal<String>,
     on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
     owned_tabs_store: Option<Store<Vec<Tab<K>>>>,
+    latest_owned_tabs: Option<&[Tab<K>]>,
     mut indicator_revision: Signal<u64>,
 ) {
     if !config.reorderable {
@@ -1417,7 +1453,12 @@ fn handle_tab_drop<K: TabKey>(
 
     let focus_key = source_key.clone();
 
-    if !reorder_owned_tab(owned_tabs_store, &reorder_event, external_reorder_committed) {
+    if !reorder_owned_tab(
+        owned_tabs_store,
+        &reorder_event,
+        external_reorder_committed,
+        latest_owned_tabs,
+    ) {
         return;
     }
 
@@ -1455,6 +1496,7 @@ fn handle_tab_keydown<K: TabKey>(
     on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
     modality: &Arc<dyn ModalityContext>,
     owned_tabs_store: Option<Store<Vec<Tab<K>>>>,
+    latest_owned_tabs: Option<&[Tab<K>]>,
     disallow_empty_selection: bool,
     mut indicator_revision: Signal<u64>,
 ) {
@@ -1525,7 +1567,12 @@ fn handle_tab_keydown<K: TabKey>(
                     return;
                 };
 
-                if reorder_owned_tab(owned_tabs_store, &reorder_event, external_reorder_committed) {
+                if reorder_owned_tab(
+                    owned_tabs_store,
+                    &reorder_event,
+                    external_reorder_committed,
+                    latest_owned_tabs,
+                ) {
                     send.call(Event::ReorderTab {
                         tab: key.clone(),
                         new_index,
@@ -1617,6 +1664,7 @@ fn handle_tab_keydown<K: TabKey>(
                 .map(|(successor_key, _)| successor_key.clone()),
             &config.tabs_meta,
             owned_tabs_store,
+            latest_owned_tabs,
             disallow_empty_selection,
         );
 
@@ -1893,6 +1941,7 @@ fn emit_close_request<K: TabKey>(
     successor: Option<Key>,
     tabs_meta: &[TabMeta<K>],
     owned_tabs_store: Option<Store<Vec<Tab<K>>>>,
+    latest_owned_tabs: Option<&[Tab<K>]>,
     disallow_empty_selection: bool,
 ) {
     if !machine.with_api_snapshot(|api| api.can_close_tab(key)) {
@@ -1907,7 +1956,12 @@ fn emit_close_request<K: TabKey>(
         callback.call(typed_key);
     }
 
-    close_owned_tab(owned_tabs_store, key, disallow_empty_selection);
+    close_owned_tab(
+        owned_tabs_store,
+        key,
+        disallow_empty_selection,
+        latest_owned_tabs,
+    );
 
     if let Some(successor) = successor {
         machine.send.call(Event::SelectTab(successor.clone()));
@@ -1924,12 +1978,17 @@ fn close_owned_tab<K: TabKey>(
     owned_tabs_store: Option<Store<Vec<Tab<K>>>>,
     key: &Key,
     disallow_empty_selection: bool,
+    latest_owned_tabs: Option<&[Tab<K>]>,
 ) {
     let Some(mut tabs_store) = owned_tabs_store else {
         return;
     };
 
     let mut tabs = tabs_store.write();
+
+    if let Some(latest_owned_tabs) = latest_owned_tabs {
+        tabs.clone_from(&latest_owned_tabs.to_vec());
+    }
 
     if disallow_empty_selection && tabs.len() <= 1 {
         return;
@@ -1942,12 +2001,17 @@ fn reorder_owned_tab<K: TabKey>(
     owned_tabs_store: Option<Store<Vec<Tab<K>>>>,
     event: &ReorderEvent<K>,
     external_reorder_committed: bool,
+    latest_owned_tabs: Option<&[Tab<K>]>,
 ) -> bool {
     let Some(mut tabs_store) = owned_tabs_store else {
         return external_reorder_committed;
     };
 
     let mut tabs = tabs_store.write();
+
+    if let Some(latest_owned_tabs) = latest_owned_tabs {
+        tabs.clone_from(&latest_owned_tabs.to_vec());
+    }
 
     if event.old_index >= tabs.len() || event.new_index >= tabs.len() {
         return false;

@@ -558,6 +558,17 @@ fn selected_tab_text(parent: &web_sys::HtmlElement) -> String {
         .unwrap_or_default()
 }
 
+fn selected_panel_text(parent: &web_sys::HtmlElement) -> String {
+    parent
+        .query_selector(r#"[role="tabpanel"]:not([hidden])"#)
+        .expect("query should succeed")
+        .expect("a tab panel should be selected")
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("panel is HtmlElement")
+        .text_content()
+        .unwrap_or_default()
+}
+
 fn tab_at(parent: &web_sys::HtmlElement, index: u32) -> web_sys::HtmlElement {
     first_with_data_part(parent, "list")
         .query_selector_all(r#"[role="tab"]"#)
@@ -4207,6 +4218,58 @@ async fn store_disabled_toggle_updates_tab_accessibility_attrs() {
         second.get_attribute("data-ars-disabled").as_deref(),
         Some(""),
         "data-ars-disabled must update when the backing store disables a tab"
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
+async fn store_same_key_row_update_refreshes_trigger_and_panel_content() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent, store) = owner.with(|| {
+        let parent = container();
+        let store = store_handle(three_tabs());
+        let field: Field<Vec<TestTab>> = store.tabs().into();
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! { <Tabs default_value="first" tabs=field /> }
+        });
+
+        (mount_handle, parent, store)
+    });
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        tab_at(&parent, 0).text_content().unwrap_or_default(),
+        "First"
+    );
+    assert_eq!(selected_panel_text(&parent), "Panel one");
+
+    owner.with(|| {
+        let field = store.tabs();
+        let mut tabs = field.write();
+
+        tabs[0] = Tab::new_with_label(
+            "first",
+            "First",
+            ViewFn::from(|| view! { "First updated trigger" }),
+            ViewFn::from(|| view! { <p>"Panel one updated"</p> }),
+        );
+    });
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        tab_at(&parent, 0).text_content().unwrap_or_default(),
+        "First updated trigger",
+        "same-key trigger content should refresh from the latest tab row"
+    );
+    assert_eq!(
+        selected_panel_text(&parent),
+        "Panel one updated",
+        "same-key panel content should refresh from the latest tab row"
     );
 
     drop(mount_handle);

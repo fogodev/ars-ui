@@ -368,6 +368,17 @@ fn selected_tab_text(parent: &web_sys::HtmlElement) -> String {
         .unwrap_or_default()
 }
 
+fn selected_panel_text(parent: &web_sys::HtmlElement) -> String {
+    parent
+        .query_selector(r#"[role="tabpanel"]:not([hidden])"#)
+        .expect("query should succeed")
+        .expect("a tab panel should be selected")
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("panel is HtmlElement")
+        .text_content()
+        .unwrap_or_default()
+}
+
 fn tab_at(parent: &web_sys::HtmlElement, index: u32) -> web_sys::HtmlElement {
     first_with_data_part(parent, "list")
         .query_selector_all(r#"[role="tab"]"#)
@@ -982,6 +993,42 @@ fn inline_owned_panel_state_probe() -> Element {
                 Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
                     p { "Panel two" }
                 }),
+            ],
+        }
+    }
+}
+
+#[expect(
+    unused_qualifications,
+    reason = "rsx! macro expansion currently reports event-handler attribute names as redundant qualifications"
+)]
+fn inline_owned_panel_close_after_refresh_probe() -> Element {
+    let mut updated = use_signal(|| false);
+
+    let first_panel = if updated() {
+        rsx! {
+            p { id: "owned-panel-after-close-status", "updated" }
+        }
+    } else {
+        rsx! {
+            p { id: "owned-panel-after-close-status", "initial" }
+        }
+    };
+
+    rsx! {
+        button {
+            id: "update-owned-panel-before-close",
+            onclick: move |_| updated.set(true),
+            "Update"
+        }
+        Tabs {
+            default_value: "first",
+            tabs: [
+                Tab::new_with_label("first", "First", rsx! { "First" }, first_panel),
+                Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
+                    p { "Panel two" }
+                })
+                .closable(true),
             ],
         }
     }
@@ -2088,6 +2135,49 @@ async fn web_inline_array_owned_tabs_refresh_existing_panel_content() {
     assert_eq!(
         status, "updated",
         "owned inline tabs must refresh existing panel content when parent Dioxus state changes"
+    );
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_inline_array_owned_tabs_keep_refreshed_panel_after_close() {
+    let parent = container();
+    let dom = VirtualDom::new(inline_owned_panel_close_after_refresh_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert_eq!(selected_panel_text(&parent), "initial");
+
+    click(
+        &parent
+            .query_selector("#update-owned-panel-before-close")
+            .expect("query should succeed")
+            .expect("update trigger should exist")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("update trigger is HtmlElement"),
+    );
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        selected_panel_text(&parent),
+        "updated",
+        "parent same-key render content should refresh before close"
+    );
+
+    click(&first_with_data_part(&parent, "tab-close-trigger"));
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        selected_panel_text(&parent),
+        "updated",
+        "closing another owned tab must not restore stale same-key panel content"
     );
 }
 

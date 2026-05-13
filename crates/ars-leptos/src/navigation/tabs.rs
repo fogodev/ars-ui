@@ -537,7 +537,9 @@ pub fn Tabs<K: TabKey>(
 
     // Keyed `<For>` iteration so per-tab DOM nodes (and their event
     // handlers / refs) survive list mutations: closing or reordering a
-    // tab no longer tears down sibling rows.
+    // tab no longer tears down sibling rows. The element-kind bit is part
+    // of the key because switching between button-like `<div>` and link
+    // `<a>` rows must recreate the DOM node.
     let each_tabs = move || tabs_field.read().iter().cloned().collect::<Vec<_>>();
     let each_panels = move || tabs_field.read().iter().cloned().collect::<Vec<_>>();
 
@@ -567,13 +569,20 @@ pub fn Tabs<K: TabKey>(
     };
 
     let render_panel = move |tab: Tab<K>| {
-        render_tab_panel(tab, machine, lazy_mount, unmount_on_exit, ever_selected)
+        render_tab_panel(
+            tab,
+            machine,
+            lazy_mount,
+            unmount_on_exit,
+            ever_selected,
+            tabs_field,
+        )
     };
 
     view! {
         <div {..root_attrs}>
             <div {..list_attrs}>
-                <For each=each_tabs key=|tab| tab.key.into_key() children=render_button />
+                <For each=each_tabs key=|tab| (tab.key.into_key(), tab.link.is_some()) children=render_button />
                 <span {..tab_indicator_attrs} style=indicator_style></span>
             </div>
             <For each=each_panels key=|tab| tab.key.into_key() children=render_panel />
@@ -1058,6 +1067,10 @@ fn setup_tab_indicator<K: TabKey>(
     clippy::too_many_lines,
     reason = "Leptos tab rendering keeps related DOM event closures in one helper"
 )]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Leptos keyed For hands owned rows to child renderers, and closures keep cloned fallbacks"
+)]
 fn render_tab_button<K: TabKey>(
     tab: Tab<K>,
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
@@ -1066,7 +1079,7 @@ fn render_tab_button<K: TabKey>(
     reorder_status: RwSignal<String>,
     drag_source: RwSignal<Option<Key>>,
     modality_revision: RwSignal<u64>,
-    _tabs_field: Field<Vec<Tab<K>>>,
+    tabs_field: Field<Vec<Tab<K>>>,
     tab_nodes: TabNodeRegistry,
     modality: &Arc<dyn ModalityContext>,
     on_value_change: Option<Callback<Option<K>>>,
@@ -1088,8 +1101,7 @@ fn render_tab_button<K: TabKey>(
         config,
     ));
 
-    let label = tab.label;
-    let link = tab.link;
+    let link = tab.link.clone();
 
     let prevent_default_on_click = link.is_some();
 
@@ -1125,10 +1137,12 @@ fn render_tab_button<K: TabKey>(
 
     let on_keydown = {
         let key = key.clone();
-        let label_text = tab.label_text.clone();
+        let fallback = tab.clone();
         let modality = Arc::clone(modality);
         move |event: web_sys::KeyboardEvent| {
-            let label_text = label_text.resolve();
+            let label_text = current_tab_by_key(tabs_field, typed_key, &fallback)
+                .label_text
+                .resolve();
             bump_revision(modality_revision);
 
             handle_tab_keydown(
@@ -1201,7 +1215,7 @@ fn render_tab_button<K: TabKey>(
     // remounting the parent row's DOM node.
     let close_button = {
         let key = key.clone();
-        let label_text = tab.label_text.clone();
+        let fallback = tab.clone();
 
         move || {
             let is_closable = config.with_value(|cfg| {
@@ -1217,10 +1231,12 @@ fn render_tab_button<K: TabKey>(
                 return None;
             }
 
-            let label_text = label_text.clone();
+            let fallback = fallback.clone();
             let close_attrs =
                 attr_map_to_leptos_inline_attrs(machine.with_api_snapshot(move |api| {
-                    let label_text = label_text.resolve();
+                    let label_text = current_tab_by_key(tabs_field, typed_key, &fallback)
+                        .label_text
+                        .resolve();
 
                     let mut attrs = api.close_trigger_attrs(&label_text);
 
@@ -1261,6 +1277,7 @@ fn render_tab_button<K: TabKey>(
     };
 
     if let Some(href) = link {
+        let fallback_label = tab.clone();
         Either::Left(view! {
             <a
                 {..tab_attrs}
@@ -1278,11 +1295,12 @@ fn render_tab_button<K: TabKey>(
                 on:dragend=on_dragend
                 draggable=is_draggable
             >
-                {move || label.run()}
+                {move || current_tab_by_key(tabs_field, typed_key, &fallback_label).label.run()}
                 {close_button}
             </a>
         })
     } else {
+        let fallback_label = tab.clone();
         Either::Right(view! {
             <div
                 {..tab_attrs}
@@ -1299,11 +1317,24 @@ fn render_tab_button<K: TabKey>(
                 on:dragend=on_dragend
                 draggable=is_draggable
             >
-                {move || label.run()}
+                {move || current_tab_by_key(tabs_field, typed_key, &fallback_label).label.run()}
                 {close_button}
             </div>
         })
     }
+}
+
+fn current_tab_by_key<K: TabKey>(
+    tabs_field: Field<Vec<Tab<K>>>,
+    typed_key: K,
+    fallback: &Tab<K>,
+) -> Tab<K> {
+    tabs_field
+        .read()
+        .iter()
+        .find(|tab| tab.key == typed_key)
+        .cloned()
+        .unwrap_or_else(|| fallback.clone())
 }
 
 fn tab_anchor_node_ref(tab_nodes: TabNodeRegistry, key: Key) -> NodeRef<html::A> {
@@ -1669,7 +1700,9 @@ fn render_tab_panel<K: TabKey>(
     lazy_mount: Signal<bool>,
     unmount_on_exit: Signal<bool>,
     ever_selected: RwSignal<BTreeSet<Key>>,
+    tabs_field: Field<Vec<Tab<K>>>,
 ) -> impl IntoView + use<K> {
+    let typed_key = tab.key;
     let key_for_attrs = tab.key.into_key();
     let key_for_panel = tab.key.into_key();
 
@@ -1682,7 +1715,7 @@ fn render_tab_panel<K: TabKey>(
         machine.derive(move |api| api.is_tab_selected(&key))
     };
 
-    let panel_view = tab.panel;
+    let fallback_panel = tab;
 
     let panel_body = move || {
         let is_selected = is_selected_memo.get();
@@ -1697,7 +1730,11 @@ fn render_tab_panel<K: TabKey>(
         );
 
         if should_render {
-            Some(panel_view.run())
+            Some(
+                current_tab_by_key(tabs_field, typed_key, &fallback_panel)
+                    .panel
+                    .run(),
+            )
         } else {
             None
         }
