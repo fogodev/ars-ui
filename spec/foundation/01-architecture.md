@@ -598,7 +598,7 @@ The contract is:
 1. **Machine override:** machines whose initial state can carry an active
    lifecycle MUST override `initial_effects` to return the same effect set
    the equivalent transition would produce. Unit machines (`State::Off ↔
-   State::On`) typically need no override.
+State::On`) typically need no override.
 2. **Adapter consumption:** adapters MUST call `Service::take_initial_effects`
    exactly once, on first mount, immediately after constructing the service
    (or after `new_hydrated` for SSR restoration). Each returned effect is
@@ -761,11 +761,11 @@ bounds make that ergonomic without any string round-trip.
 
 **Choosing a typed enum vs `NoEffect` vs `&'static str`:**
 
-| Component shape                                    | `type Effect`                |
-| -------------------------------------------------- | ---------------------------- |
-| Production machine emitting named intents          | bespoke `pub enum Effect`    |
-| Machine that never emits effects (Presence, Form…) | `NoEffect`                   |
-| Internal test machine / prototype / migration      | `&'static str`               |
+| Component shape                                    | `type Effect`             |
+| -------------------------------------------------- | ------------------------- |
+| Production machine emitting named intents          | bespoke `pub enum Effect` |
+| Machine that never emits effects (Presence, Form…) | `NoEffect`                |
+| Internal test machine / prototype / migration      | `&'static str`            |
 
 `&'static str` already implements every required bound, so internal
 test machines and prototypes can use it directly as their `type Effect`
@@ -4590,7 +4590,7 @@ Companion stylesheet classes (e.g., `ars-visually-hidden`, `ars-touch-none`) are
 
 #### 3.2.2 Companion Stylesheet: `ars-base.css`
 
-Static, unchanging styles (visually-hidden, screen-reader-only input, touch-action suppression) are defined as utility classes in a companion stylesheet. This avoids inline styles entirely for these patterns, making them CSP-safe in **all** strategies.
+Static, unchanging styles (visually-hidden, focusable visually-hidden, screen-reader-only input, touch-action suppression) are defined as utility selectors in a companion stylesheet. This avoids inline styles entirely for these patterns, making them CSP-safe in **all** strategies.
 
 ```css
 /* ars-base.css — companion stylesheet for ars-core
@@ -4608,6 +4608,23 @@ Static, unchanging styles (visually-hidden, screen-reader-only input, touch-acti
     padding: 0 !important;
     margin: -1px !important;
     overflow: hidden !important;
+    clip-path: inset(50%) !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    word-wrap: normal !important;
+}
+
+/* Visually hidden until focus, for skip-link style affordances.
+ * Used by: VisuallyHidden (focusable variant, when `is_focusable=true`). */
+[data-ars-visually-hidden-focusable]:not(:focus):not(:focus-within) {
+    position: absolute !important;
+    border: 0 !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip-path: inset(50%) !important;
     clip: rect(0, 0, 0, 0) !important;
     white-space: nowrap !important;
     word-wrap: normal !important;
@@ -4630,7 +4647,7 @@ Static, unchanging styles (visually-hidden, screen-reader-only input, touch-acti
 }
 ```
 
-**Distribution:** `ars-base.css` is published alongside the `ars-core` crate. Applications MUST include it via a `<link>` element. The file is ~500 bytes uncompressed and contains only the three classes above.
+**Distribution:** `ars-base.css` is published alongside the `ars-core` crate. Applications MUST include it via a `<link>` element. The file contains only the static utility selectors above.
 
 For build systems that prefer programmatic asset collection, `ars-core` may also expose an
 opt-in embedded stylesheet constant behind a dedicated feature flag. The sidecar file remains the

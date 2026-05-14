@@ -21,6 +21,12 @@ pub mod dismissable;
 /// Browser E2E harness for ErrorBoundary.
 pub mod error_boundary;
 
+/// Browser E2E harness for Separator.
+pub mod separator;
+
+/// Browser E2E harness for VisuallyHidden.
+pub mod visually_hidden;
+
 /// Runtime options for utility E2E harnesses.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
@@ -61,6 +67,8 @@ pub async fn run(options: Options) -> Result<(), Error> {
 
     let run = async {
         button::run_button_flow(&session.driver, &session.url, adapter).await?;
+        visually_hidden::run_visually_hidden_flow(&session.driver, &session.url, adapter).await?;
+        separator::run_separator_flow(&session.driver, &session.url, adapter).await?;
         dismissable::run_dismissable_flow(&session.driver, &session.url).await?;
         error_boundary::run_error_boundary_flow(&session.driver, &session.url).await
     }

@@ -138,6 +138,39 @@ h2 {
     gap: 12px;
 }
 
+.separator-demo-row {
+    display: flex;
+    align-items: stretch;
+    gap: 12px;
+    min-height: 48px;
+}
+
+[data-ars-scope="separator"][data-ars-part="root"] {
+    border: 0;
+    background: currentColor;
+    color: #cbd5e1;
+}
+
+[data-ars-scope="separator"][data-ars-part="root"][data-ars-orientation="horizontal"],
+[data-ars-scope="separator"][data-ars-part="root"][role="none"] {
+    display: block;
+    width: 100%;
+    height: 1px;
+    margin: 1rem 0;
+}
+
+[data-ars-scope="separator"][data-ars-part="root"][data-ars-orientation="vertical"] {
+    display: inline-block;
+    align-self: stretch;
+    width: 1px;
+    min-height: 2rem;
+    margin: 0 0.25rem;
+}
+
+.separator-as-child {
+    color: #94a3b8;
+}
+
 [data-ars-scope="button"][data-ars-part="root"] {
     border: 1px solid transparent;
     border-radius: 7px;

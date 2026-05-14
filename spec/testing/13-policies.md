@@ -319,7 +319,7 @@ For each component (e.g., Checkbox, Select, Dialog):
   |ars-leptos tests - ars-dioxus tests| <= 2  (tolerance for adapter-specific edge cases)
 ```
 
-`cargo xtask lint adapter-parity` compares test counts per component (not total), with tolerance of |count_leptos - count_dioxus| <= 2 per component.
+`cargo xtask lint adapter-parity` compares test counts per component (not total), with tolerance of |count*leptos - count_dioxus| <= 2 per component. It counts canonical `test*{component}\_\*.rs` files plus component-named adapter integration tests that have been explicitly admitted to the parity gate while the repository migrates older adapter suites onto the canonical naming pattern.
 
 > See [14-ci.md](./14-ci.md) §6.1 for the lint specification — it must match this per-component granularity.
 

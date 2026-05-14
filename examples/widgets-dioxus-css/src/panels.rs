@@ -1,10 +1,12 @@
 use ars_dioxus::{
     navigation::tabs::{Tab, Tabs},
-    prelude::t,
+    prelude::{Orientation, t},
     utility::{
         button::{self, Button, ButtonAsChild},
         dismissable,
         error_boundary::{Boundary, CapturedError},
+        separator::{Separator, SeparatorAsChild},
+        visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
     },
 };
 use dioxus::prelude::*;
@@ -193,6 +195,54 @@ pub(crate) fn UtilityPanel() -> Element {
                         }
                     }
                 }
+            }
+            section { class: "showcase-panel", "aria-labelledby": "visually-hidden",
+                div { class: "panel-heading",
+                    h2 { id: "visually-hidden", {t(WidgetsText::VisuallyHidden)} }
+                    p { class: "panel-note", {t(WidgetsText::VisuallyHiddenDescription)} }
+                }
+                p {
+                    VisuallyHidden { id: "dioxus-css-visually-hidden-label",
+                        {t(WidgetsText::VisuallyHiddenLabel)}
+                    }
+                    {t(WidgetsText::VisuallyHiddenDescription)}
+                }
+                p {
+                    VisuallyHidden { id: "dioxus-css-focusable-skip", is_focusable: true,
+                        a { href: "#variants", {t(WidgetsText::FocusableSkipLink)} }
+                    }
+                }
+                VisuallyHiddenAsChild {
+                    id: "dioxus-css-visually-hidden-as-child",
+                    render: |slot: ars_dioxus::as_child::AsChildRenderProps| rsx! {
+                        span { ..slot.attrs,{t(WidgetsText::AsChildHiddenLabel)} }
+                    },
+                }
+            }
+            section { class: "showcase-panel", "aria-labelledby": "separator",
+                div { class: "panel-heading",
+                    h2 { id: "separator", {t(WidgetsText::SeparatorPrimitive)} }
+                    p { class: "panel-note", {t(WidgetsText::SeparatorDescription)} }
+                }
+                Separator { id: "dioxus-css-separator-horizontal" }
+                div { class: "separator-demo-row",
+                    span { {t(WidgetsText::HorizontalSeparator)} }
+                    Separator {
+                        id: "dioxus-css-separator-vertical",
+                        orientation: Orientation::Vertical,
+                    }
+                    span { {t(WidgetsText::VerticalSeparator)} }
+                }
+                Separator { id: "dioxus-css-separator-decorative", decorative: true }
+                p { class: "panel-note", {t(WidgetsText::DecorativeSeparator)} }
+                SeparatorAsChild {
+                    id: "dioxus-css-separator-as-child",
+                    orientation: Orientation::Vertical,
+                    render: |slot: ars_dioxus::as_child::AsChildRenderProps| rsx! {
+                        div { class: "separator-as-child", ..slot.attrs }
+                    },
+                }
+                p { class: "panel-note", {t(WidgetsText::AsChildSeparator)} }
             }
             section {
                 class: "showcase-panel wide",

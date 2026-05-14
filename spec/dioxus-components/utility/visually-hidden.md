@@ -20,21 +20,35 @@ pub struct VisuallyHiddenProps {
     #[props(optional)]
     pub id: Option<String>,
     #[props(default = false)]
-    pub as_child: bool,
-    #[props(default = false)]
     pub is_focusable: bool,
     pub children: Element,
 }
 
+#[derive(Props, Clone, PartialEq)]
+pub struct VisuallyHiddenAsChildProps {
+    #[props(optional)]
+    pub id: Option<String>,
+    #[props(default = false)]
+    pub is_focusable: bool,
+    pub render: Callback<AsChildRenderProps, Element>,
+}
+
 #[component]
 pub fn VisuallyHidden(props: VisuallyHiddenProps) -> Element
+
+#[component]
+pub fn VisuallyHiddenAsChild(props: VisuallyHiddenAsChildProps) -> Element
 ```
 
-The adapter surfaces the full core prop set: `id`, `as_child`, and `is_focusable`.
+The default component surfaces `id` and `is_focusable`. The core `as_child`
+contract is exposed as an explicit `VisuallyHiddenAsChild` component rather than
+as a bool prop, matching the adapter-wide root-reassignment pattern and avoiding
+opaque child-vnode mutation.
 
 ## 3. Mapping to Core Component Contract
 
-- Props parity: full parity.
+- Props parity: full semantic parity; `as_child` is represented by the explicit
+  `VisuallyHiddenAsChild` adapter component.
 - Structure parity: root wrapper by default, reassigned root under `as_child`.
 
 ## 4. Part Mapping
@@ -62,6 +76,7 @@ This utility has no long-lived machine sync beyond any optional focusable-reveal
 
 | Adapter prop             | Mode                      | Sync trigger     | Machine event / update path      | Visible effect                                             | Notes                                                                                    |
 | ------------------------ | ------------------------- | ---------------- | -------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| explicit `id`            | optional adapter prop     | render time only | included in root attr derivation | emits an `id` only when provided by the consumer           | passive utilities do not generate IDs by default                                         |
 | focusable reveal options | non-reactive adapter prop | render time only | included in root attr derivation | determines whether hidden content becomes visible on focus | post-mount changes should be treated as unsupported unless re-rendered through a wrapper |
 
 ## 8. Registration and Cleanup Contract
@@ -157,7 +172,8 @@ This utility has no long-lived machine sync beyond any optional focusable-reveal
 
 ## 23. Framework-Specific Behavior
 
-Dioxus may use an adapter-local slot helper for `as_child`.
+Dioxus uses the explicit `VisuallyHiddenAsChild` component and an adapter-local
+render callback for root reassignment.
 
 ## 24. Canonical Implementation Sketch
 
@@ -190,9 +206,10 @@ Must preserve accessibility-tree visibility and focusable reveal behavior.
 
 ## 28. Parity Summary and Intentional Deviations
 
-Parity summary: full core parity.
+Parity summary: full semantic core parity.
 
-Intentional deviations: none.
+Intentional deviations: the adapter exposes `as_child` as `VisuallyHiddenAsChild`
+instead of a bool prop.
 
 ## 29. Test Scenarios
 

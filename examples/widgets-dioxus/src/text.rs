@@ -238,6 +238,54 @@ pub(crate) enum WidgetsText {
     #[translate(en_US = "Reset", pt_BR = "Redefinir")]
     Reset,
 
+    #[translate(en_US = "Visually hidden", pt_BR = "Visualmente oculto")]
+    VisuallyHidden,
+
+    #[translate(
+        en_US = "Screen-reader text stays in the DOM while the visual layout remains quiet.",
+        pt_BR = "O texto para leitores de tela permanece no DOM enquanto o leiaute visual fica limpo."
+    )]
+    VisuallyHiddenDescription,
+
+    #[translate(
+        en_US = "Screen reader only label",
+        pt_BR = "Rótulo apenas para leitor de tela"
+    )]
+    VisuallyHiddenLabel,
+
+    #[translate(en_US = "Skip to button variants", pt_BR = "Pular para variantes de botão")]
+    FocusableSkipLink,
+
+    #[translate(
+        en_US = "Hidden label on consumer root",
+        pt_BR = "Rótulo oculto na raiz do consumidor"
+    )]
+    AsChildHiddenLabel,
+
+    #[translate(en_US = "Separator", pt_BR = "Separador")]
+    SeparatorPrimitive,
+
+    #[translate(
+        en_US = "Semantic, vertical, and decorative separators share the same root part.",
+        pt_BR = "Separadores semânticos, verticais e decorativos compartilham a mesma parte raiz."
+    )]
+    SeparatorDescription,
+
+    #[translate(en_US = "Horizontal section break", pt_BR = "Quebra horizontal de seção")]
+    HorizontalSeparator,
+
+    #[translate(en_US = "Vertical divider", pt_BR = "Divisor vertical")]
+    VerticalSeparator,
+
+    #[translate(en_US = "Decorative divider", pt_BR = "Divisor decorativo")]
+    DecorativeSeparator,
+
+    #[translate(
+        en_US = "Consumer-owned divider keeps separator semantics",
+        pt_BR = "O divisor da raiz do consumidor preserva a semântica de separador"
+    )]
+    AsChildSeparator,
+
     #[translate(en_US = "Dismissable primitive", pt_BR = "Primitivo dismissable")]
     DismissablePrimitive,
 

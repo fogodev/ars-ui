@@ -1,7 +1,7 @@
 //! Shared browser process and `WebDriver` lifecycle helpers.
 
 use std::{
-    env,
+    env, fs,
     net::{SocketAddr, TcpStream},
     process::{Child, Command, Stdio},
     thread,
@@ -81,7 +81,7 @@ fn wait_for_tcp_with_child_guard(
     timeout: Duration,
     label: &str,
 ) -> Result<ChildGuard, Error> {
-    let guard = ChildGuard { child };
+    let guard = ChildGuard::new(child);
 
     wait_for_tcp(addr, timeout, label)?;
 
@@ -98,11 +98,22 @@ pub(crate) fn quiet_spawn(command: &mut Command) -> std::io::Result<Child> {
 
 pub(crate) struct ChildGuard {
     child: Child,
+    log_path: Option<std::path::PathBuf>,
 }
 
 impl ChildGuard {
     pub(crate) const fn new(child: Child) -> Self {
-        Self { child }
+        Self {
+            child,
+            log_path: None,
+        }
+    }
+
+    pub(crate) const fn new_with_log(child: Child, log_path: std::path::PathBuf) -> Self {
+        Self {
+            child,
+            log_path: Some(log_path),
+        }
     }
 }
 
@@ -110,6 +121,10 @@ impl Drop for ChildGuard {
     fn drop(&mut self) {
         drop(self.child.kill());
         drop(self.child.wait());
+
+        if let Some(log_path) = &self.log_path {
+            drop(fs::remove_file(log_path));
+        }
     }
 }
 

@@ -181,10 +181,13 @@ Separator
 
 The agnostic-core does not prescribe an element type — that is an adapter
 concern, documented in `spec/leptos-components/utility/separator.md` and
-`spec/dioxus-components/utility/separator.md`. Adapters render `<hr>` for
-content separators (between paragraphs, sections) and `<div>` for menu,
-toolbar, or listbox separators where `<hr>` is semantically inappropriate.
-When `decorative` is true, either element is acceptable.
+`spec/dioxus-components/utility/separator.md`. Adapters render `<hr>` by
+default for content separators (between paragraphs, sections). When a consumer
+needs a generic separator node, such as a menu, toolbar, or listbox separator
+where `<hr>` is semantically inappropriate, the framework adapter exposes an
+explicit root-reassignment component (`SeparatorAsChild`) so the consumer owns
+the element while the core separator attrs remain intact. When `decorative` is
+true, either element is acceptable.
 
 ## 3. Accessibility
 
@@ -216,7 +219,7 @@ When `decorative` is true, either element is acceptable.
 | Decorative   | `decorative`  | `decorative`  | --            | Radix and ars-ui; RA uses role="presentation" implicitly |
 | Element type | --            | --            | `elementType` | RA allows overriding the HTML element                    |
 
-**Gaps:** None. React Aria's `elementType` is handled by ars-ui's adapter element choice (section 2.1).
+**Gaps:** None. React Aria's `elementType` is handled by ars-ui's explicit adapter root-reassignment component (section 2.1).
 
 ### 5.2 Role token for decorative separators
 
@@ -237,5 +240,5 @@ When `decorative` is true, either element is acceptable.
 ### 5.4 Summary
 
 - **Overall:** Full parity.
-- **Divergences:** React Aria exposes `elementType` as a prop; ars-ui handles element choice at the adapter level (section 2.1). React Aria also uses the older `role="presentation"` token for decorative separators where ars-ui (and modern Radix) use `role="none"`.
+- **Divergences:** React Aria exposes `elementType` as a prop; ars-ui handles element choice with an explicit `SeparatorAsChild` adapter component (section 2.1). React Aria also uses the older `role="presentation"` token for decorative separators where ars-ui (and modern Radix) use `role="none"`.
 - **Recommended additions:** None.

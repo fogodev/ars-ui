@@ -111,6 +111,7 @@ a[data-ars-scope="button"] {
     outline-offset: 3px;
 }
 
+.ars-visually-hidden,
 [data-ars-visually-hidden] {
     position: absolute;
     width: 1px;
@@ -121,6 +122,47 @@ a[data-ars-scope="button"] {
     clip: rect(0 0 0 0);
     white-space: nowrap;
     border: 0;
+}
+
+[data-ars-visually-hidden-focusable]:not(:focus):not(:focus-within) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.separator-demo-row {
+    display: flex;
+    align-items: stretch;
+    gap: 12px;
+    min-height: 48px;
+}
+
+[data-ars-scope="separator"][data-ars-part="root"] {
+    border: 0;
+    background: currentColor;
+    color: #cbd5e1;
+}
+
+[data-ars-scope="separator"][data-ars-part="root"][data-ars-orientation="horizontal"],
+[data-ars-scope="separator"][data-ars-part="root"][role="none"] {
+    display: block;
+    width: 100%;
+    height: 1px;
+    margin: 16px 0;
+}
+
+[data-ars-scope="separator"][data-ars-part="root"][data-ars-orientation="vertical"] {
+    display: inline-block;
+    align-self: stretch;
+    width: 1px;
+    min-height: 32px;
+    margin: 0 4px;
 }
 
 .dismissable-card {
