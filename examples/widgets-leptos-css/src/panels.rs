@@ -2,11 +2,13 @@ use std::fmt::{self, Display};
 
 use ars_leptos::{
     navigation::tabs::{Tab, Tabs},
-    prelude::t,
+    prelude::{Orientation, t},
     utility::{
         button::{self, Button, ButtonAsChild},
         dismissable,
         error_boundary::Boundary,
+        separator::{Separator, SeparatorAsChild},
+        visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
     },
 };
 use leptos::prelude::*;
@@ -206,6 +208,50 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                         </Button>
                     </div>
                 </form>
+            </section>
+            <section class="showcase-panel" aria-labelledby="visually-hidden">
+                <div class="panel-heading">
+                    <h2 id="visually-hidden">{t(WidgetsText::VisuallyHidden)}</h2>
+                    <p class="panel-note">{t(WidgetsText::VisuallyHiddenDescription)}</p>
+                </div>
+                <p>
+                    <VisuallyHidden id="leptos-css-visually-hidden-label">
+                        {t(WidgetsText::VisuallyHiddenLabel)}
+                    </VisuallyHidden>
+                    {t(WidgetsText::VisuallyHiddenDescription)}
+                </p>
+                <p>
+                    <VisuallyHidden id="leptos-css-focusable-skip" is_focusable=true>
+                        <a href="#variants">{t(WidgetsText::FocusableSkipLink)}</a>
+                    </VisuallyHidden>
+                </p>
+                <VisuallyHiddenAsChild id="leptos-css-visually-hidden-as-child">
+                    <span>{t(WidgetsText::AsChildHiddenLabel)}</span>
+                </VisuallyHiddenAsChild>
+            </section>
+            <section class="showcase-panel" aria-labelledby="separator">
+                <div class="panel-heading">
+                    <h2 id="separator">{t(WidgetsText::SeparatorPrimitive)}</h2>
+                    <p class="panel-note">{t(WidgetsText::SeparatorDescription)}</p>
+                </div>
+                <Separator id="leptos-css-separator-horizontal" />
+                <div class="separator-demo-row">
+                    <span>{t(WidgetsText::HorizontalSeparator)}</span>
+                    <Separator
+                        id="leptos-css-separator-vertical"
+                        orientation=Orientation::Vertical
+                    />
+                    <span>{t(WidgetsText::VerticalSeparator)}</span>
+                </div>
+                <Separator id="leptos-css-separator-decorative" decorative=true />
+                <p class="panel-note">{t(WidgetsText::DecorativeSeparator)}</p>
+                <SeparatorAsChild
+                    id="leptos-css-separator-as-child"
+                    orientation=Orientation::Vertical
+                >
+                    <div class="separator-as-child"></div>
+                </SeparatorAsChild>
+                <p class="panel-note">{t(WidgetsText::AsChildSeparator)}</p>
             </section>
             <section class="showcase-panel wide" aria-labelledby="dismissable">
                 <div class="panel-heading">

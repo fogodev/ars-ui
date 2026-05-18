@@ -3,11 +3,13 @@ use std::sync::Arc;
 use ars_dioxus::{
     ArsProvider, I18nRegistries, MessageFn, MessagesRegistry,
     navigation::tabs::{self, Tab, Tabs},
-    prelude::{Locale, TabKey, Translate, t},
+    prelude::{Locale, Orientation, TabKey, Translate, t},
     utility::{
         button::{self, Button, ButtonAsChild},
         dismissable,
         error_boundary::{Boundary, CapturedError},
+        separator::{Separator, SeparatorAsChild},
+        visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
     },
 };
 use dioxus::prelude::*;
@@ -131,6 +133,18 @@ enum FixtureText {
     #[translate(en_US = "Reset", pt_BR = "Redefinir")]
     Reset,
 
+    #[translate(en_US = "Screen reader only label", pt_BR = "Rótulo apenas para leitor de tela")]
+    VisuallyHiddenLabel,
+
+    #[translate(en_US = "Skip to button variants", pt_BR = "Pular para variantes de botão")]
+    FocusableSkipLink,
+
+    #[translate(
+        en_US = "Hidden label on consumer root",
+        pt_BR = "Rótulo oculto na raiz do consumidor"
+    )]
+    AsChildHiddenLabel,
+
     #[translate(
         en_US = "Dismiss example region",
         pt_BR = "Dispensar região de exemplo"
@@ -242,9 +256,12 @@ fn NavigationPanel() -> Element {
 
 #[component]
 fn UtilityPanel() -> Element {
-    let mut dismiss_status = use_signal_sync(|| FixtureText::DismissInitial);
+    let dismiss_status = use_signal_sync(|| FixtureText::DismissInitial);
+    let dismiss_status_for_dismiss = dismiss_status;
 
     let dismiss_props = dismissable::Props::new().on_dismiss(move |reason| {
+        let mut dismiss_status = dismiss_status_for_dismiss;
+
         dismiss_status.set(FixtureText::DismissReason {
             reason: format!("{reason:?}"),
         });
@@ -339,6 +356,40 @@ fn UtilityPanel() -> Element {
                         {t(FixtureText::Reset)}
                     }
                 }
+            }
+            section { class: "showcase-panel wide", "aria-labelledby": "utility-primitives",
+                h2 { id: "utility-primitives", "Utility primitives" }
+                p {
+                    VisuallyHidden { id: "dioxus-fixture-visually-hidden-label",
+                        {t(FixtureText::VisuallyHiddenLabel)}
+                    }
+                    "Visible copy with a hidden accessible companion."
+                }
+                p {
+                    VisuallyHidden { id: "dioxus-fixture-focusable-skip", is_focusable: true,
+                        a { href: "#variants", {t(FixtureText::FocusableSkipLink)} }
+                    }
+                }
+                VisuallyHiddenAsChild {
+                    id: "dioxus-fixture-visually-hidden-as-child",
+                    render: |slot: ars_dioxus::as_child::AsChildRenderProps| rsx! {
+                        span { ..slot.attrs, {t(FixtureText::AsChildHiddenLabel)} }
+                    },
+                }
+                Separator { id: "dioxus-fixture-separator-horizontal" }
+                div { class: "separator-demo-row",
+                    span { "Before" }
+                    Separator { id: "dioxus-fixture-separator-vertical", orientation: Orientation::Vertical }
+                    span { "After" }
+                }
+                SeparatorAsChild {
+                    id: "dioxus-fixture-separator-as-child",
+                    orientation: Orientation::Vertical,
+                    render: |slot: ars_dioxus::as_child::AsChildRenderProps| rsx! {
+                        div { class: "separator-as-child", ..slot.attrs }
+                    },
+                }
+                Separator { id: "dioxus-fixture-separator-decorative", decorative: true }
             }
             section {
                 class: "showcase-panel wide",

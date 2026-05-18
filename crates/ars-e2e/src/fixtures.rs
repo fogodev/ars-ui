@@ -1,11 +1,13 @@
 //! Shared internal fixture server helpers for E2E harnesses.
 
 use std::{
-    env,
+    env, fs,
+    fs::OpenOptions,
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
-    time::Duration,
+    process::{Child, Command, Stdio},
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use clap::ValueEnum;
@@ -13,7 +15,7 @@ use thirtyfour::{ChromeCapabilities, ChromiumLikeCapabilities, prelude::*};
 
 use crate::{
     Error,
-    browser::{ChildGuard, maybe_spawn_chromedriver, quiet_spawn, wait_for_tcp, webdriver_url},
+    browser::{ChildGuard, maybe_spawn_chromedriver, wait_for_tcp, webdriver_url},
 };
 
 const DEFAULT_LEPTOS_PORT: u16 = 5200;
@@ -59,10 +61,40 @@ pub(crate) fn spawn_fixture_server(adapter: Adapter, port: u16) -> Result<ChildG
         Error::Command(format!("failed to build {name} server command: {error}"))
     })?;
 
-    let child = quiet_spawn(&mut command)
+    let log_path = fixture_log_path(name, port)?;
+
+    let log_file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&log_path)
+        .map_err(|error| {
+            Error::Command(format!(
+                "failed to open fixture server log {}: {error}",
+                log_path.display()
+            ))
+        })?;
+
+    command
+        .stdout(Stdio::from(log_file.try_clone().map_err(|error| {
+            Error::Command(format!(
+                "failed to clone fixture server log {}: {error}",
+                log_path.display()
+            ))
+        })?))
+        .stderr(Stdio::from(log_file));
+
+    let child = command
+        .spawn()
         .map_err(|error| Error::Command(format!("failed to spawn {name}: {error}")))?;
 
-    Ok(ChildGuard::new(child))
+    wait_for_fixture_server(
+        child,
+        log_path,
+        SocketAddr::from(([127, 0, 0, 1], port)),
+        Duration::from_secs(90),
+        name,
+    )
 }
 
 pub(crate) struct FixtureOptions {
@@ -195,6 +227,69 @@ fn dioxus_command(path: &str, port: u16) -> Result<Command, String> {
     Ok(command)
 }
 
+fn wait_for_fixture_server(
+    mut child: Child,
+    log_path: PathBuf,
+    addr: SocketAddr,
+    timeout: Duration,
+    label: &str,
+) -> Result<ChildGuard, Error> {
+    let deadline = Instant::now() + timeout;
+
+    while Instant::now() < deadline {
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() {
+            return Ok(ChildGuard::new_with_log(child, log_path));
+        }
+
+        if let Some(status) = child.try_wait().map_err(|error| {
+            Error::Command(format!("failed to poll {label} process status: {error}"))
+        })? {
+            let log = fs::read_to_string(&log_path).unwrap_or_else(|error| {
+                format!(
+                    "failed to read fixture server log {}: {error}",
+                    log_path.display()
+                )
+            });
+
+            drop(fs::remove_file(&log_path));
+
+            return Err(Error::Command(format!(
+                "{label} exited before listening on {addr} with status {status}\n\n{log}"
+            )));
+        }
+
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    drop(child.kill());
+    drop(child.wait());
+
+    let log = fs::read_to_string(&log_path).unwrap_or_else(|error| {
+        format!(
+            "failed to read fixture server log {}: {error}",
+            log_path.display()
+        )
+    });
+
+    drop(fs::remove_file(&log_path));
+
+    Err(Error::Timeout(format!(
+        "timed out waiting for {label} at {addr}\n\n{log}"
+    )))
+}
+
+fn fixture_log_path(name: &str, port: u16) -> Result<PathBuf, Error> {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| Error::Command(format!("system clock is before UNIX_EPOCH: {error}")))?
+        .as_nanos();
+
+    Ok(env::temp_dir().join(format!(
+        "ars-ui-e2e-{name}-{port}-{}-{nanos}.log",
+        std::process::id()
+    )))
+}
+
 fn examples_target_dir() -> Result<PathBuf, String> {
     Ok(env::current_dir()
         .map_err(|error| error.to_string())?
@@ -263,5 +358,90 @@ mod tests {
         let caps = chrome_capabilities(false).expect("Chrome capabilities should build");
 
         assert!(!caps.args().contains(&"--headless=new".to_string()));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn fixture_server_wait_reports_early_exit_output() {
+        let log_path = fixture_log_path("test-fixture", 5999).expect("log path should build");
+
+        let log_file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&log_path)
+            .expect("log file should open");
+
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg("echo fixture build failed >&2; exit 42")
+            .stdout(Stdio::from(
+                log_file.try_clone().expect("log file should clone"),
+            ))
+            .stderr(Stdio::from(log_file))
+            .spawn()
+            .expect("test child should spawn");
+
+        let result = wait_for_fixture_server(
+            child,
+            log_path,
+            SocketAddr::from(([127, 0, 0, 1], 9)),
+            Duration::from_secs(1),
+            "test fixture",
+        );
+
+        let Err(error) = result else {
+            panic!("early exit should fail");
+        };
+
+        let message = error.to_string();
+
+        assert!(message.contains("test fixture exited before listening"));
+        assert!(message.contains("fixture build failed"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn fixture_server_wait_reports_timeout_output_and_removes_log() {
+        let log_path =
+            fixture_log_path("test-fixture-timeout", 5998).expect("log path should build");
+
+        let log_file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&log_path)
+            .expect("log file should open");
+
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg("echo fixture still building >&2; while true; do sleep 1; done")
+            .stdout(Stdio::from(
+                log_file.try_clone().expect("log file should clone"),
+            ))
+            .stderr(Stdio::from(log_file))
+            .spawn()
+            .expect("test child should spawn");
+
+        let result = wait_for_fixture_server(
+            child,
+            log_path.clone(),
+            SocketAddr::from(([127, 0, 0, 1], 9)),
+            Duration::from_millis(1),
+            "test fixture",
+        );
+
+        let Err(error) = result else {
+            panic!("timeout should fail");
+        };
+
+        let message = error.to_string();
+
+        assert!(message.contains("timed out waiting for test fixture"));
+        assert!(message.contains("fixture still building"));
+        assert!(
+            !log_path.exists(),
+            "fixture timeout should remove captured log file"
+        );
     }
 }

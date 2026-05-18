@@ -1,15 +1,41 @@
 use ars_dioxus::{
     navigation::tabs::{Tab, Tabs},
-    prelude::t,
+    prelude::{Orientation, t},
     utility::{
         button::{self, Button, ButtonAsChild},
         dismissable,
         error_boundary::{Boundary, CapturedError},
+        separator::{Separator, SeparatorAsChild},
+        visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
     },
 };
 use dioxus::prelude::*;
 
 use crate::text::{NavigationTab, WidgetsText};
+
+const SEPARATOR_STYLE: &str = r#"
+[data-ars-scope="separator"][data-ars-part="root"] {
+    border: 0;
+    background: currentColor;
+    color: #cbd5e1;
+}
+
+[data-ars-scope="separator"][data-ars-part="root"][data-ars-orientation="horizontal"],
+[data-ars-scope="separator"][data-ars-part="root"][role="none"] {
+    display: block;
+    width: 100%;
+    height: 1px;
+    margin: 1rem 0;
+}
+
+[data-ars-scope="separator"][data-ars-part="root"][data-ars-orientation="vertical"] {
+    display: inline-block;
+    align-self: stretch;
+    width: 1px;
+    min-height: 2rem;
+    margin: 0 0.25rem;
+}
+"#;
 
 #[component]
 fn ExampleErrorChild() -> Element {
@@ -72,6 +98,7 @@ pub(crate) fn UtilityPanel() -> Element {
     });
 
     rsx! {
+        style { "{SEPARATOR_STYLE}" }
         div { class: "utility-grid",
             section { "aria-labelledby": "variants",
                 h3 { id: "variants", {t(WidgetsText::ButtonVariants)} }
@@ -162,6 +189,50 @@ pub(crate) fn UtilityPanel() -> Element {
                         }
                     }
                 }
+            }
+            section { "aria-labelledby": "visually-hidden",
+                h3 { id: "visually-hidden", {t(WidgetsText::VisuallyHidden)} }
+                p {
+                    VisuallyHidden { id: "dioxus-visually-hidden-label", {t(WidgetsText::VisuallyHiddenLabel)} }
+                    {t(WidgetsText::VisuallyHiddenDescription)}
+                }
+                p {
+                    VisuallyHidden { id: "dioxus-focusable-skip", is_focusable: true,
+                        a { href: "#variants", {t(WidgetsText::FocusableSkipLink)} }
+                    }
+                }
+                VisuallyHiddenAsChild {
+                    id: "dioxus-visually-hidden-as-child",
+                    render: |slot: ars_dioxus::as_child::AsChildRenderProps| rsx! {
+                        span { ..slot.attrs,{t(WidgetsText::AsChildHiddenLabel)} }
+                    },
+                }
+            }
+            section { "aria-labelledby": "separator",
+                h3 { id: "separator", {t(WidgetsText::SeparatorPrimitive)} }
+                p { {t(WidgetsText::SeparatorDescription)} }
+                Separator { id: "dioxus-separator-horizontal" }
+                div { style: "display: flex; align-items: stretch; gap: 12px; min-height: 48px;",
+                    span { {t(WidgetsText::HorizontalSeparator)} }
+                    Separator {
+                        id: "dioxus-separator-vertical",
+                        orientation: Orientation::Vertical,
+                    }
+                    span { {t(WidgetsText::VerticalSeparator)} }
+                }
+                Separator { id: "dioxus-separator-decorative", decorative: true }
+                p { {t(WidgetsText::DecorativeSeparator)} }
+                SeparatorAsChild {
+                    id: "dioxus-separator-as-child",
+                    orientation: Orientation::Vertical,
+                    render: |slot: ars_dioxus::as_child::AsChildRenderProps| rsx! {
+                        div {
+                            style: "width: 2px; min-height: 32px; background: currentColor;",
+                            ..slot.attrs,
+                        }
+                    },
+                }
+                p { {t(WidgetsText::AsChildSeparator)} }
             }
             section { "aria-labelledby": "dismissable",
                 h3 { id: "dismissable", {t(WidgetsText::DismissablePrimitive)} }

@@ -5,47 +5,49 @@
 /* Visually hidden but accessible to screen readers.
  * Used by: VisuallyHidden (non-focusable variant), LiveAnnouncer. */
 .ars-visually-hidden {
-  position: absolute !important;
-  border: 0 !important;
-  width: 1px !important;
-  height: 1px !important;
-  padding: 0 !important;
-  margin: -1px !important;
-  overflow: hidden !important;
-  clip: rect(0, 0, 0, 0) !important;
-  white-space: nowrap !important;
-  word-wrap: normal !important;
+    position: absolute !important;
+    border: 0 !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip-path: inset(50%) !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    word-wrap: normal !important;
 }
 
 /* Visually hidden until focus, for skip-link style affordances.
  * Used by: VisuallyHidden (focusable variant, when `is_focusable=true`). */
 [data-ars-visually-hidden-focusable]:not(:focus):not(:focus-within) {
-  position: absolute !important;
-  border: 0 !important;
-  width: 1px !important;
-  height: 1px !important;
-  padding: 0 !important;
-  margin: -1px !important;
-  overflow: hidden !important;
-  clip: rect(0, 0, 0, 0) !important;
-  white-space: nowrap !important;
-  word-wrap: normal !important;
+    position: absolute !important;
+    border: 0 !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip-path: inset(50%) !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    word-wrap: normal !important;
 }
 
 /* Screen-reader-only native input (hidden but participates in form submission).
  * Used by: RadioGroup hidden input, Switch hidden input, FileUpload hidden input. */
 .ars-sr-input {
-  position: absolute !important;
-  width: 1px !important;
-  height: 1px !important;
-  overflow: hidden !important;
-  clip: rect(0, 0, 0, 0) !important;
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
 }
 
 /* Suppress browser touch gestures on drag targets.
  * Used by: Slider thumb, Splitter handle, use_move targets. */
 .ars-touch-none {
-  touch-action: none !important;
+    touch-action: none !important;
 }
 
 /* Print media reset — spec/foundation/03-accessibility.md §8.
@@ -55,37 +57,37 @@
  * specific dialog in print) can use a higher-specificity selector or
  * additional @media print rules after this stylesheet. */
 @media print {
-  /* §8.1 — Hide overlays and backdrops (alertdialog remains visible). */
-  [data-ars-scope="dialog"]:not([role="alertdialog"]),
-  [data-ars-scope="drawer"],
-  [data-ars-scope="popover"],
-  [data-ars-scope="tooltip"],
-  [data-ars-scope="toast"],
-  [data-ars-backdrop] {
-    display: none !important;
-  }
+    /* §8.1 — Hide overlays and backdrops (alertdialog remains visible). */
+    [data-ars-scope="dialog"]:not([role="alertdialog"]),
+    [data-ars-scope="drawer"],
+    [data-ars-scope="popover"],
+    [data-ars-scope="tooltip"],
+    [data-ars-scope="toast"],
+    [data-ars-backdrop] {
+        display: none !important;
+    }
 
-  /* §8.3 — Remove scroll-lock side-effects. */
-  html,
-  body {
-    overflow: visible !important;
-    padding-right: 0 !important;
-    height: auto !important;
-  }
+    /* §8.3 — Remove scroll-lock side-effects. */
+    html,
+    body {
+        overflow: visible !important;
+        padding-right: 0 !important;
+        height: auto !important;
+    }
 
-  /* §8.4 — Hide portal root (content should be inlined for print). */
-  #ars-portal-root {
-    display: none !important;
-  }
+    /* §8.4 — Hide portal root (content should be inlined for print). */
+    #ars-portal-root {
+        display: none !important;
+    }
 
-  /* §8.2 — Suppress focus indicators. */
-  [data-ars-focus-visible] {
-    outline: none !important;
-    box-shadow: none !important;
-  }
+    /* §8.2 — Suppress focus indicators. */
+    [data-ars-focus-visible] {
+        outline: none !important;
+        box-shadow: none !important;
+    }
 
-  /* Suppress loading spinners / skeleton screens. */
-  [data-ars-state="loading"] {
-    visibility: hidden;
-  }
+    /* Suppress loading spinners / skeleton screens. */
+    [data-ars-state="loading"] {
+        visibility: hidden;
+    }
 }

@@ -11,6 +11,10 @@ use regex::Regex;
 
 use crate::manifest;
 
+// Component-named adapter integration tests admitted while older adapter suites
+// migrate toward the canonical `test_{component}_*.rs` parity naming pattern.
+const COMPONENT_NAMED_ADAPTER_TEST_FILES: &[&str] = &["separator", "visually_hidden"];
+
 /// Options for adapter parity linting.
 #[derive(Debug, Clone)]
 pub struct AdapterParityOptions {
@@ -402,7 +406,12 @@ fn adapter_test_counts(
     let files = collect_files(dir, |path| {
         path.file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with("test_") && name.ends_with(".rs"))
+            .is_some_and(|name| {
+                (name.starts_with("test_") && name.ends_with(".rs"))
+                    || COMPONENT_NAMED_ADAPTER_TEST_FILES
+                        .iter()
+                        .any(|component| name == format!("{component}.rs"))
+            })
     })?;
 
     let mut counts = BTreeMap::new();
@@ -426,7 +435,12 @@ fn extract_component_from_test_file(
     path: &Path,
     known_components: &BTreeSet<String>,
 ) -> Option<String> {
-    let stem = path.file_stem()?.to_str()?.strip_prefix("test_")?;
+    let stem = path
+        .file_stem()?
+        .to_str()?
+        .strip_prefix("test_")
+        .unwrap_or(path.file_stem()?.to_str()?);
+
     known_components
         .iter()
         .filter(|component| {
@@ -1075,6 +1089,40 @@ mod tests {
 
         assert_eq!(leptos_counts["button"], 2);
         assert_eq!(dioxus_counts["button"], 2);
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn adapter_parity_counts_component_named_integration_tests() {
+        let root = temp_dir("adapter-component-named");
+
+        let leptos = root.join("leptos");
+        let dioxus = root.join("dioxus");
+
+        write(
+            &leptos.join("visually_hidden.rs"),
+            "#[test]\nfn default_root() {}\n#[test]\nfn as_child() {}\n",
+        );
+
+        write(
+            &dioxus.join("visually_hidden.rs"),
+            "#[test]\nfn default_root() {}\n#[test]\nfn as_child() {}\n",
+        );
+
+        let components = BTreeSet::from(["visually_hidden".to_owned()]);
+
+        let leptos_counts = adapter_test_counts(&leptos, &components).expect("leptos counts");
+        let dioxus_counts = adapter_test_counts(&dioxus, &components).expect("dioxus counts");
+
+        assert_eq!(leptos_counts["visually_hidden"], 2);
+        assert_eq!(dioxus_counts["visually_hidden"], 2);
+
+        let (output, failures) =
+            adapter_parity_report(&components, &leptos_counts, &dioxus_counts, 2);
+
+        assert!(failures.is_empty());
+        assert!(output.contains("visually_hidden | 2 | 2 | 0 | OK"));
 
         drop(fs::remove_dir_all(root));
     }

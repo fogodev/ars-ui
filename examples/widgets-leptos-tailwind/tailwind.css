@@ -83,6 +83,19 @@
         @apply rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-md shadow-blue-950/10 transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-blue-950/15;
     }
 
+    [data-ars-scope="separator"][data-ars-part="root"] {
+        @apply border-0 bg-current text-slate-300;
+    }
+
+    [data-ars-scope="separator"][data-ars-part="root"][data-ars-orientation="horizontal"],
+    [data-ars-scope="separator"][data-ars-part="root"][role="none"] {
+        @apply my-4 block h-px w-full;
+    }
+
+    [data-ars-scope="separator"][data-ars-part="root"][data-ars-orientation="vertical"] {
+        @apply mx-1 inline-block min-h-8 w-px self-stretch;
+    }
+
     .locale-switcher {
         @apply mt-5 inline-flex items-center gap-2 rounded-lg border border-slate-300/70 bg-white/80 p-1.5 shadow-lg shadow-slate-900/10;
     }

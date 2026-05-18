@@ -25,8 +25,22 @@ pub struct SeparatorProps {
     pub decorative: bool,
 }
 
+#[derive(Props, Clone, PartialEq)]
+pub struct SeparatorAsChildProps {
+    #[props(optional)]
+    pub id: Option<String>,
+    #[props(default = Orientation::Horizontal)]
+    pub orientation: Orientation,
+    #[props(default = false)]
+    pub decorative: bool,
+    pub render: Callback<AsChildRenderProps, Element>,
+}
+
 #[component]
 pub fn Separator(props: SeparatorProps) -> Element
+
+#[component]
+pub fn SeparatorAsChild(props: SeparatorAsChildProps) -> Element
 ```
 
 ## 3. Mapping to Core Component Contract
@@ -36,27 +50,28 @@ pub fn Separator(props: SeparatorProps) -> Element
 
 ## 4. Part Mapping
 
-| Core part / structure | Required? | Adapter rendering target | Ownership     | Attr source        | Notes                                       |
-| --------------------- | --------- | ------------------------ | ------------- | ------------------ | ------------------------------------------- |
-| `Root`                | required  | `<hr>` or `<div>`        | adapter-owned | `api.root_attrs()` | Exact element depends on semantic use case. |
+| Core part / structure | Required? | Adapter rendering target                                   | Ownership                                                        | Attr source        | Notes                                                                          |
+| --------------------- | --------- | ---------------------------------------------------------- | ---------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------ |
+| `Root`                | required  | `<hr>` by default; consumer child under `SeparatorAsChild` | adapter-owned by default; consumer-owned under root reassignment | `api.root_attrs()` | Use `SeparatorAsChild` when the semantic use case requires a non-`hr` element. |
 
 ## 5. Attr Merge and Ownership Rules
 
-| Target node    | Core attrs                        | Adapter-owned attrs                     | Consumer attrs      | Merge order                                                                     | Ownership notes    |
-| -------------- | --------------------------------- | --------------------------------------- | ------------------- | ------------------------------------------------------------------------------- | ------------------ |
-| separator root | separator attrs from the core API | decorative-vs-semantic structural attrs | consumer root attrs | core orientation and decorative semantics win; `class`/`style` merge additively | adapter-owned root |
+| Target node    | Core attrs                        | Adapter-owned attrs                     | Consumer attrs      | Merge order                                                                     | Ownership notes                                                   |
+| -------------- | --------------------------------- | --------------------------------------- | ------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| separator root | separator attrs from the core API | decorative-vs-semantic structural attrs | consumer root attrs | core orientation and decorative semantics win; `class`/`style` merge additively | adapter-owned by default; consumer-owned under `SeparatorAsChild` |
 
 ## 6. Composition / Context Contract
 
-No context contract.
+No context contract. `SeparatorAsChild` follows the shared `AsChild` root-reassignment rules.
 
 ## 7. Prop Sync and Event Mapping
 
 Separator semantics are init-only render concerns.
 
-| Adapter prop                 | Mode                      | Sync trigger     | Machine event / update path | Visible effect                                   | Notes                       |
-| ---------------------------- | ------------------------- | ---------------- | --------------------------- | ------------------------------------------------ | --------------------------- |
-| decorative/orientation props | non-reactive adapter prop | render time only | root attr derivation        | determines `<hr>` vs generic separator semantics | no post-mount sync expected |
+| Adapter prop                 | Mode                      | Sync trigger     | Machine event / update path | Visible effect                                   | Notes                                            |
+| ---------------------------- | ------------------------- | ---------------- | --------------------------- | ------------------------------------------------ | ------------------------------------------------ |
+| explicit `id`                | optional adapter prop     | render time only | root attr derivation        | emits an `id` only when provided by the consumer | passive utilities do not generate IDs by default |
+| decorative/orientation props | non-reactive adapter prop | render time only | root attr derivation        | determines separator accessibility attrs         | no post-mount sync expected                      |
 
 ## 8. Registration and Cleanup Contract
 
@@ -152,7 +167,8 @@ Separator semantics are init-only render concerns.
 
 ## 23. Framework-Specific Behavior
 
-Dioxus chooses the root element according to content semantics and decoration mode.
+Dioxus renders `<hr>` by default. `SeparatorAsChild` lets consumers own the root
+element when the semantic context requires a generic separator node.
 
 ## 24. Canonical Implementation Sketch
 
@@ -170,7 +186,7 @@ No expanded skeleton beyond the canonical sketch is required for this utility.
 
 ## 26. Adapter Invariants
 
-- The adapter must explicitly preserve when a separator should render as native `<hr>` versus a generic separator node.
+- The adapter must explicitly preserve when a separator should render as native `<hr>` versus a consumer-owned generic separator node.
 - Decorative and semantic separator behavior must remain distinct in both structure and accessibility output.
 
 ## 27. Accessibility and SSR Notes

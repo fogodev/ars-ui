@@ -2,11 +2,13 @@ use std::fmt::{self, Display};
 
 use ars_leptos::{
     navigation::tabs::{Tab, Tabs},
-    prelude::t,
+    prelude::{Orientation, t},
     utility::{
         button::{self, Button, ButtonAsChild},
         dismissable,
         error_boundary::Boundary,
+        separator::{Separator, SeparatorAsChild},
+        visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
     },
 };
 use leptos::prelude::*;
@@ -244,6 +246,64 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                         </Button>
                     </div>
                 </form>
+            </section>
+            <section
+                class="p-5 rounded-lg border shadow-lg border-slate-200 bg-white/85 shadow-slate-900/10"
+                aria-labelledby="visually-hidden"
+            >
+                <div class="flex flex-wrap gap-3 justify-between items-center mb-4">
+                    <h2 id="visually-hidden" class="text-base font-bold text-slate-950">
+                        {t(WidgetsText::VisuallyHidden)}
+                    </h2>
+                    <p class="text-sm text-slate-500">
+                        {t(WidgetsText::VisuallyHiddenDescription)}
+                    </p>
+                </div>
+                <p class="text-sm leading-6 text-slate-600">
+                    <VisuallyHidden id="leptos-tw-visually-hidden-label">
+                        {t(WidgetsText::VisuallyHiddenLabel)}
+                    </VisuallyHidden>
+                    {t(WidgetsText::VisuallyHiddenDescription)}
+                </p>
+                <p class="mt-2 text-sm leading-6">
+                    <VisuallyHidden id="leptos-tw-focusable-skip" is_focusable=true>
+                        <a class="font-semibold text-blue-700 underline" href="#variants">
+                            {t(WidgetsText::FocusableSkipLink)}
+                        </a>
+                    </VisuallyHidden>
+                </p>
+                <VisuallyHiddenAsChild id="leptos-tw-visually-hidden-as-child">
+                    <span>{t(WidgetsText::AsChildHiddenLabel)}</span>
+                </VisuallyHiddenAsChild>
+            </section>
+            <section
+                class="p-5 rounded-lg border shadow-lg border-slate-200 bg-white/85 shadow-slate-900/10"
+                aria-labelledby="separator"
+            >
+                <div class="flex flex-wrap gap-3 justify-between items-center mb-4">
+                    <h2 id="separator" class="text-base font-bold text-slate-950">
+                        {t(WidgetsText::SeparatorPrimitive)}
+                    </h2>
+                    <p class="text-sm text-slate-500">{t(WidgetsText::SeparatorDescription)}</p>
+                </div>
+                <Separator id="leptos-tw-separator-horizontal" />
+                <div class="flex gap-3 items-stretch text-sm min-h-12 text-slate-600">
+                    <span>{t(WidgetsText::HorizontalSeparator)}</span>
+                    <Separator
+                        id="leptos-tw-separator-vertical"
+                        orientation=Orientation::Vertical
+                    />
+                    <span>{t(WidgetsText::VerticalSeparator)}</span>
+                </div>
+                <Separator id="leptos-tw-separator-decorative" decorative=true />
+                <p class="text-sm text-slate-500">{t(WidgetsText::DecorativeSeparator)}</p>
+                <SeparatorAsChild
+                    id="leptos-tw-separator-as-child"
+                    orientation=Orientation::Vertical
+                >
+                    <div class="w-0.5 h-8 bg-current text-slate-300"></div>
+                </SeparatorAsChild>
+                <p class="text-sm text-slate-500">{t(WidgetsText::AsChildSeparator)}</p>
             </section>
             <section
                 class="p-5 rounded-lg border shadow-lg lg:col-span-2 border-slate-200 bg-white/85 shadow-slate-900/10"

@@ -2,16 +2,42 @@ use std::fmt::{self, Display};
 
 use ars_leptos::{
     navigation::tabs::{Tab, Tabs},
-    prelude::t,
+    prelude::{Orientation, t},
     utility::{
         button::{self, Button, ButtonAsChild},
         dismissable,
         error_boundary::Boundary,
+        separator::{Separator, SeparatorAsChild},
+        visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
     },
 };
 use leptos::prelude::*;
 
 use crate::text::{NavigationTab, WidgetsText};
+
+const SEPARATOR_STYLE: &str = r#"
+[data-ars-scope="separator"][data-ars-part="root"] {
+    border: 0;
+    background: currentColor;
+    color: #cbd5e1;
+}
+
+[data-ars-scope="separator"][data-ars-part="root"][data-ars-orientation="horizontal"],
+[data-ars-scope="separator"][data-ars-part="root"][role="none"] {
+    display: block;
+    width: 100%;
+    height: 1px;
+    margin: 1rem 0;
+}
+
+[data-ars-scope="separator"][data-ars-part="root"][data-ars-orientation="vertical"] {
+    display: inline-block;
+    align-self: stretch;
+    width: 1px;
+    min-height: 2rem;
+    margin: 0 0.25rem;
+}
+"#;
 
 #[derive(Debug)]
 struct ExampleError(Signal<String>);
@@ -99,6 +125,7 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
     let error_message = t(WidgetsText::ExampleChildError);
 
     view! {
+        <style>{SEPARATOR_STYLE}</style>
         <div class="utility-grid">
             <section aria-labelledby="variants">
                 <h3 id="variants">{t(WidgetsText::ButtonVariants)}</h3>
@@ -186,6 +213,39 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                         </Button>
                     </div>
                 </form>
+            </section>
+            <section aria-labelledby="visually-hidden">
+                <h3 id="visually-hidden">{t(WidgetsText::VisuallyHidden)}</h3>
+                <p>
+                    <VisuallyHidden id="leptos-visually-hidden-label">
+                        {t(WidgetsText::VisuallyHiddenLabel)}
+                    </VisuallyHidden>
+                    {t(WidgetsText::VisuallyHiddenDescription)}
+                </p>
+                <p>
+                    <VisuallyHidden id="leptos-focusable-skip" is_focusable=true>
+                        <a href="#variants">{t(WidgetsText::FocusableSkipLink)}</a>
+                    </VisuallyHidden>
+                </p>
+                <VisuallyHiddenAsChild id="leptos-visually-hidden-as-child">
+                    <span>{t(WidgetsText::AsChildHiddenLabel)}</span>
+                </VisuallyHiddenAsChild>
+            </section>
+            <section aria-labelledby="separator">
+                <h3 id="separator">{t(WidgetsText::SeparatorPrimitive)}</h3>
+                <p>{t(WidgetsText::SeparatorDescription)}</p>
+                <Separator id="leptos-separator-horizontal" />
+                <div style="display: flex; align-items: stretch; gap: 12px; min-height: 48px;">
+                    <span>{t(WidgetsText::HorizontalSeparator)}</span>
+                    <Separator id="leptos-separator-vertical" orientation=Orientation::Vertical />
+                    <span>{t(WidgetsText::VerticalSeparator)}</span>
+                </div>
+                <Separator id="leptos-separator-decorative" decorative=true />
+                <p>{t(WidgetsText::DecorativeSeparator)}</p>
+                <SeparatorAsChild id="leptos-separator-as-child" orientation=Orientation::Vertical>
+                    <div style="width: 2px; min-height: 32px; background: currentColor;"></div>
+                </SeparatorAsChild>
+                <p>{t(WidgetsText::AsChildSeparator)}</p>
             </section>
             <section aria-labelledby="dismissable">
                 <h3 id="dismissable">{t(WidgetsText::DismissablePrimitive)}</h3>

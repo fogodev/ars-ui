@@ -6,11 +6,13 @@ use std::{
 use ars_leptos::{
     ArsProvider, I18nRegistries, MessageFn, MessagesRegistry,
     navigation::tabs::{self, Tab, Tabs},
-    prelude::{Locale, TabKey, Translate, t},
+    prelude::{Locale, Orientation, TabKey, Translate, t},
     utility::{
         button::{self, Button, ButtonAsChild},
         dismissable,
         error_boundary::Boundary,
+        separator::{Separator, SeparatorAsChild},
+        visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
     },
 };
 use leptos::{mount::mount_to_body, prelude::*};
@@ -133,6 +135,18 @@ enum FixtureText {
 
     #[translate(en_US = "Reset", pt_BR = "Redefinir")]
     Reset,
+
+    #[translate(en_US = "Screen reader only label", pt_BR = "Rótulo apenas para leitor de tela")]
+    VisuallyHiddenLabel,
+
+    #[translate(en_US = "Skip to button variants", pt_BR = "Pular para variantes de botão")]
+    FocusableSkipLink,
+
+    #[translate(
+        en_US = "Hidden label on consumer root",
+        pt_BR = "Rótulo oculto na raiz do consumidor"
+    )]
+    AsChildHiddenLabel,
 
     #[translate(
         en_US = "Inside dismissable content",
@@ -336,6 +350,36 @@ fn UtilityPanel() -> impl IntoView {
                         {t(FixtureText::Reset)}
                     </Button>
                 </form>
+            </section>
+            <section class="showcase-panel wide" aria-labelledby="utility-primitives">
+                <h2 id="utility-primitives">"Utility primitives"</h2>
+                <p>
+                    <VisuallyHidden id="leptos-fixture-visually-hidden-label">
+                        {t(FixtureText::VisuallyHiddenLabel)}
+                    </VisuallyHidden>
+                    "Visible copy with a hidden accessible companion."
+                </p>
+                <p>
+                    <VisuallyHidden id="leptos-fixture-focusable-skip" is_focusable=true>
+                        <a href="#variants">{t(FixtureText::FocusableSkipLink)}</a>
+                    </VisuallyHidden>
+                </p>
+                <VisuallyHiddenAsChild id="leptos-fixture-visually-hidden-as-child">
+                    <span>{t(FixtureText::AsChildHiddenLabel)}</span>
+                </VisuallyHiddenAsChild>
+                <Separator id="leptos-fixture-separator-horizontal" />
+                <div class="separator-demo-row">
+                    <span>"Before"</span>
+                    <Separator
+                        id="leptos-fixture-separator-vertical"
+                        orientation=Orientation::Vertical
+                    />
+                    <span>"After"</span>
+                </div>
+                <SeparatorAsChild id="leptos-fixture-separator-as-child" orientation=Orientation::Vertical>
+                    <div class="separator-as-child"></div>
+                </SeparatorAsChild>
+                <Separator id="leptos-fixture-separator-decorative" decorative=true />
             </section>
             <section class="showcase-panel wide" aria-labelledby="dismissable">
                 <h2 id="dismissable">"Dismissable primitive"</h2>

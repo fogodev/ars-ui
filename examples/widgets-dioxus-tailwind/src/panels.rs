@@ -1,10 +1,12 @@
 use ars_dioxus::{
     navigation::tabs::{Tab, Tabs},
-    prelude::t,
+    prelude::{Orientation, t},
     utility::{
         button::{self, Button, ButtonAsChild},
         dismissable,
         error_boundary::{Boundary, CapturedError},
+        separator::{Separator, SeparatorAsChild},
+        visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
     },
 };
 use dioxus::prelude::*;
@@ -220,6 +222,72 @@ pub(crate) fn UtilityPanel() -> Element {
                         }
                     }
                 }
+            }
+            section {
+                class: "rounded-lg border border-slate-200 bg-white/85 p-5 shadow-lg shadow-slate-900/10",
+                "aria-labelledby": "visually-hidden",
+                div { class: "mb-4 flex flex-wrap items-center justify-between gap-3",
+                    h2 {
+                        id: "visually-hidden",
+                        class: "text-base font-bold text-slate-950",
+                        {t(WidgetsText::VisuallyHidden)}
+                    }
+                    p { class: "text-sm text-slate-500",
+                        {t(WidgetsText::VisuallyHiddenDescription)}
+                    }
+                }
+                p { class: "text-sm leading-6 text-slate-600",
+                    VisuallyHidden { id: "dioxus-tw-visually-hidden-label",
+                        {t(WidgetsText::VisuallyHiddenLabel)}
+                    }
+                    {t(WidgetsText::VisuallyHiddenDescription)}
+                }
+                p { class: "mt-2 text-sm leading-6",
+                    VisuallyHidden { id: "dioxus-tw-focusable-skip", is_focusable: true,
+                        a {
+                            class: "font-semibold text-blue-700 underline",
+                            href: "#variants",
+                            {t(WidgetsText::FocusableSkipLink)}
+                        }
+                    }
+                }
+                VisuallyHiddenAsChild {
+                    id: "dioxus-tw-visually-hidden-as-child",
+                    render: |slot: ars_dioxus::as_child::AsChildRenderProps| rsx! {
+                        span { ..slot.attrs,{t(WidgetsText::AsChildHiddenLabel)} }
+                    },
+                }
+            }
+            section {
+                class: "rounded-lg border border-slate-200 bg-white/85 p-5 shadow-lg shadow-slate-900/10",
+                "aria-labelledby": "separator",
+                div { class: "mb-4 flex flex-wrap items-center justify-between gap-3",
+                    h2 {
+                        id: "separator",
+                        class: "text-base font-bold text-slate-950",
+                        {t(WidgetsText::SeparatorPrimitive)}
+                    }
+                    p { class: "text-sm text-slate-500", {t(WidgetsText::SeparatorDescription)} }
+                }
+                Separator { id: "dioxus-tw-separator-horizontal" }
+                div { class: "flex min-h-12 items-stretch gap-3 text-sm text-slate-600",
+                    span { {t(WidgetsText::HorizontalSeparator)} }
+                    Separator {
+                        id: "dioxus-tw-separator-vertical",
+                        orientation: Orientation::Vertical,
+                    }
+                    span { {t(WidgetsText::VerticalSeparator)} }
+                }
+                Separator { id: "dioxus-tw-separator-decorative", decorative: true }
+                p { class: "text-sm text-slate-500", {t(WidgetsText::DecorativeSeparator)} }
+                SeparatorAsChild {
+                    id: "dioxus-tw-separator-as-child",
+                    orientation: Orientation::Vertical,
+                    render: |slot: ars_dioxus::as_child::AsChildRenderProps| rsx! {
+                        div { class: "h-8 w-0.5 bg-current text-slate-300", ..slot.attrs }
+                    },
+                }
+                p { class: "text-sm text-slate-500", {t(WidgetsText::AsChildSeparator)} }
             }
             section {
                 class: "rounded-lg border border-slate-200 bg-white/85 p-5 shadow-lg shadow-slate-900/10 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-900/15 lg:col-span-2",

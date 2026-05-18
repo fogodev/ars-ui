@@ -2812,6 +2812,7 @@ positioned relative to a parent.
     padding: 0;
     margin: -1px;
     overflow: hidden;
+    clip-path: inset(50%);
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
     border-width: 0;
@@ -2825,6 +2826,7 @@ positioned relative to a parent.
     padding: 0;
     margin: -1px;
     overflow: hidden;
+    clip-path: inset(50%);
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
     border-width: 0;
