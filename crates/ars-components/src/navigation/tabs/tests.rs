@@ -1619,6 +1619,90 @@ fn tab_registration_struct_round_trip() {
 // ────────────────────────────────────────────────────────────────────
 
 #[test]
+fn sync_messages_same_locale_and_messages_is_noop() {
+    let env = Env::default();
+    let messages = Messages::default();
+    let mut service = Service::<Machine>::new(test_props(), &env, &messages);
+
+    let result = service.send(Event::SyncMessages {
+        locale: env.locale,
+        messages,
+    });
+
+    assert!(!result.state_changed);
+    assert!(!result.context_changed);
+}
+
+#[test]
+fn sync_controlled_value_accepts_registered_enabled_key() {
+    let mut service = service_with_tabs(
+        Props {
+            value: Some(Some(key("a"))),
+            ..test_props()
+        },
+        &[key("a"), key("b"), key("c")],
+    );
+
+    service.set_props(Props {
+        value: Some(Some(key("c"))),
+        ..test_props()
+    });
+
+    assert_eq!(service.context().value.get().as_ref(), Some(&key("c")));
+    assert!(service.context().value.is_controlled());
+}
+
+#[test]
+fn sync_controlled_value_plan_preserves_focus_when_focused_tab_valid() {
+    let props = Props {
+        value: Some(Some(key("a"))),
+        ..test_props()
+    };
+    let (_, mut ctx) = Machine::init(&props, &Env::default(), &Messages::default());
+
+    ctx.tabs = vec![key("b")];
+    ctx.focused_tab = Some(key("b"));
+
+    let plan = sync_controlled_value_plan(&State::Focused { tab: key("b") }, &ctx, None);
+
+    assert_eq!(plan.target, None);
+}
+
+#[test]
+fn sync_controlled_value_plan_downgrades_when_focused_tab_disabled() {
+    let props = Props {
+        value: Some(Some(key("a"))),
+        ..test_props()
+    };
+    let (_, mut ctx) = Machine::init(&props, &Env::default(), &Messages::default());
+
+    ctx.tabs = vec![key("b")];
+    ctx.focused_tab = Some(key("b"));
+    ctx.disabled_tabs = BTreeSet::from([key("b")]);
+
+    let plan = sync_controlled_value_plan(&State::Focused { tab: key("b") }, &ctx, Some(key("a")));
+
+    assert_eq!(plan.target, Some(State::Idle));
+}
+
+#[test]
+fn next_reorder_index_public_wrapper_reports_prev_next_and_clamps() {
+    let service = service_with_tabs(
+        Props {
+            reorderable: true,
+            ..test_props()
+        },
+        &[key("a"), key("b"), key("c")],
+    );
+    let api = service.connect(&|_| {});
+
+    assert_eq!(api.next_reorder_index(&key("b"), true), Some(2));
+    assert_eq!(api.next_reorder_index(&key("b"), false), Some(0));
+    assert_eq!(api.next_reorder_index(&key("a"), false), None);
+    assert_eq!(api.next_reorder_index(&key("c"), true), None);
+}
+
+#[test]
 fn step_focus_next_advances_one_position_in_non_loop_mode() {
     // Catches `index + 1 < total` → `index + 1 > total` (step_focus
     // would clamp at the FIRST tab instead of advancing).
