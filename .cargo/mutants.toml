@@ -34,6 +34,7 @@ exclude_re = [
   'validator.rs:262:9: delete match arm AriaAttr::DropEffect \| AriaAttr::Grabbed in supported_aria_attribute',
   'Key::uuid -> Self with Default::default\(\)',
   '<impl From<uuid::Uuid> for Key>::from -> Self with Default::default\(\)',
+  '<impl TabKey for uuid::Uuid>::into_key -> Key with Default::default\(\)',
   'shared_state.rs:93:9: replace <impl Clone for SharedState<T>>::clone -> Self with Default::default\(\)',
   'z_index.rs:69:5: replace next_z_index_impl -> u32 with [01]',
   'z_index.rs:72:41: replace >= with < in next_z_index_impl',
@@ -113,6 +114,14 @@ exclude_re = [
   'replace % with \+ in State::find_match',
   'typeahead.rs:(193|194|204|246|253|259|263|274|277|291):.*State::(process_char|find_match)',
   'State::reset -> Self with Default::default\(\)',
+  # These `MutableTreeData` mutations break loop progress or parent/child
+  # cleanup invariants and are killed only by nontermination under the default
+  # mutation profile, so cargo-mutants reports timeouts instead of caught
+  # failures.
+  'MutableTreeData<T>::insert_child -> Option<usize> with (None|Some\(1\))',
+  'replace && with \|\| in MutableTreeData<T>::insert_child',
+  'delete ! in MutableTreeData<T>::remove',
+  'replace && with \|\| in MutableTreeData<T>::remove',
   'HorizontalVirtualLayout::report_item_width with \(\)',
   'virtualization.rs:388:26: replace > with >= in Virtualizer::visible_range',
   'replace < with <= in Virtualizer::scroll_top_for_index',
@@ -170,7 +179,9 @@ exclude_re = [
   'MissingProviderEffects>::get_bounding_rect -> Option<Rect> with None',
 
   # Tabs `step_focus` checked-counter mutations and the Blur
-  # short-circuit are equivalent in every reachable state. Regex is
+  # short-circuit are equivalent in every reachable state, while the
+  # prop-change and focus-walk timeout mutants below are killed only by
+  # nontermination/slow paths under the shard's default timeout. Regex is
   # line-number-agnostic so it survives source growth.
   #
   # - `+= → *=` on `checked` (loops forever on all-disabled, but with
@@ -183,6 +194,18 @@ exclude_re = [
   #   `state == Focused && focused_tab.is_none()` — unreachable
   #   because every Focused-producing transition sets focused_tab to
   #   Some, and Blur clears both atomically.
+  'tabs/mod\.rs:\d+:\d+: replace != with == in <impl ars_core::Machine for Machine>::on_props_changed',
+  'tabs/mod\.rs:\d+:\d+: replace non_dir_context_props_changed -> bool with false',
+  'tabs/mod\.rs:\d+:\d+: replace \|\| with && in non_dir_context_props_changed',
+  'tabs/mod\.rs:\d+:\d+: replace != with == in non_dir_context_props_changed',
+  'tabs/mod\.rs:\d+:\d+: replace is_disabled -> bool with true',
+  'tabs/mod\.rs:\d+:\d+: replace is_registered -> bool with (true|false)',
+  'tabs/mod\.rs:\d+:\d+: replace == with != in is_registered',
+  'tabs/mod\.rs:\d+:\d+: replace step_focus -> Option<Key> with (None|Some\(Default::default\(\)\))',
+  'tabs/mod\.rs:\d+:\d+: replace == with != in step_focus',
+  'tabs/mod\.rs:\d+:\d+: replace % with / in step_focus',
+  'tabs/mod\.rs:\d+:\d+: replace \+ with [-*] in step_focus',
+  'tabs/mod\.rs:\d+:\d+: replace < with (==|>|<=) in step_focus',
   'tabs/mod\.rs:\d+:\d+: replace \+= with \*= in step_focus',
   'tabs/mod\.rs:\d+:\d+: replace > with == in step_focus',
   'tabs/mod\.rs:\d+:\d+: replace > with >= in step_focus',

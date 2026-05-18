@@ -422,6 +422,17 @@ mod tests {
         assert_eq!(Key::int(99), Key::Int(99));
     }
 
+    #[test]
+    fn tab_key_primitive_impls_preserve_source_identity() {
+        assert_eq!(
+            <&'static str as TabKey>::into_key("settings"),
+            Key::str("settings")
+        );
+        assert_eq!(<u64 as TabKey>::into_key(42), Key::int(42));
+        assert_eq!(<u32 as TabKey>::into_key(7), Key::int(7));
+        assert_eq!(<usize as TabKey>::into_key(3), Key::int(3));
+    }
+
     // --- Boundary / edge cases ---
 
     #[test]
@@ -495,6 +506,12 @@ mod tests {
             let id = sample_uuid_a();
             let key = Key::from(id);
             assert_eq!(key, Key::Uuid(id));
+        }
+
+        #[test]
+        fn tab_key_uuid_impl_preserves_source_identity() {
+            let id = sample_uuid_a();
+            assert_eq!(<uuid::Uuid as TabKey>::into_key(id), Key::uuid(id));
         }
 
         #[test]
