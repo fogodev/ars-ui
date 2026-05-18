@@ -114,14 +114,6 @@ exclude_re = [
   'replace % with \+ in State::find_match',
   'typeahead.rs:(193|194|204|246|253|259|263|274|277|291):.*State::(process_char|find_match)',
   'State::reset -> Self with Default::default\(\)',
-  # These `MutableTreeData` mutations break loop progress or parent/child
-  # cleanup invariants and are killed only by nontermination under the default
-  # mutation profile, so cargo-mutants reports timeouts instead of caught
-  # failures.
-  'MutableTreeData<T>::insert_child -> Option<usize> with (None|Some\(1\))',
-  'replace && with \|\| in MutableTreeData<T>::insert_child',
-  'delete ! in MutableTreeData<T>::remove',
-  'replace && with \|\| in MutableTreeData<T>::remove',
   'HorizontalVirtualLayout::report_item_width with \(\)',
   'virtualization.rs:388:26: replace > with >= in Virtualizer::visible_range',
   'replace < with <= in Virtualizer::scroll_top_for_index',
