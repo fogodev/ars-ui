@@ -34,7 +34,6 @@ exclude_re = [
   'validator.rs:262:9: delete match arm AriaAttr::DropEffect \| AriaAttr::Grabbed in supported_aria_attribute',
   'Key::uuid -> Self with Default::default\(\)',
   '<impl From<uuid::Uuid> for Key>::from -> Self with Default::default\(\)',
-  '<impl TabKey for uuid::Uuid>::into_key -> Key with Default::default\(\)',
   'shared_state.rs:93:9: replace <impl Clone for SharedState<T>>::clone -> Self with Default::default\(\)',
   'z_index.rs:69:5: replace next_z_index_impl -> u32 with [01]',
   'z_index.rs:72:41: replace >= with < in next_z_index_impl',
