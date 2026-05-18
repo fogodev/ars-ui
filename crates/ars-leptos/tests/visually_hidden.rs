@@ -81,3 +81,30 @@ fn visually_hidden_as_child_forwards_attrs_without_wrapper() {
 
     assert!(!html.contains("<span"), "unexpected wrapper span: {html}");
 }
+
+#[test]
+fn visually_hidden_as_child_merges_child_class_with_hidden_class() {
+    let html = view! {
+        <VisuallyHiddenAsChild id="skip-copy">
+            <span class="skip-link">"Screen reader only"</span>
+        </VisuallyHiddenAsChild>
+    }
+    .to_html();
+
+    assert!(
+        html.trim_start().starts_with("<span"),
+        "as-child should render the child root directly: {html}"
+    );
+    assert_eq!(
+        html.matches("class=").count(),
+        1,
+        "class attrs should merge instead of rendering duplicates: {html}"
+    );
+
+    for token in ["skip-link", "ars-visually-hidden"] {
+        assert!(
+            html.contains(token),
+            "missing merged class token {token}: {html}"
+        );
+    }
+}

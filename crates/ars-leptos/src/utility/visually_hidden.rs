@@ -5,16 +5,12 @@
 //! [`VisuallyHiddenAsChild`].
 
 pub use ars_components::utility::visually_hidden::{Api, Part, Props};
-use ars_core::HtmlAttr;
+use ars_core::{AttrMap, AttrValue, HtmlAttr};
 use leptos::{children::TypedChildren, prelude::*, tachys::view::add_attr::AddAnyAttr};
 
 use crate::{as_child::AsChildAttrs, attr_map_to_leptos_inline_attrs};
 
-fn root_attrs(
-    id: Option<String>,
-    is_focusable: bool,
-    as_child: bool,
-) -> Vec<crate::LeptosAttribute> {
+fn root_attr_map(id: Option<String>, is_focusable: bool, as_child: bool) -> AttrMap {
     let mut props = Props::new().is_focusable(is_focusable).as_child(as_child);
 
     if let Some(id) = id.clone() {
@@ -27,7 +23,35 @@ fn root_attrs(
         attrs.set(HtmlAttr::Id, id);
     }
 
-    attr_map_to_leptos_inline_attrs(attrs)
+    attrs
+}
+
+fn root_attrs(
+    id: Option<String>,
+    is_focusable: bool,
+    as_child: bool,
+) -> Vec<crate::LeptosAttribute> {
+    attr_map_to_leptos_inline_attrs(root_attr_map(id, is_focusable, as_child))
+}
+
+fn as_child_root_attrs(id: Option<String>, is_focusable: bool) -> Vec<crate::LeptosAttribute> {
+    use leptos::tachys::html::attribute::any_attribute::IntoAnyAttribute as _;
+
+    let mut attrs = root_attr_map(id, is_focusable, true);
+
+    if !is_focusable {
+        attrs.set(HtmlAttr::Class, AttrValue::None);
+    }
+
+    let mut leptos_attrs = attr_map_to_leptos_inline_attrs(attrs);
+
+    if !is_focusable {
+        leptos_attrs.push(
+            leptos::tachys::html::class::class(("ars-visually-hidden", true)).into_any_attr(),
+        );
+    }
+
+    leptos_attrs
 }
 
 /// Leptos VisuallyHidden component rendered as an adapter-owned `<span>` root.
@@ -75,5 +99,5 @@ where
     let id = id.map(Oco::into_owned);
 
     children.into_inner()()
-        .add_any_attr(AsChildAttrs::from(root_attrs(id, is_focusable, true)).into_inner())
+        .add_any_attr(AsChildAttrs::from(as_child_root_attrs(id, is_focusable)).into_inner())
 }

@@ -48,6 +48,9 @@ async fn visually_hidden_browser_attrs_cover_default_focusable_and_as_child() {
                 <VisuallyHiddenAsChild id="vh-wasm-as-child" is_focusable=true>
                     <a href="#main">"Skip"</a>
                 </VisuallyHiddenAsChild>
+                <VisuallyHiddenAsChild id="vh-wasm-classed">
+                    <span class="skip-link">"Classed hidden copy"</span>
+                </VisuallyHiddenAsChild>
             }
         });
 
@@ -106,6 +109,21 @@ async fn visually_hidden_browser_attrs_cover_default_focusable_and_as_child() {
         Some("visually-hidden")
     );
     assert_eq!(as_child.get_attribute("href").as_deref(), Some("#main"));
+
+    let classed = parent
+        .query_selector("#vh-wasm-classed")
+        .expect("query should succeed")
+        .expect("classed as-child root should exist");
+
+    assert_eq!(classed.tag_name(), "SPAN");
+    assert!(
+        classed.class_list().contains("skip-link"),
+        "consumer class should be preserved"
+    );
+    assert!(
+        classed.class_list().contains("ars-visually-hidden"),
+        "component hidden class should be preserved"
+    );
 
     parent.remove();
 }
