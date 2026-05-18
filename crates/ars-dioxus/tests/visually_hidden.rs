@@ -108,3 +108,75 @@ fn visually_hidden_as_child_forwards_attrs_without_wrapper() {
 
     assert!(!html.contains("<span"), "unexpected wrapper span: {html}");
 }
+
+#[test]
+fn visually_hidden_as_child_merges_child_class_with_hidden_class() {
+    fn app() -> Element {
+        rsx! {
+            VisuallyHiddenAsChild {
+                id: "skip-copy",
+                render: |slot: ars_dioxus::as_child::AsChildRenderProps| rsx! {
+                    span { class: "skip-link", ..slot.attrs, "Screen reader only" }
+                },
+            }
+        }
+    }
+
+    let html = render_app(app);
+
+    assert!(
+        html.trim_start().starts_with("<span"),
+        "as-child should render the callback root directly: {html}"
+    );
+    assert_eq!(
+        html.matches("class=").count(),
+        1,
+        "class attrs should merge instead of rendering duplicates: {html}"
+    );
+
+    for token in ["skip-link", "ars-visually-hidden"] {
+        assert!(
+            html.contains(token),
+            "missing merged class token {token}: {html}"
+        );
+    }
+
+    let cached_html = render_app(app);
+
+    assert_eq!(
+        cached_html.matches("class=").count(),
+        1,
+        "cached template class attrs should still merge: {cached_html}"
+    );
+}
+
+#[test]
+fn visually_hidden_as_child_merges_dynamic_child_class_with_hidden_class() {
+    fn app() -> Element {
+        let class_name = "skip-link";
+
+        rsx! {
+            VisuallyHiddenAsChild {
+                id: "skip-copy",
+                render: move |slot: ars_dioxus::as_child::AsChildRenderProps| rsx! {
+                    span { class: "{class_name}", ..slot.attrs, "Screen reader only" }
+                },
+            }
+        }
+    }
+
+    let html = render_app(app);
+
+    assert_eq!(
+        html.matches("class=").count(),
+        1,
+        "dynamic class attrs should merge instead of rendering duplicates: {html}"
+    );
+
+    for token in ["skip-link", "ars-visually-hidden"] {
+        assert!(
+            html.contains(token),
+            "missing merged class token {token}: {html}"
+        );
+    }
+}

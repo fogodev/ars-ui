@@ -41,6 +41,14 @@ fn visually_hidden_browser_path_constructs_all_render_variants() {
                     }
                 }),
             }
+            VisuallyHiddenAsChild {
+                id: "vh-wasm-classed",
+                render: Callback::new(|slot: AsChildRenderProps| {
+                    rsx! {
+                        span { class: "skip-link", ..slot.attrs, "Classed hidden copy" }
+                    }
+                }),
+            }
         }
     }
 
