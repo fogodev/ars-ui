@@ -1,0 +1,239 @@
+Implement task #205
+
+---
+
+Go with the best outcome possible, disregarding the code and the prose
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Plan: Implement task #205 — Group agnostic core
+
+## Context
+
+GitHub issue #205 (`task: Implement Group agnostic core`) is a **1-point** task in the
+`ars-ui implementation roadmap` project. It delivers the framework-agnostic core of the
+`Group` utility component: a stateless attribute mapper that renders a semantic grouping
+container and exposes a `GroupContext` struct that adapters can publish to descendants for
+`disabled`/`invalid`/`read_only` propagation.
+
+Authoritative spec: `spec/components/utility/group.md` (250 lines, fully specified —
+`tier: stateless`, `foundation_deps: [architecture, accessibility]`, no shared deps).
+
+Status: `Todo` on the project board, no dependencies, no blockers.
+
+## Spec vs. issue discrepancy (RESOLVED — spec wins per CLAUDE.md "spec is the contract")
+
+The issue's "Tests to add first" lists two tests that contradict the spec:
+
+- ❌ `` `label` prop produces `aria-label` ``
+- ❌ `` `label_id` prop produces `aria-labelledby` ``
+
+The spec's `Props` struct (§1.1) has exactly six fields — `id`, `disabled`, `invalid`,
+`read_only`, `role`, `dir` — and **no** `label`/`label_id`. Spec §3.1 explicitly marks
+`aria-label` and `aria-labelledby` as "Consumer-provided", meaning adapter users supply them
+via prop spreading, not via Group props. Inventing `label`/`label_id` props would silently
+diverge from the React Aria parity table (§5.1) which already shows full parity without them.
+
+**Decision:** Implement per spec, drop the two contradicting test bullets, replace with
+spec-aligned tests below.
+
+## Internal spec inconsistency — resolved on accessibility merits
+
+Spec §3.1 prose said: "When `role` is `Presentation`, state attributes (`aria-disabled`,
+`aria-invalid`) are omitted since the grouping has no semantic meaning."
+
+Spec §1.2 code example: unconditionally emits state attributes regardless of `role`.
+
+**Best-outcome decision: always emit state attributes when the prop is true, regardless of
+role.** Reasoning:
+
+1. **WAI-ARIA 1.2 §5.4** explicitly states `aria-*` global states and properties ARE still
+   exposed on elements with `role="presentation"` — the role only suppresses the *implicit*
+   role mapping, not state attributes. The original §3.1 prose was based on a misreading.
+2. **React Aria parity** (§5.1 documents full parity): React Aria emits state attributes
+   unconditionally on its `Group`. Diverging here would silently break parity that the spec
+   commits to.
+3. **`GroupContext` is the load-bearing propagation mechanism**, not root ARIA. The root
+   `aria-disabled`/`aria-invalid`/`aria-readonly` are decorative complements that help AT
+   when the disabled state visually applies to the whole group; gating them on `role`
+   creates asymmetric behavior between the propagation path (always works) and the AT
+   announcement (sometimes works).
+4. **`data-ars-*` styling hooks must always emit** regardless of role so CSS targeting stays
+   consistent. Splitting aria-* vs data-* on role-gated logic introduces a footgun.
+5. **Simpler mental model**: `disabled=true ⇒ aria-disabled on root`, end of story. Fewer
+   branches, fewer edge cases, lower test surface.
+
+**Implementation consequence:** Match the §1.2 code example. **Spec consequence:** Replace
+the §3.1 line "When `role` is `Presentation`, state attributes (`aria-disabled`,
+`aria-invalid`) are omitted..." with a brief note clarifying that state attributes are
+always emitted (and citing the React Aria parity / WAI-ARIA §5.4 justification). Lands in
+the same PR per CLAUDE.md "no spec drift" rule.
+
+## Files
+
+### Create
+
+- **`crates/ars-components/src/utility/group.rs`** — entire component module (Props, GroupRole,
+  GroupContext, Part, Api, ConnectApi impl, and `#[cfg(test)] mod tests`). Template:
+  `crates/ars-components/src/utility/separator.rs` (446 lines, identical structure minus the
+  Context struct). No state machine, no Service, no Messages.
+
+### Modify
+
+- **`crates/ars-components/src/utility/mod.rs`** — add one `pub mod group;` declaration
+  with a doc comment, alphabetically positioned (between `form_submit` and `heading`).
+- **`spec/components/utility/group.md` §3.1** — replace the "When `role` is `Presentation`,
+  state attributes are omitted..." line with a one-line note that state attributes are always
+  emitted, citing WAI-ARIA 1.2 §5.4 and the React Aria parity commitment in §5.1. Keeps the
+  spec internally consistent with the implementation per CLAUDE.md "Spec/code mismatch
+  resolution".
+
+### Snapshots (created by `cargo insta accept` after first test run)
+
+- `crates/ars-components/src/utility/snapshots/ars_components__utility__group__tests__*.snap`
+  (committed as part of this PR; PR gets the `snapshot-reviewed` label per CLAUDE.md).
+
+## Implementation outline
+
+Match `spec/components/utility/group.md` §1.1 and §1.2 line-for-line. Specifically:
+
+1. **`GroupRole`** — `#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]` enum with three
+   variants (`Group` default, `Region`, `Presentation`). Use `#[default]` on `Group`.
+
+2. **`Props`** — `#[derive(Clone, Debug, Default, PartialEq, HasId)]`. The spec writes a manual
+   `impl Default` that produces identical output to derive; use derive for DRY (matches
+   `Separator`'s convention). Builder chain matching separator's pattern: `new()`, `id()`,
+   `disabled()`, `invalid()`, `read_only()`, `role()`, `dir()`. Setters that don't take
+   `String` are `const fn`.
+
+3. **`GroupContext`** — `#[derive(Clone, Debug, PartialEq)]` plain struct. Three `pub bool`
+   fields exactly as spec §1.2. Named `GroupContext` (not `Context`) per foundation 08 §8.4
+   ("Secondary contexts or helpers use descriptive non-prefixed names — `GroupContext`,
+   `QueueContext`, ..."), so consumers write `group::GroupContext`.
+
+4. **`Part`** — `#[derive(ComponentPart)] #[scope = "group"] pub enum Part { Root }`.
+
+5. **`Api`** — `#[derive(Clone, Debug)] pub struct Api { props: Props }`. Methods:
+   `new(Props) -> Self` (`const`), `props() -> &Props`, `id() -> &str`,
+   `group_context() -> GroupContext`, `root_attrs() -> AttrMap`. `root_attrs` follows the
+   spec code: set Id, scope/part data attrs, then a `match` on role emitting
+   `role="group"|"region"|"presentation"`, then three independent `if` blocks emitting
+   `aria-disabled` + `data-ars-disabled`, `aria-invalid` + `data-ars-invalid`,
+   `aria-readonly` + `data-ars-readonly`, then optional `dir`.
+
+6. **`ConnectApi for Api`** — single-arm `match part { Part::Root => self.root_attrs() }`.
+
+## Tests (TDD — write before implementation per workspace convention)
+
+Drop the issue's two label-related test bullets. The replacement coverage that fully
+exercises the spec contract:
+
+**Props / Api / Debug smoke**
+
+- `props_default_is_zero_state` — id="", disabled/invalid/read_only=false, role=Group, dir=None.
+- `props_builder_round_trips` — chained setters set exactly their own fields; `Props::new()
+   == Props::default()`.
+- `props_has_id_derive_round_trips` — `with_id` / `set_id` / `HasId::id` round-trip.
+- `props_clone_and_partial_eq_round_trip`.
+- `props_and_api_debug_impl_is_non_empty`.
+- `api_id_returns_empty_str_for_default_props`.
+- `api_exposes_props_fields`.
+
+**Role mapping** (covers issue bullet 1 & 2)
+
+- `root_default_role_is_group` — `Api::new(Props::default()).root_attrs()` →
+  `role="group"`.
+- `root_role_region_overrides` — `role(GroupRole::Region)` → `role="region"`.
+- `root_role_presentation_overrides` — `role(GroupRole::Presentation)` → `role="presentation"`.
+- `role_branches_produce_different_role_attrs` — cross-branch inequality
+  (defensive regression).
+
+**State propagation via `group_context()`** (covers issue bullet 3)
+
+- `group_context_propagates_disabled` — `Props { disabled: true, ..default }` →
+  `Api::group_context() == GroupContext { disabled: true, invalid: false, read_only: false }`.
+- `group_context_propagates_invalid` — analogous.
+- `group_context_propagates_read_only` — analogous.
+- `group_context_default_is_all_false`.
+
+**Root state attributes**
+
+- `root_disabled_emits_aria_and_data_attrs` — `aria-disabled="true"` + `data-ars-disabled` set.
+- `root_invalid_emits_aria_and_data_attrs` — `aria-invalid="true"` + `data-ars-invalid` set.
+- `root_read_only_emits_aria_and_data_attrs` — `aria-readonly="true"` + `data-ars-readonly` set.
+- `root_state_attrs_omitted_when_false` — none of the three are present in the default-props
+  AttrMap.
+- `root_dir_emits_dir_attr` — `dir(Some(Direction::Rtl))` → `dir="rtl"`; default → no `dir`.
+- `root_id_is_set_to_props_id` — even when empty, follows spec §1.2 code which sets
+  unconditionally.
+
+**ConnectApi dispatch**
+
+- `part_attrs_dispatches_root` — sanity check (scope/part data attrs match).
+- `part_attrs_root_equals_root_attrs` — loop across role × disabled × invalid × read_only ×
+  dir combinations and assert `api.part_attrs(Part::Root) == api.root_attrs()`.
+
+**Snapshots** (one per output-affecting branch group, named per the
+`snapshot_attrs(&attr_map)` convention from separator.rs)
+
+- `group_root_default` (role=Group, no state)
+- `group_root_region` (role=Region, no state)
+- `group_root_presentation` (role=Presentation, no state)
+- `group_root_all_states` (role=Group, disabled+invalid+read_only=true)
+- `group_root_dir_rtl` (role=Group, dir=Rtl)
+
+## Verification
+
+1. `cargo test -p ars-components --lib utility::group` — all named tests pass.
+2. `cargo insta accept` (after first run) — review every `.snap` for spec accuracy, then
+   commit them; PR gets the `snapshot-reviewed` label.
+3. `cargo clippy -p ars-components --lib -- -D warnings` — zero warnings, in particular zero
+   `missing_docs` failures (all public items documented).
+4. `cargo doc -p ars-components --no-deps` — no doc warnings.
+5. `cargo llvm-cov test -p ars-components --text -- utility::group` — line and branch coverage
+   of new code at or above the 90/90 crate threshold; uncovered branches are a hard fail.
+6. **Run `post-implementation-audit` skill** (mandatory per CLAUDE.md §7) — three sequential
+   audits: (a) spec/impl drift incl. the §3.1 prose fix above, (b) iterative "anything else
+   missing?" rounds (≥2), (c) test-coverage audit across unit + snapshot + doctest dimensions.
+   Every finding lands in this PR.
+7. `cargo xci` — full pre-PR gate; must pass before opening the PR.
+8. Present diff to user → after approval, commit, push, open PR with `Closes #205` in the
+   body, attach `snapshot-reviewed` label.
+
+## Out of scope (deliberately deferred to follow-up issues)
+
+- Leptos adapter (`ars-leptos` Group component) — separate task per the project board.
+- Dioxus adapter (`ars-dioxus` Group component) — separate task per the project board.
+- Wiring `GroupContext` consumption into existing child components (Button, TextField,
+  etc.) — separate cross-component tasks once the adapter components exist.
+- Property tests under `crates/ars-components/tests/proptest_state_machines/` — Group has no
+  state transitions, so proptest's signal is low; unit + snapshot tests are the right
+  coverage tier for a stateless attribute mapper.
+
+## Critical files to reference during implementation
+
+| Purpose | Path |
+| --- | --- |
+| Authoritative contract | `spec/components/utility/group.md` |
+| Structural template | `crates/ars-components/src/utility/separator.rs` |
+| Context-struct pattern (more complex example) | `crates/ars-components/src/utility/field/mod.rs` §lines 58–87 |
+| Module registration | `crates/ars-components/src/utility/mod.rs` |
+| Snapshot location convention | `crates/ars-components/src/utility/snapshots/` |
+| Snapshot naming rule | `ars_components__utility__group__tests__{name}.snap` |
+| `Direction::as_html_attr` | `crates/ars-i18n/src/lib.rs:127` |
+| AttrMap / HtmlAttr / AriaAttr | `crates/ars-core/src/connect.rs` |
+| Foundation 08 §8.4 (naming) | `spec/foundation/08-adapter-leptos.md:2127` |
+| Coverage thresholds | `xtask/src/coverage.rs` (ars-components: 90/90) |
+
+---
+
+I reviewed here, commit and push a PR to github
+
+---
+
+Did it finish?
+
+---
+
+Did it finish now?

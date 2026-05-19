@@ -1,0 +1,155 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "dd04cc188196",
+  "session_id": "e797994f-9915-4551-9b97-73a56771e5d9",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-19T05:35:51.024135Z",
+  "branch": "t3code/e16f9343",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "crates/ars-components/src/utility/group.rs",
+    "crates/ars-components/src/utility/mod.rs",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__group__tests__group_root_all_states.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__group__tests__group_root_default.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__group__tests__group_root_dir_rtl.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__group__tests__group_root_presentation.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__group__tests__group_root_region.snap",
+    "crates/ars-components/tests/spec_conformance/utility.rs",
+    "spec/components/utility/group.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "d21a5d9cd157",
+  "token_usage": {
+    "input_tokens": 148,
+    "cache_creation_tokens": 525288,
+    "cache_read_tokens": 13138981,
+    "output_tokens": 72667,
+    "api_call_count": 85
+  },
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "summary": {
+    "intent": "Implement task #205 — the framework-agnostic 'Group' utility component core for the ars-ui project, delivering a stateless attribute mapper with a GroupContext struct for disabled/invalid/read_only propagation to descendants.",
+    "outcome": "Full implementation delivered: group.rs (GroupRole, Props, GroupContext, Part, Api, ConnectApi + 33 unit tests + 5 snapshots), spec corrections, spec-conformance test, and module registration. All 20 cargo xci gates passed, 100% line/region/function coverage, 0 missed mutations, committed and pushed with PR closing #205.",
+    "learnings": {
+      "repo": [
+        "CLAUDE.md designates spec as the authoritative contract — when issue bullets contradict the spec, the spec wins unconditionally.",
+        "Post-implementation-audit is mandatory per CLAUDE.md §7: three phases — (a) spec/impl drift, (b) ≥2 iterative 'anything else?' rounds until two consecutive clean rounds, (c) test coverage + mutation audit.",
+        "Spec edits must land in the same PR as the implementation per the 'no spec drift' rule.",
+        "Secondary context structs use descriptive non-prefixed names per foundation 08 §8.4 — e.g., GroupContext not Context, so consumer writes group::GroupContext.",
+        "Coverage threshold for ars-components is 90/90 (line/region); enforced via cargo llvm-cov.",
+        "Snapshot tests use cargo insta; reviewed snapshots earn the PR label 'snapshot-reviewed'; orphan check runs with --unreferenced=reject.",
+        "Spec-conformance anatomy tests live in crates/ars-components/tests/spec_conformance/utility.rs and must be added for every new component.",
+        "cargo doc errors are pre-existing tech debt and are not part of xci/CI gates — only clippy warnings are hard-failed.",
+        "cargo mutants is used for mutation testing; unviable mutations (const fn / builder-return-self) are a free correctness signal, not a coverage gap.",
+        "Issues must be moved to 'In Progress' on the GitHub project board at implementation start via gh CLI."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/separator.rs",
+          "line": 1,
+          "end_line": 446,
+          "finding": "Canonical template for stateless utility components — same Props/Part/Api/ConnectApi/tests structure used for Group."
+        },
+        {
+          "path": "crates/ars-components/src/utility/field/mod.rs",
+          "line": 58,
+          "end_line": 87,
+          "finding": "Reference pattern for a secondary context struct (FieldContext) — Group's GroupContext follows this shape."
+        },
+        {
+          "path": "crates/ars-i18n/src/lib.rs",
+          "line": 127,
+          "end_line": 127,
+          "finding": "Direction::as_html_attr — used to emit the dir attribute in root_attrs."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/utility.rs",
+          "line": 1,
+          "finding": "Spec-conformance anatomy tests for all utility components live here; a group_anatomy_matches_spec test was missing and had to be added during the post-audit."
+        },
+        {
+          "path": "spec/components/utility/group.md",
+          "finding": "Had two internal contradictions: §3.1 prose said state attrs are omitted for role=Presentation (wrong per WAI-ARIA 1.2 §5.4), and the Api struct showed borrowed &'a Props but impl correctly uses owned Props. Both fixed in the same PR."
+        }
+      ],
+      "workflow": [
+        "cargo xci is the full pre-PR gate (20 checks); must pass with exit code 0 before committing.",
+        "TDD ordering: tests written in the same file as implementation (not a separate test file) per workspace convention.",
+        "cargo insta snapshot workflow: first test run generates .snap.new files → review them manually → cargo insta accept → commit the .snap files.",
+        "cargo mutants -p <crate> -f <file> scopes mutation testing to a single file, keeping runtime practical.",
+        "cargo xtask spec validate checks spec frontmatter for all 340 spec files; cargo test -p xtask --test spec_corpus_compile_snippets verifies code examples in specs actually compile.",
+        "When cargo xci runs in background, its output file stays empty until completion because the recipe pipes through tail -50 — check task status rather than file size to gauge progress.",
+        "wasm-coverage stage for ars-dioxus is the slowest xci gate (~25-30 min); plan accordingly."
+      ]
+    },
+    "friction": [
+      "cargo xci took ~30+ minutes due to wasm-coverage stage compiling ars-dioxus with nightly wasm32 instrument-coverage — the output file appeared empty throughout, making progress opaque.",
+      "GitHub issue #205 contained two contradicting test bullets (label/label_id props) that don't exist in the spec, requiring explicit resolution and user confirmation before proceeding.",
+      "Internal spec contradiction between §1.2 code example and §3.1 prose on state attribute emission for role=Presentation required research into WAI-ARIA 1.2 §5.4 to resolve confidently.",
+      "Post-implementation audit surfaced 7 spec drift issues (including a medium-high severity Api<'a> lifetime mismatch), all requiring spec rewrites in the same PR.",
+      "Snapshot tests always fail on first run by design, requiring a separate cargo insta accept step that could surprise contributors unfamiliar with insta.",
+      "Pre-existing doc warnings in the codebase triggered a false alarm during cargo doc check, requiring investigation to confirm they predated this PR."
+    ],
+    "open_items": [
+      "Leptos adapter: ars-leptos Group component — separate task on the project board.",
+      "Dioxus adapter: ars-dioxus Group component — separate task on the project board.",
+      "Wiring GroupContext consumption into existing child components (Button, TextField, etc.) — blocked on adapter components existing first; separate cross-component tasks.",
+      "Pre-existing cargo doc warnings in the codebase (not in group.rs) — tech debt unrelated to #205, no issue filed."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-19T05:35:01.702517Z",
+    "agent_lines": 987,
+    "agent_removed": 39,
+    "human_added": 23,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1010,
+    "total_lines_changed": 1049,
+    "agent_percentage": 97.80743565300286,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 23,
+      "user_lines_removed": 0,
+      "agent_lines_added": 987,
+      "agent_lines_removed": 39,
+      "user_added_per_file": {
+        "crates/ars-components/src/utility/group.rs": 23
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1010,
+      "agent_lines_removed": 39
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1010,
+      "agent_lines_removed": 39
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1010,
+      "agent_lines_removed": 39
+    }
+  ]
+}
