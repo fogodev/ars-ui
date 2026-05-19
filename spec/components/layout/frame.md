@@ -107,10 +107,10 @@ impl Api {
     }
 
     /// Attributes for the iframe element.
-    /// Panics when `title` is empty because iframe titles are required
-    /// accessible names.
+    /// Panics when `title` is empty or whitespace-only because iframe titles
+    /// are required accessible names.
     pub fn iframe_attrs(&self) -> AttrMap {
-        assert!(!self.props.title.is_empty(), "Frame title must be non-empty");
+        assert!(!self.props.title.trim().is_empty(), "Frame title must be non-empty");
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Iframe.data_attrs();
         attrs.set(scope_attr, scope_val);

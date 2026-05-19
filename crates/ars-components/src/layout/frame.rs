@@ -218,12 +218,12 @@ impl Api {
     ///
     /// # Panics
     ///
-    /// Panics when the frame title is empty, because iframe titles are required
-    /// accessible names.
+    /// Panics when the frame title is empty or whitespace-only, because iframe
+    /// titles are required accessible names.
     #[must_use]
     pub fn iframe_attrs(&self) -> AttrMap {
         assert!(
-            !self.props.title.is_empty(),
+            !self.props.title.trim().is_empty(),
             "Frame title must be non-empty"
         );
 
@@ -408,6 +408,12 @@ mod tests {
     #[should_panic(expected = "Frame title must be non-empty")]
     fn iframe_attrs_requires_non_empty_title() {
         let _attrs = Api::new(Props::new()).iframe_attrs();
+    }
+
+    #[test]
+    #[should_panic(expected = "Frame title must be non-empty")]
+    fn iframe_attrs_rejects_whitespace_only_title() {
+        let _attrs = Api::new(Props::new().title("   ")).iframe_attrs();
     }
 
     #[test]
