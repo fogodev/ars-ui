@@ -283,7 +283,12 @@ fn table_column_header_non_sortable_omits_aria_sort() {
 }
 
 #[test]
-fn table_sort_column_sets_is_sorting() {
+fn table_sort_column_does_not_touch_is_sorting() {
+    // `ctx.is_sorting` is adapter-controlled (Codex review PR #651). The
+    // agnostic core's SortColumn transition only updates `sort_descriptor`
+    // — for async sort indicators, adapters dispatch `Event::SetIsSorting`
+    // explicitly. Synchronous sorts never expose the flag because the
+    // sort completes in the same render frame.
     let mut service = service_with_rows(test_props(), &[]);
 
     assert!(!service.context().is_sorting);
@@ -292,11 +297,10 @@ fn table_sort_column_sets_is_sorting() {
         column: "name".to_string(),
     }));
 
-    assert!(service.context().is_sorting);
-
-    drop(service.send(Event::SyncControlledSortDescriptor(None)));
-
-    assert!(!service.context().is_sorting);
+    assert!(
+        !service.context().is_sorting,
+        "SortColumn must not flip is_sorting; use SetIsSorting from the adapter"
+    );
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1857,14 +1861,18 @@ fn table_sync_controlled_expanded_rows() {
 }
 
 #[test]
-fn table_sync_controlled_sort_descriptor_clears_is_sorting() {
-    let mut service = service_with_rows(test_props(), &[]);
-
-    drop(service.send(Event::SortColumn {
-        column: "name".to_string(),
-    }));
-
-    assert!(service.context().is_sorting);
+fn table_sync_controlled_sort_descriptor_pushes_value() {
+    // `SyncControlledSortDescriptor` mirrors a parent-driven controlled
+    // value into the Bindable. `is_sorting` is no longer coupled to the
+    // sort transition — adapters drive it explicitly via `SetIsSorting`.
+    let mut service = service_with_rows(
+        Props {
+            sort_descriptor: Bindable::controlled(None),
+            ..test_props()
+        },
+        &[],
+    );
+    assert!(service.context().sort_descriptor.get().is_none());
 
     drop(
         service.send(Event::SyncControlledSortDescriptor(Some(SortDescriptor {
@@ -1873,7 +1881,8 @@ fn table_sync_controlled_sort_descriptor_clears_is_sorting() {
         }))),
     );
 
-    assert!(!service.context().is_sorting);
+    let descriptor = service.context().sort_descriptor.get().clone();
+    assert_eq!(descriptor.as_ref().map(|d| d.column.as_str()), Some("name"),);
 }
 
 #[test]
@@ -2213,4 +2222,256 @@ fn table_part_attrs_dispatcher_covers_every_variant() {
             "expected non-empty AttrMap for the dispatched part"
         );
     }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 18. Codex review (PR #651) — regression guards for findings that
+//      surfaced in the first automated review pass.
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn codex_sync_props_copies_updated_disabled_keys_into_context() {
+    // Codex P1 (thread PRRT_kwDORp4enM6DRmcb).
+    // SyncProps must mirror Props → Context for the non-Bindable fields.
+    let service = service_with_rows(test_props_multi(), &[key("r1"), key("r2")]);
+    assert!(service.context().disabled_keys.is_empty());
+
+    let mut new_disabled = BTreeSet::new();
+    new_disabled.insert(key("r1"));
+    let new_props = Props {
+        selection_mode: selection::Mode::Multiple,
+        disabled_keys: new_disabled,
+        ..test_props_multi()
+    };
+
+    let mut service = service;
+    drop(service.set_props(new_props));
+
+    assert!(
+        service.context().disabled_keys.contains(&key("r1")),
+        "SyncProps must copy disabled_keys from new props into Context"
+    );
+}
+
+#[test]
+fn codex_sync_props_copies_updated_interactive_flag() {
+    // Codex P1 — SyncProps interactivity update.
+    let service = service_with_rows(test_props(), &[key("r1")]);
+    assert!(!service.context().interactive);
+
+    let new_props = Props {
+        interactive: true,
+        ..test_props()
+    };
+    let mut service = service;
+    drop(service.set_props(new_props));
+
+    assert!(service.context().interactive);
+}
+
+#[test]
+fn codex_toggle_row_materializes_set_all_for_individual_deselect() {
+    // Codex P1 (thread PRRT_kwDORp4enM6DRmce).
+    // After a bulk SelectAll that writes `Set::All` (AllData mode), a
+    // ToggleRow on an individual row must deselect that row only,
+    // materializing the All set against ctx.rows.
+    let mut service = service_with_rows(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            select_all_mode: SelectAllMode::AllData { total_count: 3 },
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    drop(service.send(Event::SelectAll));
+    assert!(matches!(
+        service.context().selected_rows.get(),
+        selection::Set::All
+    ));
+
+    drop(service.send(Event::ToggleRow(key("r2"))));
+
+    let sel = service.context().selected_rows.get().clone();
+    assert!(
+        sel.contains(&key("r1")),
+        "r1 should still be selected after toggle-off r2"
+    );
+    assert!(!sel.contains(&key("r2")), "r2 must be deselected");
+    assert!(sel.contains(&key("r3")), "r3 should still be selected");
+}
+
+#[test]
+fn codex_deselect_row_materializes_set_all_for_individual_deselect() {
+    // Codex P1 (thread PRRT_kwDORp4enM6DRmc7).
+    // Same as toggle but via the explicit `DeselectRow` event — used by
+    // adapter checkbox uncheck handlers.
+    let mut service = service_with_rows(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            select_all_mode: SelectAllMode::AllData { total_count: 3 },
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    drop(service.send(Event::SelectAll));
+
+    drop(service.send(Event::DeselectRow(key("r2"))));
+
+    let sel = service.context().selected_rows.get().clone();
+    assert!(sel.contains(&key("r1")));
+    assert!(!sel.contains(&key("r2")));
+    assert!(sel.contains(&key("r3")));
+}
+
+#[test]
+fn codex_on_props_changed_dispatches_sync_events() {
+    // Codex P1 (thread PRRT_kwDORp4enM6DRmck).
+    // `Machine::on_props_changed` must emit the appropriate sync events
+    // when props differ between renders. We verify via `Service::set_props`
+    // which calls `on_props_changed` and then dispatches the returned
+    // events.
+    let old_props = test_props_multi();
+    let mut disabled = BTreeSet::new();
+    disabled.insert(key("r1"));
+    let new_props = Props {
+        disabled_keys: disabled.clone(),
+        dir: Direction::Rtl,
+        ..test_props_multi()
+    };
+
+    let service = service_with_rows(old_props, &[key("r1"), key("r2")]);
+    let mut service = service;
+    drop(service.set_props(new_props));
+
+    // `SetDirection` must have flowed.
+    assert_eq!(service.context().dir, Direction::Rtl);
+    // `SyncProps` must have copied the new disabled_keys.
+    assert_eq!(service.context().disabled_keys, disabled);
+}
+
+#[test]
+fn codex_select_all_in_all_visible_mode_materializes_current_rows() {
+    // Codex P1 (thread PRRT_kwDORp4enM6DRmc3).
+    // Default `SelectAllMode::AllVisible` must NOT write `Set::All` —
+    // that variant means "every row in the dataset including unloaded
+    // ones". Visible-only select-all materializes the registered row set.
+    let mut service = service_with_rows(test_props_multi(), &[key("r1"), key("r2")]);
+
+    drop(service.send(Event::SelectAll));
+
+    let sel = service.context().selected_rows.get().clone();
+    assert!(
+        !matches!(sel, selection::Set::All),
+        "AllVisible select-all must not write Set::All — that means dataset-wide"
+    );
+    assert!(sel.contains(&key("r1")));
+    assert!(sel.contains(&key("r2")));
+}
+
+#[test]
+fn codex_select_all_in_all_data_mode_writes_set_all() {
+    // Codex P1 (companion to the previous test). `AllData` mode keeps
+    // the `Set::All` semantics — adapter knows the total row count and
+    // wants the global-select-with-exclusions pattern.
+    let mut service = service_with_rows(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            select_all_mode: SelectAllMode::AllData { total_count: 1_204 },
+            ..test_props()
+        },
+        &[key("r1"), key("r2")],
+    );
+
+    drop(service.send(Event::SelectAll));
+
+    assert!(matches!(
+        service.context().selected_rows.get(),
+        selection::Set::All
+    ));
+}
+
+#[test]
+fn codex_sort_column_does_not_leave_is_sorting_stuck() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DRmcs).
+    // The agnostic `SortColumn` transition must not leave `is_sorting`
+    // stuck `true` in the synchronous-sort path. The flag becomes
+    // adapter-controlled via `SetIsSorting(bool)`.
+    let mut service = service_with_rows(test_props(), &[]);
+    drop(service.send(Event::SortColumn {
+        column: "name".to_string(),
+    }));
+
+    assert!(
+        !service.context().is_sorting,
+        "SortColumn must not set is_sorting in the synchronous path; adapters opt-in via SetIsSorting"
+    );
+}
+
+#[test]
+fn codex_set_is_sorting_event_toggles_flag() {
+    // Codex P2 follow-up — the new `SetIsSorting` event lets adapters
+    // drive the async-sort indicator explicitly.
+    let mut service = service_with_rows(test_props(), &[]);
+    assert!(!service.context().is_sorting);
+
+    drop(service.send(Event::SetIsSorting(true)));
+    assert!(service.context().is_sorting);
+
+    drop(service.send(Event::SetIsSorting(false)));
+    assert!(!service.context().is_sorting);
+}
+
+#[test]
+fn codex_select_all_attrs_gated_on_mode_multiple() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DRmcy).
+    // `select_all_attrs` must return an empty AttrMap in Single / None
+    // selection modes — even when `SelectAllMode::AllVisible` is set —
+    // because `Event::SelectAll` is rejected in those modes and the
+    // checkbox would render but never work.
+    let service = service_with_rows(test_props_single(), &[key("r1")]);
+    let attrs = service.connect(&|_| {}).select_all_attrs(&[&key("r1")]);
+
+    assert!(
+        attrs.iter_attrs().next().is_none(),
+        "select_all_attrs must short-circuit when selection_mode != Multiple, got {attrs:?}"
+    );
+}
+
+#[test]
+fn codex_select_all_attrs_empty_when_mode_none() {
+    let service = service_with_rows(test_props(), &[key("r1")]);
+    let attrs = service.connect(&|_| {}).select_all_attrs(&[&key("r1")]);
+
+    assert!(attrs.iter_attrs().next().is_none());
+}
+
+#[test]
+fn codex_set_rows_rebases_focused_cell_when_row_moves_index() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DRmdB).
+    // When the focused row stays in the new row list but moves to a new
+    // index (sort/filter/reorder), `focused_cell.1` must update to track
+    // the new position so adapter focus wiring targets the right cell.
+    let mut service = service_with_rows(
+        Props {
+            interactive: true,
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    drop(service.send(Event::FocusCell {
+        row: key("r2"),
+        col: 1,
+        row_index: 1,
+    }));
+    assert_eq!(service.context().focused_cell, Some((1, 1)));
+
+    // Reorder: r2 was at index 1, now at index 0.
+    drop(service.send(Event::SetRows(vec![key("r2"), key("r3"), key("r1")])));
+
+    assert_eq!(
+        service.context().focused_cell,
+        Some((1, 0)),
+        "SetRows must rebase focused_cell row-index to the new position"
+    );
+    assert_eq!(service.context().focused_row.as_ref(), Some(&key("r2")));
 }

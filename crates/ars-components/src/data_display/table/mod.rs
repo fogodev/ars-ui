@@ -199,6 +199,15 @@ pub enum Event {
     /// Toggle the async loading indicator (§1.6).
     SetLoading(bool),
 
+    /// Toggle the async-sort indicator (§1.1.1).
+    ///
+    /// Adapters dispatch `SetIsSorting(true)` before kicking off an async
+    /// sort against their data source, and `SetIsSorting(false)` when the
+    /// sort completes. The agnostic core never touches this flag itself
+    /// because synchronous sorts complete in the same render frame and
+    /// the indicator would never be visible.
+    SetIsSorting(bool),
+
     /// Update the cached width for `column`. Clamps to
     /// [`Context::min_column_width`] and upserts the entry on first
     /// resize. Records `column` as the currently resizing column.
@@ -655,20 +664,43 @@ fn restrict_selection_to_rows(set: &selection::Set, rows: &[Key]) -> selection::
     }
 }
 
+/// Materializes [`selection::Set::All`] against the registered row set
+/// so that `selection::State::deselect` (which is a no-op on `Set::All`)
+/// can subsequently drop individual keys. Used by [`Event::ToggleRow`]
+/// and [`Event::DeselectRow`] to keep individual-deselect workable after
+/// a bulk select-all.
+fn materialize_all_against_rows(state: &selection::State, rows: &[Key]) -> selection::State {
+    if !matches!(state.selected_keys, selection::Set::All) {
+        return state.clone();
+    }
+    let materialized: BTreeSet<Key> = rows
+        .iter()
+        .filter(|k| !state.is_disabled(k))
+        .cloned()
+        .collect();
+    let new_keys = match materialized.len() {
+        0 => selection::Set::Empty,
+        1 => selection::Set::Single(materialized.into_iter().next().unwrap()),
+        _ => selection::Set::Multiple(materialized),
+    };
+    selection::State {
+        selected_keys: new_keys,
+        ..state.clone()
+    }
+}
+
 /// Toggle helper that avoids the `Collection` generic on
 /// [`selection::State::toggle`]. The Table machine intentionally does
-/// not own a `Collection`, so it computes toggle directly from the
-/// `selection::Set::All` case.
+/// not own a `Collection`, so it computes toggle directly. Callers
+/// pre-materialize [`selection::Set::All`] via
+/// [`materialize_all_against_rows`] so `deselect` can drop individual
+/// keys.
 fn toggle_state_without_collection(state: &selection::State, key: Key) -> selection::State {
     if state.is_disabled(&key) {
         return state.clone();
     }
 
     if state.is_selected(&key) {
-        // `selection::State::deselect_from_all` requires a Collection;
-        // expand `All` to `Multiple(rows \ {key})` below by caller —
-        // here we simply call `deselect` which handles `Set::All` by
-        // returning the state unchanged. The caller pre-handles `All`.
         state.deselect(&key)
     } else {
         state.select(key)
@@ -813,7 +845,7 @@ impl ars_core::Machine for Machine {
         _state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match event {
             // ── Sort ─────────────────────────────────────────────────
@@ -841,7 +873,10 @@ impl ars_core::Machine for Machine {
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.sort_descriptor.set(new_descriptor);
-                    ctx.is_sorting = true;
+                    // `ctx.is_sorting` is adapter-controlled — see
+                    // `Event::SetIsSorting`. Synchronous sorts complete
+                    // in the same render frame as `SortColumn`, so the
+                    // agnostic core does not flip the flag itself.
                 }))
             }
 
@@ -901,7 +936,14 @@ impl ars_core::Machine for Machine {
                 let key = key.clone();
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let new_state = ctx.selection_state.deselect(&key);
+                    // `Set::All` is opaque to `selection::State::deselect`,
+                    // so materialize it against the registered row list
+                    // first — otherwise individual checkbox uncheck would
+                    // silently keep every row selected after a bulk
+                    // select-all.
+                    let materialized =
+                        materialize_all_against_rows(&ctx.selection_state, &ctx.rows);
+                    let new_state = materialized.deselect(&key);
 
                     ctx.selected_rows.set(new_state.selected_keys.clone());
                     ctx.selection_state = new_state;
@@ -929,7 +971,12 @@ impl ars_core::Machine for Machine {
                 let key = key.clone();
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let new_state = toggle_state_without_collection(&ctx.selection_state, key);
+                    // Materialize `Set::All` so the toggle-off path can
+                    // actually drop the individual key. See
+                    // `materialize_all_against_rows` for the rationale.
+                    let materialized =
+                        materialize_all_against_rows(&ctx.selection_state, &ctx.rows);
+                    let new_state = toggle_state_without_collection(&materialized, key);
 
                     ctx.selected_rows.set(new_state.selected_keys.clone());
                     ctx.selection_state = new_state;
@@ -941,15 +988,45 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                if matches!(ctx.selected_rows.get(), selection::Set::All) {
+                // Materialization differs by SelectAll strategy:
+                //
+                // - `AllData { total_count }` → write `Set::All`, the
+                //   global "every row in the dataset, including unloaded
+                //   ones" semantics. The Bindable stays at `Set::All`
+                //   until adapter exclusion logic kicks in (§5.2).
+                // - `AllVisible` (default) → write `Multiple(ctx.rows)`,
+                //   only the rows currently registered. `Set::All` here
+                //   would falsely report unloaded rows as selected.
+                // - `None` → no SelectAll affordance; reject the event.
+                let materialize_as_all = match &ctx.select_all_mode {
+                    SelectAllMode::AllData { .. } => true,
+                    SelectAllMode::AllVisible => false,
+                    SelectAllMode::None => return None,
+                };
+
+                let already_all = matches!(ctx.selected_rows.get(), selection::Set::All);
+                if materialize_as_all && already_all {
                     return None;
                 }
 
-                Some(TransitionPlan::context_only(|ctx: &mut Context| {
-                    let new_state = ctx.selection_state.select_all();
-
-                    ctx.selected_rows.set(new_state.selected_keys.clone());
-                    ctx.selection_state = new_state;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let new_keys = if materialize_as_all {
+                        selection::Set::All
+                    } else {
+                        let visible: BTreeSet<Key> = ctx
+                            .rows
+                            .iter()
+                            .filter(|k| !ctx.disabled_keys.contains(k))
+                            .cloned()
+                            .collect();
+                        match visible.len() {
+                            0 => selection::Set::Empty,
+                            1 => selection::Set::Single(visible.into_iter().next().unwrap()),
+                            _ => selection::Set::Multiple(visible),
+                        }
+                    };
+                    ctx.selection_state.selected_keys = new_keys.clone();
+                    ctx.selected_rows.set(new_keys);
                 }))
             }
 
@@ -1098,12 +1175,22 @@ impl ars_core::Machine for Machine {
                         .cloned()
                         .collect::<BTreeSet<_>>();
 
-                    if let Some(focused) = ctx.focused_row.clone()
-                        && !rows.contains(&focused)
-                    {
-                        ctx.focused_row = None;
-                        ctx.focused_cell = None;
-                        ctx.focused_col = None;
+                    // Rebase focus against the new row list:
+                    //   * row disappeared → clear focus entirely
+                    //   * row remained but moved index → update
+                    //     `focused_cell.1` so adapter focus wiring
+                    //     targets the right cell after sort / filter /
+                    //     reorder
+                    if let Some(focused) = ctx.focused_row.clone() {
+                        if let Some(new_index) = rows.iter().position(|k| k == &focused) {
+                            if let Some((col, _old_index)) = ctx.focused_cell {
+                                ctx.focused_cell = Some((col, new_index));
+                            }
+                        } else {
+                            ctx.focused_row = None;
+                            ctx.focused_cell = None;
+                            ctx.focused_col = None;
+                        }
                     }
 
                     ctx.selected_rows.set(restricted_selection.clone());
@@ -1154,6 +1241,16 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
+            Event::SetIsSorting(value) => {
+                if ctx.is_sorting == *value {
+                    return None;
+                }
+                let value = *value;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.is_sorting = value;
+                }))
+            }
+
             // ── Column resize ────────────────────────────────────────
             Event::ColumnResize { column, width } => {
                 let min = ctx.min_column_width;
@@ -1177,24 +1274,57 @@ impl ars_core::Machine for Machine {
             }
 
             // ── Prop sync ────────────────────────────────────────────
-            Event::SyncProps => Some(TransitionPlan::context_only(|ctx: &mut Context| {
-                let disabled = ctx.disabled_keys.clone();
+            // Mirror every non-Bindable Props field into Context, then
+            // re-prune selection / expansion against the (possibly new)
+            // disabled set. Bindable fields are pushed via the
+            // `SyncControlled*` events.
+            Event::SyncProps => {
+                let new_disabled = props.disabled_keys.clone();
+                let new_selection_mode = props.selection_mode;
+                let new_selection_behavior = props.selection_behavior;
+                let new_interactive = props.interactive;
+                let new_sticky_header = props.sticky_header;
+                let new_escape_key_behavior = props.escape_key_behavior;
+                let new_select_all_mode = props.select_all_mode.clone();
+                let new_min_column_width = props.min_column_width;
+                let new_column_resize_step = props.column_resize_step;
+                let new_virtual_scrolling = props.virtual_scrolling;
+                let new_total_rows = props.total_rows;
+                let new_total_cols = props.total_cols;
+                let new_disallow_empty_selection = props.disallow_empty_selection;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.disabled_keys = new_disabled.clone();
+                    ctx.selection_mode = new_selection_mode;
+                    ctx.selection_state.mode = new_selection_mode;
+                    ctx.selection_state.behavior = new_selection_behavior;
+                    ctx.selection_state.disabled_keys = new_disabled.clone();
+                    ctx.interactive = new_interactive;
+                    ctx.sticky_header = new_sticky_header;
+                    ctx.escape_key_behavior = new_escape_key_behavior;
+                    ctx.select_all_mode = new_select_all_mode;
+                    ctx.min_column_width = new_min_column_width;
+                    ctx.column_resize_step = new_column_resize_step;
+                    ctx.virtual_scrolling = new_virtual_scrolling;
+                    ctx.total_rows = new_total_rows;
+                    ctx.total_cols = new_total_cols;
+                    ctx.disallow_empty_selection = new_disallow_empty_selection;
 
-                let pruned_selection =
-                    prune_selection_against(&ctx.selected_rows.get().clone(), &disabled);
-
-                let pruned_expansion = ctx
-                    .expanded_rows
-                    .get()
-                    .iter()
-                    .filter(|k| !disabled.contains(k))
-                    .cloned()
-                    .collect::<BTreeSet<_>>();
-
-                ctx.selected_rows.set(pruned_selection.clone());
-                ctx.selection_state.selected_keys = pruned_selection;
-                ctx.expanded_rows.set(pruned_expansion);
-            })),
+                    // Re-prune selection / expansion against the new
+                    // disabled set.
+                    let pruned_selection =
+                        prune_selection_against(&ctx.selected_rows.get().clone(), &new_disabled);
+                    let pruned_expansion: BTreeSet<Key> = ctx
+                        .expanded_rows
+                        .get()
+                        .iter()
+                        .filter(|k| !new_disabled.contains(k))
+                        .cloned()
+                        .collect();
+                    ctx.selected_rows.set(pruned_selection.clone());
+                    ctx.selection_state.selected_keys = pruned_selection;
+                    ctx.expanded_rows.set(pruned_expansion);
+                }))
+            }
 
             Event::SyncControlledSelectedRows(value) => {
                 let v = value.clone();
@@ -1242,6 +1372,61 @@ impl ars_core::Machine for Machine {
             send,
         }
     }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        let mut events = Vec::new();
+
+        // `dir` flows through `SetDirection`, not `SyncProps`, so a
+        // runtime-resolved direction (e.g. one the adapter installed via
+        // `SetDirection` after resolving `Direction::Auto`) is not
+        // overwritten by an unrelated prop delta. `SetDirection` is
+        // idempotent.
+        if old.dir != new.dir {
+            events.push(Event::SetDirection(new.dir));
+        }
+
+        if non_dir_context_props_changed(old, new) {
+            events.push(Event::SyncProps);
+        }
+
+        // Each controlled Bindable has its own sync event because the
+        // outer `Option` is the controlled-mode toggle and the inner
+        // value carries the new content.
+        if old.selected_rows != new.selected_rows {
+            events.push(Event::SyncControlledSelectedRows(new.selected_rows.clone()));
+        }
+        if old.expanded_rows != new.expanded_rows {
+            events.push(Event::SyncControlledExpandedRows(new.expanded_rows.clone()));
+        }
+        if old.sort_descriptor.is_controlled()
+            && old.sort_descriptor.get() != new.sort_descriptor.get()
+        {
+            events.push(Event::SyncControlledSortDescriptor(
+                new.sort_descriptor.get().clone(),
+            ));
+        }
+
+        events
+    }
+}
+
+/// Returns `true` when any non-Bindable, non-direction Props field
+/// changed between renders. Drives the [`Event::SyncProps`] dispatch
+/// inside [`Machine::on_props_changed`].
+fn non_dir_context_props_changed(old: &Props, new: &Props) -> bool {
+    old.selection_mode != new.selection_mode
+        || old.selection_behavior != new.selection_behavior
+        || old.disabled_keys != new.disabled_keys
+        || old.disallow_empty_selection != new.disallow_empty_selection
+        || old.escape_key_behavior != new.escape_key_behavior
+        || old.select_all_mode != new.select_all_mode
+        || old.interactive != new.interactive
+        || old.sticky_header != new.sticky_header
+        || old.min_column_width.to_bits() != new.min_column_width.to_bits()
+        || old.column_resize_step.to_bits() != new.column_resize_step.to_bits()
+        || old.virtual_scrolling != new.virtual_scrolling
+        || old.total_rows != new.total_rows
+        || old.total_cols != new.total_cols
 }
 
 /// Returns `true` when deselecting `key` would leave the selection empty.
@@ -1625,6 +1810,14 @@ impl<'a> Api<'a> {
     #[must_use]
     pub fn select_all_attrs(&self, all_row_ids: &[&Key]) -> AttrMap {
         let mut attrs = AttrMap::new();
+
+        // `Event::SelectAll` is only honored in `Mode::Multiple`. Rendering
+        // the checkbox in other modes would surface a control the user
+        // can click but the machine will reject — so short-circuit here
+        // and let adapters render only when the mode supports it.
+        if self.ctx.selection_mode != selection::Mode::Multiple {
+            return attrs;
+        }
 
         if matches!(self.ctx.select_all_mode, SelectAllMode::None) {
             return attrs;

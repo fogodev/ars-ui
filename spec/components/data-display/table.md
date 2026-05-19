@@ -33,7 +33,7 @@ Table sort state is managed exclusively through `Context.sort_descriptor: Bindab
 - No state/context synchronization logic needed
 - The Bindable pattern handles controlled vs uncontrolled sort seamlessly
 
-**Visual Feedback**: For components that need to show a sorting indicator (e.g., spinner while async sort completes), use `Context.is_sorting: bool`:
+**Visual Feedback**: For components that need to show a sorting indicator (e.g., spinner while async sort completes), use `Context.is_sorting: bool`. The flag is **adapter-controlled** via `Event::SetIsSorting(bool)` — the agnostic core never touches it inside `Event::SortColumn` because synchronous sorts complete in the same render frame as the transition and the indicator would never be visible. Adapters running async sort dispatch `SetIsSorting(true)` before kicking off the reorder and `SetIsSorting(false)` when the data source has finished:
 
 ```rust
 /// Context for the Table
@@ -49,10 +49,13 @@ pub struct TableContext {
 
 When a sort column header is clicked:
 
-1. Update `sort_descriptor` via Bindable (handles controlled/uncontrolled)
-2. Set `is_sorting = true`
-3. Emit `on_sort_change` callback
-4. When sort completes (sync or async): set `is_sorting = false`
+1. The machine dispatches `SortColumn { column }`, which updates
+   `sort_descriptor` via Bindable (handles controlled/uncontrolled).
+2. Adapters running an **async** sort dispatch `SetIsSorting(true)`
+   before kicking off the data reorder, then `SetIsSorting(false)`
+   when the reorder completes. The agnostic core does not flip
+   `is_sorting` itself.
+3. The adapter emits its own `on_sort_change` callback.
 
 ### 1.2 Events
 
@@ -76,6 +79,7 @@ When a sort column header is clicked:
 | `SetDirection`                 | `Direction`                                  | Replace `Context::dir`. Idempotent.                                    |
 | `SetRowCounts`                 | `{ total_rows: usize, total_cols: usize }`   | Replace virtualized total row / column counts.                         |
 | `SetLoading`                   | `bool`                                       | Toggle the async loading indicator (§1.6).                             |
+| `SetIsSorting`                 | `bool`                                       | Toggle the async-sort indicator (§1.1.1). Adapter-controlled.          |
 | `ColumnResize`                 | `{ column: String, width: f64 }`             | Update the cached column width. Clamps to `Props::min_column_width`.   |
 | `ColumnResizeEnd`              | `column: String`                             | Clear `Context::resizing_column` when it matches `column`.             |
 | `SyncProps`                    | —                                            | Re-apply non-Bindable `Props` fields and re-prune selection/expansion. |
@@ -549,7 +553,10 @@ impl ars_core::Machine for Machine {
                 };
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.sort_descriptor.set(next_descriptor);
-                    ctx.is_sorting = true;
+                    // `ctx.is_sorting` is adapter-controlled — see
+                    // `Event::SetIsSorting`. The agnostic core does not
+                    // flip the flag inside `SortColumn` because synchronous
+                    // sorts complete in the same render frame.
                 }))
                 // Sort change notification is handled by the adapter layer.
             }
@@ -619,13 +626,43 @@ impl ars_core::Machine for Machine {
 
             Event::SelectAll => {
                 if ctx.selection_mode != selection::Mode::Multiple { return None; }
-                if matches!(ctx.selected_rows.get(), selection::Set::All) { return None; }
-                Some(TransitionPlan::context_only(|ctx| {
-                    let new_state = ctx.selection_state.select_all();
-                    ctx.selected_rows.set(new_state.selected_keys.clone());
-                    ctx.selection_state = new_state;
-                    // LiveAnnouncer: announce "All rows selected"
-                }))
+                // Materialization differs by `SelectAllMode`:
+                //   * `AllData { .. }` → write `Set::All` (the global
+                //     "every row in the dataset including unloaded ones"
+                //     semantics, paired with `BulkSelection` exclusion
+                //     tracking in §5.2).
+                //   * `AllVisible` → write `Multiple(ctx.rows)` so
+                //     unloaded rows aren't falsely reported as selected.
+                //   * `None` → reject the event entirely.
+                match &ctx.select_all_mode {
+                    SelectAllMode::None => return None,
+                    SelectAllMode::AllData { .. } => {
+                        if matches!(ctx.selected_rows.get(), selection::Set::All) {
+                            return None;
+                        }
+                        Some(TransitionPlan::context_only(|ctx| {
+                            ctx.selection_state.selected_keys = selection::Set::All;
+                            ctx.selected_rows.set(selection::Set::All);
+                        }))
+                    }
+                    SelectAllMode::AllVisible => {
+                        let visible: BTreeSet<Key> = ctx
+                            .rows
+                            .iter()
+                            .filter(|k| !ctx.disabled_keys.contains(k))
+                            .cloned()
+                            .collect();
+                        Some(TransitionPlan::context_only(move |ctx| {
+                            let new_keys = match visible.len() {
+                                0 => selection::Set::Empty,
+                                1 => selection::Set::Single(visible.into_iter().next().unwrap()),
+                                _ => selection::Set::Multiple(visible),
+                            };
+                            ctx.selection_state.selected_keys = new_keys.clone();
+                            ctx.selected_rows.set(new_keys);
+                        }))
+                    }
+                }
             }
 
             Event::DeselectAll => {
