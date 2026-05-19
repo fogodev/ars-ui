@@ -946,6 +946,21 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
+                // Materializing `Set::All` only makes sense when the
+                // mode's `Set::All` actually represents "every visible
+                // row" — i.e. `SelectAllMode::AllVisible`. In `AllData`
+                // the `Set::All` carries the "every row in the dataset
+                // (incl. unloaded)" semantic that adapters track with
+                // §5.2 `BulkSelection`; the agnostic core must NOT
+                // downgrade it to `Multiple(ctx.rows)` because that
+                // would drop every unloaded row from selection on the
+                // first individual deselect.
+                if matches!(ctx.select_all_mode, SelectAllMode::AllData { .. })
+                    && matches!(ctx.selected_rows.get(), selection::Set::All)
+                {
+                    return None;
+                }
+
                 let key = key.clone();
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
@@ -953,13 +968,19 @@ impl ars_core::Machine for Machine {
                     // so materialize it against the registered row list
                     // first — otherwise individual checkbox uncheck would
                     // silently keep every row selected after a bulk
-                    // select-all.
+                    // select-all. The `AllData` short-circuit above
+                    // protects against incorrect materialization in
+                    // paginated mode.
                     let materialized =
                         materialize_all_against_rows(&ctx.selection_state, &ctx.rows);
                     let new_state = materialized.deselect(&key);
 
                     ctx.selected_rows.set(new_state.selected_keys.clone());
-                    ctx.selection_state = new_state;
+                    ctx.selection_state.selected_keys = ctx.selected_rows.get().clone();
+                    // Preserve anchor/focus/mode/behavior from the
+                    // materialized state.
+                    ctx.selection_state.anchor_key = new_state.anchor_key;
+                    ctx.selection_state.focused_key = new_state.focused_key;
                 }))
             }
 
@@ -981,12 +1002,25 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
+                // Same `AllData` preservation rule as `DeselectRow` —
+                // toggling off an individual row in paginated mode would
+                // otherwise downgrade `Set::All` → `Multiple(ctx.rows)`.
+                let is_toggling_off_set_all =
+                    is_currently_selected && matches!(ctx.selected_rows.get(), selection::Set::All);
+                if is_toggling_off_set_all
+                    && matches!(ctx.select_all_mode, SelectAllMode::AllData { .. })
+                {
+                    return None;
+                }
+
                 let key = key.clone();
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     // Materialize `Set::All` so the toggle-off path can
                     // actually drop the individual key. See
                     // `materialize_all_against_rows` for the rationale.
+                    // (Safe in `AllVisible`; gated out above for
+                    // `AllData`.)
                     let materialized =
                         materialize_all_against_rows(&ctx.selection_state, &ctx.rows);
                     let new_state = toggle_state_without_collection(&materialized, key);
@@ -1545,6 +1579,63 @@ fn would_empty_after_deselect(set: &selection::Set, key: &Key) -> bool {
     }
 }
 
+/// Walks `all_row_ids` starting from `current` (exclusive) in the
+/// indicated direction (`forward = true` for next, `false` for
+/// previous) and returns the first non-disabled row key. Returns `None`
+/// when no enabled row exists in that direction.
+fn next_enabled_row(
+    all_row_ids: &[&Key],
+    current: usize,
+    disabled: &BTreeSet<Key>,
+    forward: bool,
+) -> Option<Key> {
+    next_enabled_row_index(all_row_ids, current, disabled, forward).map(|i| all_row_ids[i].clone())
+}
+
+/// Index-returning variant of [`next_enabled_row`], used by
+/// `on_cell_keydown` which also needs the index to populate
+/// `Event::FocusCell::row_index`.
+fn next_enabled_row_index(
+    all_row_ids: &[&Key],
+    current: usize,
+    disabled: &BTreeSet<Key>,
+    forward: bool,
+) -> Option<usize> {
+    if forward {
+        ((current + 1)..all_row_ids.len()).find(|&i| !disabled.contains(all_row_ids[i]))
+    } else {
+        (0..current)
+            .rev()
+            .find(|&i| !disabled.contains(all_row_ids[i]))
+    }
+}
+
+/// Returns the first or last enabled row key. `from_start = true` walks
+/// forward from index 0; `false` walks backward from the end (for
+/// `End` / `Ctrl+End`). Returns `None` when every row is disabled.
+fn first_enabled_row(
+    all_row_ids: &[&Key],
+    disabled: &BTreeSet<Key>,
+    from_start: bool,
+) -> Option<Key> {
+    first_enabled_row_index(all_row_ids, disabled, from_start).map(|i| all_row_ids[i].clone())
+}
+
+/// Index variant of [`first_enabled_row`].
+fn first_enabled_row_index(
+    all_row_ids: &[&Key],
+    disabled: &BTreeSet<Key>,
+    from_start: bool,
+) -> Option<usize> {
+    if from_start {
+        (0..all_row_ids.len()).find(|&i| !disabled.contains(all_row_ids[i]))
+    } else {
+        (0..all_row_ids.len())
+            .rev()
+            .find(|&i| !disabled.contains(all_row_ids[i]))
+    }
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Api
 // ────────────────────────────────────────────────────────────────────
@@ -1683,6 +1774,12 @@ impl<'a> Api<'a> {
 
         if self.ctx.interactive {
             attrs.set(HtmlAttr::Role, "grid");
+            // Advertise multi-select on the grid root so assistive tech
+            // doesn't read the table as single-select when the user can
+            // actually pick multiple rows.
+            if self.ctx.selection_mode == selection::Mode::Multiple {
+                attrs.set(HtmlAttr::Aria(AriaAttr::MultiSelectable), "true");
+            }
         } else {
             attrs.set(HtmlAttr::Role, "table");
         }
@@ -1820,9 +1917,21 @@ impl<'a> Api<'a> {
     }
 
     /// Returns row attributes for a row that acts as a link.
+    /// Convenience for non-virtualized callers; passes `row_index = 0`.
+    /// Virtualized tables MUST call [`Self::row_link_attrs_indexed`] so
+    /// `aria-rowindex` reflects the real position.
     #[must_use]
     pub fn row_link_attrs(&self, row_id: &Key, href: &str) -> AttrMap {
-        let mut attrs = self.row_attrs(row_id);
+        self.row_link_attrs_indexed(row_id, href, 0)
+    }
+
+    /// Returns row attributes for a linked row at the supplied row
+    /// index. Use this variant inside a virtualized list so the
+    /// `aria-rowindex` adapter output reflects the row's true position
+    /// in the dataset (not always `1`).
+    #[must_use]
+    pub fn row_link_attrs_indexed(&self, row_id: &Key, href: &str, row_index: usize) -> AttrMap {
+        let mut attrs = self.row_attrs_indexed(row_id, row_index);
 
         attrs.set(HtmlAttr::Data("ars-href"), href.to_owned());
 
@@ -2115,30 +2224,31 @@ impl<'a> Api<'a> {
         match data.key {
             KeyboardKey::ArrowDown => {
                 if let Some(idx) = current_idx
-                    && let Some(next) = all_row_ids.get(idx + 1)
+                    && let Some(next) =
+                        next_enabled_row(all_row_ids, idx, &self.ctx.disabled_keys, true)
                 {
-                    (self.send)(Event::FocusRow((*next).clone()));
+                    (self.send)(Event::FocusRow(next));
                 }
             }
 
             KeyboardKey::ArrowUp => {
                 if let Some(idx) = current_idx
-                    && idx > 0
-                    && let Some(prev) = all_row_ids.get(idx - 1)
+                    && let Some(prev) =
+                        next_enabled_row(all_row_ids, idx, &self.ctx.disabled_keys, false)
                 {
-                    (self.send)(Event::FocusRow((*prev).clone()));
+                    (self.send)(Event::FocusRow(prev));
                 }
             }
 
             KeyboardKey::Home => {
-                if let Some(first) = all_row_ids.first() {
-                    (self.send)(Event::FocusRow((*first).clone()));
+                if let Some(first) = first_enabled_row(all_row_ids, &self.ctx.disabled_keys, true) {
+                    (self.send)(Event::FocusRow(first));
                 }
             }
 
             KeyboardKey::End => {
-                if let Some(last) = all_row_ids.last() {
-                    (self.send)(Event::FocusRow((*last).clone()));
+                if let Some(last) = first_enabled_row(all_row_ids, &self.ctx.disabled_keys, false) {
+                    (self.send)(Event::FocusRow(last));
                 }
             }
 
@@ -2203,45 +2313,50 @@ impl<'a> Api<'a> {
 
             KeyboardKey::ArrowDown => {
                 if let Some(idx) = current_row_idx
-                    && let Some(next) = all_row_ids.get(idx + 1)
+                    && let Some(next_idx) =
+                        next_enabled_row_index(all_row_ids, idx, &self.ctx.disabled_keys, true)
                 {
                     (self.send)(Event::FocusCell {
-                        row: (*next).clone(),
+                        row: all_row_ids[next_idx].clone(),
                         col,
-                        row_index: idx + 1,
+                        row_index: next_idx,
                     });
                 }
             }
 
             KeyboardKey::ArrowUp => {
                 if let Some(idx) = current_row_idx
-                    && idx > 0
-                    && let Some(prev) = all_row_ids.get(idx - 1)
+                    && let Some(prev_idx) =
+                        next_enabled_row_index(all_row_ids, idx, &self.ctx.disabled_keys, false)
                 {
                     (self.send)(Event::FocusCell {
-                        row: (*prev).clone(),
+                        row: all_row_ids[prev_idx].clone(),
                         col,
-                        row_index: idx - 1,
+                        row_index: prev_idx,
                     });
                 }
             }
 
             KeyboardKey::Home if data.ctrl_key => {
-                if let Some(first) = all_row_ids.first() {
+                if let Some(first_idx) =
+                    first_enabled_row_index(all_row_ids, &self.ctx.disabled_keys, true)
+                {
                     (self.send)(Event::FocusCell {
-                        row: (*first).clone(),
+                        row: all_row_ids[first_idx].clone(),
                         col: 0,
-                        row_index: 0,
+                        row_index: first_idx,
                     });
                 }
             }
 
             KeyboardKey::End if data.ctrl_key => {
-                if let Some(last) = all_row_ids.last() {
+                if let Some(last_idx) =
+                    first_enabled_row_index(all_row_ids, &self.ctx.disabled_keys, false)
+                {
                     (self.send)(Event::FocusCell {
-                        row: (*last).clone(),
+                        row: all_row_ids[last_idx].clone(),
                         col: col_count.saturating_sub(1),
-                        row_index: all_row_ids.len().saturating_sub(1),
+                        row_index: last_idx,
                     });
                 }
             }

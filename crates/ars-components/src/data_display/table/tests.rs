@@ -2272,59 +2272,23 @@ fn codex_sync_props_copies_updated_interactive_flag() {
     assert!(service.context().interactive);
 }
 
-#[test]
-fn codex_toggle_row_materializes_set_all_for_individual_deselect() {
-    // Codex P1 (thread PRRT_kwDORp4enM6DRmce).
-    // After a bulk SelectAll that writes `Set::All` (AllData mode), a
-    // ToggleRow on an individual row must deselect that row only,
-    // materializing the All set against ctx.rows.
-    let mut service = service_with_rows(
-        Props {
-            selection_mode: selection::Mode::Multiple,
-            select_all_mode: SelectAllMode::AllData { total_count: 3 },
-            ..test_props()
-        },
-        &[key("r1"), key("r2"), key("r3")],
-    );
-    drop(service.send(Event::SelectAll));
-    assert!(matches!(
-        service.context().selected_rows.get(),
-        selection::Set::All
-    ));
-
-    drop(service.send(Event::ToggleRow(key("r2"))));
-
-    let sel = service.context().selected_rows.get().clone();
-    assert!(
-        sel.contains(&key("r1")),
-        "r1 should still be selected after toggle-off r2"
-    );
-    assert!(!sel.contains(&key("r2")), "r2 must be deselected");
-    assert!(sel.contains(&key("r3")), "r3 should still be selected");
-}
-
-#[test]
-fn codex_deselect_row_materializes_set_all_for_individual_deselect() {
-    // Codex P1 (thread PRRT_kwDORp4enM6DRmc7).
-    // Same as toggle but via the explicit `DeselectRow` event — used by
-    // adapter checkbox uncheck handlers.
-    let mut service = service_with_rows(
-        Props {
-            selection_mode: selection::Mode::Multiple,
-            select_all_mode: SelectAllMode::AllData { total_count: 3 },
-            ..test_props()
-        },
-        &[key("r1"), key("r2"), key("r3")],
-    );
-    drop(service.send(Event::SelectAll));
-
-    drop(service.send(Event::DeselectRow(key("r2"))));
-
-    let sel = service.context().selected_rows.get().clone();
-    assert!(sel.contains(&key("r1")));
-    assert!(!sel.contains(&key("r2")));
-    assert!(sel.contains(&key("r3")));
-}
+// Note: the original pass-1 tests
+// `codex_toggle_row_materializes_set_all_for_individual_deselect` and
+// `codex_deselect_row_materializes_set_all_for_individual_deselect`
+// were superseded by the round-4 contracts:
+//
+//   * `AllData` mode preserves `Set::All` — see
+//     `codex_round4_toggle_row_keeps_set_all_in_all_data_mode` and
+//     `codex_round4_deselect_row_keeps_set_all_in_all_data_mode`.
+//   * `AllVisible` mode never writes `Set::All` from `Event::SelectAll`
+//     — it materializes to `Multiple(ctx.rows)` at the SelectAll step
+//     so there's nothing left to materialize on deselect.
+//
+// The `materialize_all_against_rows` helper is retained as a defensive
+// net for the edge case where `Set::All` enters selection via a
+// controlled `selected_rows` Bindable that subsequently exits
+// controlled mode — that path is exercised by the round-3 tests on
+// `SyncControlledSelectedRows`.
 
 #[test]
 fn codex_on_props_changed_dispatches_sync_events() {
@@ -2786,4 +2750,378 @@ fn codex_round3_sync_controlled_selected_rows_leave_controlled_resyncs_state() {
         service.context().selected_rows.get(),
         "selection_state must follow `selected_rows.get()` after leaving controlled mode",
     );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 21. Codex review pass 4 (PR #651) — semantic + a11y findings around
+//      AllData mode, disabled-row keyboard navigation, multiselect,
+//      and row-link virtualization.
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn codex_round4_deselect_row_keeps_set_all_in_all_data_mode() {
+    // Codex P1 (thread PRRT_kwDORp4enM6DTElS).
+    // For paginated `AllData` tables, the agnostic core MUST NOT
+    // silently downgrade `Set::All` → `Multiple(rows)` on the first
+    // individual deselect — that drops every unloaded row from
+    // selection. The adapter tracks exclusions via §5.2
+    // `BulkSelection`; the core leaves `Set::All` alone.
+    let mut service = service_with_rows(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            select_all_mode: SelectAllMode::AllData {
+                total_count: 10_000,
+            },
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    drop(service.send(Event::SelectAll));
+    assert!(matches!(
+        service.context().selected_rows.get(),
+        selection::Set::All
+    ));
+
+    drop(service.send(Event::DeselectRow(key("r2"))));
+
+    assert!(
+        matches!(service.context().selected_rows.get(), selection::Set::All),
+        "AllData mode must keep `Set::All` after individual deselect — adapter tracks the exclusion via BulkSelection",
+    );
+}
+
+#[test]
+fn codex_round4_toggle_row_keeps_set_all_in_all_data_mode() {
+    // Codex P1 follow-up — same contract via ToggleRow.
+    let mut service = service_with_rows(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            select_all_mode: SelectAllMode::AllData {
+                total_count: 10_000,
+            },
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    drop(service.send(Event::SelectAll));
+
+    drop(service.send(Event::ToggleRow(key("r2"))));
+
+    assert!(
+        matches!(service.context().selected_rows.get(), selection::Set::All),
+        "AllData mode must keep `Set::All` after toggle on individual row",
+    );
+}
+
+#[test]
+fn codex_round4_on_row_keydown_skips_disabled_when_arrow_down() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DTElY).
+    // Arrow-key row navigation must skip disabled rows so adapter focus
+    // wiring doesn't land on `aria-disabled` rows.
+    let mut disabled = BTreeSet::new();
+    disabled.insert(key("r2"));
+    let service = service_with_rows(
+        Props {
+            interactive: true,
+            disabled_keys: disabled,
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    let recorder = EventRecorder::default();
+    let rows = [key("r1"), key("r2"), key("r3")];
+    let row_refs: Vec<&Key> = rows.iter().collect();
+    {
+        let send = |e| record(&recorder, e);
+        let api = service.connect(&send);
+        api.on_row_keydown(&key("r1"), &keydown(KeyboardKey::ArrowDown), &row_refs);
+    }
+
+    match &recorder.borrow()[0] {
+        Event::FocusRow(k) => assert_eq!(k, &key("r3"), "must skip disabled r2"),
+        other => panic!("expected FocusRow(r3), got {other:?}"),
+    }
+}
+
+#[test]
+fn codex_round4_on_row_keydown_skips_disabled_when_arrow_up() {
+    let mut disabled = BTreeSet::new();
+    disabled.insert(key("r2"));
+    let service = service_with_rows(
+        Props {
+            interactive: true,
+            disabled_keys: disabled,
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    let recorder = EventRecorder::default();
+    let rows = [key("r1"), key("r2"), key("r3")];
+    let row_refs: Vec<&Key> = rows.iter().collect();
+    {
+        let send = |e| record(&recorder, e);
+        let api = service.connect(&send);
+        api.on_row_keydown(&key("r3"), &keydown(KeyboardKey::ArrowUp), &row_refs);
+    }
+
+    match &recorder.borrow()[0] {
+        Event::FocusRow(k) => assert_eq!(k, &key("r1"), "must skip disabled r2"),
+        other => panic!("expected FocusRow(r1), got {other:?}"),
+    }
+}
+
+#[test]
+fn codex_round4_on_cell_keydown_arrow_down_skips_disabled_row() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DTElb).
+    let mut disabled = BTreeSet::new();
+    disabled.insert(key("r2"));
+    let service = service_with_rows(
+        Props {
+            interactive: true,
+            disabled_keys: disabled,
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    let recorder = EventRecorder::default();
+    let rows = [key("r1"), key("r2"), key("r3")];
+    let row_refs: Vec<&Key> = rows.iter().collect();
+    {
+        let send = |e| record(&recorder, e);
+        let api = service.connect(&send);
+        api.on_cell_keydown(
+            &key("r1"),
+            0,
+            &keydown(KeyboardKey::ArrowDown),
+            &row_refs,
+            3,
+        );
+    }
+
+    match &recorder.borrow()[0] {
+        Event::FocusCell { row, row_index, .. } => {
+            assert_eq!(row, &key("r3"), "must skip disabled r2");
+            assert_eq!(*row_index, 2);
+        }
+        other => panic!("expected FocusCell(r3), got {other:?}"),
+    }
+}
+
+#[test]
+fn codex_round4_table_attrs_emits_aria_multiselectable_on_interactive_grid() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DTEld).
+    let service = service_with_rows(
+        Props {
+            interactive: true,
+            selection_mode: selection::Mode::Multiple,
+            ..test_props()
+        },
+        &[key("r1")],
+    );
+    let attrs = service.connect(&|_| {}).table_attrs();
+
+    assert_eq!(
+        attrs
+            .get(&HtmlAttr::Aria(AriaAttr::MultiSelectable))
+            .map(ToString::to_string),
+        Some("true".to_string()),
+        "interactive grid with Mode::Multiple must advertise aria-multiselectable",
+    );
+}
+
+#[test]
+fn codex_round4_table_attrs_omits_aria_multiselectable_in_single_mode() {
+    let service = service_with_rows(
+        Props {
+            interactive: true,
+            selection_mode: selection::Mode::Single,
+            ..test_props()
+        },
+        &[key("r1")],
+    );
+    let attrs = service.connect(&|_| {}).table_attrs();
+
+    assert!(
+        attrs
+            .get(&HtmlAttr::Aria(AriaAttr::MultiSelectable))
+            .is_none(),
+        "Mode::Single must NOT emit aria-multiselectable",
+    );
+}
+
+#[test]
+fn codex_round4_table_attrs_omits_aria_multiselectable_when_non_interactive() {
+    let service = service_with_rows(
+        Props {
+            interactive: false,
+            selection_mode: selection::Mode::Multiple,
+            ..test_props()
+        },
+        &[key("r1")],
+    );
+    let attrs = service.connect(&|_| {}).table_attrs();
+
+    assert!(
+        attrs
+            .get(&HtmlAttr::Aria(AriaAttr::MultiSelectable))
+            .is_none(),
+        "non-interactive `role=table` must NOT emit aria-multiselectable",
+    );
+}
+
+#[test]
+fn codex_round4_row_link_attrs_indexed_preserves_aria_rowindex() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DTElh).
+    // `row_link_attrs` currently delegates to `row_attrs` which hardcodes
+    // row_index=0, breaking aria-rowindex on virtualized tables. The
+    // indexed variant must propagate the row position.
+    let service = service_with_rows(
+        Props {
+            virtual_scrolling: true,
+            total_rows: 1_000,
+            total_cols: 4,
+            ..test_props()
+        },
+        &[],
+    );
+
+    let attrs = service
+        .connect(&|_| {})
+        .row_link_attrs_indexed(&key("r99"), "/orders/99", 98);
+
+    assert_eq!(
+        attrs
+            .get(&HtmlAttr::Aria(AriaAttr::RowIndex))
+            .map(ToString::to_string),
+        Some("99".to_string()),
+        "row_link_attrs_indexed must propagate the row index into aria-rowindex",
+    );
+    assert_eq!(
+        attrs
+            .get(&HtmlAttr::Data("ars-href"))
+            .map(ToString::to_string),
+        Some("/orders/99".to_string()),
+    );
+}
+
+#[test]
+fn codex_round4_on_row_keydown_home_skips_disabled_first_row() {
+    // Home must land on the first ENABLED row, skipping any leading
+    // disabled rows.
+    let mut disabled = BTreeSet::new();
+    disabled.insert(key("r1"));
+    let service = service_with_rows(
+        Props {
+            interactive: true,
+            disabled_keys: disabled,
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    let recorder = EventRecorder::default();
+    let rows = [key("r1"), key("r2"), key("r3")];
+    let row_refs: Vec<&Key> = rows.iter().collect();
+    {
+        let send = |e| record(&recorder, e);
+        let api = service.connect(&send);
+        api.on_row_keydown(&key("r3"), &keydown(KeyboardKey::Home), &row_refs);
+    }
+
+    match &recorder.borrow()[0] {
+        Event::FocusRow(k) => assert_eq!(k, &key("r2"), "Home must skip disabled r1"),
+        other => panic!("expected FocusRow(r2), got {other:?}"),
+    }
+}
+
+#[test]
+fn codex_round4_on_row_keydown_end_skips_disabled_last_row() {
+    let mut disabled = BTreeSet::new();
+    disabled.insert(key("r3"));
+    let service = service_with_rows(
+        Props {
+            interactive: true,
+            disabled_keys: disabled,
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    let recorder = EventRecorder::default();
+    let rows = [key("r1"), key("r2"), key("r3")];
+    let row_refs: Vec<&Key> = rows.iter().collect();
+    {
+        let send = |e| record(&recorder, e);
+        let api = service.connect(&send);
+        api.on_row_keydown(&key("r1"), &keydown(KeyboardKey::End), &row_refs);
+    }
+
+    match &recorder.borrow()[0] {
+        Event::FocusRow(k) => assert_eq!(k, &key("r2"), "End must skip disabled r3"),
+        other => panic!("expected FocusRow(r2), got {other:?}"),
+    }
+}
+
+#[test]
+fn codex_round4_on_row_keydown_arrow_no_op_when_all_remaining_disabled() {
+    // When every row after the current one is disabled, ArrowDown
+    // must emit no event (no FocusRow to land on).
+    let mut disabled = BTreeSet::new();
+    disabled.insert(key("r2"));
+    disabled.insert(key("r3"));
+    let service = service_with_rows(
+        Props {
+            interactive: true,
+            disabled_keys: disabled,
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    let recorder = EventRecorder::default();
+    let rows = [key("r1"), key("r2"), key("r3")];
+    let row_refs: Vec<&Key> = rows.iter().collect();
+    {
+        let send = |e| record(&recorder, e);
+        let api = service.connect(&send);
+        api.on_row_keydown(&key("r1"), &keydown(KeyboardKey::ArrowDown), &row_refs);
+    }
+
+    assert!(
+        recorder.borrow().is_empty(),
+        "no event when no enabled successor"
+    );
+}
+
+#[test]
+fn codex_round4_ctrl_home_skips_disabled_first_row_in_cell_nav() {
+    let mut disabled = BTreeSet::new();
+    disabled.insert(key("r1"));
+    let service = service_with_rows(
+        Props {
+            interactive: true,
+            disabled_keys: disabled,
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    let recorder = EventRecorder::default();
+    let rows = [key("r1"), key("r2"), key("r3")];
+    let row_refs: Vec<&Key> = rows.iter().collect();
+    {
+        let send = |e| record(&recorder, e);
+        let api = service.connect(&send);
+        api.on_cell_keydown(
+            &key("r3"),
+            2,
+            &ctrl_keydown(KeyboardKey::Home),
+            &row_refs,
+            4,
+        );
+    }
+
+    match &recorder.borrow()[0] {
+        Event::FocusCell { row, row_index, .. } => {
+            assert_eq!(row, &key("r2"), "Ctrl+Home must skip disabled r1");
+            assert_eq!(*row_index, 1);
+        }
+        other => panic!("expected FocusCell(r2), got {other:?}"),
+    }
 }
