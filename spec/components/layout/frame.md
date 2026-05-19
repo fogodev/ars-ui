@@ -47,6 +47,9 @@ pub struct Props {
     pub loading: LoadingStrategy,
     /// When set, wraps the iframe in an aspect-ratio container using the
     /// padding-top technique. Value is width/height (e.g., 16.0/9.0).
+    /// Values that are non-positive, non-finite, or too small to produce
+    /// finite padding are normalized to the default `1.0` ratio when
+    /// attributes are generated.
     pub aspect_ratio: Option<f64>,
     /// Explicit width (CSS value, e.g., "100%", "640px"). Defaults to "100%".
     pub width: String,
@@ -95,7 +98,8 @@ impl Api {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         if let Some(ratio) = self.props.aspect_ratio {
-            let padding = (1.0 / ratio) * 100.0;
+            let padding = 100.0 / ratio;
+            let padding = if padding.is_finite() && padding > 0.0 { padding } else { 100.0 };
             attrs.set_style(CssProperty::Position, "relative");
             attrs.set_style(CssProperty::Width, &self.props.width);
             attrs.set_style(CssProperty::PaddingTop, format!("{:.4}%", padding));
@@ -104,12 +108,17 @@ impl Api {
     }
 
     /// Attributes for the iframe element.
+    /// Panics when `title` is empty or whitespace-only because iframe titles
+    /// are required accessible names.
     pub fn iframe_attrs(&self) -> AttrMap {
+        assert!(!self.props.title.trim().is_empty(), "Frame title must be non-empty");
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Iframe.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Src, &self.props.src);
+        if !self.props.src.is_empty() {
+            attrs.set(HtmlAttr::Src, &self.props.src);
+        }
         attrs.set(HtmlAttr::Title, &self.props.title);
         if let Some(sandbox) = &self.props.sandbox {
             attrs.set(HtmlAttr::Sandbox, sandbox);
