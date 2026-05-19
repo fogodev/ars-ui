@@ -1,0 +1,28 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "73f511b23822",
+  "strategy": "manual-commit",
+  "branch": "t3code/7f73cfa1",
+  "checkpoints_count": 3,
+  "files_touched": [
+    ".cargo/mutants.toml",
+    ".github/workflows/nightly.yml",
+    "crates/ars-components/src/utility/highlight.rs",
+    "spec/components/utility/highlight.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/73/f511b23822/0/metadata.json",
+      "transcript": "/73/f511b23822/0/full.jsonl",
+      "content_hash": "/73/f511b23822/0/content_hash.txt",
+      "prompt": "/73/f511b23822/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 2559,
+    "cache_creation_tokens": 3912565,
+    "cache_read_tokens": 122424436,
+    "output_tokens": 328111,
+    "api_call_count": 329
+  }
+}

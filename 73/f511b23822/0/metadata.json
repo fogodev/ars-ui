@@ -1,0 +1,150 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "73f511b23822",
+  "session_id": "9d4f251b-a7b5-491d-b107-5137af2fa959",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-19T03:46:21.611224Z",
+  "branch": "t3code/7f73cfa1",
+  "checkpoints_count": 3,
+  "files_touched": [
+    ".cargo/mutants.toml",
+    ".github/workflows/nightly.yml",
+    "crates/ars-components/src/utility/highlight.rs",
+    "spec/components/utility/highlight.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "c9aad57bae42",
+  "token_usage": {
+    "input_tokens": 2559,
+    "cache_creation_tokens": 3912565,
+    "cache_read_tokens": 122424436,
+    "output_tokens": 328111,
+    "api_call_count": 329
+  },
+  "session_metrics": {
+    "turn_count": 16
+  },
+  "summary": {
+    "intent": "Implement the framework-agnostic `Highlight` utility component (task #204) for ars-ui, covering text-to-chunks splitting with Contains/StartsWith/Fuzzy strategies and Unicode-aware case folding, then harden it through spec-drift audits, test coverage analysis, a reusable post-implementation-audit skill, and PR review resolution.",
+    "outcome": "PR #647 opened with `Closes #204`, including the full `highlight.rs` module, TR21 case folding via a new `ars_i18n::case_fold` helper, 44 unit tests, 9 insta snapshots, proptest invariants, spec-conformance test, 0 missed mutations, and a new mandatory `post-implementation-audit` skill committed alongside the implementation.",
+    "learnings": {
+      "repo": [
+        "`ars-components` declares `ars-i18n = { default-features = false }`, so any `ars_i18n` feature-gated function (e.g., `to_lowercase`, `case_fold`) requires an explicit forwarding feature in `ars-components/Cargo.toml` — the plan's 'no Cargo.toml changes' assumption was wrong",
+        "`ars_i18n::to_lowercase` wraps `CaseMapper::lowercase_to_string` and preserves `ß` — it does NOT expand it to `ss`. TR21 case folding (`fold_string`) is required for genuine `ß ↔ ss ↔ SS` equivalence; using `to_lowercase` silently violates the German eszett contract",
+        "`cargo llvm-cov` reports `0.00%` for wasm-gated code paths — not uncovered but unmeasured. Adapter crates and wasm-only paths require `cargo xtask coverage wasm --package <crate> --feature <f> --file out.lcov.info`; never use bare llvm-cov for those crates",
+        "Rust `str::match_indices` does NOT find overlapping matches — e.g., query `'aa'` in `'aaa'` yields one match, not two. Contains strategy requires a manual loop advancing by one byte after each hit to find all overlapping occurrences",
+        "Fuzzy matching with multi-char fold expansions (e.g., `İ → i + combining dot`) must match per original source character, not per folded byte, to avoid partial-char boundary violations",
+        "`.claude/skills/` is a symlink to `.agents/skills/` — the canonical path for skills and the correct path to reference in AGENTS.md is `.agents/skills/`",
+        "CLAUDE.md is itself a symlink to AGENTS.md — edits must target `AGENTS.md` directly",
+        "`cargo mutants` timeout mutations (infinite loops from `+` → no-advance mutations) count as caught, not missed; they should be added to `mutants.toml` skip entries only when they are true equivalents, not timeouts",
+        "The spec template (`foundation/10` §4.1.2) requires `Part` + `Api` + `ConnectApi` for all stateless components even when a spec explicitly says 'function-based API' — resolve by implementing both the standalone function and the thin attribute-mapper `Api`",
+        "Anatomy slots whose attributes depend on runtime data (parametric slots like `Chunk`) cannot be `Part` enum variants when `ConnectApi::part_attrs` takes `Part` by value with no payload — expose via a parameterised `Api::method(bool)` instead",
+        "Adapter feature wiring: `ars-leptos/icu4x` and `ars-dioxus/icu4x` features must explicitly forward `ars-components/i18n` or the Highlight module is invisible to adapter builds even when icu4x is on"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/highlight.rs",
+          "line": 1,
+          "end_line": 1280,
+          "finding": "New file: Props (with builder), MatchStrategy (Contains/StartsWith/Fuzzy), HighlightChunk, Part, Api, ConnectApi, highlight_chunks, full test suite. Gated on `#[cfg(feature = \"i18n\")]`."
+        },
+        {
+          "path": "crates/ars-components/src/utility/mod.rs",
+          "line": 1,
+          "end_line": 20,
+          "finding": "`pub mod highlight;` registration gated on `#[cfg(feature = \"i18n\")]` — module is absent from non-i18n builds rather than providing a fallback"
+        },
+        {
+          "path": "crates/ars-i18n/src/case.rs",
+          "line": 70,
+          "end_line": 170,
+          "finding": "Added `case_fold(text, locale)` wrapping `CaseMapper::fold_turkic_string` for Turkic locales and `CaseMapper::fold_string` otherwise — this is TR21, not `lowercase_to_string`, and is the correct function for case-insensitive matching (expands ß→ss, collapses Greek final sigma)"
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/utility.rs",
+          "line": 1,
+          "end_line": 130,
+          "finding": "Proptest block added: `proptest_highlight_chunks_invariants` fuzz-tests (props × locale) across 8 locales including `az`, `lt`, `hy` for broader Unicode coverage; 5 invariants checked"
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/utility.rs",
+          "line": 1,
+          "end_line": 40,
+          "finding": "New spec-conformance test: asserts `Part::scope() == \"highlight\"` and anatomy table matches `Part::all()` — build-time anatomy-drift detection per workspace convention"
+        },
+        {
+          "path": ".cargo/mutants.toml",
+          "line": 1,
+          "end_line": 50,
+          "finding": "Skip entries for equivalent mutations (defensive zero-length guards, `orig_start < orig_end` and `orig_end > 0` filters) and for timeout-producing `+` mutations in `push_contains_matches` advance loop"
+        },
+        {
+          "path": "spec/foundation/10-component-spec-template.md",
+          "line": 1,
+          "end_line": 13,
+          "finding": "New §4.2 'Static vs parametric anatomy slots' section documenting the convention that anatomy rows whose attributes depend on runtime data use a parameterised `Api` method instead of a `Part` enum variant"
+        }
+      ],
+      "workflow": [
+        "The plan's case-folding decision ('use `to_lowercase`, identical to fold on named tests') was incorrect — the eszett test in the plan only covered uppercase-to-lowercase direction and silently missed the `ß ↔ ss` contract. Always verify Unicode folding claims with a live probe, not just reasoning about named test cases",
+        "Three-phase post-implementation audit (spec drift → iterative surface scan → test coverage) reliably surfaces issues that TDD + acceptance criteria alone miss; codified as the mandatory `post-implementation-audit` skill in `.agents/skills/`",
+        "`cargo mutants` should be re-run after any algorithmic change to the module — the new `Normalised::map_range` design eliminated two previously-documented equivalent mutations, and the Contains advance loop introduced three new timeout mutations",
+        "Running `cargo xci` in the background and working on other tasks (spec edits, mutants run) while waiting prevents idle time in the pre-PR gate",
+        "Snapshot tests must be regenerated with `cargo insta accept` whenever the output changes (e.g., adding `dir=\"auto\"` to `root_attrs`) — always re-run with `--unreferenced=reject` before committing to catch orphan snapshots",
+        "When both spec and implementation are wrong (e.g., the eszett case), escalate to the user via `AskUserQuestion` before landing — the fix touches all three (spec + impl + tests) and needs design confirmation",
+        "External skill analyzers (ambiguity-detection, cognitive-load) catch real issues in workflow skills but apply generic templates — evaluate each finding on its specific merit before applying the suggested fix mechanically"
+      ]
+    },
+    "friction": [
+      "The approved plan stated 'No Cargo.toml changes' but enabling `ars_i18n::case_fold` required adding an `i18n = [\"ars-i18n/icu4x\"]` feature — an assumption should have been verified against the dependency graph before writing the plan",
+      "The case-folding decision made during planning (use `to_lowercase` over `fold_string`) was wrong for German eszett; the error was only discovered during the third audit round, requiring a retroactive switch to `case_fold` and new helper in `ars-i18n`",
+      "Background task notifications were unreliable — `cargo xci` completed without a notification arriving, requiring the user to ask 'Did xci finish?' to unblock the session",
+      "The skill file was initially written to `.claude/skills/` (a symlink) instead of the canonical `.agents/skills/` path, requiring a corrective AGENTS.md edit",
+      "Rust `match_indices` not finding overlapping matches was a hidden semantic gap in the Contains strategy that only surfaced as a PR review comment, not during initial implementation or testing"
+    ],
+    "open_items": [
+      "Issue #204 remains 'In Progress' on the project board — must move to 'Done' only after PR #647 merges and CI passes",
+      "Leptos and Dioxus adapter wrapper implementations for Highlight (the `<Highlight>` components that consume `highlight_chunks`) are out of scope for this task and will land in future adapter tasks",
+      "Prelude re-exports for Highlight in `ars-leptos` and `ars-dioxus` land with the adapter implementation tasks",
+      "Performance optimization for per-char `case_fold` allocation in `build_normalised` is deferred — no streaming `CaseMapper` API exists in ICU4X 2.x, so the per-char allocation is the only correct approach until upstream changes",
+      "The 'parametric anatomy slot' pattern (documented inline in Highlight spec and `foundation/10`) should be illustrated with concrete examples from table rows, tags-input chips, and toaster toasts when those components are implemented — a broader cross-cutting foundation update deferred",
+      "The one remaining uncovered region (defensive `else` of `if end > start` zero-length-highlight guard in `build_chunks`) is documented as an equivalent mutation in `mutants.toml` — intentionally left at 99.91% rather than adding a misleading test to fake the unreachable branch"
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-19T03:44:49.547828Z",
+    "agent_lines": 282,
+    "agent_removed": 92,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 282,
+    "total_lines_changed": 374,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 264,
+      "agent_lines_removed": 76
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 282,
+      "agent_lines_removed": 92
+    }
+  ]
+}
