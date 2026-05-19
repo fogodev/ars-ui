@@ -1,0 +1,96 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "f7e6abe0831d",
+  "session_id": "9d4f251b-a7b5-491d-b107-5137af2fa959",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-19T03:50:42.815274Z",
+  "branch": "t3code/7f73cfa1",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "c9aad57bae42",
+  "token_usage": {
+    "input_tokens": 2571,
+    "cache_creation_tokens": 3931571,
+    "cache_read_tokens": 130355968,
+    "output_tokens": 335204,
+    "api_call_count": 341
+  },
+  "session_metrics": {
+    "turn_count": 16
+  },
+  "summary": {
+    "intent": "Implement task #204: the framework-agnostic Highlight utility component for ars-ui, which splits text into highlighted/non-highlighted chunks with three match strategies and Unicode-aware case folding.",
+    "outcome": "PR #647 pushed with the full Highlight implementation, three rounds of spec/impl drift audits all landed, a reusable post-implementation-audit skill added to CLAUDE.md as a mandatory step, and five PR review comments addressed with corrected semantics and an extra fmt-fix commit.",
+    "learnings": {
+      "repo": [
+        "ars-components declares `ars-i18n = { default-features = false }`, so any ICU4X API requires an explicit feature flag on the consuming crate — the feature-free build compiles but the gated module is simply absent, not degraded",
+        "CLAUDE.md is a symlink to AGENTS.md; edits must target AGENTS.md directly to persist",
+        ".claude/skills is a symlink to .agents/skills; canonical skill paths belong under .agents/",
+        "CI runs nightly rustfmt, which can reformat code that local stable rustfmt considers valid — always run `cargo +nightly fmt` before pushing",
+        "The spec template (foundation/10-component-spec-template.md §4.1.2) mandates Part/Api/ConnectApi even for function-based components; Highlight spec's 'rather than' language was wrong",
+        "Parametric anatomy slots (parts whose attributes depend on runtime data, e.g., per-chunk highlighted bool) must NOT get a Part enum variant — expose them via a parameterised Api method; this is now documented in foundation/10",
+        "cargo-mutants timeout exits count as caught mutations per CLAUDE.md — infinite-loop mutations from removing loop-advance operators are legitimate catches to document in mutants.toml, not suppress",
+        "Coverage routing: native crates use `cargo llvm-cov`; wasm/adapter crates must use `cargo xtask coverage wasm` — bare llvm-cov reports 0% for wasm-gated paths, making it look like a gap rather than an unmeasured path",
+        "`cargo insta test … --unreferenced=reject` is the correct way to verify no orphan snapshots exist after accepting or deleting snapshots",
+        "The snapshot-reviewed label must be re-applied for any push that adds or modifies .snap files, not just the initial PR open"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-collections/src/typeahead.rs",
+          "line": 255,
+          "end_line": 297,
+          "finding": "Existing precedent for locale-aware case-insensitive matching; was originally cited to justify reusing to_lowercase, but ultimately the eszett gap made case_fold the correct choice instead"
+        },
+        {
+          "path": "crates/ars-components/src/utility/separator.rs",
+          "line": 418,
+          "end_line": 444,
+          "finding": "Canonical pattern for snapshot_attrs helper + assert_snapshot! — all new utility components follow this structure"
+        },
+        {
+          "path": "crates/ars-i18n/src/case.rs",
+          "line": 70,
+          "end_line": 70,
+          "finding": "to_lowercase wraps CaseMapper::lowercase_to_string — does NOT expand ß to ss; only the new case_fold (TR21 fold_string) produces the ß↔ss/SS equivalence required for case-insensitive matching"
+        },
+        {
+          "path": "crates/ars-components/src/utility/highlight.rs",
+          "line": 1,
+          "end_line": 1,
+          "finding": "New module; must be gated with #[cfg(feature = \"i18n\")] in mod.rs because the entire correctness contract (Turkic, eszett, Greek) depends on the ICU4X backend — a feature-off fallback to str::to_lowercase violates the MUST spec language and was removed"
+        },
+        {
+          "path": ".cargo/mutants.toml",
+          "line": 1,
+          "end_line": 1,
+          "finding": "Timeout-producing mutations (e.g., removing the offset increment inside a scan loop) should be documented as equivalent here rather than left as unexplained timeouts in CI output"
+        }
+      ],
+      "workflow": [
+        "TDD ordering is enforced by CLAUDE.md: write tests first (expected to fail), then implement; running them before the impl confirms they actually fail and thus test real behaviour",
+        "cargo xci is the mandatory full pre-PR gate — run it before every push, not just before the first one",
+        "Three-round post-implementation-audit flow (spec drift → iterative 'anything else?' × 2 clean rounds → test coverage audit) is now codified as a mandatory skill invocation in CLAUDE.md step 7",
+        "German eszett ß↔ss equivalence requires TR21 case folding (CaseMapper::fold_string), not locale-aware lowercasing (CaseMapper::lowercase_to_string) — to_lowercase preserves ß; a test that only checks SS→ss will pass even when the contract is violated",
+        "When an initial plan assumption ('no Cargo.toml changes') turns out wrong during implementation, document the deviation explicitly in the summary rather than silently deviating",
+        "Mutation testing should be re-run after any significant algorithmic refactor — the mutants.toml skip list may need updating as the algorithm changes",
+        "Adapter feature wiring (e.g. ars-leptos/icu4x propagating ars-components/i18n) is easy to miss during implementation; check all adapter Cargo.toml files when adding a feature-gated module"
+      ]
+    },
+    "friction": [
+      "Plan incorrectly stated 'no Cargo.toml changes' — ars-components uses ars-i18n with default-features = false, making the i18n feature flag unavoidable; assumption was not verified before planning",
+      "Initial case-folding approach (to_lowercase) silently violated the German eszett contract; the initial test only exercised the trivial uppercase→lowercase direction and passed despite the ß→ss direction being broken; the bug was only caught during the audit round",
+      "CI nightly rustfmt reformatted a match expression that local stable rustfmt had left untouched, requiring a corrective commit after the PR was already pushed and CI had run",
+      "Two algorithmic bugs surfaced in PR reviews that the 44 unit tests and 1000-case proptest had not caught: (1) Fuzzy matching consumed only one fold-expanded byte per source char instead of all bytes of the fold expansion, causing İ to highlight only i and miss the combining dot; (2) Contains byte-map did not track source_end separately from source_start, making overlapping fold expansions produce incorrect original-text ranges",
+      "cargo xci output is only available via a background task file — there is no streaming progress indicator, making it unclear whether the job is still running or has silently exited",
+      "The skill-creator external analyzer flagged six issues in the initial SKILL.md draft, requiring a second edit pass; one finding (both-spec-and-impl-wrong escalation path) was a genuine gap that had been overlooked"
+    ],
+    "open_items": [
+      "Adapter wrapper components (Leptos and Dioxus implementations of Highlight) are explicitly out of scope for this task — separate issues to be filed",
+      "Issue #204 remains open on the project board until PR #647 passes CI and merges",
+      "Promoting the 'parametric anatomy slot' pattern to foundation/10-component-spec-template.md as a first-class concept was deferred — currently documented only inline in the Highlight spec; worth a cross-cutting foundation PR once tables/tags-input/toaster land",
+      "ars-derive (proc-macro crate) has no coverage measurement path via either llvm-cov or xtask coverage wasm — acknowledged as unmeasurable, not a gap to fix"
+    ]
+  }
+}

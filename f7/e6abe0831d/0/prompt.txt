@@ -1,0 +1,491 @@
+Let's implement task #204
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Task #204 — Implement `Highlight` agnostic core
+
+## Context
+
+Implement the framework-agnostic `Highlight` utility component
+(`spec/components/utility/highlight.md`) — a stateless utility that splits a
+text string into highlighted / non-highlighted chunks based on one or more
+search queries, with three match strategies (`Contains`, `StartsWith`,
+`Fuzzy`), Unicode-aware case folding via ICU4X `CaseMapper`, and multi-query
+overlap merging.
+
+The component is consumed by adapters (Leptos, Dioxus) that render each
+returned chunk as `<mark>` or `<span>`. Agnostic core is the only deliverable
+here — adapter wrappers are out of scope.
+
+GitHub issue: <https://github.com/anthropics/ars-ui/issues/204> · 3 points ·
+no dependencies.
+
+## Files to create / modify
+
+| Action | Path | Purpose |
+|---|---|---|
+| Create | `crates/ars-components/src/utility/highlight.rs` | Component module: `Props`, `MatchStrategy`, `HighlightChunk`, `highlight_chunks`, `Part`, `Api`, tests. |
+| Modify | `crates/ars-components/src/utility/mod.rs` | Add `pub mod highlight;` entry, alphabetized under existing utility modules. |
+| Create | `crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__*.snap` | Insta snapshots — generated via `cargo insta review` and committed (label `snapshot-reviewed` on PR). |
+
+No `Cargo.toml` changes (no new dependencies — `ars-i18n` already pulled in by
+`ars-components` and exposes locale-aware case mapping via
+`ars_i18n::to_lowercase`).
+
+## Public API (from spec §1)
+
+```rust
+// spec/components/utility/highlight.md lines 20–46
+pub struct Props {
+    pub query: Vec<String>,
+    pub text: String,
+    pub ignore_case: bool,
+    pub match_strategy: MatchStrategy,
+}
+
+pub enum MatchStrategy {
+    Contains,
+    StartsWith,
+    Fuzzy,
+}
+
+pub struct HighlightChunk<'a> {
+    pub text: &'a str,
+    pub highlighted: bool,
+}
+
+pub fn highlight_chunks<'a>(props: &'a Props, locale: &Locale) -> Vec<HighlightChunk<'a>>;
+```
+
+Defaults (per spec text):
+
+- `ignore_case: bool` defaults to `true`.
+- `match_strategy: MatchStrategy` defaults to `MatchStrategy::Contains`
+  (most permissive — pure inclusion match, matches Ark UI default).
+- `query` and `text` default to empty vec / empty string.
+
+## Utility-pattern conformance additions
+
+The Highlight spec §1.2 says it uses a "function-based API" instead of the
+standard `ConnectApi` / `AttrMap` pattern — but the issue's acceptance
+criteria still require "snapshot tests cover the component's `connect()` /
+`Api` `AttrMap` output for every anatomy part", and the spec template
+(`foundation/10-component-spec-template.md` §4.1.2) mandates `Props` / `Part`
+/ `Api` for all stateless components. We satisfy both by adding the standard
+utility shape **alongside** the function:
+
+```rust
+#[derive(ComponentPart)]
+#[scope = "highlight"]
+pub enum Part {
+    Root,
+}
+
+pub struct Api { props: Props }
+
+impl Api {
+    pub const fn new(props: Props) -> Self;
+    pub const fn props(&self) -> &Props;
+    pub fn query(&self) -> &[String];
+    pub fn text(&self) -> &str;
+    pub const fn ignore_case(&self) -> bool;
+    pub const fn match_strategy(&self) -> MatchStrategy;
+    pub fn root_attrs(&self) -> AttrMap;                       // Part::Root
+    pub fn chunk_attrs(&self, highlighted: bool) -> AttrMap;   // Chunk (parametric)
+    pub fn chunks<'a>(&'a self, locale: &Locale) -> Vec<HighlightChunk<'a>>;
+}
+
+impl ConnectApi for Api {
+    type Part = Part;
+    fn part_attrs(&self, part: Part) -> AttrMap { /* Root → root_attrs */ }
+}
+```
+
+`Part::Chunk` is intentionally not a Part variant: the chunk anatomy slot is
+parametric on a runtime boolean (`highlighted`), and `ConnectApi::part_attrs`
+takes a `Part` by value with no payload. Adapters call `chunk_attrs(bool)`
+per emitted chunk. Doc-comment on `Part` explains this.
+
+`root_attrs()` emits `data-ars-scope="highlight"` + `data-ars-part="root"`
+(via `Part::Root.data_attrs()`). `chunk_attrs(b)` emits
+`data-ars-part="highlight-chunk"` + `data-ars-highlighted="true"|"false"`.
+
+## Algorithm — `highlight_chunks`
+
+Reuse `ars_i18n::to_lowercase(text, locale)` for Unicode-aware,
+locale-sensitive normalisation. This is the **same** helper the
+already-implemented `ars-collections::typeahead` (`typeahead.rs:255,297`) uses
+for case-insensitive matching, so Turkic locales (`İ`/`i`/`I`/`ı`), German
+eszett, Greek final sigma, etc. are already handled by the underlying ICU4X
+`CaseMapper`. See "Open question — case folding" below.
+
+Pipeline:
+
+1. **Short-circuit empty input.** If `props.query.is_empty()` or every entry
+   is empty, return `vec![HighlightChunk { text: &props.text, highlighted: false }]`.
+   If `props.text.is_empty()`, return an empty `Vec`.
+2. **Build normalised text + byte-mapping** (only when `ignore_case`):
+   - Iterate `props.text.char_indices()`. For each char, take its substring
+     (`text[orig_start..orig_end]`), pass to `ars_i18n::to_lowercase`, and
+     append the lowercased bytes to a `String` while pushing `orig_start`
+     into a parallel `Vec<usize>` once per appended byte. Push a sentinel
+     `text.len()` at the end of the map.
+   - The resulting `byte_map[i]` ≡ original-text byte index of the source
+     char that produced normalised byte `i`. Property:
+     `byte_map[match_end_in_normalised]` is always an original-char boundary
+     (or `text.len()` at the end), because each fold block is emitted
+     contiguously.
+   - When `!ignore_case`, the normalised text **is** the original text and
+     `byte_map` is identity (`0..=text.len()`).
+3. **Collect raw match ranges per query × strategy:**
+   - `Contains`: `normalised_text.match_indices(&normalised_query)`. Map each
+     `(start, _)` to original range `(byte_map[start], byte_map[start + normalised_query.len()])`.
+   - `StartsWith`: if `normalised_text.starts_with(&normalised_query)`, emit
+     a single range `(0, byte_map[normalised_query.len()])`.
+   - `Fuzzy`: iterate normalised text char-by-char, advancing a query-char
+     cursor; each matched character emits one original-char range
+     `(orig_start, orig_end)`. Use `char_indices()` on the **original** text
+     and `to_lowercase` per-char to avoid the byte-map indirection for the
+     1-char case (cleaner + handles Unicode expansion correctly).
+4. **Merge overlapping / adjacent ranges.** Sort by start; sweep merging
+   `(a, b), (c, d)` where `c <= b` into `(a, max(b, d))`. Adjacency-merge
+   (`c == b`) keeps the rendered output minimal — naturally consolidates
+   fuzzy 1-char hits that happen to land next to each other and meets spec
+   §3.1's "consolidate adjacent highlighted chunks" recommendation.
+5. **Build chunks.** Walk the merged ranges; emit a non-highlighted
+   `HighlightChunk` for each gap and a highlighted one for each range. Skip
+   zero-length segments so we never emit an empty chunk.
+
+### Edge cases the algorithm must hit
+
+- Empty query / all-empty queries → one non-highlighted chunk (`text`).
+- Empty text → empty vec.
+- Query longer than text → no matches → one non-highlighted chunk.
+- All-matched text → one highlighted chunk.
+- Query at end of text → highlighted tail + no trailing non-highlighted chunk.
+- Multi-query overlapping ranges merged into one chunk.
+- Fuzzy with `query.chars().count() > text.chars().count()` → no matches
+  → one non-highlighted chunk.
+- `ignore_case = false` → byte-exact matching, no normalisation pass.
+
+## Tests (TDD — written before implementation)
+
+All inline in `#[cfg(test)] mod tests { ... }` per `separator.rs` precedent.
+Snapshot tests use `insta::assert_snapshot!` and live under
+`crates/ars-components/src/utility/snapshots/`.
+
+### Strategy / props matrix (named tests required by issue)
+
+| # | Test name | Coverage |
+|---|---|---|
+| 1 | `contains_strategy_matches_substring` | Single contains match in middle of text → 3 chunks. |
+| 2 | `contains_strategy_finds_all_occurrences` | Repeated query → N+1 alternating chunks. |
+| 3 | `starts_with_strategy_matches_at_start` | Match only at position 0. |
+| 4 | `starts_with_strategy_no_match_in_middle` | Query is in middle of text → single non-highlighted chunk. |
+| 5 | `fuzzy_strategy_matches_in_order_with_gaps` | `"abc"` in `"a_b_c"` → 5 chunks (3 highlighted, 2 gaps). |
+| 6 | `fuzzy_strategy_no_match_when_chars_missing` | Missing char in query → no fuzzy match. |
+| 7 | `unicode_case_folding_turkic_dotted_i` | `tr` locale: `"İ"` query matches `"i"` text and vice versa. |
+| 8 | `unicode_case_folding_german_eszett` | `de` locale: `"ss"` query matches `"ß"` text when `ignore_case`. |
+| 9 | `multi_query_overlapping_ranges_merged` | Two queries `["foo", "oob"]` on `"foobar"` → merged into single highlighted span `"foob"`. |
+| 10 | `empty_query_returns_single_non_highlighted_chunk` | `query: vec![]` → `[Chunk { text, highlighted: false }]`. |
+| 11 | `all_empty_queries_returns_single_non_highlighted_chunk` | `query: vec!["".into(), "".into()]` → same. |
+| 12 | `ignore_case_true_matches_case_insensitive` | `"hello"` query matches `"HELLO"` text with `ignore_case = true`. |
+| 13 | `ignore_case_false_matches_case_sensitive` | Same input with `ignore_case = false` → no match. |
+| 14 | `empty_text_returns_empty_vec` | Defensive edge case. |
+| 15 | `query_longer_than_text_returns_single_non_highlighted_chunk` | Defensive edge case. |
+
+### Props / `Api` ergonomic tests (mirror separator.rs §"Props" and §"Api accessors")
+
+| # | Test name |
+|---|---|
+| 16 | `props_default_is_contains_ignore_case_true` |
+| 17 | `props_clone_and_partial_eq_round_trip` |
+| 18 | `props_debug_impl_non_empty` |
+| 19 | `api_exposes_all_props_fields` |
+| 20 | `api_props_round_trips` |
+| 21 | `part_attrs_root_equals_root_attrs` |
+
+### Snapshot tests (insta)
+
+| # | Test name | Snapshots `connect()` / chunk output |
+|---|---|---|
+| 22 | `highlight_root_snapshot` | `root_attrs()` AttrMap. |
+| 23 | `highlight_chunk_highlighted_snapshot` | `chunk_attrs(true)`. |
+| 24 | `highlight_chunk_not_highlighted_snapshot` | `chunk_attrs(false)`. |
+| 25 | `highlight_chunks_contains_en_snapshot` | `highlight_chunks` output for canonical Contains case. |
+| 26 | `highlight_chunks_starts_with_snapshot` | Starts-with case. |
+| 27 | `highlight_chunks_fuzzy_snapshot` | Fuzzy case. |
+| 28 | `highlight_chunks_multi_query_merged_snapshot` | Two overlapping queries. |
+| 29 | `highlight_chunks_turkic_snapshot` | Turkic case folding. |
+| 30 | `highlight_chunks_german_eszett_snapshot` | German eszett. |
+
+PR must apply the `snapshot-reviewed` label after committing the snapshots
+(per `CLAUDE.md` "Development Workflow" item 10).
+
+## Key existing utilities to reuse
+
+| Reusable | Where | How |
+|---|---|---|
+| `ars_i18n::to_lowercase(text, locale)` | `crates/ars-i18n/src/case.rs:70` | Locale-aware lowercase using ICU4X `CaseMapper`; matches `typeahead.rs:255` precedent. |
+| `ars_i18n::Locale` | `crates/ars-i18n/src/locale.rs` | Function parameter. |
+| `ars_core::{AttrMap, ComponentPart, ConnectApi, HasId, HtmlAttr}` | `crates/ars-core/src/lib.rs` | Standard utility-component scaffolding (same imports as `separator.rs:12`). |
+| Insta snapshot pattern | `crates/ars-components/src/utility/separator.rs:418–444` | `snapshot_attrs` helper + `assert_snapshot!`. |
+
+## Spec conformance notes
+
+The Highlight spec has two small inconsistencies worth flagging — both
+should be **fixed in this PR** alongside the implementation per `CLAUDE.md`
+"Spec/code mismatch resolution":
+
+1. **`spec/components/utility/highlight.md:65`** — references
+   `CaseMapper::fold_turkic()` / `CaseMapper::fold()`. We use
+   `ars_i18n::to_lowercase` (which wraps `CaseMapper::lowercase_to_string`,
+   handles Turkic via `language_identifier`). The acceptance criterion
+   "Unicode case folding uses ICU4X CaseMapper, not ASCII-only lowering" is
+   satisfied — the comment in the spec should be reworded to describe the
+   helper used (or the helper renamed). Proposed edit: replace the explicit
+   ICU4X method names with "delegate to the locale-aware case helpers in
+   `ars-i18n`, which use ICU4X `CaseMapper` under the hood."
+2. **`spec/components/utility/highlight.md:111`** — the adapter example
+   calls `highlight_chunks(&props)` (one arg). Function signature is
+   `(&props, &locale)`. Update the example to pass `&locale`.
+
+Both are doc-only edits in the same component spec file. No other spec files
+touch this component.
+
+## Verification (end-to-end)
+
+After implementation, run **in this order**:
+
+```bash
+# 1. Focused tests for the new module
+cargo test -p ars-components --lib utility::highlight
+
+# 2. Review and accept snapshots, then re-run (must remain green)
+cargo insta review
+cargo test -p ars-components --lib utility::highlight
+
+# 3. Module-level lints / docs
+cargo clippy -p ars-components --all-features -- -D warnings
+cargo doc -p ars-components --no-deps
+
+# 4. Coverage spot-check on the new module
+cargo llvm-cov test -p ars-components --text -- utility::highlight
+
+# 5. Spec validator picks up frontmatter / manifest consistency
+cargo run -p spec-tool -- validate
+
+# 6. Full pre-PR gate (after user approval)
+cargo xci
+```
+
+PR body MUST include `Closes #204`; PR MUST get the `snapshot-reviewed`
+label after `.snap` files land (`gh pr edit <num> --add-label "snapshot-reviewed"`).
+
+## Resolved decisions (from plan review)
+
+1. **Case folding:** use `ars_i18n::to_lowercase(text, locale)`. Matches the
+   `ars-collections::typeahead.rs:255,297` precedent; no new public API in
+   `ars-i18n`. Spec wording at `highlight.md:65` is reworded in this PR to
+   describe the helper rather than the literal `CaseMapper::fold*` names.
+2. **API surface:** ship the standard utility-component shape — `Part` enum,
+   `Api` struct, `root_attrs` / `chunk_attrs(bool)` / `chunks(locale)`
+   methods, and `ConnectApi` impl — **alongside** the standalone
+   `highlight_chunks` function the spec defines. Satisfies both the spec
+   template (`foundation/10` §4.1.2) and the issue's `connect()/Api`
+   `AttrMap` snapshot acceptance criterion.
+3. **Spec drift fixes:** both items under "Spec conformance notes" are
+   addressed in this same PR (line 65 wording, line 111 missing `&locale`).
+
+---
+
+Great, now let's do an audit on how well our new code here follows our spec, do an in depth check for spec drift and suggest recomendations on how to proceed for each finding. In those recommendations, I want you to totally disregard the spec and the current implementation, the recommendation should be the best outcome as possible. Sometimes the best outcome may the spec, other times it will be the current implementation, some other times it will be a mix of both, and eventually it can also be a totally different thing
+
+---
+
+Let's go with the best outcome for all those findings now, don't defer anything for later
+
+---
+
+Any other improvement that we might still be missing?
+
+---
+
+Any other improvement that we might still be missing?
+
+---
+
+How good is our test coverage here, by looking at the code paths, checking the coverage report and considering the many kinds of tests that we are intending to have (including snapshot test, proptests and e2e tests)? Can it be improved?
+
+---
+
+Proceed
+
+---
+
+Let's synthesize our previous audit and improvements, and the test audit and improvements into a proper skill that we will use right after implementing a task, to severely improve the initial implementation. Use your /skill-creator skill for it. Then include in your CLAUDE.md that this skill must be used always after implementing a task that the used asked to be implemented. Here are the prompts that we used:
+
+1 - Great, now let's do an audit on how well our new code here follows our spec, do an in depth check for spec drift and suggest recomendations on how to proceed for each finding. In those recommendations, I want you to totally disregard the spec and the current implementation, the recommendation should be the best outcome as possible. Sometimes the best outcome may the spec, other times it will be the current implementation, some other times it will be a mix of both, and eventually it can also be a totally different thing.
+
+Where you give me a bunch of findings and the best outcome recommendation. I ask you to implemented all the recommended improvements, without skipping or deferring anything for later.
+
+Followed by 2 rounds of:
+
+2 - Any other improvement that we might still be missing?
+
+Where I also ask that all recommendations must be implemented in the same PR, without skipping or deferring anything.
+
+Then we finish with this prompt here:
+
+3 - How good is our test coverage here, by looking at the code paths, checking the coverage report and considering the many kinds of tests that we are intending to have (including snapshot test, proptests and e2e tests)? Can it be improved?
+
+Where you to a proper audit on the test coverage and I ask that we must improve our coverage as much as possible, without changing our code too much just for coverage sake.
+
+These are the steps to synthesized in this new "post initial implementation improvements flow"
+
+---
+
+The skill mentions about running `cargo llvm-cov` directly, but that won't be an issue with our wasm coverage? We have it handled properly in our xtask, give it a check
+
+---
+
+I've run the skill through an external analyzer and got these responses back:
+```json
+[{
+	"resource": "/Users/ericson/.t3/worktrees/ars-ui/t3code-7f73cfa1/.agents/skills/post-implementation-audit/SKILL.md",
+	"owner": "_generated_diagnostic_collection_name_#3",
+	"code": "ambiguity-llm",
+	"severity": 4,
+	"message": "Ambiguous: \"Trigger whenever an implementation task has just had its named tests pass and you are about to present the result to the user. Also trigger on phrases like 'ready to present', 'implementation is complete', 'named tests pass', 'before opening the PR', or 'ready for review'.\". The list of trigger phrases is vague and open to interpretation. It is unclear whether all these phrases must be present, or if any one of them suffices. Additionally, the scope of 'named tests pass' is not clearly defined. Suggestion: Clarify whether all phrases are required or if any one of them is sufficient. For example: 'Trigger when any of the following phrases are detected: ...'",
+	"source": "chat-customizations-evaluations (ambiguity-detection)",
+	"startLineNumber": 2,
+	"startColumn": 12,
+	"endLineNumber": 2,
+	"endColumn": 26,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},
+{
+	"resource": "/Users/ericson/.t3/worktrees/ars-ui/t3code-7f73cfa1/.agents/skills/post-implementation-audit/SKILL.md",
+	"owner": "_generated_diagnostic_collection_name_#3",
+	"code": "cognitive-constraint-overload",
+	"severity": 4,
+	"message": "Cognitive load (constraint-overload): The prompt imposes numerous constraints, such as 'no deferral', 'land everything in the same PR', and 'run three sequential audits'. These overlapping constraints may overwhelm the model, leading to missed steps or incomplete adherence.. Suggestion: Break the constraints into smaller, clearly prioritized steps. For example, separate the 'no deferral' rule into its own section with examples.",
+	"source": "chat-customizations-evaluations (cognitive-load)",
+	"startLineNumber": 3,
+	"startColumn": 539,
+	"endLineNumber": 3,
+	"endColumn": 543,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},
+{
+	"resource": "/Users/ericson/.t3/worktrees/ars-ui/t3code-7f73cfa1/.agents/skills/post-implementation-audit/SKILL.md",
+	"owner": "_generated_diagnostic_collection_name_#3",
+	"code": "cognitive-deep-decision-tree",
+	"severity": 4,
+	"message": "Cognitive load (deep-decision-tree): The sequential phases and their substeps create a deeply nested decision tree, making it difficult for the model to track progress and ensure all steps are completed.. Suggestion: Use a numbered list or flowchart to simplify the decision tree and make the sequence of actions explicit.",
+	"source": "chat-customizations-evaluations (cognitive-load)",
+	"startLineNumber": 22,
+	"startColumn": 1,
+	"endLineNumber": 22,
+	"endColumn": 120,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},
+{
+	"resource": "/Users/ericson/.t3/worktrees/ars-ui/t3code-7f73cfa1/.agents/skills/post-implementation-audit/SKILL.md",
+	"owner": "_generated_diagnostic_collection_name_#3",
+	"code": "ambiguity-llm",
+	"severity": 2,
+	"message": "Ambiguous: \"Don't open follow-up issues. Don't TODO-flag. Don't promise 'next iteration'.\". The term 'next iteration' could be interpreted in multiple ways, such as a future PR or a subsequent development cycle. Suggestion: Replace 'next iteration' with 'future pull request or development cycle' to eliminate ambiguity.",
+	"source": "chat-customizations-evaluations (ambiguity-detection)",
+	"startLineNumber": 3,
+	"startColumn": 490,
+	"endLineNumber": 3,
+	"endColumn": 494,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},
+{
+	"resource": "/Users/ericson/.t3/worktrees/ars-ui/t3code-7f73cfa1/.agents/skills/post-implementation-audit/SKILL.md",
+	"owner": "_generated_diagnostic_collection_name_#3",
+	"code": "coverage-gap",
+	"severity": 2,
+	"message": "Coverage gap: Handling of scenarios where the spec and implementation are both incorrect or incomplete.. Suggestion: Add explicit instructions for how to handle cases where both the spec and implementation are incorrect, such as escalating to the user or creating a new spec.",
+	"source": "chat-customizations-evaluations (semantic-coverage)",
+	"startLineNumber": 28,
+	"startColumn": 270,
+	"endLineNumber": 28,
+	"endColumn": 358,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},
+{
+	"resource": "/Users/ericson/.t3/worktrees/ars-ui/t3code-7f73cfa1/.agents/skills/post-implementation-audit/SKILL.md",
+	"owner": "_generated_diagnostic_collection_name_#3",
+	"code": "missing-error-handling",
+	"severity": 2,
+	"message": "Missing error handling: What to do if the spec file or implementation file is missing or inaccessible.. Suggestion: Add: 'If the spec file or implementation file is missing, notify the user and halt the audit process.'",
+	"source": "chat-customizations-evaluations (semantic-coverage)",
+	"startLineNumber": 36,
+	"startColumn": 4,
+	"endLineNumber": 36,
+	"endColumn": 96,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+}]
+```
+
+What are your takes on them, worth to improve/fix?
+
+---
+
+Yeah, fix them
+
+---
+
+I reviewed here, let's commit, rebase with the latest main and push a PR to github
+
+---
+
+<task-notification>
+<task-id>bhj9zuaf2</task-id>
+<tool-use-id>toolu_015o8q96yNdd92wHtyZNbakR</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson--t3-worktrees-ars-ui-t3code-7f73cfa1/f9584230-fc36-4504-bc82-888a346eac93/tasks/bhj9zuaf2.output</output-file>
+<status>completed</status>
+<summary>Background command "Run full pre-PR gate" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+It hasn't finished yet?
+
+---
+
+We have reviews in our PR, let's give them a check. Make sure to properly test any new code that you might add for addressing the reviews, we don't want to let our test coverage get lower. Commit, push and then reply the reviews inline at github, marking them as resolved afterward
+
+---
+
+<task-notification>
+<task-id>bik6fkpao</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson--t3-worktrees-ars-ui-t3code-7f73cfa1/83a61426-498a-43f4-8e23-36a096870b74/tasks/bik6fkpao.output</output-file>
+<status>completed</status>
+<summary>Background command "Re-run cargo-mutants with new impl" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>buq9ilpgx</task-id>
+<tool-use-id>toolu_01WfC2VWYymQwbmPT2hNontB</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson--t3-worktrees-ars-ui-t3code-7f73cfa1/83a61426-498a-43f4-8e23-36a096870b74/tasks/buq9ilpgx.output</output-file>
+<status>completed</status>
+<summary>Background command "Final cargo xci before pushing review fixes" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+Did xci finished?
