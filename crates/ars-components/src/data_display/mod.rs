@@ -8,3 +8,6 @@ pub mod badge;
 
 /// Skeleton component connect API.
 pub mod skeleton;
+
+/// Table component state machine and connect API.
+pub mod table;

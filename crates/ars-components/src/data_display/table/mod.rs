@@ -1,0 +1,2063 @@
+//! Table data-display component machine.
+//!
+//! Owns row/column selection, sort descriptors, expansion, grid focus,
+//! optional column-resize state, optional virtual-scrolling metadata, and
+//! the registered row list. The agnostic core never moves DOM focus,
+//! never measures column widths, never observes scroll, and never reads
+//! the rendered cell contents — adapters apply DOM focus by inspecting
+//! [`Context::focused_cell`] / [`Context::focused_row`] /
+//! [`Context::focused_col`], and observe pointer events to drive
+//! [`Event::ColumnResize`] / [`Event::ColumnResizeEnd`].
+//!
+//! Sort state lives exclusively in [`Context::sort_descriptor`] (spec
+//! §1.1.1). [`State`] has a single `Idle` variant; the visual sort
+//! spinner is gated on [`Context::is_sorting`].
+//!
+//! Direction resolution: [`Props::dir`] is mirrored into
+//! [`Context::dir`] at [`Machine::init`] time. Adapters must dispatch
+//! [`Event::SetDirection`] from [`Machine::on_props_changed`] (and on
+//! mount when the prop is [`Direction::Auto`] — the runtime-resolved
+//! concrete value is passed in) so RTL keyboard navigation stays live.
+//!
+//! Row registry: the machine tracks the rendered row list via
+//! [`Context::rows`], replaced by [`Event::SetRows`]. The registry
+//! powers `disallow_empty_selection` pruning and the
+//! `aria-rowcount`/`aria-rowindex` derivations for virtual scrolling.
+//! Keyboard helpers ([`Api::on_row_keydown`], [`Api::on_cell_keydown`])
+//! still accept an `all_row_ids` slice so adapters can pass the rendered
+//! row order without an extra registry round-trip.
+//!
+//! See `spec/components/data-display/table.md` for the full contract,
+//! plus §5 (SelectAll), §6 (Column Resizing), §3.5 (Virtual Scrolling),
+//! and §1.6 (Async loading).
+
+use alloc::{
+    borrow::ToOwned as _,
+    collections::{BTreeMap, BTreeSet},
+    format,
+    string::{String, ToString as _},
+    vec::Vec,
+};
+use core::fmt::{self, Debug};
+
+use ars_collections::{Key, SortDescriptor, SortDirection, selection};
+use ars_core::{
+    AriaAttr, AttrMap, Bindable, ComponentIds, ComponentMessages, ComponentPart, ConnectApi,
+    Direction, Env, HtmlAttr, Locale, MessageFn, NoEffect, TransitionPlan,
+};
+use ars_interactions::{KeyboardEventData, KeyboardKey};
+
+#[cfg(test)]
+mod tests;
+
+// ────────────────────────────────────────────────────────────────────
+// State
+// ────────────────────────────────────────────────────────────────────
+
+/// States for the [`Table`](self) component.
+///
+/// The table machine never changes state — every interaction (sort,
+/// selection, expansion, grid focus, column resize, virtual scroll)
+/// is expressed as a context mutation. Sort state in particular lives
+/// exclusively in [`Context::sort_descriptor`] per spec §1.1.1.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum State {
+    /// The table is at rest.
+    #[default]
+    Idle,
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Escape-key behavior
+// ────────────────────────────────────────────────────────────────────
+
+/// Controls behavior when Escape is pressed while rows are selected.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EscapeKeyBehavior {
+    /// Escape clears the current selection (default).
+    #[default]
+    ClearSelection,
+
+    /// Escape is not handled by the Table.
+    None,
+}
+
+// ────────────────────────────────────────────────────────────────────
+// SelectAll mode (§5.1)
+// ────────────────────────────────────────────────────────────────────
+
+/// Strategy for the `SelectAll` affordance.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SelectAllMode {
+    /// No select-all affordance is rendered.
+    None,
+
+    /// Select all currently visible (rendered) rows. Default.
+    #[default]
+    AllVisible,
+
+    /// Select every row in the dataset, including rows not yet loaded.
+    /// `total_count` is the known cardinality.
+    AllData {
+        /// Total number of rows in the dataset.
+        total_count: usize,
+    },
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Events
+// ────────────────────────────────────────────────────────────────────
+
+/// Events accepted by the [`Table`](self) state machine.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Event {
+    /// Apply or toggle sort on the given column. Cycle is
+    /// `None → Ascending → Descending → None`.
+    SortColumn {
+        /// Column identifier the user activated.
+        column: String,
+    },
+
+    /// Mark a row as selected. Rejected when selection is disabled or
+    /// the row is in [`Context::disabled_keys`].
+    SelectRow(Key),
+
+    /// Remove a row from the selection. Honors
+    /// [`Context::disallow_empty_selection`].
+    DeselectRow(Key),
+
+    /// Select every row (`Mode::Multiple` only). Uses
+    /// [`selection::Set::All`].
+    SelectAll,
+
+    /// Clear the entire selection. Rejected when
+    /// [`Context::disallow_empty_selection`] would leave the table empty.
+    DeselectAll,
+
+    /// Flip the selection state of one row. Honors disabled and
+    /// `disallow_empty_selection`.
+    ToggleRow(Key),
+
+    /// Show the expanded content for a row. No-op when already
+    /// expanded or the row is disabled.
+    ExpandRow(Key),
+
+    /// Hide the expanded content for a row.
+    CollapseRow(Key),
+
+    /// Move the logical grid focus to a cell by `(col, row)` indices.
+    Focus {
+        /// `(col, row)` index pair.
+        cell: (usize, usize),
+    },
+
+    /// Remove focus from the grid. Clears
+    /// [`Context::focused_cell`] / [`Context::focused_row`] /
+    /// [`Context::focused_col`].
+    Blur,
+
+    /// Move the logical row focus to the supplied row key.
+    FocusRow(Key),
+
+    /// Move the logical grid focus to the supplied row + column pair.
+    FocusCell {
+        /// Row key receiving focus.
+        row: Key,
+
+        /// Column index receiving focus.
+        col: usize,
+
+        /// Zero-based index of `row` inside [`Context::rows`] (so the
+        /// transition can write `(col, row_index)` into
+        /// [`Context::focused_cell`] without re-scanning the row list).
+        row_index: usize,
+    },
+
+    /// Primary action triggered on a row (Enter, double-click).
+    RowAction(Key),
+
+    /// User pressed Escape. Honors
+    /// [`Context::escape_key_behavior`].
+    EscapeKey,
+
+    /// Replace the registered row list. Stale selection / expansion /
+    /// focused row keys are pruned.
+    SetRows(Vec<Key>),
+
+    /// Replace [`Context::dir`]. Idempotent.
+    SetDirection(Direction),
+
+    /// Replace the virtualized total row / column counts (§3.5).
+    SetRowCounts {
+        /// Total row count across the entire dataset.
+        total_rows: usize,
+
+        /// Total column count across the entire dataset.
+        total_cols: usize,
+    },
+
+    /// Toggle the async loading indicator (§1.6).
+    SetLoading(bool),
+
+    /// Update the cached width for `column`. Clamps to
+    /// [`Context::min_column_width`] and upserts the entry on first
+    /// resize. Records `column` as the currently resizing column.
+    ColumnResize {
+        /// Column identifier.
+        column: String,
+
+        /// Requested width in pixels (pre-clamp).
+        width: f64,
+    },
+
+    /// Clear [`Context::resizing_column`] when it matches `column`.
+    ColumnResizeEnd {
+        /// Column identifier whose drag ended.
+        column: String,
+    },
+
+    /// Re-apply non-Bindable `Props` fields and re-prune
+    /// selection/expansion against new `disabled_keys`.
+    SyncProps,
+
+    /// Push a new controlled value into [`Context::selected_rows`].
+    SyncControlledSelectedRows(Option<selection::Set>),
+
+    /// Push a new controlled value into [`Context::expanded_rows`].
+    SyncControlledExpandedRows(Option<BTreeSet<Key>>),
+
+    /// Push a new controlled value into [`Context::sort_descriptor`].
+    SyncControlledSortDescriptor(Option<SortDescriptor<String>>),
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Messages
+// ────────────────────────────────────────────────────────────────────
+
+/// Closure signature for the localized label messages.
+///
+/// Receives the active [`Locale`] and returns the localized string.
+pub type LocaleFn = dyn Fn(&Locale) -> String + Send + Sync;
+
+/// Closure signature for the `SelectAll` label which may take a row count.
+///
+/// Receives the total row count (or `0` when none is known) and the
+/// active [`Locale`], and returns the localized "Select all N rows"
+/// label.
+pub type SelectAllLabelFn = dyn Fn(usize, &Locale) -> String + Send + Sync;
+
+/// Localizable strings for [`Table`](self).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Messages {
+    /// Accessible label for the `SelectAll` checkbox. Receives the total
+    /// row count (`0` when unknown) so [`SelectAllMode::AllData`] can
+    /// render "Select all 1,204 rows".
+    pub select_all: MessageFn<SelectAllLabelFn>,
+
+    /// Accessible label for a row's selection checkbox.
+    pub select_row: MessageFn<LocaleFn>,
+
+    /// Announcement fired when a column is sorted ascending.
+    pub sort_ascending: MessageFn<LocaleFn>,
+
+    /// Announcement fired when a column is sorted descending.
+    pub sort_descending: MessageFn<LocaleFn>,
+
+    /// Announcement fired when sort is removed.
+    pub sort_none: MessageFn<LocaleFn>,
+}
+
+impl Default for Messages {
+    fn default() -> Self {
+        Self {
+            select_all: MessageFn::new(|count: usize, _locale: &Locale| {
+                if count == 0 {
+                    "Select all rows".to_string()
+                } else {
+                    format!("Select all {count} rows")
+                }
+            }),
+            select_row: MessageFn::new(|_locale: &Locale| "Select row".to_string()),
+            sort_ascending: MessageFn::new(|_locale: &Locale| "Sort ascending".to_string()),
+            sort_descending: MessageFn::new(|_locale: &Locale| "Sort descending".to_string()),
+            sort_none: MessageFn::new(|_locale: &Locale| "Remove sort".to_string()),
+        }
+    }
+}
+
+impl ComponentMessages for Messages {}
+
+// ────────────────────────────────────────────────────────────────────
+// Props
+// ────────────────────────────────────────────────────────────────────
+
+/// Immutable configuration for a [`Table`](self) instance.
+#[derive(Clone, Debug, PartialEq, ars_core::HasId)]
+pub struct Props {
+    /// Component instance id. Required.
+    pub id: String,
+
+    // ── Selection ────────────────────────────────────────────────────
+    /// Controlled selected rows.
+    pub selected_rows: Option<selection::Set>,
+
+    /// Uncontrolled initial selection. Disabled rows are pruned during
+    /// [`Machine::init`].
+    pub default_selected_rows: selection::Set,
+
+    /// Row selection mode.
+    pub selection_mode: selection::Mode,
+
+    /// Controls whether selection toggles or replaces on click.
+    pub selection_behavior: selection::Behavior,
+
+    /// Keys of individually disabled rows.
+    pub disabled_keys: BTreeSet<Key>,
+
+    /// Forbid deselecting the last remaining selected row.
+    pub disallow_empty_selection: bool,
+
+    /// Behavior when Escape is pressed while rows are selected.
+    pub escape_key_behavior: EscapeKeyBehavior,
+
+    /// `SelectAll` affordance strategy (§5).
+    pub select_all_mode: SelectAllMode,
+
+    // ── Expansion ────────────────────────────────────────────────────
+    /// Controlled expanded rows.
+    pub expanded_rows: Option<BTreeSet<Key>>,
+
+    /// Uncontrolled initial expansion.
+    pub default_expanded_rows: BTreeSet<Key>,
+
+    // ── Sort ─────────────────────────────────────────────────────────
+    /// Controlled/uncontrolled sort state.
+    pub sort_descriptor: Bindable<Option<SortDescriptor<String>>>,
+
+    // ── Layout & a11y ────────────────────────────────────────────────
+    /// Enables `role="grid"` with full keyboard cell navigation.
+    pub interactive: bool,
+
+    /// Fixes the `<thead>` while the `<tbody>` scrolls.
+    pub sticky_header: bool,
+
+    /// Optional visible caption text. When `Some`, the table renders
+    /// `aria-labelledby` pointing at the caption's id.
+    pub caption: Option<String>,
+
+    /// Text direction. `Direction::Auto` resolves from the active
+    /// locale at [`Machine::init`] time.
+    pub dir: Direction,
+
+    // ── Column resizing (§6) ─────────────────────────────────────────
+    /// Minimum allowed column width in pixels.
+    pub min_column_width: f64,
+
+    /// Keyboard width-adjustment step in pixels.
+    pub column_resize_step: f64,
+
+    // ── Virtual scrolling (§3.5) ─────────────────────────────────────
+    /// When `true`, the table emits `aria-rowcount` / `aria-colcount`
+    /// and rows emit `aria-rowindex`.
+    pub virtual_scrolling: bool,
+
+    /// Total row count in the dataset (not just visible rows).
+    pub total_rows: usize,
+
+    /// Total column count in the dataset.
+    pub total_cols: usize,
+
+    // ── Async loading (§1.6) ─────────────────────────────────────────
+    /// Async loading flag. Adapters render skeleton rows when `true`.
+    pub loading: Bindable<bool>,
+}
+
+impl Default for Props {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            selected_rows: None,
+            default_selected_rows: selection::Set::default(),
+            selection_mode: selection::Mode::None,
+            selection_behavior: selection::Behavior::Toggle,
+            disabled_keys: BTreeSet::new(),
+            disallow_empty_selection: false,
+            escape_key_behavior: EscapeKeyBehavior::ClearSelection,
+            select_all_mode: SelectAllMode::default(),
+            expanded_rows: None,
+            default_expanded_rows: BTreeSet::new(),
+            sort_descriptor: Bindable::uncontrolled(None),
+            interactive: false,
+            sticky_header: false,
+            caption: None,
+            dir: Direction::default(),
+            min_column_width: 50.0,
+            column_resize_step: 10.0,
+            virtual_scrolling: false,
+            total_rows: 0,
+            total_cols: 0,
+            loading: Bindable::uncontrolled(false),
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Context
+// ────────────────────────────────────────────────────────────────────
+
+/// Runtime context for the [`Table`](self) machine.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Context {
+    /// Currently selected row IDs.
+    pub selected_rows: Bindable<selection::Set>,
+
+    /// Full selection state machine (mode, behavior, anchor, focus,
+    /// disabled keys).
+    pub selection_state: selection::State,
+
+    /// Currently expanded row IDs (expansion is unrelated to selection).
+    pub expanded_rows: Bindable<BTreeSet<Key>>,
+
+    /// Unified sort state. `None` means no active sort.
+    pub sort_descriptor: Bindable<Option<SortDescriptor<String>>>,
+
+    /// True while an async sort is in progress (drives sort-indicator
+    /// visuals only; the canonical state is `sort_descriptor`).
+    pub is_sorting: bool,
+
+    /// Grid focus position: `(col_index, row_index)`. None when
+    /// unfocused.
+    pub focused_cell: Option<(usize, usize)>,
+
+    /// Focused row key for row-level keyboard navigation.
+    pub focused_row: Option<Key>,
+
+    /// Focused column index for cell-level keyboard navigation.
+    pub focused_col: Option<usize>,
+
+    /// Keys of individually disabled rows.
+    pub disabled_keys: BTreeSet<Key>,
+
+    /// Row selection mode.
+    pub selection_mode: selection::Mode,
+
+    /// When `true`, the table renders `role="grid"`.
+    pub interactive: bool,
+
+    /// Registered row keys, replaced via [`Event::SetRows`].
+    pub rows: Vec<Key>,
+
+    /// Resolved layout direction.
+    pub dir: Direction,
+
+    /// Per-column cached widths (§6).
+    pub column_widths: BTreeMap<String, f64>,
+
+    /// Column currently being resized (§6).
+    pub resizing_column: Option<String>,
+
+    /// True when virtual scrolling drives the ARIA output (§3.5).
+    pub virtual_scrolling: bool,
+
+    /// Total row count across the entire dataset.
+    pub total_rows: usize,
+
+    /// Total column count across the entire dataset.
+    pub total_cols: usize,
+
+    /// Async loading flag (§1.6).
+    pub loading: Bindable<bool>,
+
+    /// Escape-key behavior.
+    pub escape_key_behavior: EscapeKeyBehavior,
+
+    /// `SelectAll` affordance strategy.
+    pub select_all_mode: SelectAllMode,
+
+    /// Minimum allowed column width when resizing (§6).
+    pub min_column_width: f64,
+
+    /// Keyboard width-adjustment step when resizing (§6).
+    pub column_resize_step: f64,
+
+    /// Whether deselecting the last selected row is forbidden.
+    pub disallow_empty_selection: bool,
+
+    /// Whether the `<thead>` is fixed while the `<tbody>` scrolls.
+    pub sticky_header: bool,
+
+    /// Resolved locale for message formatting.
+    pub locale: Locale,
+
+    /// Resolved messages for selection and sort UI.
+    pub messages: Messages,
+
+    /// `<caption>` element id wired into `aria-labelledby`.
+    pub caption_id: String,
+
+    /// Component instance ID.
+    pub id: String,
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Part
+// ────────────────────────────────────────────────────────────────────
+
+/// Anatomy parts for the [`Table`](self) component.
+#[derive(ars_core::ComponentPart)]
+#[scope = "table"]
+pub enum Part {
+    /// Wrapper `<div>` around the table element.
+    Root,
+
+    /// The `<table>` element itself.
+    Table,
+
+    /// The `<caption>` element.
+    Caption,
+
+    /// The `<thead>` element.
+    Head,
+
+    /// The `<tbody>` element.
+    Body,
+
+    /// The `<tfoot>` element.
+    Foot,
+
+    /// A data `<tr>` row.
+    Row {
+        /// Row identifier.
+        key: Key,
+    },
+
+    /// A `<th scope="col">` column header.
+    ColumnHeader {
+        /// Column identifier.
+        header: String,
+    },
+
+    /// A `<th scope="row">` row header cell.
+    RowHeader,
+
+    /// A `<td>` data cell.
+    Cell {
+        /// Column index.
+        col: usize,
+
+        /// Row index.
+        row: usize,
+    },
+
+    /// The `SelectAll` checkbox in the header.
+    SelectAllCheckbox,
+
+    /// The per-row selection checkbox.
+    RowCheckbox {
+        /// Row identifier.
+        key: Key,
+    },
+
+    /// The expand/collapse trigger for an expandable row.
+    ExpandTrigger {
+        /// Row identifier.
+        key: Key,
+    },
+
+    /// The expanded detail content for a row.
+    ExpandedContent {
+        /// Row identifier.
+        key: Key,
+    },
+
+    /// The column resize handle (§6).
+    ColumnResizeHandle {
+        /// Column identifier.
+        column: String,
+    },
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Helpers (selection / row registry pruning)
+// ────────────────────────────────────────────────────────────────────
+
+/// Removes disabled keys from a [`selection::Set`].
+fn prune_selection_against(set: &selection::Set, disabled: &BTreeSet<Key>) -> selection::Set {
+    // `Empty` and `All` (and any future non-exhaustive variants) cannot
+    // independently carry a disabled key, so they're cloned through
+    // unchanged via the wildcard arm at the bottom.
+    #[expect(
+        clippy::match_same_arms,
+        reason = "explicit non-exhaustive wildcard distinguishes Empty/All from unknown future variants"
+    )]
+    match set {
+        selection::Set::Single(key) => {
+            if disabled.contains(key) {
+                selection::Set::Empty
+            } else {
+                selection::Set::Single(key.clone())
+            }
+        }
+
+        selection::Set::Multiple(keys) => {
+            let pruned = keys
+                .iter()
+                .filter(|k| !disabled.contains(k))
+                .cloned()
+                .collect::<BTreeSet<_>>();
+
+            match pruned.len() {
+                0 => selection::Set::Empty,
+                1 => selection::Set::Single(pruned.into_iter().next().unwrap()),
+                _ => selection::Set::Multiple(pruned),
+            }
+        }
+
+        selection::Set::Empty | selection::Set::All => set.clone(),
+
+        _ => set.clone(),
+    }
+}
+
+/// Restricts a [`selection::Set`] to keys present in `rows`. `All` is
+/// preserved (it logically expands to the registered set).
+fn restrict_selection_to_rows(set: &selection::Set, rows: &[Key]) -> selection::Set {
+    #[expect(
+        clippy::match_same_arms,
+        reason = "explicit non-exhaustive wildcard distinguishes Empty/All from unknown future variants"
+    )]
+    match set {
+        selection::Set::Single(key) => {
+            if rows.contains(key) {
+                selection::Set::Single(key.clone())
+            } else {
+                selection::Set::Empty
+            }
+        }
+
+        selection::Set::Multiple(keys) => {
+            let pruned = keys
+                .iter()
+                .filter(|k| rows.contains(k))
+                .cloned()
+                .collect::<BTreeSet<_>>();
+
+            match pruned.len() {
+                0 => selection::Set::Empty,
+                1 => selection::Set::Single(pruned.into_iter().next().unwrap()),
+                _ => selection::Set::Multiple(pruned),
+            }
+        }
+
+        selection::Set::Empty | selection::Set::All => set.clone(),
+
+        _ => set.clone(),
+    }
+}
+
+/// Toggle helper that avoids the `Collection` generic on
+/// [`selection::State::toggle`]. The Table machine intentionally does
+/// not own a `Collection`, so it computes toggle directly from the
+/// `selection::Set::All` case.
+fn toggle_state_without_collection(state: &selection::State, key: Key) -> selection::State {
+    if state.is_disabled(&key) {
+        return state.clone();
+    }
+
+    if state.is_selected(&key) {
+        // `selection::State::deselect_from_all` requires a Collection;
+        // expand `All` to `Multiple(rows \ {key})` below by caller —
+        // here we simply call `deselect` which handles `Set::All` by
+        // returning the state unchanged. The caller pre-handles `All`.
+        state.deselect(&key)
+    } else {
+        state.select(key)
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Machine
+// ────────────────────────────────────────────────────────────────────
+
+/// State machine for the [`Table`](self) component.
+///
+/// # Examples
+///
+/// ```
+/// use ars_components::data_display::table;
+/// use ars_collections::{Key, selection};
+/// use ars_core::{Env, Service};
+///
+/// let props = table::Props {
+///     id: "demo".to_string(),
+///     selection_mode: selection::Mode::Multiple,
+///     ..table::Props::default()
+/// };
+///
+/// let mut service = Service::<table::Machine>::new(
+///     props,
+///     &Env::default(),
+///     &table::Messages::default(),
+/// );
+///
+/// // Register the rendered row list — required for selection /
+/// // expansion / focus pruning, and to drive `aria-rowcount`.
+/// drop(service.send(table::Event::SetRows(vec![Key::str("r1"), Key::str("r2")])));
+/// drop(service.send(table::Event::ToggleRow(Key::str("r1"))));
+///
+/// let api = service.connect(&|_| {});
+///
+/// // `role="table"` by default; flip `interactive` for `role="grid"`.
+/// assert!(api.is_row_selected(&Key::str("r1")));
+/// ```
+#[derive(Debug)]
+pub struct Machine;
+
+impl ars_core::Machine for Machine {
+    type State = State;
+    type Event = Event;
+    type Context = Context;
+    type Props = Props;
+    type Messages = Messages;
+    type Effect = NoEffect;
+    type Api<'a> = Api<'a>;
+
+    fn init(
+        props: &Self::Props,
+        env: &Env,
+        messages: &Self::Messages,
+    ) -> (Self::State, Self::Context) {
+        let locale = env.locale.clone();
+
+        let messages = messages.clone();
+
+        let ids = ComponentIds::from_id(&props.id);
+
+        let pruned_default_selection =
+            prune_selection_against(&props.default_selected_rows, &props.disabled_keys);
+
+        let pruned_default_expansion = props
+            .default_expanded_rows
+            .iter()
+            .filter(|key| !props.disabled_keys.contains(key))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+
+        let initial_selection = if let Some(controlled) = &props.selected_rows {
+            controlled.clone()
+        } else {
+            pruned_default_selection.clone()
+        };
+
+        let selection_state = selection::State::new(props.selection_mode, props.selection_behavior)
+            .with_disabled(props.disabled_keys.clone());
+
+        let selection_state = selection::State {
+            selected_keys: initial_selection,
+            ..selection_state
+        };
+
+        let dir = if props.dir == Direction::Auto {
+            // Resolve `Auto → concrete` from the active locale. Adapters
+            // can override via `Event::SetDirection` if the platform
+            // provides a more authoritative resolution.
+            Direction::from(locale.direction())
+        } else {
+            props.dir
+        };
+
+        let ctx = Context {
+            selected_rows: if let Some(v) = &props.selected_rows {
+                Bindable::controlled(v.clone())
+            } else {
+                Bindable::uncontrolled(pruned_default_selection)
+            },
+            selection_state,
+            expanded_rows: if let Some(v) = &props.expanded_rows {
+                Bindable::controlled(v.clone())
+            } else {
+                Bindable::uncontrolled(pruned_default_expansion)
+            },
+            sort_descriptor: props.sort_descriptor.clone(),
+            is_sorting: false,
+            focused_cell: None,
+            focused_row: None,
+            focused_col: None,
+            disabled_keys: props.disabled_keys.clone(),
+            selection_mode: props.selection_mode,
+            interactive: props.interactive,
+            rows: Vec::new(),
+            dir,
+            column_widths: BTreeMap::new(),
+            resizing_column: None,
+            virtual_scrolling: props.virtual_scrolling,
+            total_rows: props.total_rows,
+            total_cols: props.total_cols,
+            loading: props.loading.clone(),
+            escape_key_behavior: props.escape_key_behavior,
+            select_all_mode: props.select_all_mode.clone(),
+            min_column_width: props.min_column_width,
+            column_resize_step: props.column_resize_step,
+            disallow_empty_selection: props.disallow_empty_selection,
+            sticky_header: props.sticky_header,
+            locale,
+            messages,
+            caption_id: ids.part("caption"),
+            id: ids.id().to_string(),
+        };
+
+        (State::Idle, ctx)
+    }
+
+    fn transition(
+        _state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
+    ) -> Option<TransitionPlan<Self>> {
+        match event {
+            // ── Sort ─────────────────────────────────────────────────
+            // Sort state lives entirely in `ctx.sort_descriptor`. The
+            // single-column cycle is None → Ascending → Descending → None.
+            Event::SortColumn { column } => {
+                let current = ctx.sort_descriptor.get().clone();
+
+                let new_descriptor = if let Some(desc) = current
+                    && desc.column == *column
+                {
+                    match desc.direction {
+                        SortDirection::Ascending => Some(SortDescriptor {
+                            column: column.clone(),
+                            direction: SortDirection::Descending,
+                        }),
+                        SortDirection::Descending => None,
+                    }
+                } else {
+                    Some(SortDescriptor {
+                        column: column.clone(),
+                        direction: SortDirection::Ascending,
+                    })
+                };
+
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.sort_descriptor.set(new_descriptor);
+                    ctx.is_sorting = true;
+                }))
+            }
+
+            // ── Row Action ───────────────────────────────────────────
+            Event::RowAction(key) => {
+                if ctx.disabled_keys.contains(key) {
+                    return None;
+                }
+
+                // Notification only — adapter listens for the event.
+                Some(TransitionPlan::context_only(|_ctx: &mut Context| {}))
+            }
+
+            // ── Selection ────────────────────────────────────────────
+            Event::SelectRow(key) => {
+                if ctx.selection_mode == selection::Mode::None {
+                    return None;
+                }
+
+                if ctx.disabled_keys.contains(key) {
+                    return None;
+                }
+
+                if ctx.selection_state.is_selected(key) {
+                    return None;
+                }
+
+                let key = key.clone();
+
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let new_state = ctx.selection_state.select(key);
+
+                    ctx.selected_rows.set(new_state.selected_keys.clone());
+                    ctx.selection_state = new_state;
+                }))
+            }
+
+            Event::DeselectRow(key) => {
+                if ctx.selection_mode == selection::Mode::None {
+                    return None;
+                }
+
+                if ctx.disabled_keys.contains(key) {
+                    return None;
+                }
+
+                if !ctx.selection_state.is_selected(key) {
+                    return None;
+                }
+
+                if ctx.disallow_empty_selection
+                    && would_empty_after_deselect(&ctx.selection_state.selected_keys, key)
+                {
+                    return None;
+                }
+
+                let key = key.clone();
+
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let new_state = ctx.selection_state.deselect(&key);
+
+                    ctx.selected_rows.set(new_state.selected_keys.clone());
+                    ctx.selection_state = new_state;
+                }))
+            }
+
+            Event::ToggleRow(key) => {
+                if ctx.selection_mode == selection::Mode::None {
+                    return None;
+                }
+
+                if ctx.disabled_keys.contains(key) {
+                    return None;
+                }
+
+                let is_currently_selected = ctx.selection_state.is_selected(key);
+
+                if is_currently_selected
+                    && ctx.disallow_empty_selection
+                    && would_empty_after_deselect(&ctx.selection_state.selected_keys, key)
+                {
+                    return None;
+                }
+
+                let key = key.clone();
+
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let new_state = toggle_state_without_collection(&ctx.selection_state, key);
+
+                    ctx.selected_rows.set(new_state.selected_keys.clone());
+                    ctx.selection_state = new_state;
+                }))
+            }
+
+            Event::SelectAll => {
+                if ctx.selection_mode != selection::Mode::Multiple {
+                    return None;
+                }
+
+                if matches!(ctx.selected_rows.get(), selection::Set::All) {
+                    return None;
+                }
+
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    let new_state = ctx.selection_state.select_all();
+
+                    ctx.selected_rows.set(new_state.selected_keys.clone());
+                    ctx.selection_state = new_state;
+                }))
+            }
+
+            Event::DeselectAll => {
+                if ctx.selection_mode == selection::Mode::None {
+                    return None;
+                }
+
+                if matches!(ctx.selected_rows.get(), selection::Set::Empty) {
+                    return None;
+                }
+
+                if ctx.disallow_empty_selection {
+                    return None;
+                }
+
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    let new_state = ctx.selection_state.clear();
+
+                    ctx.selected_rows.set(new_state.selected_keys.clone());
+                    ctx.selection_state = new_state;
+                }))
+            }
+
+            // ── Expansion ────────────────────────────────────────────
+            Event::ExpandRow(key) => {
+                if ctx.disabled_keys.contains(key) {
+                    return None;
+                }
+
+                if ctx.expanded_rows.get().contains(key) {
+                    return None;
+                }
+
+                let key = key.clone();
+
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let mut rows = ctx.expanded_rows.get().clone();
+
+                    rows.insert(key);
+
+                    ctx.expanded_rows.set(rows);
+                }))
+            }
+
+            Event::CollapseRow(key) => {
+                if !ctx.expanded_rows.get().contains(key) {
+                    return None;
+                }
+
+                let key = key.clone();
+
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let mut rows = ctx.expanded_rows.get().clone();
+
+                    rows.remove(&key);
+
+                    ctx.expanded_rows.set(rows);
+                }))
+            }
+
+            // ── Grid focus ───────────────────────────────────────────
+            Event::Focus { cell } => {
+                if !ctx.interactive {
+                    return None;
+                }
+
+                let c = *cell;
+
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.focused_cell = Some(c);
+                }))
+            }
+
+            Event::Blur => Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                ctx.focused_cell = None;
+                ctx.focused_row = None;
+                ctx.focused_col = None;
+            })),
+
+            Event::FocusRow(key) => {
+                if !ctx.interactive {
+                    return None;
+                }
+
+                let key = key.clone();
+
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.focused_row = Some(key);
+                }))
+            }
+
+            Event::FocusCell {
+                row,
+                col,
+                row_index,
+            } => {
+                if !ctx.interactive {
+                    return None;
+                }
+
+                let row = row.clone();
+                let col = *col;
+                let row_index = *row_index;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.focused_cell = Some((col, row_index));
+                    ctx.focused_row = Some(row);
+                    ctx.focused_col = Some(col);
+                }))
+            }
+
+            // ── Escape key ───────────────────────────────────────────
+            Event::EscapeKey => {
+                if ctx.escape_key_behavior != EscapeKeyBehavior::ClearSelection {
+                    return None;
+                }
+
+                if ctx.disallow_empty_selection {
+                    return None;
+                }
+
+                if matches!(ctx.selected_rows.get(), selection::Set::Empty) {
+                    return None;
+                }
+
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    let new_state = ctx.selection_state.clear();
+
+                    ctx.selected_rows.set(new_state.selected_keys.clone());
+                    ctx.selection_state = new_state;
+                }))
+            }
+
+            // ── Row registry ─────────────────────────────────────────
+            Event::SetRows(new_rows) => {
+                let rows = new_rows.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let restricted_selection =
+                        restrict_selection_to_rows(&ctx.selected_rows.get().clone(), &rows);
+
+                    let restricted_expansion = ctx
+                        .expanded_rows
+                        .get()
+                        .iter()
+                        .filter(|k| rows.contains(k))
+                        .cloned()
+                        .collect::<BTreeSet<_>>();
+
+                    if let Some(focused) = ctx.focused_row.clone()
+                        && !rows.contains(&focused)
+                    {
+                        ctx.focused_row = None;
+                        ctx.focused_cell = None;
+                        ctx.focused_col = None;
+                    }
+
+                    ctx.selected_rows.set(restricted_selection.clone());
+                    ctx.selection_state.selected_keys = restricted_selection;
+                    ctx.expanded_rows.set(restricted_expansion);
+                    ctx.rows = rows;
+                }))
+            }
+
+            // ── Direction ────────────────────────────────────────────
+            Event::SetDirection(dir) => {
+                if ctx.dir == *dir {
+                    return None;
+                }
+
+                let dir = *dir;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.dir = dir;
+                }))
+            }
+
+            // ── Virtual scroll counts ────────────────────────────────
+            Event::SetRowCounts {
+                total_rows,
+                total_cols,
+            } => {
+                if ctx.total_rows == *total_rows && ctx.total_cols == *total_cols {
+                    return None;
+                }
+
+                let total_rows = *total_rows;
+                let total_cols = *total_cols;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.total_rows = total_rows;
+                    ctx.total_cols = total_cols;
+                }))
+            }
+
+            // ── Async loading ────────────────────────────────────────
+            Event::SetLoading(value) => {
+                if *ctx.loading.get() == *value {
+                    return None;
+                }
+
+                let value = *value;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.loading.set(value);
+                }))
+            }
+
+            // ── Column resize ────────────────────────────────────────
+            Event::ColumnResize { column, width } => {
+                let min = ctx.min_column_width;
+
+                let clamped = if *width < min { min } else { *width };
+                let column = column.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.column_widths.insert(column.clone(), clamped);
+                    ctx.resizing_column = Some(column);
+                }))
+            }
+
+            Event::ColumnResizeEnd { column } => {
+                if ctx.resizing_column.as_deref() != Some(column.as_str()) {
+                    return None;
+                }
+
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.resizing_column = None;
+                }))
+            }
+
+            // ── Prop sync ────────────────────────────────────────────
+            Event::SyncProps => Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                let disabled = ctx.disabled_keys.clone();
+
+                let pruned_selection =
+                    prune_selection_against(&ctx.selected_rows.get().clone(), &disabled);
+
+                let pruned_expansion = ctx
+                    .expanded_rows
+                    .get()
+                    .iter()
+                    .filter(|k| !disabled.contains(k))
+                    .cloned()
+                    .collect::<BTreeSet<_>>();
+
+                ctx.selected_rows.set(pruned_selection.clone());
+                ctx.selection_state.selected_keys = pruned_selection;
+                ctx.expanded_rows.set(pruned_expansion);
+            })),
+
+            Event::SyncControlledSelectedRows(value) => {
+                let v = value.clone();
+
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.selected_rows.sync_controlled(v.clone());
+
+                    if let Some(set) = v {
+                        ctx.selection_state.selected_keys = set;
+                    }
+                }))
+            }
+
+            Event::SyncControlledExpandedRows(value) => {
+                let value = value.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.expanded_rows.sync_controlled(value);
+                }))
+            }
+
+            Event::SyncControlledSortDescriptor(value) => {
+                let value = value.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    // `Bindable<Option<SortDescriptor<String>>>::sync_controlled`
+                    // expects `Option<Option<…>>` — the outer `Some` keeps
+                    // the Bindable in controlled mode while the inner
+                    // `Option` is the new sort value (`None` == cleared).
+                    ctx.sort_descriptor.sync_controlled(Some(value));
+                    ctx.is_sorting = false;
+                }))
+            }
+        }
+    }
+
+    fn connect<'a>(
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
+        Api {
+            state,
+            ctx,
+            props,
+            send,
+        }
+    }
+}
+
+/// Returns `true` when deselecting `key` would leave the selection empty.
+fn would_empty_after_deselect(set: &selection::Set, key: &Key) -> bool {
+    match set {
+        selection::Set::Single(k) => k == key,
+
+        selection::Set::Multiple(keys) => keys.len() == 1 && keys.contains(key),
+
+        // `Empty` / `All` / unknown non-exhaustive variants are not at
+        // risk of becoming empty from a single deselect.
+        _ => false,
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Api
+// ────────────────────────────────────────────────────────────────────
+
+/// Connect API for the [`Table`](self) component.
+pub struct Api<'a> {
+    state: &'a State,
+    ctx: &'a Context,
+    props: &'a Props,
+    send: &'a dyn Fn(Event),
+}
+
+impl<'a> Debug for Api<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Api")
+            .field("state", self.state)
+            .field("ctx", self.ctx)
+            .field("props", self.props)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a> Api<'a> {
+    /// Returns the underlying machine state.
+    #[must_use]
+    pub const fn state(&self) -> &State {
+        self.state
+    }
+
+    /// Returns the underlying context.
+    #[must_use]
+    pub const fn context(&self) -> &Context {
+        self.ctx
+    }
+
+    /// Returns the underlying props.
+    #[must_use]
+    pub const fn props(&self) -> &Props {
+        self.props
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────
+
+    /// Returns `true` when `row_id` is currently selected.
+    #[must_use]
+    pub fn is_row_selected(&self, row_id: &Key) -> bool {
+        self.ctx.selected_rows.get().contains(row_id)
+    }
+
+    /// Returns `true` when `row_id` is currently expanded.
+    #[must_use]
+    pub fn is_row_expanded(&self, row_id: &Key) -> bool {
+        self.ctx.expanded_rows.get().contains(row_id)
+    }
+
+    /// Returns `true` when `row_id` is in the disabled set.
+    #[must_use]
+    pub fn is_row_disabled(&self, row_id: &Key) -> bool {
+        self.ctx.disabled_keys.contains(row_id)
+    }
+
+    /// Returns the current sort descriptor.
+    #[must_use]
+    pub fn sort_descriptor(&self) -> Option<&SortDescriptor<String>> {
+        self.ctx.sort_descriptor.get().as_ref()
+    }
+
+    /// Returns the active sort column, if any.
+    #[must_use]
+    pub fn active_sort_column(&self) -> Option<&String> {
+        self.sort_descriptor().map(|d| &d.column)
+    }
+
+    /// Returns the current sort direction for the active sort column.
+    /// Returns `None` when no column is sorted (per
+    /// [`SortDirection`]'s definition `Ascending`/`Descending` only).
+    #[must_use]
+    pub fn sort_direction(&self) -> Option<SortDirection> {
+        self.sort_descriptor().map(|d| d.direction)
+    }
+
+    /// Returns `true` when every key in `all_row_ids` is currently
+    /// selected. Handles [`selection::Set::All`] efficiently.
+    #[must_use]
+    pub fn all_selected(&self, all_row_ids: &[&Key]) -> bool {
+        let sel = self.ctx.selected_rows.get();
+
+        if sel.is_all() {
+            return true;
+        }
+
+        if all_row_ids.is_empty() {
+            return false;
+        }
+
+        all_row_ids.iter().all(|id| sel.contains(id))
+    }
+
+    /// Returns `true` when at least one key in `all_row_ids` is
+    /// currently selected.
+    #[must_use]
+    pub fn some_selected(&self, all_row_ids: &[&Key]) -> bool {
+        let sel = self.ctx.selected_rows.get();
+
+        if sel.is_all() {
+            return !all_row_ids.is_empty();
+        }
+
+        all_row_ids.iter().any(|id| sel.contains(id))
+    }
+
+    // ── Root / Table ──────────────────────────────────────────────────
+
+    /// Returns the attribute map for the wrapper `<div>`.
+    #[must_use]
+    pub fn root_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+
+        set_part(&mut attrs, &Part::Root);
+
+        if self.ctx.sticky_header {
+            attrs.set_bool(HtmlAttr::Data("ars-sticky-header"), true);
+        }
+
+        attrs
+    }
+
+    /// Returns the attribute map for the `<table>` element.
+    #[must_use]
+    pub fn table_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+
+        attrs.set(HtmlAttr::Id, self.ctx.id.clone());
+
+        set_part(&mut attrs, &Part::Table);
+
+        if self.ctx.interactive {
+            attrs.set(HtmlAttr::Role, "grid");
+        } else {
+            attrs.set(HtmlAttr::Role, "table");
+        }
+
+        if self.props.caption.is_some() {
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::LabelledBy),
+                self.ctx.caption_id.clone(),
+            );
+        }
+
+        if self.ctx.virtual_scrolling {
+            attrs
+                .set(
+                    HtmlAttr::Aria(AriaAttr::RowCount),
+                    self.ctx.total_rows.to_string(),
+                )
+                .set(
+                    HtmlAttr::Aria(AriaAttr::ColCount),
+                    self.ctx.total_cols.to_string(),
+                );
+        }
+
+        attrs
+    }
+
+    /// Returns the attribute map for the `<caption>` element.
+    #[must_use]
+    pub fn caption_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+
+        attrs.set(HtmlAttr::Id, self.ctx.caption_id.clone());
+
+        set_part(&mut attrs, &Part::Caption);
+
+        attrs
+    }
+
+    /// Returns the attribute map for the `<thead>` element.
+    #[must_use]
+    pub fn head_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+
+        set_part(&mut attrs, &Part::Head);
+
+        if self.ctx.sticky_header {
+            attrs.set_bool(HtmlAttr::Data("ars-sticky"), true);
+        }
+
+        attrs
+    }
+
+    /// Returns the attribute map for the `<tbody>` element.
+    #[must_use]
+    pub fn body_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+
+        set_part(&mut attrs, &Part::Body);
+
+        attrs
+    }
+
+    /// Returns the attribute map for the `<tfoot>` element.
+    #[must_use]
+    pub fn foot_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        set_part(&mut attrs, &Part::Foot);
+        attrs
+    }
+
+    // ── Rows ──────────────────────────────────────────────────────────
+
+    /// Returns the attribute map for a `<tr>` row.
+    ///
+    /// `row_index` is the zero-based position of the row in the rendered
+    /// dataset; it becomes `aria-rowindex = row_index + 1` when virtual
+    /// scrolling is active. For non-virtualized callers, pass `0` or
+    /// use [`Self::row_attrs`].
+    #[must_use]
+    pub fn row_attrs_indexed(&self, row_id: &Key, row_index: usize) -> AttrMap {
+        let mut attrs = AttrMap::new();
+
+        set_part(
+            &mut attrs,
+            &Part::Row {
+                key: Key::default(),
+            },
+        );
+
+        let selected = self.is_row_selected(row_id);
+        let expanded = self.is_row_expanded(row_id);
+        let disabled = self.is_row_disabled(row_id);
+
+        if self.ctx.selection_mode != selection::Mode::None {
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::Selected),
+                if selected { "true" } else { "false" },
+            );
+
+            if selected {
+                attrs.set_bool(HtmlAttr::Data("ars-selected"), true);
+            }
+        }
+
+        if expanded {
+            attrs
+                .set(HtmlAttr::Aria(AriaAttr::Expanded), "true")
+                .set_bool(HtmlAttr::Data("ars-expanded"), true);
+        }
+
+        if disabled {
+            attrs
+                .set(HtmlAttr::Aria(AriaAttr::Disabled), "true")
+                .set_bool(HtmlAttr::Data("ars-disabled"), true);
+        }
+
+        if self.ctx.interactive {
+            attrs.set(HtmlAttr::Role, "row");
+        }
+
+        if self.ctx.virtual_scrolling {
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::RowIndex),
+                (row_index + 1).to_string(),
+            );
+        }
+        attrs
+    }
+
+    /// Returns the attribute map for a `<tr>` row using `row_index = 0`.
+    /// Convenience for non-virtualized tables.
+    #[must_use]
+    pub fn row_attrs(&self, row_id: &Key) -> AttrMap {
+        self.row_attrs_indexed(row_id, 0)
+    }
+
+    /// Returns row attributes for a row that acts as a link.
+    #[must_use]
+    pub fn row_link_attrs(&self, row_id: &Key, href: &str) -> AttrMap {
+        let mut attrs = self.row_attrs(row_id);
+
+        attrs.set(HtmlAttr::Data("ars-href"), href.to_owned());
+
+        attrs
+    }
+
+    // ── Headers / cells ───────────────────────────────────────────────
+
+    /// Returns the attribute map for a `<th scope="col">` column header.
+    ///
+    /// Non-sortable columns omit `aria-sort` entirely per spec §3.4.2.
+    #[must_use]
+    pub fn column_header_attrs(&self, column: &str, sortable: bool) -> AttrMap {
+        let mut attrs = AttrMap::new();
+
+        set_part(
+            &mut attrs,
+            &Part::ColumnHeader {
+                header: String::new(),
+            },
+        );
+
+        attrs.set(HtmlAttr::Scope, "col");
+
+        if sortable {
+            let is_sorted = self.active_sort_column().is_some_and(|c| c == column);
+
+            let aria_sort = if is_sorted {
+                match self.sort_direction() {
+                    Some(SortDirection::Ascending) => "ascending",
+                    Some(SortDirection::Descending) => "descending",
+                    None => "none",
+                }
+            } else {
+                "none"
+            };
+
+            attrs
+                .set(HtmlAttr::Aria(AriaAttr::Sort), aria_sort)
+                .set(HtmlAttr::Data("ars-sort"), aria_sort);
+
+            if is_sorted {
+                attrs.set_bool(HtmlAttr::Data("ars-sorted"), true);
+            }
+
+            attrs.set(HtmlAttr::TabIndex, "0");
+        }
+        attrs
+    }
+
+    /// Returns the attribute map for a `<th scope="row">` row header cell.
+    #[must_use]
+    pub fn row_header_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+
+        set_part(&mut attrs, &Part::RowHeader);
+
+        attrs.set(HtmlAttr::Scope, "row");
+
+        attrs
+    }
+
+    /// Returns the attribute map for a `<td>` cell.
+    ///
+    /// Manages a roving `tabindex` when the table is `interactive`.
+    #[must_use]
+    pub fn cell_attrs(&self, col: usize, row: usize) -> AttrMap {
+        let mut attrs = AttrMap::new();
+
+        set_part(&mut attrs, &Part::Cell { col, row });
+
+        if self.ctx.interactive {
+            let focused = self.ctx.focused_cell == Some((col, row));
+
+            attrs.set(HtmlAttr::TabIndex, if focused { "0" } else { "-1" });
+        }
+
+        attrs
+    }
+
+    // ── Selection controls ────────────────────────────────────────────
+
+    /// Returns the attribute map for the `SelectAll` checkbox.
+    ///
+    /// Returns an empty map when
+    /// [`SelectAllMode::None`](crate::data_display::table::SelectAllMode::None)
+    /// is configured.
+    #[must_use]
+    pub fn select_all_attrs(&self, all_row_ids: &[&Key]) -> AttrMap {
+        let mut attrs = AttrMap::new();
+
+        if matches!(self.ctx.select_all_mode, SelectAllMode::None) {
+            return attrs;
+        }
+
+        set_part(&mut attrs, &Part::SelectAllCheckbox);
+
+        attrs.set(HtmlAttr::Type, "checkbox");
+
+        let count = if let SelectAllMode::AllData { total_count } = &self.ctx.select_all_mode {
+            *total_count
+        } else {
+            all_row_ids.len()
+        };
+
+        let label = (self.ctx.messages.select_all)(count, &self.ctx.locale);
+
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
+
+        let all = self.all_selected(all_row_ids);
+
+        let some = !all && self.some_selected(all_row_ids);
+
+        let aria_checked = if all {
+            "true"
+        } else if some {
+            "mixed"
+        } else {
+            "false"
+        };
+
+        attrs.set(HtmlAttr::Aria(AriaAttr::Checked), aria_checked);
+
+        if all {
+            attrs.set_bool(HtmlAttr::Checked, true);
+        }
+
+        if some {
+            attrs.set_bool(HtmlAttr::Data("ars-indeterminate"), true);
+        }
+
+        attrs
+    }
+
+    /// Returns the attribute map for the per-row selection checkbox.
+    #[must_use]
+    pub fn row_checkbox_attrs(&self, row_id: &Key) -> AttrMap {
+        let mut attrs = AttrMap::new();
+
+        set_part(
+            &mut attrs,
+            &Part::RowCheckbox {
+                key: Key::default(),
+            },
+        );
+
+        attrs.set(HtmlAttr::Type, "checkbox");
+
+        let selected = self.is_row_selected(row_id);
+
+        let label = (self.ctx.messages.select_row)(&self.ctx.locale);
+
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), label).set(
+            HtmlAttr::Aria(AriaAttr::Checked),
+            if selected { "true" } else { "false" },
+        );
+
+        if selected {
+            attrs.set_bool(HtmlAttr::Checked, true);
+        }
+
+        if self.is_row_disabled(row_id) {
+            attrs
+                .set(HtmlAttr::Aria(AriaAttr::Disabled), "true")
+                .set_bool(HtmlAttr::Disabled, true);
+        }
+
+        attrs
+    }
+
+    // ── Expand controls ───────────────────────────────────────────────
+
+    /// Returns the attribute map for an expand trigger `<button>`.
+    #[must_use]
+    pub fn expand_trigger_attrs(&self, row_id: &Key) -> AttrMap {
+        let mut attrs = AttrMap::new();
+
+        set_part(
+            &mut attrs,
+            &Part::ExpandTrigger {
+                key: Key::default(),
+            },
+        );
+
+        let expanded = self.is_row_expanded(row_id);
+        let detail_id = format!("{}-expanded-{}", self.ctx.id, row_id);
+
+        attrs
+            .set(HtmlAttr::Type, "button")
+            .set(
+                HtmlAttr::Aria(AriaAttr::Expanded),
+                if expanded { "true" } else { "false" },
+            )
+            .set(HtmlAttr::Aria(AriaAttr::Controls), detail_id);
+
+        if expanded {
+            attrs.set_bool(HtmlAttr::Data("ars-expanded"), true);
+        }
+
+        if self.is_row_disabled(row_id) {
+            attrs
+                .set(HtmlAttr::Aria(AriaAttr::Disabled), "true")
+                .set_bool(HtmlAttr::Disabled, true);
+        }
+
+        attrs
+    }
+
+    /// Returns the attribute map for the expanded detail `<tr>`.
+    #[must_use]
+    pub fn expanded_content_attrs(&self, row_id: &Key) -> AttrMap {
+        let mut attrs = AttrMap::new();
+
+        set_part(
+            &mut attrs,
+            &Part::ExpandedContent {
+                key: Key::default(),
+            },
+        );
+
+        let detail_id = format!("{}-expanded-{}", self.ctx.id, row_id);
+
+        attrs.set(HtmlAttr::Id, detail_id);
+
+        let expanded = self.is_row_expanded(row_id);
+
+        if expanded {
+            attrs.set_bool(HtmlAttr::Data("ars-expanded"), true);
+        } else {
+            attrs.set_bool(HtmlAttr::Hidden, true);
+        }
+
+        attrs
+    }
+
+    // ── Column resize handle (§6) ─────────────────────────────────────
+
+    /// Returns the attribute map for a column resize handle.
+    #[must_use]
+    pub fn column_resize_handle_attrs(&self, column: &str, current_width: f64) -> AttrMap {
+        let mut attrs = AttrMap::new();
+
+        set_part(
+            &mut attrs,
+            &Part::ColumnResizeHandle {
+                column: String::new(),
+            },
+        );
+
+        let effective_width = self
+            .ctx
+            .column_widths
+            .get(column)
+            .copied()
+            .unwrap_or(current_width);
+
+        attrs
+            .set(HtmlAttr::Role, "separator")
+            .set(HtmlAttr::Aria(AriaAttr::Orientation), "vertical")
+            .set(
+                HtmlAttr::Aria(AriaAttr::ValueNow),
+                format_width(effective_width),
+            );
+
+        if self.ctx.resizing_column.as_deref() == Some(column) {
+            attrs.set_bool(HtmlAttr::Data("ars-resizing"), true);
+        }
+
+        attrs.set(HtmlAttr::TabIndex, "0");
+
+        attrs
+    }
+
+    // ── Keyboard navigation ───────────────────────────────────────────
+
+    /// Handle a keydown event delivered to a row element. Emits the
+    /// appropriate [`Event::FocusRow`] / [`Event::ToggleRow`] /
+    /// [`Event::EscapeKey`] event.
+    pub fn on_row_keydown(&self, row_id: &Key, data: &KeyboardEventData, all_row_ids: &[&Key]) {
+        let current_idx = all_row_ids.iter().position(|id| *id == row_id);
+
+        match data.key {
+            KeyboardKey::ArrowDown => {
+                if let Some(idx) = current_idx
+                    && let Some(next) = all_row_ids.get(idx + 1)
+                {
+                    (self.send)(Event::FocusRow((*next).clone()));
+                }
+            }
+
+            KeyboardKey::ArrowUp => {
+                if let Some(idx) = current_idx
+                    && idx > 0
+                    && let Some(prev) = all_row_ids.get(idx - 1)
+                {
+                    (self.send)(Event::FocusRow((*prev).clone()));
+                }
+            }
+
+            KeyboardKey::Home => {
+                if let Some(first) = all_row_ids.first() {
+                    (self.send)(Event::FocusRow((*first).clone()));
+                }
+            }
+
+            KeyboardKey::End => {
+                if let Some(last) = all_row_ids.last() {
+                    (self.send)(Event::FocusRow((*last).clone()));
+                }
+            }
+
+            KeyboardKey::Enter | KeyboardKey::Space => {
+                (self.send)(Event::ToggleRow(row_id.clone()));
+            }
+
+            KeyboardKey::Escape => {
+                (self.send)(Event::EscapeKey);
+            }
+
+            _ => {}
+        }
+    }
+
+    /// Handle a keydown event delivered to a cell element when the table
+    /// is `interactive=true`. Resolves Arrow Left/Right against
+    /// [`Context::dir`] so Arrow Right always moves toward the logical
+    /// "end" column.
+    pub fn on_cell_keydown(
+        &self,
+        row_id: &Key,
+        col: usize,
+        data: &KeyboardEventData,
+        all_row_ids: &[&Key],
+        col_count: usize,
+    ) {
+        let current_row_idx = all_row_ids.iter().position(|id| *id == row_id);
+
+        let is_rtl = self.ctx.dir == Direction::Rtl;
+
+        let (next_col_key, prev_col_key) = if is_rtl {
+            (KeyboardKey::ArrowLeft, KeyboardKey::ArrowRight)
+        } else {
+            (KeyboardKey::ArrowRight, KeyboardKey::ArrowLeft)
+        };
+
+        match data.key {
+            key if key == next_col_key => {
+                if col + 1 < col_count
+                    && let Some(idx) = current_row_idx
+                {
+                    (self.send)(Event::FocusCell {
+                        row: row_id.clone(),
+                        col: col + 1,
+                        row_index: idx,
+                    });
+                }
+            }
+
+            key if key == prev_col_key => {
+                if col > 0
+                    && let Some(idx) = current_row_idx
+                {
+                    (self.send)(Event::FocusCell {
+                        row: row_id.clone(),
+                        col: col - 1,
+                        row_index: idx,
+                    });
+                }
+            }
+
+            KeyboardKey::ArrowDown => {
+                if let Some(idx) = current_row_idx
+                    && let Some(next) = all_row_ids.get(idx + 1)
+                {
+                    (self.send)(Event::FocusCell {
+                        row: (*next).clone(),
+                        col,
+                        row_index: idx + 1,
+                    });
+                }
+            }
+
+            KeyboardKey::ArrowUp => {
+                if let Some(idx) = current_row_idx
+                    && idx > 0
+                    && let Some(prev) = all_row_ids.get(idx - 1)
+                {
+                    (self.send)(Event::FocusCell {
+                        row: (*prev).clone(),
+                        col,
+                        row_index: idx - 1,
+                    });
+                }
+            }
+
+            KeyboardKey::Home if data.ctrl_key => {
+                if let Some(first) = all_row_ids.first() {
+                    (self.send)(Event::FocusCell {
+                        row: (*first).clone(),
+                        col: 0,
+                        row_index: 0,
+                    });
+                }
+            }
+
+            KeyboardKey::End if data.ctrl_key => {
+                if let Some(last) = all_row_ids.last() {
+                    (self.send)(Event::FocusCell {
+                        row: (*last).clone(),
+                        col: col_count.saturating_sub(1),
+                        row_index: all_row_ids.len().saturating_sub(1),
+                    });
+                }
+            }
+
+            KeyboardKey::Home => {
+                if let Some(idx) = current_row_idx {
+                    (self.send)(Event::FocusCell {
+                        row: row_id.clone(),
+                        col: 0,
+                        row_index: idx,
+                    });
+                }
+            }
+
+            KeyboardKey::End => {
+                if let Some(idx) = current_row_idx {
+                    (self.send)(Event::FocusCell {
+                        row: row_id.clone(),
+                        col: col_count.saturating_sub(1),
+                        row_index: idx,
+                    });
+                }
+            }
+
+            KeyboardKey::Space => {
+                (self.send)(Event::ToggleRow(row_id.clone()));
+            }
+
+            KeyboardKey::Escape => {
+                (self.send)(Event::EscapeKey);
+            }
+
+            _ => {}
+        }
+    }
+
+    /// Handle a keydown event delivered to a column resize handle.
+    /// Emits [`Event::ColumnResize`] with the current width adjusted by
+    /// [`Context::column_resize_step`], honoring RTL.
+    pub fn on_resize_handle_keydown(
+        &self,
+        column: &str,
+        current_width: f64,
+        data: &KeyboardEventData,
+    ) {
+        let step = self.ctx.column_resize_step;
+
+        let is_rtl = self.ctx.dir == Direction::Rtl;
+
+        let (grow_key, shrink_key) = if is_rtl {
+            (KeyboardKey::ArrowLeft, KeyboardKey::ArrowRight)
+        } else {
+            (KeyboardKey::ArrowRight, KeyboardKey::ArrowLeft)
+        };
+
+        let next_width = match data.key {
+            key if key == grow_key => Some(current_width + step),
+            key if key == shrink_key => Some(current_width - step),
+            _ => None,
+        };
+
+        if let Some(width) = next_width {
+            (self.send)(Event::ColumnResize {
+                column: column.to_owned(),
+                width,
+            });
+        }
+    }
+}
+
+impl<'a> ConnectApi for Api<'a> {
+    type Part = Part;
+
+    fn part_attrs(&self, part: Self::Part) -> AttrMap {
+        match &part {
+            Part::Root => self.root_attrs(),
+            Part::Table => self.table_attrs(),
+            Part::Caption => self.caption_attrs(),
+            Part::Head => self.head_attrs(),
+            Part::Body => self.body_attrs(),
+            Part::Foot => self.foot_attrs(),
+            Part::Row { key } => self.row_attrs(key),
+            Part::ColumnHeader { header } => self.column_header_attrs(header, true),
+            Part::RowHeader => self.row_header_attrs(),
+            Part::Cell { col, row } => self.cell_attrs(*col, *row),
+            Part::SelectAllCheckbox => self.select_all_attrs(&[]),
+            Part::RowCheckbox { key } => self.row_checkbox_attrs(key),
+            Part::ExpandTrigger { key } => self.expand_trigger_attrs(key),
+            Part::ExpandedContent { key } => self.expanded_content_attrs(key),
+            Part::ColumnResizeHandle { column } => self.column_resize_handle_attrs(column, 0.0),
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Internal helpers
+// ────────────────────────────────────────────────────────────────────
+
+/// Sets the canonical `data-ars-scope` / `data-ars-part` attribute pair.
+fn set_part(attrs: &mut AttrMap, part: &Part) {
+    let [(scope_attr, scope_val), (part_attr, part_val)] = part.data_attrs();
+
+    attrs.set(scope_attr, scope_val);
+    attrs.set(part_attr, part_val);
+}
+
+/// Renders an `aria-valuenow` width value to a clean string, trimming a
+/// trailing `.0` when the width is integer-valued.
+fn format_width(width: f64) -> String {
+    if width.fract() == 0.0 {
+        format!("{width:.0}")
+    } else {
+        format!("{width}")
+    }
+}

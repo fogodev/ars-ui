@@ -17,6 +17,9 @@
 #[path = "spec_conformance/helper.rs"]
 mod helper;
 
+#[path = "spec_conformance/data_display.rs"]
+mod data_display;
+
 #[path = "spec_conformance/layout.rs"]
 mod layout;
 

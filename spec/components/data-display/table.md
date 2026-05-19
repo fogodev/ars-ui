@@ -25,7 +25,7 @@ navigable `grid` for interactive use.
 
 #### 1.1.1 Sort State Single Source of Truth
 
-Table sort state is managed exclusively through `Context.sort_descriptor: Bindable<Option<SortDescriptor>>`. There is NO `State::Sorting` variant in the state enum — the Table state machine uses only `Idle`, `Scrolling`, and other interaction states.
+Table sort state is managed exclusively through `Context.sort_descriptor: Bindable<Option<SortDescriptor>>`. There is NO `State::Sorting` variant in the state enum — the Table state machine has a single `Idle` state, and every interaction (sort, selection, expansion, grid focus, column resize) is expressed as a context mutation. Scroll position and live measurement are owned by the adapter, not by the agnostic core.
 
 **Rationale**: Having both a `State::Sorting` variant and a `Context.sort_descriptor` created a sync race where the state and context could disagree about the current sort. By using `Context.sort_descriptor` as the single source of truth:
 
@@ -56,19 +56,32 @@ When a sort column header is clicked:
 
 ### 1.2 Events
 
-| Event         | Payload                | Description                                   |
-| ------------- | ---------------------- | --------------------------------------------- |
-| `SortColumn`  | `column: String`       | Apply or toggle sort on the given column.     |
-| `SelectRow`   | `Key` (row id)         | Mark a row as selected.                       |
-| `DeselectRow` | `Key` (row id)         | Remove a row from the selection.              |
-| `SelectAll`   | —                      | Select all rows (uses `selection::Set::All`). |
-| `DeselectAll` | —                      | Clear all selected rows.                      |
-| `ToggleRow`   | `Key` (row id)         | Flip selection state of one row.              |
-| `ExpandRow`   | `Key` (row id)         | Show the expanded content for a row.          |
-| `CollapseRow` | `Key` (row id)         | Hide the expanded content for a row.          |
-| `Focus`       | `cell: (usize, usize)` | Move the logical grid focus to a cell.        |
-| `Blur`        | —                      | Remove focus from the grid.                   |
-| `RowAction`   | `Key` (row id)         | Primary action triggered on a row.            |
+| Event                          | Payload                                      | Description                                                            |
+| ------------------------------ | -------------------------------------------- | ---------------------------------------------------------------------- |
+| `SortColumn`                   | `column: String`                             | Apply or toggle sort on the given column.                              |
+| `SelectRow`                    | `Key` (row id)                               | Mark a row as selected.                                                |
+| `DeselectRow`                  | `Key` (row id)                               | Remove a row from the selection.                                       |
+| `SelectAll`                    | —                                            | Select all rows (uses `selection::Set::All`).                          |
+| `DeselectAll`                  | —                                            | Clear all selected rows.                                               |
+| `ToggleRow`                    | `Key` (row id)                               | Flip selection state of one row.                                       |
+| `ExpandRow`                    | `Key` (row id)                               | Show the expanded content for a row.                                   |
+| `CollapseRow`                  | `Key` (row id)                               | Hide the expanded content for a row.                                   |
+| `Focus`                        | `cell: (usize, usize)`                       | Move the logical grid focus to a cell by `(col, row)` indices.         |
+| `Blur`                         | —                                            | Remove focus from the grid.                                            |
+| `FocusRow`                     | `Key` (row id)                               | Move the logical row focus to the supplied row key.                    |
+| `FocusCell`                    | `{ row: Key, col: usize, row_index: usize }` | Move the logical grid focus to the supplied row + column index pair.   |
+| `RowAction`                    | `Key` (row id)                               | Primary action triggered on a row.                                     |
+| `EscapeKey`                    | —                                            | User pressed Escape. Honors `Props::escape_key_behavior`.              |
+| `SetRows`                      | `Vec<Key>`                                   | Replace the registered row list. Prunes stale selection / expansion.   |
+| `SetDirection`                 | `Direction`                                  | Replace `Context::dir`. Idempotent.                                    |
+| `SetRowCounts`                 | `{ total_rows: usize, total_cols: usize }`   | Replace virtualized total row / column counts.                         |
+| `SetLoading`                   | `bool`                                       | Toggle the async loading indicator (§1.6).                             |
+| `ColumnResize`                 | `{ column: String, width: f64 }`             | Update the cached column width. Clamps to `Props::min_column_width`.   |
+| `ColumnResizeEnd`              | `column: String`                             | Clear `Context::resizing_column` when it matches `column`.             |
+| `SyncProps`                    | —                                            | Re-apply non-Bindable `Props` fields and re-prune selection/expansion. |
+| `SyncControlledSelectedRows`   | `Option<selection::Set>`                     | Push a new controlled value into `Context::selected_rows`.             |
+| `SyncControlledExpandedRows`   | `Option<BTreeSet<Key>>`                      | Push a new controlled value into `Context::expanded_rows`.             |
+| `SyncControlledSortDescriptor` | `Option<SortDescriptor<String>>`             | Push a new controlled value into `Context::sort_descriptor`.           |
 
 ### 1.3 Context
 
@@ -97,6 +110,40 @@ pub struct Context {
     pub selection_mode: selection::Mode,
     /// When true, renders role="grid" with full keyboard navigation.
     pub interactive: bool,
+    /// True while an async sort operation is in progress. Drives sort-indicator
+    /// visuals only; the canonical sort state is `sort_descriptor`.
+    pub is_sorting: bool,
+    /// Registered row keys, replaced via `Event::SetRows`. Used to prune stale
+    /// selection / expansion and validate `disallow_empty_selection`.
+    pub rows: Vec<Key>,
+    /// Resolved layout direction. Adapters dispatch `Event::SetDirection` from
+    /// `Machine::on_props_changed` so RTL keyboard navigation remains live.
+    pub dir: Direction,
+    /// Per-column cached widths in pixels (§6 Column Resizing).
+    pub column_widths: BTreeMap<String, f64>,
+    /// Column currently being resized; cleared by `ColumnResizeEnd` (§6).
+    pub resizing_column: Option<String>,
+    /// True when the table is rendered with virtual scrolling — gates the
+    /// `aria-rowcount` / `aria-colcount` / `aria-rowindex` output (§3.5).
+    pub virtual_scrolling: bool,
+    /// Total row count in the dataset (not just rendered rows). `0` until set.
+    pub total_rows: usize,
+    /// Total column count in the dataset (not just rendered cols). `0` until set.
+    pub total_cols: usize,
+    /// Async loading state — adapters render skeleton rows when `true` (§1.6).
+    pub loading: Bindable<bool>,
+    /// Behavior when Escape is pressed while rows are selected.
+    pub escape_key_behavior: EscapeKeyBehavior,
+    /// Strategy for the SelectAll affordance (§5).
+    pub select_all_mode: SelectAllMode,
+    /// Minimum allowed column width when resizing (§6).
+    pub min_column_width: f64,
+    /// Width delta applied per keyboard step when resizing (§6).
+    pub column_resize_step: f64,
+    /// Whether deselecting the last selected row is forbidden.
+    pub disallow_empty_selection: bool,
+    /// Whether `<thead>` is fixed while `<tbody>` scrolls.
+    pub sticky_header: bool,
     /// Resolved locale for message formatting.
     pub locale: Locale,
     /// Resolved messages for selection and sort UI.
@@ -139,12 +186,30 @@ fn is_row_expanded(ctx: &Context, row_id: &Key) -> bool {
 
 ```rust
 /// Controls behavior when Escape is pressed while rows are selected.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum EscapeKeyBehavior {
     /// Escape clears the current selection.
+    #[default]
     ClearSelection,
     /// Escape is not handled by the Table.
     None,
+}
+
+/// Strategy for the SelectAll affordance (§5).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SelectAllMode {
+    /// No select-all affordance is rendered.
+    None,
+    /// Select all currently visible (rendered) rows. This is the default.
+    #[default]
+    AllVisible,
+    /// Select all rows in the dataset, including those not yet loaded.
+    /// `total_count` is the known cardinality — used for the checkbox label
+    /// ("Select all 1,204 items") and for the `aria-checked` derivation.
+    AllData {
+        /// Total number of rows in the dataset.
+        total_count: usize,
+    },
 }
 
 /// Props for the Table component.
@@ -188,11 +253,41 @@ pub struct Props {
     pub sticky_header: bool,
     /// Optional visible caption text.
     pub caption: Option<String>,
-    /// Localized labels for selection and sort UI.
     /// Prevents deselecting the last remaining selected row. When `true` and the user
     /// attempts to deselect the only selected row, the action is a no-op, ensuring at
     /// least one row is always selected.
     pub disallow_empty_selection: bool,
+
+    // ── Direction (§4) ─────────────────────────────────────────────────────
+    /// Text direction. `Direction::Auto` resolves from the active locale at
+    /// `init` time; adapters re-dispatch `Event::SetDirection` from
+    /// `Machine::on_props_changed` when this prop differs between renders.
+    pub dir: Direction,
+
+    // ── SelectAll variant (§5) ─────────────────────────────────────────────
+    /// Strategy for the SelectAll affordance.
+    pub select_all_mode: SelectAllMode,
+
+    // ── Column resizing variant (§6) ───────────────────────────────────────
+    /// Minimum allowed column width in pixels (default: 50).
+    pub min_column_width: f64,
+    /// Keyboard width-adjustment step in pixels (default: 10).
+    pub column_resize_step: f64,
+
+    // ── Virtual scrolling (§3.5) ───────────────────────────────────────────
+    /// When `true`, `aria-rowcount` / `aria-colcount` are emitted on the table
+    /// and `aria-rowindex` is emitted on rows.
+    pub virtual_scrolling: bool,
+    /// Total row count in the dataset; mirrored into `Context::total_rows`.
+    pub total_rows: usize,
+    /// Total column count in the dataset; mirrored into `Context::total_cols`.
+    pub total_cols: usize,
+
+    // ── Async loading (§1.6) ───────────────────────────────────────────────
+    /// Controlled/uncontrolled async loading flag. `on_load_more` is an
+    /// adapter-only callback and is not stored in the agnostic core.
+    pub loading: Bindable<bool>,
+
     // Change callbacks provided by the adapter layer
 }
 ```
@@ -233,6 +328,14 @@ impl Default for Props {
             sticky_header: false,
             caption: None,
             disallow_empty_selection: false,
+            dir: Direction::default(),
+            select_all_mode: SelectAllMode::default(),
+            min_column_width: 50.0,
+            column_resize_step: 10.0,
+            virtual_scrolling: false,
+            total_rows: 0,
+            total_cols: 0,
+            loading: Bindable::uncontrolled(false),
         }
     }
 }
@@ -274,16 +377,61 @@ pub enum Event {
     ExpandRow(Key),
     /// Hide the expanded content for a row.
     CollapseRow(Key),
-    /// Move the logical grid focus to a cell.
+    /// Move the logical grid focus to a cell by `(col, row)` indices.
     Focus { cell: (usize, usize) },
     /// Remove focus from the grid.
     Blur,
     /// Move the logical grid focus to a row.
     FocusRow(Key),
-    /// Move the logical grid focus to a cell.
-    FocusCell { row: Key, col: usize },
+    /// Move the logical grid focus to a specific cell. `row_index` is the
+    /// zero-based position of `row` within `Context::rows` so the
+    /// transition can write `(col, row_index)` into `focused_cell` without
+    /// re-scanning the row list.
+    FocusCell {
+        /// Row key receiving focus.
+        row: Key,
+        /// Column index receiving focus.
+        col: usize,
+        /// Zero-based index of `row` inside `Context::rows`.
+        row_index: usize,
+    },
     /// Primary action triggered on a row (Enter key or double-click).
     RowAction(Key),
+    /// User pressed Escape. See `Props::escape_key_behavior`.
+    EscapeKey,
+    /// Replace the registered row list.
+    SetRows(Vec<Key>),
+    /// Replace `Context::dir`. Idempotent.
+    SetDirection(Direction),
+    /// Replace virtualized row / column totals (§3.5).
+    SetRowCounts {
+        /// Total row count across the entire dataset.
+        total_rows: usize,
+        /// Total column count across the entire dataset.
+        total_cols: usize,
+    },
+    /// Toggle the async loading flag (§1.6).
+    SetLoading(bool),
+    /// Update the cached width for `column`. Clamps to `Props::min_column_width`.
+    ColumnResize {
+        /// Column identifier.
+        column: String,
+        /// Requested width in pixels.
+        width: f64,
+    },
+    /// Clear `Context::resizing_column` when it matches `column`.
+    ColumnResizeEnd {
+        /// Column identifier whose drag ended.
+        column: String,
+    },
+    /// Re-apply non-Bindable `Props` fields and re-prune selection / expansion.
+    SyncProps,
+    /// Push a new controlled value into `Context::selected_rows`.
+    SyncControlledSelectedRows(Option<selection::Set>),
+    /// Push a new controlled value into `Context::expanded_rows`.
+    SyncControlledExpandedRows(Option<BTreeSet<Key>>),
+    /// Push a new controlled value into `Context::sort_descriptor`.
+    SyncControlledSortDescriptor(Option<SortDescriptor<String>>),
 }
 
 /// Machine for the Table.
@@ -301,19 +449,45 @@ impl ars_core::Machine for Machine {
         let locale = env.locale.clone();
         let messages = messages.clone();
         let ids = ComponentIds::from_id(&props.id);
+
+        // Prune disabled rows from the uncontrolled default selection so the
+        // boot state never contains keys the spec says are non-selectable.
+        let pruned_default_selection = prune_selection_against(
+            &props.default_selected_rows,
+            &props.disabled_keys,
+        );
+        let initial_selection = match &props.selected_rows {
+            Some(controlled) => controlled.clone(),
+            None             => pruned_default_selection.clone(),
+        };
+
+        // Seed `selection_state.selected_keys` from the initial selection so
+        // `is_selected` / `SelectRow` guards observe the correct boot state.
         let selection_state = selection::State::new(
             props.selection_mode,
             props.selection_behavior,
-        );
+        )
+        .with_disabled(props.disabled_keys.clone());
+        let selection_state = selection::State {
+            selected_keys: initial_selection,
+            ..selection_state
+        };
+
         let ctx = Context {
             selected_rows: match &props.selected_rows {
                 Some(v) => Bindable::controlled(v.clone()),
-                None    => Bindable::uncontrolled(props.default_selected_rows.clone()),
+                None    => Bindable::uncontrolled(pruned_default_selection),
             },
             selection_state,
             expanded_rows: match &props.expanded_rows {
                 Some(v) => Bindable::controlled(v.clone()),
-                None    => Bindable::uncontrolled(props.default_expanded_rows.clone()),
+                None    => Bindable::uncontrolled(
+                    props.default_expanded_rows
+                        .iter()
+                        .filter(|key| !props.disabled_keys.contains(key))
+                        .cloned()
+                        .collect(),
+                ),
             },
             sort_descriptor: props.sort_descriptor.clone(),
             focused_cell: None,
@@ -322,6 +496,21 @@ impl ars_core::Machine for Machine {
             disabled_keys: props.disabled_keys.clone(),
             selection_mode: props.selection_mode,
             interactive: props.interactive,
+            is_sorting: false,
+            rows: Vec::new(),
+            dir: props.dir,
+            column_widths: BTreeMap::new(),
+            resizing_column: None,
+            virtual_scrolling: props.virtual_scrolling,
+            total_rows: props.total_rows,
+            total_cols: props.total_cols,
+            loading: props.loading.clone(),
+            escape_key_behavior: props.escape_key_behavior,
+            select_all_mode: props.select_all_mode.clone(),
+            min_column_width: props.min_column_width,
+            column_resize_step: props.column_resize_step,
+            disallow_empty_selection: props.disallow_empty_selection,
+            sticky_header: props.sticky_header,
             locale,
             messages,
             caption_id: ids.part("caption"),
@@ -341,26 +530,26 @@ impl ars_core::Machine for Machine {
             // Sort state lives entirely in `ctx.sort_descriptor` (see §1.1.1).
             // There is no State::Sorting variant — we stay in `Idle` throughout.
             Event::SortColumn { column } => {
-                let new_direction = match ctx.sort_descriptor.get() {
-                    Some(desc) if desc.column == *column => {
-                        match desc.direction {
-                            SortDirection::Ascending  => SortDirection::Descending,
-                            SortDirection::Descending => SortDirection::None,
-                            SortDirection::None       => SortDirection::Ascending,
-                        }
-                    }
-                    // New column — always start ascending
-                    _ => SortDirection::Ascending,
+                // `ars_collections::SortDirection` only has `Ascending` and
+                // `Descending`; the "no sort" state is represented by
+                // `Option::None` on the descriptor itself. Cycle is
+                // `None → Ascending → Descending → None`.
+                let next_descriptor = match ctx.sort_descriptor.get() {
+                    Some(desc) if desc.column == *column => match desc.direction {
+                        SortDirection::Ascending => Some(SortDescriptor {
+                            column: column.clone(),
+                            direction: SortDirection::Descending,
+                        }),
+                        SortDirection::Descending => None,
+                    },
+                    _ => Some(SortDescriptor {
+                        column: column.clone(),
+                        direction: SortDirection::Ascending,
+                    }),
                 };
-                let col = column.clone();
-                let dir = new_direction;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let descriptor = if dir == SortDirection::None {
-                        None
-                    } else {
-                        Some(SortDescriptor { column: col, direction: dir })
-                    };
-                    ctx.sort_descriptor.set(descriptor);
+                    ctx.sort_descriptor.set(next_descriptor);
+                    ctx.is_sorting = true;
                 }))
                 // Sort change notification is handled by the adapter layer.
             }
@@ -388,9 +577,17 @@ impl ars_core::Machine for Machine {
             Event::DeselectRow(key) => {
                 if ctx.selection_mode == selection::Mode::None { return None; }
                 if ctx.disabled_keys.contains(key) { return None; }
+                if !ctx.selection_state.is_selected(key) { return None; }
+                // Honor `disallow_empty_selection` — refuse the deselect when
+                // it would empty the selection.
+                if ctx.disallow_empty_selection
+                    && would_empty_after_deselect(&ctx.selection_state.selected_keys, key)
+                {
+                    return None;
+                }
                 let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let new_state = ctx.selection_state.deselect(key);
+                    let new_state = ctx.selection_state.deselect(&key);
                     ctx.selected_rows.set(new_state.selected_keys.clone());
                     ctx.selection_state = new_state;
                 }))
@@ -399,9 +596,22 @@ impl ars_core::Machine for Machine {
             Event::ToggleRow(key) => {
                 if ctx.selection_mode == selection::Mode::None { return None; }
                 if ctx.disabled_keys.contains(key) { return None; }
+                let is_currently_selected = ctx.selection_state.is_selected(key);
+                if is_currently_selected
+                    && ctx.disallow_empty_selection
+                    && would_empty_after_deselect(&ctx.selection_state.selected_keys, key)
+                {
+                    return None;
+                }
                 let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let new_state = ctx.selection_state.toggle(key);
+                    // The implementation uses a local toggle helper to avoid
+                    // the `Collection` generic on `selection::State::toggle`.
+                    let new_state = if ctx.selection_state.is_selected(&key) {
+                        ctx.selection_state.deselect(&key)
+                    } else {
+                        ctx.selection_state.select(key)
+                    };
                     ctx.selected_rows.set(new_state.selected_keys.clone());
                     ctx.selection_state = new_state;
                 }))
@@ -409,6 +619,7 @@ impl ars_core::Machine for Machine {
 
             Event::SelectAll => {
                 if ctx.selection_mode != selection::Mode::Multiple { return None; }
+                if matches!(ctx.selected_rows.get(), selection::Set::All) { return None; }
                 Some(TransitionPlan::context_only(|ctx| {
                     let new_state = ctx.selection_state.select_all();
                     ctx.selected_rows.set(new_state.selected_keys.clone());
@@ -419,6 +630,19 @@ impl ars_core::Machine for Machine {
 
             Event::DeselectAll => {
                 if ctx.selection_mode == selection::Mode::None { return None; }
+                if matches!(ctx.selected_rows.get(), selection::Set::Empty) { return None; }
+                if ctx.disallow_empty_selection { return None; }
+                Some(TransitionPlan::context_only(|ctx| {
+                    let new_state = ctx.selection_state.clear();
+                    ctx.selected_rows.set(new_state.selected_keys.clone());
+                    ctx.selection_state = new_state;
+                }))
+            }
+
+            Event::EscapeKey => {
+                if ctx.escape_key_behavior != EscapeKeyBehavior::ClearSelection { return None; }
+                if ctx.disallow_empty_selection { return None; }
+                if matches!(ctx.selected_rows.get(), selection::Set::Empty) { return None; }
                 Some(TransitionPlan::context_only(|ctx| {
                     let new_state = ctx.selection_state.clear();
                     ctx.selected_rows.set(new_state.selected_keys.clone());
@@ -428,6 +652,8 @@ impl ars_core::Machine for Machine {
 
             // ── Row Expansion ─────────────────────────────────────────────────
             Event::ExpandRow(key) => {
+                // Disabled rows cannot be expanded.
+                if ctx.disabled_keys.contains(key) { return None; }
                 // Guard: skip when the row is already expanded — avoids
                 // creating an unnecessary transition plan.
                 if ctx.expanded_rows.get().contains(key) {
@@ -443,6 +669,8 @@ impl ars_core::Machine for Machine {
             }
 
             Event::CollapseRow(key) => {
+                // Guard: skip when already collapsed.
+                if !ctx.expanded_rows.get().contains(key) { return None; }
                 let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
                     let mut rows = ctx.expanded_rows.get().clone();
@@ -464,6 +692,8 @@ impl ars_core::Machine for Machine {
             Event::Blur => {
                 Some(TransitionPlan::context_only(|ctx| {
                     ctx.focused_cell = None;
+                    ctx.focused_row = None;
+                    ctx.focused_col = None;
                 }))
             }
 
@@ -475,16 +705,25 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            Event::FocusCell { row, col } => {
+            Event::FocusCell { row, col, row_index } => {
                 if !ctx.interactive { return None; }
                 let r = row.clone();
                 let c = *col;
+                let ri = *row_index;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.focused_cell = Some((c, 0)); // row index resolved by adapter
+                    ctx.focused_cell = Some((c, ri));
                     ctx.focused_row = Some(r);
                     ctx.focused_col = Some(c);
                 }))
             }
+
+            // The remaining events (`EscapeKey`, `SetRows`, `SetDirection`,
+            // `SetRowCounts`, `SetLoading`, `ColumnResize`, `ColumnResizeEnd`,
+            // `SyncProps`, `SyncControlledSelectedRows`,
+            // `SyncControlledExpandedRows`, `SyncControlledSortDescriptor`)
+            // follow the same `context_only` pattern. Their full
+            // implementation lives in `crates/ars-components/src/data_display/table/mod.rs`.
+            _ => None,
         }
     }
 
@@ -901,6 +1140,7 @@ pub enum Part {
     RowCheckbox { key: Key },
     ExpandTrigger { key: Key },
     ExpandedContent { key: Key },
+    ColumnResizeHandle { column: String },
 }
 
 impl ConnectApi for Api<'_> {
@@ -908,20 +1148,21 @@ impl ConnectApi for Api<'_> {
 
     fn part_attrs(&self, part: Part) -> AttrMap {
         match &part {
-            Part::Root                        => self.root_attrs(),
-            Part::Table                       => self.table_attrs(),
-            Part::Caption                     => self.caption_attrs(),
-            Part::Head                        => self.head_attrs(),
-            Part::Body                        => self.body_attrs(),
-            Part::Foot                        => self.foot_attrs(),
-            Part::Row { key }                 => self.row_attrs(key),
-            Part::ColumnHeader { header }     => self.column_header_attrs(header, true),
-            Part::RowHeader                   => self.row_header_attrs(),
-            Part::Cell { col, row }           => self.cell_attrs(*col, *row),
-            Part::SelectAllCheckbox           => self.select_all_attrs(&[]),
-            Part::RowCheckbox { key }         => self.row_checkbox_attrs(key),
-            Part::ExpandTrigger { key }       => self.expand_trigger_attrs(key),
-            Part::ExpandedContent { key }     => self.expanded_content_attrs(key),
+            Part::Root                          => self.root_attrs(),
+            Part::Table                         => self.table_attrs(),
+            Part::Caption                       => self.caption_attrs(),
+            Part::Head                          => self.head_attrs(),
+            Part::Body                          => self.body_attrs(),
+            Part::Foot                          => self.foot_attrs(),
+            Part::Row { key }                   => self.row_attrs(key),
+            Part::ColumnHeader { header }       => self.column_header_attrs(header, true),
+            Part::RowHeader                     => self.row_header_attrs(),
+            Part::Cell { col, row }             => self.cell_attrs(*col, *row),
+            Part::SelectAllCheckbox             => self.select_all_attrs(&[]),
+            Part::RowCheckbox { key }           => self.row_checkbox_attrs(key),
+            Part::ExpandTrigger { key }         => self.expand_trigger_attrs(key),
+            Part::ExpandedContent { key }       => self.expanded_content_attrs(key),
+            Part::ColumnResizeHandle { column } => self.column_resize_handle_attrs(column, 0.0),
         }
     }
 }
@@ -994,7 +1235,7 @@ Tables may support expandable rows that reveal additional detail content:
 **`aria-sort` and `aria-current` Semantics**
 
 - Sortable column headers MUST set `aria-sort` to one of: `"ascending"`, `"descending"`, or `"none"`.
-- When a column is not currently sorted, set `aria-sort="none"` (not omitted) so screen readers can distinguish sortable from non-sortable columns.
+- Non-sortable column headers MUST omit `aria-sort` entirely so screen readers can distinguish sortable from non-sortable columns.
 - When sort state changes (user clicks a column header), announce the new sort state via `LiveAnnouncer` with `Politeness::Polite`: e.g., `"Sorted by Name, ascending"`. Use the `Messages.sort_ascending` / `Messages.sort_descending` message keys.
 
 **Pagination `aria-current`:**
@@ -1093,47 +1334,58 @@ column name substituted. When sort is removed, `sort_none` is used.
 For multi-column sort, the adapter uses `multi_sort_changed` with a formatted list of all
 active sort columns and their directions, ordered by sort priority (primary first).
 
-```rust
-/// Builds the live-region announcement string after a sort change.
+```rust,no_check
+/// Adapter-side helper. The agnostic core does not implement this — it
+/// belongs to the adapter that owns the live-region rendering. The
+/// signature matches `SortDescriptor<String>` from `ars_collections`
+/// (the agnostic core's sort descriptor uses `column: String`, not a
+/// `column_key` field).
 fn build_sort_announcement(
     columns: &[ColumnDef],
-    sort_descriptors: &[SortDescriptor],
-    messages: &SortMessages,
+    sort_descriptors: &[SortDescriptor<String>],
+    messages: &Messages,
+    locale: &Locale,
 ) -> String {
     if sort_descriptors.is_empty() {
-        // All sorts removed — announce the last column that was unsorted.
         return String::new();
     }
+
     if sort_descriptors.len() == 1 {
         let desc = &sort_descriptors[0];
-        let col_name = columns.iter()
-            .find(|c| c.key == desc.column_key)
-            .map(|c| c.header_text.as_str())
-            .unwrap_or("");
         return match desc.direction {
-            SortDirection::Ascending => (messages.sort_ascending)(&locale),
-            SortDirection::Descending => (messages.sort_descending)(&locale),
+            SortDirection::Ascending  => (messages.sort_ascending)(locale),
+            SortDirection::Descending => (messages.sort_descending)(locale),
         };
     }
-    // Multi-column: build comma-separated list.
-    let parts = sort_descriptors.iter().map(|desc| {
-        let col_name = columns.iter()
-            .find(|c| c.key == desc.column_key)
-            .map(|c| c.header_text.as_str())
-            .unwrap_or("");
-        let dir = match desc.direction {
-            SortDirection::Ascending => "ascending",
-            SortDirection::Descending => "descending",
-        };
-        format!("{col_name} {dir}")
-    }).collect::<Vec<_>>();
-    messages.multi_sort_changed.replace("{columns}", &parts.join(", "))
+
+    // Multi-column: build a comma-separated list.
+    let parts: Vec<String> = sort_descriptors
+        .iter()
+        .map(|desc| {
+            let col_name = columns
+                .iter()
+                .find(|c| c.key == desc.column)
+                .map(|c| c.header_text.as_str())
+                .unwrap_or("");
+            let dir = match desc.direction {
+                SortDirection::Ascending  => "ascending",
+                SortDirection::Descending => "descending",
+            };
+            format!("{col_name} {dir}")
+        })
+        .collect();
+
+    format!("sorted by {}", parts.join(", "))
 }
 ```
 
 ### 3.5 Virtual Scrolling
 
 When the Table uses virtual scrolling (only rendering visible rows), the `<table>` element must include `aria-colcount` and `aria-rowcount` attributes reflecting the total column and row counts (not just visible ones). Each visible `<tr>` must include `aria-rowindex` indicating its 1-based position in the full dataset.
+
+The agnostic core exposes two `row_attrs` helpers — adapters call the
+indexed variant inside a virtualized list, and the non-indexed variant
+elsewhere:
 
 ```rust,no_check
 // In table_attrs() when virtual scrolling is enabled:
@@ -1142,9 +1394,14 @@ if self.ctx.virtual_scrolling {
     attrs.set(HtmlAttr::Aria(AriaAttr::ColCount), self.ctx.total_cols.to_string());
 }
 
-// In row_attrs(index):
-if self.ctx.virtual_scrolling {
-    attrs.set(HtmlAttr::Aria(AriaAttr::RowIndex), (index + 1).to_string());
+// Indexed variant. `row_attrs(row_id)` is a thin delegate that calls
+// `row_attrs_indexed(row_id, 0)`.
+pub fn row_attrs_indexed(&self, row_id: &Key, row_index: usize) -> AttrMap {
+    let mut p = /* … same as `row_attrs(row_id)` … */;
+    if self.ctx.virtual_scrolling {
+        p.set(HtmlAttr::Aria(AriaAttr::RowIndex), (row_index + 1).to_string());
+    }
+    p
 }
 ```
 
@@ -1175,22 +1432,37 @@ Components displaying ordinal numbers (e.g., pagination "Page 1st", table rankin
 - "Select all rows" and "Select row" labels are passed through `Messages`:
 
 ```rust
-#[derive(Clone, Debug)]
+/// Closure signature for `select_all`. Receives the total row count
+/// (or `0` when none is known) and the active locale so
+/// `SelectAllMode::AllData { total_count }` can render
+/// "Select all 1,204 rows".
+pub type SelectAllLabelFn = dyn Fn(usize, &Locale) -> String + Send + Sync;
+
+/// Closure signature for every other localized message.
+pub type LocaleFn = dyn Fn(&Locale) -> String + Send + Sync;
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
-    pub select_all: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
-    pub select_row: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
-    pub sort_ascending: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
-    pub sort_descending: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
-    pub sort_none: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    pub select_all:     MessageFn<SelectAllLabelFn>,
+    pub select_row:     MessageFn<LocaleFn>,
+    pub sort_ascending: MessageFn<LocaleFn>,
+    pub sort_descending: MessageFn<LocaleFn>,
+    pub sort_none:      MessageFn<LocaleFn>,
 }
 impl Default for Messages {
     fn default() -> Self {
         Self {
-            select_all: MessageFn::static_str("Select all rows"),
-            select_row: MessageFn::static_str("Select row"),
-            sort_ascending: MessageFn::static_str("Sort ascending"),
-            sort_descending: MessageFn::static_str("Sort descending"),
-            sort_none: MessageFn::static_str("Remove sort"),
+            select_all: MessageFn::new(|count: usize, _locale: &Locale| {
+                if count == 0 {
+                    String::from("Select all rows")
+                } else {
+                    format!("Select all {count} rows")
+                }
+            }),
+            select_row:     MessageFn::new(|_locale: &Locale| String::from("Select row")),
+            sort_ascending: MessageFn::new(|_locale: &Locale| String::from("Sort ascending")),
+            sort_descending: MessageFn::new(|_locale: &Locale| String::from("Sort descending")),
+            sort_none:      MessageFn::new(|_locale: &Locale| String::from("Remove sort")),
         }
     }
 }
@@ -1252,7 +1524,12 @@ and then deselects individual rows, `selection::State::deselect()` transitions f
 `Keys(complement)` using the full known key set. For async/paginated collections where the
 full key set is unknown, the adapter should track an exclusion set alongside `selection::Set::All`:
 
-```rust
+```rust,no_check
+/// Adapter-side wrapper. `selection::Set` from `ars_collections` is
+/// `#[non_exhaustive]`, so adapters that want to reason about the full
+/// shape need to handle every known variant plus a forward-compatible
+/// fallback.
+///
 /// Extended selection tracking for server-paginated AllData tables.
 /// Wraps the canonical `selection::Set` with an exclusion list for rows
 /// deselected after a bulk select-all on an incompletely-loaded collection.
@@ -1275,9 +1552,11 @@ impl BulkSelection {
     /// Returns the effective count of selected rows.
     pub fn effective_count(&self, total: usize, selection: &selection::Set) -> usize {
         match selection {
-            selection::Set::All => total.saturating_sub(self.excluded.len()),
-            selection::Set::Multiple(s) => s.len(),
-            selection::Set::Empty => 0,
+            selection::Set::All           => total.saturating_sub(self.excluded.len()),
+            selection::Set::Multiple(s)   => s.len(),
+            selection::Set::Single(_)     => 1,
+            selection::Set::Empty         => 0,
+            _                             => 0, // future non-exhaustive variants
         }
     }
 }
@@ -1331,11 +1610,38 @@ ColumnHeader  (<th scope="col">)
 ### 6.4 Behavior
 
 - **Pointer drag**: `pointerdown` on the handle starts resize. `pointermove` updates
-  `column_widths[column]`. `pointerup` commits.
-- **Keyboard**: When focused, `ArrowLeft`/`ArrowRight` adjust width by `step` (default 10px).
-  `aria-valuenow` reflects the current pixel width.
-- **Constraint**: `min_column_width` prop (default 50px) prevents columns from collapsing to zero.
+  `column_widths[column]`. `pointerup` commits and dispatches `ColumnResizeEnd`.
+- **Keyboard**: When focused, `ArrowLeft`/`ArrowRight` adjust width by
+  `Props::column_resize_step` (default 10px). `aria-valuenow` reflects the current
+  pixel width.
+- **Constraint**: `Props::min_column_width` (default 50px) prevents columns from
+  collapsing to zero.
 - The adapter applies `style="width: {w}px"` to each `<col>` in a `<colgroup>` element.
+
+### 6.5 Additional Api Methods
+
+```rust,no_check
+impl<'a> Api<'a> {
+    /// Returns the attributes for a column resize handle. `current_width`
+    /// is used as a fallback when `column` has no entry in
+    /// `Context::column_widths` yet (first render before any resize).
+    pub fn column_resize_handle_attrs(
+        &self,
+        column: &str,
+        current_width: f64,
+    ) -> AttrMap;
+
+    /// Handle a keydown event on a column resize handle. Emits
+    /// `Event::ColumnResize` with `width ± Context::column_resize_step`
+    /// on `ArrowLeft` / `ArrowRight`, RTL-aware via `Context::dir`.
+    pub fn on_resize_handle_keydown(
+        &self,
+        column: &str,
+        current_width: f64,
+        data: &KeyboardEventData,
+    );
+}
+```
 
 ## 7. Library Parity
 
