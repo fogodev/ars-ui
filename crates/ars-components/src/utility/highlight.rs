@@ -590,7 +590,9 @@ fn push_fuzzy_matches(
         // expansions like `ß → ss` it may consume two or more.
         let mut consumed_any = false;
         for folded_char in normalised_ch_string.chars() {
-            if let Some(&want) = query_iter.peek() && want == folded_char {
+            if let Some(&want) = query_iter.peek()
+                && want == folded_char
+            {
                 query_iter.next();
                 consumed_any = true;
             }
