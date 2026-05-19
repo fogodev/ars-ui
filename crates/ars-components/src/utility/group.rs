@@ -61,8 +61,12 @@ pub struct Props {
     pub invalid: bool,
 
     /// Whether the group is read-only. Propagated to descendants via
-    /// [`GroupContext`] and surfaced on the root as `aria-readonly="true"`
-    /// plus `data-ars-readonly` for styling.
+    /// [`GroupContext`] and surfaced on the root as `data-ars-readonly` for
+    /// styling. **No `aria-readonly` is emitted on the root** — WAI-ARIA 1.2
+    /// does not list `aria-readonly` as supported on `role="group"`,
+    /// `role="region"`, or `role="presentation"`, so descendant controls
+    /// whose own roles support it apply it themselves after reading
+    /// [`GroupContext`]. See [`Api::root_attrs`] for the full rationale.
     pub read_only: bool,
 
     /// The ARIA role for the group container. Defaults to [`GroupRole::Group`].
