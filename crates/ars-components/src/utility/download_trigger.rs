@@ -339,8 +339,8 @@ fn classify_href(href: &str, document_origin: Option<&str>) -> DownloadPolicy {
         return classify_http_https_against_document(&href_origin, document_origin);
     }
 
-    // Scheme-relative inputs (`//…`) without a parsable authority are not path-relative URLs.
-    if trimmed.starts_with("//") {
+    // Scheme-relative network-path references without a parsable authority are not path-relative URLs.
+    if trimmed.starts_with("//") || trimmed.starts_with(r"\\") {
         return DownloadPolicy::BlobFallbackRequired;
     }
 
@@ -390,12 +390,32 @@ fn authorities_partition(rest: &str) -> Option<&str> {
     rest.get(..authority_end)
 }
 
+/// Returns the substring after `http(s):` when at least two `/` or `\` leaders open an authority.
+fn http_https_authority_rest(after_colon: &str) -> Option<&str> {
+    let bytes = after_colon.as_bytes();
+    let mut idx = 0;
+
+    while idx < bytes.len() && (bytes[idx] == b'/' || bytes[idx] == b'\\') {
+        idx += 1;
+    }
+
+    if idx < 2 {
+        return None;
+    }
+
+    let rest = after_colon.get(idx..)?;
+
+    Some(rest.trim_start_matches(|ch| ['/', '\\'].contains(&ch)))
+}
+
 /// Parses scheme-relative references (`//authority/…`) using [`Props::document_origin`]'s scheme.
 ///
 /// Inputs such as `///authority/path` are normalized like browsers: excess slashes after `//`
 /// are skipped so an authority token is recovered instead of mis-classifying as a path-relative URL.
 fn parse_network_path_origin(trimmed: &str, document_origin: Option<&str>) -> Option<ParsedOrigin> {
-    let rest = trimmed.strip_prefix("//")?;
+    let rest = trimmed
+        .strip_prefix("//")
+        .or_else(|| trimmed.strip_prefix(r"\\"))?;
 
     let mut rest = rest;
 
@@ -561,7 +581,7 @@ fn is_same_scheme_special_relative_http_https(href: &str, document_origin: Optio
 
     let after_scheme = href.get(prefix_len..).unwrap_or("");
 
-    !after_scheme.starts_with("//")
+    http_https_authority_rest(after_scheme).is_none()
 }
 
 fn parse_document_origin(origin: &str) -> Option<ParsedOrigin> {
@@ -596,13 +616,7 @@ fn parse_http_https_origin(href: &str) -> Option<ParsedOrigin> {
         return None;
     };
 
-    if !after_colon.starts_with("//") {
-        return None;
-    }
-
-    let rest = after_colon
-        .get(2..)?
-        .trim_start_matches(|ch| ['/', '\\'].contains(&ch));
+    let rest = http_https_authority_rest(after_colon)?;
 
     if rest.is_empty() {
         return None;
@@ -648,10 +662,16 @@ fn parse_authority(scheme: &str, authority: &str) -> Option<ParsedOrigin> {
 
         let after = rest.get(end + 1..).unwrap_or("");
 
-        let port = if let Some(port_raw) = after.strip_prefix(':') {
-            port_raw.parse::<u16>().ok()?
-        } else {
+        let port = if after.is_empty() {
             default_http_port(scheme)
+        } else if let Some(port_raw) = after.strip_prefix(':') {
+            if port_raw.is_empty() {
+                default_http_port(scheme)
+            } else {
+                port_raw.parse::<u16>().ok()?
+            }
+        } else {
+            return None;
         };
 
         return Some(ParsedOrigin {
@@ -662,15 +682,24 @@ fn parse_authority(scheme: &str, authority: &str) -> Option<ParsedOrigin> {
     }
 
     if let Some((host, port_raw)) = authority.rsplit_once(':')
-        && let Ok(port) = port_raw.parse::<u16>()
         && !host.is_empty()
         && !host.contains(':')
     {
-        return Some(ParsedOrigin {
-            scheme: scheme.to_string(),
-            host: host.to_ascii_lowercase(),
-            port,
-        });
+        if port_raw.is_empty() {
+            return Some(ParsedOrigin {
+                scheme: scheme.to_string(),
+                host: host.to_ascii_lowercase(),
+                port: default_http_port(scheme),
+            });
+        }
+
+        if let Ok(port) = port_raw.parse::<u16>() {
+            return Some(ParsedOrigin {
+                scheme: scheme.to_string(),
+                host: host.to_ascii_lowercase(),
+                port,
+            });
+        }
     }
 
     Some(ParsedOrigin {
@@ -1039,6 +1068,58 @@ mod tests {
 
         assert!(!api.native_download_eligible());
         assert!(api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn https_two_backslashes_after_scheme_cross_origin_requires_fallback() {
+        let props = Props::new()
+            .href("https:\\\\cdn.other.test/asset.zip")
+            .filename("bundle.zip")
+            .document_origin("https://app.example");
+
+        let api = api(props);
+
+        assert!(!api.native_download_eligible());
+        assert!(api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn scheme_relative_two_backslashes_cross_origin_requires_fallback() {
+        let props = Props::new()
+            .href(r"\\cdn.other.test/asset.dat")
+            .filename("a.dat")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(!api.native_download_eligible());
+        assert!(api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn empty_explicit_port_matches_scheme_default_origin() {
+        let props = Props::new()
+            .href("https://example.com:/file.bin")
+            .filename("f.bin")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn ipv6_bracket_with_illegal_suffix_is_not_native_eligible() {
+        let props = Props::new()
+            .href("https://[::1]evil.com/file.bin")
+            .filename("f.bin")
+            .document_origin("https://[::1]");
+
+        let api = api(props);
+
+        assert!(!api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
     }
 
     #[test]
