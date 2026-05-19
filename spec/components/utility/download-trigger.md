@@ -112,7 +112,7 @@ impl ConnectApi for Api {
 
 ### 1.3 HTTP(S) URL classification
 
-For native `download` vs blob-fetch fallback, the core trims leading and trailing ASCII whitespace on `href` before parsing. Absolute `http://` / `https://` URLs are compared to [`Props::document_origin`]. Scheme-relative URLs (`//authority/path`) use the **scheme** from `document_origin` and compare **host** and **port** the same way; credentials (`userinfo@`) in the authority are stripped before host comparison. Path references that begin with `///` follow the relative/eligible rules for native `download`. A bare `//` without a usable authority is treated as needing blob fallback when `document_origin` is present.
+For native `download` vs blob-fetch fallback, the core trims leading and trailing ASCII whitespace on `href` before parsing. Absolute `http:` / `https:` URLs accept browser-normalized spellings (extra slashes after the colon are ignored, including `https:/host/path` and `http:host/path`) and compare host/port to [`Props::document_origin`]. Scheme-relative URLs (`//authority/path`, including excess slashes such as `///authority/path`) use the **scheme** from `document_origin` and compare **host** and **port** the same way. Authority scanning treats `\` like `/` before `/`, `?`, or `#`, matching browsers on special schemes; credentials (`userinfo@`) in the authority are stripped before host comparison. Single-segment path URLs (`/report.pdf`, `./x`, …) do not use `document_origin`. A bare `//` without a usable authority is treated as needing blob fallback when `document_origin` is present.
 
 ## 2. Anatomy
 

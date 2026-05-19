@@ -17,6 +17,9 @@
 //! (matching URL parsing). Scheme-relative references (`//authority/path`) use the
 //! document origin's scheme; credentials in the authority (`userinfo@host`) are
 //! stripped before host comparison.
+//!
+//! Delimiters `/`, `?`, `#`, and `\` terminate HTTP(S) authority scanning here so
+//! classification aligns with browsers that rewrite `\` as `/` for special schemes.
 
 use alloc::string::String;
 
@@ -331,9 +334,8 @@ fn classify_href(href: &str, document_origin: Option<&str>) -> DownloadPolicy {
         return classify_http_https_against_document(&href_origin, document_origin);
     }
 
-    // `//` without a resolvable authority is not a same-origin relative path; avoid
-    // treating it as [`DownloadPolicy::Native`] via [`is_relative_reference`].
-    if trimmed.starts_with("//") && !trimmed.starts_with("///") {
+    // Scheme-relative inputs (`//…`) without a parsable authority are not path-relative URLs.
+    if trimmed.starts_with("//") {
         return DownloadPolicy::BlobFallbackRequired;
     }
 
@@ -373,19 +375,34 @@ fn classify_http_https_against_document(
     }
 }
 
-/// Parses `//authority/…` using the document origin's scheme (scheme-relative URL).
+fn authorities_partition(rest: &str) -> Option<&str> {
+    const HOST_TERMINATORS: [char; 4] = ['/', '?', '#', '\\'];
+
+    let authority_end = rest
+        .find(|ch| HOST_TERMINATORS.contains(&ch))
+        .unwrap_or(rest.len());
+
+    rest.get(..authority_end)
+}
+
+/// Parses scheme-relative references (`//authority/…`) using [`Props::document_origin`]'s scheme.
+///
+/// Inputs such as `///authority/path` are normalized like browsers: excess slashes after `//`
+/// are skipped so an authority token is recovered instead of mis-classifying as a path-relative URL.
 fn parse_network_path_origin(trimmed: &str, document_origin: Option<&str>) -> Option<ParsedOrigin> {
     let rest = trimmed.strip_prefix("//")?;
 
-    if rest.is_empty() || rest.starts_with('/') {
+    let mut rest = rest;
+
+    while rest.starts_with('/') {
+        rest = rest.get(1..)?;
+    }
+
+    if rest.is_empty() {
         return None;
     }
 
-    let authority_end = rest
-        .find(|c| ['/', '?', '#'].contains(&c))
-        .unwrap_or(rest.len());
-
-    let authority = rest.get(..authority_end)?;
+    let authority = authorities_partition(rest)?;
 
     if authority.is_empty() {
         return None;
@@ -431,7 +448,7 @@ fn parse_document_origin(origin: &str) -> Option<ParsedOrigin> {
     let after_scheme = &trimmed[scheme_sep + 3..];
 
     let authority_end = after_scheme
-        .find(|c| ['/', '?', '#'].contains(&c))
+        .find(|ch| ['/', '?', '#', '\\'].contains(&ch))
         .unwrap_or(after_scheme.len());
 
     let authority = after_scheme.get(..authority_end)?;
@@ -440,19 +457,23 @@ fn parse_document_origin(origin: &str) -> Option<ParsedOrigin> {
 }
 
 fn parse_http_https_origin(href: &str) -> Option<ParsedOrigin> {
-    let (scheme, rest) = if starts_with_ignore_case(href.as_bytes(), b"https://") {
-        ("https", href.get(8..)?)
-    } else if starts_with_ignore_case(href.as_bytes(), b"http://") {
-        ("http", href.get(7..)?)
+    let bytes = href.as_bytes();
+
+    let (scheme, after_colon) = if starts_with_ignore_case(bytes, b"https:") {
+        ("https", href.get(6..)?)
+    } else if starts_with_ignore_case(bytes, b"http:") {
+        ("http", href.get(5..)?)
     } else {
         return None;
     };
 
-    let authority_end = rest
-        .find(|c| ['/', '?', '#'].contains(&c))
-        .unwrap_or(rest.len());
+    let rest = after_colon.trim_start_matches(|ch| ['/', '\\'].contains(&ch));
 
-    let authority = rest.get(..authority_end)?;
+    if rest.is_empty() {
+        return None;
+    }
+
+    let authority = authorities_partition(rest)?;
 
     parse_authority(scheme, authority)
 }
@@ -769,15 +790,81 @@ mod tests {
     }
 
     #[test]
-    fn triple_slash_path_remains_native_relative() {
+    fn triple_slash_scheme_relative_respects_origin_same_origin_native() {
         let props = Props::new()
-            .href("///absolute/path/doc.pdf")
-            .filename("doc.pdf");
+            .href("///example.com/path/doc.pdf")
+            .filename("doc.pdf")
+            .document_origin("https://example.com");
 
         let api = api(props);
 
         assert!(api.native_download_eligible());
         assert!(!api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn triple_slash_scheme_relative_cross_origin_requires_fallback() {
+        let props = Props::new()
+            .href("///evil.cdn/asset.bin")
+            .filename("a.bin")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(!api.native_download_eligible());
+        assert!(api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn https_single_slash_prefix_matches_browser_origin_rules() {
+        let props = Props::new()
+            .href("https:/example.com/file.bin ")
+            .filename("f.bin")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn http_without_slashes_after_scheme_matches_browser_origin_rules() {
+        let props = Props::new()
+            .href("http:example.com/report.pdf")
+            .filename("r.pdf")
+            .document_origin("http://example.com");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn backslash_splits_https_authority_before_userinfo_normalization() {
+        let props = Props::new()
+            .href("https://evil.com\\@example.com/trick.bin")
+            .filename("t.bin")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(!api.native_download_eligible());
+        assert!(api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn scheme_relative_backslash_splits_authority() {
+        let props = Props::new()
+            .href("//evil.com\\@example.com/a.dat")
+            .filename("a.dat")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(!api.native_download_eligible());
+        assert!(api.needs_blob_fallback());
     }
 
     #[test]
