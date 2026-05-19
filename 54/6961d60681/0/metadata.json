@@ -1,0 +1,126 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "546961d60681",
+  "session_id": "c1afe54f-0983-4579-91b3-27bd3bf95b73",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-19T22:15:00.577347Z",
+  "branch": "t3code/49f3737d",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/tests/spec_conformance/data_display.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "23029313b5a8",
+  "token_usage": {
+    "input_tokens": 601,
+    "cache_creation_tokens": 4719504,
+    "cache_read_tokens": 215078795,
+    "output_tokens": 313720,
+    "api_call_count": 460
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "summary": {
+    "intent": "Implement Task #286 — the framework-agnostic Table state machine for the ars-ui component library, including full state/event transitions, API attribute methods, spec drift fixes, and a complete test suite.",
+    "outcome": "Fully implemented the Table agnostic core (~1843 LOC in mod.rs, ~1990 LOC in tests.rs), 126+ tests including snapshots/spec-conformance/proptest, fixed 11+ spec drifts, addressed 5 rounds of Codex review (26 total findings across 5 passes), and pushed PR #651 with all xci-fast gates passing. Round 5 fixes were implemented but the final commit/push/reply cycle was cut off at session end.",
+    "learnings": {
+      "repo": [
+        "Tabs (navigation/tabs/mod.rs) is the canonical structural template for new complex components — section ordering (State→Event→Messages→Props→Context→Part→Machine→Api), TransitionPlan::context_only() usage, SyncProps + SyncControlledValue pattern, and on_props_changed override all follow its layout",
+        "Bindable<T> controlled/uncontrolled contract: set() on a controlled Bindable is a no-op — get() returns the parent-controlled value, so any internal state derived from the Bindable (e.g. selection_state.selected_keys) must be re-synced from get() after every event that touches it, not just after set() calls",
+        "selection::Set is #[non_exhaustive] — match arms require a wildcard fallback; toggle() on selection::State requires a Collection generic the Table doesn't own, so Table calls is_selected + select/deselect directly",
+        "SelectAll semantics split by SelectAllMode: AllVisible materializes Set::Multiple(ctx.rows) on select-all; AllData preserves Set::All and individual deselects are rejected at the core layer (adapter handles exclusions via BulkSelection §5.2)",
+        "type Effect = NoEffect is correct when all transitions are context_only — adapters read ctx.focused_cell/focused_row/focused_col and apply DOM focus directly; widening to a typed enum is required only when ScrollToRow(Key) is added",
+        "Direction::Auto must be resolved to Direction::Ltr or Direction::Rtl in init() via env.locale — the Auto variant cannot persist in Context",
+        "cargo xtask spec validate checks frontmatter; cargo xtask spec compile-snippets checks code blocks in markdown specs — both must pass as part of xci-fast",
+        "proptest tests are marked #[ignore = \"proptest — nightly extended-proptest job\"] and excluded from the standard test run",
+        "cargo xci-fast is the 10-check pre-push gate; cargo fmt must run before it — the formatter catches style issues that block the gate but that clippy does not catch",
+        "CLAUDE.md mandates: post-implementation-audit before user review, snapshot-reviewed label on any PR creating .snap files, waiting-for-codex-review after first push; Codex review is triggered via @codex review comment and cycles through 👀 → 👍 or thread-drop",
+        "Codex thread reply convention: cite the commit SHA + the regression test name that locks in the fix; resolve via GitHub GraphQL API after all replies are posted"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/navigation/tabs/mod.rs",
+          "finding": "Reference template for Table: provides the Machine impl pattern (init/transition/connect), SyncProps + SyncControlledValue events, on_props_changed override shape, and registered-keys pattern analogous to Table's SetRows"
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "Part::ColumnHeader must carry a sortable: bool field — ConnectApi::part_attrs dispatcher must pass it through to column_header_attrs(); hardcoding sortable=true in the dispatcher silently breaks non-sortable column headers"
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "is_row_selected / all_selected / some_selected must filter ctx.disabled_keys regardless of Set variant — Set::All would otherwise report disabled rows as selected, producing wrong aria-checked on row checkboxes"
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "on_row_keydown and on_cell_keydown must skip disabled rows when computing next/prev/first/last via next_enabled_row / first_enabled_row helpers — raw index arithmetic lands on non-interactive rows"
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "SyncProps must re-clamp all existing ctx.column_widths entries against the new min_column_width — changing the prop without re-clamping leaves stale narrow columns in the map"
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "SetRows must clear focused_cell even when focused_row is None — Event::Focus can set focused_cell without setting focused_row, so the rebase check must be independent"
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "SyncControlledSortDescriptor payload is Option<Option<SortDescriptor<String>>> — outer None exits controlled mode, inner None clears the sort value; the spec erroneously showed Option<SortDescriptor<String>>"
+        },
+        {
+          "path": "spec/components/data-display/table.md",
+          "finding": "1419-line spec had 11+ internal inconsistencies fixed in this PR: missing Context fields (dir, is_sorting, loading, column_widths, etc.), FocusCell hard-coding row 0, EscapeKey/FocusRow/FocusCell absent from §1.2 events table, build_sort_announcement referencing nonexistent locale/column_key field, misleading Scrolling state mention in §1.1.1"
+        },
+        {
+          "path": "spec/components/data-display/table.md",
+          "finding": "§3.4.2: non-sortable column headers MUST omit aria-sort entirely — the spec example was wrong and set aria-sort='none' unconditionally; test table_column_header_non_sortable_omits_aria_sort locks the correct behavior"
+        }
+      ],
+      "workflow": [
+        "TDD red-green enforced across all Codex rounds: write named failing tests first, verify compilation failure or assertion failure, then implement the fix — never implement without a failing test in place",
+        "cargo insta review (or --unreferenced=reject) must be run after snapshot-generating test changes; new fixtures require explicit acceptance before committing",
+        "Rebase onto main (not merge) is standard before any force-push; the spec_conformance.rs module registration is a common conflict point when parallel work adds sibling modules",
+        "Post-implementation-audit skill is a multi-phase structured process: Phase 1 (spec/impl drift table), Phase 2 iterative rounds (run until 2 consecutive clean rounds), Phase 3 (coverage measurement) — must complete all phases before presenting to user",
+        "Background polling scripts can be wiped between sessions (exit 127) — always verify the output file or run a direct gh CLI check before acting on a stored verdict",
+        "Codex thread reply format should cite: commit SHA + regression test name + one-line root-cause explanation — this speeds up the subsequent pass by giving Codex direct pointers to the fix"
+      ]
+    },
+    "friction": [
+      "Socket connection closed unexpectedly mid-session during initial plan drafting — the plan write was lost and had to be redone after the user explicitly asked 'Where is the plan?'",
+      "Background Codex polling scripts exited with code 127 twice (harness environment wiped between sessions), requiring manual script recreation and direct gh CLI re-verification each time",
+      "selection::State::toggle() requires a Collection generic that Table doesn't own — forced manual is_selected + select/deselect branches instead of a clean single-call delegate",
+      "Multiple clippy warning rounds accumulated across fix cycles: unnecessary *id derefs, unused mut, collapsible if-let — each blocked xci-fast and required an extra commit round-trip",
+      "5 full Codex review passes (26 total findings) before approaching 👍 — each pass required: fetch threads → write failing tests → implement → rebase → commit → force-push → reply inline → GraphQL resolve → re-trigger",
+      "Two mid-session rebases needed because concurrent PRs (#649, #652) landed on main while the Table branch was in the fix cycle",
+      "Branch coverage on table/mod.rs dropped to ~89.6% after Round 4 fixes, triggering the 90% crate-level gate — required targeted backfill tests to recover"
+    ],
+    "open_items": [
+      "ScrollToRow(Key) event and full Virtualizer integration are explicitly deferred — requires widening type Effect from NoEffect to a typed enum and pulling in ars-collections::Virtualizer plumbing; tagged for a follow-up issue",
+      "BulkSelection exclusion-set wrapper (§5.2) was intentionally excluded from the agnostic core — integration contract between Set::All and the adapter-side BulkSelection should be documented in a follow-up",
+      "row_link_attrs non-indexed variant delegates with row_index=0; row_link_attrs_indexed was added as the indexed variant but should become the primary API in a follow-up cleanup for virtualized table consistency",
+      "Round 5 Codex fixes (Part::ColumnHeader sortable field, disabled-key filtering in selection helpers, SyncProps min_column_width re-clamping, SetRows focused_cell rebase, spec event-table payload type update) were implemented and xci-fast passed, but the final commit/rebase/force-push/thread-reply/resolve cycle was cut off at session end — needs completion in the next session"
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-19T22:12:35.105531Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 256,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 256,
+    "total_lines_changed": 281,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}

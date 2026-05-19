@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "546961d60681",
+  "strategy": "manual-commit",
+  "branch": "t3code/49f3737d",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/tests/spec_conformance/data_display.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/54/6961d60681/0/metadata.json",
+      "transcript": "/54/6961d60681/0/full.jsonl",
+      "content_hash": "/54/6961d60681/0/content_hash.txt",
+      "prompt": "/54/6961d60681/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 601,
+    "cache_creation_tokens": 4719504,
+    "cache_read_tokens": 215078795,
+    "output_tokens": 313720,
+    "api_call_count": 460
+  }
+}
