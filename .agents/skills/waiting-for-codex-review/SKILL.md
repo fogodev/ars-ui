@@ -209,7 +209,26 @@ Codex review runs typically complete in 1–5 minutes for a small PR, 10–20 fo
 
 For dynamic-paced `/loop` runs, use `ScheduleWakeup` with `delaySeconds=120` (cache-warm) until 👍 lands. Don't poll faster than 60 seconds — Codex doesn't react that quickly anyway, and the prompt cache cost dominates.
 
-For event-driven monitoring (one notification per state change instead of fixed-interval polling), `Monitor` works well. The script below emits a `[change]` line whenever any reaction or unresolved-thread count changes, an `[approval]` line and exits on 👍, and a `[needs_action]` line when 👀 has dropped and there is at least one unresolved Codex thread — that's the signal to stop the monitor and enter the thread-handling subroutine.
+**Prefer Bash `run_in_background` over Monitor for this loop.** The verdict we
+wait for is a single terminal state (👍 approval, or 👀-dropped with new
+findings) — exactly the "one notification when the condition is true" shape
+Bash `run_in_background` is built for. Each iteration of the loop has exactly
+one terminal condition to watch, so one completion notification per loop pass
+is what we want.
+
+Monitor is designed for ongoing event streams (one notification per
+state-change line) — useful when you want to know about every transition in
+real time, but notification delivery is best-effort and intermediate events
+can drop. Real-world example from this skill's own bootstrap session: the 👀
+→ 👍 transition fired correctly inside the monitor and was written to the
+script's stdout file, but the follow-up `[change]` and `[approval]`
+notifications never reached the conversation. The model sat waiting for an
+event that had already fired.
+
+Use the script below with `run_in_background: true` (not Monitor). It loops
+until either terminal state, then exits with the verdict written to its last
+stdout line so a single `Read` on the task's output file at notification time
+recovers the verdict.
 
 ```bash
 prev=""
@@ -233,19 +252,54 @@ while true; do
   prev=$cur
 
   if [ -n "$codex_thumb" ]; then
-    echo "[approval]"
-    break
+    echo "VERDICT=approval"
+    exit 0
   fi
   if [ -z "$codex_eyes" ] && [ "$threads" -gt 0 ]; then
-    echo "[needs_action] threads=$threads"
-    break
+    echo "VERDICT=needs_action threads=$threads"
+    exit 0
   fi
 
   sleep 120
 done
 ```
 
-## Disagreeing with Codex
+When this script completes via Bash `run_in_background`, the single completion
+notification fires. Recover the verdict with one `Read` on the task's output
+file — the last line is `VERDICT=approval` or `VERDICT=needs_action threads=N`.
+If the file's last line is something else (script crashed or hit the bash
+timeout), apply the defensive re-check below.
+
+### Defensive re-check: don't trust silence as "still reviewing"
+
+Whether you use Bash `run_in_background` or `Monitor`, the delivery of
+notifications back to the conversation is best-effort. If the runtime drops
+the completion or change event, the loop sits waiting indefinitely for a
+signal that already fired. The script's stdout file is authoritative;
+the notification stream is convenience.
+
+The mitigation is cheap and load-bearing: **after any unusually long quiet
+period — more than ~10 minutes of total wait once you've seen 👀, or more
+than ~5 minutes since the most recent event — do a direct verification
+before continuing to wait or escalating to the user.** Verification is two
+steps, in this order:
+
+1. `Read` the background task's stdout file (the output path returned when
+   the task started). If it contains a terminal line (the script's exit
+   line, or an `[approval]` / `[needs_action]` event from a Monitor script)
+   you missed the notification — act on it now.
+2. Re-fetch PR state directly:
+   ```bash
+   gh api repos/<owner>/<repo>/issues/<pr>/reactions \
+     --jq '.[] | "\(.user.login):\(.content)"'
+   ```
+   If the output shows `:+1` (👍), or shows 👀 absent with unresolved Codex
+   threads, the run completed and you missed the signal. Re-run the
+   threads query and act on the verdict.
+
+The general principle: **the script's stdout file is the source of truth
+for detection; the notification stream is best-effort delivery.** Treat
+the two as separate channels — the file is durable, the channel is lossy.
 
 Codex is usually right but not always. When you read a thread and your read of the spec or code says Codex is wrong (or redundant, or stylistic-without-justification):
 
@@ -262,6 +316,8 @@ Codex is usually right but not always. When you read a thread and your read of t
 - **Continuing past a 👍 in case there are still threads.** 👍 means Codex is satisfied with the current state — pending threads are stale. Re-verify with the user before bulk-resolving.
 - **Arguing with Codex inline without escalating.** A wrong reply is more expensive than a one-minute user clarification.
 - **Hard-coding the bot login.** Different installs use different handles (`chatgpt-codex-connector`, `codex[bot]`, etc.). Match by case-insensitive substring instead.
+- **Treating background-task notifications as a complete event log.** Whether you use Bash `run_in_background` or Monitor, the conversation-side notification stream is best-effort delivery — the script's stdout file is authoritative. After any quiet period of >5 minutes since the last event (or >10 minutes total since 👀 was seen), `Read` the task's output path *and* re-fetch reactions directly with `gh api .../reactions` before assuming "still reviewing." See "Defensive re-check" under Polling cadence.
+- **Using Monitor when you only need a terminal verdict.** Monitor is designed for ongoing event streams (every state change becomes a notification). When the loop is waiting for a single terminal verdict — 👍 or new findings — Bash `run_in_background` is the right tool: one reliable completion notification, single `Read` of the output file to recover the verdict. Reach for Monitor only when you need real-time visibility into every intermediate state change.
 
 ## What this skill is not
 
