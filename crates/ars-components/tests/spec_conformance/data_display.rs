@@ -39,6 +39,7 @@ fn table_anatomy_matches_spec() {
             (
                 table::Part::ColumnHeader {
                     header: String::new(),
+                    sortable: false,
                 },
                 "column-header",
             ),

@@ -85,7 +85,7 @@ When a sort column header is clicked:
 | `SyncProps`                    | —                                            | Re-apply non-Bindable `Props` fields and re-prune selection/expansion. |
 | `SyncControlledSelectedRows`   | `Option<selection::Set>`                     | Push a new controlled value into `Context::selected_rows`.             |
 | `SyncControlledExpandedRows`   | `Option<BTreeSet<Key>>`                      | Push a new controlled value into `Context::expanded_rows`.             |
-| `SyncControlledSortDescriptor` | `Option<SortDescriptor<String>>`             | Push a new controlled value into `Context::sort_descriptor`.           |
+| `SyncControlledSortDescriptor` | `Option<Option<SortDescriptor<String>>>`     | Push a new controlled value into `Context::sort_descriptor`. Outer `Some(opt)` enters/updates controlled mode (inner `None` = no active sort); outer `None` exits controlled mode. |
 
 ### 1.3 Context
 
@@ -435,7 +435,20 @@ pub enum Event {
     /// Push a new controlled value into `Context::expanded_rows`.
     SyncControlledExpandedRows(Option<BTreeSet<Key>>),
     /// Push a new controlled value into `Context::sort_descriptor`.
-    SyncControlledSortDescriptor(Option<SortDescriptor<String>>),
+    ///
+    /// The outer `Option` is the controlled-mode toggle (matches
+    /// `Bindable::sync_controlled`'s `Option<T>` argument):
+    ///
+    /// * `Some(opt)` — enter / update controlled mode with value `opt`.
+    ///   `opt = None` means "controlled, no active sort".
+    /// * `None` — leave controlled mode; the Bindable falls back to its
+    ///   uncontrolled internal value.
+    SyncControlledSortDescriptor(Option<Option<SortDescriptor<String>>>),
+    /// Push a new controlled value into `Context::loading`. Same outer-
+    /// `Option` semantics as `SyncControlledSortDescriptor`.
+    SyncControlledLoading(Option<bool>),
+    /// Toggle the async-sort indicator (§1.1.1). Adapter-controlled.
+    SetIsSorting(bool),
 }
 
 /// Machine for the Table.

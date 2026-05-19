@@ -557,6 +557,11 @@ pub enum Part {
     ColumnHeader {
         /// Column identifier.
         header: String,
+        /// Whether the column header should emit `aria-sort` and the
+        /// sort-affordance ARIA / data attributes. Non-sortable columns
+        /// pass `false` so the dispatcher and adapters agree on
+        /// sortability.
+        sortable: bool,
     },
 
     /// A `<th scope="row">` row header cell.
@@ -1222,21 +1227,37 @@ impl ars_core::Machine for Machine {
                         .cloned()
                         .collect::<BTreeSet<_>>();
 
-                    // Rebase focus against the new row list:
-                    //   * row disappeared → clear focus entirely
-                    //   * row remained but moved index → update
-                    //     `focused_cell.1` so adapter focus wiring
-                    //     targets the right cell after sort / filter /
-                    //     reorder
-                    if let Some(focused) = ctx.focused_row.clone() {
-                        if let Some(new_index) = rows.iter().position(|k| k == &focused) {
-                            if let Some((col, _old_index)) = ctx.focused_cell {
-                                ctx.focused_cell = Some((col, new_index));
+                    // Rebase focus against the new row list. Two cases
+                    // matter:
+                    //
+                    // 1. `focused_row` is set — look up the key in the
+                    //    new row list; rebase `focused_cell.1` if it
+                    //    moved, clear focus entirely if it disappeared.
+                    // 2. `focused_row` is None but `focused_cell` is
+                    //    set (e.g. via `Event::Focus { cell }` which
+                    //    doesn't carry a row key) — clear `focused_cell`
+                    //    when its row index falls out of bounds. We
+                    //    can't rebase without a key, so the safe move
+                    //    is to clear and let the adapter re-focus.
+                    match ctx.focused_row.clone() {
+                        Some(focused) => {
+                            if let Some(new_index) = rows.iter().position(|k| k == &focused) {
+                                if let Some((col, _old_index)) = ctx.focused_cell {
+                                    ctx.focused_cell = Some((col, new_index));
+                                }
+                            } else {
+                                ctx.focused_row = None;
+                                ctx.focused_cell = None;
+                                ctx.focused_col = None;
                             }
-                        } else {
-                            ctx.focused_row = None;
-                            ctx.focused_cell = None;
-                            ctx.focused_col = None;
+                        }
+                        None => {
+                            if let Some((_, row_index)) = ctx.focused_cell
+                                && row_index >= rows.len()
+                            {
+                                ctx.focused_cell = None;
+                                ctx.focused_col = None;
+                            }
                         }
                     }
 
@@ -1370,6 +1391,16 @@ impl ars_core::Machine for Machine {
                     ctx.select_all_mode = new_select_all_mode;
                     ctx.min_column_width = new_min_column_width;
                     ctx.column_resize_step = new_column_resize_step;
+
+                    // Re-clamp any cached column widths that fell below
+                    // the new minimum so adapter rendering never
+                    // surfaces a value that violates the active
+                    // constraint.
+                    for width in ctx.column_widths.values_mut() {
+                        if *width < new_min_column_width {
+                            *width = new_min_column_width;
+                        }
+                    }
                     ctx.virtual_scrolling = new_virtual_scrolling;
                     ctx.total_rows = new_total_rows;
                     ctx.total_cols = new_total_cols;
@@ -1680,8 +1711,17 @@ impl<'a> Api<'a> {
     // ── Helpers ───────────────────────────────────────────────────────
 
     /// Returns `true` when `row_id` is currently selected.
+    ///
+    /// Disabled rows always report as unselected — the disabled
+    /// contract says they are non-selectable, and `selection::Set::All`
+    /// returning `true` for every key would otherwise erroneously
+    /// surface disabled rows as selected after a bulk `SelectAll` in
+    /// `AllData` mode.
     #[must_use]
     pub fn is_row_selected(&self, row_id: &Key) -> bool {
+        if self.ctx.disabled_keys.contains(row_id) {
+            return false;
+        }
         self.ctx.selected_rows.get().contains(row_id)
     }
 
@@ -1717,8 +1757,11 @@ impl<'a> Api<'a> {
         self.sort_descriptor().map(|d| d.direction)
     }
 
-    /// Returns `true` when every key in `all_row_ids` is currently
-    /// selected. Handles [`selection::Set::All`] efficiently.
+    /// Returns `true` when every selectable key in `all_row_ids` is
+    /// currently selected. Disabled rows are excluded from the check
+    /// because they are non-selectable — selecting every selectable
+    /// row should yield `aria-checked="true"` on the header checkbox,
+    /// not `"mixed"`. Handles [`selection::Set::All`] efficiently.
     #[must_use]
     pub fn all_selected(&self, all_row_ids: &[&Key]) -> bool {
         let sel = self.ctx.selected_rows.get();
@@ -1727,24 +1770,38 @@ impl<'a> Api<'a> {
             return true;
         }
 
-        if all_row_ids.is_empty() {
+        let mut selectable = all_row_ids
+            .iter()
+            .copied()
+            .filter(|id| !self.ctx.disabled_keys.contains(id))
+            .peekable();
+
+        if selectable.peek().is_none() {
             return false;
         }
 
-        all_row_ids.iter().all(|id| sel.contains(id))
+        selectable.all(|id| sel.contains(id))
     }
 
-    /// Returns `true` when at least one key in `all_row_ids` is
-    /// currently selected.
+    /// Returns `true` when at least one selectable key in `all_row_ids`
+    /// is currently selected. Mirrors `all_selected`'s disabled-row
+    /// filter so the header checkbox's mixed/checked transitions
+    /// reflect "some selectable rows are selected".
     #[must_use]
     pub fn some_selected(&self, all_row_ids: &[&Key]) -> bool {
         let sel = self.ctx.selected_rows.get();
 
         if sel.is_all() {
-            return !all_row_ids.is_empty();
+            return all_row_ids
+                .iter()
+                .copied()
+                .any(|id| !self.ctx.disabled_keys.contains(id));
         }
 
-        all_row_ids.iter().any(|id| sel.contains(id))
+        all_row_ids
+            .iter()
+            .copied()
+            .any(|id| !self.ctx.disabled_keys.contains(id) && sel.contains(id))
     }
 
     // ── Root / Table ──────────────────────────────────────────────────
@@ -1951,6 +2008,7 @@ impl<'a> Api<'a> {
             &mut attrs,
             &Part::ColumnHeader {
                 header: String::new(),
+                sortable,
             },
         );
 
@@ -2439,7 +2497,7 @@ impl<'a> ConnectApi for Api<'a> {
             Part::Body => self.body_attrs(),
             Part::Foot => self.foot_attrs(),
             Part::Row { key } => self.row_attrs(key),
-            Part::ColumnHeader { header } => self.column_header_attrs(header, true),
+            Part::ColumnHeader { header, sortable } => self.column_header_attrs(header, *sortable),
             Part::RowHeader => self.row_header_attrs(),
             Part::Cell { col, row } => self.cell_attrs(*col, *row),
             Part::SelectAllCheckbox => {

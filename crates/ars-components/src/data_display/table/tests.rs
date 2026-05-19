@@ -2203,6 +2203,7 @@ fn table_part_attrs_dispatcher_covers_every_variant() {
         Part::Row { key: key("r1") },
         Part::ColumnHeader {
             header: "name".to_string(),
+            sortable: true,
         },
         Part::RowHeader,
         Part::Cell { col: 0, row: 0 },
@@ -3124,4 +3125,162 @@ fn codex_round4_ctrl_home_skips_disabled_first_row_in_cell_nav() {
         }
         other => panic!("expected FocusCell(r2), got {other:?}"),
     }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 22. Codex review pass 5 (PR #651) — width clamping, disabled-row
+//      semantics on SelectAll, focused_cell rebase without focused_row,
+//      and Part::ColumnHeader sortable dispatch.
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn codex_round5_sync_props_reclamps_column_widths_below_new_min() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DTd50).
+    // After `Props::min_column_width` increases, existing cached widths
+    // that fall below the new minimum must be re-clamped — otherwise
+    // adapter rendering surfaces values that violate the active
+    // constraint until the user resizes again.
+    let mut service = service_with_rows(
+        Props {
+            min_column_width: 50.0,
+            ..test_props()
+        },
+        &[],
+    );
+    drop(service.send(Event::ColumnResize {
+        column: "name".to_string(),
+        width: 60.0,
+    }));
+    assert_eq!(service.context().column_widths.get("name"), Some(&60.0));
+
+    let new_props = Props {
+        min_column_width: 100.0,
+        ..test_props()
+    };
+    drop(service.set_props(new_props));
+
+    assert_eq!(
+        service.context().column_widths.get("name"),
+        Some(&100.0),
+        "existing column_widths must be re-clamped against the new minimum",
+    );
+}
+
+#[test]
+fn codex_round5_is_row_selected_excludes_disabled_in_set_all() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DTd56).
+    // `is_row_selected` must return `false` for disabled rows even when
+    // selection is `Set::All` — the contract is "disabled rows are
+    // non-selectable", not "disabled rows happen to be selected when
+    // everyone is".
+    let mut disabled = BTreeSet::new();
+    disabled.insert(key("r1"));
+    let service = service_with_rows(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            select_all_mode: SelectAllMode::AllData { total_count: 3 },
+            selected_rows: Some(selection::Set::All),
+            disabled_keys: disabled,
+            ..test_props()
+        },
+        &[key("r1"), key("r2")],
+    );
+    let api = service.connect(&|_| {});
+
+    assert!(
+        !api.is_row_selected(&key("r1")),
+        "disabled row must not report as selected under Set::All",
+    );
+    assert!(api.is_row_selected(&key("r2")));
+}
+
+#[test]
+fn codex_round5_all_selected_excludes_disabled() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DTd5_).
+    // When the user has selected every selectable row in a multi-select
+    // table that contains disabled rows, the header checkbox should
+    // report `aria-checked="true"`, not `"mixed"`. `all_selected` must
+    // filter the disabled set so the result reflects "every SELECTABLE
+    // row is selected".
+    let mut disabled = BTreeSet::new();
+    disabled.insert(key("r3"));
+    let mut service = service_with_rows(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            disabled_keys: disabled,
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    drop(service.send(Event::SelectAll));
+
+    let ids = [key("r1"), key("r2"), key("r3")];
+    let id_refs: Vec<&Key> = ids.iter().collect();
+    let api = service.connect(&|_| {});
+
+    assert!(
+        api.all_selected(&id_refs),
+        "all_selected must filter disabled rows when checking",
+    );
+    let attrs = api.select_all_attrs(&id_refs);
+    assert_eq!(
+        attrs
+            .get(&HtmlAttr::Aria(AriaAttr::Checked))
+            .map(ToString::to_string),
+        Some("true".to_string()),
+    );
+}
+
+#[test]
+fn codex_round5_set_rows_rebases_focused_cell_without_focused_row() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DTd6B).
+    // `Event::Focus { cell }` populates `focused_cell` but NOT
+    // `focused_row`. After SetRows, the row index inside focused_cell
+    // can fall out of range. Clear it instead of leaving a stale
+    // pointer that breaks the roving tabindex.
+    let mut service = service_with_rows(
+        Props {
+            interactive: true,
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    drop(service.send(Event::Focus { cell: (1, 2) }));
+    assert_eq!(service.context().focused_cell, Some((1, 2)));
+    assert!(service.context().focused_row.is_none());
+
+    // Shrink the row list — index 2 is no longer valid.
+    drop(service.send(Event::SetRows(vec![key("r1")])));
+
+    assert!(
+        service.context().focused_cell.is_none(),
+        "focused_cell row index must be cleared when out of bounds after SetRows",
+    );
+}
+
+#[test]
+fn codex_round5_part_attrs_column_header_sortable_field() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DTd6C).
+    // `Part::ColumnHeader` now carries a `sortable: bool` so the
+    // dispatcher honors caller intent.
+    let service = service_with_rows(test_props(), &[]);
+    let api = service.connect(&|_| {});
+
+    let sortable = api.part_attrs(Part::ColumnHeader {
+        header: "name".to_string(),
+        sortable: true,
+    });
+    assert!(
+        sortable.get(&HtmlAttr::Aria(AriaAttr::Sort)).is_some(),
+        "sortable=true must emit aria-sort",
+    );
+
+    let non_sortable = api.part_attrs(Part::ColumnHeader {
+        header: "avatar".to_string(),
+        sortable: false,
+    });
+    assert!(
+        non_sortable.get(&HtmlAttr::Aria(AriaAttr::Sort)).is_none(),
+        "sortable=false must omit aria-sort",
+    );
 }
