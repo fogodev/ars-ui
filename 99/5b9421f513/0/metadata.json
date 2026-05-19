@@ -1,0 +1,177 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "995b9421f513",
+  "session_id": "e797994f-9915-4551-9b97-73a56771e5d9",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-19T15:02:38.896879Z",
+  "branch": "t3code/e16f9343",
+  "checkpoints_count": 7,
+  "files_touched": [
+    ".agents/skills/waiting-for-codex-review/SKILL.md",
+    ".cargo/config.toml",
+    "AGENTS.md",
+    "xtask/src/ci/mod.rs",
+    "xtask/src/main.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "b737a93f5a7d",
+  "checkpoint_transcript_start": 433,
+  "transcript_lines_at_start": 433,
+  "token_usage": {
+    "input_tokens": 132,
+    "cache_creation_tokens": 777055,
+    "cache_read_tokens": 23940472,
+    "output_tokens": 70962,
+    "api_call_count": 72
+  },
+  "session_metrics": {
+    "turn_count": 15
+  },
+  "summary": {
+    "intent": "The user wanted to: (1) create a reusable skill for waiting on Codex PR reviews with an automatic re-trigger loop, (2) document it in CLAUDE.md/AGENTS.md as mandatory post-push, and (3) implement a faster local CI profile (`cargo xci --profile fast`) that skips coverage and feature-matrix steps to serve as a ~5-minute pre-push gate.",
+    "outcome": "All three goals were completed and committed to PR #648: the `waiting-for-codex-review` skill was created in `.agents/skills/`, AGENTS.md was updated with step 12 mandating the skill and step 9 updated for fast profile usage, and `cargo xci --profile fast` / `cargo xci-fast` were implemented and verified to run in 1m 24s (vs. ~25min full).",
+    "learnings": {
+      "repo": [
+        "`.claude/skills/` is a symlink into `.agents/skills/` — skills must be written to `.agents/skills/<name>/SKILL.md` to actually land in the repo.",
+        "`CLAUDE.md` is a symlink to `AGENTS.md`; edits must target `AGENTS.md` directly.",
+        "Codex bot login is `chatgpt-codex-connector` on this install; detection should use case-insensitive substring match on `codex` for forward-compat.",
+        "Codex signals: 👀 = review in progress, 👀 disappears = review finished (either 👍 added for approval OR threads posted for changes requested — never both).",
+        "Codex does not reliably auto-trigger on new pushes; posting `@codex review` as a top-level comment is required both on first PR push and after resolving all review threads.",
+        "`cargo xci` full run takes ~25 minutes locally; bottlenecks are `Coverage` (~15 min, wasm32 `-Cinstrument-coverage` with nightly + LLVM 22) and five `FeatureMatrix*` steps (~5 min).",
+        "The fast profile of 10 steps ran in 1m 24s wall-clock on a warm cache, well under the 5-min target.",
+        "`ars-components` coverage threshold is 90/90 (line and branch), enforced in `xtask/src/coverage.rs`.",
+        "Snapshot files live in `crates/ars-components/src/utility/snapshots/` with naming convention `ars_components__utility__{module}__tests__{name}.snap`.",
+        "`GroupContext` naming (not `Context`) is required by foundation 08 §8.4 so consumers write `group::GroupContext`."
+      ],
+      "code": [
+        {
+          "path": "xtask/src/ci/mod.rs",
+          "line": 30,
+          "end_line": 125,
+          "finding": "Step enum and PIPELINE_ORDER constant live here; FAST_PIPELINE_ORDER was added adjacent to PIPELINE_ORDER with the 10 fast steps."
+        },
+        {
+          "path": "xtask/src/ci/mod.rs",
+          "line": 1212,
+          "finding": "Existing tests module starts here; 7 new profile-related tests were added and 4 existing `resolve_steps` call sites updated to pass the new Profile arg."
+        },
+        {
+          "path": "xtask/src/main.rs",
+          "line": 18,
+          "end_line": 30,
+          "finding": "Command::Ci variant definition; `--profile <full|fast>` flag added here with default Full for backward compat."
+        },
+        {
+          "path": ".cargo/config.toml",
+          "finding": "`xci-fast = 'xtask ci --profile fast'` alias added so both `cargo xci --profile fast` and `cargo xci-fast` work."
+        },
+        {
+          "path": "crates/ars-components/src/utility/separator.rs",
+          "line": 1,
+          "end_line": 446,
+          "finding": "Canonical structural template for new stateless utility components (Props, Part, Api, ConnectApi pattern without state machine or Service)."
+        },
+        {
+          "path": "crates/ars-components/src/utility/field/mod.rs",
+          "line": 58,
+          "end_line": 87,
+          "finding": "Reference pattern for context structs (more complex example than separator)."
+        }
+      ],
+      "workflow": [
+        "Skills should live in the repo (`.agents/skills/`) not globally (`~/.claude/skills/`) unless intentionally cross-project.",
+        "Post-push Codex review loop: push → comment `@codex review` → poll for 👀 to appear then disappear → if 👍 done, if threads appear address them → push fix → comment `@codex review` → repeat.",
+        "The `waiting-for-codex-review` skill uses Monitor for event-driven polling (one notification per state change) to avoid burning context on tight polling loops.",
+        "CLAUDE.md / AGENTS.md mandate `waiting-for-codex-review` after every push to a PR (step 12) and require Codex 👍 before closing an issue (step 13).",
+        "Fast profile is the routine pre-push gate; full `cargo xci` is reserved for final pre-PR run or after substantial refactors affecting feature-flag interactions.",
+        "Positional step arguments to `cargo xci` override the profile — `cargo xci --profile fast i18n-browser dom-browser` re-adds skipped steps for wasm-touching changes."
+      ]
+    },
+    "friction": [
+      "Multiple rounds of skill iteration were needed due to incremental corrections: (1) initial reaction lifecycle was wrong (👍 disappears vs. 👀 disappears), (2) `@codex review` re-trigger not in original draft, (3) initial `@codex review` on first push not in draft — each required separate edit passes.",
+      "CLAUDE.md symlink indirection caused an initial edit to the wrong file before the symlink target was discovered.",
+      "Step renumbering after inserting a new step 2 required multiple sequential edits to fix cross-references scattered throughout the skill file.",
+      "The `resolve_steps` signature change required finding and updating 4 existing call sites in the tests module to pass the new Profile argument."
+    ],
+    "open_items": [
+      "Task #205 (Group agnostic core) implementation — the plan is fully written in the plan file but was not executed in this session; it remains Todo on the project board.",
+      "PR #648's actual review thread on `group.rs:245` from `chatgpt-codex-connector` was identified but never addressed — the session ended after committing the infra changes.",
+      "`--exclude <step>` flag for ad-hoc subtraction from a profile — deferred as a follow-up.",
+      "Pre-push git hook that auto-runs `cargo xci-fast` — deferred; enforcement is currently via CLAUDE.md habit.",
+      "Promoting `--profile fast` to the `cargo xci` no-arg default — deferred pending telemetry on whether anyone uses full local run.",
+      "Leptos and Dioxus adapters for the Group component — separate tasks per the project board.",
+      "Wiring `GroupContext` consumption into existing child components (Button, TextField, etc.) — deferred until adapter components exist."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-19T15:02:02.077547Z",
+    "agent_lines": 448,
+    "agent_removed": 19,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 448,
+    "total_lines_changed": 467,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 212,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 247,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 260,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 270,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 273,
+      "agent_lines_removed": 2
+    },
+    {
+      "checkpoint_number": 7,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 273,
+      "agent_lines_removed": 2
+    },
+    {
+      "checkpoint_number": 8,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 448,
+      "agent_lines_removed": 19
+    }
+  ]
+}
