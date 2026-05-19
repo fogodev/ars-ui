@@ -21,7 +21,8 @@
 //! Delimiters `/`, `?`, `#`, and `\` terminate HTTP(S) authority scanning here so
 //! classification aligns with browsers that rewrite `\` as `/` for special schemes.
 
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
+use core::net::{Ipv4Addr, Ipv6Addr};
 
 use ars_core::{
     AriaAttr, AttrMap, ComponentMessages, ComponentPart, ConnectApi, HasId, HtmlAttr,
@@ -326,6 +327,10 @@ fn classify_href(href: &str, document_origin: Option<&str>) -> DownloadPolicy {
         return DownloadPolicy::NoDownloadHint;
     }
 
+    if is_same_scheme_special_relative_http_https(trimmed, document_origin) {
+        return DownloadPolicy::Native;
+    }
+
     if let Some(href_origin) = parse_http_https_origin(trimmed) {
         return classify_http_https_against_document(&href_origin, document_origin);
     }
@@ -431,8 +436,132 @@ const fn default_http_port(scheme: &str) -> u16 {
 
 fn origins_match(a: &ParsedOrigin, b: &ParsedOrigin) -> bool {
     a.scheme.eq_ignore_ascii_case(&b.scheme)
-        && a.host.eq_ignore_ascii_case(&b.host)
+        && canonical_host_for_origin_compare(a.host.as_str())
+            == canonical_host_for_origin_compare(b.host.as_str())
         && a.port == b.port
+}
+
+/// Normalizes hosts the way browsers do before comparing origins (IPv4
+/// shorthand, IPv6 text forms, IDNA/punycode).
+fn canonical_host_for_origin_compare(host: &str) -> String {
+    if let Some(ip) = parse_ipv4_address_relaxed(host) {
+        return ip.to_string();
+    }
+
+    if let Ok(ip) = host.parse::<Ipv6Addr>() {
+        return ip.to_string();
+    }
+
+    idna::domain_to_ascii(host).map_or_else(
+        |_| host.to_ascii_lowercase(),
+        |ascii| ascii.to_ascii_lowercase(),
+    )
+}
+
+/// inet_aton-style IPv4 parsing for forms browsers accept (for example `127.1`).
+fn parse_ipv4_address_relaxed(text: &str) -> Option<Ipv4Addr> {
+    if text.is_empty() || text.contains(':') {
+        return None;
+    }
+
+    if let Ok(ip) = text.parse::<Ipv4Addr>() {
+        return Some(ip);
+    }
+
+    let parts: Vec<&str> = text.split('.').collect();
+
+    match parts.len() {
+        4 => {
+            let mut octets = [0_u8; 4];
+
+            for (slot, part) in octets.iter_mut().zip(parts) {
+                *slot = parse_ipv4_octet(part)?;
+            }
+
+            Some(Ipv4Addr::from(octets))
+        }
+
+        3 => {
+            let a = parse_ipv4_octet(parts[0])?;
+            let b = parse_ipv4_octet(parts[1])?;
+            let merged: u32 = parts[2].parse().ok()?;
+
+            if merged > u32::from(u16::MAX) {
+                return None;
+            }
+
+            Some(Ipv4Addr::from(
+                u32::from(a) << 24 | u32::from(b) << 16 | merged,
+            ))
+        }
+
+        2 => {
+            let a = parse_ipv4_octet(parts[0])?;
+            let merged: u32 = parts[1].parse().ok()?;
+
+            if merged > 0xFF_FFFF {
+                return None;
+            }
+
+            Some(Ipv4Addr::from(u32::from(a) << 24 | merged))
+        }
+
+        1 => {
+            let val: u32 = parts[0].parse().ok()?;
+
+            Some(Ipv4Addr::from(val))
+        }
+
+        _ => None,
+    }
+}
+
+fn parse_ipv4_octet(raw: &str) -> Option<u8> {
+    let value: u32 = raw.parse().ok()?;
+
+    if value <= u8::MAX.into() {
+        Some(value as u8)
+    } else {
+        None
+    }
+}
+
+/// Browser “same-scheme relative” URLs: `https:foo` / `https:/foo` resolve against
+/// the document base when the scheme matches `document_origin`.
+fn is_same_scheme_special_relative_http_https(href: &str, document_origin: Option<&str>) -> bool {
+    let Some(doc_raw) = document_origin else {
+        return false;
+    };
+
+    let doc_trim = doc_raw.trim();
+
+    let Some(scheme_sep) = doc_trim.find("://") else {
+        return false;
+    };
+
+    let doc_scheme = &doc_trim[..scheme_sep];
+
+    if !doc_scheme.eq_ignore_ascii_case("http") && !doc_scheme.eq_ignore_ascii_case("https") {
+        return false;
+    }
+
+    let bytes = href.as_bytes();
+
+    let (href_scheme, prefix_len) = if starts_with_ignore_case(bytes, b"https:") {
+        ("https", 6)
+    } else if starts_with_ignore_case(bytes, b"http:") {
+        ("http", 5)
+    } else {
+        return false;
+    };
+
+    if !href_scheme.eq_ignore_ascii_case(doc_scheme) {
+        return false;
+    }
+
+    let after_scheme = href.get(prefix_len..).unwrap_or("");
+
+    !after_scheme.starts_with("//")
 }
 
 fn parse_document_origin(origin: &str) -> Option<ParsedOrigin> {
@@ -467,7 +596,13 @@ fn parse_http_https_origin(href: &str) -> Option<ParsedOrigin> {
         return None;
     };
 
-    let rest = after_colon.trim_start_matches(|ch| ['/', '\\'].contains(&ch));
+    if !after_colon.starts_with("//") {
+        return None;
+    }
+
+    let rest = after_colon
+        .get(2..)?
+        .trim_start_matches(|ch| ['/', '\\'].contains(&ch));
 
     if rest.is_empty() {
         return None;
@@ -821,6 +956,45 @@ mod tests {
             .href("https:/example.com/file.bin ")
             .filename("f.bin")
             .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn https_colon_segment_relative_matches_browser_semantics() {
+        let props = Props::new()
+            .href("https:assets/pkg.tar")
+            .filename("pkg.tar")
+            .document_origin("https://app.example");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn ipv4_shorthand_host_matches_dotted_decimal_origin() {
+        let props = Props::new()
+            .href("https://127.1/readme.txt")
+            .filename("r.txt")
+            .document_origin("https://127.0.0.1");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn idn_unicode_host_matches_punycode_document_origin() {
+        let props = Props::new()
+            .href("https://xn--bcher-kva.example/file.bin")
+            .filename("f.bin")
+            .document_origin("https://bücher.example");
 
         let api = api(props);
 
