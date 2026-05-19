@@ -1874,12 +1874,15 @@ fn table_sync_controlled_sort_descriptor_pushes_value() {
     );
     assert!(service.context().sort_descriptor.get().is_none());
 
-    drop(
-        service.send(Event::SyncControlledSortDescriptor(Some(SortDescriptor {
+    // Outer `Some(...)` = enter / update controlled mode; inner `Some(...)` is the
+    // sort value (a `SortDescriptor`). `Some(None)` would mean "controlled,
+    // no active sort"; `None` would exit controlled mode entirely.
+    drop(service.send(Event::SyncControlledSortDescriptor(Some(Some(
+        SortDescriptor {
             column: "name".to_string(),
             direction: SortDirection::Ascending,
-        }))),
-    );
+        },
+    )))));
 
     let descriptor = service.context().sort_descriptor.get().clone();
     assert_eq!(descriptor.as_ref().map(|d| d.column.as_str()), Some("name"),);
@@ -2474,4 +2477,236 @@ fn codex_set_rows_rebases_focused_cell_when_row_moves_index() {
         "SetRows must rebase focused_cell row-index to the new position"
     );
     assert_eq!(service.context().focused_row.as_ref(), Some(&key("r2")));
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 19. Codex review pass 2 (PR #651) — regression guards for findings
+//      that surfaced after the first round of Codex fixes landed.
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn codex_round2_uncontrolled_to_controlled_sort_dispatches_sync() {
+    // Codex P1 (thread PRRT_kwDORp4enM6DSWzU).
+    // Switching `Props.sort_descriptor` from uncontrolled to controlled
+    // between renders must propagate the new controlled value into
+    // `Context::sort_descriptor`. Without this fix the Bindable stayed
+    // uncontrolled and parent-controlled sort silently drifted.
+    let old_props = Props {
+        sort_descriptor: Bindable::uncontrolled(None),
+        ..test_props()
+    };
+    let new_props = Props {
+        sort_descriptor: Bindable::controlled(Some(SortDescriptor {
+            column: "name".to_string(),
+            direction: SortDirection::Ascending,
+        })),
+        ..test_props()
+    };
+
+    let service = service_with_rows(old_props, &[]);
+    let mut service = service;
+    drop(service.set_props(new_props));
+
+    assert!(
+        service.context().sort_descriptor.is_controlled(),
+        "Bindable must switch to controlled mode after props change"
+    );
+    assert_eq!(
+        service
+            .context()
+            .sort_descriptor
+            .get()
+            .as_ref()
+            .map(|d| d.column.as_str()),
+        Some("name"),
+    );
+}
+
+#[test]
+fn codex_round2_controlled_to_uncontrolled_sort_dispatches_sync() {
+    // Codex P1 (thread PRRT_kwDORp4enM6DSWzd).
+    // The dual case: parent moves the prop back to uncontrolled. The
+    // Bindable must exit controlled mode, which requires the sync event
+    // to carry the outer "leave controlled mode" toggle as `None`.
+    let old_props = Props {
+        sort_descriptor: Bindable::controlled(Some(SortDescriptor {
+            column: "name".to_string(),
+            direction: SortDirection::Ascending,
+        })),
+        ..test_props()
+    };
+    let new_props = Props {
+        sort_descriptor: Bindable::uncontrolled(None),
+        ..test_props()
+    };
+
+    let service = service_with_rows(old_props, &[]);
+    let mut service = service;
+    drop(service.set_props(new_props));
+
+    assert!(
+        !service.context().sort_descriptor.is_controlled(),
+        "Bindable must exit controlled mode after props change to uncontrolled"
+    );
+}
+
+#[test]
+fn codex_round2_controlled_loading_syncs_on_props_change() {
+    // Codex P1 (thread PRRT_kwDORp4enM6DSWzm).
+    // `on_props_changed` was omitting `loading`, so controlled-loading
+    // updates from the parent never reached `Context::loading`.
+    let old_props = Props {
+        loading: Bindable::controlled(false),
+        ..test_props()
+    };
+    let new_props = Props {
+        loading: Bindable::controlled(true),
+        ..test_props()
+    };
+
+    let service = service_with_rows(old_props, &[]);
+    let mut service = service;
+    drop(service.set_props(new_props));
+
+    assert!(
+        *service.context().loading.get(),
+        "controlled loading prop must flow into Context"
+    );
+}
+
+#[test]
+fn codex_round2_sync_props_does_not_corrupt_controlled_selection() {
+    // Codex P1 (thread PRRT_kwDORp4enM6DSWzs).
+    // For a controlled `selected_rows`, `set(...)` updates the internal
+    // value but `get()` keeps returning the external controlled value.
+    // SyncProps must not silently desync `selection_state.selected_keys`
+    // from the actually-visible selection — re-sync from `get()`.
+    let mut disabled = BTreeSet::new();
+    disabled.insert(key("r1"));
+
+    let mut controlled = BTreeSet::new();
+    controlled.insert(key("r1"));
+    controlled.insert(key("r2"));
+
+    let mut service = service_with_rows(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            selected_rows: Some(selection::Set::Multiple(controlled.clone())),
+            ..test_props()
+        },
+        &[key("r1"), key("r2")],
+    );
+
+    // Parent renders with new disabled_keys.
+    let new_props = Props {
+        selection_mode: selection::Mode::Multiple,
+        selected_rows: Some(selection::Set::Multiple(controlled)),
+        disabled_keys: disabled.clone(),
+        ..test_props()
+    };
+    drop(service.set_props(new_props));
+
+    // For controlled bindables, the user-visible value is whatever the
+    // parent passed — including any disabled keys. The contract is
+    // "parent owns the value; pruning is best-effort". What MUST hold
+    // is that `selection_state.selected_keys` matches what the API
+    // surface reports (`selected_rows.get()`), not a divergent internal
+    // value.
+    assert_eq!(
+        &service.context().selection_state.selected_keys,
+        service.context().selected_rows.get(),
+        "selection_state.selected_keys must track the actual current value",
+    );
+}
+
+#[test]
+fn codex_round2_sync_props_prunes_uncontrolled_selection() {
+    // Codex P1 follow-up — pruning still applies in the uncontrolled
+    // case where the agnostic core owns the value.
+    let mut new_disabled = BTreeSet::new();
+    new_disabled.insert(key("r1"));
+
+    let mut service = service_with_rows(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            default_selected_rows: selection::Set::Multiple({
+                let mut s = BTreeSet::new();
+                s.insert(key("r1"));
+                s.insert(key("r2"));
+                s
+            }),
+            ..test_props()
+        },
+        &[key("r1"), key("r2")],
+    );
+
+    let new_props = Props {
+        selection_mode: selection::Mode::Multiple,
+        disabled_keys: new_disabled,
+        default_selected_rows: selection::Set::Multiple({
+            let mut s = BTreeSet::new();
+            s.insert(key("r1"));
+            s.insert(key("r2"));
+            s
+        }),
+        ..test_props()
+    };
+    drop(service.set_props(new_props));
+
+    let sel = service.context().selected_rows.get().clone();
+    assert!(
+        !sel.contains(&key("r1")),
+        "uncontrolled selection must be pruned of disabled rows"
+    );
+    assert!(sel.contains(&key("r2")));
+}
+
+#[test]
+fn codex_round2_sync_props_resyncs_id_and_caption_id() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DSWzg).
+    // `Props.id` change must propagate to `Context.id` and
+    // `Context.caption_id`, otherwise ARIA wiring breaks (the
+    // `aria-labelledby` and `aria-controls` ids stay stale after a
+    // parent rename).
+    let mut service = service_with_rows(test_props(), &[]);
+    assert_eq!(service.context().id, "table");
+    assert_eq!(service.context().caption_id, "table-caption");
+
+    let new_props = Props {
+        id: "orders".to_string(),
+        ..test_props()
+    };
+    drop(service.set_props(new_props));
+
+    assert_eq!(
+        service.context().id,
+        "orders",
+        "Context.id must follow Props.id"
+    );
+    assert_eq!(
+        service.context().caption_id,
+        "orders-caption",
+        "caption_id must be derived from the new base id",
+    );
+}
+
+#[test]
+fn codex_round2_part_attrs_select_all_uses_ctx_rows() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DSWzi).
+    // `ConnectApi::part_attrs(Part::SelectAllCheckbox)` previously
+    // called `select_all_attrs(&[])`, always reporting an empty row set
+    // and therefore "aria-checked=false" even when every registered row
+    // was selected. The dispatcher must route through `ctx.rows`.
+    let mut service = service_with_rows(test_props_multi(), &[key("r1"), key("r2")]);
+    drop(service.send(Event::SelectAll));
+
+    let attrs = service.connect(&|_| {}).part_attrs(Part::SelectAllCheckbox);
+
+    assert_eq!(
+        attrs
+            .get(&HtmlAttr::Aria(AriaAttr::Checked))
+            .map(ToString::to_string),
+        Some("true".to_string()),
+        "part_attrs dispatcher must drive aria-checked from ctx.rows, not an empty slice",
+    );
 }

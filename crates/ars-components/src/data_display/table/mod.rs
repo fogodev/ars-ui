@@ -236,7 +236,20 @@ pub enum Event {
     SyncControlledExpandedRows(Option<BTreeSet<Key>>),
 
     /// Push a new controlled value into [`Context::sort_descriptor`].
-    SyncControlledSortDescriptor(Option<SortDescriptor<String>>),
+    ///
+    /// The outer `Option` is the controlled-mode toggle, matching
+    /// [`Bindable::sync_controlled`]'s `Option<T>` argument:
+    ///
+    /// * `Some(opt)` — enter / update controlled mode with value `opt`.
+    ///   `opt = None` means "controlled, no active sort".
+    /// * `None` — leave controlled mode entirely; the Bindable falls
+    ///   back to its uncontrolled internal value.
+    SyncControlledSortDescriptor(Option<Option<SortDescriptor<String>>>),
+
+    /// Push a new controlled value into [`Context::loading`]. Same
+    /// outer-Option semantics as
+    /// [`Event::SyncControlledSortDescriptor`].
+    SyncControlledLoading(Option<bool>),
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1279,6 +1292,7 @@ impl ars_core::Machine for Machine {
             // disabled set. Bindable fields are pushed via the
             // `SyncControlled*` events.
             Event::SyncProps => {
+                let new_id = props.id.clone();
                 let new_disabled = props.disabled_keys.clone();
                 let new_selection_mode = props.selection_mode;
                 let new_selection_behavior = props.selection_behavior;
@@ -1293,6 +1307,16 @@ impl ars_core::Machine for Machine {
                 let new_total_cols = props.total_cols;
                 let new_disallow_empty_selection = props.disallow_empty_selection;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    // Rebuild ComponentIds-derived strings when `Props.id`
+                    // changes — otherwise `table_attrs`,
+                    // `caption_attrs`, and expand-trigger
+                    // `aria-controls` ids stay stale.
+                    if ctx.id != new_id {
+                        let ids = ComponentIds::from_id(&new_id);
+                        ctx.id = ids.id().to_string();
+                        ctx.caption_id = ids.part("caption");
+                    }
+
                     ctx.disabled_keys = new_disabled.clone();
                     ctx.selection_mode = new_selection_mode;
                     ctx.selection_state.mode = new_selection_mode;
@@ -1309,20 +1333,39 @@ impl ars_core::Machine for Machine {
                     ctx.total_cols = new_total_cols;
                     ctx.disallow_empty_selection = new_disallow_empty_selection;
 
-                    // Re-prune selection / expansion against the new
-                    // disabled set.
-                    let pruned_selection =
-                        prune_selection_against(&ctx.selected_rows.get().clone(), &new_disabled);
-                    let pruned_expansion: BTreeSet<Key> = ctx
-                        .expanded_rows
-                        .get()
-                        .iter()
-                        .filter(|k| !new_disabled.contains(k))
-                        .cloned()
-                        .collect();
-                    ctx.selected_rows.set(pruned_selection.clone());
-                    ctx.selection_state.selected_keys = pruned_selection;
-                    ctx.expanded_rows.set(pruned_expansion);
+                    // Pruning rules:
+                    //   * uncontrolled Bindable — write the pruned value
+                    //     directly via `set()`. The agnostic core owns
+                    //     the value, so it can clean it.
+                    //   * controlled Bindable — the parent owns the value;
+                    //     `set()` would update the internal field but
+                    //     `get()` would still return the external
+                    //     controlled value, silently desyncing
+                    //     `selection_state.selected_keys` from the
+                    //     user-visible selection. Skip the pruning write
+                    //     and let the parent pass a clean value next render.
+                    if !ctx.selected_rows.is_controlled() {
+                        let pruned_selection = prune_selection_against(
+                            &ctx.selected_rows.get().clone(),
+                            &new_disabled,
+                        );
+                        ctx.selected_rows.set(pruned_selection);
+                    }
+                    if !ctx.expanded_rows.is_controlled() {
+                        let pruned_expansion: BTreeSet<Key> = ctx
+                            .expanded_rows
+                            .get()
+                            .iter()
+                            .filter(|k| !new_disabled.contains(k))
+                            .cloned()
+                            .collect();
+                        ctx.expanded_rows.set(pruned_expansion);
+                    }
+
+                    // Re-sync `selection_state.selected_keys` from the
+                    // user-visible selection so it tracks the actual
+                    // current value regardless of controlled-mode.
+                    ctx.selection_state.selected_keys = ctx.selected_rows.get().clone();
                 }))
             }
 
@@ -1348,12 +1391,18 @@ impl ars_core::Machine for Machine {
             Event::SyncControlledSortDescriptor(value) => {
                 let value = value.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    // `Bindable<Option<SortDescriptor<String>>>::sync_controlled`
-                    // expects `Option<Option<…>>` — the outer `Some` keeps
-                    // the Bindable in controlled mode while the inner
-                    // `Option` is the new sort value (`None` == cleared).
-                    ctx.sort_descriptor.sync_controlled(Some(value));
-                    ctx.is_sorting = false;
+                    // The outer `Option` is the controlled-mode toggle —
+                    // pass it straight through. `Some(opt)` enters /
+                    // updates controlled mode (with `opt` carrying the
+                    // inner sort value); `None` leaves controlled mode.
+                    ctx.sort_descriptor.sync_controlled(value);
+                }))
+            }
+
+            Event::SyncControlledLoading(value) => {
+                let value = *value;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.loading.sync_controlled(value);
                 }))
             }
         }
@@ -1398,15 +1447,55 @@ impl ars_core::Machine for Machine {
         if old.expanded_rows != new.expanded_rows {
             events.push(Event::SyncControlledExpandedRows(new.expanded_rows.clone()));
         }
-        if old.sort_descriptor.is_controlled()
-            && old.sort_descriptor.get() != new.sort_descriptor.get()
-        {
-            events.push(Event::SyncControlledSortDescriptor(
-                new.sort_descriptor.get().clone(),
-            ));
+
+        // Sort + loading Bindables: emit on any controlled-mode
+        // transition (entering, exiting, or value change while
+        // controlled) so parent renders can both push new controlled
+        // values AND drop back to uncontrolled.
+        if bindable_controlled_state_changed(&old.sort_descriptor, &new.sort_descriptor) {
+            events.push(Event::SyncControlledSortDescriptor(bindable_sync_payload(
+                &new.sort_descriptor,
+            )));
+        }
+        if bindable_controlled_state_changed(&old.loading, &new.loading) {
+            events.push(Event::SyncControlledLoading(bindable_sync_payload(
+                &new.loading,
+            )));
         }
 
         events
+    }
+}
+
+/// Detects any controlled-mode delta between two Bindables that warrants
+/// a sync event:
+///
+/// * Both controlled, values differ.
+/// * One side controlled, the other not.
+fn bindable_controlled_state_changed<T>(old: &Bindable<T>, new: &Bindable<T>) -> bool
+where
+    T: ars_core::BindableValue,
+{
+    if old.is_controlled() != new.is_controlled() {
+        return true;
+    }
+    if new.is_controlled() && old.get() != new.get() {
+        return true;
+    }
+    false
+}
+
+/// Translates a Bindable into the `Option<T>` payload expected by
+/// [`Bindable::sync_controlled`]: `Some(value)` to enter/update
+/// controlled mode, `None` to exit.
+fn bindable_sync_payload<T>(b: &Bindable<T>) -> Option<T>
+where
+    T: ars_core::BindableValue,
+{
+    if b.is_controlled() {
+        Some(b.get().clone())
+    } else {
+        None
     }
 }
 
@@ -1414,7 +1503,8 @@ impl ars_core::Machine for Machine {
 /// changed between renders. Drives the [`Event::SyncProps`] dispatch
 /// inside [`Machine::on_props_changed`].
 fn non_dir_context_props_changed(old: &Props, new: &Props) -> bool {
-    old.selection_mode != new.selection_mode
+    old.id != new.id
+        || old.selection_mode != new.selection_mode
         || old.selection_behavior != new.selection_behavior
         || old.disabled_keys != new.disabled_keys
         || old.disallow_empty_selection != new.disallow_empty_selection
@@ -2224,7 +2314,16 @@ impl<'a> ConnectApi for Api<'a> {
             Part::ColumnHeader { header } => self.column_header_attrs(header, true),
             Part::RowHeader => self.row_header_attrs(),
             Part::Cell { col, row } => self.cell_attrs(*col, *row),
-            Part::SelectAllCheckbox => self.select_all_attrs(&[]),
+            Part::SelectAllCheckbox => {
+                // Drive checked / mixed / aria-checked from the
+                // registered row list. The typed `select_all_attrs`
+                // method is what adapters should call directly with
+                // their per-render visible-row slice — the dispatcher
+                // path is for tooling that walks every Part and needs
+                // the live state to reflect the machine's row registry.
+                let rows: Vec<&Key> = self.ctx.rows.iter().collect();
+                self.select_all_attrs(&rows)
+            }
             Part::RowCheckbox { key } => self.row_checkbox_attrs(key),
             Part::ExpandTrigger { key } => self.expand_trigger_attrs(key),
             Part::ExpandedContent { key } => self.expanded_content_attrs(key),
