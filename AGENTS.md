@@ -44,6 +44,7 @@ Default delivery rules:
 - Preserve the crate and dependency layering defined by the architecture and implementation plan.
 - Do not add a new dependency crate without explicit user approval first. If a task appears to need a new crate, stop, explain why, and get approval before editing any `Cargo.toml`.
 - When a task is complete, verify the exact tests and checks named by the issue before considering it done.
+- For adapter-level component implementation, follow `docs/implementation/adapter-component-delivery.md`. Adapter component work must cover the adapter crate, adapter tests, E2E fixtures/harnesses when applicable, widgets examples, spec synchronization, and the required validation/audit loop in one PR.
 
 ### Code Quality Standards
 
