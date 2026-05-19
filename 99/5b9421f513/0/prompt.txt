@@ -388,3 +388,13 @@ Add a `mod tests` block at the bottom of `xtask/src/ci/mod.rs`:
 | `Ci` subcommand definition | `xtask/src/main.rs:18-30` |
 | Cargo aliases | `.cargo/config.toml` |
 | Workflow doc to update | `AGENTS.md` step 9 (symlinked as `CLAUDE.md`) |
+
+---
+
+<task-notification>
+<task-id>b4mngztcs</task-id>
+<tool-use-id>toolu_012fSyKE92ydUEt1L23Ds9TS</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson--t3-worktrees-ars-ui-t3code-e16f9343/084034a7-b41d-4a6b-8b9e-667f83441891/tasks/b4mngztcs.output</output-file>
+<status>completed</status>
+<summary>Background command "End-to-end fast profile run" completed (exit code 0)</summary>
+</task-notification>
