@@ -398,3 +398,7 @@ Add a `mod tests` block at the bottom of `xtask/src/ci/mod.rs`:
 <status>completed</status>
 <summary>Background command "End-to-end fast profile run" completed (exit code 0)</summary>
 </task-notification>
+
+---
+
+Alright, proceed with your commit but don't push yet. Let's use our new skill to handle the reviews in github first, then we can push both commits together in the same push
