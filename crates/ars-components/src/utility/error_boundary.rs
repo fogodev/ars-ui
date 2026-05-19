@@ -21,7 +21,7 @@
 //! See `spec/components/utility/error-boundary.md` for the canonical
 //! specification.
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 
 use ars_core::{
     AriaAttr, AttrMap, AttrValue, ComponentMessages, ComponentPart, ConnectApi, HtmlAttr, MessageFn,

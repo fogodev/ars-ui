@@ -13,8 +13,10 @@
 //! IPv6 (`[::1]:443`). Hostnames with ambiguous `:` patterns outside these forms
 //! may classify conservatively toward blob fallback for absolute HTTP(S) URLs.
 //!
-//! Leading and trailing ASCII whitespace in `href` is ignored for classification
-//! (matching URL parsing). Scheme-relative references (`//authority/path`) use the
+//! Leading and trailing WHATWG “C0 control or space” characters (Unicode scalar
+//! values U+0000 through U+0020 inclusive) in `href` and `document_origin` are
+//! stripped before classification — Unicode whitespace such as NBSP is **not**
+//! trimmed. Scheme-relative references (`//authority/path`) use the
 //! document origin's scheme; credentials in the authority (`userinfo@host`) are
 //! stripped before host comparison.
 //!
@@ -24,7 +26,12 @@
 //! Hostnames are percent-decoded (`%HH`) before IPv4 / IDNA normalization so encoded
 //! ASCII labels match their decoded form.
 
-use alloc::{borrow::Cow, string::String, vec::Vec};
+use alloc::{
+    borrow::Cow,
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::net::{Ipv4Addr, Ipv6Addr};
 
 use ars_core::{
@@ -323,8 +330,16 @@ enum DownloadPolicy {
     NoDownloadHint,
 }
 
+/// Trims WHATWG URL preprocessing whitespace only (C0 controls U+0000–U+001F and U+0020 SPACE).
+///
+/// This deliberately does **not** apply Rust's Unicode-aware [`str::trim`], which would strip
+/// characters such as NBSP (U+00A0) that browsers keep when resolving relative URLs.
+fn trim_url_c0_control_or_space(input: &str) -> &str {
+    input.trim_matches(|ch| ch <= '\u{0020}')
+}
+
 fn classify_href(href: &str, document_origin: Option<&str>) -> DownloadPolicy {
-    let trimmed = href.trim();
+    let trimmed = trim_url_c0_control_or_space(href);
 
     if trimmed.is_empty() {
         return DownloadPolicy::NoDownloadHint;
@@ -619,7 +634,7 @@ fn is_same_scheme_special_relative_http_https(href: &str, document_origin: Optio
         return false;
     };
 
-    let doc_trim = doc_raw.trim();
+    let doc_trim = trim_url_c0_control_or_space(doc_raw);
 
     let Some(scheme_sep) = doc_trim.find("://") else {
         return false;
@@ -651,7 +666,7 @@ fn is_same_scheme_special_relative_http_https(href: &str, document_origin: Optio
 }
 
 fn document_origin_scheme(document_origin: Option<&str>) -> Option<&str> {
-    let raw = document_origin?.trim();
+    let raw = trim_url_c0_control_or_space(document_origin?);
     let sep = raw.find("://")?;
     let candidate = raw.get(..sep)?;
 
@@ -665,7 +680,7 @@ fn document_origin_scheme(document_origin: Option<&str>) -> Option<&str> {
 }
 
 fn parse_document_origin(origin: &str) -> Option<ParsedOrigin> {
-    let trimmed = origin.trim();
+    let trimmed = trim_url_c0_control_or_space(origin);
 
     let scheme_sep = trimmed.find("://")?;
     let scheme = trimmed[..scheme_sep].to_string();
@@ -825,8 +840,11 @@ fn is_relative_reference(url: &str) -> bool {
     !contains_scheme_separator_before_delim(bytes)
 }
 
-/// Returns true when a `:` appears before the first `/`, `?`, or `#`, treating
-/// that as an absolute URL with a scheme.
+/// Returns true when a `:` appears before the first `/`, `?`, or `#` and the preceding
+/// bytes form an RFC 3986 `scheme` (`ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`).
+///
+/// Colons inside opaque paths such as `:/report.pdf` or `1:2` therefore do **not**
+/// force absolute-scheme classification.
 fn contains_scheme_separator_before_delim(bytes: &[u8]) -> bool {
     let mut index = 0;
 
@@ -837,7 +855,7 @@ fn contains_scheme_separator_before_delim(bytes: &[u8]) -> bool {
             return false;
         }
 
-        if byte == b':' {
+        if byte == b':' && scheme_prefix_bytes_valid(&bytes[..index]) {
             return true;
         }
 
@@ -845,6 +863,21 @@ fn contains_scheme_separator_before_delim(bytes: &[u8]) -> bool {
     }
 
     false
+}
+
+fn scheme_prefix_bytes_valid(prefix: &[u8]) -> bool {
+    let Some(&first) = prefix.first() else {
+        return false;
+    };
+
+    if !first.is_ascii_alphabetic() {
+        return false;
+    }
+
+    prefix[1..]
+        .iter()
+        .copied()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'-' || b == b'.')
 }
 
 const fn starts_with_ignore_case(haystack: &[u8], needle: &[u8]) -> bool {
@@ -1289,6 +1322,45 @@ mod tests {
         let props = Props::new()
             .href("https://example.com/path/file.bin ")
             .filename("f.bin")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn leading_nbsp_before_https_is_not_trimmed_stays_native_relative() {
+        let props = Props::new()
+            .href("\u{00A0}https://cdn.other.test/asset.dat")
+            .filename("a.dat")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn colon_only_path_href_is_native_eligible() {
+        let props = Props::new()
+            .href(":/report.pdf")
+            .filename("r.pdf")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn digit_prefixed_colon_segment_href_is_native_eligible() {
+        let props = Props::new()
+            .href("1:2")
+            .filename("out.bin")
             .document_origin("https://example.com");
 
         let api = api(props);

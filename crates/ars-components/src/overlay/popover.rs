@@ -64,6 +64,7 @@
 //! ```
 
 use alloc::{
+    format,
     string::{String, ToString as _},
     vec::Vec,
 };
