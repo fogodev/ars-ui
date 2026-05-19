@@ -1,0 +1,404 @@
+We have reviews in our PR, let's give them a check. Make sure to properly test any new code that you might add for addressing the reviews, we don't want to let our test coverage get lower. Commit, push and then reply the reviews inline at github, marking them as resolved afterward. 
+
+But before you start working in those reviews, I want you to write a new skill using /skill-creator that after pushing a PR to github, you need to wait for Codex's reviews on github, while it is reviewing it will leave a 👀 emoji in the PR, if there are any review it will be posted on github, if everything is fine it will put a 👍️️️️️️ emoji in the PR. The skill need to keep a loop, watching for new reviews while the 👍️️️️️️ from Codex isn't received. Using this prompt above to handle the reviews. Let me give a check in the skill before start working in the reviews
+
+---
+
+The skill should live in the repo, not globally
+
+---
+
+Some quick corrections already, when Codex post review threads, it drops the 👀 emoji from the PR, this is how we now that it finished its review and posted review threads
+
+---
+
+Sometimes Codex doesn't pick up automatically, so after resolving all review threads. Let's put a new comment in the PR saying `@codex review` to force Codex to start a new review round after our latest changes
+
+---
+
+Let's also mention that we need to do a `@codex review` comment just after the first push creating the PR
+
+---
+
+Let's include in the CLAUDE.md that this skill must be used after pushing a new PR to github to handle this review loop automatically
+
+---
+
+As we're improve our flow here. I want to have a lighter version of `cargo xci` to run locally. The current version have a ton of repeated stuff that doesn't make much sense to run locally, like the Coverage step, as we already run all tests previously. Let's do a proper plan on what steps we can drop from the full xci to quickly run a local version before each push to github, to ensure that our new code is sound
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Plan: Implement task #205 — Group agnostic core
+
+## Context
+
+GitHub issue #205 (`task: Implement Group agnostic core`) is a **1-point** task in the
+`ars-ui implementation roadmap` project. It delivers the framework-agnostic core of the
+`Group` utility component: a stateless attribute mapper that renders a semantic grouping
+container and exposes a `GroupContext` struct that adapters can publish to descendants for
+`disabled`/`invalid`/`read_only` propagation.
+
+Authoritative spec: `spec/components/utility/group.md` (250 lines, fully specified —
+`tier: stateless`, `foundation_deps: [architecture, accessibility]`, no shared deps).
+
+Status: `Todo` on the project board, no dependencies, no blockers.
+
+## Spec vs. issue discrepancy (RESOLVED — spec wins per CLAUDE.md "spec is the contract")
+
+The issue's "Tests to add first" lists two tests that contradict the spec:
+
+- ❌ `` `label` prop produces `aria-label` ``
+- ❌ `` `label_id` prop produces `aria-labelledby` ``
+
+The spec's `Props` struct (§1.1) has exactly six fields — `id`, `disabled`, `invalid`,
+`read_only`, `role`, `dir` — and **no** `label`/`label_id`. Spec §3.1 explicitly marks
+`aria-label` and `aria-labelledby` as "Consumer-provided", meaning adapter users supply them
+via prop spreading, not via Group props. Inventing `label`/`label_id` props would silently
+diverge from the React Aria parity table (§5.1) which already shows full parity without them.
+
+**Decision:** Implement per spec, drop the two contradicting test bullets, replace with
+spec-aligned tests below.
+
+## Internal spec inconsistency — resolved on accessibility merits
+
+Spec §3.1 prose said: "When `role` is `Presentation`, state attributes (`aria-disabled`,
+`aria-invalid`) are omitted since the grouping has no semantic meaning."
+
+Spec §1.2 code example: unconditionally emits state attributes regardless of `role`.
+
+**Best-outcome decision: always emit state attributes when the prop is true, regardless of
+role.** Reasoning:
+
+1. **WAI-ARIA 1.2 §5.4** explicitly states `aria-*` global states and properties ARE still
+   exposed on elements with `role="presentation"` — the role only suppresses the *implicit*
+   role mapping, not state attributes. The original §3.1 prose was based on a misreading.
+2. **React Aria parity** (§5.1 documents full parity): React Aria emits state attributes
+   unconditionally on its `Group`. Diverging here would silently break parity that the spec
+   commits to.
+3. **`GroupContext` is the load-bearing propagation mechanism**, not root ARIA. The root
+   `aria-disabled`/`aria-invalid`/`aria-readonly` are decorative complements that help AT
+   when the disabled state visually applies to the whole group; gating them on `role`
+   creates asymmetric behavior between the propagation path (always works) and the AT
+   announcement (sometimes works).
+4. **`data-ars-*` styling hooks must always emit** regardless of role so CSS targeting stays
+   consistent. Splitting aria-* vs data-* on role-gated logic introduces a footgun.
+5. **Simpler mental model**: `disabled=true ⇒ aria-disabled on root`, end of story. Fewer
+   branches, fewer edge cases, lower test surface.
+
+**Implementation consequence:** Match the §1.2 code example. **Spec consequence:** Replace
+the §3.1 line "When `role` is `Presentation`, state attributes (`aria-disabled`,
+`aria-invalid`) are omitted..." with a brief note clarifying that state attributes are
+always emitted (and citing the React Aria parity / WAI-ARIA §5.4 justification). Lands in
+the same PR per CLAUDE.md "no spec drift" rule.
+
+## Files
+
+### Create
+
+- **`crates/ars-components/src/utility/group.rs`** — entire component module (Props, GroupRole,
+  GroupContext, Part, Api, ConnectApi impl, and `#[cfg(test)] mod tests`). Template:
+  `crates/ars-components/src/utility/separator.rs` (446 lines, identical structure minus the
+  Context struct). No state machine, no Service, no Messages.
+
+### Modify
+
+- **`crates/ars-components/src/utility/mod.rs`** — add one `pub mod group;` declaration
+  with a doc comment, alphabetically positioned (between `form_submit` and `heading`).
+- **`spec/components/utility/group.md` §3.1** — replace the "When `role` is `Presentation`,
+  state attributes are omitted..." line with a one-line note that state attributes are always
+  emitted, citing WAI-ARIA 1.2 §5.4 and the React Aria parity commitment in §5.1. Keeps the
+  spec internally consistent with the implementation per CLAUDE.md "Spec/code mismatch
+  resolution".
+
+### Snapshots (created by `cargo insta accept` after first test run)
+
+- `crates/ars-components/src/utility/snapshots/ars_components__utility__group__tests__*.snap`
+  (committed as part of this PR; PR gets the `snapshot-reviewed` label per CLAUDE.md).
+
+## Implementation outline
+
+Match `spec/components/utility/group.md` §1.1 and §1.2 line-for-line. Specifically:
+
+1. **`GroupRole`** — `#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]` enum with three
+   variants (`Group` default, `Region`, `Presentation`). Use `#[default]` on `Group`.
+
+2. **`Props`** — `#[derive(Clone, Debug, Default, PartialEq, HasId)]`. The spec writes a manual
+   `impl Default` that produces identical output to derive; use derive for DRY (matches
+   `Separator`'s convention). Builder chain matching separator's pattern: `new()`, `id()`,
+   `disabled()`, `invalid()`, `read_only()`, `role()`, `dir()`. Setters that don't take
+   `String` are `const fn`.
+
+3. **`GroupContext`** — `#[derive(Clone, Debug, PartialEq)]` plain struct. Three `pub bool`
+   fields exactly as spec §1.2. Named `GroupContext` (not `Context`) per foundation 08 §8.4
+   ("Secondary contexts or helpers use descriptive non-prefixed names — `GroupContext`,
+   `QueueContext`, ..."), so consumers write `group::GroupContext`.
+
+4. **`Part`** — `#[derive(ComponentPart)] #[scope = "group"] pub enum Part { Root }`.
+
+5. **`Api`** — `#[derive(Clone, Debug)] pub struct Api { props: Props }`. Methods:
+   `new(Props) -> Self` (`const`), `props() -> &Props`, `id() -> &str`,
+   `group_context() -> GroupContext`, `root_attrs() -> AttrMap`. `root_attrs` follows the
+   spec code: set Id, scope/part data attrs, then a `match` on role emitting
+   `role="group"|"region"|"presentation"`, then three independent `if` blocks emitting
+   `aria-disabled` + `data-ars-disabled`, `aria-invalid` + `data-ars-invalid`,
+   `aria-readonly` + `data-ars-readonly`, then optional `dir`.
+
+6. **`ConnectApi for Api`** — single-arm `match part { Part::Root => self.root_attrs() }`.
+
+## Tests (TDD — write before implementation per workspace convention)
+
+Drop the issue's two label-related test bullets. The replacement coverage that fully
+exercises the spec contract:
+
+**Props / Api / Debug smoke**
+
+- `props_default_is_zero_state` — id="", disabled/invalid/read_only=false, role=Group, dir=None.
+- `props_builder_round_trips` — chained setters set exactly their own fields; `Props::new()
+   == Props::default()`.
+- `props_has_id_derive_round_trips` — `with_id` / `set_id` / `HasId::id` round-trip.
+- `props_clone_and_partial_eq_round_trip`.
+- `props_and_api_debug_impl_is_non_empty`.
+- `api_id_returns_empty_str_for_default_props`.
+- `api_exposes_props_fields`.
+
+**Role mapping** (covers issue bullet 1 & 2)
+
+- `root_default_role_is_group` — `Api::new(Props::default()).root_attrs()` →
+  `role="group"`.
+- `root_role_region_overrides` — `role(GroupRole::Region)` → `role="region"`.
+- `root_role_presentation_overrides` — `role(GroupRole::Presentation)` → `role="presentation"`.
+- `role_branches_produce_different_role_attrs` — cross-branch inequality
+  (defensive regression).
+
+**State propagation via `group_context()`** (covers issue bullet 3)
+
+- `group_context_propagates_disabled` — `Props { disabled: true, ..default }` →
+  `Api::group_context() == GroupContext { disabled: true, invalid: false, read_only: false }`.
+- `group_context_propagates_invalid` — analogous.
+- `group_context_propagates_read_only` — analogous.
+- `group_context_default_is_all_false`.
+
+**Root state attributes**
+
+- `root_disabled_emits_aria_and_data_attrs` — `aria-disabled="true"` + `data-ars-disabled` set.
+- `root_invalid_emits_aria_and_data_attrs` — `aria-invalid="true"` + `data-ars-invalid` set.
+- `root_read_only_emits_aria_and_data_attrs` — `aria-readonly="true"` + `data-ars-readonly` set.
+- `root_state_attrs_omitted_when_false` — none of the three are present in the default-props
+  AttrMap.
+- `root_dir_emits_dir_attr` — `dir(Some(Direction::Rtl))` → `dir="rtl"`; default → no `dir`.
+- `root_id_is_set_to_props_id` — even when empty, follows spec §1.2 code which sets
+  unconditionally.
+
+**ConnectApi dispatch**
+
+- `part_attrs_dispatches_root` — sanity check (scope/part data attrs match).
+- `part_attrs_root_equals_root_attrs` — loop across role × disabled × invalid × read_only ×
+  dir combinations and assert `api.part_attrs(Part::Root) == api.root_attrs()`.
+
+**Snapshots** (one per output-affecting branch group, named per the
+`snapshot_attrs(&attr_map)` convention from separator.rs)
+
+- `group_root_default` (role=Group, no state)
+- `group_root_region` (role=Region, no state)
+- `group_root_presentation` (role=Presentation, no state)
+- `group_root_all_states` (role=Group, disabled+invalid+read_only=true)
+- `group_root_dir_rtl` (role=Group, dir=Rtl)
+
+## Verification
+
+1. `cargo test -p ars-components --lib utility::group` — all named tests pass.
+2. `cargo insta accept` (after first run) — review every `.snap` for spec accuracy, then
+   commit them; PR gets the `snapshot-reviewed` label.
+3. `cargo clippy -p ars-components --lib -- -D warnings` — zero warnings, in particular zero
+   `missing_docs` failures (all public items documented).
+4. `cargo doc -p ars-components --no-deps` — no doc warnings.
+5. `cargo llvm-cov test -p ars-components --text -- utility::group` — line and branch coverage
+   of new code at or above the 90/90 crate threshold; uncovered branches are a hard fail.
+6. **Run `post-implementation-audit` skill** (mandatory per CLAUDE.md §7) — three sequential
+   audits: (a) spec/impl drift incl. the §3.1 prose fix above, (b) iterative "anything else
+   missing?" rounds (≥2), (c) test-coverage audit across unit + snapshot + doctest dimensions.
+   Every finding lands in this PR.
+7. `cargo xci` — full pre-PR gate; must pass before opening the PR.
+8. Present diff to user → after approval, commit, push, open PR with `Closes #205` in the
+   body, attach `snapshot-reviewed` label.
+
+## Out of scope (deliberately deferred to follow-up issues)
+
+- Leptos adapter (`ars-leptos` Group component) — separate task per the project board.
+- Dioxus adapter (`ars-dioxus` Group component) — separate task per the project board.
+- Wiring `GroupContext` consumption into existing child components (Button, TextField,
+  etc.) — separate cross-component tasks once the adapter components exist.
+- Property tests under `crates/ars-components/tests/proptest_state_machines/` — Group has no
+  state transitions, so proptest's signal is low; unit + snapshot tests are the right
+  coverage tier for a stateless attribute mapper.
+
+## Critical files to reference during implementation
+
+| Purpose | Path |
+| --- | --- |
+| Authoritative contract | `spec/components/utility/group.md` |
+| Structural template | `crates/ars-components/src/utility/separator.rs` |
+| Context-struct pattern (more complex example) | `crates/ars-components/src/utility/field/mod.rs` §lines 58–87 |
+| Module registration | `crates/ars-components/src/utility/mod.rs` |
+| Snapshot location convention | `crates/ars-components/src/utility/snapshots/` |
+| Snapshot naming rule | `ars_components__utility__group__tests__{name}.snap` |
+| `Direction::as_html_attr` | `crates/ars-i18n/src/lib.rs:127` |
+| AttrMap / HtmlAttr / AriaAttr | `crates/ars-core/src/connect.rs` |
+| Foundation 08 §8.4 (naming) | `spec/foundation/08-adapter-leptos.md:2127` |
+| Coverage thresholds | `xtask/src/coverage.rs` (ars-components: 90/90) |
+
+---
+
+# Plan: Lighter local `cargo xci` (`--profile fast`)
+
+## Context
+
+`cargo xci` is the local mirror of `.github/workflows/ci.yml`'s 20 gates. We just measured it
+taking ~25 minutes locally — the bulk of that is the `coverage` step (~15 minutes; wasm32
+`-Cinstrument-coverage` recompile of every adapter crate via nightly + LLVM 22) and the
+five `feature-matrix-*` steps (~5 minutes combined). After a normal implementation flow the
+relevant unit / integration / adapter test suites have already run during TDD iteration and
+the `post-implementation-audit` skill; re-running them under coverage measurement before push
+is pure redundancy. Five different feature-matrix combos checking subsystem crates the change
+didn't touch is also overkill for a local gate whose only job is "catch what focused tests
+miss before this push lands on origin".
+
+We need an opt-in **fast profile** that covers cross-crate / workspace-level regressions
+without paying the wasm-coverage and feature-matrix taxes. Target run time: ~5 minutes on a
+warm cache.
+
+## Step selection
+
+Per the Phase-1 audit of `xtask/src/ci/mod.rs` lines 30–125, the 20 steps split cleanly:
+
+**Fast profile — 10 steps, ~5 min:**
+
+| Step | Why it stays |
+|---|---|
+| `Fmt` | Catches formatter drift across the workspace; ~15 s. |
+| `Check` | Type-error gate; fast and foundational. |
+| `Clippy` | `-D warnings` gate; required for merge. |
+| `Unit` | Workspace-wide nextest run; catches inter-crate regressions focused tests miss. |
+| `Integration` | Black-box suite; separate from unit, fast enough, catches real bugs. |
+| `Adapter` | Leptos + Dioxus harness; touches both adapters in one pass. |
+| `SpecCompileSnippets` | Catches spec drift Codex can't see; fast. |
+| `ErrorVariantCoverage` | Catches untested `ComponentError` variants; fast lint. |
+| `MutualExclusion` | The `icu4x` + `web-intl` compile-guard; ~3 s and load-bearing. |
+| `SnapshotCount` | Per-component snapshot policy lint; ~3 s. |
+
+**Skipped from fast — 10 steps, ~20 min saved:**
+
+| Step | Why it's skipped from fast (still runs in `cargo xci` full) |
+|---|---|
+| `I18nBrowser`, `DomBrowser` | wasm-pack browser runs, only relevant when ars-i18n / ars-dom code changes; skip-by-default and re-add positionally when you touched those crates. |
+| `Release` | Release-profile compile/test; release-only failures are rare. |
+| `AdapterParity` | Per-component test-count diff lint; useful but not pre-push critical. |
+| `Coverage` | The big one — wasm `-Cinstrument-coverage` recompile + nightly + LLVM 22. The same tests already ran in `Unit`/`Integration`/`Adapter`; redundant pre-push. CI still enforces thresholds. |
+| `FeatureMatrixCore`, `FeatureMatrixI18n`, `FeatureMatrixSubsystems`, `FeatureMatrixLeptos`, `FeatureMatrixDioxus` | Feature-combination CI concern; rarely catches anything a workspace-wide `--all-features` `check`/`clippy`/`unit` pass didn't already. |
+
+Power users who touched wasm/feature code can opt the skipped steps back in positionally:
+`cargo xci --profile fast i18n-browser dom-browser`. Positional steps override the profile
+(preserves the current `cargo xci fmt check` selection semantics).
+
+## Files
+
+### Modify
+
+- **`xtask/src/ci/mod.rs`**:
+  - Add `pub enum Profile { Full, Fast }` with `Default = Full` derive next to the `Step` enum
+    (~line 30).
+  - Add `const FAST_PIPELINE_ORDER: &[Step]` next to `PIPELINE_ORDER` (~line 104), listing the
+    10 steps above in dependency order: `Fmt, Check, Clippy, Unit, Integration, Adapter,
+    SpecCompileSnippets, ErrorVariantCoverage, MutualExclusion, SnapshotCount`.
+  - Change `pub fn run(steps: Vec<Step>, message_format: Option<&str>) -> Result<(), Error>`
+    to `pub fn run(steps: Vec<Step>, profile: Profile, message_format: Option<&str>) ->
+    Result<(), Error>`.
+  - Change `resolve_steps(vec) -> Vec<Step>` to `resolve_steps(vec, profile) -> Vec<Step>`:
+    - If positional `vec` is non-empty, return as-is (existing behavior).
+    - Else return `FAST_PIPELINE_ORDER.to_vec()` when `profile == Profile::Fast`, else
+      `PIPELINE_ORDER.to_vec()`.
+
+- **`xtask/src/main.rs`** lines 18–30:
+  - Add `#[arg(long, value_enum, default_value_t = ci::Profile::Full)] profile: ci::Profile`
+    to the `Command::Ci` variant.
+  - Update the call site to pass `profile` through to `ci::run`.
+  - Update the doc comment on `Ci` to mention `--profile fast` and the ~5-minute target.
+
+- **`.cargo/config.toml`** — add one alias after `xci`:
+  ```toml
+  xci-fast = "xtask ci --profile fast"
+  ```
+  So both `cargo xci --profile fast` and `cargo xci-fast` work.
+
+- **`AGENTS.md` (the real file behind the `CLAUDE.md` symlink), step 9**:
+  - Reword to: "After user approval, run `cargo xci --profile fast` locally (~5 min) before
+    every push. Reserve full `cargo xci` (~25 min) for the final pre-PR run or after
+    substantial refactors that may have shifted feature-flag interactions. For small
+    follow-up changes, run the focused tests and checks that cover the edited code instead."
+
+### Add tests
+
+Add a `mod tests` block at the bottom of `xtask/src/ci/mod.rs`:
+
+- `profile_default_is_full` — `Profile::default() == Profile::Full`.
+- `resolve_steps_fast_returns_fast_pipeline` — `resolve_steps(vec![], Profile::Fast)`
+  equals `FAST_PIPELINE_ORDER`.
+- `resolve_steps_full_returns_full_pipeline` — `resolve_steps(vec![], Profile::Full)`
+  equals `PIPELINE_ORDER`.
+- `resolve_steps_positional_overrides_profile` — `resolve_steps(vec![Step::Fmt],
+  Profile::Fast)` equals `vec![Step::Fmt]`.
+- `fast_pipeline_is_subset_of_full` — every `Step` in `FAST_PIPELINE_ORDER` also appears in
+  `PIPELINE_ORDER` (defensive: prevents the fast list from referencing a step that's been
+  removed from the full pipeline).
+- `fast_pipeline_excludes_coverage_and_feature_matrix` — guards the intent: the fast list
+  must not contain `Coverage` or any `FeatureMatrix*` variant. Catches a regression where
+  someone reflexively adds them back without reading the rationale.
+
+## Verification
+
+1. `cargo build -p xtask` — clean.
+2. `cargo test -p xtask` — new unit tests pass.
+3. `cargo xci --profile fast` (warm cache) — runs the 10 steps, exits green, wall-clock ≤
+   6 minutes.
+4. `cargo xci --help` — surfaces the new `--profile` flag and its values.
+5. `cargo xci` (no args, no flag) — still runs all 20 steps (backward compat).
+6. `cargo xci --profile fast fmt check` — runs only `fmt` + `check` (positional override
+   still wins).
+7. `cargo xci-fast` — alias dispatches correctly.
+8. Spot-check on `main` after introducing a known break (e.g., temporarily mismatch
+   `aria-disabled` value in a stateless component) and confirm the fast profile catches
+   it via `Unit` failure within ~3 minutes.
+
+## Out of scope
+
+- A `--exclude <step>` flag for ad-hoc subtraction from a profile. Useful but deferrable; add
+  as a follow-up if the fast profile turns out to need finer-grained subtraction.
+- A pre-push git hook that auto-runs `cargo xci-fast`. Possible follow-up, but enforcement
+  here belongs in CLAUDE.md / habit, not a hook that surprises devs.
+- Promoting `--profile fast` to the new `cargo xci` no-arg default. Backward compat with
+  any external scripts that call `cargo xci` argues for keeping `full` as the no-arg
+  default. The user can flip later if telemetry shows nobody uses the full local run.
+
+## Critical files
+
+| Purpose | Path |
+| --- | --- |
+| Step enum + PIPELINE_ORDER | `xtask/src/ci/mod.rs:30-125` |
+| `Ci` subcommand definition | `xtask/src/main.rs:18-30` |
+| Cargo aliases | `.cargo/config.toml` |
+| Workflow doc to update | `AGENTS.md` step 9 (symlinked as `CLAUDE.md`) |
+
+---
+
+<task-notification>
+<task-id>b4mngztcs</task-id>
+<tool-use-id>toolu_012fSyKE92ydUEt1L23Ds9TS</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson--t3-worktrees-ars-ui-t3code-e16f9343/084034a7-b41d-4a6b-8b9e-667f83441891/tasks/b4mngztcs.output</output-file>
+<status>completed</status>
+<summary>Background command "End-to-end fast profile run" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+Alright, proceed with your commit but don't push yet. Let's use our new skill to handle the reviews in github first, then we can push both commits together in the same push

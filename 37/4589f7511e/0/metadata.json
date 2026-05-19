@@ -1,0 +1,117 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "374589f7511e",
+  "session_id": "e797994f-9915-4551-9b97-73a56771e5d9",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-19T15:22:43.674577Z",
+  "branch": "t3code/e16f9343",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/utility/group.rs",
+    "spec/components/utility/group.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "bc798e655c4e",
+  "token_usage": {
+    "input_tokens": 325,
+    "cache_creation_tokens": 1354555,
+    "cache_read_tokens": 51688896,
+    "output_tokens": 167443,
+    "api_call_count": 193
+  },
+  "session_metrics": {
+    "turn_count": 16
+  },
+  "summary": {
+    "intent": "Implement task #205 (Group agnostic core stateless component), improve CI tooling with a lighter local profile, and create a reusable skill for the Codex review-wait loop — then address the first round of Codex review findings on the resulting PR.",
+    "outcome": "Group component fully implemented with 33 unit + 5 snapshot tests (100% coverage, 0 missed mutations), `cargo xci --profile fast` added (1m 24s vs ~25min full), `waiting-for-codex-review` skill created in the repo, and Codex's `aria-readonly` finding addressed with a TDD fix. Three commits exist locally, not yet pushed.",
+    "learnings": {
+      "repo": [
+        "`aria-readonly` is NOT a WAI-ARIA 1.2 global state attribute — it is only valid on specific interactive roles (textbox, checkbox, etc.), NOT on `group`, `region`, or `presentation`. `aria-disabled` and `aria-invalid` ARE global (WAI-ARIA §5.4) and valid on any role.",
+        "CLAUDE.md is a symlink to AGENTS.md — edits must target AGENTS.md directly.",
+        "`.claude/skills` is a symlink to `.agents/skills/` — repo-local skills live in `.agents/skills/`.",
+        "Secondary context structs must use descriptive non-prefixed names (`GroupContext`, not `Context`) per foundation 08 §8.4, so consumers write `group::GroupContext`.",
+        "`cargo xci` runtime is ~25min locally; the bottleneck is `Coverage` (~15min for wasm32 `-Cinstrument-coverage` recompile via nightly + LLVM 22) plus five `FeatureMatrix*` steps (~5min combined).",
+        "The spec §1.2 code example is authoritative over §3.1 prose when they conflict — the prose contained a WAI-ARIA misreading.",
+        "GitHub issue test bullets can contradict the spec; spec wins per CLAUDE.md 'spec is the contract' rule.",
+        "The Codex review bot login is `chatgpt-codex-connector`; it signals review completion by dropping the 👀 reaction (not by adding a new one), and does not always auto-trigger on new pushes.",
+        "`cargo insta test --unreferenced=reject` must be scoped to `ars-components` only — running workspace-wide incorrectly flags other crates' snapshots as unreferenced.",
+        "Pre-existing `cargo doc` warnings exist as baseline tech debt; `cargo doc` is not part of the `xci`/CI gate."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/separator.rs",
+          "line": 1,
+          "end_line": 446,
+          "finding": "Canonical template for stateless utility components — same structure (Props, Part, Api, ConnectApi, inline tests + snapshots) used for Group."
+        },
+        {
+          "path": "crates/ars-components/src/utility/group.rs",
+          "line": 1,
+          "end_line": 694,
+          "finding": "New file. `root_attrs()` emits `aria-disabled` + `data-ars-disabled` and `aria-invalid` + `data-ars-invalid` unconditionally when true, but only emits `data-ars-readonly` (NOT `aria-readonly`) for read_only state — `aria-readonly` is not a global WAI-ARIA state."
+        },
+        {
+          "path": "xtask/src/ci/mod.rs",
+          "line": 1212,
+          "end_line": 1212,
+          "finding": "Existing tests module start; new `Profile` enum, `FAST_PIPELINE_ORDER` constant, and 7 new unit tests added here. `resolve_steps()` now accepts a `Profile` argument."
+        },
+        {
+          "path": "spec/components/utility/group.md",
+          "line": 1,
+          "end_line": 1,
+          "finding": "Had two internal inconsistencies fixed: §3.1 prose incorrectly stated state attrs are omitted on `role=presentation` (WAI-ARIA misreading), and §3.1 + §1.2 incorrectly listed `aria-readonly` as a global state attribute alongside `aria-disabled`/`aria-invalid`."
+        },
+        {
+          "path": "xtask/src/main.rs",
+          "line": 18,
+          "end_line": 30,
+          "finding": "`Command::Ci` variant — added `--profile <full|fast>` flag (default `Full` for backward compat) forwarded to `ci::run`."
+        }
+      ],
+      "workflow": [
+        "TDD discipline: write the failing test first and confirm the red phase with a test run before landing the implementation fix — enforced by the Codex review skill.",
+        "Snapshot review workflow: run tests to generate `.snap.new` files, inspect diffs manually, then run `cargo insta accept` only after confirming the output matches the spec contract.",
+        "Mutation testing with `cargo mutants`: unviable mutations (const fn, builder-return-self) are expected and not regressions — only missed viable mutations are failures.",
+        "After pushing a PR and after pushing any follow-up fix, post `@codex review` as a top-level comment to reliably trigger Codex — do not rely on automatic retrigger.",
+        "Positional step arguments to `cargo xci` override the profile — `cargo xci --profile fast fmt check` runs only `fmt` + `check`.",
+        "When a commit happens prematurely, `git reset --soft HEAD~1` preserves staged changes cleanly without losing work.",
+        "Spec-conformance anatomy tests in `crates/ars-components/tests/spec_conformance/utility.rs` must be added for each new utility component — they are not auto-generated."
+      ]
+    },
+    "friction": [
+      "The commit landed before the user could review the diff — the assistant committed immediately after producing the summary rather than waiting for explicit approval, requiring a `git reset --soft` recovery.",
+      "`cargo xci` takes ~25 minutes locally, making it impractical as a routine pre-push gate — motivated the entire `--profile fast` work.",
+      "The spec had two separate internal inconsistencies (§3.1 prose vs §1.2 code; `aria-readonly` mis-categorized as global) that required auditing and correction before implementation could proceed.",
+      "The GitHub issue's test bullets contradicted the spec (`label`/`label_id` props that don't exist), requiring explicit resolution before starting TDD.",
+      "Pre-existing `cargo doc` warnings caused temporary confusion about whether new code introduced failures — required a baseline verification step.",
+      "`cargo insta test --unreferenced=reject` without a `-p` scope falsely flagged other crates' snapshots, requiring a re-run with the correct package filter.",
+      "The `CLAUDE.md` symlink meant edits to it silently failed — the real target `AGENTS.md` had to be edited directly."
+    ],
+    "open_items": [
+      "Three local commits not yet pushed; waiting to push both the Group component fixes and the infra/skill commits together after Codex review round completes.",
+      "Full `cargo xci` run (all 20 steps) still needed before final PR submission per CLAUDE.md step 9.",
+      "Leptos adapter component for Group (`ars-leptos`) — separate task on the project board.",
+      "Dioxus adapter component for Group (`ars-dioxus`) — separate task on the project board.",
+      "Wiring `GroupContext` consumption into existing child components (Button, TextField, etc.) — blocked on adapter components existing first.",
+      "`--exclude <step>` flag for ad-hoc subtraction from an xci profile — deferred as a follow-up.",
+      "Pre-push git hook to auto-run `cargo xci-fast` — deferred; enforcement left to CLAUDE.md habit.",
+      "Potentially promoting `--profile fast` to the no-arg `cargo xci` default — deferred pending telemetry on actual usage patterns.",
+      "Pre-existing `cargo doc` warnings in the workspace are unaddressed tech debt not introduced by this PR."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-19T15:21:45.914993Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 54,
+    "human_modified": 25,
+    "human_removed": 0,
+    "total_committed": 54,
+    "total_lines_changed": 87,
+    "agent_percentage": 0,
+    "metric_version": 2
+  }
+}
