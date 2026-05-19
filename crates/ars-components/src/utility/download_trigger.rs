@@ -331,7 +331,7 @@ fn classify_href(href: &str, document_origin: Option<&str>) -> DownloadPolicy {
         return DownloadPolicy::Native;
     }
 
-    if let Some(href_origin) = parse_http_https_origin(trimmed) {
+    if let Some(href_origin) = parse_http_https_origin(trimmed, document_origin) {
         return classify_http_https_against_document(&href_origin, document_origin);
     }
 
@@ -419,7 +419,7 @@ fn parse_network_path_origin(trimmed: &str, document_origin: Option<&str>) -> Op
 
     let mut rest = rest;
 
-    while rest.starts_with('/') {
+    while rest.starts_with('/') || rest.starts_with('\\') {
         rest = rest.get(1..)?;
     }
 
@@ -504,7 +504,7 @@ fn parse_ipv4_address_relaxed(text: &str) -> Option<Ipv4Addr> {
         3 => {
             let a = parse_ipv4_octet(parts[0])?;
             let b = parse_ipv4_octet(parts[1])?;
-            let merged: u32 = parts[2].parse().ok()?;
+            let merged = parse_ipv4_component_value(parts[2])?;
 
             if merged > u32::from(u16::MAX) {
                 return None;
@@ -517,7 +517,7 @@ fn parse_ipv4_address_relaxed(text: &str) -> Option<Ipv4Addr> {
 
         2 => {
             let a = parse_ipv4_octet(parts[0])?;
-            let merged: u32 = parts[1].parse().ok()?;
+            let merged = parse_ipv4_component_value(parts[1])?;
 
             if merged > 0xFF_FFFF {
                 return None;
@@ -527,7 +527,7 @@ fn parse_ipv4_address_relaxed(text: &str) -> Option<Ipv4Addr> {
         }
 
         1 => {
-            let val: u32 = parts[0].parse().ok()?;
+            let val = parse_ipv4_component_value(parts[0])?;
 
             Some(Ipv4Addr::from(val))
         }
@@ -536,8 +536,28 @@ fn parse_ipv4_address_relaxed(text: &str) -> Option<Ipv4Addr> {
     }
 }
 
+/// Parses a single dotted IPv4 piece using WHATWG-style leading-zero octal and `0x` hex.
+fn parse_ipv4_component_value(raw: &str) -> Option<u32> {
+    if raw.is_empty() {
+        return None;
+    }
+
+    if raw.len() >= 2 {
+        let head = raw.get(..2)?;
+        if head.eq_ignore_ascii_case("0x") {
+            return u32::from_str_radix(raw.get(2..)?, 16).ok();
+        }
+    }
+
+    if raw.starts_with('0') && raw.len() > 1 {
+        return u32::from_str_radix(raw, 8).ok();
+    }
+
+    raw.parse::<u32>().ok()
+}
+
 fn parse_ipv4_octet(raw: &str) -> Option<u8> {
-    let value: u32 = raw.parse().ok()?;
+    let value = parse_ipv4_component_value(raw)?;
 
     if value <= u8::MAX.into() {
         Some(value as u8)
@@ -584,6 +604,20 @@ fn is_same_scheme_special_relative_http_https(href: &str, document_origin: Optio
     http_https_authority_rest(after_scheme).is_none()
 }
 
+fn document_origin_scheme(document_origin: Option<&str>) -> Option<&str> {
+    let raw = document_origin?.trim();
+    let sep = raw.find("://")?;
+    let candidate = raw.get(..sep)?;
+
+    if candidate.eq_ignore_ascii_case("http") {
+        Some("http")
+    } else if candidate.eq_ignore_ascii_case("https") {
+        Some("https")
+    } else {
+        None
+    }
+}
+
 fn parse_document_origin(origin: &str) -> Option<ParsedOrigin> {
     let trimmed = origin.trim();
 
@@ -605,7 +639,7 @@ fn parse_document_origin(origin: &str) -> Option<ParsedOrigin> {
     parse_authority(scheme.as_str(), authority)
 }
 
-fn parse_http_https_origin(href: &str) -> Option<ParsedOrigin> {
+fn parse_http_https_origin(href: &str, document_origin: Option<&str>) -> Option<ParsedOrigin> {
     let bytes = href.as_bytes();
 
     let (scheme, after_colon) = if starts_with_ignore_case(bytes, b"https:") {
@@ -616,13 +650,30 @@ fn parse_http_https_origin(href: &str) -> Option<ParsedOrigin> {
         return None;
     };
 
-    let rest = http_https_authority_rest(after_colon)?;
+    if let Some(rest) = http_https_authority_rest(after_colon) {
+        if rest.is_empty() {
+            return None;
+        }
 
-    if rest.is_empty() {
+        let authority = authorities_partition(rest)?;
+
+        return parse_authority(scheme, authority);
+    }
+
+    let scheme_mismatch = document_origin_scheme(document_origin)
+        .is_none_or(|doc_s| !doc_s.eq_ignore_ascii_case(scheme));
+
+    if !scheme_mismatch {
         return None;
     }
 
-    let authority = authorities_partition(rest)?;
+    let tail = after_colon.trim_start_matches(|ch| ['/', '\\'].contains(&ch));
+
+    if tail.is_empty() {
+        return None;
+    }
+
+    let authority = authorities_partition(tail)?;
 
     parse_authority(scheme, authority)
 }
@@ -1120,6 +1171,45 @@ mod tests {
 
         assert!(!api.native_download_eligible());
         assert!(!api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn scheme_relative_extra_backslashes_normalize_like_browser() {
+        let props = Props::new()
+            .href(r"\\\example.com/a.bin")
+            .filename("a.bin")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn ipv4_legacy_octal_form_is_not_same_origin_as_decimal_octets() {
+        let props = Props::new()
+            .href("http://0177.1/file.bin")
+            .filename("f.bin")
+            .document_origin("http://177.0.0.1");
+
+        let api = api(props);
+
+        assert!(!api.native_download_eligible());
+        assert!(api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn http_authority_cross_scheme_https_document_requires_fallback() {
+        let props = Props::new()
+            .href("http:evil.example/phish.bin")
+            .filename("p.bin")
+            .document_origin("https://trusted.example");
+
+        let api = api(props);
+
+        assert!(!api.native_download_eligible());
+        assert!(api.needs_blob_fallback());
     }
 
     #[test]
