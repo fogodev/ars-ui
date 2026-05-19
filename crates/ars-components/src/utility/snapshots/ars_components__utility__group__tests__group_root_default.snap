@@ -1,0 +1,37 @@
+---
+source: crates/ars-components/src/utility/group.rs
+expression: "snapshot_attrs(&Api::new(default_props()).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "group",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "group",
+            ),
+        ),
+    ],
+    styles: [],
+}
