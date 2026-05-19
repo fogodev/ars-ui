@@ -97,7 +97,30 @@ pub enum Step {
     MutualExclusion,
 }
 
-/// Default pipeline order when no steps are specified.
+/// Pipeline profile selecting which step list to run when no positional steps
+/// are passed.
+///
+/// - [`Profile::Full`] mirrors the GitHub Actions CI job exactly (20 gates,
+///   ~25 minutes locally) and is the default for backward compatibility with
+///   scripts that call `cargo xci` directly.
+/// - [`Profile::Fast`] runs the curated [`FAST_PIPELINE_ORDER`] subset
+///   (~5 minutes) intended as the routine pre-push gate. It drops the coverage
+///   recompile, the wasm browser tests, the release-profile checks, and the
+///   five `feature-matrix-*` groups — all of which are CI-only concerns that
+///   re-test what `Unit` / `Integration` / `Adapter` already covered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum Profile {
+    /// Full CI parity (default). Runs every step in [`PIPELINE_ORDER`].
+    #[default]
+    Full,
+
+    /// Fast pre-push gate. Runs every step in [`FAST_PIPELINE_ORDER`].
+    Fast,
+}
+
+/// Default pipeline order when no steps are specified and [`Profile::Full`]
+/// is selected.
 ///
 /// `FeatureMatrix` is intentionally absent — the pipeline runs each sub-group
 /// individually so progress is visible per group.
@@ -122,6 +145,32 @@ const PIPELINE_ORDER: &[Step] = &[
     Step::FeatureMatrixLeptos,
     Step::FeatureMatrixDioxus,
     Step::MutualExclusion,
+];
+
+/// Curated pipeline order when [`Profile::Fast`] is selected and no positional
+/// steps are passed.
+///
+/// Covers cross-crate / workspace-level regressions and the structural lints
+/// that gate merge, while skipping the wasm-coverage recompile, the wasm
+/// browser tests, the release-profile checks, and the five `feature-matrix-*`
+/// groups — those run in CI and rarely change the outcome of a local pre-push
+/// gate when `Unit`, `Integration`, `Adapter`, and `--all-features check`
+/// have already passed.
+///
+/// Power users who touched wasm or feature-gated code can opt the skipped
+/// steps back in positionally, e.g. `cargo xci --profile fast i18n-browser`;
+/// positional steps still override the profile.
+const FAST_PIPELINE_ORDER: &[Step] = &[
+    Step::Fmt,
+    Step::Check,
+    Step::Clippy,
+    Step::Unit,
+    Step::Integration,
+    Step::Adapter,
+    Step::SpecCompileSnippets,
+    Step::ErrorVariantCoverage,
+    Step::MutualExclusion,
+    Step::SnapshotCount,
 ];
 
 /// Errors from CI operations.
@@ -203,17 +252,23 @@ impl std::error::Error for Error {}
 // Public entry point
 // ---------------------------------------------------------------------------
 
-/// Run the specified CI steps, or the full pipeline if none are given.
+/// Run the specified CI steps.
+///
+/// When `steps` is empty, the step list is taken from the `profile`'s default
+/// pipeline ([`PIPELINE_ORDER`] for [`Profile::Full`], [`FAST_PIPELINE_ORDER`]
+/// for [`Profile::Fast`]). When `steps` is non-empty, the positional list
+/// runs as-is and `profile` is ignored — this preserves the existing
+/// `cargo xci fmt check` ad-hoc selection semantics.
 ///
 /// Execution is sequential and fail-fast: the first step that fails stops the
 /// pipeline and returns its error.
 ///
 /// # Errors
 ///
-/// Returns [`CiError`] on the first step that fails — either a subprocess
+/// Returns [`Error`] on the first step that fails — either a subprocess
 /// non-zero exit, a missing tool, or a coverage threshold violation.
-pub fn run(steps: Vec<Step>, message_format: Option<&str>) -> Result<(), Error> {
-    let steps = resolve_steps(steps);
+pub fn run(steps: Vec<Step>, profile: Profile, message_format: Option<&str>) -> Result<(), Error> {
+    let steps = resolve_steps(steps, profile);
 
     for (i, step) in steps.iter().enumerate() {
         print_header(*step, i + 1, steps.len());
@@ -296,12 +351,19 @@ pub fn format_stdin() -> Result<(), Error> {
 
 /// Resolve the user-provided step list into the concrete list to execute.
 ///
-/// - Empty input → full [`PIPELINE_ORDER`].
+/// - Empty input → profile's default pipeline ([`PIPELINE_ORDER`] for
+///   [`Profile::Full`], [`FAST_PIPELINE_ORDER`] for [`Profile::Fast`]).
 /// - `FeatureMatrix` → expands to the five individual groups.
 /// - Everything else passes through as-is.
-fn resolve_steps(steps: Vec<Step>) -> Vec<Step> {
+///
+/// Positional steps always override the profile: passing `vec![Step::Fmt]`
+/// with `Profile::Fast` yields `vec![Step::Fmt]`, not the fast subset.
+fn resolve_steps(steps: Vec<Step>, profile: Profile) -> Vec<Step> {
     if steps.is_empty() {
-        return PIPELINE_ORDER.to_vec();
+        return match profile {
+            Profile::Full => PIPELINE_ORDER.to_vec(),
+            Profile::Fast => FAST_PIPELINE_ORDER.to_vec(),
+        };
     }
 
     let mut resolved = Vec::with_capacity(steps.len());
@@ -1215,7 +1277,7 @@ mod tests {
 
     #[test]
     fn empty_steps_resolve_to_pipeline_order() {
-        let resolved = resolve_steps(vec![]);
+        let resolved = resolve_steps(vec![], Profile::Full);
 
         assert_eq!(resolved, PIPELINE_ORDER);
     }
@@ -1224,14 +1286,14 @@ mod tests {
     fn explicit_steps_pass_through() {
         let input = vec![Step::Check, Step::Clippy];
 
-        let resolved = resolve_steps(input.clone());
+        let resolved = resolve_steps(input.clone(), Profile::Full);
 
         assert_eq!(resolved, input);
     }
 
     #[test]
     fn feature_matrix_expands_to_five_groups() {
-        let resolved = resolve_steps(vec![Step::FeatureMatrix]);
+        let resolved = resolve_steps(vec![Step::FeatureMatrix], Profile::Full);
 
         assert_eq!(resolved.len(), 5);
         assert_eq!(resolved[0], Step::FeatureMatrixCore);
@@ -1243,7 +1305,10 @@ mod tests {
 
     #[test]
     fn feature_matrix_expands_in_context() {
-        let resolved = resolve_steps(vec![Step::Fmt, Step::FeatureMatrix, Step::Coverage]);
+        let resolved = resolve_steps(
+            vec![Step::Fmt, Step::FeatureMatrix, Step::Coverage],
+            Profile::Full,
+        );
 
         assert_eq!(resolved.len(), 7); // 1 + 5 + 1
         assert_eq!(resolved[0], Step::Fmt);
@@ -1255,6 +1320,84 @@ mod tests {
         assert!(
             !PIPELINE_ORDER.contains(&Step::FeatureMatrix),
             "PIPELINE_ORDER must not include the FeatureMatrix meta-step"
+        );
+    }
+
+    // ── Profile / fast pipeline ───────────────────────────────────────
+
+    #[test]
+    fn profile_default_is_full() {
+        assert_eq!(Profile::default(), Profile::Full);
+    }
+
+    #[test]
+    fn empty_steps_with_fast_profile_resolve_to_fast_pipeline() {
+        let resolved = resolve_steps(vec![], Profile::Fast);
+
+        assert_eq!(resolved, FAST_PIPELINE_ORDER);
+    }
+
+    #[test]
+    fn empty_steps_with_full_profile_resolve_to_full_pipeline() {
+        let resolved = resolve_steps(vec![], Profile::Full);
+
+        assert_eq!(resolved, PIPELINE_ORDER);
+    }
+
+    #[test]
+    fn positional_steps_override_fast_profile() {
+        // Positional steps must always win — `cargo xci --profile fast fmt`
+        // runs only `fmt`, not the fast subset.
+        let resolved = resolve_steps(vec![Step::Fmt], Profile::Fast);
+
+        assert_eq!(resolved, vec![Step::Fmt]);
+    }
+
+    #[test]
+    fn fast_pipeline_is_subset_of_full_pipeline() {
+        // Defensive: every step in the fast pipeline must also exist in the
+        // full pipeline. Catches a regression where the fast list references
+        // a step that has been removed (or renamed) from the canonical list.
+        for &step in FAST_PIPELINE_ORDER {
+            assert!(
+                PIPELINE_ORDER.contains(&step),
+                "FAST_PIPELINE_ORDER includes {step:?} which is not in PIPELINE_ORDER",
+            );
+        }
+    }
+
+    #[test]
+    fn fast_pipeline_excludes_coverage_and_feature_matrix() {
+        // Guards the intent of the fast profile: the wasm-coverage recompile
+        // and the five feature-matrix groups are deliberately skipped because
+        // they are CI-only concerns that pay no marginal dividend on a
+        // pre-push gate when Unit / Integration / Adapter already ran.
+        // Catches a regression where someone reflexively re-adds them.
+        let banned = [
+            Step::Coverage,
+            Step::FeatureMatrix,
+            Step::FeatureMatrixCore,
+            Step::FeatureMatrixI18n,
+            Step::FeatureMatrixSubsystems,
+            Step::FeatureMatrixLeptos,
+            Step::FeatureMatrixDioxus,
+        ];
+
+        for forbidden in banned {
+            assert!(
+                !FAST_PIPELINE_ORDER.contains(&forbidden),
+                "FAST_PIPELINE_ORDER must not contain {forbidden:?} — see Profile docs",
+            );
+        }
+    }
+
+    #[test]
+    fn fast_pipeline_does_not_contain_meta_step() {
+        // Same guard as `pipeline_order_does_not_contain_meta_step`, applied
+        // to the fast list — the meta-step is a positional-only convenience.
+        assert!(
+            !FAST_PIPELINE_ORDER.contains(&Step::FeatureMatrix),
+            "FAST_PIPELINE_ORDER must not include the FeatureMatrix meta-step"
         );
     }
 
