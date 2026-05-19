@@ -274,6 +274,19 @@ Contains:
 
 Parts must be marked as required (component broken without it) or optional (enhances UX, degrades gracefully).
 
+#### Static vs parametric anatomy slots
+
+Most parts are **static**: exactly one DOM element per component instance per part, and the part appears as a variant in the component's `Part` enum so `ConnectApi::part_attrs(Part) -> AttrMap` can address it. This is the default and applies to the majority of the catalog.
+
+A minority of components have **parametric** anatomy slots — anatomy positions that emit zero-to-N elements per component instance, where the emitted attributes depend on runtime data the `Part` enum cannot carry (a row key, an item value, a `highlighted` boolean). Examples: a per-chunk wrapper in `Highlight`, a per-row cell in `Table`, a per-tag chip in `TagsInput`. For these:
+
+- Keep the row in the Anatomy table and the ASCII diagram so the rendered shape is documented end-to-end.
+- Do **not** add a `Part` enum variant. `ConnectApi::part_attrs` takes a `Part` by value with no payload — it cannot express runtime parameters cleanly.
+- Expose the attributes through an `Api` method that takes the runtime parameter explicitly (e.g., `Api::chunk_attrs(highlighted: bool) -> AttrMap`, `Api::row_attrs(&row_key) -> AttrMap`). Document the method name in the Anatomy parts-table's "Key Attributes" column.
+- Note the slot's parametric nature in the spec text once, ideally right under the table.
+
+The convention keeps the static-`Part` happy path simple while giving parametric slots a typed, discoverable API.
+
 ### 4.3 Accessibility
 
 REQUIRED for all tiers. Subsections:

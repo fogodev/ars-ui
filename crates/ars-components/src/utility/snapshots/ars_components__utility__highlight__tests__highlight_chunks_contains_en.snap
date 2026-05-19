@@ -1,0 +1,18 @@
+---
+source: crates/ars-components/src/utility/highlight.rs
+expression: "snapshot_chunks(&highlight_chunks(&props, &en_us()))"
+---
+[
+    HighlightChunk {
+        text: "Hello ",
+        highlighted: false,
+    },
+    HighlightChunk {
+        text: "world",
+        highlighted: true,
+    },
+    HighlightChunk {
+        text: "!",
+        highlighted: false,
+    },
+]

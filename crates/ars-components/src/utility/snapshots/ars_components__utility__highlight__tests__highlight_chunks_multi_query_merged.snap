@@ -1,0 +1,14 @@
+---
+source: crates/ars-components/src/utility/highlight.rs
+expression: "snapshot_chunks(&highlight_chunks(&props, &en_us()))"
+---
+[
+    HighlightChunk {
+        text: "foob",
+        highlighted: true,
+    },
+    HighlightChunk {
+        text: "ar",
+        highlighted: false,
+    },
+]

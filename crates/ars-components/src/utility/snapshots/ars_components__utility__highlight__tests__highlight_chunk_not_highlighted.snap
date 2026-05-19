@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/utility/highlight.rs
+expression: "snapshot_attrs(&Api::new(Props::default()).chunk_attrs(false))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-highlighted",
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "highlight-chunk",
+            ),
+        ),
+    ],
+    styles: [],
+}

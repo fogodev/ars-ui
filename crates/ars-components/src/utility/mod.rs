@@ -38,6 +38,15 @@ pub mod form_submit;
 /// `Heading` component (stateless heading-level mapper).
 pub mod heading;
 
+/// `Highlight` component (stateless text substring matcher with Unicode-aware
+/// case folding and chunked output for adapter-rendered `<mark>` highlights).
+///
+/// Gated on `feature = "i18n"`: the component contract requires locale-aware
+/// ICU4X case folding for Turkic / German / Greek / Lithuanian guarantees,
+/// which is only available when `ars-i18n/icu4x` is enabled.
+#[cfg(feature = "i18n")]
+pub mod highlight;
+
 /// `Keyboard` component (stateless `<kbd>` shortcut renderer with
 /// platform-aware modifier mapping).
 pub mod keyboard;

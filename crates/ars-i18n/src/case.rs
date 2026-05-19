@@ -73,6 +73,52 @@ pub fn to_lowercase(text: &str, locale: &Locale) -> String {
         .into_owned()
 }
 
+/// Unicode case folding for case-insensitive comparison.
+///
+/// Returns the canonical case-fold form per Unicode Technical Report 21 —
+/// the right primitive for case-insensitive **matching** (as opposed to
+/// case **transformation**, which is what [`to_lowercase`] / [`to_uppercase`]
+/// do). The key differences for matching:
+///
+/// - German eszett: `fold("ß") == fold("SS") == "ss"`, so `"ß"` and `"ss"`
+///   match each other (whereas `to_lowercase("ß") == "ß"`).
+/// - Greek final sigma collapses into the medial form, so a query against
+///   text containing `"Ος"` matches `"ΟΣ"` and vice versa.
+/// - Turkic dotted/dotless I: when `locale` is a Turkic language (`tr` /
+///   `az`), the implementation switches to ICU4X
+///   `CaseMapper::fold_turkic_string` so `İ ↔ i` and `I ↔ ı` per the
+///   Turkic case-folding convention. Non-Turkic locales use the default
+///   Unicode fold.
+///
+/// Available only under the `icu4x` feature; the `web-intl` backend has
+/// no equivalent (browser `Intl` exposes only locale-aware lowercase /
+/// uppercase) so callers requiring case-fold-based matching must use the
+/// ICU4X backend.
+#[must_use]
+#[cfg(feature = "icu4x")]
+pub fn case_fold(text: &str, locale: &Locale) -> String {
+    let mapper = CaseMapper::new();
+
+    if is_turkic_locale(locale) {
+        mapper.fold_turkic_string(text).into_owned()
+    } else {
+        mapper.fold_string(text).into_owned()
+    }
+}
+
+/// Returns `true` for locales that use Turkic case-folding rules — Turkish
+/// (`tr`) and Azerbaijani (`az`).
+///
+/// These are the language tags ICU treats as Turkic for case mapping per
+/// CLDR's `special-casing` data, which is the same set that
+/// `CaseMapper::lowercase_to_string` already switches behaviour on. Other
+/// Turkic family languages (Kazakh `kk`, Tatar `tt`, Uzbek `uz`) follow
+/// regular Unicode case rules in CLDR.
+#[cfg(feature = "icu4x")]
+fn is_turkic_locale(locale: &Locale) -> bool {
+    matches!(locale.language(), "tr" | "az")
+}
+
 /// Locale-aware lowercase transformation.
 ///
 /// Delegates to browser `String.prototype.toLocaleLowerCase()` on wasm
@@ -174,6 +220,62 @@ mod tests {
         let locale = Locale::parse("el").expect("locale should parse");
 
         assert_eq!(to_lowercase("ΟΣ", &locale), "ος");
+    }
+
+    // ── case_fold (Unicode case folding for case-insensitive match) ──
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn fold_expands_eszett_to_ss() {
+        // Per Unicode TR21, `case_fold("ß") == "ss"` and `case_fold("SS")
+        // == "ss"`, so the two are equivalent for case-insensitive
+        // matching. (Lowercase preserves `ß`; only the fold form expands.)
+        let de = Locale::parse("de").expect("locale should parse");
+
+        assert_eq!(super::case_fold("ß", &de), "ss");
+        assert_eq!(super::case_fold("SS", &de), "ss");
+        assert_eq!(super::case_fold("Straße", &de), "strasse");
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn fold_collapses_greek_final_sigma_into_medial_form() {
+        // Final sigma `ς` and medial sigma `σ` both fold to `σ`, and
+        // capital `Σ` folds to the same. So queries against text mixing
+        // the three forms still match under case_fold.
+        let el = Locale::parse("el").expect("locale should parse");
+
+        assert_eq!(super::case_fold("ΟΣ", &el), super::case_fold("Ος", &el));
+        assert_eq!(super::case_fold("σ", &el), super::case_fold("ς", &el));
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn fold_turkic_locale_uses_turkic_fold() {
+        // Under `tr` / `az`, `İ ↔ i` and `I ↔ ı`. Under non-Turkic
+        // locales the standard Unicode fold applies (`İ → i̇`).
+        let tr = Locale::parse("tr").expect("locale should parse");
+        let en = Locale::parse("en-US").expect("locale should parse");
+
+        // Turkic: dotted/dotless I pairings collapse.
+        assert_eq!(super::case_fold("İ", &tr), super::case_fold("i", &tr));
+        assert_eq!(super::case_fold("I", &tr), super::case_fold("ı", &tr));
+
+        // Non-Turkic: `İ` does NOT fold to plain `i`.
+        assert_ne!(super::case_fold("İ", &en), "i");
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn fold_is_idempotent() {
+        // Folding an already-folded string is a no-op (the fold form is
+        // its own canonical representative).
+        for input in ["hello", "Straße", "İstanbul", "ΟΣ"] {
+            let de = Locale::parse("de").expect("locale should parse");
+            let folded = super::case_fold(input, &de);
+
+            assert_eq!(super::case_fold(&folded, &de), folded);
+        }
     }
 
     #[cfg(all(

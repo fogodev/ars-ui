@@ -169,6 +169,34 @@ exclude_re = [
   'MissingProviderEffects>::now_ms -> u64 with 0',
   'MissingProviderEffects>::get_bounding_rect -> Option<Rect> with None',
 
+  # Highlight component: two equivalent mutations in the merge /
+  # chunk-emission pipeline. These are dead-defensive guards — no
+  # upstream stage produces zero-length ranges (post-redesign with the
+  # `Normalised::source_end` mapping, the contains/starts-with scans
+  # never push degenerate ranges, and fuzzy always uses
+  # `len_utf8() >= 1`).
+  #
+  # - `> → >=` in merge_ranges: when `end == last.1`, the body becomes
+  #   `last.1 = last.1`, a no-op.
+  # - `> → >=` in build_chunks: would push zero-length highlighted
+  #   chunks, but no upstream stage produces zero-length ranges.
+  'highlight\.rs:\d+:\d+: replace > with >= in merge_ranges',
+  'highlight\.rs:\d+:\d+: replace > with >= in build_chunks',
+
+  # Highlight `push_contains_matches` overlap-aware scan: the three
+  # `+ → */-` mutants on `search_start + rel`, `start + normalised_query.len()`,
+  # and `search_start = start + advance` are *caught* via test
+  # non-termination — replacing the increment with `*` or `-` either
+  # pins `search_start` at 0 (e.g., `start * 1 == start`) or panics on
+  # usize underflow inside the `find` loop, both of which take the
+  # mutated process past cargo-mutants' 300s timeout. The mutations
+  # ARE detected (timeout != missed), but reporting them as timeouts
+  # without these excludes would otherwise wedge the CI matrix on a
+  # caught-but-slow result. Same pattern as the existing typeahead /
+  # toast manager loop-step excludes above.
+  'highlight\.rs:\d+:\d+: replace \+ with \* in push_contains_matches',
+  'highlight\.rs:\d+:\d+: replace \+ with - in push_contains_matches',
+
   # Tabs `step_focus` checked-counter mutations and the Blur
   # short-circuit are equivalent in every reachable state. Regex is
   # line-number-agnostic so it survives source growth.
