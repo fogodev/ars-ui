@@ -174,7 +174,12 @@ Blob fallback is client-only in Leptos. Cross-origin downloads may use `fetch` p
 ```rust
 #[component]
 pub fn DownloadTrigger(children: Children) -> impl IntoView {
-    let api = download_trigger::Api::new(&download_trigger::Props::default());
+    // `locale` / `messages` are resolved from `ArsProvider` / app context in real adapters.
+    let api = download_trigger::Api::new(
+        download_trigger::Props::default(),
+        locale,
+        download_trigger::Messages::default(),
+    );
     view! { <a {..api.root_attrs()}>{children()}</a> }
 }
 ```

@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility]
 shared_deps: []
 related: []
 references:
-  ark-ui: DownloadTrigger
+    ark-ui: DownloadTrigger
 ---
 
 # DownloadTrigger
@@ -19,7 +19,7 @@ A stateless utility component that initiates file downloads via the browser down
 
 ```rust
 /// Props for the `DownloadTrigger` component.
-#[derive(Clone, Debug, PartialEq, HasId)]
+#[derive(Clone, Debug, Default, PartialEq, HasId)]
 pub struct Props {
     /// Component instance ID.
     pub id: String,
@@ -35,93 +35,71 @@ pub struct Props {
     pub mime_type: Option<String>,
     /// Disabled state. When true, the trigger is visually and functionally disabled.
     pub disabled: bool,
+    /// Adapter-supplied document origin (`scheme://host[:port]`, e.g.
+    /// `https://example.com`). Used only to classify absolute `http`/`https`
+    /// URLs for native `download` vs blob-fetch fallback; relative URLs ignore
+    /// this field.
+    pub document_origin: Option<String>,
 }
 
-impl Default for Props {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            href: String::new(),
-            filename: None,
-            mime_type: None,
-            disabled: false,
-        }
+impl Props {
+    /// Returns fresh props with the documented defaults.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
     }
+
+    // … builder methods (`id`, `href`, `filename`, …) mirror the implementation.
 }
 ```
 
 ### 1.2 Connect / API
 
 ```rust
+/// Stable `data-ars-download-fallback` attribute value when blob-fetch fallback is required.
+pub const DOWNLOAD_FALLBACK_REQUIRED: &str = "required";
+
 #[derive(ComponentPart)]
 #[scope = "download-trigger"]
 pub enum Part {
     Root,
 }
 
+/// Dynamic callable signature for [`Messages::download_label`].
+pub type DownloadLabelFn = dyn Fn(&str, &Locale) -> String + Send + Sync;
+
 /// API for the `DownloadTrigger` component.
-pub struct Api<'a> {
-    props: &'a Props,
+pub struct Api {
+    props: Props,
     locale: Locale,
     messages: Messages,
 }
 
-impl<'a> Api<'a> {
-    pub fn new(props: &'a Props, locale: Locale, messages: Messages) -> Self {
-        Self { props, locale, messages }
-    }
+impl Api {
+    pub fn new(props: Props, locale: Locale, messages: Messages) -> Self;
 
-    /// Root element attributes. Returns attrs suitable for an `<a>` element.
+    pub fn props(&self) -> &Props;
+
+    /// Root `<a>` attributes — includes `type` when [`Props::mime_type`] is set.
     ///
-    /// When the href is same-origin, uses native `<a download="filename">`.
-    /// When cross-origin (where the `download` attribute is ignored by browsers),
-    /// the adapter should attach a click handler that fetches the resource as a
-    /// blob and triggers download via `URL.createObjectURL`.
-    pub fn root_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        attrs.set(HtmlAttr::Id, &self.props.id);
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Href, &self.props.href);
+    /// Emits the native `download` attribute when [`Self::native_download_eligible`]
+    /// is true (relative URLs, `blob:` / `data:`, or same-origin absolute `http`/`https`
+    /// against [`Props::document_origin`]).
+    ///
+    /// When [`Self::needs_blob_fallback`] is true, omits `download` and sets
+    /// `data-ars-download-fallback="required"` for adapter-side fetch/blob handling.
+    ///
+    /// When disabled, keeps `href`, sets `aria-disabled="true"` and
+    /// `data-ars-disabled="true"`; the adapter must prevent default on activation.
+    pub fn root_attrs(&self) -> AttrMap;
 
-        // Set the download attribute with optional filename.
-        match &self.props.filename {
-            Some(name) => attrs.set(HtmlAttr::Download, name),
-            None       => attrs.set_bool(HtmlAttr::Download, true),
-        }
-
-        // Apply accessible label from Messages.
-        // Consumer-provided aria-label takes precedence via AttrMap merge.
-        let label = (self.messages.download_label)(
-            self.props.filename.as_deref().unwrap_or(""),
-            &self.locale,
-        );
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
-
-        if self.props.disabled {
-            // Use aria-disabled="true" with href preserved so the element
-            // remains focusable for screen reader discoverability. The adapter
-            // must prevent default on click when aria-disabled is true.
-            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
-            attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
-        }
-
-        attrs
-    }
-
-    /// Whether the trigger is disabled.
-    pub fn is_disabled(&self) -> bool {
-        self.props.disabled
-    }
-
-    /// The resolved filename for the download.
-    pub fn filename(&self) -> Option<&str> {
-        self.props.filename.as_deref()
-    }
+    pub fn native_download_eligible(&self) -> bool;
+    pub fn needs_blob_fallback(&self) -> bool;
+    pub fn is_disabled(&self) -> bool;
+    pub fn filename(&self) -> Option<&str>;
 }
 
-impl ConnectApi for Api<'_> {
+impl ConnectApi for Api {
     type Part = Part;
 
     fn part_attrs(&self, part: Part) -> AttrMap {
@@ -139,9 +117,9 @@ DownloadTrigger
 └── Root  <a>  download attribute
 ```
 
-| Part | Element | Key Attributes                                                          |
-| ---- | ------- | ----------------------------------------------------------------------- |
-| Root | `<a>`   | `data-ars-scope="download-trigger"`, `data-ars-part="root"`, `download` |
+| Part | Element | Key Attributes                                                                                                                                                                                                                                                                      |
+| ---- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Root | `<a>`   | `data-ars-scope="download-trigger"`, `data-ars-part="root"`, `download` when same-origin / relative / `blob:` / `data:`; `data-ars-download-fallback="required"` when blob fallback is needed for HTTP(S) cross-origin or unknown document origin; optional `type` from `mime_type` |
 
 **1 part total.** A single anchor element with the `download` attribute.
 
@@ -159,10 +137,12 @@ DownloadTrigger
 ### 4.1 Messages
 
 ```rust
-#[derive(Clone, Debug)]
+pub type DownloadLabelFn = dyn Fn(&str, &Locale) -> String + Send + Sync;
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     /// Accessible label for the download trigger (e.g., "Download file").
-    pub download_label: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
+    pub download_label: MessageFn<DownloadLabelFn>,
 }
 
 impl Default for Messages {
@@ -172,7 +152,10 @@ impl Default for Messages {
                 if filename.is_empty() {
                     "Download file".to_string()
                 } else {
-                    format!("Download {}", isolate_text_safe(filename))
+                    format!(
+                        "Download {}",
+                        isolate_text_safe(filename, IsolateDirection::FirstStrong)
+                    )
                 }
             }),
         }
@@ -196,7 +179,7 @@ When downloading cross-origin resources, the HTML `download` attribute is ignore
 
 This pattern is adapter-specific (requires DOM access) and is NOT implemented in the headless core.
 
-> **SSR safety:** The cross-origin download fallback handler MUST only be attached on the client. During SSR, render the `<a>` element with `href` and `download` attributes only — the fallback handler is attached after hydration via `use_effect`.
+> **SSR safety:** The cross-origin download fallback handler MUST only be attached on the client. During SSR, render `href` plus native `download` only when the headless core classifies the URL as native-download eligible; when `data-ars-download-fallback="required"` is present, omit `download` — attach the fallback handler after hydration via `use_effect`.
 >
 > **Platform Note:** The cross-origin download fallback using `fetch` + `Blob` + `URL.createObjectURL` works in browsers and Dioxus Web. On Dioxus Desktop, downloads should use the native file system APIs. On Dioxus Mobile, download behavior is OS-dependent. The adapter should abstract the download mechanism.
 >
@@ -208,7 +191,7 @@ This pattern is adapter-specific (requires DOM access) and is NOT implemented in
 
 `DownloadTrigger` is a thin wrapper component — a pure rendering component with no state machine:
 
-- **Renders an `<a>` element** with the `download` attribute. This is the only DOM element produced.
+- **Renders an `<a>` element** with `href`. Emits the `download` attribute when native same-origin / relative / `blob:` / `data:` rules apply; omits `download` and emits `data-ars-download-fallback="required"` when HTTP(S) blob-fetch fallback is needed.
 - If `filename` is provided, the element renders as `<a href="..." download="filename">`. If `filename` is `None`, renders as `<a href="..." download>` (browser infers the filename from the URL).
 - **No state machine needed** — `DownloadTrigger` has no internal states, events, or transitions. It is a direct `Props`-to-`AttrMap` mapping.
 - **Blob URL cleanup**: If `href` is a blob URL (starts with `blob:`), the adapter MUST call `URL.revokeObjectURL(href)` on component unmount to release the underlying memory. This is handled in the adapter's cleanup/dispose lifecycle, not in the headless core.
@@ -225,11 +208,12 @@ Adapters MUST clean up blob URLs on unmount to prevent memory leaks:
 
 ### 7.1 Props
 
-| Feature   | ars-ui      | Ark UI                | Notes                                         |
-| --------- | ----------- | --------------------- | --------------------------------------------- |
-| href      | `href`      | (via native `<a>`)    | Both libraries                                |
-| Filename  | `filename`  | (via `download` attr) | Both libraries                                |
-| MIME type | `mime_type` | --                    | ars-ui addition for cross-origin content-type |
+| Feature         | ars-ui            | Ark UI                | Notes                                                                    |
+| --------------- | ----------------- | --------------------- | ------------------------------------------------------------------------ |
+| href            | `href`            | (via native `<a>`)    | Both libraries                                                           |
+| Filename        | `filename`        | (via `download` attr) | Both libraries                                                           |
+| MIME type       | `mime_type`       | --                    | ars-ui addition for cross-origin content-type                            |
+| Document origin | `document_origin` | --                    | Adapter-supplied `scheme://host[:port]` for HTTP(S) download eligibility |
 
 **Gaps:** None.
 

@@ -1,0 +1,51 @@
+---
+source: crates/ars-components/src/utility/download_trigger.rs
+expression: "snapshot_attrs(&api(Props::new().id(\"dl-sf\").href(\"https://my.app/doc.pdf\").filename(\"manual.pdf\").document_origin(\"https://my.app\"),).root_attrs(),)"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "download-trigger",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Download \u{2068}manual.pdf\u{2069}",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "dl-sf",
+            ),
+        ),
+        (
+            Download,
+            String(
+                "manual.pdf",
+            ),
+        ),
+        (
+            Href,
+            String(
+                "https://my.app/doc.pdf",
+            ),
+        ),
+    ],
+    styles: [],
+}

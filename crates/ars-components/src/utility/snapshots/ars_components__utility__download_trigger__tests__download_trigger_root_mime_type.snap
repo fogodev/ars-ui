@@ -1,0 +1,57 @@
+---
+source: crates/ars-components/src/utility/download_trigger.rs
+expression: "snapshot_attrs(&api(Props::new().id(\"dl-mt\").href(\"/export.csv\").mime_type(\"text/csv\"),).root_attrs(),)"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "download-trigger",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Download file",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "dl-mt",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "text/csv",
+            ),
+        ),
+        (
+            Download,
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Href,
+            String(
+                "/export.csv",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -185,7 +185,12 @@ pub struct DownloadTriggerSketchProps {
 
 #[component]
 pub fn DownloadTrigger(props: DownloadTriggerSketchProps) -> Element {
-    let api = download_trigger::Api::new(&download_trigger::Props::default());
+    // `locale` is resolved from `ArsProvider` / app context in real adapters.
+    let api = download_trigger::Api::new(
+        download_trigger::Props::default(),
+        locale,
+        download_trigger::Messages::default(),
+    );
     rsx! { a { ..api.root_attrs(), {props.children} } }
 }
 ```

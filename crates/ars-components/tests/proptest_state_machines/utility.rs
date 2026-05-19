@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 #[cfg(feature = "i18n")]
 use ars_components::utility::highlight;
 use ars_components::utility::{
-    button, error_boundary, field, fieldset, form, form_submit, separator, visually_hidden,
+    button, download_trigger, error_boundary, field, fieldset, form, form_submit, separator,
+    visually_hidden,
 };
 use ars_core::{ConnectApi, Env, HtmlAttr, Service, WeakSend, callback};
 use ars_forms::{
@@ -395,6 +396,51 @@ fn arb_separator_props() -> impl Strategy<Value = separator::Props> {
     })
 }
 
+fn arb_optional_short_filename() -> impl Strategy<Value = Option<String>> {
+    prop_oneof![Just(None), "[a-z]{1,12}\\.[a-z]{2,4}".prop_map(Some),]
+}
+
+fn arb_optional_mime_type() -> impl Strategy<Value = Option<String>> {
+    prop_oneof![Just(None), "[a-z]{1,12}/[a-z]{1,12}".prop_map(Some),]
+}
+
+fn arb_download_trigger_props() -> impl Strategy<Value = download_trigger::Props> {
+    (
+        arb_short_id(),
+        prop_oneof![
+            "[a-z]{1,16}".prop_map(|segment| format!("/{segment}")),
+            Just(String::from("https://example.com/file")),
+        ],
+        arb_optional_short_filename(),
+        arb_optional_mime_type(),
+        any::<bool>(),
+        prop_oneof![Just(None), Just(Some(String::from("https://example.com"))),],
+    )
+        .prop_map(
+            |(id, href, filename, mime_type, disabled, document_origin)| download_trigger::Props {
+                id,
+                href,
+                filename,
+                mime_type,
+                disabled,
+                document_origin,
+            },
+        )
+}
+
+fn arb_download_trigger_cross_origin_props() -> impl Strategy<Value = download_trigger::Props> {
+    (arb_short_id(), arb_optional_short_filename(), any::<bool>()).prop_map(
+        |(id, filename, disabled)| download_trigger::Props {
+            id,
+            href: String::from("https://cdn.example/asset.bin"),
+            filename,
+            mime_type: None,
+            disabled,
+            document_origin: Some(String::from("https://app.example")),
+        },
+    )
+}
+
 proptest! {
     #![proptest_config(super::common::proptest_config())]
 
@@ -598,6 +644,106 @@ proptest! {
         prop_assert_eq!(api.id(), original.id.as_str());
         prop_assert_eq!(api.orientation(), original.orientation);
         prop_assert_eq!(api.decorative(), original.decorative);
+    }
+
+    // ── DownloadTrigger ────────────────────────────────────────────
+
+    /// `Api::part_attrs(Part::Root)` always equals `Api::root_attrs()`.
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_download_trigger_part_root_dispatch_equals_root_attrs(
+        props in arb_download_trigger_props(),
+    ) {
+        let api = download_trigger::Api::new(
+            props,
+            ars_i18n::locales::en_us(),
+            download_trigger::Messages::default(),
+        );
+
+        prop_assert_eq!(
+            api.part_attrs(download_trigger::Part::Root),
+            api.root_attrs()
+        );
+    }
+
+    /// Root attrs always carry canonical scope/part data attributes.
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_download_trigger_root_attrs_always_have_scope_and_part(
+        props in arb_download_trigger_props(),
+    ) {
+        let attrs = download_trigger::Api::new(
+            props,
+            ars_i18n::locales::en_us(),
+            download_trigger::Messages::default(),
+        )
+        .root_attrs();
+
+        prop_assert_eq!(
+            attrs.get(&HtmlAttr::Data("ars-scope")),
+            Some("download-trigger")
+        );
+        prop_assert_eq!(attrs.get(&HtmlAttr::Data("ars-part")), Some("root"));
+    }
+
+    /// Relative hrefs remain native-download eligible without `document_origin`.
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_download_trigger_relative_href_is_always_native_eligible(
+        props in arb_download_trigger_props()
+            .prop_filter("relative href", |p| p.href.starts_with('/')),
+    ) {
+        let api = download_trigger::Api::new(
+            props,
+            ars_i18n::locales::en_us(),
+            download_trigger::Messages::default(),
+        );
+
+        prop_assert!(api.native_download_eligible());
+        prop_assert!(!api.needs_blob_fallback());
+        prop_assert!(api.root_attrs().contains(&HtmlAttr::Download));
+    }
+
+    /// Cross-origin HTTP(S) emits the fallback hook instead of `download`.
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_download_trigger_cross_origin_signals_blob_fallback(
+        props in arb_download_trigger_cross_origin_props(),
+    ) {
+        let api = download_trigger::Api::new(
+            props,
+            ars_i18n::locales::en_us(),
+            download_trigger::Messages::default(),
+        );
+
+        prop_assert!(!api.native_download_eligible());
+        prop_assert!(api.needs_blob_fallback());
+
+        let attrs = api.root_attrs();
+
+        prop_assert_eq!(attrs.get(&HtmlAttr::Download), None);
+        prop_assert_eq!(
+            attrs.get(&HtmlAttr::Data("ars-download-fallback")),
+            Some(download_trigger::DOWNLOAD_FALLBACK_REQUIRED)
+        );
+    }
+
+    /// `Api::props()` round-trip for DownloadTrigger.
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_download_trigger_api_props_round_trip(props in arb_download_trigger_props()) {
+        let original = props.clone();
+
+        let api = download_trigger::Api::new(
+            props,
+            ars_i18n::locales::en_us(),
+            download_trigger::Messages::default(),
+        );
+
+        prop_assert_eq!(api.props(), &original);
+        prop_assert_eq!(api.id(), original.id.as_str());
+        prop_assert_eq!(api.is_disabled(), original.disabled);
+        prop_assert_eq!(api.filename(), original.filename.as_deref());
     }
 
     // ── ErrorBoundary ─────────────────────────────────────────────
