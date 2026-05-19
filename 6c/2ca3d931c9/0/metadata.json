@@ -1,0 +1,148 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "6c2ca3d931c9",
+  "session_id": "e797994f-9915-4551-9b97-73a56771e5d9",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-19T16:11:25.602052Z",
+  "branch": "t3code/e16f9343",
+  "checkpoints_count": 2,
+  "files_touched": [
+    ".agents/skills/waiting-for-codex-review/SKILL.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "f43e5a016583",
+  "token_usage": {
+    "input_tokens": 415,
+    "cache_creation_tokens": 1873325,
+    "cache_read_tokens": 75174633,
+    "output_tokens": 196335,
+    "api_call_count": 243
+  },
+  "session_metrics": {
+    "turn_count": 23
+  },
+  "summary": {
+    "intent": "Implement the Group agnostic core component (task #205) in the ars-ui Rust component library, then improve the development workflow by adding a Codex review-wait skill and a faster local CI profile (`cargo xci --profile fast`).",
+    "outcome": "PR #648 was opened with the full Group component implementation, passed three Codex review passes (fixing `aria-readonly` root emission and stale doc comment), all CI gates passed except an unrelated flaky DOM Browser animation test. The `waiting-for-codex-review` skill and `cargo xci --profile fast` (1m45s vs 25min full) were implemented, committed, and pushed to the same PR.",
+    "learnings": {
+      "repo": [
+        "`aria-readonly` is NOT a WAI-ARIA 1.2 global state attribute — it is only valid on specific roles (checkbox, textbox, combobox, grid, etc.), unlike `aria-disabled` and `aria-invalid` which are global and valid on any role including `role=presentation`.",
+        "`CLAUDE.md` is a symlink to `AGENTS.md`; edits must target `AGENTS.md` directly.",
+        "`.claude/skills/` is a symlink that resolves to `.agents/skills/` — repo-local skills live in `.agents/skills/<name>/SKILL.md`.",
+        "The spec is the authoritative contract (CLAUDE.md 'spec is the contract'); GitHub issue test bullets that contradict the spec must be dropped in favor of spec-aligned tests.",
+        "Secondary context structs must use descriptive non-prefixed names per foundation 08 §8.4 (e.g., `GroupContext` not `Context`) so consumers write `group::GroupContext`.",
+        "Snapshots must be reviewed before committing and the PR labeled `snapshot-reviewed` per CLAUDE.md.",
+        "Issues must be moved to 'In Progress' on the project board before starting implementation.",
+        "`cargo xci` runs ~25 minutes locally due to wasm `-Cinstrument-coverage` recompile under nightly + LLVM 22; the new `cargo xci --profile fast` skips Coverage and all five FeatureMatrix steps and completes in ~1m45s.",
+        "`post-implementation-audit` skill is mandatory per CLAUDE.md §7 before committing; covers spec/impl drift, iterative gap rounds (≥2 clean), and mutation + coverage audit.",
+        "Spec-conformance tests live in `crates/ars-components/tests/spec_conformance/utility.rs` and require a `{component}_anatomy_matches_spec` entry for each new component.",
+        "The `cargo-mutants` 'unviable' category includes `const fn` and builder-return-self mutations that can't compile — these are a correctness signal, not a gap.",
+        "Codex's bot login on this install is `chatgpt-codex-connector[bot]` — important for reaction/review polling scripts."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/separator.rs",
+          "line": 1,
+          "end_line": 446,
+          "finding": "Template file for all new stateless utility components — identical structure to Group minus the Context struct."
+        },
+        {
+          "path": "crates/ars-components/src/utility/field/mod.rs",
+          "line": 58,
+          "end_line": 87,
+          "finding": "Reference pattern for a secondary context struct with propagation fields."
+        },
+        {
+          "path": "xtask/src/ci/mod.rs",
+          "line": 30,
+          "end_line": 125,
+          "finding": "Step enum and PIPELINE_ORDER constant — new `Profile { Full, Fast }` enum and `FAST_PIPELINE_ORDER` (10 steps) were added alongside these. `resolve_steps` now accepts a `Profile` argument."
+        },
+        {
+          "path": "xtask/src/ci/mod.rs",
+          "line": 1212,
+          "end_line": 1212,
+          "finding": "Existing tests module starts here; 7 new profile/resolve_steps tests were added at the bottom."
+        },
+        {
+          "path": "xtask/src/main.rs",
+          "line": 18,
+          "end_line": 30,
+          "finding": "`Command::Ci` variant — `--profile <full|fast>` flag added here with `default_value_t = ci::Profile::Full` for backward compat."
+        },
+        {
+          "path": "crates/ars-i18n/src/lib.rs",
+          "line": 127,
+          "end_line": 127,
+          "finding": "`Direction::as_html_attr` implementation — used by stateless utility components to emit `dir` HTML attribute."
+        },
+        {
+          "path": "spec/foundation/08-adapter-leptos.md",
+          "line": 2127,
+          "end_line": 2127,
+          "finding": "Foundation §8.4 naming rule for secondary contexts: use descriptive non-prefixed names like `GroupContext`, not bare `Context`."
+        }
+      ],
+      "workflow": [
+        "TDD is enforced by workspace convention: failing tests must be written first, confirmed red, before the implementation fix lands.",
+        "The `Monitor` tool can drop intermediate events — for terminal-verdict polling (waiting for approval/rejection), use `Bash run_in_background` with a polling loop instead; it gives a single reliable completion notification.",
+        "Codex signals completion by *dropping* the 👀 reaction: replaced by 👍 for approval, or simply removed when review threads are posted. 👍 is never added alongside threads.",
+        "After pushing a PR and after each subsequent fix push, post `@codex review` as a top-level comment — auto-retrigger fires sometimes but is not reliable.",
+        "The initial `@codex review` comment should be posted immediately after PR creation, before any polling.",
+        "Pre-push gate: run `cargo xci --profile fast` (~1.5 min); reserve full `cargo xci` (~25 min) for the final pre-PR run or after substantial refactors that may shift feature-flag interactions.",
+        "`cargo insta test --workspace -p ars-components --unreferenced=reject` is the correct snapshot orphan gate — running it with a file filter causes other crates' snapshots to appear unreferenced.",
+        "Pre-existing doc warnings (e.g., `cargo doc` failures at unrelated line 749) should be verified against a baseline before attributing them to new changes.",
+        "When a spec has internal contradictions, resolve on accessibility/correctness merits and update the spec prose to match the best-outcome implementation in the same PR."
+      ]
+    },
+    "friction": [
+      "Spec §3.1 prose contradicted the §1.2 code example on whether state attributes should be emitted with `role=presentation` — required a planning-phase resolution and user confirmation before implementation.",
+      "GitHub issue #205 listed two test bullets (`label`/`label_id` props) that directly contradicted the spec's Props struct — required dropping them with explicit justification.",
+      "Spec wrote `Api<'a> { props: &'a Props }` (borrowed lifetime) but the workspace convention and adapter sketches both assumed an owned `Api` — required a Phase 1 audit finding to correct the spec.",
+      "`cargo xci` took ~25 minutes locally, making it impractical as a routine pre-push gate — drove the `--profile fast` work.",
+      "The `Monitor` tool dropped the 👍 approval notification after the third Codex pass; the approval had already been posted minutes earlier and was only discovered by direct state inspection.",
+      "Codex's second review pass caught the `aria-readonly` global/role-supported boundary mistake — a real ARIA spec error in the initial implementation that required a TDD red-phase fix, snapshot update, and spec prose update.",
+      "Codex's third pass caught a stale doc comment on `Props::read_only` that still described the removed `aria-readonly` emission.",
+      "DOM Browser Tests failed in CI on the final push due to two flaky animation-timing tests in `ars-dom` that are unrelated to any changed code — unresolved at end of session."
+    ],
+    "open_items": [
+      "Leptos adapter Group component (`ars-leptos`) — deliberately deferred to a separate task on the project board.",
+      "Dioxus adapter Group component (`ars-dioxus`) — deliberately deferred to a separate task.",
+      "Wiring `GroupContext` consumption into existing child components (Button, TextField, etc.) — deferred; requires adapter components to exist first.",
+      "DOM Browser Tests CI failure on PR #648 — two flaky animation-timing tests in `crates/ars-dom/platform::wasm_tests` unrelated to #205 changes; needs investigation.",
+      "`--exclude <step>` flag for ad-hoc subtraction from a CI profile — deferred as a follow-up to the `--profile fast` work.",
+      "Pre-push git hook that auto-runs `cargo xci-fast` — deferred; enforcement currently relies on CLAUDE.md/habit.",
+      "Potentially flipping the no-arg `cargo xci` default from `full` to `fast` — deferred pending telemetry on actual local usage patterns.",
+      "The `waiting-for-codex-review` skill's polling section could be strengthened: after a Monitor-based wait, always do a direct `gh api` state check before concluding nothing happened, since Monitor notifications are not guaranteed to be delivered."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-19T16:10:17.515682Z",
+    "agent_lines": 62,
+    "agent_removed": 6,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 62,
+    "total_lines_changed": 68,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 62,
+      "agent_lines_removed": 6
+    }
+  ]
+}
