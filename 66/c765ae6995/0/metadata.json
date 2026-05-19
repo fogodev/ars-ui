@@ -1,0 +1,126 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "66c765ae6995",
+  "session_id": "e797994f-9915-4551-9b97-73a56771e5d9",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-19T15:41:15.210459Z",
+  "branch": "t3code/e16f9343",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "7a4034b73fcc",
+  "token_usage": {
+    "input_tokens": 364,
+    "cache_creation_tokens": 1374997,
+    "cache_read_tokens": 60428182,
+    "output_tokens": 175395,
+    "api_call_count": 212
+  },
+  "session_metrics": {
+    "turn_count": 19
+  },
+  "summary": {
+    "intent": "Implement GitHub issue #205 (Group agnostic core Rust component), establish a Codex review-wait skill, and add a lighter `cargo xci --profile fast` pre-push gate to reduce the local CI cycle from ~25 min to ~5 min.",
+    "outcome": "All three objectives completed: Group component shipped in PR #648 with 33 unit tests + 5 snapshots at 100% coverage, `waiting-for-codex-review` skill landed in `.agents/skills/`, and `cargo xci --profile fast` (10-step subset, ~1m24s wall-clock) implemented with alias `cargo xci-fast`. Two Codex review rounds were addressed and resolved before final push.",
+    "learnings": {
+      "repo": [
+        "CLAUDE.md is a symlink to AGENTS.md — edits must target the real file at AGENTS.md, not the symlink path.",
+        "`.claude/skills/` is a symlink resolving into `.agents/skills/` — repo-scoped skills must be written to `.agents/skills/`.",
+        "`separator.rs` is the canonical template for stateless utility components (Props + Api + ConnectApi, no state machine, no Service).",
+        "Secondary context structs use descriptive non-prefixed names (`GroupContext`, not `Context`) per foundation 08 §8.4 so consumers write `group::GroupContext`.",
+        "`aria-readonly` is NOT a WAI-ARIA 1.2 global state — it is role-specific (valid on textbox, checkbox, etc.) and must NOT be emitted on `role=group|region|presentation`. Only `aria-disabled` and `aria-invalid` are WAI-ARIA §6.5 globals.",
+        "Post-implementation-audit skill is mandatory per CLAUDE.md §7 and runs three phases: spec/impl drift, iterative 'anything else?' rounds (≥2 clean), and test-coverage audit.",
+        "Snapshot fixtures require `cargo insta accept` after the first test run and the PR must receive the `snapshot-reviewed` label.",
+        "`pub mod group;` in `utility/mod.rs` must be positioned alphabetically (between `form_submit` and `heading`).",
+        "Pre-existing `cargo doc` warnings exist in the workspace and are not gated by `cargo xci` — only new doc warnings in changed files matter.",
+        "Codex bot login is `chatgpt-codex-connector` (case-insensitive substring `codex` for discovery).",
+        "Codex does not reliably auto-trigger on new pushes — always post `@codex review` explicitly after each push.",
+        "Codex signals 'reviewing' by adding 👀; signals 'approved' by replacing 👀 with 👍; signals 'changes requested' by dropping 👀 and posting threads (no 👍 added).",
+        "`cargo xci` full profile runs 20 steps (~25 min locally); the new fast profile runs 10 steps in ~1m24s — skips Coverage, FeatureMatrix×5, I18nBrowser, DomBrowser, Release, AdapterParity."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/separator.rs",
+          "line": 1,
+          "end_line": 446,
+          "finding": "Canonical template for stateless utility components — identical structure to Group minus the Context struct."
+        },
+        {
+          "path": "crates/ars-components/src/utility/field/mod.rs",
+          "line": 58,
+          "end_line": 87,
+          "finding": "Reference implementation for a secondary Context struct (FieldContext pattern)."
+        },
+        {
+          "path": "crates/ars-i18n/src/lib.rs",
+          "line": 127,
+          "end_line": 127,
+          "finding": "`Direction::as_html_attr()` — used to emit the `dir` attribute from the `dir: Option<Direction>` prop."
+        },
+        {
+          "path": "spec/foundation/08-adapter-leptos.md",
+          "line": 2127,
+          "end_line": 2127,
+          "finding": "Foundation 08 §8.4 naming rule: secondary contexts use descriptive non-prefixed names (`GroupContext`, `QueueContext`)."
+        },
+        {
+          "path": "xtask/src/ci/mod.rs",
+          "line": 30,
+          "end_line": 125,
+          "finding": "`Step` enum and `PIPELINE_ORDER` constant live here. Added `Profile { Full, Fast }` enum and `FAST_PIPELINE_ORDER` constant alongside them."
+        },
+        {
+          "path": "xtask/src/main.rs",
+          "line": 18,
+          "end_line": 30,
+          "finding": "`Command::Ci` variant definition — added `--profile <full|fast>` flag here with `default_value_t = Profile::Full`."
+        },
+        {
+          "path": "crates/ars-components/src/utility/group.rs",
+          "line": 245,
+          "end_line": 245,
+          "finding": "Codex first-pass review flagged this line — original impl emitted `aria-readonly` here, which is invalid ARIA on role=group/region/presentation (not a WAI-ARIA global state)."
+        }
+      ],
+      "workflow": [
+        "TDD order is enforced by workspace convention: write the failing test first, confirm red, then land the fix.",
+        "Monitor tool provides event-driven polling for Codex reaction changes without busy-waiting — emit `[needs_action]` on 👀 drop + threads, `[approval]` on 👍.",
+        "Spec wins over issue when they contradict — issue test bullets that contradict the spec are dropped, not implemented.",
+        "When impl and spec diverge and the impl is the better outcome, update the spec to match (spec is documentation, impl is ground truth after deliberate decision).",
+        "Codex review workflow: push → `@codex review` comment → poll reactions → address threads (TDD-first, no coverage regression) → push fix → resolve thread via GraphQL → post `@codex review` again → loop.",
+        "`cargo xci --profile fast` is now the routine pre-push gate; full `cargo xci` reserved for final pre-PR run or large refactors.",
+        "Mutation testing (`cargo mutants`) is part of the Phase 3 audit — 0 missed mutations is the bar alongside 100% line/region coverage.",
+        "Issue is moved to 'In Progress' on the project board at implementation start; stays there until merged (not closed at PR open)."
+      ]
+    },
+    "friction": [
+      "Spec §3.1 and §1.2 code example contradicted each other on whether state attrs emit for role=presentation — required an explicit planning decision before implementation could start.",
+      "Issue #205's test bullets listed `label`/`label_id` props that don't exist in the spec, requiring reconciliation and dropped bullets.",
+      "Pre-existing `cargo doc` warnings in the workspace caused false alarm confusion about whether the doc-check step was a new failure.",
+      "`aria-readonly` was incorrectly grouped with WAI-ARIA global states in the initial spec edit — Codex caught this in the first review pass. Required a second round: implementation fix, snapshot regeneration, spec prose correction, doc-comment fix.",
+      "A commit landed before the user's review message arrived (async timing) — required a soft-reset to restore staged state for re-inspection.",
+      "Codex does not reliably auto-trigger on new pushes, making the `@codex review` explicit comment a required step rather than an optional fallback.",
+      "`cargo xci` snapshot orphan check failed when run with a crate filter (`-p ars-components`) because other crates' snapshots appeared unreferenced — required running without the filter."
+    ],
+    "open_items": [
+      "Leptos adapter for Group component (`ars-leptos`) — deferred to a separate task on the project board.",
+      "Dioxus adapter for Group component (`ars-dioxus`) — deferred to a separate task.",
+      "Wiring `GroupContext` consumption into existing child components (Button, TextField, etc.) — deferred pending adapter components.",
+      "`--exclude <step>` flag for ad-hoc subtraction from a `cargo xci` profile — deferred as a follow-up to the fast-profile feature.",
+      "Pre-push git hook to auto-run `cargo xci-fast` — deferred; current enforcement is via CLAUDE.md habit rather than a hook.",
+      "Flipping `cargo xci` no-arg default to `fast` profile — deferred pending telemetry on whether anyone uses the full local run.",
+      "Pre-existing `cargo doc` warnings in the workspace are unaddressed tech debt not introduced by this PR.",
+      "Final Codex doc-fix commit (`Props::read_only` doc correction) was committed locally but transcript ends before it was pushed and the thread resolved — that push and resolution is still pending."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
