@@ -691,7 +691,9 @@ proptest! {
     #[ignore = "proptest — nightly extended-proptest job"]
     fn proptest_download_trigger_relative_href_is_always_native_eligible(
         props in arb_download_trigger_props()
-            .prop_filter("relative href", |p| p.href.starts_with('/')),
+            .prop_filter("relative href", |p| {
+                p.href.starts_with('/') && !p.href.starts_with("//")
+            }),
     ) {
         let api = download_trigger::Api::new(
             props,

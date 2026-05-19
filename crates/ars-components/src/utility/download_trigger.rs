@@ -12,6 +12,11 @@
 //! Origin parsing supports common `host`/`host:port` authorities and bracketed
 //! IPv6 (`[::1]:443`). Hostnames with ambiguous `:` patterns outside these forms
 //! may classify conservatively toward blob fallback for absolute HTTP(S) URLs.
+//!
+//! Leading and trailing ASCII whitespace in `href` is ignored for classification
+//! (matching URL parsing). Scheme-relative references (`//authority/path`) use the
+//! document origin's scheme; credentials in the authority (`userinfo@host`) are
+//! stripped before host comparison.
 
 use alloc::string::String;
 
@@ -312,10 +317,24 @@ enum DownloadPolicy {
 }
 
 fn classify_href(href: &str, document_origin: Option<&str>) -> DownloadPolicy {
-    let trimmed = href.trim_start();
+    let trimmed = href.trim();
 
     if trimmed.is_empty() {
         return DownloadPolicy::NoDownloadHint;
+    }
+
+    if let Some(href_origin) = parse_http_https_origin(trimmed) {
+        return classify_http_https_against_document(&href_origin, document_origin);
+    }
+
+    if let Some(href_origin) = parse_network_path_origin(trimmed, document_origin) {
+        return classify_http_https_against_document(&href_origin, document_origin);
+    }
+
+    // `//` without a resolvable authority is not a same-origin relative path; avoid
+    // treating it as [`DownloadPolicy::Native`] via [`is_relative_reference`].
+    if trimmed.starts_with("//") && !trimmed.starts_with("///") {
+        return DownloadPolicy::BlobFallbackRequired;
     }
 
     if is_relative_reference(trimmed) {
@@ -332,23 +351,50 @@ fn classify_href(href: &str, document_origin: Option<&str>) -> DownloadPolicy {
         return DownloadPolicy::NoDownloadHint;
     }
 
-    if let Some(href_origin) = parse_http_https_origin(trimmed) {
-        let Some(doc_raw) = document_origin else {
-            return DownloadPolicy::BlobFallbackRequired;
-        };
+    DownloadPolicy::NoDownloadHint
+}
 
-        let Some(doc_origin) = parse_document_origin(doc_raw) else {
-            return DownloadPolicy::BlobFallbackRequired;
-        };
+fn classify_http_https_against_document(
+    href_origin: &ParsedOrigin,
+    document_origin: Option<&str>,
+) -> DownloadPolicy {
+    let Some(doc_raw) = document_origin else {
+        return DownloadPolicy::BlobFallbackRequired;
+    };
 
-        if origins_match(&href_origin, &doc_origin) {
-            DownloadPolicy::Native
-        } else {
-            DownloadPolicy::BlobFallbackRequired
-        }
+    let Some(doc_origin) = parse_document_origin(doc_raw) else {
+        return DownloadPolicy::BlobFallbackRequired;
+    };
+
+    if origins_match(href_origin, &doc_origin) {
+        DownloadPolicy::Native
     } else {
-        DownloadPolicy::NoDownloadHint
+        DownloadPolicy::BlobFallbackRequired
     }
+}
+
+/// Parses `//authority/…` using the document origin's scheme (scheme-relative URL).
+fn parse_network_path_origin(trimmed: &str, document_origin: Option<&str>) -> Option<ParsedOrigin> {
+    let rest = trimmed.strip_prefix("//")?;
+
+    if rest.is_empty() || rest.starts_with('/') {
+        return None;
+    }
+
+    let authority_end = rest
+        .find(|c| ['/', '?', '#'].contains(&c))
+        .unwrap_or(rest.len());
+
+    let authority = rest.get(..authority_end)?;
+
+    if authority.is_empty() {
+        return None;
+    }
+
+    let doc_raw = document_origin?;
+    let doc_origin = parse_document_origin(doc_raw)?;
+
+    parse_authority(doc_origin.scheme.as_str(), authority)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -411,7 +457,30 @@ fn parse_http_https_origin(href: &str) -> Option<ParsedOrigin> {
     parse_authority(scheme, authority)
 }
 
+/// Returns the host/port portion of an authority, dropping `userinfo@` when the
+/// `@` is not inside `[...]` (IPv6 literals).
+fn authority_without_userinfo(authority: &str) -> &str {
+    let mut bracket_depth = 0_i32;
+    let mut split_at = None;
+
+    for (index, ch) in authority.char_indices() {
+        match ch {
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            '@' if bracket_depth == 0 => split_at = Some(index),
+            _ => {}
+        }
+    }
+
+    split_at
+        .and_then(|idx| authority.get(idx.saturating_add(1)..))
+        .filter(|host_port| !host_port.is_empty())
+        .unwrap_or(authority)
+}
+
 fn parse_authority(scheme: &str, authority: &str) -> Option<ParsedOrigin> {
+    let authority = authority_without_userinfo(authority);
+
     if authority.is_empty() {
         return None;
     }
@@ -650,6 +719,104 @@ mod tests {
             attrs.get_value(&HtmlAttr::Data("ars-disabled")),
             Some(&ars_core::AttrValue::Bool(true))
         );
+    }
+
+    #[test]
+    fn scheme_relative_https_cross_origin_sets_fallback() {
+        let props = Props::new()
+            .href("//cdn.other.test/asset.dat")
+            .filename("a.dat")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(!api.native_download_eligible());
+        assert!(api.needs_blob_fallback());
+
+        let attrs = api.root_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Download), None);
+        assert_eq!(
+            attrs.get(&HtmlAttr::Data("ars-download-fallback")),
+            Some(DOWNLOAD_FALLBACK_REQUIRED)
+        );
+    }
+
+    #[test]
+    fn scheme_relative_same_origin_sets_native_download() {
+        let props = Props::new()
+            .href("//example.com/files/x.bin")
+            .filename("x.bin")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
+
+        assert_eq!(api.root_attrs().get(&HtmlAttr::Download), Some("x.bin"));
+    }
+
+    #[test]
+    fn scheme_relative_uses_document_scheme_http() {
+        let props = Props::new()
+            .href("//example.com/a")
+            .document_origin("http://example.com");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+    }
+
+    #[test]
+    fn triple_slash_path_remains_native_relative() {
+        let props = Props::new()
+            .href("///absolute/path/doc.pdf")
+            .filename("doc.pdf");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn bare_double_slash_requires_fallback() {
+        let props = Props::new()
+            .href("//")
+            .filename("x.bin")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(!api.native_download_eligible());
+        assert!(api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn trailing_whitespace_on_https_href_still_matches_origin() {
+        let props = Props::new()
+            .href("https://example.com/path/file.bin ")
+            .filename("f.bin")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn userinfo_on_https_authority_does_not_force_cross_origin() {
+        let props = Props::new()
+            .href("https://user@example.com/secret.bin")
+            .filename("s.bin")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
     }
 
     #[test]

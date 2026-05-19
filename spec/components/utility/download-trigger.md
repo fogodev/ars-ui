@@ -110,6 +110,10 @@ impl ConnectApi for Api {
 }
 ```
 
+### 1.3 HTTP(S) URL classification
+
+For native `download` vs blob-fetch fallback, the core trims leading and trailing ASCII whitespace on `href` before parsing. Absolute `http://` / `https://` URLs are compared to [`Props::document_origin`]. Scheme-relative URLs (`//authority/path`) use the **scheme** from `document_origin` and compare **host** and **port** the same way; credentials (`userinfo@`) in the authority are stripped before host comparison. Path references that begin with `///` follow the relative/eligible rules for native `download`. A bare `//` without a usable authority is treated as needing blob fallback when `document_origin` is present.
+
 ## 2. Anatomy
 
 ```text
