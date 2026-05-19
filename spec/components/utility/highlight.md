@@ -21,7 +21,12 @@ references:
 
 ```rust
 /// Props for the `Highlight` component.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+///
+/// `Default` is implemented manually (below) rather than derived because
+/// the defaults are non-field-default — `ignore_case = true` and
+/// `match_strategy = MatchStrategy::Contains` are spec contracts, not
+/// just whatever the field type happens to default to.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Props {
     /// The search queries to highlight. Supports a single query string or
     /// multiple queries to highlight simultaneously (e.g., multiple search
@@ -53,16 +58,28 @@ impl Default for Props {
 /// The strategy used to match the query against the text.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum MatchStrategy {
-    /// Highlight every occurrence of the query within the text. Default.
+    /// Highlight every occurrence of the query within the text, including
+    /// overlapping ones (e.g., `query = "ana"` against `text = "banana"`
+    /// produces two matches at byte offsets 1 and 3, which then merge
+    /// into a single highlighted span covering `"anana"`). Default.
     #[default]
     Contains,
     /// Highlight only the leading run of the text when it starts with the
-    /// query (after case folding, if `ignore_case` is `true`).
+    /// query (after case folding, if `ignore_case` is `true`). When the
+    /// matched prefix ends inside a case-fold expansion (e.g.,
+    /// `query = "stras"` against German `text = "Straße"` where `ß`
+    /// folds to `ss`), the highlighted span extends to cover the full
+    /// source character that contributed the matched fold bytes.
     StartsWith,
     /// Subsequence match: highlight each individual query character within
     /// the text in order, allowing arbitrary gaps. All query characters
     /// must be present; if any character is missing, no fuzzy ranges are
-    /// emitted for that query (all-or-nothing).
+    /// emitted for that query (all-or-nothing). When a source character's
+    /// case-fold expansion contains multiple characters (e.g., `ß → ss`
+    /// under German), the matcher consumes **all** consecutive query
+    /// characters that appear in that expansion in order, so a fuzzy
+    /// query of `"ss"` matches text `"ß"` symmetrically with the
+    /// equivalence Contains delivers.
     Fuzzy,
 }
 ```

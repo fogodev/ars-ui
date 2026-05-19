@@ -31,7 +31,7 @@ use ars_i18n::Locale;
 /// `Highlight` does not carry a DOM `id` — chunk output is a sequence of
 /// adapter-rendered children, not a single identifiable element — so [`Props`]
 /// does not derive [`HasId`](ars_core::HasId) like other stateless utilities.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Props {
     /// The search queries to highlight. Supports a single query string or
     /// multiple queries to highlight simultaneously (e.g., multiple search
@@ -317,6 +317,21 @@ impl ConnectApi for Api {
 /// genuinely additional a11y behaviour (e.g., summary announcements for
 /// high-cardinality fuzzy results) on top.
 ///
+/// `MatchStrategy::Contains` scans for **every** occurrence of the query
+/// including overlapping ones (e.g., `"ana"` against `"banana"` matches
+/// at byte offsets 1 and 3, merging into a single highlight covering
+/// `"anana"`). When a match's end falls inside a case-fold expansion
+/// (e.g., `"stras"` against German `"Straße"` where `ß` folds to `ss`),
+/// the highlighted span extends to cover the **full** source character
+/// that contributed the matched fold bytes, so the rendered output is
+/// `"Straß"`, never a mid-codepoint slice.
+///
+/// `MatchStrategy::Fuzzy` consumes as many consecutive query characters
+/// as appear, in order, inside each source character's fold expansion.
+/// This keeps fuzzy matching symmetric with the other strategies under
+/// many-to-one folds (`"ss"` matches `"ß"` under German, just like the
+/// other direction does for `Contains` and `StartsWith`).
+///
 /// # Edge cases
 ///
 /// - Empty `query`, or `query` containing only empty strings → a single
@@ -347,7 +362,7 @@ pub fn highlight_chunks<'a>(props: &'a Props, locale: &Locale) -> Vec<HighlightC
         }];
     }
 
-    let (normalised_text, byte_map) = build_normalised(text, props.ignore_case, locale);
+    let normalised = Normalised::build(text, props.ignore_case, locale);
 
     let mut ranges: Vec<(usize, usize)> = Vec::new();
 
@@ -365,11 +380,11 @@ pub fn highlight_chunks<'a>(props: &'a Props, locale: &Locale) -> Vec<HighlightC
 
         match props.match_strategy {
             MatchStrategy::Contains => {
-                push_contains_matches(&normalised_text, &normalised_query, &byte_map, &mut ranges);
+                push_contains_matches(&normalised, &normalised_query, &mut ranges);
             }
 
             MatchStrategy::StartsWith => {
-                push_starts_with_match(&normalised_text, &normalised_query, &byte_map, &mut ranges);
+                push_starts_with_match(&normalised, &normalised_query, &mut ranges);
             }
 
             MatchStrategy::Fuzzy => {
@@ -396,44 +411,80 @@ pub fn highlight_chunks<'a>(props: &'a Props, locale: &Locale) -> Vec<HighlightC
     build_chunks(text, &merged)
 }
 
-/// Build a normalised form of `text` (lowercased when `ignore_case`) plus a
-/// byte-map from normalised byte indices back to original byte indices.
+/// Normalised text plus a byte-level mapping back to the original source
+/// text. Each normalised byte `i` has two map entries:
 ///
-/// The map has length `normalised.len() + 1`. For each normalised byte `i`
-/// produced from original char starting at `orig_byte`, `byte_map[i] ==
-/// orig_byte`. The trailing entry `byte_map[normalised.len()] == text.len()`
-/// is a sentinel so callers can read the end index of a match without
-/// bounds-special-casing.
+/// - `source_start[i]` — original byte index where the source character
+///   that produced normalised byte `i` *starts*.
+/// - `source_end[i]` — original byte index where that source character
+///   *ends* (i.e., `source_start + char.len_utf8()`).
 ///
-/// When `!ignore_case`, the normalised text is `text` verbatim and the map
-/// is the identity `0..=text.len()` (each byte trivially maps to itself).
-fn build_normalised(text: &str, ignore_case: bool, locale: &Locale) -> (String, Vec<usize>) {
-    if !ignore_case {
-        let map: Vec<usize> = (0..=text.len()).collect();
+/// Both arrays are aligned: `source_start.len() == source_end.len() ==
+/// normalised.len()`. For a normalised match `[a, b)` we always map to
+/// the source range `[source_start[a], source_end[b - 1]]`, even when
+/// `a` or `b` falls *inside* a case-fold expansion (e.g. `ß → ss`).
+/// Using `source_end[b - 1]` rather than `source_start[b]` is what lets
+/// a match that ends mid-expansion still highlight the full source
+/// character that contributed the matched bytes — without this, queries
+/// like `"stras"` against text `"Straße"` would highlight only the
+/// `"Stra"` prefix and drop the `ß` that contributed the trailing `s`.
+struct Normalised {
+    text: String,
+    source_start: Vec<usize>,
+    source_end: Vec<usize>,
+}
 
-        return (text.to_owned(), map);
-    }
-
-    let mut normalised = String::with_capacity(text.len());
-    let mut byte_map = Vec::with_capacity(text.len() + 1);
-
-    for (orig_byte, ch) in text.char_indices() {
-        let mut buf = [0u8; 4];
-
-        let ch_str = ch.encode_utf8(&mut buf);
-
-        let folded = case_fold(ch_str, locale);
-
-        for _ in 0..folded.len() {
-            byte_map.push(orig_byte);
+impl Normalised {
+    /// Build the normalised view of `text`. When `!ignore_case`, the
+    /// normalised text is the original verbatim and the maps are the
+    /// per-byte identity.
+    fn build(text: &str, ignore_case: bool, locale: &Locale) -> Self {
+        if !ignore_case {
+            let source_start: Vec<usize> = (0..text.len()).collect();
+            let source_end: Vec<usize> = (1..=text.len()).collect();
+            return Self {
+                text: text.to_owned(),
+                source_start,
+                source_end,
+            };
         }
 
-        normalised.push_str(&folded);
+        let mut normalised = String::with_capacity(text.len());
+        let mut source_start = Vec::with_capacity(text.len());
+        let mut source_end = Vec::with_capacity(text.len());
+
+        for (orig_byte, ch) in text.char_indices() {
+            let mut buf = [0u8; 4];
+            let ch_str = ch.encode_utf8(&mut buf);
+            let folded = case_fold(ch_str, locale);
+            let end_of_source_char = orig_byte + ch.len_utf8();
+
+            for _ in 0..folded.len() {
+                source_start.push(orig_byte);
+                source_end.push(end_of_source_char);
+            }
+
+            normalised.push_str(&folded);
+        }
+
+        Self {
+            text: normalised,
+            source_start,
+            source_end,
+        }
     }
 
-    byte_map.push(text.len());
-
-    (normalised, byte_map)
+    /// Map a normalised half-open range `[start_norm, end_norm)` to the
+    /// corresponding original-text half-open range. `end_norm` must be
+    /// strictly greater than `start_norm` (the caller filters empty
+    /// matches before calling).
+    fn map_range(&self, start_norm: usize, end_norm: usize) -> (usize, usize) {
+        debug_assert!(
+            end_norm > start_norm,
+            "Normalised::map_range requires a non-empty range"
+        );
+        (self.source_start[start_norm], self.source_end[end_norm - 1])
+    }
 }
 
 /// Unicode case fold for case-insensitive comparison. Delegates to
@@ -447,43 +498,67 @@ fn case_fold(text: &str, locale: &Locale) -> String {
     ars_i18n::case_fold(text, locale)
 }
 
+/// Push every occurrence of `normalised_query` inside `normalised.text`,
+/// **including overlapping ones** (`str::match_indices` only yields the
+/// non-overlapping ones, which would miss `"ana"` at position 3 of
+/// `"banana"`). Advances by one character past each match's start to
+/// hit the next overlapping occurrence.
 fn push_contains_matches(
-    normalised_text: &str,
+    normalised: &Normalised,
     normalised_query: &str,
-    byte_map: &[usize],
     out: &mut Vec<(usize, usize)>,
 ) {
-    for (start, _) in normalised_text.match_indices(normalised_query) {
-        let end = start + normalised_query.len();
-        let orig_start = byte_map[start];
-        let orig_end = byte_map[end];
+    if normalised_query.is_empty() {
+        return;
+    }
 
-        if orig_start < orig_end {
-            out.push((orig_start, orig_end));
-        }
+    let haystack = normalised.text.as_str();
+    let mut search_start = 0;
+
+    while let Some(rel) = haystack[search_start..].find(normalised_query) {
+        let start = search_start + rel;
+        let end = start + normalised_query.len();
+        let (orig_start, orig_end) = normalised.map_range(start, end);
+
+        out.push((orig_start, orig_end));
+
+        // Advance past one character so the next iteration can find
+        // overlapping matches. UTF-8 guarantees that `find` returned a
+        // position on a char boundary, so `chars().next()` is sound.
+        let advance = haystack[start..].chars().next().map_or(1, char::len_utf8);
+        search_start = start + advance;
     }
 }
 
 fn push_starts_with_match(
-    normalised_text: &str,
+    normalised: &Normalised,
     normalised_query: &str,
-    byte_map: &[usize],
     out: &mut Vec<(usize, usize)>,
 ) {
-    if normalised_text.starts_with(normalised_query) {
-        let end = normalised_query.len();
-        let orig_end = byte_map[end];
+    if normalised_query.is_empty() {
+        return;
+    }
 
-        if orig_end > 0 {
-            out.push((0, orig_end));
-        }
+    if normalised.text.starts_with(normalised_query) {
+        let end = normalised_query.len();
+        let (_, orig_end) = normalised.map_range(0, end);
+        out.push((0, orig_end));
     }
 }
 
-/// Walk the original text char-by-char, lowercasing each char individually
-/// when needed, and consume the query in order. Each matched original-text
-/// character contributes a one-char range to `out`. Fuzzy matching collapses
-/// to no match (zero ranges pushed) when any query char cannot be located.
+/// Walk the original text char-by-char and consume the query in order.
+/// Each source character that contributes at least one matched query
+/// character produces a one-char highlighted range. Fuzzy matching is
+/// all-or-nothing — if any query character cannot be located in order,
+/// the function emits zero ranges for this query.
+///
+/// **Multi-char fold expansions**: a single source char can fold to
+/// multiple chars (e.g. `ß → ss` under German), so we consume *as many*
+/// query characters as match the source char's folded expansion *in
+/// order*. Without this, `MatchStrategy::Fuzzy` with `query=["ss"]` and
+/// `text="ß"` would consume only the first `s` from the query, fail on
+/// the second, and emit no match — violating the spec's eszett
+/// equivalence contract.
 fn push_fuzzy_matches(
     original_text: &str,
     normalised_query: &str,
@@ -495,27 +570,34 @@ fn push_fuzzy_matches(
     let mut local = Vec::new();
 
     for (orig_byte, ch) in original_text.char_indices() {
-        let Some(&want) = query_iter.peek() else {
+        if query_iter.peek().is_none() {
             break;
-        };
+        }
 
         let normalised_ch_string = if ignore_case {
             let mut buf = [0u8; 4];
             let ch_str = ch.encode_utf8(&mut buf);
-
             case_fold(ch_str, locale)
         } else {
             let mut s = String::new();
-
             s.push(ch);
-
             s
         };
 
-        if normalised_ch_string.chars().any(|c| c == want) {
-            local.push((orig_byte, orig_byte + ch.len_utf8()));
+        // Consume every leading query character that appears, in order,
+        // in this source char's folded expansion. For single-char folds
+        // (the common case) this consumes at most one query char; for
+        // expansions like `ß → ss` it may consume two or more.
+        let mut consumed_any = false;
+        for folded_char in normalised_ch_string.chars() {
+            if let Some(&want) = query_iter.peek() && want == folded_char {
+                query_iter.next();
+                consumed_any = true;
+            }
+        }
 
-            query_iter.next();
+        if consumed_any {
+            local.push((orig_byte, orig_byte + ch.len_utf8()));
         }
     }
 
@@ -874,15 +956,16 @@ mod tests {
     }
 
     #[test]
-    fn fold_expansion_partial_match_does_not_emit_partial_char_highlight() {
-        // Branch coverage for the byte-map zero-length-range filter in
-        // both `push_contains_matches` (orig_start < orig_end) and
-        // `push_starts_with_match` (orig_end > 0). Under en-US, "İ"
-        // folds to "i\u{307}" (i + combining dot above, 3 bytes). A
-        // query "i" matches the first folded byte but maps to a
-        // zero-length original range — the implementation must NOT emit
-        // a partial-character highlight, because rendering only part of
-        // a code point would corrupt the displayed text.
+    fn fold_expansion_partial_match_highlights_full_source_char() {
+        // Under en-US (non-Turkic), `İ` case-folds to `i\u{307}` (i +
+        // combining dot above, 3 bytes). A query of `"i"` matches the
+        // leading byte of that expansion. The implementation must
+        // highlight the **entire** source character `İ` (not nothing,
+        // and not just the leading byte), because rendering only part
+        // of a code point would corrupt the displayed text. Verified
+        // for both Contains and StartsWith — the byte-map's
+        // `source_end` mapping is what lets the match extend to the
+        // source char's full UTF-8 span.
         for strategy in [MatchStrategy::Contains, MatchStrategy::StartsWith] {
             let props = Props::new()
                 .query(["i"])
@@ -897,11 +980,92 @@ mod tests {
                 .map(|c| c.text)
                 .collect();
 
-            assert!(
-                highlighted.is_empty(),
-                "{strategy:?}: must not emit partial-char highlight, got {highlighted:?}"
+            assert_eq!(
+                highlighted,
+                vec!["İ"],
+                "{strategy:?}: must highlight the full `İ`, got {highlighted:?}"
             );
         }
+    }
+
+    #[test]
+    fn contains_strategy_finds_overlapping_occurrences() {
+        // `str::match_indices` only yields non-overlapping matches, so
+        // a naive implementation would highlight only the first `ana`
+        // in `banana` and miss the second. The spec says Contains
+        // highlights **every** occurrence then merges overlaps, so the
+        // expected result is one merged highlight covering `anana`.
+        let props = Props::new().query(["ana"]).text("banana");
+
+        let chunks = highlight_chunks(&props, &en_us());
+
+        assert_eq!(
+            chunks,
+            vec![
+                HighlightChunk {
+                    text: "b",
+                    highlighted: false,
+                },
+                HighlightChunk {
+                    text: "anana",
+                    highlighted: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn starts_with_extends_match_to_full_fold_expansion_source_char() {
+        // German `Straße` folds to `strasse`. Query `stras` matches
+        // the folded prefix, with its final byte coming from the
+        // `ß`'s fold expansion. The highlighted span must extend to
+        // cover the full `ß` so the rendered output is `Straß`, not
+        // `Stra` (which would slice off the ß mid-codepoint).
+        let props = Props::new()
+            .query(["stras"])
+            .text("Straße")
+            .match_strategy(MatchStrategy::StartsWith);
+
+        let chunks = highlight_chunks(&props, &german());
+
+        assert_eq!(
+            chunks,
+            vec![
+                HighlightChunk {
+                    text: "Straß",
+                    highlighted: true,
+                },
+                HighlightChunk {
+                    text: "e",
+                    highlighted: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn fuzzy_consumes_full_folded_expansion_for_eszett() {
+        // Under German, `ß` folds to `ss`. A fuzzy query of `ss`
+        // against text `ß` must consume **both** query characters
+        // against the single source char's folded expansion, then
+        // emit a one-char highlight for the `ß` itself. Without
+        // multi-char consumption the second `s` is left in the query,
+        // fuzzy's all-or-nothing rule kicks in, and `ß` ↔ `ss`
+        // equivalence breaks asymmetrically with the other strategies.
+        let props = Props::new()
+            .query(["ss"])
+            .text("ß")
+            .match_strategy(MatchStrategy::Fuzzy);
+
+        let chunks = highlight_chunks(&props, &german());
+
+        assert_eq!(
+            chunks,
+            vec![HighlightChunk {
+                text: "ß",
+                highlighted: true,
+            }]
+        );
     }
 
     #[test]
