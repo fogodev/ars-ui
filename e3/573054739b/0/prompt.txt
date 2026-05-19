@@ -1,0 +1,407 @@
+Implement task #286
+
+---
+
+Where is the plan?
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Task #286 — Implement Table agnostic core
+
+## Context
+
+Task **#286** ("Implement Table agnostic core", 8 pts, complex tier) is the
+framework-agnostic state machine for the `Table` data-display component. The
+Collections Epic (#53) it depends on closed in 2026-04-08, so it is unblocked.
+
+Spec: `spec/components/data-display/table.md` (1419 lines).
+
+The Table is a stateful machine that owns row/column selection, sort
+descriptors, expansion, grid focus, optional column-resize state, and
+optional virtual-scrolling metadata. The agnostic core MUST NOT touch the
+DOM — adapters apply focus, measure layout, and observe scroll. The core
+produces ARIA + `data-ars-*` attributes via `ConnectApi` and the typed
+`Api<'_>` so both Leptos and Dioxus adapters can render identical markup.
+
+### Spec drift to fix in this task
+
+The spec is internally inconsistent in several places. Per the CLAUDE.md
+rule "Resolve the spec/code mismatch in the same task," every drift below
+is fixed in this PR — the spec edits land alongside the code:
+
+1. **`Context::dir: Direction`** missing from §1.3 but referenced by
+   `Api::on_cell_keydown` for RTL arrow-key resolution. Add the field and
+   resolve `Direction::Auto → concrete` in `init` from `env.locale`. Add
+   `Event::SetDirection(Direction)` so runtime changes are wired through.
+2. **`Context::is_sorting: bool`** described in §1.1.1 but absent from
+   §1.3. Add it; toggle inside the `SortColumn` arm.
+3. **§1.1.1 mentions `Scrolling` state** but §1.1 lists only `Idle`.
+   Resolve by deleting the misleading reference in the spec (the
+   single-`Idle` design is correct — sort lives in Context, scroll lives
+   in adapter).
+4. **§1.7 `Event::FocusCell` writes `Some((c, 0))`** — a literal bug that
+   hard-codes row 0. Fix the spec **and** code: `Event::FocusCell` carries
+   `{ row: Key, col: usize, row_index: usize }`, and the transition writes
+   `(col, row_index)` to `focused_cell`.
+5. **§1.2 events table omits `FocusRow` and `FocusCell`** even though
+   §1.7 defines them. Add both rows to §1.2.
+6. **§3.4.3 `build_sort_announcement`** references undeclared `locale` and
+   uses `SortDescriptor::column_key` (the real field is `column`). Rewrite
+   that code block in the spec to compile against the real `SortDescriptor`
+   API. (Adapter helper, not in the agnostic core — but it must compile
+   under `cargo xtask spec compile-snippets`.)
+
+## Approach
+
+Implement the Table machine + connect API as a single Rust module living
+in a `table/` directory next to existing data-display components, with
+unit + snapshot tests inline via `mod tests;`. Use **Tabs** as the
+structural template (`crates/ars-components/src/navigation/tabs/`) — it is
+the closest existing complex component (registered keys + selection +
+keyboard nav + Bindable controlled/uncontrolled + Direction).
+
+### Variants covered in this task
+
+The issue's "Tests to add first" list names every variant explicitly:
+
+- §5 SelectAll (mixed checkbox, `selection::Set::All`, **plus
+  `SelectAllMode::{None, AllVisible, AllData { total_count }}` as a Props
+  field** because it controls whether `SelectAllCheckbox` is rendered and
+  what `aria-label` it carries) → included
+- §6 Column Resizing (`ColumnResizeHandle` part, `ColumnResize` and
+  `ColumnResizeEnd` events, `column_widths` + `resizing_column` in
+  Context, **`min_column_width: f64` and `column_resize_step: f64`
+  Props**, **`on_resize_handle_keydown` Api method** for keyboard width
+  adjustments per §6.4) → included
+- §3.5 Virtual Scrolling **(ARIA-only slice in this PR)**:
+  `virtual_scrolling`, `total_rows`, `total_cols` Context fields →
+  `aria-rowcount` / `aria-colcount` on the table, `aria-rowindex` on
+  rows. The full `Virtualizer` integration and the `ScrollToRow(Key)`
+  event are explicitly **deferred** to a follow-up issue — they would
+  require widening `Effect` from `NoEffect` to a typed enum and pulling
+  in `ars-collections::Virtualizer` plumbing.
+- §1.6 Async data loading (`loading: Bindable<bool>`, minimal
+  `SetLoading(bool)` event) → included (Bindable field + event). The
+  `on_load_more: Option<Callback<()>>` callback is **adapter-only** and
+  is not stored in the core.
+- §5 `BulkSelection` exclusion-set wrapper → **excluded**. The spec
+  describes it as adapter/application code that wraps the canonical
+  `selection::Set::All`; it is not part of the agnostic core.
+
+### Row registry
+
+The machine needs to know the full row list to validate
+`disallow_empty_selection`, derive `aria-rowcount` semantics, and prune
+`default_selected_rows` against `disabled_keys` at init. Mirror Tabs'
+`Event::SetTabs(Vec<TabRegistration>)`:
+
+- Add **`Event::SetRows(Vec<Key>)`** — replaces `ctx.rows` and snaps
+  selection / expansion to the new set.
+- Add `Context::rows: Vec<Key>`. The keyboard helpers
+  (`on_row_keydown`, `on_cell_keydown`) keep their `all_row_ids: &[&Key]`
+  parameter (adapter slice for that render) — the registry exists for
+  invariants, not for navigation walks.
+- Init prunes any key that appears in both `disabled_keys` and
+  `default_selected_rows` from the seed selection (workspace convention;
+  spec is silent — document the choice inline).
+
+### Prop sync (controlled-mode parent updates)
+
+Tabs has `Event::SyncProps` plus `Event::SyncControlledValue`. Table has
+three Bindable fields, so the plan uses one coalesced event per Bindable
+plus a general `SyncProps` for non-Bindable runtime changes:
+
+- **`Event::SyncProps`** — re-applies `selection_mode`,
+  `selection_behavior`, `disabled_keys`, `disallow_empty_selection`,
+  `escape_key_behavior`, `interactive`, `sticky_header`,
+  `min_column_width`, `column_resize_step` from props. Re-runs the
+  selection invariant.
+- **`Event::SyncControlledSelectedRows(Option<selection::Set>)`**
+- **`Event::SyncControlledExpandedRows(Option<BTreeSet<Key>>)`**
+- **`Event::SyncControlledSortDescriptor(Option<SortDescriptor<String>>)`**
+
+Each `SyncControlled*` calls `Bindable::sync_controlled` on the matching
+Context field.
+
+### Escape-key handling
+
+§1.5 names `EscapeKeyBehavior::{ClearSelection, None}`. The transition
+table in §1.7 omits it — add:
+
+- **`Event::EscapeKey`** — when `escape_key_behavior == ClearSelection`
+  and the current selection is non-empty, dispatch the same context
+  mutation as `DeselectAll` (subject to `disallow_empty_selection`).
+  Otherwise no transition.
+
+### Files to create
+
+| Path | Purpose |
+|------|---------|
+| `crates/ars-components/src/data_display/table/mod.rs` | State, Event, Context, Props, Messages, Machine impl, Part enum, Api with all `*_attrs` and keyboard helpers |
+| `crates/ars-components/src/data_display/table/tests.rs` | Inline unit + snapshot tests for every named issue test |
+| `crates/ars-components/src/data_display/table/snapshots/` | insta `.snap` fixtures (auto-created) |
+| `crates/ars-components/tests/spec_conformance/data_display.rs` | Add `assert_anatomy` entry for Table (file may not yet exist — create) |
+
+### Files to modify
+
+| Path | Change |
+|------|--------|
+| `crates/ars-components/src/data_display/mod.rs` | Add `pub mod table;` |
+| `crates/ars-components/tests/spec_conformance.rs` | Register new `data_display` module if not present |
+| `crates/ars-components/tests/proptest_state_machines/data_display.rs` | Add `proptest_table_event_sequences_preserve_invariants` (selection ⊆ rows, expansion ⊆ rows, focus in bounds) |
+| `spec/components/data-display/table.md` | §1.3 Context: add `dir: Direction`, `is_sorting: bool`, `column_widths: BTreeMap<String, f64>`, `resizing_column: Option<String>`, `virtual_scrolling: bool`, `total_rows: usize`, `total_cols: usize`, `loading: Bindable<bool>`. §1.2 Events: add `SetDirection(Direction)`, `ColumnResize`, `SetLoading(bool)`, `SetRowCounts`. §1.7 init: thread `dir` through. |
+
+### Module layout (`table/mod.rs`)
+
+Single file, ~1500–2000 LOC, organized in the same section order as
+`tabs/mod.rs`:
+
+1. `State` — single `Idle` variant per §1.1.1 (sort state is in Context).
+2. `Event` — every event from §1.2 plus `SetDirection`, `ColumnResize`,
+   `SetRowCounts`, `SetLoading`.
+3. `EscapeKeyBehavior` — enum (ClearSelection / None) from §1.5.
+4. `Messages` — five `MessageFn` fields (select_all, select_row,
+   sort_ascending, sort_descending, sort_none); `ComponentMessages`
+   marker; `Default` returns static-str fns.
+5. `Props` — every field from §1.5 + `disallow_empty_selection`,
+   `loading`, `virtual_scrolling`, `total_rows`, `total_cols`,
+   `dir: Direction`. `#[derive(ars_core::HasId)]`.
+6. `Context` — every field from §1.3 plus the §6/§3.5/§1.6/spec-drift
+   fields described above. Derives `Clone`, `Debug`, `PartialEq` (not
+   `Eq` — `MessageFn` only ptr-compares).
+7. `Part` — `#[derive(ComponentPart)] #[scope = "table"]` with all 14
+   anatomy parts + `ColumnResizeHandle { column: String }`.
+8. `Machine` — empty marker struct; impl `ars_core::Machine`. Uses
+   `ars_core::NoEffect` for `type Effect` (no DOM effects — adapters
+   read `ctx.focused_cell`/`ctx.focused_row`/`ctx.focused_col` and apply
+   focus directly).
+9. `Api<'a>` — every method from spec §1.8 plus the §6 resize-handle
+   attrs and §3.5 virtual-scrolling additions to `table_attrs` and
+   `row_attrs(row_id, index)`.
+
+### Transitions (high-level)
+
+Match `tabs::Machine::transition` style — each arm returns
+`Some(TransitionPlan::context_only(move |ctx| ...))` or `None` when
+guarded out:
+
+| Event | Behavior |
+|-------|----------|
+| `SortColumn { column }` | Toggle: None → Ascending → Descending → None. Update `ctx.sort_descriptor`, set `ctx.is_sorting = true`. |
+| `SelectRow / DeselectRow / ToggleRow` | Reject when `selection_mode == None` or row in `disabled_keys`. Honor `disallow_empty_selection` on deselect: if removing the last selected row, return `None`. Delegate to `selection::State::{select, deselect, toggle}` and write `selected_keys` back to `Bindable`. |
+| `SelectAll` | Reject unless `Mode::Multiple`. Call `selection::State::select_all()`. |
+| `DeselectAll` | Reject when `Mode::None`. Reject when `disallow_empty_selection` and selection is non-empty (return `None` to preserve last). |
+| `ExpandRow / CollapseRow` | Skip when no-op (already in/out of set). Mutate cloned `BTreeSet<Key>`. |
+| `Focus { cell }` / `FocusRow` / `FocusCell` | Reject when `!ctx.interactive`. Update `focused_cell`/`focused_row`/`focused_col`. |
+| `Blur` | Always: clear all three focus fields. |
+| `RowAction(key)` | Reject when disabled. No mutation — adapter listens. |
+| `SetDirection(dir)` | Idempotent. Replace `ctx.dir` only if new value differs. |
+| `SetRows(rows)` | Replace `ctx.rows`. Prune `selected_rows` / `expanded_rows` of keys not present. Clear `focused_row`/`focused_cell` if pointing at a removed row. |
+| `EscapeKey` | When `escape_key_behavior == ClearSelection` and selection is non-empty, clear (subject to `disallow_empty_selection`). |
+| `ColumnResize { column, width }` | Clamp to `props.min_column_width` (default 50). Upsert `ctx.column_widths[column]` (create-on-first-resize) and set `ctx.resizing_column = Some(column)`. |
+| `ColumnResizeEnd { column }` | Clear `ctx.resizing_column` when it matches `column`. |
+| `SetRowCounts { total_rows, total_cols }` | Replace `ctx.total_rows`/`ctx.total_cols`. |
+| `SetLoading(bool)` | `ctx.loading.set(value)`. |
+| `SyncProps` | Re-apply non-Bindable Props fields; re-prune selection/expansion against new `disabled_keys`. |
+| `SyncControlledSelectedRows(opt)` | `ctx.selected_rows.sync_controlled(opt)`. |
+| `SyncControlledExpandedRows(opt)` | `ctx.expanded_rows.sync_controlled(opt)`. |
+| `SyncControlledSortDescriptor(opt)` | `ctx.sort_descriptor.sync_controlled(opt)`. |
+
+### Api / attribute methods
+
+Every method from §1.8 verbatim, plus:
+
+- `column_resize_handle_attrs(column: &str, current_width: f64) -> AttrMap`
+  — emits the standard `data-ars-scope="table"` / `data-ars-part=
+  "column-resize-handle"`, plus `role="separator"`,
+  `aria-orientation="vertical"`, `aria-valuenow=width`, and
+  `data-ars-resizing` when `ctx.resizing_column == Some(column)`.
+- `on_resize_handle_keydown(column: &str, current_width: f64,
+  data: &KeyboardEventData)` — emits `Event::ColumnResize` with
+  `width ± ctx.column_resize_step` on `ArrowLeft`/`ArrowRight`,
+  RTL-aware via `ctx.dir`.
+- `table_attrs` — adds `aria-rowcount` / `aria-colcount` when
+  `ctx.virtual_scrolling`.
+- A virtual-scrolling-aware `row_attrs(row_id, row_index: usize)` that
+  emits `aria-rowindex` (1-based) when `ctx.virtual_scrolling`. The
+  non-virtualized `row_attrs(row_id)` from §1.8 is kept as a thin
+  delegate that passes `row_index = 0`.
+- `select_all_attrs` short-circuits to an empty `AttrMap` when
+  `props.select_all_mode == SelectAllMode::None`, and substitutes the
+  `AllData { total_count }` count into the `aria-label` via
+  `Messages::select_all`.
+- `column_header_attrs(column, sortable=false)` MUST omit `aria-sort`
+  entirely (§3.4.2). The spec's example sets `aria-sort="none"`
+  unconditionally — that is wrong; the named test
+  `table_column_header_non_sortable_omits_aria_sort` locks the correct
+  behavior.
+- `on_cell_keydown` resolves left/right against `ctx.dir == Direction::Rtl`,
+  handles `Ctrl+Home`/`Ctrl+End` per §3.2 in addition to the §1.8
+  Home/End/Arrow set.
+
+### `ConnectApi::part_attrs` dispatcher
+
+Wire all 15 parts (§2.1 + §6 ColumnResizeHandle). Variants that need
+extra data (`Part::ColumnHeader { header }`,
+`Part::Cell { col, row }`, `Part::Row { key }`,
+`Part::RowCheckbox { key }`, `Part::ExpandTrigger { key }`,
+`Part::ExpandedContent { key }`, `Part::ColumnResizeHandle { column }`)
+read those fields directly out of the variant.
+
+### Tests (named in issue)
+
+`table/tests.rs` mirrors `tabs/tests.rs` layout:
+
+| Test | Asserts |
+|------|---------|
+| `table_root_produces_table_role` | `table_attrs()` has `role="table"` when `interactive=false`. |
+| `table_root_produces_grid_role` | `role="grid"` when `interactive=true`. |
+| `table_column_header_sortable_aria_sort_none_default` | New sortable column: `aria-sort="none"`. |
+| `table_column_header_sortable_aria_sort_ascending_after_click` | After `SortColumn { column }`: `aria-sort="ascending"`. |
+| `table_column_header_sortable_aria_sort_descending_after_second_click` | Cycle to descending. |
+| `table_column_header_sortable_aria_sort_none_after_third_click` | Cycle clears. |
+| `table_row_checkbox_aria_checked_false_default` | Unselected row. |
+| `table_row_checkbox_aria_checked_true_after_toggle` | After `ToggleRow`. |
+| `table_select_all_checkbox_mixed_when_partial` | `aria-checked="mixed"`. |
+| `table_select_all_checkbox_true_when_all` | `aria-checked="true"`. |
+| `table_select_all_event_only_when_multiple` | `SelectAll` is a no-op in `Mode::Single`. |
+| `table_expand_trigger_aria_expanded_after_event` | `aria-expanded="true"` + `data-ars-expanded`. |
+| `table_expanded_content_hidden_when_collapsed` | `hidden` attr present when collapsed. |
+| `table_column_resize_handle_role_separator` | `role="separator"` + `aria-orientation="vertical"`. |
+| `table_column_resize_handle_aria_valuenow_after_resize` | `aria-valuenow` reflects new width. |
+| `table_column_resize_clamps_to_min_width` | Below 50px clamps to 50px. |
+| `table_on_cell_keydown_arrow_right_emits_focus_cell_next` | `Event::FocusCell { col: col+1 }`. |
+| `table_on_cell_keydown_arrow_right_rtl_emits_prev` | RTL flips. |
+| `table_on_cell_keydown_home_jumps_to_col_zero` | `col: 0`. |
+| `table_sticky_header_data_attr` | `data-ars-sticky-header` on root + `data-ars-sticky` on head. |
+| `table_empty_state_renders_zero_rows` | No rows registered → no row attrs called; SelectAll is `false`/non-mixed. |
+| `table_row_action_event_disabled_row_no_op` | `RowAction(disabled)` returns `None`. |
+| `table_row_action_event_passes_through` | `RowAction(key)` returns `Some(context_only)` for non-disabled. |
+| `table_aria_rowcount_aria_colcount_virtualized` | Both ARIA attrs present on `table_attrs` when `virtual_scrolling`. |
+| `table_aria_rowindex_on_row_when_virtualized` | `aria-rowindex` set on `row_attrs(row, index)`. |
+| `table_disallow_empty_selection_blocks_last_deselect` | `DeselectRow` on the sole selected row is rejected. |
+| `table_disallow_empty_selection_blocks_deselect_all` | `DeselectAll` is rejected when flag is set and selection non-empty. |
+| `table_column_header_non_sortable_omits_aria_sort` | `aria-sort` is absent from non-sortable headers (§3.4.2). |
+| `table_escape_clears_selection_when_clear_selection_mode` | `EscapeKey` clears selection when `escape_key_behavior == ClearSelection`. |
+| `table_escape_no_op_when_behavior_none` | `EscapeKey` is rejected when `escape_key_behavior == None`. |
+| `table_init_prunes_disabled_default_selection` | Keys in both `disabled_keys` and `default_selected_rows` are pruned at init. |
+| `table_set_rows_prunes_stale_selection_and_focus` | `SetRows` drops selected/expanded/focused keys that vanished. |
+| `table_set_direction_idempotent` | Re-sending the same `SetDirection` does not transition. |
+| `table_ctrl_home_jumps_to_first_cell_of_first_row` | `Ctrl+Home` per §3.2. |
+| `table_ctrl_end_jumps_to_last_cell_of_last_row` | `Ctrl+End` per §3.2. |
+| `table_row_action_passes_through_for_enabled_row` | Non-disabled row produces `Some(context_only)`. |
+| `table_blur_clears_all_three_focus_fields` | `Blur` zeroes `focused_cell`, `focused_row`, `focused_col`. |
+| `table_column_resize_creates_entry_on_first_resize` | First `ColumnResize` for an unknown column upserts the entry. |
+| `table_column_resize_end_clears_resizing_column` | `ColumnResizeEnd` clears `ctx.resizing_column`. |
+| `table_resize_handle_keydown_arrow_left_decreases_width` | Decrements by `column_resize_step`. |
+| `table_resize_handle_keydown_rtl_flips` | `ArrowRight` decreases when RTL. |
+| `table_sync_controlled_selected_rows` | `SyncControlledSelectedRows(Some(set))` updates Bindable. |
+| `table_select_all_mode_none_renders_empty_attrs` | `select_all_attrs` returns empty map when `SelectAllMode::None`. |
+| `table_select_all_mode_all_data_label_includes_total_count` | `aria-label` contains the formatted count. |
+| `table_set_loading_round_trips_via_bindable` | `SetLoading(true)` then `false` lands cleanly. |
+
+Plus `insta::assert_snapshot!(snapshot_attrs(&attrs))` snapshots for each
+distinct anatomy part output that an adapter consumes (≥14 fixtures).
+
+### Spec-conformance test
+
+Add `crates/ars-components/tests/spec_conformance/data_display.rs`:
+
+```rust
+mod table {
+    use ars_components::data_display::table::{Key, Part};
+    use super::helper::assert_anatomy;
+
+    #[test]
+    fn table_anatomy_matches_spec() {
+        assert_anatomy("table", &[
+            (Part::Root, "root"),
+            (Part::Table, "table"),
+            (Part::Caption, "caption"),
+            (Part::Head, "head"),
+            (Part::Body, "body"),
+            (Part::Foot, "foot"),
+            (Part::Row { key: Key::default() }, "row"),
+            (Part::ColumnHeader { header: String::new() }, "column-header"),
+            (Part::RowHeader, "row-header"),
+            (Part::Cell { col: 0, row: 0 }, "cell"),
+            (Part::SelectAllCheckbox, "select-all-checkbox"),
+            (Part::RowCheckbox { key: Key::default() }, "row-checkbox"),
+            (Part::ExpandTrigger { key: Key::default() }, "expand-trigger"),
+            (Part::ExpandedContent { key: Key::default() }, "expanded-content"),
+            (Part::ColumnResizeHandle { column: String::new() }, "column-resize-handle"),
+        ]);
+    }
+}
+```
+
+Register the new module in `tests/spec_conformance.rs` next to the
+existing `navigation`, `overlay`, `utility` modules.
+
+### Proptest invariants
+
+Extend `tests/proptest_state_machines/data_display.rs` with:
+
+- Strategy for arbitrary `Props` (id, mode, behavior, disabled set,
+  disallow_empty_selection bool, default selected set).
+- Strategy for arbitrary `Event` (all 14 events with bounded keys/cols).
+- Invariants after any sequence of `<=64` events:
+  - `ctx.selected_rows.get()` only contains keys never marked disabled.
+  - `ctx.expanded_rows.get()` only contains rows never disabled.
+  - When `disallow_empty_selection` and any default selection was set,
+    selection is non-empty.
+  - `ctx.column_widths` values all `>= 50.0`.
+  - `ctx.focused_cell.map(|(c, _)| c < ctx.total_cols)` is true when
+    virtual scrolling is on.
+
+Marked `#[ignore = "proptest — nightly extended-proptest job"]` per the
+workspace convention.
+
+## Reused existing utilities (no re-implementation)
+
+- `ars_collections::Key` — row identifiers.
+- `ars_collections::selection::{Set, State, Mode, Behavior}` — selection
+  semantics; `selection::State::{new, select, deselect, toggle,
+  select_all, clear}` are called from each transition.
+- `ars_collections::SortDescriptor<String>` and `SortDirection` — sort
+  state.
+- `ars_core::Bindable` — controlled/uncontrolled for `selected_rows`,
+  `expanded_rows`, `sort_descriptor`, `loading`.
+- `ars_core::ComponentIds` — derive `caption_id` / `id` from `props.id`.
+- `ars_core::{HtmlAttr, AriaAttr, AttrMap, ConnectApi, ComponentPart,
+  HasId, MessageFn, ComponentMessages, TransitionPlan, NoEffect,
+  Direction, Env, Locale}` — same imports as Tabs.
+- `ars_interactions::KeyboardEventData` — passed into keydown helpers.
+
+## Verification
+
+Run from the repo root (`/Users/ericson/.t3/worktrees/ars-ui/t3code-49f3737d`):
+
+```bash
+# Unit + snapshot tests
+cargo test -p ars-components data_display::table::tests
+
+# Spec-conformance
+cargo test -p ars-components --test spec_conformance data_display::table
+
+# Snapshot review (must be inspected before commit)
+cargo insta review
+
+# Doc-test compile (machine spec snippets)
+cargo test -p ars-components --doc data_display::table
+
+# Manifest validates spec frontmatter still matches
+cargo xtask spec validate
+
+# Workspace pre-push gate (must pass before pushing)
+cargo xci-fast
+
+# Once pushed, the PR body needs `Closes #286`; the `snapshot-reviewed`
+# label is required since this PR creates many `.snap` files.
+```
+
+The `post-implementation-audit` skill (spec/impl drift + missing-coverage
++ test-tier audit) is mandatory before user review per CLAUDE.md step 7.
+Codex review wait (`waiting-for-codex-review`) is mandatory after the
+first push per step 12.

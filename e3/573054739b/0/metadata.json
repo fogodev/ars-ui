@@ -1,0 +1,181 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "e3573054739b",
+  "session_id": "c1afe54f-0983-4579-91b3-27bd3bf95b73",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-19T19:36:31.405188Z",
+  "branch": "t3code/49f3737d",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/data_display/mod.rs",
+    "crates/ars-components/src/data_display/table/mod.rs",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_column_header_non_sortable.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_column_header_sortable_ascending.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_column_header_sortable_unsorted.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_column_resize_handle_idle.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_column_resize_handle_resizing.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_expand_trigger_expanded.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_expanded_content_collapsed.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_expanded_content_expanded.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_head_sticky.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_root_sticky_header.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_row_checkbox_selected.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_row_checkbox_unselected.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_row_disabled.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_select_all_checked.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_select_all_mixed.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_select_all_unchecked.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_table_role_interactive_grid.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_table_role_non_interactive.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_table_virtualized.snap",
+    "crates/ars-components/src/data_display/table/tests.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/data_display.rs",
+    "spec/components/data-display/table.md",
+    "spec/dioxus-components/data-display/table.md",
+    "spec/leptos-components/data-display/table.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "d5401b829fed",
+  "token_usage": {
+    "input_tokens": 277,
+    "cache_creation_tokens": 1620170,
+    "cache_read_tokens": 72814529,
+    "output_tokens": 181953,
+    "api_call_count": 224
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement Task #286 — the framework-agnostic state machine core for the Table data-display component in the ars-ui Rust library, including all variants (SelectAll, Column Resizing, Virtual Scrolling ARIA slice, Async loading) and mandatory spec drift fixes.",
+    "outcome": "The Table agnostic core was fully implemented and audited: 1843-line mod.rs, 1990-line tests.rs with 94 unit/snapshot tests, spec conformance, proptest invariants, and doc test. All 11 spec drifts were fixed in the same PR. Zero clippy warnings, 99.4% line coverage, 1595 lib tests passing. Commit created and PR opened to GitHub with Closes #286.",
+    "learnings": {
+      "repo": [
+        "Tabs (`crates/ars-components/src/navigation/tabs/mod.rs`) is the canonical structural template for complex components — section order, derive set, TransitionPlan style, and SyncProps/SyncControlledValue naming all mirror it.",
+        "`type Effect = NoEffect` is the correct choice for components that delegate all DOM side-effects (focus, scroll) to adapters; adapters read focused_cell/focused_row/focused_col directly from Context.",
+        "The workspace convention marks slow proptests `#[ignore = \"proptest — nightly extended-proptest job\"]` — they run only on the nightly extended-proptest CI job.",
+        "`cargo insta test --features i18n --unreferenced=reject` is the correct command to verify no orphaned snapshot fixtures.",
+        "Spec drift must be fixed in the same task/PR (CLAUDE.md rule) — spec edits land alongside code, not in a follow-up.",
+        "`cargo xci-fast` is the mandatory pre-push gate (10 steps); must pass before any push.",
+        "The post-implementation-audit skill is mandatory before user review per CLAUDE.md step 7 — it runs spec/impl drift, iterative missing-anything, and test-coverage phases.",
+        "`ars_collections::selection::State::toggle` requires a `Collection` generic that the Table machine doesn't own — toggles must be computed locally via `is_selected` + `select`/`deselect`.",
+        "`selection::Set` is `#[non_exhaustive]`, so match arms need a `_` fallback even when all known variants are covered.",
+        "The GitHub Project board uses `gh project item-edit` with a `--field-id` + `--single-select-option-id` to move issues between status columns.",
+        "Line coverage threshold for ars-components is 90%; branch coverage threshold also applies and must be checked separately.",
+        "`Direction::Auto` must be resolved to a concrete direction in `init` from `env.locale` — it cannot remain as `Auto` in Context at runtime."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "line": 1,
+          "end_line": 1843,
+          "finding": "Single-file module ~1843 LOC following tabs section order: State → Event → EscapeKeyBehavior → SelectAllMode → Messages → Props → Context → Part → Machine → Api. Uses `type Effect = NoEffect` and `TransitionPlan::context_only` for all transitions."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "Closure type inference failures occur with `context_only` when the closure captures variables of ambiguous type — annotating the closure parameter `|ctx: &mut Context|` resolves it."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "`SyncControlledSortDescriptor(Option<SortDescriptor<String>>)` requires wrapping the payload in `Some(...)` inside the transition because the outer Option on Bindable::sync_controlled is the controlled-mode toggle, not the value itself."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/tabs/mod.rs",
+          "line": 1,
+          "finding": "Reference implementation for complex components: shows correct pattern for Bindable controlled/uncontrolled fields, SyncProps + SyncControlledValue event naming, Machine::transition arm structure, and ConnectApi::part_attrs dispatcher."
+        },
+        {
+          "path": "spec/components/data-display/table.md",
+          "finding": "§1.7 FocusCell hard-coded row 0 in the spec (literal bug). Real payload must carry `{ row: Key, col: usize, row_index: usize }` and write `(col, row_index)` to focused_cell."
+        },
+        {
+          "path": "spec/components/data-display/table.md",
+          "finding": "§3.4.3 build_sort_announcement referenced undeclared `locale` and used `SortDescriptor::column_key` (real field is `column`); must be marked `rust,no_check` until the adapter helper is in scope for spec-snippet compilation."
+        },
+        {
+          "path": "spec/components/data-display/table.md",
+          "finding": "§1.1.1 mistakenly mentioned a `Scrolling` state — the single-`Idle` design is correct; sort state lives in Context, scroll lives in adapters."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/data_display.rs",
+          "finding": "Proptest module required a closing brace for the table proptest module that was missing after the append; always verify brace balance when appending to existing test files."
+        }
+      ],
+      "workflow": [
+        "Write tests first (TDD), get them failing, then implement — the plan explicitly separated test-writing (Task 4) from implementation (Task 3) even though both files were written in the same session.",
+        "The post-implementation-audit skill runs three phases: (1) spec/impl drift table, (2) iterative 'anything else missing?' rounds until two consecutive clean rounds, (3) coverage audit with a quantitative threshold check.",
+        "Mutation testing with cargo-mutants on a large module (~195 mutants) takes ~30 min for a full run — run a representative shard (--shard 0/8) during the audit to get signal without blocking.",
+        "Coverage gaps are best targeted by examining mutation-testing output, not just line coverage — surviving mutants reveal which branches lack assertions even when lines are covered.",
+        "`cargo clippy --fix` cleans up `unused_mut`, fully-qualified `std::string::ToString::to_string`, and other mechanical warnings automatically.",
+        "Socket connection drops mid-response (API errors) don't lose work if tools already ran — the plan write simply needed to be retried.",
+        "Spec adapter specs (leptos-components/, dioxus-components/) must be updated in the same PR when the agnostic API signatures change, otherwise adapter authors get stale method signatures."
+      ]
+    },
+    "friction": [
+      "API socket connection closed unexpectedly mid-response while writing the plan, requiring a retry with a separate Write tool call.",
+      "Eleven spec drifts required fixing before implementation could be considered complete — the spec was internally inconsistent across multiple sections (§1.1, §1.2, §1.3, §1.5, §1.7, §1.8, §3.4.2, §3.4.3, §4).",
+      "selection::State::toggle requires a Collection generic the Table machine doesn't own, requiring a local workaround (is_selected + select/deselect) instead of calling toggle directly.",
+      "Initial branch coverage came in below the 90% threshold, requiring two rounds of additional tests to reach 85.99% then exceed it.",
+      "Closure type inference failures with context_only required explicit parameter type annotations on multiple transition arms.",
+      "The proptest module was missing a closing brace after appending, causing a compile error that required a follow-up fix.",
+      "Adapter specs (leptos-components/, dioxus-components/) referenced stale API signatures (wrong arity for column_header_attrs, cell_attrs, select_all_attrs, column_resize_handle_attrs) and needed separate fixes.",
+      "The snapshot review step required running cargo insta test with the i18n feature flag explicitly, otherwise some fixtures were not exercised."
+    ],
+    "open_items": [
+      "ScrollToRow(Key) event is deferred to a follow-up issue — implementing it requires widening Effect from NoEffect to a typed enum and pulling in ars-collections::Virtualizer plumbing.",
+      "Full Virtualizer integration and scroll-position management are deferred — this PR only adds ARIA-slice virtual scrolling (aria-rowcount, aria-colcount, aria-rowindex).",
+      "BulkSelection exclusion-set wrapper is excluded from the agnostic core — it is adapter/application code that wraps selection::Set::All.",
+      "on_load_more: Option<Callback<()>> callback is adapter-only and not stored in the core — deferred to the adapter layer.",
+      "Full mutation-testing run (195 mutants, ~30 min) was not completed — only a representative shard was run during the audit.",
+      "The PR requires the snapshot-reviewed label before merge (per workspace convention, since it introduces 37 new .snap files).",
+      "Codex review wait (waiting-for-codex-review label) is mandatory after the first push per CLAUDE.md step 12."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-19T19:35:22.920341Z",
+    "agent_lines": 4210,
+    "agent_removed": 0,
+    "human_added": 934,
+    "human_modified": 682,
+    "human_removed": 0,
+    "total_committed": 5485,
+    "total_lines_changed": 5826,
+    "agent_percentage": 72.26227257123242,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 808,
+      "user_lines_removed": 341,
+      "agent_lines_added": 5359,
+      "agent_lines_removed": 119,
+      "user_added_per_file": {
+        "crates/ars-components/src/data_display/table/mod.rs": 407,
+        "crates/ars-components/src/data_display/table/tests.rs": 269,
+        "crates/ars-components/tests/proptest_state_machines/data_display.rs": 82,
+        "spec/components/data-display/table.md": 26,
+        "spec/dioxus-components/data-display/table.md": 12,
+        "spec/leptos-components/data-display/table.md": 12
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/data_display/table/mod.rs": 184,
+        "crates/ars-components/src/data_display/table/tests.rs": 33,
+        "crates/ars-components/tests/proptest_state_machines/data_display.rs": 74,
+        "spec/components/data-display/table.md": 26,
+        "spec/dioxus-components/data-display/table.md": 12,
+        "spec/leptos-components/data-display/table.md": 12
+      }
+    }
+  ]
+}

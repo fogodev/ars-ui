@@ -1,0 +1,52 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "e3573054739b",
+  "strategy": "manual-commit",
+  "branch": "t3code/49f3737d",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/data_display/mod.rs",
+    "crates/ars-components/src/data_display/table/mod.rs",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_column_header_non_sortable.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_column_header_sortable_ascending.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_column_header_sortable_unsorted.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_column_resize_handle_idle.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_column_resize_handle_resizing.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_expand_trigger_expanded.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_expanded_content_collapsed.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_expanded_content_expanded.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_head_sticky.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_root_sticky_header.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_row_checkbox_selected.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_row_checkbox_unselected.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_row_disabled.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_select_all_checked.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_select_all_mixed.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_select_all_unchecked.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_table_role_interactive_grid.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_table_role_non_interactive.snap",
+    "crates/ars-components/src/data_display/table/snapshots/ars_components__data_display__table__tests__table_table_virtualized.snap",
+    "crates/ars-components/src/data_display/table/tests.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/data_display.rs",
+    "spec/components/data-display/table.md",
+    "spec/dioxus-components/data-display/table.md",
+    "spec/leptos-components/data-display/table.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/e3/573054739b/0/metadata.json",
+      "transcript": "/e3/573054739b/0/full.jsonl",
+      "content_hash": "/e3/573054739b/0/content_hash.txt",
+      "prompt": "/e3/573054739b/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 277,
+    "cache_creation_tokens": 1620170,
+    "cache_read_tokens": 72814529,
+    "output_tokens": 181953,
+    "api_call_count": 224
+  }
+}
