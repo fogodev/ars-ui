@@ -20,8 +20,11 @@
 //!
 //! Delimiters `/`, `?`, `#`, and `\` terminate HTTP(S) authority scanning here so
 //! classification aligns with browsers that rewrite `\` as `/` for special schemes.
+//!
+//! Hostnames are percent-decoded (`%HH`) before IPv4 / IDNA normalization so encoded
+//! ASCII labels match their decoded form.
 
-use alloc::{string::String, vec::Vec};
+use alloc::{borrow::Cow, string::String, vec::Vec};
 use core::net::{Ipv4Addr, Ipv6Addr};
 
 use ars_core::{
@@ -461,9 +464,52 @@ fn origins_match(a: &ParsedOrigin, b: &ParsedOrigin) -> bool {
         && a.port == b.port
 }
 
+const fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Applies ASCII percent-decoding to `%HH` sequences in a hostname (browser-style).
+fn percent_decode_host(host: &str) -> Cow<'_, str> {
+    let bytes = host.as_bytes();
+
+    if !bytes.contains(&b'%') {
+        return Cow::Borrowed(host);
+    }
+
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(hi), Some(lo)) = (hex_value(bytes[i + 1]), hex_value(bytes[i + 2]))
+        {
+            out.push(hi << 4 | lo);
+            i += 3;
+            continue;
+        }
+
+        out.push(bytes[i]);
+        i += 1;
+    }
+
+    match String::from_utf8(out) {
+        Ok(decoded) => Cow::Owned(decoded),
+        Err(_) => Cow::Borrowed(host),
+    }
+}
+
 /// Normalizes hosts the way browsers do before comparing origins (IPv4
 /// shorthand, IPv6 text forms, IDNA/punycode).
 fn canonical_host_for_origin_compare(host: &str) -> String {
+    let host = percent_decode_host(host);
+    let host = host.as_ref();
+
     if let Some(ip) = parse_ipv4_address_relaxed(host) {
         return ip.to_string();
     }
@@ -1062,6 +1108,19 @@ mod tests {
             .href("https://127.1/readme.txt")
             .filename("r.txt")
             .document_origin("https://127.0.0.1");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn percent_encoded_ascii_host_matches_decoded_document_origin() {
+        let props = Props::new()
+            .href("https://%65xample.com/report.pdf")
+            .filename("r.pdf")
+            .document_origin("https://example.com");
 
         let api = api(props);
 

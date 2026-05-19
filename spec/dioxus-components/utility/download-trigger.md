@@ -177,7 +177,7 @@ Blob fallback is web-only in Dioxus Web. Cross-origin downloads may use `fetch` 
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct DownloadTriggerSketchProps {
     pub children: Element,
@@ -185,7 +185,7 @@ pub struct DownloadTriggerSketchProps {
 
 #[component]
 pub fn DownloadTrigger(props: DownloadTriggerSketchProps) -> Element {
-    // `locale` is resolved from `ArsProvider` / app context in real adapters.
+    let locale = ars_i18n::locales::en_us(); // production adapters read locale from `ArsProvider` / context.
     let api = download_trigger::Api::new(
         download_trigger::Props::default(),
         locale,
