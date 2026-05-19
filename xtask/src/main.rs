@@ -16,12 +16,26 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Run CI pipeline steps locally (alias: `cargo xci`).
+    ///
+    /// `--profile full` (default) mirrors GitHub Actions exactly — all 20 gates,
+    /// ~25 min locally. `--profile fast` runs the curated pre-push subset
+    /// (~5 min): fmt, check, clippy, unit, integration, adapter,
+    /// spec-compile-snippets, error-variant-coverage, mutual-exclusion,
+    /// snapshot-count. Positional `steps` override the profile and run as-is,
+    /// so `cargo xci fmt check` still works.
     Ci {
-        /// Steps to run (default: all in pipeline order).
+        /// Steps to run (default: every step in the selected profile).
         ///
         /// Use `feature-matrix` to run all five feature-flag groups at once.
+        /// When supplied, this list overrides `--profile`.
         #[arg(value_enum)]
         steps: Vec<ci::Step>,
+
+        /// Pipeline profile when no positional steps are given. Defaults to
+        /// `full` for backward compatibility; use `fast` (alias:
+        /// `cargo xci-fast`) for the routine pre-push gate.
+        #[arg(long, value_enum, default_value_t = ci::Profile::Full)]
+        profile: ci::Profile,
 
         /// Forward `--message-format` to cargo check/clippy (e.g. `json` for
         /// rust-analyzer's `overrideCommand`).
@@ -470,9 +484,10 @@ fn main() {
         // ── CI ────────────────────────────────────────────────────────
         Command::Ci {
             steps,
+            profile,
             message_format,
         } => {
-            if let Err(e) = ci::run(steps, message_format.as_deref()) {
+            if let Err(e) = ci::run(steps, profile, message_format.as_deref()) {
                 eprintln!("error: {e}");
 
                 process::exit(1);

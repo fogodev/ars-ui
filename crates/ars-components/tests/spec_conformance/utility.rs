@@ -3,11 +3,20 @@
 //! Each test pulls the expected anatomy from the corresponding component
 //! spec's §2 anatomy table and asserts the impl's `Part` enum matches.
 
+use ars_components::utility::group;
 #[cfg(feature = "i18n")]
 use ars_components::utility::highlight;
 
-#[cfg(feature = "i18n")]
 use super::helper::assert_anatomy;
+
+#[test]
+fn group_anatomy_matches_spec() {
+    // Group's anatomy table (spec §2) declares a single row: `Root`.
+    // Children are not parts — they are an unenumerated subtree that
+    // inherits state through `GroupContext`, so the `Part` enum stays
+    // single-variant.
+    assert_anatomy("group", &[(group::Part::Root, "root")]);
+}
 
 #[cfg(feature = "i18n")]
 #[test]

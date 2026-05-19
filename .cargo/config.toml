@@ -1,7 +1,8 @@
 [alias]
 xtask   = "run --package xtask --"
-xci     = "xtask ci"
-xclippy = "xtask clippy"
+xci      = "xtask ci"
+xci-fast = "xtask ci --profile fast"
+xclippy  = "xtask clippy"
 xfmt    = "run --quiet --package xtask -- fmt"
 xmcp    = "xtask mcp"
 xspec   = "xtask spec"

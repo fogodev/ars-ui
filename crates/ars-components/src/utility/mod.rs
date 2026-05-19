@@ -35,6 +35,10 @@ pub mod focus_ring;
 /// Form submit machine.
 pub mod form_submit;
 
+/// `Group` component (stateless semantic grouping wrapper with
+/// `disabled` / `invalid` / `read_only` propagation via `GroupContext`).
+pub mod group;
+
 /// `Heading` component (stateless heading-level mapper).
 pub mod heading;
 

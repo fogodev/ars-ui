@@ -41,7 +41,7 @@ pub enum GroupRole {
 }
 
 /// Props for the `Group` component.
-#[derive(Clone, Debug, PartialEq, HasId)]
+#[derive(Clone, Debug, Default, PartialEq, HasId)]
 pub struct Props {
     /// Component instance ID.
     pub id: String,
@@ -59,20 +59,11 @@ pub struct Props {
     /// Layout direction for RTL support.
     pub dir: Option<Direction>,
 }
-
-impl Default for Props {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            disabled: false,
-            invalid: false,
-            read_only: false,
-            role: GroupRole::default(),
-            dir: None,
-        }
-    }
-}
 ```
+
+`Props` also provides the workspace-standard builder chain (`Props::new()`,
+`.id(...)`, `.disabled(true)`, `.invalid(true)`, `.read_only(true)`, `.role(...)`,
+`.dir(...)`) matching every other stateless utility component.
 
 ### 1.2 Connect / API
 
@@ -85,7 +76,10 @@ pub enum Part {
 
 /// Context propagated to descendant components.
 /// Children read this to inherit disabled/invalid/read_only state.
-#[derive(Clone, Debug, PartialEq)]
+///
+/// `Default` is derived so child components can fall back to a zero-state
+/// context via `.unwrap_or_default()` when no parent `Group` is present.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GroupContext {
     /// Whether the group is disabled.
     pub disabled: bool,
@@ -95,18 +89,20 @@ pub struct GroupContext {
     pub read_only: bool,
 }
 
-/// The API for the `Group` component.
-pub struct Api<'a> {
-    props: &'a Props,
+/// The API for the `Group` component. Owns its `Props` so adapters can
+/// construct it once per render without tracking a separate borrow.
+#[derive(Clone, Debug)]
+pub struct Api {
+    props: Props,
 }
 
-impl<'a> Api<'a> {
-    pub fn new(props: &'a Props) -> Self {
+impl Api {
+    pub const fn new(props: Props) -> Self {
         Self { props }
     }
 
     /// Returns the `GroupContext` to provide to descendants.
-    pub fn group_context(&self) -> GroupContext {
+    pub const fn group_context(&self) -> GroupContext {
         GroupContext {
             disabled: self.props.disabled,
             invalid: self.props.invalid,
@@ -117,29 +113,37 @@ impl<'a> Api<'a> {
     /// Root element attributes.
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
-        attrs.set(HtmlAttr::Id, &self.props.id);
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
+        attrs
+            .set(HtmlAttr::Id, &self.props.id)
+            .set(scope_attr, scope_val)
+            .set(part_attr, part_val);
 
         // Role
-        match self.props.role {
-            GroupRole::Group => attrs.set(HtmlAttr::Role, "group"),
-            GroupRole::Region => attrs.set(HtmlAttr::Role, "region"),
-            GroupRole::Presentation => attrs.set(HtmlAttr::Role, "presentation"),
-        }
+        let role_str = match self.props.role {
+            GroupRole::Group => "group",
+            GroupRole::Region => "region",
+            GroupRole::Presentation => "presentation",
+        };
+        attrs.set(HtmlAttr::Role, role_str);
 
-        // State attributes
+        // State attributes — `aria-disabled` and `aria-invalid` are WAI-ARIA
+        // 1.2 §6.5 globals (valid on every role, including `presentation`);
+        // `aria-readonly` is non-global and is NOT emitted on the root because
+        // WAI-ARIA does not list it as supported on `group`/`region`/
+        // `presentation`. See §3.1 for the full rationale. The `data-ars-*`
+        // styling hooks always emit so CSS targeting stays symmetric.
         if self.props.disabled {
-            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
-            attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
+            attrs
+                .set(HtmlAttr::Aria(AriaAttr::Disabled), "true")
+                .set_bool(HtmlAttr::Data("ars-disabled"), true);
         }
         if self.props.invalid {
-            attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
-            attrs.set_bool(HtmlAttr::Data("ars-invalid"), true);
+            attrs
+                .set(HtmlAttr::Aria(AriaAttr::Invalid), "true")
+                .set_bool(HtmlAttr::Data("ars-invalid"), true);
         }
         if self.props.read_only {
-            attrs.set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true");
             attrs.set_bool(HtmlAttr::Data("ars-readonly"), true);
         }
         if let Some(dir) = self.props.dir {
@@ -150,7 +154,7 @@ impl<'a> Api<'a> {
     }
 }
 
-impl ConnectApi for Api<'_> {
+impl ConnectApi for Api {
     type Part = Part;
 
     fn part_attrs(&self, part: Part) -> AttrMap {
@@ -180,15 +184,18 @@ Group
 | Attribute          | Element | Source            | Notes                                                        |
 | ------------------ | ------- | ----------------- | ------------------------------------------------------------ |
 | `role`             | Root    | `props.role`      | `"group"` (default), `"region"`, or `"presentation"`         |
-| `aria-disabled`    | Root    | `props.disabled`  | `"true"` when the group is disabled                          |
-| `aria-invalid`     | Root    | `props.invalid`   | `"true"` when the group is in an invalid state               |
-| `aria-readonly`    | Root    | `props.read_only` | `"true"` when the group is read-only                         |
+| `aria-disabled`    | Root    | `props.disabled`  | `"true"` when the group is disabled (global state)           |
+| `aria-invalid`     | Root    | `props.invalid`   | `"true"` when the group is in an invalid state (global state) |
+| `data-ars-disabled` | Root   | `props.disabled`  | `"true"` styling hook when the group is disabled             |
+| `data-ars-invalid` | Root    | `props.invalid`   | `"true"` styling hook when the group is in an invalid state  |
+| `data-ars-readonly` | Root   | `props.read_only` | `"true"` styling hook when the group is read-only            |
 | `aria-label`       | Root    | Consumer-provided | Accessible name for the group (required for `role="region"`) |
 | `aria-labelledby`  | Root    | Consumer-provided | Alternative accessible name via referenced element           |
 | `aria-describedby` | Root    | Consumer-provided | Links to description or error message                        |
 
 - When `role` is `Region`, an accessible name (`aria-label` or `aria-labelledby`) is **required** per WAI-ARIA.
-- When `role` is `Presentation`, state attributes (`aria-disabled`, `aria-invalid`) are omitted since the grouping has no semantic meaning.
+- `aria-disabled` and `aria-invalid` are WAI-ARIA 1.2 §6.5 **global** states — supported on every role, including `role="presentation"`. They emit on the root whenever the corresponding prop is `true`.
+- `aria-readonly` is **not** a WAI-ARIA 1.2 global state and is **not** emitted on the root. WAI-ARIA only lists `aria-readonly` as supported on roles such as `checkbox`, `textbox`, `combobox`, `grid`, `radiogroup`, `slider`, `spinbutton`, and `switch` — none of `GroupRole`'s variants (`group`, `region`, `presentation`) appear in that set, so emitting it would be invalid ARIA that conformance tools flag and assistive tech may ignore. The read-only state still propagates to descendants through `GroupContext`, and the `data-ars-readonly` styling hook still emits so CSS targeting remains symmetric. Descendant controls whose own roles support `aria-readonly` apply it themselves after reading the context.
 - `aria-disabled` on a `role="group"` container does NOT natively propagate to children (unlike `<fieldset disabled>`). The adapter MUST use `GroupContext` to disable children programmatically.
 
 ### 3.2 Context Propagation
