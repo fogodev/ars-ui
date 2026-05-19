@@ -1,0 +1,148 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "8ff45bff1742",
+  "session_id": "e797994f-9915-4551-9b97-73a56771e5d9",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-19T15:14:51.480298Z",
+  "branch": "t3code/e16f9343",
+  "checkpoints_count": 2,
+  "files_touched": [
+    ".agents/skills/waiting-for-codex-review/SKILL.md",
+    ".cargo/config.toml",
+    "AGENTS.md",
+    "xtask/src/ci/mod.rs",
+    "xtask/src/main.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "bc798e655c4e",
+  "token_usage": {
+    "input_tokens": 295,
+    "cache_creation_tokens": 1317741,
+    "cache_read_tokens": 40336678,
+    "output_tokens": 148381,
+    "api_call_count": 167
+  },
+  "session_metrics": {
+    "turn_count": 16
+  },
+  "summary": {
+    "intent": "Implement GitHub issue #205 (Group agnostic core Rust component), then improve the development workflow by creating a Codex review-wait skill and a lighter local CI gate (`cargo xci --profile fast`).",
+    "outcome": "Group component fully implemented (694-line group.rs, 33 unit + 5 snapshot tests, 100% coverage, 0 missed mutations), PR #648 opened. `waiting-for-codex-review` skill created in the repo. `cargo xci --profile fast` implemented (1m24s vs ~25min full), with `xci-fast` alias. Two commits staged locally, not yet pushed pending Codex review resolution.",
+    "learnings": {
+      "repo": [
+        "`crates/ars-components/src/utility/separator.rs` is the canonical template for new stateless utility components (446 lines, identical structure).",
+        "CLAUDE.md is a symlink to AGENTS.md — edits must target AGENTS.md directly.",
+        "`.claude/skills/` resolves via symlink to `.agents/skills/` — skills belong in the repo under `.agents/skills/`, not globally.",
+        "Spec is authoritative ('spec is the contract'); when issue test bullets contradict the spec, spec wins and the bullets are dropped.",
+        "GroupContext naming convention comes from foundation 08 §8.4 — use descriptive non-prefixed names (`GroupContext`, not `Context`) so consumers write `group::GroupContext`.",
+        "Spec-conformance anatomy tests live in `crates/ars-components/tests/spec_conformance/utility.rs` and must be added for each new component.",
+        "`snapshot-reviewed` label must be applied to any PR that introduces new `.snap` files.",
+        "Codex bot login is `chatgpt-codex-connector`; it posts 👀 while reviewing, then drops 👀 — replaced by 👍 on approval or removed when threads are posted.",
+        "`@codex review` comment must be posted after first push (auto-trigger is unreliable) and after each subsequent fix push.",
+        "cargo xci full profile ~25 min; fast profile (10 of 20 steps) runs in ~1m24s on a warm cache. Coverage and FeatureMatrix* steps are the main cost drivers."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/separator.rs",
+          "line": 1,
+          "end_line": 446,
+          "finding": "Structural template for stateless utility components; group.rs was modeled on this file."
+        },
+        {
+          "path": "crates/ars-components/src/utility/field/mod.rs",
+          "line": 58,
+          "end_line": 87,
+          "finding": "Pattern for a secondary context struct (FieldContext); used as reference for GroupContext design."
+        },
+        {
+          "path": "crates/ars-i18n/src/lib.rs",
+          "line": 127,
+          "end_line": 127,
+          "finding": "`Direction::as_html_attr` — used by group.rs to emit the `dir` attribute."
+        },
+        {
+          "path": "xtask/src/ci/mod.rs",
+          "line": 30,
+          "end_line": 125,
+          "finding": "Step enum and PIPELINE_ORDER definition; Profile enum and FAST_PIPELINE_ORDER added here alongside existing tests module at line 1212."
+        },
+        {
+          "path": "xtask/src/main.rs",
+          "line": 18,
+          "end_line": 30,
+          "finding": "Ci subcommand definition; `--profile <full|fast>` flag added here, default Full for backward compat."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/utility.rs",
+          "line": 1,
+          "finding": "Spec-conformance anatomy tests; `group_anatomy_matches_spec` was missing and added during post-implementation-audit Phase 2 Round 1."
+        }
+      ],
+      "workflow": [
+        "post-implementation-audit skill is mandatory per CLAUDE.md §7; runs three phases: spec/impl drift, iterative 'anything else missing?' rounds (≥2 clean rounds to terminate), and test coverage audit.",
+        "cargo insta workflow: run tests → `.snap.new` files generated → read and verify each → `cargo insta accept` → commit snapshots with implementation.",
+        "cargo mutants validates test suite quality beyond coverage; unviable mutations (const fn, builder return-self) are expected and not failures.",
+        "Pre-existing doc check warnings (`cargo doc`) exist in the workspace and are not CI-gated — distinguish new warnings from baseline before reporting.",
+        "Snapshot orphan gate must be run without a per-crate filter or other crates' snapshots appear unreferenced (false positive).",
+        "Two separate commits strategy: implementation commit first, then infra/workflow commit; push both together after Codex review loop completes.",
+        "Soft-resetting a premature commit (`git reset --soft HEAD~1`) preserves all staged changes and is the safe recovery when committing before user review."
+      ]
+    },
+    "friction": [
+      "Issue #205 test bullets contradicted the spec (`label`/`label_id` props that don't exist); required explicit resolution decision before implementation could start.",
+      "Spec §3.1 prose contradicted §1.2 code example (role=Presentation state-attr behavior); required accessibility-grounded decision and spec rewrite.",
+      "CLAUDE.md symlink indirection caused an initial failed edit attempt before discovering AGENTS.md is the real file.",
+      ".claude/skills symlink caused skill to be placed globally before user corrected it to the repo's .agents/skills/ directory.",
+      "Snapshot orphan gate produced false positives when filtered to a single crate; required re-running without the filter.",
+      "cargo xci (~25 min locally) was the motivation to build xci-fast, but this added a full planning + implementation cycle to the session.",
+      "Commit landed before user could review the diff; required a soft-reset and re-commit workflow."
+    ],
+    "open_items": [
+      "PR #648 reviews from Codex still need to be addressed (the review-wait skill was built but the actual review-fix work was deferred to after both commits are pushed together).",
+      "Both local commits (Group implementation + xci-fast infra) are not yet pushed to origin; awaiting Codex review resolution before the combined push.",
+      "Leptos adapter for Group component (`ars-leptos`) — deferred to a separate task.",
+      "Dioxus adapter for Group component (`ars-dioxus`) — deferred to a separate task.",
+      "GroupContext consumption wiring into existing child components (Button, TextField, etc.) — deferred to cross-component follow-up tasks.",
+      "`--exclude <step>` flag for ad-hoc subtraction from xci profiles — deferred.",
+      "Pre-push git hook to auto-run `cargo xci-fast` — deferred.",
+      "Pre-existing doc check warnings (`cargo doc` baseline tech debt) in the workspace — not introduced by this PR but unresolved.",
+      "Flipping `cargo xci` no-arg default from `full` to `fast` — deliberately deferred for backward compat with external scripts."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-19T15:13:53.065102Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 2,
+    "human_modified": 4,
+    "human_removed": 0,
+    "total_committed": 2,
+    "total_lines_changed": 6,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 3,
+      "user_lines_removed": 2,
+      "agent_lines_added": 448,
+      "agent_lines_removed": 19,
+      "user_added_per_file": {
+        "AGENTS.md": 2,
+        "xtask/src/ci/mod.rs": 1
+      },
+      "user_removed_per_file": {
+        "AGENTS.md": 2
+      }
+    }
+  ]
+}
