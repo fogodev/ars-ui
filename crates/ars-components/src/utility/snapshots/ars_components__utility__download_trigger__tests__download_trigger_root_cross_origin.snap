@@ -1,0 +1,53 @@
+---
+source: crates/ars-components/src/utility/download_trigger.rs
+expression: "snapshot_attrs(&api(Props::new().id(\"dl-co\").href(\"https://cdn.example/resource.zip\").filename(\"bundle.zip\").document_origin(\"https://app.example\"),).root_attrs(),)"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-download-fallback",
+            ),
+            String(
+                "required",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "download-trigger",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Download \u{2068}bundle.zip\u{2069}",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "dl-co",
+            ),
+        ),
+        (
+            Href,
+            String(
+                "https://cdn.example/resource.zip",
+            ),
+        ),
+    ],
+    styles: [],
+}

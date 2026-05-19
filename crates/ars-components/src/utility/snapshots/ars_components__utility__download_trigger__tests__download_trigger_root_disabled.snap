@@ -1,0 +1,67 @@
+---
+source: crates/ars-components/src/utility/download_trigger.rs
+expression: "snapshot_attrs(&api(Props::new().id(\"dl-dis\").href(\"https://ex.org/a.png\").document_origin(\"https://ex.org\").disabled(true),).root_attrs(),)"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-disabled",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "download-trigger",
+            ),
+        ),
+        (
+            Aria(
+                Disabled,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Download file",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "dl-dis",
+            ),
+        ),
+        (
+            Download,
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Href,
+            String(
+                "https://ex.org/a.png",
+            ),
+        ),
+    ],
+    styles: [],
+}

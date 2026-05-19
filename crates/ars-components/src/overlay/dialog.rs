@@ -13,6 +13,7 @@
 
 use alloc::{
     string::{String, ToString as _},
+    vec,
     vec::Vec,
 };
 use core::fmt::{self, Debug};

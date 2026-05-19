@@ -1,0 +1,51 @@
+---
+source: crates/ars-components/src/utility/download_trigger.rs
+expression: "snapshot_attrs(&api(Props::new().id(\"dl-sb\").href(\"./asset.bin\").document_origin(\"https://ignored.example\"),).root_attrs(),)"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "download-trigger",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Download file",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "dl-sb",
+            ),
+        ),
+        (
+            Download,
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Href,
+            String(
+                "./asset.bin",
+            ),
+        ),
+    ],
+    styles: [],
+}

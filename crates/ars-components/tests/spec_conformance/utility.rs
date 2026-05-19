@@ -3,9 +3,9 @@
 //! Each test pulls the expected anatomy from the corresponding component
 //! spec's §2 anatomy table and asserts the impl's `Part` enum matches.
 
-use ars_components::utility::group;
 #[cfg(feature = "i18n")]
 use ars_components::utility::highlight;
+use ars_components::utility::{download_trigger, group};
 
 use super::helper::assert_anatomy;
 
@@ -16,6 +16,15 @@ fn group_anatomy_matches_spec() {
     // inherits state through `GroupContext`, so the `Part` enum stays
     // single-variant.
     assert_anatomy("group", &[(group::Part::Root, "root")]);
+}
+
+#[test]
+fn download_trigger_anatomy_matches_spec() {
+    // DownloadTrigger anatomy table (spec §2): single `Root` row (`<a>`).
+    assert_anatomy(
+        "download-trigger",
+        &[(download_trigger::Part::Root, "root")],
+    );
 }
 
 #[cfg(feature = "i18n")]

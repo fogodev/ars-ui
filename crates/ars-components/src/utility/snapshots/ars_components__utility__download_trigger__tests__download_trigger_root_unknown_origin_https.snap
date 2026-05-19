@@ -1,0 +1,53 @@
+---
+source: crates/ars-components/src/utility/download_trigger.rs
+expression: "snapshot_attrs(&api(Props::new().id(\"dl-uo\").href(\"https://static.dev/file.tgz\").filename(\"archive.tgz\"),).root_attrs(),)"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-download-fallback",
+            ),
+            String(
+                "required",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "download-trigger",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Download \u{2068}archive.tgz\u{2069}",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "dl-uo",
+            ),
+        ),
+        (
+            Href,
+            String(
+                "https://static.dev/file.tgz",
+            ),
+        ),
+    ],
+    styles: [],
+}
