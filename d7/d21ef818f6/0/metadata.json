@@ -1,0 +1,124 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "d7d21ef818f6",
+  "session_id": "c1afe54f-0983-4579-91b3-27bd3bf95b73",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-19T20:22:13.614865Z",
+  "branch": "t3code/49f3737d",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "spec/components/data-display/table.md",
+    "crates/ars-components/src/data_display/table/mod.rs",
+    "crates/ars-components/src/data_display/table/tests.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "51722350e5eb",
+  "token_usage": {
+    "input_tokens": 374,
+    "cache_creation_tokens": 2710059,
+    "cache_read_tokens": 110626074,
+    "output_tokens": 219870,
+    "api_call_count": 298
+  },
+  "summary": {
+    "intent": "Implement Task #286 — a framework-agnostic Rust state machine ('agnostic core') for the Table data-display component in the ars-ui library, including selection, sort, expansion, grid focus, column resize, and virtual-scrolling ARIA metadata, following the CLAUDE.md workflow through spec fixes, TDD, post-implementation audit, PR, and Codex review.",
+    "outcome": "Implementation complete and PR #651 opened with 1843-line mod.rs, 1990-line tests.rs, 37 snapshot fixtures, spec conformance test, and proptest invariants. All 8 Codex review findings were addressed with new failing-first tests. Final rebase against main was in progress at session end but push had not yet been completed.",
+    "learnings": {
+      "repo": [
+        "Tabs (`crates/ars-components/src/navigation/tabs/`) is the canonical structural template for new stateful components — section order, event/transition style, Bindable controlled/uncontrolled wiring, and test layout all mirror it.",
+        "`type Effect = NoEffect` is the correct choice for components where adapters read context fields (focused_cell/focused_row) directly and apply DOM side-effects themselves; widening to a typed Effect enum requires a follow-up issue.",
+        "Proptest tests must be marked `#[ignore = \"proptest — nightly extended-proptest job\"]` per workspace convention; they run on the extended CI job, not on every push.",
+        "`cargo xci-fast` is the mandatory 10-step pre-push gate; `cargo xtask spec validate` and `cargo xtask spec compile-snippets` validate spec frontmatter and code block syntax.",
+        "Line coverage threshold for `ars-components` is 90%; `cargo insta test --unreferenced=reject` enforces that every `.snap` fixture is referenced by at least one test.",
+        "The CLAUDE.md workflow has numbered steps that must be followed in order: step 7 = post-implementation-audit skill, step 8 = present for user review before commit, step 11 = add `snapshot-reviewed` label for PRs creating `.snap` files, step 12 = `waiting-for-codex-review` skill after first push.",
+        "`on_props_changed` must be overridden on the `Machine` impl to detect prop deltas and dispatch `SyncProps` / `SyncControlled*` / `SetDirection` events; without it those events are never enqueued.",
+        "GitHub Project board status is updated via `gh` CLI before touching code (CLAUDE.md step: move to In Progress).",
+        "Collections Epic #53 closed 2026-04-08, unblocking Table and all downstream data-display work."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "selection::State::toggle requires a Collection generic that Table doesn't own; toggle must be computed locally via is_selected + select/deselect rather than delegating to state.toggle()."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "After SelectAll, state holds Set::All; DeselectRow and ToggleRow are no-ops against Set::All. Both transitions must materialize Set::All to Multiple(ctx.rows \\ {key}) before applying the deselect."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "SelectAll with SelectAllMode::AllVisible must materialize to Multiple(ctx.rows) rather than Set::All; only SelectAllMode::AllData keeps Set::All."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "is_sorting must be adapter-controlled via a new SetIsSorting(bool) event rather than being implicitly toggled inside the SortColumn arm; the implicit set left the flag stuck when sort state was reset via SyncControlledSortDescriptor."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "select_all_attrs must gate on selection_mode == Multiple (not just select_all_mode); otherwise Single/None modes render an actionable select-all checkbox."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "SetRows must rebase focused_cell.1 (row index) when the focused row moves to a different index after a reorder/sort/filter, not only clear focus when the row disappears entirely."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/tabs/mod.rs",
+          "finding": "SyncControlledValue helper exists in Tabs for wiring Bindable::sync_controlled; SyncControlled* events for Table follow the same pattern where the outer Option is the controlled-mode toggle, not the value itself."
+        }
+      ],
+      "workflow": [
+        "Write failing tests first (TDD red) before implementing fixes — especially critical for Codex review findings where each thread became a failing test before the fix was applied.",
+        "The post-implementation-audit skill runs in multiple rounds: Phase 1 (spec/impl drift table), Phase 2 iterative rounds until two clean passes, Phase 3 coverage audit with numeric threshold check.",
+        "Must commit local changes before rebasing; git rebase will fail if there are uncommitted modifications in the working tree.",
+        "Snapshot tests (insta) require `cargo insta review` or `cargo insta accept` after first run; new fixtures aren't auto-accepted.",
+        "Coverage can be driven up by targeting uncovered branches identified in mutation testing output rather than running a full mutation suite (195 mutants ≈ 30 min; a representative shard is sufficient for the audit).",
+        "Adapter spec files (leptos-components/, dioxus-components/) must be updated in the same PR when agnostic core API signatures change, or they will reference wrong method signatures.",
+        "API socket errors mid-response lose in-flight work; save plan files immediately when returning to plan-writing after a connection drop."
+      ]
+    },
+    "friction": [
+      "API socket connection dropped mid-response while writing the initial plan, losing the in-progress output and requiring an explicit 'Where is the plan?' prompt from the user.",
+      "Spec had 11 significant internal inconsistencies (missing Context fields, wrong FocusCell payload, undeclared locale in code snippets, missing events in the §1.2 table) that all had to be fixed in the same PR.",
+      "selection::State::toggle lacks a non-Collection variant, forcing a manual is_selected + select/deselect pattern throughout the Table machine.",
+      "SyncProps initially only re-pruned selection against disabled_keys but did not copy any Props fields into Context, making runtime prop updates silent no-ops — caught only by Codex review.",
+      "Initial line coverage was below the 90% threshold, requiring two rounds of additional tests to reach 89.58% on mod.rs and 99.4% crate-wide.",
+      "Had to commit Codex fix changes before the rebase could proceed because the working tree was dirty."
+    ],
+    "open_items": [
+      "ScrollToRow(Key) event deferred: requires widening Effect from NoEffect to a typed enum and pulling in ars-collections::Virtualizer plumbing — explicitly deferred to a follow-up issue.",
+      "Full Virtualizer integration for virtual scrolling deferred: this PR only covers the ARIA-only slice (aria-rowcount / aria-colcount / aria-rowindex).",
+      "BulkSelection exclusion-set wrapper excluded: spec describes it as adapter/application code wrapping selection::Set::All, not part of the agnostic core.",
+      "on_load_more: Option<Callback<()>> callback excluded from core: adapter-only, not stored in Context.",
+      "Mutation testing was only run as a representative shard (subset of 195 mutants) due to ~30 min runtime; full mutation suite should run in the extended CI job.",
+      "Rebase against main and final force-push to update PR #651 was in progress at session end but not yet completed."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-19T20:21:02.628248Z",
+    "agent_lines": 203,
+    "agent_removed": 52,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 15,
+    "total_committed": 203,
+    "total_lines_changed": 270,
+    "agent_percentage": 94.44444444444444,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 340,
+      "user_lines_removed": 15,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "crates/ars-components/src/data_display/table/mod.rs": 102,
+        "crates/ars-components/src/data_display/table/tests.rs": 238
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/data_display/table/mod.rs": 15
+      }
+    }
+  ]
+}
