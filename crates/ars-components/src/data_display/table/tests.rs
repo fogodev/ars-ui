@@ -2710,3 +2710,80 @@ fn codex_round2_part_attrs_select_all_uses_ctx_rows() {
         "part_attrs dispatcher must drive aria-checked from ctx.rows, not an empty slice",
     );
 }
+
+// ────────────────────────────────────────────────────────────────────
+// 20. Codex review pass 3 (PR #651) — selection_state alignment with
+//      the user-visible `selected_rows.get()` value across SetRows and
+//      SyncControlledSelectedRows transitions.
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn codex_round3_set_rows_keeps_selection_state_aligned_when_controlled() {
+    // Codex P1 (thread PRRT_kwDORp4enM6DSv8K).
+    // For controlled `selected_rows`, `set(...)` only updates the
+    // internal fallback. `selection_state.selected_keys` must follow
+    // what `get()` actually returns (the parent's value), not the
+    // pruned/restricted internal write — otherwise transition guards
+    // and API reads disagree.
+    let mut controlled = BTreeSet::new();
+    controlled.insert(key("r1"));
+    controlled.insert(key("r2"));
+    let mut service = service_with_rows(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            selected_rows: Some(selection::Set::Multiple(controlled)),
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+
+    // Drop r2 from the registered rows. `restrict_selection_to_rows`
+    // would normally prune r2 out of the *internal* fallback, but the
+    // controlled value still carries r2 — selection_state must mirror
+    // what `selected_rows.get()` reports.
+    drop(service.send(Event::SetRows(vec![key("r1"), key("r3")])));
+
+    assert_eq!(
+        &service.context().selection_state.selected_keys,
+        service.context().selected_rows.get(),
+        "selection_state must track `selected_rows.get()` regardless of controlled mode",
+    );
+}
+
+#[test]
+fn codex_round3_sync_controlled_selected_rows_leave_controlled_resyncs_state() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DSv8M).
+    // When `SyncControlledSelectedRows(None)` switches the Bindable
+    // back to uncontrolled, the internal fallback (set during init)
+    // may differ from the last controlled value. After the transition,
+    // `selection_state.selected_keys` must reflect the internal value
+    // that `get()` now returns.
+    let mut controlled = BTreeSet::new();
+    controlled.insert(key("r1"));
+    controlled.insert(key("r2"));
+    let mut service = service_with_rows(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            selected_rows: Some(selection::Set::Multiple(controlled.clone())),
+            // Internal fallback (used when uncontrolled) is empty —
+            // different from the controlled value so the desync would
+            // be visible.
+            default_selected_rows: selection::Set::Empty,
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    assert_eq!(
+        service.context().selection_state.selected_keys,
+        selection::Set::Multiple(controlled),
+    );
+
+    // Leave controlled mode.
+    drop(service.send(Event::SyncControlledSelectedRows(None)));
+
+    assert_eq!(
+        &service.context().selection_state.selected_keys,
+        service.context().selected_rows.get(),
+        "selection_state must follow `selected_rows.get()` after leaving controlled mode",
+    );
+}

@@ -1206,8 +1206,16 @@ impl ars_core::Machine for Machine {
                         }
                     }
 
-                    ctx.selected_rows.set(restricted_selection.clone());
-                    ctx.selection_state.selected_keys = restricted_selection;
+                    // `set(...)` updates the internal fallback only;
+                    // for controlled Bindables, `get()` still returns
+                    // the parent value. Re-sync
+                    // `selection_state.selected_keys` from `get()` so
+                    // transition guards (`is_selected`, etc.) agree
+                    // with what the API surfaces — otherwise a split
+                    // brain forms after the first row-list change in
+                    // controlled mode.
+                    ctx.selected_rows.set(restricted_selection);
+                    ctx.selection_state.selected_keys = ctx.selected_rows.get().clone();
                     ctx.expanded_rows.set(restricted_expansion);
                     ctx.rows = rows;
                 }))
@@ -1373,11 +1381,16 @@ impl ars_core::Machine for Machine {
                 let v = value.clone();
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.selected_rows.sync_controlled(v.clone());
+                    ctx.selected_rows.sync_controlled(v);
 
-                    if let Some(set) = v {
-                        ctx.selection_state.selected_keys = set;
-                    }
+                    // Re-sync `selection_state.selected_keys` from
+                    // `get()` so it reflects the user-visible selection
+                    // regardless of whether we just entered, updated,
+                    // or left controlled mode. Leaving controlled
+                    // (`None` payload) flips `get()` back to the
+                    // internal fallback, which may differ from the
+                    // last controlled value.
+                    ctx.selection_state.selected_keys = ctx.selected_rows.get().clone();
                 }))
             }
 
