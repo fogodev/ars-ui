@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/layout/frame.rs
+expression: "snapshot_attrs(&Api::new(Props::new()).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "frame",
+            ),
+        ),
+    ],
+    styles: [],
+}

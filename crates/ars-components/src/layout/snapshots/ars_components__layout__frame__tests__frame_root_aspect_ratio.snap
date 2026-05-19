@@ -1,0 +1,38 @@
+---
+source: crates/ars-components/src/layout/frame.rs
+expression: "snapshot_attrs(&Api::new(Props::new().width(\"720px\").aspect_ratio(4.0 /\n3.0)).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "frame",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Width,
+            "720px",
+        ),
+        (
+            PaddingTop,
+            "75.0000%",
+        ),
+        (
+            Position,
+            "relative",
+        ),
+    ],
+}

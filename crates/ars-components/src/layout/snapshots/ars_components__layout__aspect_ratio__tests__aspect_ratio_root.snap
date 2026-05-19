@@ -1,0 +1,38 @@
+---
+source: crates/ars-components/src/layout/aspect_ratio.rs
+expression: "snapshot_attrs(&Api::new(Props::new().ratio(16.0 / 9.0)).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "aspect-ratio",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Width,
+            "100%",
+        ),
+        (
+            PaddingTop,
+            "56.2500%",
+        ),
+        (
+            Position,
+            "relative",
+        ),
+    ],
+}

@@ -1,0 +1,68 @@
+---
+source: crates/ars-components/src/layout/frame.rs
+expression: "snapshot_attrs(&Api::new(Props::new().src(\"https://example.com/embed\").title(\"Example embed\").sandbox(\"allow-scripts allow-same-origin\").allow(\"camera; microphone\").loading(LoadingStrategy::Lazy)).iframe_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "iframe",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "frame",
+            ),
+        ),
+        (
+            Title,
+            String(
+                "Example embed",
+            ),
+        ),
+        (
+            Allow,
+            String(
+                "camera; microphone",
+            ),
+        ),
+        (
+            Loading,
+            String(
+                "lazy",
+            ),
+        ),
+        (
+            Sandbox,
+            String(
+                "allow-scripts allow-same-origin",
+            ),
+        ),
+        (
+            Src,
+            String(
+                "https://example.com/embed",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Width,
+            "100%",
+        ),
+        (
+            Height,
+            "auto",
+        ),
+        (
+            Border,
+            "0",
+        ),
+    ],
+}

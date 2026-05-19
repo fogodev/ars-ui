@@ -1,0 +1,58 @@
+---
+source: crates/ars-components/src/layout/frame.rs
+expression: "snapshot_attrs(&Api::new(Props::new().aspect_ratio(16.0 /\n9.0)).iframe_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "iframe",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "frame",
+            ),
+        ),
+        (
+            Title,
+            String(
+                "",
+            ),
+        ),
+        (
+            Src,
+            String(
+                "",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Width,
+            "100%",
+        ),
+        (
+            Height,
+            "100%",
+        ),
+        (
+            Border,
+            "0",
+        ),
+        (
+            Inset,
+            "0",
+        ),
+        (
+            Position,
+            "absolute",
+        ),
+    ],
+}

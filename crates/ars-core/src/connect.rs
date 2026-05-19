@@ -1339,6 +1339,9 @@ pub enum CssProperty {
     /// `padding-block-end`
     PaddingBlockEnd,
 
+    /// `inset` shorthand for top, right, bottom, and left.
+    Inset,
+
     /// `inset-inline-start`
     InsetInlineStart,
 
@@ -1738,6 +1741,7 @@ impl Display for CssProperty {
             Self::PaddingBlock => "padding-block",
             Self::PaddingBlockStart => "padding-block-start",
             Self::PaddingBlockEnd => "padding-block-end",
+            Self::Inset => "inset",
             Self::InsetInlineStart => "inset-inline-start",
             Self::InsetInlineEnd => "inset-inline-end",
             Self::InsetBlockStart => "inset-block-start",
@@ -2867,6 +2871,7 @@ mod tests {
             (CssProperty::PaddingBlock, "padding-block"),
             (CssProperty::PaddingBlockStart, "padding-block-start"),
             (CssProperty::PaddingBlockEnd, "padding-block-end"),
+            (CssProperty::Inset, "inset"),
             (CssProperty::InsetInlineStart, "inset-inline-start"),
             (CssProperty::InsetInlineEnd, "inset-inline-end"),
             (CssProperty::InsetBlockStart, "inset-block-start"),

@@ -17,6 +17,9 @@
 #[path = "spec_conformance/helper.rs"]
 mod helper;
 
+#[path = "spec_conformance/layout.rs"]
+mod layout;
+
 #[path = "spec_conformance/navigation.rs"]
 mod navigation;
 
