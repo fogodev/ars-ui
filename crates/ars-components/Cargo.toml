@@ -17,6 +17,13 @@ std = [
   "ars-interactions/std"
 ]
 debug = ["dep:log", "ars-core/debug", "ars-interactions/debug"]
+# Enables ICU4X-backed locale-aware Unicode case mapping (via
+# `ars-i18n/icu4x`) and unlocks components whose spec contract requires it
+# — currently `utility::highlight`. Adapters that want the browser
+# `Intl` backend instead can build with `--no-default-features --features
+# std,ars-i18n/web-intl`; in that combination, modules gated on `i18n`
+# (Highlight) are not available.
+i18n = ["ars-i18n/icu4x"]
 uuid = ["ars-collections/uuid"]
 
 [dependencies]

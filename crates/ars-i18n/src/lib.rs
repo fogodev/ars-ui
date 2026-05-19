@@ -53,6 +53,8 @@ pub use calendar::{
 };
 #[cfg(feature = "std")]
 pub use calendar::{to_zoned, to_zoned_date_time};
+#[cfg(feature = "icu4x")]
+pub use case::case_fold;
 #[cfg(any(feature = "icu4x", feature = "web-intl"))]
 pub use case::{to_lowercase, to_uppercase};
 pub use collation::{CollationFormat, CollationOptions, CollationStrength, StringCollator};

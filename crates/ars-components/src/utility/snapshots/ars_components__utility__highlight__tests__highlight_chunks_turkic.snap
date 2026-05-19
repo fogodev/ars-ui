@@ -1,0 +1,14 @@
+---
+source: crates/ars-components/src/utility/highlight.rs
+expression: "snapshot_chunks(&highlight_chunks(&props, &turkish()))"
+---
+[
+    HighlightChunk {
+        text: "i",
+        highlighted: true,
+    },
+    HighlightChunk {
+        text: "stanbul",
+        highlighted: false,
+    },
+]

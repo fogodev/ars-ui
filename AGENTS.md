@@ -26,11 +26,12 @@ For implementation tasks:
 4. Add or update the named tests first.
 5. Implement only the scope required to make those tests pass.
 6. If implementation changes the intended contract, update the relevant spec in the same task.
-7. Present the final result for user review before any commit.
-8. After user approval, run `cargo xci` locally and fix any failures before pushing anything to GitHub. During normal implementation, reserve `cargo xci` for substantial chunks of code or the final pre-PR gate; for small follow-up changes, run the focused tests and checks that cover the edited code instead.
-9. After `cargo xci` passes, commit and push a PR targeting `main`. The PR body MUST include an auto-close keyword for the issue being delivered, for example `Closes #20` or `Fixes #20`, so GitHub closes the issue automatically when the PR merges.
-10. **If the PR creates or modifies any `.snap` insta fixtures, attach the `snapshot-reviewed` label after opening or updating it** (`gh pr edit <num> --add-label "snapshot-reviewed"`). This signals to reviewers that the snapshot output was inspected and is intentional. Re-apply the label whenever you push a commit that touches `.snap` files; the workflow assumes the label reflects the latest snapshot state.
-11. Only after CI passes and the PR is merged, close the issue.
+7. **MANDATORY:** Invoke the `post-implementation-audit` skill (`.agents/skills/post-implementation-audit/SKILL.md`). It runs three sequential audits on the new code — (a) spec/implementation drift with "best outcome" recommendations, (b) iterative "anything else missing?" passes (minimum two rounds), (c) test-coverage audit across every test type the workspace uses (unit, snapshot, proptest, mutation, doc, spec-conformance, llvm-cov). **Every finding lands in _this_ PR — no deferral, no follow-up issues.** This step exists because initial implementations consistently ship spec drift and silent contract violations that take 3+ review round-trips to surface; the audit collapses them into one. Skipping this step is a contract violation.
+8. Present the final result for user review before any commit.
+9. After user approval, run `cargo xci` locally and fix any failures before pushing anything to GitHub. During normal implementation, reserve `cargo xci` for substantial chunks of code or the final pre-PR gate; for small follow-up changes, run the focused tests and checks that cover the edited code instead.
+10. After `cargo xci` passes, commit and push a PR targeting `main`. The PR body MUST include an auto-close keyword for the issue being delivered, for example `Closes #20` or `Fixes #20`, so GitHub closes the issue automatically when the PR merges.
+11. **If the PR creates or modifies any `.snap` insta fixtures, attach the `snapshot-reviewed` label after opening or updating it** (`gh pr edit <num> --add-label "snapshot-reviewed"`). This signals to reviewers that the snapshot output was inspected and is intentional. Re-apply the label whenever you push a commit that touches `.snap` files; the workflow assumes the label reflects the latest snapshot state.
+12. Only after CI passes and the PR is merged, close the issue.
 
 Never close a GitHub issue without a merged PR that passes CI. Never commit or push without explicit user approval. Keep the issue, PR, and Project board status aligned with the actual work state at every step.
 

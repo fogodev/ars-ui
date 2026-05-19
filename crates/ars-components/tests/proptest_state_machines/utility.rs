@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+#[cfg(feature = "i18n")]
+use ars_components::utility::highlight;
 use ars_components::utility::{
     button, error_boundary, field, fieldset, form, form_submit, separator, visually_hidden,
 };
@@ -8,6 +10,8 @@ use ars_forms::{
     form::Mode,
     validation::{BoxedAsyncValidator, Error},
 };
+#[cfg(feature = "i18n")]
+use ars_i18n::Locale;
 use ars_i18n::Orientation;
 use proptest::prelude::*;
 
@@ -691,6 +695,134 @@ proptest! {
                 attrs_b.get(&attr),
                 "attr {:?} should be count-invariant", attr
             );
+        }
+    }
+}
+
+// ── Highlight (utility::highlight, gated on the `i18n` feature) ────
+
+#[cfg(feature = "i18n")]
+fn arb_match_strategy() -> impl Strategy<Value = highlight::MatchStrategy> {
+    prop_oneof![
+        Just(highlight::MatchStrategy::Contains),
+        Just(highlight::MatchStrategy::StartsWith),
+        Just(highlight::MatchStrategy::Fuzzy),
+    ]
+}
+
+#[cfg(feature = "i18n")]
+fn arb_highlight_text() -> impl Strategy<Value = String> {
+    // Mix of ASCII, multi-byte UTF-8 (ß, İ, é), and whitespace to
+    // exercise byte-boundary and case-folding paths together.
+    "[a-zA-Z0-9 _\u{00DF}\u{0130}\u{00E9}]{0,32}".prop_map(String::from)
+}
+
+#[cfg(feature = "i18n")]
+fn arb_highlight_query() -> impl Strategy<Value = Vec<String>> {
+    prop::collection::vec(
+        "[a-zA-Z0-9 \u{00DF}\u{0130}]{0,8}".prop_map(String::from),
+        0..4,
+    )
+}
+
+#[cfg(feature = "i18n")]
+fn arb_highlight_props() -> impl Strategy<Value = highlight::Props> {
+    (
+        arb_highlight_query(),
+        arb_highlight_text(),
+        any::<bool>(),
+        arb_match_strategy(),
+    )
+        .prop_map(|(query, text, ignore_case, match_strategy)| {
+            highlight::Props::new()
+                .query(query)
+                .text(text)
+                .ignore_case(ignore_case)
+                .match_strategy(match_strategy)
+        })
+}
+
+#[cfg(feature = "i18n")]
+fn arb_highlight_locale() -> impl Strategy<Value = Locale> {
+    // Mix of locale families that exercise different case-folding paths:
+    // - en-US: default Unicode fold.
+    // - tr / az: Turkic dotted/dotless-I fold (CaseMapper::fold_turkic_string).
+    // - de: German eszett expansion `ß → ss`.
+    // - el: Greek final-sigma collapse `Σ/σ/ς → σ`.
+    // - lt: Lithuanian combining-dot handling.
+    // - hy: Armenian — exercises a script with case but no special tailoring.
+    // - ar: a script with no case at all (the fold is the identity).
+    prop_oneof![
+        Just(Locale::parse("en-US").expect("en-US must parse")),
+        Just(Locale::parse("tr").expect("tr must parse")),
+        Just(Locale::parse("az").expect("az must parse")),
+        Just(Locale::parse("de").expect("de must parse")),
+        Just(Locale::parse("el").expect("el must parse")),
+        Just(Locale::parse("lt").expect("lt must parse")),
+        Just(Locale::parse("hy").expect("hy must parse")),
+        Just(Locale::parse("ar").expect("ar must parse")),
+    ]
+}
+
+#[cfg(feature = "i18n")]
+proptest! {
+    #![proptest_config(super::common::proptest_config())]
+
+    /// For any combination of props and locale, `highlight_chunks` must:
+    ///
+    /// 1. **Never panic** (covered by the test reaching its end).
+    /// 2. **Roundtrip the text** — concatenating all chunk slices in order
+    ///    yields the original `props.text` byte-for-byte. Catches any
+    ///    range / index / byte-map regression silently dropping or
+    ///    duplicating text.
+    /// 3. **Never emit two adjacent highlighted chunks** — the agnostic
+    ///    core's adjacency-merge contract (spec §3.1) must hold for every
+    ///    strategy and every query combination.
+    /// 4. **Never emit empty chunks** — zero-length segments are skipped
+    ///    by `build_chunks`; this guards against silent regressions there.
+    /// 5. **Empty query (or all-empty queries)** must produce exactly one
+    ///    non-highlighted chunk wrapping the full text, when the text is
+    ///    non-empty. Empty text yields an empty `Vec`.
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_highlight_chunks_invariants(
+        props in arb_highlight_props(),
+        locale in arb_highlight_locale(),
+    ) {
+        let chunks = highlight::highlight_chunks(&props, &locale);
+
+        // (2) roundtrip
+        let concatenated: String = chunks.iter().map(|c| c.text).collect();
+        prop_assert_eq!(
+            concatenated.as_str(),
+            props.text.as_str(),
+            "chunks must reconstruct the original text"
+        );
+
+        // (3) no two adjacent highlighted chunks
+        for window in chunks.windows(2) {
+            prop_assert!(
+                !(window[0].highlighted && window[1].highlighted),
+                "adjacency-merge regression: {:?}", window
+            );
+        }
+
+        // (4) no empty chunks
+        for chunk in &chunks {
+            prop_assert!(
+                !chunk.text.is_empty(),
+                "empty chunk emitted: {:?}", chunk
+            );
+        }
+
+        // (5) empty-query / empty-text special cases
+        let all_queries_empty = props.query.iter().all(String::is_empty);
+        if props.text.is_empty() {
+            prop_assert!(chunks.is_empty(), "empty text should yield empty Vec");
+        } else if props.query.is_empty() || all_queries_empty {
+            prop_assert_eq!(chunks.len(), 1, "empty query → exactly one chunk");
+            prop_assert!(!chunks[0].highlighted, "empty-query chunk must not be highlighted");
+            prop_assert_eq!(chunks[0].text, props.text.as_str());
         }
     }
 }

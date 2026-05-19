@@ -32,10 +32,10 @@ This spec maps the core [`Highlight`](../../components/utility/highlight.md) uti
 
 ## 5. Attr Merge and Ownership Rules
 
-| Target node                      | Core attrs                                     | Adapter-owned attrs                                                                                  | Consumer attrs                                         | Merge order                                                                                                     | Ownership notes                                   |
-| -------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| root text container if present   | root attrs when the utility renders a wrapper  | chunk-boundary attrs plus optional mixed-direction `dir="auto"` repair                               | consumer wrapper attrs if exposed                      | core structural attrs win; documented directionality attrs and `class`/`style` merge additively                 | adapter-owned wrapper when present                |
-| matched/unmatched chunk wrappers | chunk attrs derived from the core match result | adapter `data-*` part markers and optional `unicode-bidi: isolate` styles when bidi repair is needed | consumer decoration only if chunk rendering is exposed | match-state attrs and adapter-owned bidi repair win over conflicting decoration that would break text isolation | chunk wrappers are adapter-owned structural nodes |
+| Target node                      | Core attrs                                                                                       | Adapter-owned attrs                                            | Consumer attrs                                         | Merge order                                                                       | Ownership notes                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------- | ------------------------------------------------- |
+| root `<span>`                    | `Api::root_attrs()` → `data-ars-scope`, `data-ars-part`, `dir="auto"`                            | none                                                           | consumer wrapper attrs if exposed                      | core structural attrs win; `class`/`style` merge additively                       | core owns root attrs including the BiDi root      |
+| matched/unmatched chunk wrappers | `Api::chunk_attrs(highlighted)` → `data-ars-part="highlight-chunk"` + `data-ars-highlighted="…"` | optional `unicode-bidi: isolate` styling on mixed-bidi content | consumer decoration only if chunk rendering is exposed | match-state attrs win over conflicting decoration that would break text isolation | chunk wrappers are adapter-owned structural nodes |
 
 ## 6. Composition / Context Contract
 
@@ -145,21 +145,25 @@ Highlighting is derived from input text and query changes. If the adapter accept
 
 ## 23. Framework-Specific Behavior
 
-Leptos can render repeated chunks directly from an iterator. For mixed-direction content, the adapter should set `dir="auto"` on the root wrapper and may apply `unicode-bidi: isolate` on repeated `<mark>` and `<span>` chunk nodes when the highlighted text would otherwise bleed bidi ordering into surrounding content.
+Leptos renders repeated chunks directly from an iterator. The core sets `dir="auto"` on the root wrapper via `Api::root_attrs()` — adapters do not need to add it. For mixed-direction content where chunk boundaries would re-order surrounding text visually, adapters MAY apply `unicode-bidi: isolate` CSS to chunk nodes (this is a styling concern outside the agnostic core's reach).
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 #[component]
 pub fn Highlight() -> impl IntoView {
     let props = highlight::Props::default();
+    let api = highlight::Api::new(props);
+    let locale = use_locale();
+
     view! {
-        <span data-ars-scope="highlight" data-ars-part="root">
-            {highlight::highlight_chunks(&props).into_iter().map(|chunk| {
+        <span ..api.root_attrs()>
+            {api.chunks(&locale).into_iter().map(|chunk| {
+                let attrs = api.chunk_attrs(chunk.highlighted);
                 if chunk.highlighted {
-                    view! { <mark data-ars-part="highlight-chunk">{chunk.text}</mark> }.into_any()
+                    Either::Left(view! { <mark ..attrs>{chunk.text}</mark> })
                 } else {
-                    view! { <span data-ars-part="highlight-chunk">{chunk.text}</span> }.into_any()
+                    Either::Right(view! { <span ..attrs>{chunk.text}</span> })
                 }
             }).collect_view()}
         </span>
@@ -180,8 +184,7 @@ No expanded skeleton beyond the canonical sketch is required for this utility.
 
 ## 27. Accessibility and SSR Notes
 
-Must preserve `<mark>` semantics and repeated chunk structure.
-For fuzzy matching that would otherwise produce excessive tiny wrappers, the adapter should consolidate adjacent chunks when that reduces screen-reader verbosity without changing the user-visible matched ranges.
+Must preserve `<mark>` semantics and repeated chunk structure. The agnostic core (`highlight_chunks` / `Api::chunks`) already consolidates overlapping and adjacent ranges before returning, so adapters never see back-to-back highlighted chunks and screen readers never get a stutter of "highlighted, highlighted, highlighted" for adjacent fuzzy hits. Adapters MAY layer a summary announcement (e.g., live-region "N characters matched") for very-high-cardinality fuzzy results.
 
 ## 28. Parity Summary and Intentional Deviations
 

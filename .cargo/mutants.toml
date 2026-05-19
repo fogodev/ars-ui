@@ -169,6 +169,29 @@ exclude_re = [
   'MissingProviderEffects>::now_ms -> u64 with 0',
   'MissingProviderEffects>::get_bounding_rect -> Option<Rect> with None',
 
+  # Highlight component: three equivalent mutations in the range
+  # construction / merge / chunk-emission pipeline. All three are
+  # defensive guards against zero-length original-text ranges produced
+  # when a case-fold expansion (e.g., `ß → ss`) is partially matched.
+  # No code path in the pipeline can produce a zero-length range that
+  # would survive the *next* filter, so weakening any single guard
+  # produces equivalent end-to-end behaviour (verified by output diff
+  # against the test corpus).
+  #
+  # - `< → <=` in push_contains_matches: would push (a, a) ranges; those
+  #   then get filtered by build_chunks's `end > start` check before
+  #   emitting a chunk.
+  # - `> → >=` in merge_ranges: when `end == last.1`, the body becomes
+  #   `last.1 = last.1`, a no-op.
+  # - `> → >=` in build_chunks: would push zero-length highlighted
+  #   chunks, but no upstream pipeline stage produces zero-length ranges
+  #   (push_contains_matches filters them; push_starts_with_match
+  #   requires `orig_end > 0`; push_fuzzy_matches always uses
+  #   `len_utf8() >= 1`).
+  'highlight\.rs:\d+:\d+: replace < with <= in push_contains_matches',
+  'highlight\.rs:\d+:\d+: replace > with >= in merge_ranges',
+  'highlight\.rs:\d+:\d+: replace > with >= in build_chunks',
+
   # Tabs `step_focus` checked-counter mutations and the Blur
   # short-circuit are equivalent in every reachable state. Regex is
   # line-number-agnostic so it survives source growth.

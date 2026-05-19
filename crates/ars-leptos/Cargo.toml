@@ -16,8 +16,10 @@ csr     = ["leptos/csr"]
 uuid    = ["ars-collections/uuid", "ars-components/uuid"]
 # Pre-compiled CLDR data via ICU4X. Default backend on native targets and the
 # server-side rendering path. Use `--no-default-features --features csr,ars-i18n/web-intl`
-# to swap icu4x for the browser-native Intl API on wasm32 builds.
-icu4x = ["ars-i18n/std", "ars-i18n/icu4x"]
+# to swap icu4x for the browser-native Intl API on wasm32 builds. Also enables
+# `ars-components/i18n` so locale-aware components (e.g., `Highlight`) are
+# available in the adapter build.
+icu4x = ["ars-i18n/std", "ars-i18n/icu4x", "ars-components/i18n"]
 
 [dependencies]
 ars-a11y         = { path = "../ars-a11y" }

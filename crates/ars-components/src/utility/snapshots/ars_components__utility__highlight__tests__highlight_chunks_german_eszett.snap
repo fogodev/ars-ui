@@ -1,0 +1,26 @@
+---
+source: crates/ars-components/src/utility/highlight.rs
+expression: "snapshot_chunks(&highlight_chunks(&props, &german()))"
+---
+[
+    HighlightChunk {
+        text: "Stra",
+        highlighted: false,
+    },
+    HighlightChunk {
+        text: "ß",
+        highlighted: true,
+    },
+    HighlightChunk {
+        text: "e ist STRA",
+        highlighted: false,
+    },
+    HighlightChunk {
+        text: "SS",
+        highlighted: true,
+    },
+    HighlightChunk {
+        text: "E",
+        highlighted: false,
+    },
+]
