@@ -1,0 +1,110 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "ae53d0a267fc",
+  "session_id": "c1afe54f-0983-4579-91b3-27bd3bf95b73",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-19T20:55:59.527684Z",
+  "branch": "t3code/49f3737d",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "d63bcb603634",
+  "token_usage": {
+    "input_tokens": 440,
+    "cache_creation_tokens": 3327608,
+    "cache_read_tokens": 137419313,
+    "output_tokens": 247711,
+    "api_call_count": 344
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "summary": {
+    "intent": "Implement Task #286 — the framework-agnostic Table state machine for ars-ui, covering row/column selection, sort, expansion, grid focus, column resize, and virtual scrolling ARIA metadata, with all spec drifts fixed in the same PR.",
+    "outcome": "Full Table core implemented (~1843 LOC mod.rs, ~2000 LOC tests.rs, 37 insta snapshots, 113 passing tests), two rounds of Codex review addressed (14 total findings), rebased on main, force-pushed to PR #651, all threads resolved and Codex pass 3 triggered.",
+    "learnings": {
+      "repo": [
+        "Tabs (`crates/ars-components/src/navigation/tabs/mod.rs`) is the canonical structural template for complex stateful components — same section order (State → Event → Messages → Props → Context → Part → Machine → Api) must be followed.",
+        "CLAUDE.md mandates that spec/code mismatches are resolved in the same PR as the code; spec edits must land alongside implementation.",
+        "`cargo xci-fast` is the 10-gate pre-push gate; it must pass (including clippy zero-warnings, coverage ≥ 90%, insta --unreferenced=reject) before any push.",
+        "Proptests are marked `#[ignore = \"proptest — nightly extended-proptest job\"]` by workspace convention.",
+        "Post-implementation-audit (spec/impl drift + iterative missing-anything + test-coverage) is mandatory per CLAUDE.md step 7 before user review.",
+        "Codex review loop is mandatory: post `@codex review`, poll until terminal state, address all findings with TDD regression tests, resolve threads via GraphQL, re-trigger — repeat until 👍.",
+        "Snapshot fixtures require the `snapshot-reviewed` label on any PR that creates `.snap` files.",
+        "Coverage threshold is 90% (both line and branch) enforced by `cargo xci-fast`; the table module ended at ~92.7% lines / 91.4% branches.",
+        "The `select_all_attrs` pass-all-row-keys idiom: `ConnectApi::part_attrs` must route `Part::SelectAllCheckbox` through the actual `ctx.rows` slice, not an empty `&[]` — otherwise `aria-checked` always reports no selection.",
+        "`selection::Set::All` is not materialized by `selection::State::deselect/toggle`; callers must detect `Set::All` and manually build `Set::Multiple(ctx.rows \\ {key})` when individual rows are toggled off after a SelectAll.",
+        "Controlled Bindable sync events must use `Option<Option<T>>` semantics: outer `None` exits controlled mode, outer `Some(None)` sets controlled value to None, outer `Some(Some(v))` sets controlled value to v — using `Option<T>` prevents the adapter from ever reverting to uncontrolled.",
+        "`on_props_changed` must be overridden in `ConnectApi` to dispatch `SyncProps` / `SyncControlled*` / `SetDirection` events; without the override, no controlled-mode prop changes are ever dispatched to the machine.",
+        "`SortColumn` must NOT set `is_sorting = true` internally — that flag is adapter-controlled lifecycle state (async load), surfaced via a dedicated `SetIsSorting(bool)` event.",
+        "`SelectAll` semantics differ by mode: `SelectAllMode::AllVisible` materializes `Set::Multiple(ctx.rows)` (visible page only), `SelectAllMode::AllData` writes `Set::All` (server-side select-all)."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "Machine::transition signature uses `_props` parameter; must rename to `props` when SyncProps arm reads from it — otherwise the compiler silently ignores all prop-to-context field copies."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "context_only closure parameter types must be explicitly annotated (e.g., `|ctx: &mut Context|`) — the compiler can't infer them from the SortDescriptor generic without the annotation, causing E0282."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "SetRows must rebase focused_cell.1 (row_index) in addition to dropping stale row keys from focus — row reorder/sort/filter shifts indices even when the key is still present."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "SyncProps must re-sync ComponentIds-derived `id` and `caption_id` when props.id changes; they are not automatically re-derived by the machine framework."
+        },
+        {
+          "path": "spec/components/data-display/table.md",
+          "finding": "§1.7 FocusCell had a literal bug hardcoding row index 0; correct payload is `{ row: Key, col: usize, row_index: usize }` and the transition writes `(col, row_index)`."
+        },
+        {
+          "path": "spec/components/data-display/table.md",
+          "finding": "§3.4.2: Non-sortable columns MUST omit `aria-sort` entirely — the spec's example was setting `aria-sort=\"none\"` unconditionally which violates ARIA 1.2."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance.rs",
+          "finding": "Rebase conflict: main added a `layout` module here while the branch added `data_display`; both must be present after resolution."
+        }
+      ],
+      "workflow": [
+        "TDD is strictly enforced: write failing tests (compile error counts as red) before touching implementation — Codex findings were all addressed test-first.",
+        "Codex thread replies must cite the specific commit SHA and name the regression test that locks in the fix — generic replies are insufficient for thread resolution.",
+        "All Codex threads must be resolved via GraphQL `resolveReviewThread` mutation after addressing; just commenting is not enough.",
+        "Rebase (not merge) against main before force-push to keep PR commit history linear; conflicts must be resolved then staged before `git rebase --continue`.",
+        "Coverage improvement is a good signal: adding regression tests for Codex findings raised branch coverage from 87.95% to 91.40%.",
+        "`cargo insta test --features i18n --unreferenced=reject` is the correct command to verify no orphaned snapshot fixtures remain after test reorganization.",
+        "When an API error kills the plan mid-write, the user may not see the partial output — the next action should be to write the plan to disk immediately rather than re-deriving it from context."
+      ]
+    },
+    "friction": [
+      "API socket error mid-plan-writing caused the plan to be lost; had to write it to disk in a follow-up turn, which confused the user ('Where is the plan?').",
+      "Two full Codex review rounds (8 findings + 6 findings = 14 total) required before approval, each needing a full TDD + rebase + force-push + thread-resolve cycle.",
+      "The `selection::Set::All` materialization bug was subtle — the `state.deselect()` method silently no-ops on `Set::All`, so SelectAll followed by ToggleRow appeared to work but left state inconsistent. Not detectable by static analysis.",
+      "`SyncControlledSortDescriptor` payload semantics mismatch (`Option<T>` vs `Option<Option<T>>`) required updating both the Event enum signature and all call sites in tests and on_props_changed.",
+      "The `on_props_changed` omission (no override) caused controlled-mode sync to be completely silently broken — no compile error, no test failure until Codex specifically constructed the multi-render scenario.",
+      "Clippy `unused-mut` warning in the round-2 regression tests blocked `xci-fast` and required an extra fix+push cycle.",
+      "One rebase conflict on `spec_conformance.rs` required manual resolution (main added `layout` module while branch added `data_display`).",
+      "Background Codex poller task output had to be manually read via file path — there was no structured way to get a summary of findings without parsing raw GitHub API JSON."
+    ],
+    "open_items": [
+      "`ScrollToRow(Key)` event and full Virtualizer integration explicitly deferred — would require widening `type Effect` from `NoEffect` to a typed enum and pulling in `ars-collections::Virtualizer` plumbing.",
+      "`BulkSelection` exclusion-set wrapper deferred — described as adapter/application code that wraps `selection::Set::All`; not part of the agnostic core.",
+      "`on_load_more: Option<Callback<()>>` callback is adapter-only and not stored in the core machine.",
+      "Codex pass 3 was triggered at end of session but result not yet known — PR #651 may have additional findings.",
+      "Mutation testing shard run (195 mutants, 8 shards) was started but only shard 0 was evaluated due to the ~30 min full-run cost; mutation coverage of the transitions is unverified beyond the shard."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
