@@ -127,8 +127,12 @@ impl Api {
         };
         attrs.set(HtmlAttr::Role, role_str);
 
-        // State attributes — emitted unconditionally regardless of role
-        // (see §3.1 for the accessibility rationale).
+        // State attributes — `aria-disabled` and `aria-invalid` are WAI-ARIA
+        // 1.2 §6.5 globals (valid on every role, including `presentation`);
+        // `aria-readonly` is non-global and is NOT emitted on the root because
+        // WAI-ARIA does not list it as supported on `group`/`region`/
+        // `presentation`. See §3.1 for the full rationale. The `data-ars-*`
+        // styling hooks always emit so CSS targeting stays symmetric.
         if self.props.disabled {
             attrs
                 .set(HtmlAttr::Aria(AriaAttr::Disabled), "true")
@@ -140,9 +144,7 @@ impl Api {
                 .set_bool(HtmlAttr::Data("ars-invalid"), true);
         }
         if self.props.read_only {
-            attrs
-                .set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true")
-                .set_bool(HtmlAttr::Data("ars-readonly"), true);
+            attrs.set_bool(HtmlAttr::Data("ars-readonly"), true);
         }
         if let Some(dir) = self.props.dir {
             attrs.set(HtmlAttr::Dir, dir.as_html_attr());
@@ -182,15 +184,18 @@ Group
 | Attribute          | Element | Source            | Notes                                                        |
 | ------------------ | ------- | ----------------- | ------------------------------------------------------------ |
 | `role`             | Root    | `props.role`      | `"group"` (default), `"region"`, or `"presentation"`         |
-| `aria-disabled`    | Root    | `props.disabled`  | `"true"` when the group is disabled                          |
-| `aria-invalid`     | Root    | `props.invalid`   | `"true"` when the group is in an invalid state               |
-| `aria-readonly`    | Root    | `props.read_only` | `"true"` when the group is read-only                         |
+| `aria-disabled`    | Root    | `props.disabled`  | `"true"` when the group is disabled (global state)           |
+| `aria-invalid`     | Root    | `props.invalid`   | `"true"` when the group is in an invalid state (global state) |
+| `data-ars-disabled` | Root   | `props.disabled`  | `"true"` styling hook when the group is disabled             |
+| `data-ars-invalid` | Root    | `props.invalid`   | `"true"` styling hook when the group is in an invalid state  |
+| `data-ars-readonly` | Root   | `props.read_only` | `"true"` styling hook when the group is read-only            |
 | `aria-label`       | Root    | Consumer-provided | Accessible name for the group (required for `role="region"`) |
 | `aria-labelledby`  | Root    | Consumer-provided | Alternative accessible name via referenced element           |
 | `aria-describedby` | Root    | Consumer-provided | Links to description or error message                        |
 
 - When `role` is `Region`, an accessible name (`aria-label` or `aria-labelledby`) is **required** per WAI-ARIA.
-- State attributes (`aria-disabled`, `aria-invalid`, `aria-readonly`) are emitted on the root whenever the corresponding prop is `true`, **regardless of `role`**. WAI-ARIA 1.2 §5.4 explicitly preserves global states and properties on elements with `role="presentation"`; suppressing them there would only mask the visual state from assistive technology without changing the semantics. React Aria (parity reference, §5.1) also emits state attributes unconditionally.
+- `aria-disabled` and `aria-invalid` are WAI-ARIA 1.2 §6.5 **global** states — supported on every role, including `role="presentation"`. They emit on the root whenever the corresponding prop is `true`.
+- `aria-readonly` is **not** a WAI-ARIA 1.2 global state and is **not** emitted on the root. WAI-ARIA only lists `aria-readonly` as supported on roles such as `checkbox`, `textbox`, `combobox`, `grid`, `radiogroup`, `slider`, `spinbutton`, and `switch` — none of `GroupRole`'s variants (`group`, `region`, `presentation`) appear in that set, so emitting it would be invalid ARIA that conformance tools flag and assistive tech may ignore. The read-only state still propagates to descendants through `GroupContext`, and the `data-ars-readonly` styling hook still emits so CSS targeting remains symmetric. Descendant controls whose own roles support `aria-readonly` apply it themselves after reading the context.
 - `aria-disabled` on a `role="group"` container does NOT natively propagate to children (unlike `<fieldset disabled>`). The adapter MUST use `GroupContext` to disable children programmatically.
 
 ### 3.2 Context Propagation

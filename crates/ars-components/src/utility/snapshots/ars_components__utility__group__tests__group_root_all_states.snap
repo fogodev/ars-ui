@@ -61,14 +61,6 @@ AttrMap {
             ),
         ),
         (
-            Aria(
-                ReadOnly,
-            ),
-            String(
-                "true",
-            ),
-        ),
-        (
             Id,
             String(
                 "",

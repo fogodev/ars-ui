@@ -202,13 +202,31 @@ impl Api {
     /// Returns the attributes for the root element.
     ///
     /// Always emits the instance `id`, the scope/part data attributes, and a
-    /// `role` derived from [`Props::role`]. State attributes
-    /// (`aria-disabled`, `aria-invalid`, `aria-readonly` plus their
-    /// `data-ars-*` styling counterparts) are emitted whenever the
-    /// corresponding prop is `true`, regardless of the role — WAI-ARIA 1.2
-    /// §5.4 preserves global states on `role="presentation"`, and React Aria
-    /// follows the same convention. When [`Props::dir`] is `Some`, the
-    /// resolved direction is forwarded to the `dir` attribute.
+    /// `role` derived from [`Props::role`].
+    ///
+    /// State attributes split along the WAI-ARIA 1.2 global / role-supported
+    /// boundary:
+    ///
+    /// - `aria-disabled` and `aria-invalid` are WAI-ARIA 1.2 §6.5 *global*
+    ///   states — supported on every role, including `role="presentation"`.
+    ///   They emit on the root whenever the corresponding prop is `true`.
+    /// - `aria-readonly` is **not** global — WAI-ARIA 1.2 only lists it as
+    ///   supported on roles such as `checkbox`, `textbox`, `combobox`, `grid`,
+    ///   `radiogroup`, `slider`, `spinbutton`, and `switch`. None of
+    ///   [`GroupRole`]'s variants (`group`, `region`, `presentation`) appear
+    ///   in that set, so emitting `aria-readonly` here would be invalid ARIA.
+    ///   The read-only state still reaches descendants through
+    ///   [`GroupContext`], and the `data-ars-readonly` styling hook still
+    ///   emits so CSS targeting remains symmetric with the other states.
+    ///   Descendant controls whose own roles support `aria-readonly` apply
+    ///   it themselves after reading the context.
+    ///
+    /// The three `data-ars-*` styling hooks always emit when their
+    /// corresponding prop is `true` so that CSS / theming code can target
+    /// every state uniformly, independent of the ARIA validity constraints.
+    ///
+    /// When [`Props::dir`] is `Some`, the resolved direction is forwarded to
+    /// the `dir` attribute.
     #[must_use]
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
@@ -240,9 +258,13 @@ impl Api {
         }
 
         if self.props.read_only {
-            attrs
-                .set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true")
-                .set_bool(HtmlAttr::Data("ars-readonly"), true);
+            // No `aria-readonly` here — WAI-ARIA 1.2 does not list it as
+            // supported on `role="group"`, `role="region"`, or
+            // `role="presentation"`. Read-only state propagates through
+            // `GroupContext` to descendant controls whose own roles do
+            // support it. See the doc comment on `root_attrs` for the
+            // full rationale.
+            attrs.set_bool(HtmlAttr::Data("ars-readonly"), true);
         }
 
         if let Some(dir) = self.props.dir {
@@ -563,10 +585,25 @@ mod tests {
     }
 
     #[test]
-    fn root_read_only_emits_aria_and_data_attrs() {
+    fn root_read_only_emits_data_attr_but_not_aria_readonly() {
+        // `aria-readonly` is NOT a WAI-ARIA 1.2 global state — it is only
+        // listed as supported on roles like `checkbox`, `textbox`, `combobox`,
+        // `grid`, `radiogroup`, `slider`, `spinbutton`, `switch`, etc.
+        // `role="group"` (and `region` / `presentation`) are not in that set,
+        // so emitting `aria-readonly` on the root would be invalid ARIA that
+        // conformance tools flag and assistive tech may ignore.
+        //
+        // The read-only state still reaches descendants through
+        // `GroupContext`, and the `data-ars-readonly` styling hook stays so
+        // CSS targeting works. Descendant controls whose own roles support
+        // `aria-readonly` apply it themselves after reading the context.
         let attrs = Api::new(Props::new().read_only(true)).root_attrs();
 
-        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ReadOnly)), Some("true"));
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::ReadOnly)),
+            None,
+            "aria-readonly must not be emitted on role=\"group\"/region/presentation",
+        );
         assert_eq!(attrs.get(&HtmlAttr::Data("ars-readonly")), Some("true"));
     }
 
@@ -583,9 +620,12 @@ mod tests {
     }
 
     #[test]
-    fn root_state_attrs_emit_on_presentation_role() {
-        // WAI-ARIA 1.2 §5.4 preserves global states on `role="presentation"`;
-        // ars-ui follows React Aria parity by emitting them unconditionally.
+    fn root_global_state_attrs_emit_on_presentation_role() {
+        // `aria-disabled` and `aria-invalid` are WAI-ARIA 1.2 §6.5 global
+        // states — supported on every role, including `role="presentation"`,
+        // so they still emit on the root. `aria-readonly` is NOT global
+        // (see `root_read_only_emits_data_attr_but_not_aria_readonly`), so
+        // it is *not* emitted regardless of role.
         let attrs = Api::new(
             Props::new()
                 .disabled(true)
@@ -598,7 +638,16 @@ mod tests {
         assert_eq!(attrs.get(&HtmlAttr::Role), Some("presentation"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Invalid)), Some("true"));
-        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ReadOnly)), Some("true"));
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::ReadOnly)),
+            None,
+            "aria-readonly is non-global and must not appear on role=presentation",
+        );
+        // The data-* styling hooks still emit for all three so CSS targeting
+        // remains symmetric.
+        assert_eq!(attrs.get(&HtmlAttr::Data("ars-disabled")), Some("true"));
+        assert_eq!(attrs.get(&HtmlAttr::Data("ars-invalid")), Some("true"));
+        assert_eq!(attrs.get(&HtmlAttr::Data("ars-readonly")), Some("true"));
     }
 
     #[test]
