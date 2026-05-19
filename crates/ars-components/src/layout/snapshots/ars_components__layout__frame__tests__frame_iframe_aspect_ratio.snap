@@ -1,6 +1,6 @@
 ---
 source: crates/ars-components/src/layout/frame.rs
-expression: "snapshot_attrs(&Api::new(Props::new().aspect_ratio(16.0 /\n9.0)).iframe_attrs())"
+expression: "snapshot_attrs(&Api::new(Props::new().title(\"Example embed\").aspect_ratio(16.0\n/ 9.0)).iframe_attrs())"
 ---
 AttrMap {
     attrs: [
@@ -18,6 +18,12 @@ AttrMap {
             ),
             String(
                 "frame",
+            ),
+        ),
+        (
+            Title,
+            String(
+                "Example embed",
             ),
         ),
     ],

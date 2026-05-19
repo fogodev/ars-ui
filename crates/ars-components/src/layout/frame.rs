@@ -215,8 +215,18 @@ impl Api {
     }
 
     /// Returns attributes for the iframe element.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the frame title is empty, because iframe titles are required
+    /// accessible names.
     #[must_use]
     pub fn iframe_attrs(&self) -> AttrMap {
+        assert!(
+            !self.props.title.is_empty(),
+            "Frame title must be non-empty"
+        );
+
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Iframe.data_attrs();
 
@@ -226,9 +236,7 @@ impl Api {
             attrs.set(HtmlAttr::Src, self.props.src.as_str());
         }
 
-        if !self.props.title.is_empty() {
-            attrs.set(HtmlAttr::Title, self.props.title.as_str());
-        }
+        attrs.set(HtmlAttr::Title, self.props.title.as_str());
 
         if let Some(sandbox) = &self.props.sandbox {
             attrs.set(HtmlAttr::Sandbox, sandbox.as_str());
@@ -397,11 +405,17 @@ mod tests {
     }
 
     #[test]
-    fn iframe_attrs_omit_empty_src_and_title() {
-        let attrs = Api::new(Props::new()).iframe_attrs();
+    #[should_panic(expected = "Frame title must be non-empty")]
+    fn iframe_attrs_requires_non_empty_title() {
+        let _attrs = Api::new(Props::new()).iframe_attrs();
+    }
+
+    #[test]
+    fn iframe_attrs_omits_empty_src_after_title_is_configured() {
+        let attrs = Api::new(Props::new().title("Example embed")).iframe_attrs();
 
         assert!(!attrs.contains(&HtmlAttr::Src));
-        assert!(!attrs.contains(&HtmlAttr::Title));
+        assert_eq!(attrs.get(&HtmlAttr::Title), Some("Example embed"));
     }
 
     #[test]
@@ -426,7 +440,8 @@ mod tests {
 
     #[test]
     fn iframe_attrs_emit_absolute_fill_styles_when_aspect_ratio_is_set() {
-        let attrs = Api::new(Props::new().aspect_ratio(16.0 / 9.0)).iframe_attrs();
+        let attrs =
+            Api::new(Props::new().title("Example embed").aspect_ratio(16.0 / 9.0)).iframe_attrs();
 
         assert!(
             attrs
@@ -457,7 +472,7 @@ mod tests {
 
     #[test]
     fn part_attrs_delegates_for_all_parts() {
-        let api = Api::new(Props::new().aspect_ratio(16.0 / 9.0));
+        let api = Api::new(Props::new().title("Example embed").aspect_ratio(16.0 / 9.0));
 
         assert_eq!(api.part_attrs(Part::Root), api.root_attrs());
         assert_eq!(api.part_attrs(Part::Iframe), api.iframe_attrs());
@@ -506,7 +521,10 @@ mod tests {
         );
         assert_snapshot!(
             "frame_iframe_aspect_ratio",
-            snapshot_attrs(&Api::new(Props::new().aspect_ratio(16.0 / 9.0)).iframe_attrs())
+            snapshot_attrs(
+                &Api::new(Props::new().title("Example embed").aspect_ratio(16.0 / 9.0))
+                    .iframe_attrs()
+            )
         );
     }
 }
