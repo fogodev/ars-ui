@@ -1,0 +1,293 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "627396b308b7",
+  "session_id": "9d4f251b-a7b5-491d-b107-5137af2fa959",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-19T02:37:49.586775Z",
+  "branch": "t3code/7f73cfa1",
+  "checkpoints_count": 12,
+  "files_touched": [
+    ".agents/skills/post-implementation-audit/SKILL.md",
+    ".cargo/mutants.toml",
+    "AGENTS.md",
+    "crates/ars-components/Cargo.toml",
+    "crates/ars-components/src/utility/highlight.rs",
+    "crates/ars-components/src/utility/mod.rs",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunk_highlighted.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunk_not_highlighted.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_contains_en.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_fuzzy.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_german_eszett.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_multi_query_merged.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_starts_with.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_turkic.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_root.snap",
+    "crates/ars-components/tests/proptest_state_machines/utility.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/utility.rs",
+    "crates/ars-dioxus/Cargo.toml",
+    "crates/ars-i18n/src/case.rs",
+    "crates/ars-i18n/src/lib.rs",
+    "crates/ars-leptos/Cargo.toml",
+    "spec/components/utility/highlight.md",
+    "spec/dioxus-components/utility/highlight.md",
+    "spec/foundation/10-component-spec-template.md",
+    "spec/leptos-components/utility/highlight.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "07438ced86de",
+  "token_usage": {
+    "input_tokens": 2476,
+    "cache_creation_tokens": 2585427,
+    "cache_read_tokens": 87974675,
+    "output_tokens": 273414,
+    "api_call_count": 271
+  },
+  "session_metrics": {
+    "turn_count": 13
+  },
+  "summary": {
+    "intent": "Implement the agnostic core of the Highlight utility component (task #204) for ars-ui, then run thorough spec-drift, iterative improvement, and test coverage audits, and codify the improvement process as a reusable skill.",
+    "outcome": "Delivered a complete, production-quality Highlight module with TR21 Unicode case folding, three match strategies, multi-query range merging, 41 unit tests, 9 insta snapshots, proptest invariants, spec-conformance tests, and 0 missed mutations. Discovered and fixed a silent German eszett contract violation (ß↔ss required case folding, not lowercasing). Created the post-implementation-audit skill and registered it as a mandatory CLAUDE.md step.",
+    "learnings": {
+      "repo": [
+        "ars-components declares ars-i18n = { default-features = false }, so ICU4X features must be explicitly propagated via a new feature flag (e.g., i18n = [\"ars-i18n/icu4x\"]) — they are not inherited automatically.",
+        "ars_i18n::to_lowercase wraps CaseMapper::lowercase_to_string, which PRESERVES ß rather than expanding it to 'ss'. TR21 case folding (ß↔ss, Greek final-sigma collapse) requires a separate case_fold helper using CaseMapper::fold_string.",
+        "cargo llvm-cov does not cover wasm-gated code paths; adapter crates (ars-leptos, ars-dioxus) require cargo xtask coverage wasm --package <crate> --feature <f> --file out.lcov.info. The correct flag is --feature (repeatable), NOT --features.",
+        "CLAUDE.md is a symlink to AGENTS.md; .claude/skills/ is a symlink to .agents/skills/. The canonical path for skills is .agents/skills/.",
+        "ConnectApi::part_attrs takes a Part by value with no payload, making 'parametric anatomy slots' (parts whose attributes depend on runtime data, like highlighted: bool) impossible to represent as Part enum variants — they must be exposed as parameterised Api methods instead.",
+        "The workspace cargo-mutants configuration lives in .cargo/mutants.toml and supports skip entries with justification comments to document equivalent mutations without disabling the test suite.",
+        "Adapter Cargo.toml files must explicitly wire feature propagation: icu4x = [\"ars-components/i18n\"] in ars-leptos and ars-dioxus, otherwise Highlight is invisible to adapter builds even when icu4x is enabled.",
+        "cargo xtask coverage check-all --file <lcov> is the CI threshold gate, not bare cargo llvm-cov. Bare llvm-cov reports 0% for wasm-only paths, creating false gaps."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-collections/src/typeahead.rs",
+          "line": 255,
+          "end_line": 297,
+          "finding": "Uses CaseMapper::lowercase_to_string (via ars_i18n::to_lowercase) for case-insensitive matching, which does NOT expand ß to ss. This was the precedent cited for Highlight's initial approach — but it is semantically wrong for TR21 case-insensitive matching."
+        },
+        {
+          "path": "crates/ars-i18n/src/case.rs",
+          "line": 70,
+          "end_line": 70,
+          "finding": "to_lowercase is a locale-aware wrapper around CaseMapper::lowercase_to_string. A new case_fold function was added wrapping CaseMapper::fold_turkic_string / fold_string to correctly implement TR21 equivalence."
+        },
+        {
+          "path": "crates/ars-components/src/utility/highlight.rs",
+          "line": 336,
+          "end_line": 336,
+          "finding": "Dead continue branch guarding against empty case_fold output — unreachable because TR21 guarantees every assigned character folds to a non-empty replacement. Was removed to achieve 100% region coverage without misleading future readers."
+        },
+        {
+          "path": "crates/ars-components/src/utility/highlight.rs",
+          "line": 502,
+          "end_line": 502,
+          "finding": "merge_ranges 'contained range' else branch (incoming range fully inside an existing range → no-op) had zero test coverage. Required a dedicated test: query=[\"foobar\",\"ooba\"] on text=\"foobar\"."
+        },
+        {
+          "path": "crates/ars-components/Cargo.toml",
+          "finding": "Added i18n = [\"ars-i18n/icu4x\"] as a non-default feature. Highlight module is gated on #[cfg(feature = \"i18n\")] — no fallback path. Agnostic-core is absent from builds without i18n rather than silently falling back to ASCII lowercasing."
+        }
+      ],
+      "workflow": [
+        "The post-implementation-audit 3-phase flow (spec-drift → iterative 'anything else?' × 2 clean rounds → test coverage) collapsed what would have been 3+ user-driven review rounds into a single pre-PR pass. Codified as .agents/skills/post-implementation-audit/SKILL.md.",
+        "Mutation testing (cargo mutants) catches test gaps that line coverage misses: the Api::ignore_case accessor could be hardcoded to false with 98.67% line coverage still passing — mutation testing caught it immediately.",
+        "TDD ordering matters: writing tests before implementation for utility components prevents the trap of writing tests that confirm existing behavior rather than specifying intended behavior.",
+        "Spec drift audits should recommend 'best outcome independent of either side' — not 'spec wins' or 'impl wins'. Three categories emerged: spec catches up to impl (most common), impl changes to match spec intent (dir=auto in root_attrs, case folding switch), and a third design different from both (not needed here but the rubric should remain open to it).",
+        "Adapter specs (leptos, dioxus) need to be updated in the same PR as the agnostic core. They hardcoded attribute strings and described the wrong API surface — a separate PR would have let adapter implementations diverge from the updated core.",
+        "Skill descriptions should use 'any of these phrases' (disjunctive) not 'phrases like' to prevent ambiguity about trigger conditions. Skills also need a Quick flow TL;DR section for long workflow skills so the model orients before reading the dense body.",
+        "When both spec and impl are wrong (not just drifted), escalate to the user via AskUserQuestion rather than unilaterally picking a direction — the eszett case was the concrete example where the original plan recommendation was wrong."
+      ]
+    },
+    "friction": [
+      "Plan stated 'no Cargo.toml changes' based on an unverified assumption about feature inheritance. The assumption was wrong — ars-i18n/icu4x is not transitively enabled for ars-components. Should have verified cargo metadata before writing the plan.",
+      "ars_i18n::to_lowercase was incorrectly described as satisfying the German eszett ß↔ss contract during the initial case-folding tradeoff analysis. The bug was silent: the original German test passed by using STRASSE (uppercase-only) where lowercasing trivially works, masking the real failure on mixed-case Straße.",
+      "cargo xci completed without a notification reaching the assistant, causing a polling wait instead of automatic continuation.",
+      "The cargo xtask coverage wasm flag names were wrong in the initial skill draft (--features and --output instead of --feature repeatable and --file). Required a verify step against --help output.",
+      "Two stale 'ars_i18n::to_lowercase' doc references in highlight.rs survived all audit rounds and were only caught immediately before commit. The switch from to_lowercase to case_fold was not systematically searched in doc comments, only in code.",
+      "Skill file path was initially written to .claude/skills/ (the symlink) rather than .agents/skills/ (canonical). AGENTS.md also initially referenced the wrong path."
+    ],
+    "open_items": [
+      "Leptos and Dioxus adapter wrappers for Highlight (rendering HighlightChunk as <mark>/<span>) — explicitly out of scope for task #204, lands with separate adapter tasks.",
+      "Prelude re-exports for Highlight in ars-leptos and ars-dioxus — deferred to adapter implementation tasks.",
+      "Promoting the 'parametric anatomy slot' concept more fully in foundation/10-component-spec-template.md with examples from tables, tags-input, and toaster (which will all have the same per-row/per-item parametric part pattern).",
+      "Performance optimization of per-char allocation in build_normalised — ICU4X 2.x has no streaming case-fold API, so the current per-char String allocation is the only correct approach until upstream provides one.",
+      "Broadening proptest to cover the Props builder pattern (Props::new().query([]).text('').ignore_case(false).match_strategy(Fuzzy)) and verify builder ergonomics are fuzz-stable."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-19T02:36:31.585278Z",
+    "agent_lines": 2014,
+    "agent_removed": 37,
+    "human_added": 246,
+    "human_modified": 50,
+    "human_removed": 0,
+    "total_committed": 2310,
+    "total_lines_changed": 2347,
+    "agent_percentage": 87.38815509160631,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1311,
+      "agent_lines_removed": 7
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1311,
+      "agent_lines_removed": 7
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 6,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1473,
+      "agent_lines_removed": 53,
+      "user_added_per_file": {
+        "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_root.snap": 6
+      }
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 6,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1707,
+      "agent_lines_removed": 81,
+      "user_added_per_file": {
+        "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_root.snap": 6
+      }
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 15,
+      "user_lines_removed": 1,
+      "agent_lines_added": 1890,
+      "agent_lines_removed": 81,
+      "user_added_per_file": {
+        "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_german_eszett.snap": 9,
+        "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_root.snap": 6
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_german_eszett.snap": 1
+      }
+    },
+    {
+      "checkpoint_number": 7,
+      "user_lines_added": 15,
+      "user_lines_removed": 1,
+      "agent_lines_added": 1890,
+      "agent_lines_removed": 81,
+      "user_added_per_file": {
+        "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_german_eszett.snap": 9,
+        "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_root.snap": 6
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_german_eszett.snap": 1
+      }
+    },
+    {
+      "checkpoint_number": 8,
+      "user_lines_added": 42,
+      "user_lines_removed": 26,
+      "agent_lines_added": 2014,
+      "agent_lines_removed": 81,
+      "user_added_per_file": {
+        "crates/ars-components/src/utility/highlight.rs": 1,
+        "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_german_eszett.snap": 9,
+        "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_root.snap": 6,
+        "crates/ars-i18n/src/case.rs": 2,
+        "spec/components/utility/highlight.md": 14,
+        "spec/dioxus-components/utility/highlight.md": 4,
+        "spec/leptos-components/utility/highlight.md": 6
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/utility/highlight.rs": 1,
+        "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_german_eszett.snap": 1,
+        "spec/components/utility/highlight.md": 14,
+        "spec/dioxus-components/utility/highlight.md": 4,
+        "spec/leptos-components/utility/highlight.md": 6
+      }
+    },
+    {
+      "checkpoint_number": 9,
+      "user_lines_added": 1,
+      "user_lines_removed": 1,
+      "agent_lines_added": 2258,
+      "agent_lines_removed": 87,
+      "user_added_per_file": {
+        "crates/ars-components/src/utility/highlight.rs": 1
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/utility/highlight.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 10,
+      "user_lines_added": 51,
+      "user_lines_removed": 6,
+      "agent_lines_added": 2258,
+      "agent_lines_removed": 87,
+      "user_added_per_file": {
+        ".agents/skills/post-implementation-audit/SKILL.md": 50,
+        "crates/ars-components/src/utility/highlight.rs": 1
+      },
+      "user_removed_per_file": {
+        ".agents/skills/post-implementation-audit/SKILL.md": 5,
+        "crates/ars-components/src/utility/highlight.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 11,
+      "user_lines_added": 51,
+      "user_lines_removed": 6,
+      "agent_lines_added": 2258,
+      "agent_lines_removed": 87,
+      "user_added_per_file": {
+        ".agents/skills/post-implementation-audit/SKILL.md": 50,
+        "crates/ars-components/src/utility/highlight.rs": 1
+      },
+      "user_removed_per_file": {
+        ".agents/skills/post-implementation-audit/SKILL.md": 5,
+        "crates/ars-components/src/utility/highlight.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 12,
+      "user_lines_added": 109,
+      "user_lines_removed": 9,
+      "agent_lines_added": 2258,
+      "agent_lines_removed": 87,
+      "user_added_per_file": {
+        ".agents/skills/post-implementation-audit/SKILL.md": 83,
+        "AGENTS.md": 1,
+        "crates/ars-components/src/utility/highlight.rs": 25
+      },
+      "user_removed_per_file": {
+        ".agents/skills/post-implementation-audit/SKILL.md": 7,
+        "AGENTS.md": 1,
+        "crates/ars-components/src/utility/highlight.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 13,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2360,
+      "agent_lines_removed": 87
+    }
+  ]
+}

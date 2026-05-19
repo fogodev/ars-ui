@@ -1,0 +1,50 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "627396b308b7",
+  "strategy": "manual-commit",
+  "branch": "t3code/7f73cfa1",
+  "checkpoints_count": 12,
+  "files_touched": [
+    ".agents/skills/post-implementation-audit/SKILL.md",
+    ".cargo/mutants.toml",
+    "AGENTS.md",
+    "crates/ars-components/Cargo.toml",
+    "crates/ars-components/src/utility/highlight.rs",
+    "crates/ars-components/src/utility/mod.rs",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunk_highlighted.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunk_not_highlighted.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_contains_en.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_fuzzy.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_german_eszett.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_multi_query_merged.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_starts_with.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_chunks_turkic.snap",
+    "crates/ars-components/src/utility/snapshots/ars_components__utility__highlight__tests__highlight_root.snap",
+    "crates/ars-components/tests/proptest_state_machines/utility.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/utility.rs",
+    "crates/ars-dioxus/Cargo.toml",
+    "crates/ars-i18n/src/case.rs",
+    "crates/ars-i18n/src/lib.rs",
+    "crates/ars-leptos/Cargo.toml",
+    "spec/components/utility/highlight.md",
+    "spec/dioxus-components/utility/highlight.md",
+    "spec/foundation/10-component-spec-template.md",
+    "spec/leptos-components/utility/highlight.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/62/7396b308b7/0/metadata.json",
+      "transcript": "/62/7396b308b7/0/full.jsonl",
+      "content_hash": "/62/7396b308b7/0/content_hash.txt",
+      "prompt": "/62/7396b308b7/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 2476,
+    "cache_creation_tokens": 2585427,
+    "cache_read_tokens": 87974675,
+    "output_tokens": 273414,
+    "api_call_count": 271
+  }
+}
