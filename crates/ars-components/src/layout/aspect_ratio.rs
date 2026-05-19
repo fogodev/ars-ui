@@ -7,11 +7,13 @@ use alloc::{format, string::String};
 
 use ars_core::{AttrMap, ComponentPart, ConnectApi, CssProperty};
 
-fn positive_finite_or_default(ratio: f64) -> f64 {
-    if ratio.is_finite() && ratio > 0.0 {
-        ratio
+fn padding_percent_or_default(ratio: f64) -> f64 {
+    let padding = 100.0 / ratio;
+
+    if padding.is_finite() && padding > 0.0 {
+        padding
     } else {
-        1.0
+        100.0
     }
 }
 
@@ -64,7 +66,7 @@ impl Props {
     /// 100`.
     #[must_use]
     pub fn padding_top_percent(&self) -> f64 {
-        (1.0 / positive_finite_or_default(self.ratio)) * 100.0
+        padding_percent_or_default(self.ratio)
     }
 }
 
@@ -175,7 +177,14 @@ mod tests {
 
     #[test]
     fn padding_top_percent_normalizes_invalid_ratio_to_default() {
-        for ratio in [0.0, -1.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+        for ratio in [
+            0.0,
+            -1.0,
+            1.0e-308,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+        ] {
             assert_eq!(Props::new().ratio(ratio).padding_top_percent(), 100.0);
         }
     }

@@ -8,11 +8,13 @@ use alloc::{format, string::String};
 
 use ars_core::{AttrMap, ComponentPart, ConnectApi, CssProperty, HtmlAttr};
 
-fn positive_finite_or_default(ratio: f64) -> f64 {
-    if ratio.is_finite() && ratio > 0.0 {
-        ratio
+fn padding_percent_or_default(ratio: f64) -> f64 {
+    let padding = 100.0 / ratio;
+
+    if padding.is_finite() && padding > 0.0 {
+        padding
     } else {
-        1.0
+        100.0
     }
 }
 
@@ -203,7 +205,7 @@ impl Api {
         attrs.set(scope_attr, scope_val).set(part_attr, part_val);
 
         if let Some(ratio) = self.props.aspect_ratio {
-            let padding = (1.0 / positive_finite_or_default(ratio)) * 100.0;
+            let padding = padding_percent_or_default(ratio);
 
             attrs
                 .set_style(CssProperty::Position, "relative")
@@ -358,7 +360,14 @@ mod tests {
 
     #[test]
     fn root_attrs_normalizes_invalid_aspect_ratio_to_default_styles() {
-        for ratio in [0.0, -1.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+        for ratio in [
+            0.0,
+            -1.0,
+            1.0e-308,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+        ] {
             let attrs = Api::new(Props::new().aspect_ratio(ratio)).root_attrs();
 
             assert!(

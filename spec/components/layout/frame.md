@@ -47,8 +47,9 @@ pub struct Props {
     pub loading: LoadingStrategy,
     /// When set, wraps the iframe in an aspect-ratio container using the
     /// padding-top technique. Value is width/height (e.g., 16.0/9.0).
-    /// Non-positive or non-finite values are normalized to the default `1.0`
-    /// ratio when attributes are generated.
+    /// Values that are non-positive, non-finite, or too small to produce
+    /// finite padding are normalized to the default `1.0` ratio when
+    /// attributes are generated.
     pub aspect_ratio: Option<f64>,
     /// Explicit width (CSS value, e.g., "100%", "640px"). Defaults to "100%".
     pub width: String,
@@ -97,8 +98,8 @@ impl Api {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         if let Some(ratio) = self.props.aspect_ratio {
-            let ratio = if ratio.is_finite() && ratio > 0.0 { ratio } else { 1.0 };
-            let padding = (1.0 / ratio) * 100.0;
+            let padding = 100.0 / ratio;
+            let padding = if padding.is_finite() && padding > 0.0 { padding } else { 100.0 };
             attrs.set_style(CssProperty::Position, "relative");
             attrs.set_style(CssProperty::Width, &self.props.width);
             attrs.set_style(CssProperty::PaddingTop, format!("{:.4}%", padding));
