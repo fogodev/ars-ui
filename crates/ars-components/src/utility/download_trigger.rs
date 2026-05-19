@@ -15,10 +15,10 @@
 //!
 //! Leading and trailing WHATWG “C0 control or space” characters (Unicode scalar
 //! values U+0000 through U+0020 inclusive) in `href` and `document_origin` are
-//! stripped before classification — Unicode whitespace such as NBSP is **not**
-//! trimmed. Scheme-relative references (`//authority/path`) use the
-//! document origin's scheme; credentials in the authority (`userinfo@host`) are
-//! stripped before host comparison.
+//! stripped before classification, and embedded ASCII tab/newline characters are
+//! removed — Unicode whitespace such as NBSP is **not** trimmed. Scheme-relative
+//! references (`//authority/path`) use the document origin's scheme; credentials in
+//! the authority (`userinfo@host`) are stripped before host comparison.
 //!
 //! Delimiters `/`, `?`, `#`, and `\` terminate HTTP(S) authority scanning here so
 //! classification aligns with browsers that rewrite `\` as `/` for special schemes.
@@ -338,8 +338,31 @@ fn trim_url_c0_control_or_space(input: &str) -> &str {
     input.trim_matches(|ch| ch <= '\u{0020}')
 }
 
+fn preprocess_url_input(input: &str) -> Cow<'_, str> {
+    let trimmed = trim_url_c0_control_or_space(input);
+
+    if !trimmed
+        .as_bytes()
+        .iter()
+        .any(|byte| matches!(byte, b'\t' | b'\n' | b'\r'))
+    {
+        return Cow::Borrowed(trimmed);
+    }
+
+    let mut out = String::with_capacity(trimmed.len());
+
+    for ch in trimmed.chars() {
+        if !matches!(ch, '\t' | '\n' | '\r') {
+            out.push(ch);
+        }
+    }
+
+    Cow::Owned(out)
+}
+
 fn classify_href(href: &str, document_origin: Option<&str>) -> DownloadPolicy {
-    let trimmed = trim_url_c0_control_or_space(href);
+    let preprocessed = preprocess_url_input(href);
+    let trimmed = preprocessed.as_ref();
 
     if trimmed.is_empty() {
         return DownloadPolicy::NoDownloadHint;
@@ -358,7 +381,7 @@ fn classify_href(href: &str, document_origin: Option<&str>) -> DownloadPolicy {
     }
 
     // Scheme-relative network-path references without a parsable authority are not path-relative URLs.
-    if trimmed.starts_with("//") || trimmed.starts_with(r"\\") {
+    if has_network_path_prefix(trimmed) {
         return DownloadPolicy::BlobFallbackRequired;
     }
 
@@ -426,20 +449,30 @@ fn http_https_authority_rest(after_colon: &str) -> Option<&str> {
     Some(rest.trim_start_matches(|ch| ['/', '\\'].contains(&ch)))
 }
 
+fn leading_url_separator_count(input: &str) -> usize {
+    input
+        .as_bytes()
+        .iter()
+        .take_while(|byte| matches!(byte, b'/' | b'\\'))
+        .count()
+}
+
+fn has_network_path_prefix(input: &str) -> bool {
+    leading_url_separator_count(input) >= 2
+}
+
 /// Parses scheme-relative references (`//authority/…`) using [`Props::document_origin`]'s scheme.
 ///
 /// Inputs such as `///authority/path` are normalized like browsers: excess slashes after `//`
 /// are skipped so an authority token is recovered instead of mis-classifying as a path-relative URL.
 fn parse_network_path_origin(trimmed: &str, document_origin: Option<&str>) -> Option<ParsedOrigin> {
-    let rest = trimmed
-        .strip_prefix("//")
-        .or_else(|| trimmed.strip_prefix(r"\\"))?;
+    let separator_count = leading_url_separator_count(trimmed);
 
-    let mut rest = rest;
-
-    while rest.starts_with('/') || rest.starts_with('\\') {
-        rest = rest.get(1..)?;
+    if separator_count < 2 {
+        return None;
     }
+
+    let rest = trimmed.get(separator_count..)?;
 
     if rest.is_empty() {
         return None;
@@ -634,7 +667,8 @@ fn is_same_scheme_special_relative_http_https(href: &str, document_origin: Optio
         return false;
     };
 
-    let doc_trim = trim_url_c0_control_or_space(doc_raw);
+    let doc_preprocessed = preprocess_url_input(doc_raw);
+    let doc_trim = doc_preprocessed.as_ref();
 
     let Some(scheme_sep) = doc_trim.find("://") else {
         return false;
@@ -666,7 +700,8 @@ fn is_same_scheme_special_relative_http_https(href: &str, document_origin: Optio
 }
 
 fn document_origin_scheme(document_origin: Option<&str>) -> Option<&str> {
-    let raw = trim_url_c0_control_or_space(document_origin?);
+    let preprocessed = preprocess_url_input(document_origin?);
+    let raw = preprocessed.as_ref();
     let sep = raw.find("://")?;
     let candidate = raw.get(..sep)?;
 
@@ -680,7 +715,8 @@ fn document_origin_scheme(document_origin: Option<&str>) -> Option<&str> {
 }
 
 fn parse_document_origin(origin: &str) -> Option<ParsedOrigin> {
-    let trimmed = trim_url_c0_control_or_space(origin);
+    let preprocessed = preprocess_url_input(origin);
+    let trimmed = preprocessed.as_ref();
 
     let scheme_sep = trimmed.find("://")?;
     let scheme = trimmed[..scheme_sep].to_string();
@@ -834,6 +870,10 @@ fn is_relative_reference(url: &str) -> bool {
         || starts_with_ignore_case(bytes, b"./")
         || starts_with_ignore_case(bytes, b"../")
     {
+        if has_network_path_prefix(url) {
+            return false;
+        }
+
         return true;
     }
 
@@ -1240,6 +1280,32 @@ mod tests {
     }
 
     #[test]
+    fn slash_backslash_network_path_cross_origin_requires_fallback() {
+        let props = Props::new()
+            .href(r"/\cdn.other.test/asset.dat")
+            .filename("a.dat")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(!api.native_download_eligible());
+        assert!(api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn backslash_slash_network_path_cross_origin_requires_fallback() {
+        let props = Props::new()
+            .href(r"\/cdn.other.test/asset.dat")
+            .filename("a.dat")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(!api.native_download_eligible());
+        assert!(api.needs_blob_fallback());
+    }
+
+    #[test]
     fn empty_explicit_port_matches_scheme_default_origin() {
         let props = Props::new()
             .href("https://example.com:/file.bin")
@@ -1302,6 +1368,32 @@ mod tests {
 
         assert!(!api.native_download_eligible());
         assert!(api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn embedded_ascii_tab_newline_are_removed_before_classification() {
+        let props = Props::new()
+            .href("ht\ntps://cdn.other.test/asset.dat")
+            .filename("a.dat")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(!api.native_download_eligible());
+        assert!(api.needs_blob_fallback());
+    }
+
+    #[test]
+    fn embedded_carriage_return_is_removed_before_classification() {
+        let props = Props::new()
+            .href("https://exa\rmple.com/asset.dat")
+            .filename("a.dat")
+            .document_origin("https://example.com");
+
+        let api = api(props);
+
+        assert!(api.native_download_eligible());
+        assert!(!api.needs_blob_fallback());
     }
 
     #[test]
