@@ -8,6 +8,14 @@ use alloc::{format, string::String};
 
 use ars_core::{AttrMap, ComponentPart, ConnectApi, CssProperty, HtmlAttr};
 
+fn positive_finite_or_default(ratio: f64) -> f64 {
+    if ratio.is_finite() && ratio > 0.0 {
+        ratio
+    } else {
+        1.0
+    }
+}
+
 /// Loading strategy for iframe content.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum LoadingStrategy {
@@ -195,7 +203,7 @@ impl Api {
         attrs.set(scope_attr, scope_val).set(part_attr, part_val);
 
         if let Some(ratio) = self.props.aspect_ratio {
-            let padding = (1.0 / ratio) * 100.0;
+            let padding = (1.0 / positive_finite_or_default(ratio)) * 100.0;
 
             attrs
                 .set_style(CssProperty::Position, "relative")
@@ -212,11 +220,15 @@ impl Api {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Iframe.data_attrs();
 
-        attrs
-            .set(scope_attr, scope_val)
-            .set(part_attr, part_val)
-            .set(HtmlAttr::Src, self.props.src.as_str())
-            .set(HtmlAttr::Title, self.props.title.as_str());
+        attrs.set(scope_attr, scope_val).set(part_attr, part_val);
+
+        if !self.props.src.is_empty() {
+            attrs.set(HtmlAttr::Src, self.props.src.as_str());
+        }
+
+        if !self.props.title.is_empty() {
+            attrs.set(HtmlAttr::Title, self.props.title.as_str());
+        }
 
         if let Some(sandbox) = &self.props.sandbox {
             attrs.set(HtmlAttr::Sandbox, sandbox.as_str());
@@ -337,6 +349,19 @@ mod tests {
     }
 
     #[test]
+    fn root_attrs_normalizes_invalid_aspect_ratio_to_default_styles() {
+        for ratio in [0.0, -1.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+            let attrs = Api::new(Props::new().aspect_ratio(ratio)).root_attrs();
+
+            assert!(
+                attrs
+                    .styles()
+                    .contains(&(CssProperty::PaddingTop, String::from("100.0000%")))
+            );
+        }
+    }
+
+    #[test]
     fn iframe_attrs_emit_required_src_title_and_default_sizing() {
         let attrs = Api::new(
             Props::new()
@@ -369,6 +394,14 @@ mod tests {
                 .styles()
                 .contains(&(CssProperty::Border, String::from("0")))
         );
+    }
+
+    #[test]
+    fn iframe_attrs_omit_empty_src_and_title() {
+        let attrs = Api::new(Props::new()).iframe_attrs();
+
+        assert!(!attrs.contains(&HtmlAttr::Src));
+        assert!(!attrs.contains(&HtmlAttr::Title));
     }
 
     #[test]

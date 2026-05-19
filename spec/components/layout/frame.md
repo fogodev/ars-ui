@@ -47,6 +47,8 @@ pub struct Props {
     pub loading: LoadingStrategy,
     /// When set, wraps the iframe in an aspect-ratio container using the
     /// padding-top technique. Value is width/height (e.g., 16.0/9.0).
+    /// Non-positive or non-finite values are normalized to the default `1.0`
+    /// ratio when attributes are generated.
     pub aspect_ratio: Option<f64>,
     /// Explicit width (CSS value, e.g., "100%", "640px"). Defaults to "100%".
     pub width: String,
@@ -95,6 +97,7 @@ impl Api {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         if let Some(ratio) = self.props.aspect_ratio {
+            let ratio = if ratio.is_finite() && ratio > 0.0 { ratio } else { 1.0 };
             let padding = (1.0 / ratio) * 100.0;
             attrs.set_style(CssProperty::Position, "relative");
             attrs.set_style(CssProperty::Width, &self.props.width);
@@ -109,8 +112,12 @@ impl Api {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Iframe.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Src, &self.props.src);
-        attrs.set(HtmlAttr::Title, &self.props.title);
+        if !self.props.src.is_empty() {
+            attrs.set(HtmlAttr::Src, &self.props.src);
+        }
+        if !self.props.title.is_empty() {
+            attrs.set(HtmlAttr::Title, &self.props.title);
+        }
         if let Some(sandbox) = &self.props.sandbox {
             attrs.set(HtmlAttr::Sandbox, sandbox);
         }

@@ -24,7 +24,8 @@ pub struct Props {
     /// The id of the component.
     pub id: String,
     /// Width-to-height ratio. E.g. `16.0 / 9.0` for widescreen.
-    /// Must be positive and finite.
+    /// Must be positive and finite. Non-positive or non-finite values are
+    /// normalized to the default `1.0` ratio when attributes are generated.
     pub ratio: f64,
 }
 
@@ -33,7 +34,12 @@ impl Props {
     /// `padding-top: X%` is relative to element width, so
     /// `X = (1 / ratio) * 100`.
     pub fn padding_top_percent(&self) -> f64 {
-        (1.0 / self.ratio) * 100.0
+        let ratio = if self.ratio.is_finite() && self.ratio > 0.0 {
+            self.ratio
+        } else {
+            1.0
+        };
+        (1.0 / ratio) * 100.0
     }
 }
 

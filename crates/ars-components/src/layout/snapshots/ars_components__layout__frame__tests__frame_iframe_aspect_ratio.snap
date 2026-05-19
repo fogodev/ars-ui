@@ -20,18 +20,6 @@ AttrMap {
                 "frame",
             ),
         ),
-        (
-            Title,
-            String(
-                "",
-            ),
-        ),
-        (
-            Src,
-            String(
-                "",
-            ),
-        ),
     ],
     styles: [
         (

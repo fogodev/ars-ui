@@ -7,6 +7,14 @@ use alloc::{format, string::String};
 
 use ars_core::{AttrMap, ComponentPart, ConnectApi, CssProperty};
 
+fn positive_finite_or_default(ratio: f64) -> f64 {
+    if ratio.is_finite() && ratio > 0.0 {
+        ratio
+    } else {
+        1.0
+    }
+}
+
 /// Props for the `AspectRatio` component.
 #[derive(Clone, Debug, PartialEq, ars_core::HasId)]
 pub struct Props {
@@ -56,7 +64,7 @@ impl Props {
     /// 100`.
     #[must_use]
     pub fn padding_top_percent(&self) -> f64 {
-        (1.0 / self.ratio) * 100.0
+        (1.0 / positive_finite_or_default(self.ratio)) * 100.0
     }
 }
 
@@ -166,6 +174,13 @@ mod tests {
     }
 
     #[test]
+    fn padding_top_percent_normalizes_invalid_ratio_to_default() {
+        for ratio in [0.0, -1.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+            assert_eq!(Props::new().ratio(ratio).padding_top_percent(), 100.0);
+        }
+    }
+
+    #[test]
     fn root_attrs_emit_scope_part_and_ratio_styles() {
         let attrs = Api::new(Props::new().ratio(16.0 / 9.0)).root_attrs();
 
@@ -188,6 +203,17 @@ mod tests {
             attrs
                 .styles()
                 .contains(&(CssProperty::PaddingTop, String::from("56.2500%")))
+        );
+    }
+
+    #[test]
+    fn root_attrs_normalizes_invalid_ratio_to_default_styles() {
+        let attrs = Api::new(Props::new().ratio(0.0)).root_attrs();
+
+        assert!(
+            attrs
+                .styles()
+                .contains(&(CssProperty::PaddingTop, String::from("100.0000%")))
         );
     }
 
