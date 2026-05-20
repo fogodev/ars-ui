@@ -734,7 +734,7 @@ PinInput
 
 ## 5. Form Integration
 
-- **Hidden input**: A single `<input type="hidden">` via `HiddenInput` submits the concatenated pin value. The `name` attribute comes from context.
+- **Hidden input**: A single `<input type="hidden">` via `HiddenInput` submits the concatenated pin value. The `name` attribute comes from context. The native `required` attribute is intentionally **not** set on the hidden input: browser constraint validation skips `type="hidden"` elements, so a `required` here is a silent no-op that misleads adapters. Required-state semantics are exposed via `aria-required="true"` on every visible cell instead; adapters that need to enforce required PIN entry at form-submit time must implement custom validation.
 - **Validation states**: `aria-invalid="true"` on each cell input when `invalid=true`. The `ErrorMessage` part is linked via `aria-describedby` on the Root.
 - **Error message association**: The group Root element can reference Description and ErrorMessage via `aria-describedby`.
 - **Reset behavior**: On form reset, the adapter restores all cells to `default_value` and transitions to Idle.

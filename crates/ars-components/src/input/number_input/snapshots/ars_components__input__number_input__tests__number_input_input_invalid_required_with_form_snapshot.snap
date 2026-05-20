@@ -115,6 +115,12 @@ AttrMap {
             ),
         ),
         (
+            Required,
+            Bool(
+                true,
+            ),
+        ),
+        (
             Value,
             String(
                 "7",

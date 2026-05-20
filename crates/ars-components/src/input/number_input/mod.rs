@@ -585,7 +585,13 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     if text.is_empty() {
                         ctx.value.set(None);
-                    } else if let Ok(value) = text.parse::<f64>() {
+                    } else if let Ok(value) = text.parse::<f64>()
+                        && value.is_finite()
+                    {
+                        // Reject `NaN`, `±Inf` — they would propagate into
+                        // `ctx.value` and produce a non-numeric
+                        // `aria-valuenow`, violating the spinbutton
+                        // contract.
                         ctx.value.set(Some(value));
                     }
                 }))
@@ -923,6 +929,9 @@ impl Api<'_> {
         set_described_by(&mut attrs, self.ctx);
 
         if self.ctx.required {
+            // Native `required` works with browser constraint validation;
+            // `aria-required` announces the requirement to assistive tech.
+            attrs.set_bool(HtmlAttr::Required, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
         }
 
@@ -1239,6 +1248,33 @@ mod tests {
         drop(svc.send(Event::Change("abc".to_string())));
 
         assert_eq!(svc.context().value.get(), &Some(7.0));
+    }
+
+    #[test]
+    fn number_input_change_rejects_non_finite_values() {
+        // f64::parse accepts "inf", "-inf", "NaN", "infinity" — the
+        // machine must reject these so `ctx.value` and `aria-valuenow`
+        // never carry a non-numeric string.
+        let mut svc = service(bounded_props().default_value(7.0));
+
+        for non_finite in ["inf", "-inf", "NaN", "infinity", "-infinity"] {
+            drop(svc.send(Event::Change(non_finite.to_string())));
+            assert_eq!(
+                svc.context().value.get(),
+                &Some(7.0),
+                "Change({non_finite:?}) must not overwrite finite value"
+            );
+        }
+    }
+
+    #[test]
+    fn number_input_required_sets_native_required_alongside_aria_required() {
+        let svc = service(bounded_props().required(true));
+        let api = svc.connect(&|_| {});
+        let attrs = api.input_attrs();
+
+        assert!(attrs.contains(&HtmlAttr::Required));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Required)), Some("true"));
     }
 
     #[test]

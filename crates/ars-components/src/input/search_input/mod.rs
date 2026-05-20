@@ -480,7 +480,12 @@ impl ars_core::Machine for Machine {
                 ctx.is_composing = false;
             })),
 
-            Event::DebounceExpired | Event::CancelDebounce => None,
+            Event::DebounceExpired => None,
+
+            Event::CancelDebounce => Some(
+                TransitionPlan::context_only(|_ctx: &mut Context| {})
+                    .cancel_effect(Effect::SearchDebounce),
+            ),
 
             Event::SetValue(value) => {
                 let value = value.clone();
@@ -524,6 +529,14 @@ impl ars_core::Machine for Machine {
 
         if old.value != new.value {
             events.push(Event::SetValue(new.value.clone()));
+        }
+
+        // Cancel any in-flight debounce timer when the `debounce` prop
+        // changes — the old timer carries the previous duration and would
+        // otherwise fire stale `DebounceExpired` against the new config.
+        // The next `Change` event starts a fresh timer with the new prop.
+        if old.debounce != new.debounce {
+            events.push(Event::CancelDebounce);
         }
 
         if props_output_changed(old, new) {
@@ -1098,16 +1111,39 @@ mod tests {
     }
 
     #[test]
-    fn search_input_debounce_expired_and_cancel_are_no_ops_on_state() {
+    fn search_input_debounce_expired_does_not_change_state() {
         let mut service = service(props().debounce(Duration::from_millis(200)));
 
         drop(service.send(Event::Change("r".to_string())));
 
         let expired = service.send(Event::DebounceExpired);
-        let cancelled = service.send(Event::CancelDebounce);
 
         assert!(!expired.state_changed);
-        assert!(!cancelled.state_changed);
+    }
+
+    #[test]
+    fn search_input_cancel_debounce_emits_cancel_effect() {
+        let mut svc = service(props().debounce(Duration::from_millis(200)));
+
+        drop(svc.send(Event::Change("r".to_string())));
+
+        let result = svc.send(Event::CancelDebounce);
+
+        assert!(!result.state_changed);
+        assert_eq!(result.cancel_effects, alloc::vec![Effect::SearchDebounce]);
+    }
+
+    #[test]
+    fn search_input_debounce_prop_change_cancels_active_timer() {
+        let mut svc = service(props().debounce(Duration::from_millis(200)));
+
+        drop(svc.send(Event::Change("r".to_string())));
+
+        // Service::set_props delivers events one at a time. We only want
+        // to verify the cancel event was emitted by on_props_changed.
+        let result = svc.set_props(props().debounce(Duration::from_millis(500)));
+
+        assert_eq!(result.cancel_effects, alloc::vec![Effect::SearchDebounce]);
     }
 
     #[test]

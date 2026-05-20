@@ -613,6 +613,11 @@ impl Api<'_> {
         set_described_by(&mut attrs, self.ctx);
 
         if self.ctx.required {
+            // Set both the native `required` attribute (so browser form
+            // constraint validation blocks empty submission) and
+            // `aria-required` (so assistive tech announces the requirement
+            // consistently with the validation behaviour).
+            attrs.set_bool(HtmlAttr::Required, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
         }
 
@@ -1017,13 +1022,14 @@ mod tests {
     }
 
     #[test]
-    fn password_input_required_sets_aria_required() {
+    fn password_input_required_sets_native_required_and_aria_required() {
         let service = service(props().required(true));
 
         let api = service.connect(&|_| {});
 
         let attrs = api.input_attrs();
 
+        assert!(attrs.contains(&HtmlAttr::Required));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Required)), Some("true"));
     }
 

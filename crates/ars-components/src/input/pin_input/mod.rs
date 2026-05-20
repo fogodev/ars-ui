@@ -826,9 +826,31 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     let new_length = props.length;
                     if new_length != ctx.length {
+                        // Resize the value vector. In controlled mode we
+                        // must also push the resized vector through the
+                        // controlled slot — otherwise `get()` keeps
+                        // returning the old vector and outputs like
+                        // `hidden_input_attrs()` (which joins `get()`)
+                        // diverge from the rendered cells.
                         let mut values = ctx.value.get().clone();
                         values.resize(new_length, String::new());
-                        ctx.value.set(values);
+                        let was_controlled = ctx.value.is_controlled();
+                        ctx.value.set(values.clone());
+                        if was_controlled {
+                            ctx.value.sync_controlled(Some(values));
+                        }
+
+                        // Clear the focused index if it falls outside the
+                        // new bounds. Leaving a stale out-of-range index
+                        // strands the roving tabindex (no cell matches the
+                        // index, and the `None` fallback to cell 0 does
+                        // not fire), making the group unreachable.
+                        if let Some(idx) = ctx.focused_index
+                            && idx >= new_length
+                        {
+                            ctx.focused_index = None;
+                        }
+
                         ctx.length = new_length;
                     }
                     ctx.disabled = props.disabled;
@@ -1108,6 +1130,15 @@ impl Api<'_> {
             );
         }
 
+        if self.props.required {
+            // `aria-required` lives on every visible cell because the
+            // hidden input cannot participate in native constraint
+            // validation (browsers skip `type="hidden"`). Adapters that
+            // need to enforce required entry at form-submit time must
+            // implement custom validation; the spec §5 covers this.
+            attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
+        }
+
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);
         }
@@ -1155,9 +1186,13 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Form, form.clone());
         }
 
-        if self.props.required {
-            attrs.set_bool(HtmlAttr::Required, true);
-        }
+        // The native `required` attribute is intentionally NOT set on the
+        // hidden input: browser constraint validation skips
+        // `type="hidden"` elements, so a `required` here is a no-op that
+        // silently misleads adapters. Required-state semantics are exposed
+        // via `aria-required` on each visible cell — adapters that need to
+        // enforce required PIN entry at submit time must implement custom
+        // validation (see spec §5).
 
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);
@@ -1733,6 +1768,57 @@ mod tests {
     }
 
     #[test]
+    fn pin_input_set_props_shrinks_controlled_value_through_controlled_slot() {
+        let mut svc =
+            service(
+                props()
+                    .length(4)
+                    .value(vec!["1".into(), "2".into(), "3".into(), "4".into()]),
+            );
+
+        assert!(svc.context().value.is_controlled());
+
+        // Shrink the length. Without syncing the controlled slot,
+        // `get()` would still return the 4-cell vector and the hidden
+        // input would join "1234" instead of "12".
+        drop(svc.set_props(props().length(2).value(vec![
+            "1".into(),
+            "2".into(),
+            "3".into(),
+            "4".into(),
+        ])));
+
+        assert_eq!(svc.context().length, 2);
+        assert_eq!(svc.context().value.get().len(), 2);
+
+        let api = svc.connect(&|_| {});
+        assert_eq!(api.hidden_input_attrs().get(&HtmlAttr::Value), Some("12"));
+    }
+
+    #[test]
+    fn pin_input_set_props_clears_focused_index_when_out_of_range() {
+        let mut svc = service(props().length(4));
+
+        drop(svc.send(Event::Focus {
+            index: 3,
+            is_keyboard: false,
+        }));
+
+        assert_eq!(svc.context().focused_index, Some(3));
+
+        drop(svc.set_props(props().length(2)));
+
+        // index 3 is now out of bounds; SetProps must clear it so the
+        // roving tabindex falls back to cell 0 (otherwise every cell is
+        // -1 and the group is unreachable).
+        assert_eq!(svc.context().focused_index, None);
+
+        let api = svc.connect(&|_| {});
+        assert_eq!(api.input_attrs(0).get(&HtmlAttr::TabIndex), Some("0"));
+        assert_eq!(api.input_attrs(1).get(&HtmlAttr::TabIndex), Some("-1"));
+    }
+
+    #[test]
     fn pin_input_set_has_description_flips_context_flag_and_describedby() {
         let mut svc = service(props());
 
@@ -1821,7 +1907,7 @@ mod tests {
     }
 
     #[test]
-    fn pin_input_hidden_input_carries_name_form_and_required() {
+    fn pin_input_hidden_input_carries_name_and_form_but_not_required() {
         let svc = service(
             props()
                 .name("pin")
@@ -1836,7 +1922,26 @@ mod tests {
 
         assert_eq!(attrs.get(&HtmlAttr::Name), Some("pin"));
         assert_eq!(attrs.get(&HtmlAttr::Form), Some("login"));
-        assert!(attrs.contains(&HtmlAttr::Required));
+        // `required` on a `type="hidden"` input is a no-op under native
+        // constraint validation, so it must NOT be set here. Required
+        // semantics live on the cell `aria-required` instead.
+        assert!(!attrs.contains(&HtmlAttr::Required));
+    }
+
+    #[test]
+    fn pin_input_required_sets_aria_required_on_every_cell() {
+        let svc = service(props().required(true));
+
+        let api = svc.connect(&|_| {});
+
+        for index in 0..4 {
+            let attrs = api.input_attrs(index);
+            assert_eq!(
+                attrs.get(&HtmlAttr::Aria(AriaAttr::Required)),
+                Some("true"),
+                "cell {index} must carry aria-required=true when required"
+            );
+        }
     }
 
     #[test]
