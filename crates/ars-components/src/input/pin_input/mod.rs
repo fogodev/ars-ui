@@ -94,6 +94,19 @@ pub enum Event {
 
     /// IME composition ended.
     CompositionEnd,
+
+    /// Synchronize the externally controlled value prop.
+    SetValue(Option<Vec<String>>),
+
+    /// Synchronize output-affecting props (`length` / `disabled` / `invalid`
+    /// / `otp` / `mask` / `placeholder` / `mode` / `name` /
+    /// `select_on_focus` / `blur_on_complete`) stored in [`Context`] when
+    /// [`Service::set_props`] reports a change.
+    SetProps,
+
+    /// Track whether a [`Part::Description`] part is rendered (gates
+    /// `aria-describedby`).
+    SetHasDescription(bool),
 }
 
 /// The input validation mode for the `PinInput` component.
@@ -519,7 +532,10 @@ impl ars_core::Machine for Machine {
 
         if props.readonly {
             match event {
-                Event::InputChar { .. } | Event::DeleteChar { .. } | Event::Paste(_) => {
+                Event::InputChar { .. }
+                | Event::DeleteChar { .. }
+                | Event::Paste(_)
+                | Event::Clear => {
                     return None;
                 }
                 _ => {}
@@ -790,8 +806,73 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
+            (_, Event::SetValue(value)) => {
+                let value = value.clone();
+                let length = ctx.length;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    if let Some(mut value) = value {
+                        value.resize(length, String::new());
+                        ctx.value.set(value.clone());
+                        ctx.value.sync_controlled(Some(value.clone()));
+                        ctx.complete = length > 0 && value.iter().all(|cell| !cell.is_empty());
+                    } else {
+                        ctx.value.sync_controlled(None);
+                    }
+                }))
+            }
+
+            (_, Event::SetProps) => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let new_length = props.length;
+                    if new_length != ctx.length {
+                        let mut values = ctx.value.get().clone();
+                        values.resize(new_length, String::new());
+                        ctx.value.set(values);
+                        ctx.length = new_length;
+                    }
+                    ctx.disabled = props.disabled;
+                    ctx.invalid = props.invalid;
+                    ctx.otp = props.otp;
+                    ctx.mask = props.mask;
+                    ctx.placeholder = props.placeholder.clone();
+                    ctx.mode = props.mode;
+                    ctx.name = props.name.clone();
+                    ctx.select_on_focus = props.select_on_focus;
+                    ctx.blur_on_complete = props.blur_on_complete;
+                    ctx.complete =
+                        ctx.length > 0 && ctx.value.get().iter().all(|cell| !cell.is_empty());
+                }))
+            }
+
+            (_, Event::SetHasDescription(has_description)) => {
+                let has_description = *has_description;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.has_description = has_description;
+                }))
+            }
+
             (State::Idle, Event::InputChar { .. }) => None,
         }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(
+            old.id, new.id,
+            "pin_input::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SetValue(new.value.clone()));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
     }
 
     fn connect<'a>(
@@ -825,6 +906,22 @@ fn next_empty_index(values: &[String], current: usize) -> Option<usize> {
     let length = values.len();
 
     (current + 1..length).find(|j| values[*j].is_empty())
+}
+
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    old.length != new.length
+        || old.disabled != new.disabled
+        || old.invalid != new.invalid
+        || old.otp != new.otp
+        || old.mask != new.mask
+        || old.placeholder != new.placeholder
+        || old.mode != new.mode
+        || old.name != new.name
+        || old.form != new.form
+        || old.required != new.required
+        || old.readonly != new.readonly
+        || old.select_on_focus != new.select_on_focus
+        || old.blur_on_complete != new.blur_on_complete
 }
 
 fn value_complete_effect(joined: String) -> PendingEffect<Machine> {
@@ -982,9 +1079,22 @@ impl Api<'_> {
                 (self.ctx.messages.ordinal_label)(index + 1, self.ctx.length, &self.ctx.locale),
             );
 
+        // Roving tabindex: the focused cell is the tab stop. When no cell
+        // is focused (the initial / post-blur state), fall back to the first
+        // cell so the group remains tabbable from the document — without this
+        // fallback, every cell carries `tabindex="-1"` and keyboard users
+        // cannot enter the PinInput at all.
         let is_focused_cell = self.ctx.focused_index == Some(index);
+        let is_default_tab_target = self.ctx.focused_index.is_none() && index == 0;
 
-        attrs.set(HtmlAttr::TabIndex, if is_focused_cell { "0" } else { "-1" });
+        attrs.set(
+            HtmlAttr::TabIndex,
+            if is_focused_cell || is_default_tab_target {
+                "0"
+            } else {
+                "-1"
+            },
+        );
 
         if self.ctx.otp {
             attrs.set(HtmlAttr::AutoComplete, "one-time-code");
@@ -1532,6 +1642,110 @@ mod tests {
         assert_eq!(
             attrs.get(&HtmlAttr::Aria(AriaAttr::Label)),
             Some("Digit 3 of 4")
+        );
+    }
+
+    #[test]
+    fn pin_input_first_cell_is_default_tab_target_when_no_cell_focused() {
+        // Initial state: focused_index = None. Roving tabindex must still leave
+        // one cell tabbable so keyboard users can enter the group — otherwise
+        // every cell carries `tabindex="-1"` and the group is unreachable.
+        let svc = service(props());
+        assert_eq!(svc.context().focused_index, None);
+
+        let api = svc.connect(&|_| {});
+
+        assert_eq!(api.input_attrs(0).get(&HtmlAttr::TabIndex), Some("0"));
+        for index in 1..4 {
+            assert_eq!(
+                api.input_attrs(index).get(&HtmlAttr::TabIndex),
+                Some("-1"),
+                "cell {index} must be -1 when no cell is focused"
+            );
+        }
+    }
+
+    #[test]
+    fn pin_input_first_cell_is_default_tab_target_after_blur() {
+        let mut svc = service(props());
+
+        drop(svc.send(Event::Focus {
+            index: 2,
+            is_keyboard: false,
+        }));
+        drop(svc.send(Event::Blur));
+
+        assert_eq!(svc.context().focused_index, None);
+
+        let api = svc.connect(&|_| {});
+
+        assert_eq!(api.input_attrs(0).get(&HtmlAttr::TabIndex), Some("0"));
+        assert_eq!(api.input_attrs(2).get(&HtmlAttr::TabIndex), Some("-1"));
+    }
+
+    #[test]
+    fn pin_input_readonly_blocks_clear_event() {
+        let mut svc = service(props().readonly(true).default_value(alloc::vec![
+            "1".into(),
+            "2".into(),
+            "3".into(),
+            "4".into(),
+        ]));
+
+        let result = svc.send(Event::Clear);
+
+        assert!(!result.context_changed);
+        assert_eq!(svc.context().value.get().len(), 4);
+        assert_eq!(svc.context().value.get()[0], "1");
+    }
+
+    #[test]
+    fn pin_input_set_props_syncs_controlled_value() {
+        let mut svc =
+            service(props().value(alloc::vec!["1".into(), "2".into(), "3".into(), "4".into()]));
+
+        assert_eq!(svc.context().value.get()[0], "1");
+        assert!(svc.context().complete);
+
+        drop(svc.set_props(props().value(alloc::vec![
+            "9".into(),
+            "8".into(),
+            "7".into(),
+            "6".into()
+        ])));
+
+        assert!(svc.context().value.is_controlled());
+        assert_eq!(svc.context().value.get()[0], "9");
+
+        drop(svc.set_props(props().uncontrolled()));
+
+        assert!(!svc.context().value.is_controlled());
+    }
+
+    #[test]
+    fn pin_input_set_props_resizes_value_when_length_changes() {
+        let mut svc = service(props().length(4));
+
+        drop(svc.set_props(props().length(6)));
+
+        assert_eq!(svc.context().length, 6);
+        assert_eq!(svc.context().value.get().len(), 6);
+    }
+
+    #[test]
+    fn pin_input_set_has_description_flips_context_flag_and_describedby() {
+        let mut svc = service(props());
+
+        assert!(!svc.context().has_description);
+
+        drop(svc.send(Event::SetHasDescription(true)));
+
+        assert!(svc.context().has_description);
+        assert_eq!(
+            svc.connect(&|_| {})
+                .root_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
+            Some("pin-description")
         );
     }
 

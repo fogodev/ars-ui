@@ -73,6 +73,15 @@ pub enum Event {
     CompositionStart,
     /// IME composition ended.
     CompositionEnd,
+    /// Synchronize the externally controlled value prop. The new value is
+    /// resized to `length` before being stored.
+    SetValue(Option<Vec<String>>),
+    /// Synchronize output-affecting props stored in `Context` when
+    /// `Service::set_props` reports a change; resizes the cell vector when
+    /// `length` changes.
+    SetProps,
+    /// Track whether a `Description` part is rendered (gates `aria-describedby`).
+    SetHasDescription(bool),
 }
 ```
 
@@ -287,6 +296,16 @@ impl ars_core::Machine for Machine {
     ) -> Option<TransitionPlan<Self>> {
         // Disabled guard
         if ctx.disabled {
+            match event {
+                Event::InputChar { .. } | Event::DeleteChar { .. }
+                | Event::Paste(_) | Event::Clear => return None,
+                _ => {}
+            }
+        }
+
+        // Readonly guard — Clear is value-mutating and must be blocked
+        // alongside the per-cell input events to preserve readonly semantics.
+        if props.readonly {
             match event {
                 Event::InputChar { .. } | Event::DeleteChar { .. }
                 | Event::Paste(_) | Event::Clear => return None,
@@ -685,7 +704,7 @@ PinInput
 | `autocomplete` | Input   | `"one-time-code"` when `otp=true`                       |
 | `inputmode`    | Input   | `"numeric"` (Numeric), `"text"` (Alphanumeric/Password) |
 | `aria-invalid` | Input   | Present when group is invalid                           |
-| `tabindex`     | Input   | Roving: focused cell `0`, all others `-1`               |
+| `tabindex`     | Input   | Roving: focused cell `0`, all others `-1`. When no cell is focused (initial state, post-blur), the first cell falls back to `tabindex="0"` so keyboard users can enter the group. |
 
 ### 3.2 Keyboard Interaction
 

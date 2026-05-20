@@ -49,6 +49,14 @@ pub enum Event {
     },
     /// Focus lost.
     Blur,
+    /// Synchronize the externally controlled value prop. `Some` enters
+    /// controlled mode and pushes the value; `None` returns to uncontrolled.
+    SetValue(Option<String>),
+    /// Synchronize output-affecting props stored in `Context` when
+    /// `Service::set_props` reports a change.
+    SetProps,
+    /// Track whether a `Description` part is rendered (gates `aria-describedby`).
+    SetHasDescription(bool),
 }
 ```
 

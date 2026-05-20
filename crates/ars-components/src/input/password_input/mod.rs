@@ -37,7 +37,7 @@ impl Display for State {
 }
 
 /// The events for the `PasswordInput` component.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     /// Flip between [`State::Masked`] and [`State::Visible`].
     ToggleVisibility,
@@ -53,6 +53,21 @@ pub enum Event {
 
     /// The component lost focus.
     Blur,
+
+    /// Synchronize the externally controlled value prop.
+    ///
+    /// `Some` switches the component to controlled mode and pushes the new
+    /// value; `None` returns the component to uncontrolled mode.
+    SetValue(Option<String>),
+
+    /// Synchronize output-affecting props (disabled / readonly / invalid /
+    /// required / placeholder / name / form / autocomplete) stored in
+    /// [`Context`] when [`Service::set_props`] reports a change.
+    SetProps,
+
+    /// Track whether a [`Part::Description`] part is rendered (gates
+    /// `aria-describedby`).
+    SetHasDescription(bool),
 }
 
 /// The context for the `PasswordInput` component.
@@ -333,7 +348,7 @@ impl ars_core::Machine for Machine {
         _state: &State,
         event: &Event,
         ctx: &Context,
-        _props: &Props,
+        props: &Props,
     ) -> Option<ars_core::TransitionPlan<Self>> {
         match event {
             Event::ToggleVisibility => {
@@ -392,7 +407,61 @@ impl ars_core::Machine for Machine {
                     ctx.focus_visible = false;
                 },
             )),
+
+            Event::SetValue(value) => {
+                let value = value.clone();
+                Some(ars_core::TransitionPlan::context_only(
+                    move |ctx: &mut Context| {
+                        if let Some(value) = value {
+                            ctx.value.set(value.clone());
+                            ctx.value.sync_controlled(Some(value));
+                        } else {
+                            ctx.value.sync_controlled(None);
+                        }
+                    },
+                ))
+            }
+
+            Event::SetProps => {
+                let props = props.clone();
+                Some(ars_core::TransitionPlan::context_only(
+                    move |ctx: &mut Context| {
+                        ctx.disabled = props.disabled;
+                        ctx.required = props.required;
+                        ctx.invalid = props.invalid;
+                        ctx.readonly = props.readonly;
+                    },
+                ))
+            }
+
+            Event::SetHasDescription(has_description) => {
+                let has_description = *has_description;
+                Some(ars_core::TransitionPlan::context_only(
+                    move |ctx: &mut Context| {
+                        ctx.has_description = has_description;
+                    },
+                ))
+            }
         }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(
+            old.id, new.id,
+            "password_input::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SetValue(new.value.clone()));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
     }
 
     fn connect<'a>(
@@ -649,6 +718,17 @@ impl Api<'_> {
     }
 }
 
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    old.disabled != new.disabled
+        || old.required != new.required
+        || old.invalid != new.invalid
+        || old.readonly != new.readonly
+        || old.placeholder != new.placeholder
+        || old.name != new.name
+        || old.form != new.form
+        || old.autocomplete != new.autocomplete
+}
+
 fn set_described_by(attrs: &mut AttrMap, ctx: &Context) {
     let mut described_by = Vec::new();
 
@@ -784,28 +864,12 @@ mod tests {
     }
 
     #[test]
-    fn password_input_described_by_includes_description_when_present() {
+    fn password_input_described_by_includes_description_when_set_has_description_true() {
         let mut svc = service(props());
 
-        let result = svc.send(Event::Focus { is_keyboard: false });
+        drop(svc.send(Event::SetHasDescription(true)));
 
-        drop(result);
-
-        // Manually toggle has_description via direct mutation isn't possible via events;
-        // instead exercise the helper through invalid + ensure description path works
-        // via the broader describedby helper. We verify the description branch by
-        // constructing a Context with has_description=true and invoking input_attrs.
-        let mut ctx = svc.context().clone();
-
-        ctx.has_description = true;
-
-        let api = Api {
-            state: svc.state(),
-            ctx: &ctx,
-            props: svc.props(),
-            send: &|_| {},
-        };
-
+        let api = svc.connect(&|_| {});
         let attrs = api.input_attrs();
 
         assert_eq!(
@@ -1018,6 +1082,83 @@ mod tests {
 
         assert!(service.context().value.is_controlled());
         assert_eq!(service.context().value.get(), "from-parent");
+    }
+
+    #[test]
+    fn password_input_set_props_syncs_controlled_value() {
+        let mut service = service(props().value("initial"));
+
+        assert_eq!(service.context().value.get(), "initial");
+
+        drop(service.set_props(props().value("updated")));
+
+        assert!(service.context().value.is_controlled());
+        assert_eq!(service.context().value.get(), "updated");
+
+        drop(service.set_props(props().uncontrolled()));
+
+        assert!(!service.context().value.is_controlled());
+    }
+
+    #[test]
+    fn password_input_set_props_syncs_disabled_invalid_readonly_required() {
+        let mut service = service(props());
+
+        assert!(!service.context().disabled);
+
+        drop(
+            service.set_props(
+                props()
+                    .disabled(true)
+                    .invalid(true)
+                    .readonly(true)
+                    .required(true),
+            ),
+        );
+
+        assert!(service.context().disabled);
+        assert!(service.context().invalid);
+        assert!(service.context().readonly);
+        assert!(service.context().required);
+    }
+
+    #[test]
+    fn password_input_set_has_description_flips_context_flag() {
+        let mut service = service(props());
+
+        assert!(!service.context().has_description);
+
+        drop(service.send(Event::SetHasDescription(true)));
+
+        assert!(service.context().has_description);
+
+        let api = service.connect(&|_| {});
+        let attrs = api.input_attrs();
+
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
+            Some("pwd-description")
+        );
+    }
+
+    #[test]
+    fn password_input_props_output_changed_covers_each_field() {
+        let base = props();
+
+        assert!(!props_output_changed(&base, &base.clone()));
+
+        for next in [
+            base.clone().disabled(true),
+            base.clone().required(true),
+            base.clone().invalid(true),
+            base.clone().readonly(true),
+            base.clone().placeholder("p"),
+            base.clone().name("n"),
+            base.clone().form("f"),
+            base.clone().autocomplete("a"),
+        ] {
+            assert!(props_output_changed(&base, &next));
+        }
     }
 
     #[test]

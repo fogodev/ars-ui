@@ -79,6 +79,18 @@ pub enum Event {
 
     /// IME composition ended.
     CompositionEnd,
+
+    /// Synchronize the externally controlled value prop.
+    SetValue(Option<String>),
+
+    /// Synchronize output-affecting props (disabled / readonly / invalid /
+    /// placeholder / name) stored in [`Context`] when
+    /// [`Service::set_props`] reports a change.
+    SetProps,
+
+    /// Track whether a [`Part::Description`] part is rendered (gates
+    /// `aria-describedby`).
+    SetHasDescription(bool),
 }
 
 /// The context for the `SearchInput` component.
@@ -469,7 +481,56 @@ impl ars_core::Machine for Machine {
             })),
 
             Event::DebounceExpired | Event::CancelDebounce => None,
+
+            Event::SetValue(value) => {
+                let value = value.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    if let Some(value) = value {
+                        ctx.value.set(value.clone());
+                        ctx.value.sync_controlled(Some(value));
+                    } else {
+                        ctx.value.sync_controlled(None);
+                    }
+                }))
+            }
+
+            Event::SetProps => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.invalid = props.invalid;
+                    ctx.placeholder = props.placeholder;
+                    ctx.name = props.name;
+                }))
+            }
+
+            Event::SetHasDescription(has_description) => {
+                let has_description = *has_description;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.has_description = has_description;
+                }))
+            }
         }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(
+            old.id, new.id,
+            "search_input::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SetValue(new.value.clone()));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
     }
 
     fn connect<'a>(
@@ -772,6 +833,17 @@ impl Api<'_> {
     }
 }
 
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    old.disabled != new.disabled
+        || old.readonly != new.readonly
+        || old.invalid != new.invalid
+        || old.required != new.required
+        || old.placeholder != new.placeholder
+        || old.name != new.name
+        || old.form != new.form
+        || old.debounce != new.debounce
+}
+
 fn set_described_by(attrs: &mut AttrMap, ctx: &Context) {
     let mut described_by = Vec::new();
 
@@ -975,6 +1047,41 @@ mod tests {
         assert!(!result.state_changed);
         assert_eq!(service.state(), &State::Idle);
         assert!(!service.context().loading);
+    }
+
+    #[test]
+    fn search_input_set_props_syncs_controlled_value_and_output_props() {
+        let mut svc = service(props().value("initial"));
+
+        assert_eq!(svc.context().value.get(), "initial");
+
+        drop(svc.set_props(props().value("updated").disabled(true)));
+
+        assert_eq!(svc.context().value.get(), "updated");
+        assert!(svc.context().disabled);
+
+        drop(svc.set_props(props().uncontrolled().disabled(false).invalid(true)));
+
+        assert!(!svc.context().value.is_controlled());
+        assert!(!svc.context().disabled);
+        assert!(svc.context().invalid);
+    }
+
+    #[test]
+    fn search_input_set_has_description_flips_context_flag_and_describedby() {
+        let mut svc = service(props());
+
+        assert!(!svc.context().has_description);
+
+        drop(svc.send(Event::SetHasDescription(true)));
+
+        assert!(svc.context().has_description);
+        assert_eq!(
+            svc.connect(&|_| {})
+                .input_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
+            Some("search-description")
+        );
     }
 
     #[test]

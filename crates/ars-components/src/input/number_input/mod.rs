@@ -99,6 +99,22 @@ pub enum Event {
 
     /// IME composition ended.
     CompositionEnd,
+
+    /// Synchronize the externally controlled value prop.
+    ///
+    /// `Some` switches the component to controlled mode and pushes the new
+    /// value; `None` returns the component to uncontrolled mode.
+    SyncValue(Option<f64>),
+
+    /// Synchronize output-affecting props (`min` / `max` / `step` /
+    /// `large_step` / `precision` / `disabled` / `readonly` / `invalid` /
+    /// `required` / `name` / `spin_on_press`) stored in [`Context`] when
+    /// [`Service::set_props`] reports a change.
+    SetProps,
+
+    /// Track whether a [`Part::Description`] part is rendered (gates
+    /// `aria-describedby`).
+    SetHasDescription(bool),
 }
 
 /// The context for the `NumberInput` component.
@@ -629,7 +645,62 @@ impl ars_core::Machine for Machine {
             })),
 
             Event::Scrub(_) | Event::Wheel { .. } => None,
+
+            Event::SyncValue(value) => {
+                let value = *value;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    if let Some(v) = value {
+                        ctx.value.set(Some(v));
+                        ctx.value.sync_controlled(Some(Some(v)));
+                    } else {
+                        ctx.value.sync_controlled(None);
+                    }
+                }))
+            }
+
+            Event::SetProps => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.min = props.min;
+                    ctx.max = props.max;
+                    ctx.step = props.step;
+                    ctx.large_step = props.large_step;
+                    ctx.precision = props.precision;
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.invalid = props.invalid;
+                    ctx.required = props.required;
+                    ctx.name = props.name.clone();
+                    ctx.spin_on_press = props.spin_on_press;
+                }))
+            }
+
+            Event::SetHasDescription(has_description) => {
+                let has_description = *has_description;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.has_description = has_description;
+                }))
+            }
         }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(
+            old.id, new.id,
+            "number_input::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
     }
 
     fn connect<'a>(
@@ -668,14 +739,47 @@ const fn clamp(value: f64, min: f64, max: f64) -> f64 {
     if lower < max { lower } else { max }
 }
 
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    (old.min - new.min).abs() > f64::EPSILON
+        || (old.max - new.max).abs() > f64::EPSILON
+        || (old.step - new.step).abs() > f64::EPSILON
+        || (old.large_step - new.large_step).abs() > f64::EPSILON
+        || old.precision != new.precision
+        || old.disabled != new.disabled
+        || old.readonly != new.readonly
+        || old.invalid != new.invalid
+        || old.required != new.required
+        || old.name != new.name
+        || old.form != new.form
+        || old.spin_on_press != new.spin_on_press
+        || old.allow_mouse_wheel != new.allow_mouse_wheel
+        || old.clamp_value_on_blur != new.clamp_value_on_blur
+}
+
 fn stepped_plan(ctx: &Context, step: f64, up: bool) -> Option<TransitionPlan<Machine>> {
-    let current = ctx.value.get().unwrap_or(ctx.min);
+    let current = ctx.value.get().unwrap_or_else(|| baseline(ctx));
     let raw = if up { current + step } else { current - step };
     let next = round_to_precision(clamp(raw, ctx.min, ctx.max), ctx.precision);
 
     Some(TransitionPlan::context_only(move |ctx: &mut Context| {
         ctx.value.set(Some(next));
     }))
+}
+
+/// Returns the finite baseline used when stepping/scrubbing from an empty
+/// value. Always finite — `0.0` if it falls inside `[min, max]`, otherwise
+/// the nearest finite bound, defaulting to `0.0` when both bounds are
+/// non-finite (the default `min = -∞`, `max = +∞` config).
+fn baseline(ctx: &Context) -> f64 {
+    if ctx.min.is_finite() && ctx.max.is_finite() {
+        clamp(0.0, ctx.min, ctx.max)
+    } else if ctx.min.is_finite() && ctx.min > 0.0 {
+        ctx.min
+    } else if ctx.max.is_finite() && ctx.max < 0.0 {
+        ctx.max
+    } else {
+        0.0
+    }
 }
 
 /// Structural parts exposed by the `NumberInput` connect API.
@@ -1214,6 +1318,100 @@ mod tests {
 
         assert!(!result.context_changed);
         assert_eq!(svc.context().value.get(), &Some(10.0));
+    }
+
+    #[test]
+    fn number_input_increment_from_empty_with_infinite_bounds_uses_finite_baseline() {
+        // Default props: min=-inf, max=+inf, value=None.
+        // Without the baseline fix, this would produce -inf via unwrap_or(min).
+        let mut svc = service(props());
+
+        assert_eq!(svc.context().value.get(), &None);
+
+        drop(svc.send(Event::Increment));
+
+        let value = svc.context().value.get().expect("value set after step");
+        assert!(value.is_finite(), "value must remain finite after stepping");
+        assert!(
+            (value - 1.0).abs() < f64::EPSILON,
+            "baseline 0.0 + step 1.0 = 1.0"
+        );
+    }
+
+    #[test]
+    fn number_input_decrement_from_empty_with_infinite_bounds_uses_finite_baseline() {
+        let mut svc = service(props());
+
+        drop(svc.send(Event::Decrement));
+
+        let value = svc.context().value.get().expect("value set after step");
+        assert!(value.is_finite());
+        assert!((value - -1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn number_input_increment_from_empty_with_positive_min_starts_at_min() {
+        let mut svc = service(props().min(5.0).max(100.0));
+
+        drop(svc.send(Event::Increment));
+
+        // 0.0 clamped to [5,100] = 5.0, then +1.0 step = 6.0.
+        assert_eq!(svc.context().value.get(), &Some(6.0));
+    }
+
+    #[test]
+    fn number_input_set_props_syncs_controlled_value() {
+        let mut svc = service(bounded_props().value(10.0));
+
+        assert_eq!(svc.context().value.get(), &Some(10.0));
+
+        drop(svc.set_props(bounded_props().value(25.0)));
+
+        assert!(svc.context().value.is_controlled());
+        assert_eq!(svc.context().value.get(), &Some(25.0));
+
+        drop(svc.set_props(bounded_props().uncontrolled()));
+
+        assert!(!svc.context().value.is_controlled());
+    }
+
+    #[test]
+    fn number_input_set_props_syncs_output_affecting_fields() {
+        let mut svc = service(bounded_props());
+
+        drop(
+            svc.set_props(
+                bounded_props()
+                    .min(-50.0)
+                    .max(50.0)
+                    .step(5.0)
+                    .precision(2)
+                    .disabled(true),
+            ),
+        );
+
+        assert!((svc.context().min - -50.0).abs() < f64::EPSILON);
+        assert!((svc.context().max - 50.0).abs() < f64::EPSILON);
+        assert!((svc.context().step - 5.0).abs() < f64::EPSILON);
+        assert_eq!(svc.context().precision, Some(2));
+        assert!(svc.context().disabled);
+    }
+
+    #[test]
+    fn number_input_set_has_description_flips_context_flag_and_describedby() {
+        let mut svc = service(bounded_props().default_value(5.0));
+
+        assert!(!svc.context().has_description);
+
+        drop(svc.send(Event::SetHasDescription(true)));
+
+        assert!(svc.context().has_description);
+        assert_eq!(
+            svc.connect(&|_| {})
+                .input_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
+            Some("num-description")
+        );
     }
 
     #[test]

@@ -56,6 +56,13 @@ pub enum Event {
     CompositionStart,
     /// IME composition ended.
     CompositionEnd,
+    /// Synchronize the externally controlled value prop.
+    SetValue(Option<String>),
+    /// Synchronize output-affecting props stored in `Context` when
+    /// `Service::set_props` reports a change.
+    SetProps,
+    /// Track whether a `Description` part is rendered (gates `aria-describedby`).
+    SetHasDescription(bool),
 }
 ```
 

@@ -68,6 +68,16 @@ pub enum Event {
     CompositionStart,
     /// The component ended a composition session.
     CompositionEnd,
+    /// Synchronize the externally controlled value prop. `Some` enters
+    /// controlled mode without clamp/round; `None` returns to uncontrolled.
+    /// Use [`Event::SetValue`] for programmatic value setting that should be
+    /// clamped + rounded.
+    SyncValue(Option<f64>),
+    /// Synchronize output-affecting props stored in `Context` when
+    /// `Service::set_props` reports a change.
+    SetProps,
+    /// Track whether a `Description` part is rendered (gates `aria-describedby`).
+    SetHasDescription(bool),
 }
 ```
 
@@ -242,6 +252,16 @@ fn round_to_precision(value: f64, precision: Option<u32>) -> f64 {
 | `1.005` | 2         | `1.01` | Half-up at 3rd decimal     |
 
 **Application Order**: Precision rounding is applied AFTER clamping to min/max but BEFORE storing in Context.
+
+### 1.5.1 Stepping baseline when `value == None`
+
+`Increment` / `Decrement` / `IncrementLarge` / `DecrementLarge` MUST use a **finite baseline** when no current value is set:
+
+1. If `[min, max]` contains `0.0`, the baseline is `0.0`.
+2. Otherwise the baseline is the nearer finite bound (positive `min`, or negative `max`).
+3. With the default props (`min = f64::NEG_INFINITY`, `max = f64::INFINITY`), the baseline is `0.0`.
+
+This prevents `unwrap_or(min)` from producing `-∞` when the field is empty under the default configuration, which would propagate non-finite values into `ctx.value` and `aria-valuenow`.
 
 ### 1.6 Full Machine Implementation
 
