@@ -10,7 +10,7 @@ use core::fmt::{self, Debug};
 
 use ars_core::{
     AriaAttr, AttrMap, Callback, ComponentIds, ComponentMessages, ComponentPart, ConnectApi,
-    CssProperty, Env, HtmlAttr, Locale, MessageFn, PendingEffect, TransitionPlan,
+    CssProperty, Env, HtmlAttr, Locale, MessageFn, PendingEffect, TransitionPlan, no_cleanup,
 };
 use ars_interactions::{KeyboardEventData, KeyboardKey};
 
@@ -257,7 +257,7 @@ pub enum Event {
 /// Typed identifier for every named effect intent emitted by `FloatingPanel`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Effect {
-    /// Adapter invokes [`Props::on_open_change`].
+    /// Adapter invokes [`Props::on_open_change`] with the requested open state.
     OpenChange,
 
     /// Adapter invokes [`Props::on_position_change`].
@@ -724,7 +724,7 @@ fn close_plan(stage_changed: bool) -> TransitionPlan<Machine> {
             ctx.pre_maximize_size = None;
             ctx.z_index = None;
         })
-        .with_effect(PendingEffect::named(Effect::OpenChange))
+        .with_effect(open_change_effect(false))
         .with_effect(PendingEffect::named(Effect::ReleaseZIndex));
 
     if stage_changed {
@@ -740,7 +740,7 @@ fn controlled_close_request_plan() -> TransitionPlan<Machine> {
         ctx.focus_visible = false;
         ctx.active_resize_handle = None;
     })
-    .with_effect(PendingEffect::named(Effect::OpenChange))
+    .with_effect(open_change_effect(false))
 }
 
 fn open_controlled_plan(props: &Props) -> TransitionPlan<Machine> {
@@ -764,8 +764,21 @@ fn open_controlled_plan(props: &Props) -> TransitionPlan<Machine> {
                 ctx.size = initial_size;
             }
         })
-        .with_effect(PendingEffect::named(Effect::OpenChange))
+        .with_effect(open_change_effect(true))
         .with_effect(PendingEffect::named(Effect::AllocateZIndex))
+}
+
+fn open_change_effect(open: bool) -> PendingEffect<Machine> {
+    PendingEffect::new(
+        Effect::OpenChange,
+        move |_ctx: &Context, props: &Props, _send| {
+            if let Some(cb) = &props.on_open_change {
+                cb(open);
+            }
+
+            no_cleanup()
+        },
+    )
 }
 
 fn props_changed(old: &Props, new: &Props) -> bool {
@@ -1084,7 +1097,7 @@ impl ars_core::Machine for Machine {
     ) -> Vec<PendingEffect<Self>> {
         if context.open {
             vec![
-                PendingEffect::named(Effect::OpenChange),
+                open_change_effect(true),
                 PendingEffect::named(Effect::AllocateZIndex),
             ]
         } else {
@@ -1542,10 +1555,11 @@ impl ConnectApi for Api<'_> {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{string::ToString, vec};
+    use alloc::{string::ToString, sync::Arc, vec};
     use core::cell::RefCell;
+    use std::sync::Mutex;
 
-    use ars_core::{AriaAttr, AttrMap, CssProperty, Env, HtmlAttr, Service};
+    use ars_core::{AriaAttr, AttrMap, CssProperty, Env, HtmlAttr, Service, StrongSend, callback};
     use ars_interactions::{KeyboardEventData, KeyboardKey};
     use insta::assert_snapshot;
 
@@ -1909,10 +1923,18 @@ mod tests {
 
     #[test]
     fn controlled_close_request_preserves_open_state_until_prop_sync() {
+        let changes = Arc::new(Mutex::new(Vec::new()));
+        let captured_changes = Arc::clone(&changes);
         let mut service = Service::<Machine>::new(
             Props {
                 open: Some(true),
                 close_on_escape: true,
+                on_open_change: Some(callback(move |open| {
+                    captured_changes
+                        .lock()
+                        .expect("open-change callback state should not be poisoned")
+                        .push(open);
+                })),
                 ..test_props()
             },
             &Env::default(),
@@ -1921,12 +1943,28 @@ mod tests {
 
         drop(service.send(Event::Minimize));
 
-        let close = service.send(Event::Close);
+        let mut close = service.send(Event::Close);
 
         assert_eq!(service.state(), &State::Minimized);
         assert!(service.context().open);
         assert_eq!(service.context().stage(), Stage::Minimized);
         assert_eq!(effect_names(&close), vec![Effect::OpenChange]);
+
+        let effect = close
+            .pending_effects
+            .pop()
+            .expect("controlled close should emit open-change effect");
+        let send: StrongSend<Event> = Arc::new(|_| {});
+
+        drop(effect.run(service.context(), service.props(), send));
+
+        assert_eq!(
+            changes
+                .lock()
+                .expect("open-change callback state should not be poisoned")
+                .as_slice(),
+            &[false]
+        );
 
         let escape = service.send(Event::CloseOnEscape);
 

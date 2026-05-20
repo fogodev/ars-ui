@@ -13,7 +13,7 @@ use core::{
 
 use ars_core::{
     AriaAttr, AttrMap, Callback, ComponentIds, ComponentMessages, ComponentPart, ConnectApi,
-    CssProperty, Env, HtmlAttr, Locale, MessageFn, PendingEffect, TransitionPlan,
+    CssProperty, Env, HtmlAttr, Locale, MessageFn, PendingEffect, TransitionPlan, no_cleanup,
 };
 use ars_interactions::{KeyboardEventData, KeyboardKey};
 
@@ -28,7 +28,7 @@ pub enum Effect {
     /// Adapter starts the close-delay timer.
     CloseDelay,
 
-    /// Adapter invokes [`Props::on_open_change`] with the latest open state.
+    /// Adapter invokes [`Props::on_open_change`] with the requested open state.
     OpenChange,
 
     /// Adapter allocates a z-index and dispatches [`Event::SetZIndex`].
@@ -307,7 +307,7 @@ fn open_plan(cancel: Option<Effect>) -> TransitionPlan<Machine> {
         .apply(|ctx: &mut Context| {
             ctx.open = true;
         })
-        .with_effect(PendingEffect::named(Effect::OpenChange))
+        .with_effect(open_change_effect(true))
         .with_effect(PendingEffect::named(Effect::AllocateZIndex));
 
     if let Some(effect) = cancel {
@@ -323,7 +323,7 @@ fn controlled_open_request_plan(cancel: Option<Effect>) -> TransitionPlan<Machin
             ctx.hover_active = false;
             ctx.focus_active = false;
         })
-        .with_effect(PendingEffect::named(Effect::OpenChange));
+        .with_effect(open_change_effect(true));
 
     if let Some(effect) = cancel {
         plan = plan.cancel_effect(effect);
@@ -340,7 +340,7 @@ fn close_plan(cancel: Option<Effect>) -> TransitionPlan<Machine> {
             ctx.focus_active = false;
             ctx.z_index = None;
         })
-        .with_effect(PendingEffect::named(Effect::OpenChange))
+        .with_effect(open_change_effect(false))
         .with_effect(PendingEffect::named(Effect::ReleaseZIndex));
 
     if let Some(effect) = cancel {
@@ -356,7 +356,7 @@ fn controlled_close_request_plan(cancel: Option<Effect>) -> TransitionPlan<Machi
             ctx.hover_active = false;
             ctx.focus_active = false;
         })
-        .with_effect(PendingEffect::named(Effect::OpenChange));
+        .with_effect(open_change_effect(false));
 
     if let Some(effect) = cancel {
         plan = plan.cancel_effect(effect);
@@ -372,6 +372,19 @@ fn cancel_pending_open_plan() -> TransitionPlan<Machine> {
             ctx.focus_active = false;
         })
         .cancel_effect(Effect::OpenDelay)
+}
+
+fn open_change_effect(open: bool) -> PendingEffect<Machine> {
+    PendingEffect::new(
+        Effect::OpenChange,
+        move |_ctx: &Context, props: &Props, _send| {
+            if let Some(cb) = &props.on_open_change {
+                cb(open);
+            }
+
+            no_cleanup()
+        },
+    )
 }
 
 fn start_close_plan() -> TransitionPlan<Machine> {
@@ -766,7 +779,7 @@ impl ars_core::Machine for Machine {
     ) -> Vec<PendingEffect<Self>> {
         if matches!(state, State::Open) {
             vec![
-                PendingEffect::named(Effect::OpenChange),
+                open_change_effect(true),
                 PendingEffect::named(Effect::AllocateZIndex),
             ]
         } else {
@@ -1066,10 +1079,11 @@ impl ConnectApi for Api<'_> {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{rc::Rc, string::ToString, vec};
+    use alloc::{rc::Rc, string::ToString, sync::Arc, vec};
     use core::{cell::RefCell, time::Duration};
+    use std::sync::Mutex;
 
-    use ars_core::{AriaAttr, AttrMap, CssProperty, Env, HtmlAttr, Service};
+    use ars_core::{AriaAttr, AttrMap, CssProperty, Env, HtmlAttr, Service, StrongSend, callback};
     use ars_interactions::{KeyboardEventData, KeyboardKey};
     use insta::assert_snapshot;
 
@@ -1422,9 +1436,17 @@ mod tests {
 
     #[test]
     fn controlled_close_request_preserves_open_state_until_prop_sync() {
+        let changes = Arc::new(Mutex::new(Vec::new()));
+        let captured_changes = Arc::clone(&changes);
         let mut service = Service::<Machine>::new(
             Props {
                 open: Some(true),
+                on_open_change: Some(callback(move |open| {
+                    captured_changes
+                        .lock()
+                        .expect("open-change callback state should not be poisoned")
+                        .push(open);
+                })),
                 ..test_props()
             },
             &Env::default(),
@@ -1434,20 +1456,44 @@ mod tests {
         drop(service.send(Event::TriggerPointerEnter));
         drop(service.send(Event::TriggerFocus));
 
-        let close = service.send(Event::Close);
+        let mut close = service.send(Event::Close);
 
         assert_eq!(service.state(), &State::Open);
         assert!(service.context().open);
         assert!(!service.context().hover_active);
         assert!(!service.context().focus_active);
         assert_eq!(effect_names(&close), vec![Effect::OpenChange]);
+
+        let effect = close
+            .pending_effects
+            .pop()
+            .expect("controlled close should emit open-change effect");
+        let send: StrongSend<Event> = Arc::new(|_| {});
+
+        drop(effect.run(service.context(), service.props(), send));
+
+        assert_eq!(
+            changes
+                .lock()
+                .expect("open-change callback state should not be poisoned")
+                .as_slice(),
+            &[false]
+        );
     }
 
     #[test]
     fn controlled_false_open_timer_requests_without_opening() {
+        let changes = Arc::new(Mutex::new(Vec::new()));
+        let captured_changes = Arc::clone(&changes);
         let mut service = Service::<Machine>::new(
             Props {
                 open: Some(false),
+                on_open_change: Some(callback(move |open| {
+                    captured_changes
+                        .lock()
+                        .expect("open-change callback state should not be poisoned")
+                        .push(open);
+                })),
                 ..test_props()
             },
             &Env::default(),
@@ -1456,12 +1502,28 @@ mod tests {
 
         drop(service.send(Event::TriggerPointerEnter));
 
-        let timer = service.send(Event::OpenTimerFired);
+        let mut timer = service.send(Event::OpenTimerFired);
 
         assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().open);
         assert_eq!(timer.cancel_effects, vec![Effect::OpenDelay]);
         assert_eq!(effect_names(&timer), vec![Effect::OpenChange]);
+
+        let effect = timer
+            .pending_effects
+            .pop()
+            .expect("controlled open should emit open-change effect");
+        let send: StrongSend<Event> = Arc::new(|_| {});
+
+        drop(effect.run(service.context(), service.props(), send));
+
+        assert_eq!(
+            changes
+                .lock()
+                .expect("open-change callback state should not be poisoned")
+                .as_slice(),
+            &[true]
+        );
 
         let key = service.send(Event::TriggerKeyDown(KeyboardKey::Enter));
 
