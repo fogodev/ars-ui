@@ -1,11 +1,13 @@
 use ars_dioxus::{
-    prelude::{Orientation, t, Translate},
+    prelude::{Orientation, Translate, t},
     utility::{
         button::{self, Button, ButtonAsChild},
+        client_only::ClientOnly,
         dismissable,
         error_boundary::{Boundary, CapturedError},
         separator::{Separator, SeparatorAsChild},
         visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
+        z_index_allocator::{Context as ZIndexContext, ZIndexAllocatorProvider},
     },
 };
 use dioxus::prelude::*;
@@ -100,7 +102,10 @@ pub(crate) enum UtilityText {
     )]
     VisuallyHiddenLabel,
 
-    #[translate(en_US = "Skip to button variants", pt_BR = "Pular para variantes de botão")]
+    #[translate(
+        en_US = "Skip to button variants",
+        pt_BR = "Pular para variantes de botão"
+    )]
     FocusableSkipLink,
 
     #[translate(
@@ -118,7 +123,10 @@ pub(crate) enum UtilityText {
     )]
     SeparatorDescription,
 
-    #[translate(en_US = "Horizontal section break", pt_BR = "Quebra horizontal de seção")]
+    #[translate(
+        en_US = "Horizontal section break",
+        pt_BR = "Quebra horizontal de seção"
+    )]
     HorizontalSeparator,
 
     #[translate(en_US = "Vertical divider", pt_BR = "Divisor vertical")]
@@ -132,6 +140,36 @@ pub(crate) enum UtilityText {
         pt_BR = "O divisor da raiz do consumidor preserva a semântica de separador"
     )]
     AsChildSeparator,
+
+    #[translate(en_US = "Client-only content", pt_BR = "Conteúdo somente no cliente")]
+    ClientOnly,
+
+    #[translate(
+        en_US = "Fallback content is replaced after client mount.",
+        pt_BR = "O conteúdo fallback é substituído após a montagem no cliente."
+    )]
+    ClientOnlyDescription,
+
+    #[translate(
+        en_US = "Client content mounted",
+        pt_BR = "Conteúdo do cliente montado"
+    )]
+    ClientOnlyMounted,
+
+    #[translate(
+        en_US = "Loading client content",
+        pt_BR = "Carregando conteúdo do cliente"
+    )]
+    ClientOnlyFallback,
+
+    #[translate(en_US = "Z-index allocator", pt_BR = "Alocador de z-index")]
+    ZIndexAllocator,
+
+    #[translate(
+        en_US = "Provider-scoped claims allocate deterministic stacking layers.",
+        pt_BR = "Claims no escopo do provider alocam camadas determinísticas."
+    )]
+    ZIndexAllocatorDescription,
 
     #[translate(en_US = "Dismissable primitive", pt_BR = "Primitivo dismissable")]
     DismissablePrimitive,
@@ -215,12 +253,27 @@ fn ExampleErrorChild() -> Element {
 }
 
 #[component]
+fn ZIndexProbe(id: &'static str) -> Element {
+    let context = try_use_context::<ZIndexContext>().expect("z-index context should be provided");
+
+    let claim = context.allocate_claim();
+
+    rsx! {
+        span {
+            id,
+            class: "rounded border border-slate-300 px-2 py-1 text-xs",
+            "data-z": "{claim.value()}",
+            "{claim.value()}"
+        }
+    }
+}
+
+#[component]
 pub(crate) fn UtilityPanel() -> Element {
     let dismiss_status = use_signal_sync(|| UtilityText::DismissInitial);
-    let dismiss_status_for_dismiss = dismiss_status;
-    let dismiss_props = dismissable::Props::new().on_dismiss(move |reason| {
-        let mut dismiss_status = dismiss_status_for_dismiss;
 
+    let dismiss_props = dismissable::Props::new().on_dismiss(move |reason| {
+        let mut dismiss_status = dismiss_status;
         dismiss_status.set(UtilityText::DismissReason {
             reason: format!("{reason:?}"),
         });
@@ -439,6 +492,34 @@ pub(crate) fn UtilityPanel() -> Element {
                     },
                 }
                 p { class: "text-sm text-slate-500", {t(UtilityText::AsChildSeparator)} }
+            }
+            section {
+                class: "rounded-lg border border-slate-200 bg-white/85 p-5 shadow-lg shadow-slate-900/10",
+                "aria-labelledby": "client-only-z-index",
+                div { class: "mb-4 flex flex-wrap items-center justify-between gap-3",
+                    h2 {
+                        id: "client-only-z-index",
+                        class: "text-base font-bold text-slate-950",
+                        {t(UtilityText::ClientOnly)}
+                    }
+                    p { class: "text-sm text-slate-500", {t(UtilityText::ClientOnlyDescription)} }
+                }
+                ClientOnly {
+                    fallback: rsx! {
+                        span { {t(UtilityText::ClientOnlyFallback)} }
+                    },
+                    span { class: "text-sm text-slate-700", {t(UtilityText::ClientOnlyMounted)} }
+                }
+                h3 { class: "mt-4 text-sm font-semibold text-slate-900",
+                    {t(UtilityText::ZIndexAllocator)}
+                }
+                p { class: "text-sm text-slate-500", {t(UtilityText::ZIndexAllocatorDescription)} }
+                div { class: "mt-2 flex gap-2",
+                    ZIndexAllocatorProvider {
+                        ZIndexProbe { id: "dioxus-tw-z-index-first" }
+                        ZIndexProbe { id: "dioxus-tw-z-index-second" }
+                    }
+                }
             }
             section {
                 class: "rounded-lg border border-slate-200 bg-white/85 p-5 shadow-lg shadow-slate-900/10 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-900/15 lg:col-span-2",

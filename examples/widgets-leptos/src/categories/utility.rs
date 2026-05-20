@@ -1,13 +1,15 @@
 use std::fmt::{self, Display};
 
 use ars_leptos::{
-    prelude::{Orientation, t, Translate},
+    prelude::{Orientation, Translate, t},
     utility::{
         button::{self, Button, ButtonAsChild},
+        client_only::ClientOnly,
         dismissable,
         error_boundary::Boundary,
         separator::{Separator, SeparatorAsChild},
         visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
+        z_index_allocator::{Context as ZIndexContext, ZIndexAllocatorProvider},
     },
 };
 use leptos::prelude::*;
@@ -96,7 +98,10 @@ pub(crate) enum UtilityText {
     )]
     VisuallyHiddenLabel,
 
-    #[translate(en_US = "Skip to button variants", pt_BR = "Pular para variantes de botão")]
+    #[translate(
+        en_US = "Skip to button variants",
+        pt_BR = "Pular para variantes de botão"
+    )]
     FocusableSkipLink,
 
     #[translate(
@@ -114,7 +119,10 @@ pub(crate) enum UtilityText {
     )]
     SeparatorDescription,
 
-    #[translate(en_US = "Horizontal section break", pt_BR = "Quebra horizontal de seção")]
+    #[translate(
+        en_US = "Horizontal section break",
+        pt_BR = "Quebra horizontal de seção"
+    )]
     HorizontalSeparator,
 
     #[translate(en_US = "Vertical divider", pt_BR = "Divisor vertical")]
@@ -128,6 +136,36 @@ pub(crate) enum UtilityText {
         pt_BR = "O divisor da raiz do consumidor preserva a semântica de separador"
     )]
     AsChildSeparator,
+
+    #[translate(en_US = "Client-only content", pt_BR = "Conteúdo somente no cliente")]
+    ClientOnly,
+
+    #[translate(
+        en_US = "Fallback content is replaced after client mount.",
+        pt_BR = "O conteúdo fallback é substituído após a montagem no cliente."
+    )]
+    ClientOnlyDescription,
+
+    #[translate(
+        en_US = "Client content mounted",
+        pt_BR = "Conteúdo do cliente montado"
+    )]
+    ClientOnlyMounted,
+
+    #[translate(
+        en_US = "Loading client content",
+        pt_BR = "Carregando conteúdo do cliente"
+    )]
+    ClientOnlyFallback,
+
+    #[translate(en_US = "Z-index allocator", pt_BR = "Alocador de z-index")]
+    ZIndexAllocator,
+
+    #[translate(
+        en_US = "Provider-scoped claims allocate deterministic stacking layers.",
+        pt_BR = "Claims no escopo do provider alocam camadas determinísticas."
+    )]
+    ZIndexAllocatorDescription,
 
     #[translate(en_US = "Dismissable primitive", pt_BR = "Primitivo dismissable")]
     DismissablePrimitive,
@@ -212,13 +250,28 @@ fn example_error(message: Signal<String>) -> Result<&'static str, ExampleError> 
 }
 
 #[component]
+fn ZIndexProbe(id: &'static str) -> impl IntoView {
+    let context = use_context::<ZIndexContext>().expect("z-index context should be provided");
+
+    let claim = context.allocate_claim();
+
+    view! {
+        <span id=id class="z-index-chip" data-z=claim.value().to_string()>
+            {claim.value().to_string()}
+        </span>
+    }
+}
+
+#[component]
 pub(crate) fn UtilityPanel() -> impl IntoView {
     let (dismiss_status, set_dismiss_status) = signal(UtilityText::DismissInitial);
+
     let dismiss_props = dismissable::Props::new().on_dismiss(move |reason| {
         set_dismiss_status.set(UtilityText::DismissReason {
             reason: format!("{reason:?}"),
         });
     });
+
     let error_message = t(UtilityText::ExampleChildError);
 
     view! {
@@ -343,6 +396,19 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                     <div style="width: 2px; min-height: 32px; background: currentColor;"></div>
                 </SeparatorAsChild>
                 <p>{t(UtilityText::AsChildSeparator)}</p>
+            </section>
+            <section aria-labelledby="client-only-z-index">
+                <h3 id="client-only-z-index">{t(UtilityText::ClientOnly)}</h3>
+                <p>{t(UtilityText::ClientOnlyDescription)}</p>
+                <ClientOnly fallback=|| view! { <span>{t(UtilityText::ClientOnlyFallback)}</span> }>
+                    <span>{t(UtilityText::ClientOnlyMounted)}</span>
+                </ClientOnly>
+                <h4>{t(UtilityText::ZIndexAllocator)}</h4>
+                <p>{t(UtilityText::ZIndexAllocatorDescription)}</p>
+                <ZIndexAllocatorProvider>
+                    <ZIndexProbe id="leptos-z-index-first" />
+                    <ZIndexProbe id="leptos-z-index-second" />
+                </ZIndexAllocatorProvider>
             </section>
             <section aria-labelledby="dismissable">
                 <h3 id="dismissable">{t(UtilityText::DismissablePrimitive)}</h3>

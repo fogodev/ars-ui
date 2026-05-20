@@ -15,7 +15,10 @@ This spec maps the core [`ZIndexAllocator`](../../components/utility/z-index-all
 ## 2. Public Adapter API
 
 ```rust,no_check
-#[component] pub fn ZIndexAllocatorProvider(children: Children) -> impl IntoView
+#[component]
+pub fn ZIndexAllocatorProvider<T>(children: TypedChildren<T>) -> impl IntoView
+where
+    T: IntoView + 'static
 ```
 
 ## 3. Mapping to Core Component Contract
@@ -38,7 +41,7 @@ This spec maps the core [`ZIndexAllocator`](../../components/utility/z-index-all
 
 ## 6. Composition / Context Contract
 
-Publish allocator context with `provide_context`. Optional consumers use `use_context::<z_index_allocator::Context>()`.
+Publish allocator context with `provide_context` in a provider-owned child [`Owner`]. Optional consumers use `use_context::<z_index_allocator::Context>()`.
 
 ## 7. Prop Sync and Event Mapping
 
@@ -149,15 +152,24 @@ Allocator behavior is mostly provider-internal. If allocator options are configu
 
 ## 23. Framework-Specific Behavior
 
-Leptos owner cleanup may be used by descendants to release values.
+The provider creates a child owner, publishes context inside that owner, and renders the typed children through the same owner so descendants can read the provider-scoped context. Leptos owner cleanup may be used by descendants to release values.
 
 ## 24. Canonical Implementation Sketch
 
 ```rust
 #[component]
-pub fn ZIndexAllocatorProvider(children: Children) -> impl IntoView {
-    provide_context(z_index_allocator::Context::new());
-    view! { <>{children()}</> }
+pub fn ZIndexAllocatorProvider<T>(children: TypedChildren<T>) -> impl IntoView
+where
+    T: IntoView + 'static,
+{
+    let owner = Owner::current().map_or_else(Owner::new, |owner| owner.child());
+    let children = children.into_inner();
+    let children = owner.with(|| {
+        provide_context(z_index_allocator::Context::new());
+        children()
+    });
+
+    OwnedView::new_with_owner(children, owner)
 }
 ```
 

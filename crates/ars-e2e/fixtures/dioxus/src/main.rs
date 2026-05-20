@@ -6,10 +6,12 @@ use ars_dioxus::{
     prelude::{Locale, Orientation, TabKey, Translate, t},
     utility::{
         button::{self, Button, ButtonAsChild},
+        client_only::ClientOnly,
         dismissable,
         error_boundary::{Boundary, CapturedError},
         separator::{Separator, SeparatorAsChild},
         visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
+        z_index_allocator::{Context as ZIndexContext, ZIndexAllocatorProvider},
     },
 };
 use dioxus::prelude::*;
@@ -133,10 +135,16 @@ enum FixtureText {
     #[translate(en_US = "Reset", pt_BR = "Redefinir")]
     Reset,
 
-    #[translate(en_US = "Screen reader only label", pt_BR = "Rótulo apenas para leitor de tela")]
+    #[translate(
+        en_US = "Screen reader only label",
+        pt_BR = "Rótulo apenas para leitor de tela"
+    )]
     VisuallyHiddenLabel,
 
-    #[translate(en_US = "Skip to button variants", pt_BR = "Pular para variantes de botão")]
+    #[translate(
+        en_US = "Skip to button variants",
+        pt_BR = "Pular para variantes de botão"
+    )]
     FocusableSkipLink,
 
     #[translate(
@@ -202,6 +210,17 @@ fn i18n_registries() -> Arc<I18nRegistries> {
 #[component]
 fn FixtureErrorChild() -> Element {
     Err(CapturedError::from_display("Dioxus fixture child failed").into())
+}
+
+#[component]
+fn ZIndexProbe(id: &'static str) -> Element {
+    let context = try_use_context::<ZIndexContext>().expect("z-index context should be provided");
+
+    let claim = context.allocate_claim();
+
+    rsx! {
+        span { id, "data-z": "{claim.value()}", "Allocated" }
+    }
 }
 
 #[component]
@@ -357,7 +376,9 @@ fn UtilityPanel() -> Element {
                     }
                 }
             }
-            section { class: "showcase-panel wide", "aria-labelledby": "utility-primitives",
+            section {
+                class: "showcase-panel wide",
+                "aria-labelledby": "utility-primitives",
                 h2 { id: "utility-primitives", "Utility primitives" }
                 p {
                     VisuallyHidden { id: "dioxus-fixture-visually-hidden-label",
@@ -366,20 +387,25 @@ fn UtilityPanel() -> Element {
                     "Visible copy with a hidden accessible companion."
                 }
                 p {
-                    VisuallyHidden { id: "dioxus-fixture-focusable-skip", is_focusable: true,
+                    VisuallyHidden {
+                        id: "dioxus-fixture-focusable-skip",
+                        is_focusable: true,
                         a { href: "#variants", {t(FixtureText::FocusableSkipLink)} }
                     }
                 }
                 VisuallyHiddenAsChild {
                     id: "dioxus-fixture-visually-hidden-as-child",
                     render: |slot: ars_dioxus::as_child::AsChildRenderProps| rsx! {
-                        span { ..slot.attrs, {t(FixtureText::AsChildHiddenLabel)} }
+                        span { ..slot.attrs,{t(FixtureText::AsChildHiddenLabel)} }
                     },
                 }
                 Separator { id: "dioxus-fixture-separator-horizontal" }
                 div { class: "separator-demo-row",
                     span { "Before" }
-                    Separator { id: "dioxus-fixture-separator-vertical", orientation: Orientation::Vertical }
+                    Separator {
+                        id: "dioxus-fixture-separator-vertical",
+                        orientation: Orientation::Vertical,
+                    }
                     span { "After" }
                 }
                 SeparatorAsChild {
@@ -389,7 +415,24 @@ fn UtilityPanel() -> Element {
                         div { class: "separator-as-child", ..slot.attrs }
                     },
                 }
-                Separator { id: "dioxus-fixture-separator-decorative", decorative: true }
+                Separator {
+                    id: "dioxus-fixture-separator-decorative",
+                    decorative: true,
+                }
+                div { id: "dioxus-fixture-client-only-host",
+                    ClientOnly {
+                        fallback: rsx! {
+                            span { id: "dioxus-fixture-client-only-fallback", "Loading client content" }
+                        },
+                        span { id: "dioxus-fixture-client-only-child", "Client content" }
+                    }
+                }
+                section { id: "dioxus-fixture-z-index-host",
+                    ZIndexAllocatorProvider {
+                        ZIndexProbe { id: "dioxus-fixture-z-index-first" }
+                        ZIndexProbe { id: "dioxus-fixture-z-index-second" }
+                    }
+                }
             }
             section {
                 class: "showcase-panel wide",

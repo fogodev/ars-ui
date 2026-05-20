@@ -16,10 +16,12 @@ This spec maps the core [`ClientOnly`](../../components/utility/client-only.md) 
 
 ```rust,no_check
 #[component]
-pub fn ClientOnly(
-    #[prop(optional)] fallback: Option<ChildrenFn>,
-    children: ChildrenFn,
+pub fn ClientOnly<C>(
+    #[prop(optional, into)] fallback: ViewFn,
+    children: TypedChildrenFn<C>,
 ) -> impl IntoView
+where
+    C: IntoView + 'static,
 ```
 
 ## 3. Mapping to Core Component Contract
@@ -153,13 +155,17 @@ Leptos can use SSR cfg and a mounted signal while keeping the same initial marku
 
 ```rust
 #[component]
-pub fn ClientOnly(
-    #[prop(optional)] fallback: Option<ChildrenFn>,
-    children: ChildrenFn,
-) -> impl IntoView {
+pub fn ClientOnly<C>(
+    #[prop(optional, into)] fallback: ViewFn,
+    children: TypedChildrenFn<C>,
+) -> impl IntoView
+where
+    C: IntoView + 'static,
+{
     let mounted = RwSignal::new(false);
     Effect::new(move |_| mounted.set(true));
-    move || if mounted.get() { children() } else { fallback.as_ref().map(|f| f()).into_view() }
+    let children = children.into_inner();
+    move || if mounted.get() { Either::Left(children()) } else { Either::Right(fallback.run()) }
 }
 ```
 
