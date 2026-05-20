@@ -350,6 +350,23 @@ fn close_plan(cancel: Option<Effect>) -> TransitionPlan<Machine> {
     plan
 }
 
+fn close_sync_plan(cancel: Option<Effect>) -> TransitionPlan<Machine> {
+    let mut plan = TransitionPlan::to(State::Closed)
+        .apply(|ctx: &mut Context| {
+            ctx.open = false;
+            ctx.hover_active = false;
+            ctx.focus_active = false;
+            ctx.z_index = None;
+        })
+        .with_effect(PendingEffect::named(Effect::ReleaseZIndex));
+
+    if let Some(effect) = cancel {
+        plan = plan.cancel_effect(effect);
+    }
+
+    plan
+}
+
 fn controlled_close_request_plan(cancel: Option<Effect>) -> TransitionPlan<Machine> {
     let mut plan = TransitionPlan::to(State::Open)
         .apply(|ctx: &mut Context| {
@@ -372,6 +389,20 @@ fn cancel_pending_open_plan() -> TransitionPlan<Machine> {
             ctx.focus_active = false;
         })
         .cancel_effect(Effect::OpenDelay)
+}
+
+fn open_sync_plan(cancel: Option<Effect>) -> TransitionPlan<Machine> {
+    let mut plan = TransitionPlan::to(State::Open)
+        .apply(|ctx: &mut Context| {
+            ctx.open = true;
+        })
+        .with_effect(PendingEffect::named(Effect::AllocateZIndex));
+
+    if let Some(effect) = cancel {
+        plan = plan.cancel_effect(effect);
+    }
+
+    plan
 }
 
 fn open_change_effect(open: bool) -> PendingEffect<Machine> {
@@ -462,16 +493,16 @@ impl ars_core::Machine for Machine {
                 if *open {
                     match state {
                         State::Open => None,
-                        State::OpenPending => Some(open_plan(Some(Effect::OpenDelay))),
-                        State::ClosePending => Some(open_plan(Some(Effect::CloseDelay))),
-                        State::Closed => Some(open_plan(None)),
+                        State::OpenPending => Some(open_sync_plan(Some(Effect::OpenDelay))),
+                        State::ClosePending => Some(open_sync_plan(Some(Effect::CloseDelay))),
+                        State::Closed => Some(open_sync_plan(None)),
                     }
                 } else {
                     match state {
                         State::Closed => None,
                         State::OpenPending => Some(cancel_pending_open_plan()),
-                        State::Open => Some(close_plan(None)),
-                        State::ClosePending => Some(close_plan(Some(Effect::CloseDelay))),
+                        State::Open => Some(close_sync_plan(None)),
+                        State::ClosePending => Some(close_sync_plan(Some(Effect::CloseDelay))),
                     }
                 }
             }
@@ -525,7 +556,6 @@ impl ars_core::Machine for Machine {
                 | Event::TriggerKeyDown(_)
                 | Event::ContentPointerEnter
                 | Event::ContentFocus
-                | Event::OpenTimerFired
                 | Event::Open,
             ) if props.disabled => None,
 
@@ -557,6 +587,9 @@ impl ars_core::Machine for Machine {
             }
 
             (State::OpenPending, Event::OpenTimerFired) => {
+                if props.disabled {
+                    return Some(cancel_pending_open_plan());
+                }
                 if props.open == Some(false) {
                     return Some(controlled_open_request_plan(Some(Effect::OpenDelay)));
                 }
@@ -1409,6 +1442,28 @@ mod tests {
     }
 
     #[test]
+    fn disabled_during_open_pending_cancels_open_timer_without_sticking() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(service.send(Event::TriggerPointerEnter));
+
+        assert_eq!(service.state(), &State::OpenPending);
+
+        drop(service.set_props(Props {
+            disabled: true,
+            ..test_props()
+        }));
+
+        let timer = service.send(Event::OpenTimerFired);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+        assert_eq!(timer.cancel_effects, vec![Effect::OpenDelay]);
+        assert!(timer.pending_effects.is_empty());
+    }
+
+    #[test]
     fn controlled_open_close_cancel_pending_timers_without_spurious_open_change() {
         let mut service =
             Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
@@ -1428,10 +1483,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::Open);
         assert_eq!(controlled_open.cancel_effects, vec![Effect::CloseDelay]);
-        assert_eq!(
-            effect_names(&controlled_open),
-            vec![Effect::OpenChange, Effect::AllocateZIndex]
-        );
+        assert_eq!(effect_names(&controlled_open), vec![Effect::AllocateZIndex]);
     }
 
     #[test]
@@ -1472,6 +1524,23 @@ mod tests {
 
         drop(effect.run(service.context(), service.props(), send));
 
+        assert_eq!(
+            changes
+                .lock()
+                .expect("open-change callback state should not be poisoned")
+                .as_slice(),
+            &[false]
+        );
+
+        let sync = service.set_props(Props {
+            open: Some(false),
+            on_open_change: service.props().on_open_change.clone(),
+            ..test_props()
+        });
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+        assert_eq!(effect_names(&sync), vec![Effect::ReleaseZIndex]);
         assert_eq!(
             changes
                 .lock()

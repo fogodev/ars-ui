@@ -236,6 +236,8 @@ pub struct Props {
     pub initial_position: (f64, f64),
     /// Initial size (width, height) in pixels.
     pub initial_size: (f64, f64),
+    /// Adapter-supplied viewport bounds used for drag and resize constraints.
+    pub viewport: ViewportRect,
     /// Minimum allowed size (width, height).
     pub min_size: (f64, f64),
     /// Maximum allowed size (width, height). `(f64::INFINITY, f64::INFINITY)` for no max.
@@ -302,6 +304,12 @@ impl Default for Props {
             default_open: true,
             initial_position: (100.0, 100.0),
             initial_size: (400.0, 300.0),
+            viewport: ViewportRect {
+                x: 0.0,
+                y: 0.0,
+                width: f64::INFINITY,
+                height: f64::INFINITY,
+            },
             min_size: (200.0, 150.0),
             max_size: (f64::INFINITY, f64::INFINITY),
             resizable: true,
@@ -390,7 +398,7 @@ impl ars_core::Machine for Machine {
                     let new_pos = Self::clamp_position(
                         (x + dx, y + dy),
                         ctx.size,
-                        props.constrain_to_viewport,
+                        props,
                     );
                     ctx.position = Self::snap_to_grid(new_pos, props.grid_size);
                 }))
@@ -564,13 +572,18 @@ impl Machine {
     fn clamp_position(
         pos: (f64, f64),
         size: (f64, f64),
-        constrain: bool,
+        props: &Props,
     ) -> (f64, f64) {
-        if !constrain {
+        if !props.constrain_to_viewport || props.allow_overflow {
             return pos;
         }
-        // Ensure at least the title bar (top 32px) remains visible.
-        (pos.0.max(-size.0 + 40.0), pos.1.max(0.0))
+
+        let max_x = (props.viewport.x + props.viewport.width - size.0).max(props.viewport.x);
+        let max_y = (props.viewport.y + props.viewport.height - size.1).max(props.viewport.y);
+        (
+            pos.0.clamp(props.viewport.x, max_x),
+            pos.1.clamp(props.viewport.y, max_y),
+        )
     }
 
     fn snap_to_grid(pos: (f64, f64), grid_size: f64) -> (f64, f64) {

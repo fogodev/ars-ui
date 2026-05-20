@@ -427,6 +427,9 @@ pub struct Props {
     /// Initial size.
     pub initial_size: (f64, f64),
 
+    /// Adapter-supplied viewport bounds used for drag and resize constraints.
+    pub viewport: ViewportRect,
+
     /// Minimum allowed size.
     pub min_size: (f64, f64),
 
@@ -502,6 +505,12 @@ impl Default for Props {
             default_open: true,
             initial_position: (100.0, 100.0),
             initial_size: (400.0, 300.0),
+            viewport: ViewportRect {
+                x: 0.0,
+                y: 0.0,
+                width: f64::INFINITY,
+                height: f64::INFINITY,
+            },
             min_size: (200.0, 150.0),
             max_size: (f64::INFINITY, f64::INFINITY),
             resizable: true,
@@ -593,7 +602,23 @@ fn clamp_position(position: (f64, f64), size: (f64, f64), props: &Props) -> (f64
     if !props.constrain_to_viewport || props.allow_overflow {
         position
     } else {
-        (position.0.max(-size.0 + 40.0), position.1.max(0.0))
+        let max_x = props.viewport.x + props.viewport.width - size.0;
+        let max_y = props.viewport.y + props.viewport.height - size.1;
+        let max_x = if max_x < props.viewport.x {
+            props.viewport.x
+        } else {
+            max_x
+        };
+        let max_y = if max_y < props.viewport.y {
+            props.viewport.y
+        } else {
+            max_y
+        };
+
+        (
+            position.0.clamp(props.viewport.x, max_x),
+            position.1.clamp(props.viewport.y, max_y),
+        )
     }
 }
 
@@ -734,6 +759,28 @@ fn close_plan(stage_changed: bool) -> TransitionPlan<Machine> {
     plan
 }
 
+fn close_sync_plan(stage_changed: bool) -> TransitionPlan<Machine> {
+    let mut plan = TransitionPlan::to(State::Idle)
+        .apply(|ctx: &mut Context| {
+            ctx.open = false;
+            ctx.focused = false;
+            ctx.focus_visible = false;
+            ctx.minimized = false;
+            ctx.maximized = false;
+            ctx.active_resize_handle = None;
+            ctx.pre_maximize_position = None;
+            ctx.pre_maximize_size = None;
+            ctx.z_index = None;
+        })
+        .with_effect(PendingEffect::named(Effect::ReleaseZIndex));
+
+    if stage_changed {
+        plan = plan.with_effect(stage_change_effect());
+    }
+
+    plan
+}
+
 fn controlled_close_request_plan(target: Option<State>) -> TransitionPlan<Machine> {
     let mut plan = if let Some(target) = target {
         TransitionPlan::to(target)
@@ -750,7 +797,7 @@ fn controlled_close_request_plan(target: Option<State>) -> TransitionPlan<Machin
     plan.with_effect(open_change_effect(false))
 }
 
-fn open_controlled_plan(props: &Props) -> TransitionPlan<Machine> {
+fn open_sync_plan(props: &Props) -> TransitionPlan<Machine> {
     let initial_position = props.initial_position;
     let initial_size = props.initial_size;
     let persist_rect = props.persist_rect;
@@ -771,7 +818,6 @@ fn open_controlled_plan(props: &Props) -> TransitionPlan<Machine> {
                 ctx.size = initial_size;
             }
         })
-        .with_effect(open_change_effect(true))
         .with_effect(PendingEffect::named(Effect::AllocateZIndex))
 }
 
@@ -863,10 +909,13 @@ const fn controlled_close_target(state: State) -> Option<State> {
 fn props_changed(old: &Props, new: &Props) -> bool {
     old.min_size != new.min_size
         || old.max_size != new.max_size
+        || old.viewport != new.viewport
         || old.draggable != new.draggable
         || old.resizable != new.resizable
         || old.modal != new.modal
+        || old.constrain_to_viewport != new.constrain_to_viewport
         || old.close_on_escape != new.close_on_escape
+        || old.allow_overflow != new.allow_overflow
         || old.grid_size != new.grid_size
 }
 
@@ -924,9 +973,11 @@ impl ars_core::Machine for Machine {
         match (state, event) {
             (_, Event::SetControlledOpen(open)) if *open == ctx.open => None,
 
-            (_, Event::SetControlledOpen(true)) => Some(open_controlled_plan(props)),
+            (_, Event::SetControlledOpen(true)) => Some(open_sync_plan(props)),
 
-            (_, Event::SetControlledOpen(false)) => Some(close_plan(ctx.stage() != Stage::Default)),
+            (_, Event::SetControlledOpen(false)) => {
+                Some(close_sync_plan(ctx.stage() != Stage::Default))
+            }
 
             (_, Event::SyncProps) => {
                 let (min_size, max_size) = normalize_size_bounds(props.min_size, props.max_size);
@@ -1093,14 +1144,15 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Maximized, Event::Restore | Event::Maximize(_)) if ctx.open => {
-                Some(stage_plan(State::Idle, |ctx| {
-                    if let Some(position) = ctx.pre_maximize_position {
-                        ctx.position = position;
-                    }
+                let props = props.clone();
+                Some(stage_plan(State::Idle, move |ctx| {
+                    let mut restored_size = ctx.pre_maximize_size.unwrap_or(ctx.size);
+                    restored_size.0 = restored_size.0.clamp(ctx.min_size.0, ctx.max_size.0);
+                    restored_size.1 = restored_size.1.clamp(ctx.min_size.1, ctx.max_size.1);
+                    let restored_position = ctx.pre_maximize_position.unwrap_or(ctx.position);
 
-                    if let Some(size) = ctx.pre_maximize_size {
-                        ctx.size = size;
-                    }
+                    ctx.size = restored_size;
+                    ctx.position = clamp_position(restored_position, restored_size, &props);
 
                     ctx.pre_maximize_position = None;
                     ctx.pre_maximize_size = None;
@@ -1920,11 +1972,7 @@ mod tests {
         assert_eq!(maximized.context().stage(), Stage::Default);
         assert_eq!(
             effect_names(&close_maximized),
-            vec![
-                Effect::OpenChange,
-                Effect::ReleaseZIndex,
-                Effect::StageChange
-            ]
+            vec![Effect::ReleaseZIndex, Effect::StageChange]
         );
     }
 
@@ -2045,6 +2093,26 @@ mod tests {
         assert!(service.context().open);
         assert_eq!(service.context().stage(), Stage::Minimized);
         assert_eq!(effect_names(&escape), vec![Effect::OpenChange]);
+
+        let sync = service.set_props(Props {
+            open: Some(false),
+            on_open_change: service.props().on_open_change.clone(),
+            ..test_props()
+        });
+
+        assert_eq!(service.state(), &State::Idle);
+        assert!(!service.context().open);
+        assert_eq!(
+            effect_names(&sync),
+            vec![Effect::ReleaseZIndex, Effect::StageChange]
+        );
+        assert_eq!(
+            changes
+                .lock()
+                .expect("open-change callback state should not be poisoned")
+                .as_slice(),
+            &[false]
+        );
     }
 
     #[test]
@@ -2190,6 +2258,177 @@ mod tests {
         assert_eq!(service.context().position, (100.0, 0.0));
         assert_eq!(service.context().size, (400.0, 450.0));
         assert_eq!(effect_names(&resize), vec![Effect::SizeChange]);
+    }
+
+    #[test]
+    fn drag_and_resize_clamp_to_viewport_max_bounds_when_overflow_is_disabled() {
+        let constrained_props = Props {
+            allow_overflow: false,
+            constrain_to_viewport: true,
+            viewport: ViewportRect {
+                x: 0.0,
+                y: 0.0,
+                width: 640.0,
+                height: 480.0,
+            },
+            ..test_props()
+        };
+        let mut service = Service::<Machine>::new(
+            constrained_props.clone(),
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(service.send(Event::DragStart));
+        drop(service.send(Event::DragMove {
+            dx: 1_000.0,
+            dy: 1_000.0,
+        }));
+
+        assert_eq!(service.context().position, (240.0, 180.0));
+
+        let mut resized = Service::<Machine>::new(
+            Props {
+                initial_position: (220.0, 170.0),
+                initial_size: (300.0, 240.0),
+                ..constrained_props
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(resized.send(Event::ResizeStart(ResizeHandle::SE)));
+        drop(resized.send(Event::ResizeMove { dx: 80.0, dy: 70.0 }));
+
+        assert_eq!(resized.context().size, (380.0, 310.0));
+        assert_eq!(resized.context().position, (220.0, 170.0));
+
+        drop(resized.send(Event::ResizeMove {
+            dx: 200.0,
+            dy: 140.0,
+        }));
+
+        assert_eq!(resized.context().size, (580.0, 450.0));
+        assert_eq!(resized.context().position, (60.0, 30.0));
+    }
+
+    #[test]
+    fn viewport_clamp_handles_disabled_constraints_and_oversized_panels() {
+        let mut unconstrained = Service::<Machine>::new(
+            Props {
+                constrain_to_viewport: false,
+                allow_overflow: false,
+                viewport: ViewportRect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 320.0,
+                    height: 240.0,
+                },
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(unconstrained.send(Event::DragStart));
+        drop(unconstrained.send(Event::DragMove {
+            dx: 600.0,
+            dy: 500.0,
+        }));
+
+        assert_eq!(unconstrained.context().position, (700.0, 600.0));
+
+        let mut oversized = Service::<Machine>::new(
+            Props {
+                initial_size: (500.0, 400.0),
+                allow_overflow: false,
+                constrain_to_viewport: true,
+                viewport: ViewportRect {
+                    x: 10.0,
+                    y: 20.0,
+                    width: 320.0,
+                    height: 240.0,
+                },
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(oversized.send(Event::DragStart));
+        drop(oversized.send(Event::DragMove {
+            dx: 600.0,
+            dy: 500.0,
+        }));
+
+        assert_eq!(oversized.context().position, (10.0, 20.0));
+
+        let sync = oversized.set_props(Props {
+            initial_size: (500.0, 400.0),
+            allow_overflow: true,
+            constrain_to_viewport: false,
+            viewport: ViewportRect {
+                x: 0.0,
+                y: 0.0,
+                width: 640.0,
+                height: 480.0,
+            },
+            ..test_props()
+        });
+
+        assert!(sync.context_changed);
+    }
+
+    #[test]
+    fn restore_after_maximize_reclamps_saved_rect_to_current_constraints() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                initial_position: (420.0, 320.0),
+                initial_size: (500.0, 420.0),
+                allow_overflow: false,
+                constrain_to_viewport: true,
+                viewport: ViewportRect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 640.0,
+                    height: 480.0,
+                },
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(service.send(Event::Maximize(MaximizeMetrics {
+            viewport: ViewportRect {
+                x: 0.0,
+                y: 0.0,
+                width: 640.0,
+                height: 480.0,
+            },
+        })));
+
+        drop(service.set_props(Props {
+            initial_position: (420.0, 320.0),
+            initial_size: (500.0, 420.0),
+            min_size: (200.0, 150.0),
+            max_size: (360.0, 260.0),
+            allow_overflow: false,
+            constrain_to_viewport: true,
+            viewport: ViewportRect {
+                x: 0.0,
+                y: 0.0,
+                width: 640.0,
+                height: 480.0,
+            },
+            ..test_props()
+        }));
+
+        drop(service.send(Event::Restore));
+
+        assert_eq!(service.state(), &State::Idle);
+        assert_eq!(service.context().size, (360.0, 260.0));
+        assert_eq!(service.context().position, (280.0, 220.0));
     }
 
     #[test]
@@ -2389,10 +2628,7 @@ mod tests {
 
         let close = service.send(Event::SetControlledOpen(false));
 
-        assert_eq!(
-            effect_names(&close),
-            vec![Effect::OpenChange, Effect::ReleaseZIndex]
-        );
+        assert_eq!(effect_names(&close), vec![Effect::ReleaseZIndex]);
         assert!(!service.context().open);
 
         let reopen = service.send(Event::SetControlledOpen(true));
@@ -2400,10 +2636,7 @@ mod tests {
         assert!(service.context().open);
         assert_eq!(service.context().position, (100.0, 100.0));
         assert_eq!(service.context().size, (400.0, 300.0));
-        assert_eq!(
-            effect_names(&reopen),
-            vec![Effect::OpenChange, Effect::AllocateZIndex]
-        );
+        assert_eq!(effect_names(&reopen), vec![Effect::AllocateZIndex]);
 
         let noop = service.send(Event::SetControlledOpen(true));
 
