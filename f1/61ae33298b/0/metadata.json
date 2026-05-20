@@ -1,0 +1,197 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "f161ae33298b",
+  "session_id": "b939c529-fda9-4daf-8309-cf7be7c57583",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-20T16:04:24.485261Z",
+  "branch": "t3code/e1654fe1",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/input/mod.rs",
+    "crates/ars-components/src/input/number_input/mod.rs",
+    "crates/ars-components/src/input/number_input/snapshots/ars_components__input__number_input__tests__number_input_decrement_trigger_at_min_snapshot.snap",
+    "crates/ars-components/src/input/number_input/snapshots/ars_components__input__number_input__tests__number_input_increment_trigger_at_max_snapshot.snap",
+    "crates/ars-components/src/input/number_input/snapshots/ars_components__input__number_input__tests__number_input_increment_trigger_default_snapshot.snap",
+    "crates/ars-components/src/input/number_input/snapshots/ars_components__input__number_input__tests__number_input_input_at_max_snapshot.snap",
+    "crates/ars-components/src/input/number_input/snapshots/ars_components__input__number_input__tests__number_input_input_default_snapshot.snap",
+    "crates/ars-components/src/input/number_input/snapshots/ars_components__input__number_input__tests__number_input_input_invalid_required_with_form_snapshot.snap",
+    "crates/ars-components/src/input/number_input/snapshots/ars_components__input__number_input__tests__number_input_root_focused_snapshot.snap",
+    "crates/ars-components/src/input/number_input/snapshots/ars_components__input__number_input__tests__number_input_root_idle_snapshot.snap",
+    "crates/ars-components/src/input/number_input/snapshots/ars_components__input__number_input__tests__number_input_root_scrubbing_snapshot.snap",
+    "crates/ars-components/src/input/password_input/mod.rs",
+    "crates/ars-components/src/input/password_input/snapshots/ars_components__input__password_input__tests__password_input_description_snapshot.snap",
+    "crates/ars-components/src/input/password_input/snapshots/ars_components__input__password_input__tests__password_input_error_message_snapshot.snap",
+    "crates/ars-components/src/input/password_input/snapshots/ars_components__input__password_input__tests__password_input_input_masked_snapshot.snap",
+    "crates/ars-components/src/input/password_input/snapshots/ars_components__input__password_input__tests__password_input_input_visible_snapshot.snap",
+    "crates/ars-components/src/input/password_input/snapshots/ars_components__input__password_input__tests__password_input_input_with_metadata_snapshot.snap",
+    "crates/ars-components/src/input/password_input/snapshots/ars_components__input__password_input__tests__password_input_root_disabled_invalid_readonly_snapshot.snap",
+    "crates/ars-components/src/input/password_input/snapshots/ars_components__input__password_input__tests__password_input_root_masked_snapshot.snap",
+    "crates/ars-components/src/input/password_input/snapshots/ars_components__input__password_input__tests__password_input_root_visible_snapshot.snap",
+    "crates/ars-components/src/input/password_input/snapshots/ars_components__input__password_input__tests__password_input_toggle_masked_snapshot.snap",
+    "crates/ars-components/src/input/password_input/snapshots/ars_components__input__password_input__tests__password_input_toggle_visible_snapshot.snap",
+    "crates/ars-components/src/input/pin_input/mod.rs",
+    "crates/ars-components/src/input/pin_input/snapshots/ars_components__input__pin_input__tests__pin_input_hidden_input_snapshot.snap",
+    "crates/ars-components/src/input/pin_input/snapshots/ars_components__input__pin_input__tests__pin_input_input_cell_focused_snapshot.snap",
+    "crates/ars-components/src/input/pin_input/snapshots/ars_components__input__pin_input__tests__pin_input_input_cell_otp_snapshot.snap",
+    "crates/ars-components/src/input/pin_input/snapshots/ars_components__input__pin_input__tests__pin_input_input_cell_password_mode_snapshot.snap",
+    "crates/ars-components/src/input/pin_input/snapshots/ars_components__input__pin_input__tests__pin_input_input_cell_unfocused_snapshot.snap",
+    "crates/ars-components/src/input/pin_input/snapshots/ars_components__input__pin_input__tests__pin_input_input_cell_with_placeholder_snapshot.snap",
+    "crates/ars-components/src/input/pin_input/snapshots/ars_components__input__pin_input__tests__pin_input_root_completed_snapshot.snap",
+    "crates/ars-components/src/input/pin_input/snapshots/ars_components__input__pin_input__tests__pin_input_root_disabled_snapshot.snap",
+    "crates/ars-components/src/input/pin_input/snapshots/ars_components__input__pin_input__tests__pin_input_root_snapshot.snap",
+    "crates/ars-components/src/input/search_input/mod.rs",
+    "crates/ars-components/src/input/search_input/snapshots/ars_components__input__search_input__tests__search_input_clear_trigger_hidden_snapshot.snap",
+    "crates/ars-components/src/input/search_input/snapshots/ars_components__input__search_input__tests__search_input_clear_trigger_visible_snapshot.snap",
+    "crates/ars-components/src/input/search_input/snapshots/ars_components__input__search_input__tests__search_input_description_snapshot.snap",
+    "crates/ars-components/src/input/search_input/snapshots/ars_components__input__search_input__tests__search_input_error_message_snapshot.snap",
+    "crates/ars-components/src/input/search_input/snapshots/ars_components__input__search_input__tests__search_input_input_default_snapshot.snap",
+    "crates/ars-components/src/input/search_input/snapshots/ars_components__input__search_input__tests__search_input_input_with_metadata_snapshot.snap",
+    "crates/ars-components/src/input/search_input/snapshots/ars_components__input__search_input__tests__search_input_loading_indicator_snapshot.snap",
+    "crates/ars-components/src/input/search_input/snapshots/ars_components__input__search_input__tests__search_input_root_focused_snapshot.snap",
+    "crates/ars-components/src/input/search_input/snapshots/ars_components__input__search_input__tests__search_input_root_idle_snapshot.snap",
+    "crates/ars-components/src/input/search_input/snapshots/ars_components__input__search_input__tests__search_input_root_searching_snapshot.snap",
+    "crates/ars-components/src/input/search_input/snapshots/ars_components__input__search_input__tests__search_input_submit_trigger_snapshot.snap",
+    "crates/ars-components/tests/proptest_state_machines/input.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/input.rs",
+    "crates/ars-core/src/message_fn.rs",
+    "spec/components/input/number-input.md",
+    "spec/components/input/pin-input.md",
+    "spec/components/input/search-input.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "bac08bc2c217",
+  "token_usage": {
+    "input_tokens": 4193,
+    "cache_creation_tokens": 1671112,
+    "cache_read_tokens": 79742648,
+    "output_tokens": 201833,
+    "api_call_count": 223
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Implement GitHub issues #233, #235, and #236 — four framework-agnostic input component state machines (PasswordInput, SearchInput, NumberInput, PinInput) as part of Epic #220 (Agnostic input components), landing them in a single bundled PR.",
+    "outcome": "All four components were implemented TDD-style with full unit tests, snapshot fixtures, proptest invariants, and spec-conformance assertions. All 10 cargo xci-fast gates passed, a post-implementation audit was run, the Duration convention fix was landed after user feedback, and the commit was staged and pushed with a PR opened closing #233, #235, and #236.",
+    "learnings": {
+      "repo": [
+        "`#[derive(ComponentPart)]` supports struct variants (e.g., `Input { cell_index: usize }`) — proven by existing tests in `crates/ars-derive/src/component_part.rs:531-553`.",
+        "The workspace convention for time-interval fields is `std::time::Duration` / `Option<Duration>`, not `u32` milliseconds — both Tooltip and Toast follow this pattern.",
+        "`spec_conformance/input.rs` did not exist prior to this session; a new category file must be created when adding the first component in a category.",
+        "CLAUDE.md explicitly permits resolving spec/code mismatches (e.g., duplicate `FormatOptions`) in the same task/PR.",
+        "Coverage thresholds for `ars-components` are ≥90% line / ≥90% region; enforced by `xtask::coverage::default_thresholds`.",
+        "`cargo xci --profile fast` is the mandatory pre-push gate (~5 min, 10 gates: fmt, check, clippy, unit, integration, adapter, spec-compile-snippets, error-variant-coverage, mutual-exclusion, snapshot-count).",
+        "`cargo insta test --unreferenced=reject` is the canonical orphaned-snapshot check.",
+        "`ars_i18n::number::parse_locale_number(input, locale) -> Option<f64>` is the correct API for locale-aware number parsing in NumberInput.",
+        "PinInput callbacks must use `Fn(String)` not `Fn(&str)` because `Callback<F>` requires `Args: 'static`.",
+        "The `PendingEffect::named` / `cancel_effect` pattern for debounce timers is established in `crates/ars-components/src/overlay/tooltip.rs` and should be mirrored for any debounced component."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-derive/src/component_part.rs",
+          "line": 531,
+          "end_line": 553,
+          "finding": "Existing test proves `#[derive(ComponentPart)]` handles struct variants — PinInput's `Part::Input { cell_index: usize }` requires no changes to the derive crate."
+        },
+        {
+          "path": "crates/ars-i18n/src/number/mod.rs",
+          "line": 569,
+          "end_line": 569,
+          "finding": "`parse_locale_number(input, locale) -> Option<f64>` — the correct API for locale-aware parsing in NumberInput's Change handler."
+        },
+        {
+          "path": "crates/ars-i18n/src/number/mod.rs",
+          "line": 127,
+          "end_line": 127,
+          "finding": "`RoundingMode::HalfUp` variant location — used in `FormatOptions.rounding_mode` for NumberInput's round-half-up behavior."
+        },
+        {
+          "path": "crates/ars-core/src/message_fn.rs",
+          "finding": "Required adding a new `From<F>` impl for `MessageFn<dyn Fn(usize, usize, &Locale) -> String + Send + Sync>` to support PinInput's `Messages::ordinal_label` 3-argument callback — this was a gap in the existing impl coverage."
+        },
+        {
+          "path": "crates/ars-components/src/overlay/tooltip.rs",
+          "finding": "Canonical debounce/timer pattern: emit `Effect::SearchDebounce` via `.with_effect(PendingEffect::named(...))`, cancel via `.cancel_effect(...)`. Adapters own wall-clock timer and fire `Event::DebounceExpired`."
+        }
+      ],
+      "workflow": [
+        "TDD cycle for each component: read spec §1.x/§2 → write failing tests → implement public surface → implement `Machine::transition` → accept first-run snapshots with `cargo insta review`.",
+        "Post-implementation-audit skill runs three phases in sequence: (1) spec/impl drift, (2) iterative 'anything missing?' passes, (3) test coverage audit — must run before opening PR per CLAUDE.md workflow step 7.",
+        "Bundled PRs for related components (precedent: PR #654 bundled Toggle + Swap) should use four logical commits, one per component, each independently green.",
+        "After pushing a PR that adds snapshot fixtures, immediately apply the `snapshot-reviewed` label to signal reviewers that `.snap` files are intentional.",
+        "`cargo xtask spec validate` validates all spec frontmatter; `cargo xtask spec compile-snippets` checks code examples in spec — both required before push.",
+        "Coverage tooling (`cargo llvm-cov`) output is hard to filter per-file; plan extra time for coverage investigation if thresholds are a concern."
+      ]
+    },
+    "friction": [
+      "API Error: socket connection closed unexpectedly during initial parallel agent exploration — required re-launching exploration sequentially.",
+      "API Error: 529 Overloaded when user first requested commit/push — required retrying the session.",
+      "PinInput compilation required multiple fix iterations: `StrongSend` API didn't exist, `MessageFn` lacked a 3-argument `From<F>` impl, `readonly` check used wrong field name — each required a separate read-compile-fix cycle.",
+      "Multiple clippy rounds needed across NumberInput and PinInput: needless borrows, redundant closures, complex type aliases, missing derives — approximately 8 separate edit passes.",
+      "Coverage tooling was difficult to query precisely — many attempts to filter the lcov report to specific new files before finding a workable approach.",
+      "Post-implementation-audit (Phase 2) missed the `debounce_ms: Option<u32>` workspace convention violation; the user had to point it out explicitly, requiring a full Duration migration pass after the audit was declared complete."
+    ],
+    "open_items": [
+      "Builder method clearers (`no_debounce()`, `no_format_options()`, etc.) in SearchInput, NumberInput, and PinInput are not covered by unit tests — acknowledged as trivial setters with no logic, but a known gap.",
+      "Component catalog (`spec/foundation/02-component-catalog.md`) was checked but not updated to list the four new components — verify whether this file requires manual updates when new components land.",
+      "Adapter spec directories were checked but no adapter scaffolding was added for the four new components — adapter implementations (React, Svelte, etc.) are out of scope for this PR but will be needed downstream.",
+      "The `waiting-for-codex-review` skill invocation is pending — must be triggered after the PR is confirmed open on GitHub.",
+      "The `snapshot-reviewed` label must be re-applied after any future snapshot churn on this PR (e.g., if a Codex review triggers snapshot regeneration)."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-20T16:03:22.588398Z",
+    "agent_lines": 8255,
+    "agent_removed": 18,
+    "human_added": 447,
+    "human_modified": 22,
+    "human_removed": 0,
+    "total_committed": 8716,
+    "total_lines_changed": 8742,
+    "agent_percentage": 94.63509494394874,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 13,
+      "user_lines_removed": 6,
+      "agent_lines_added": 8486,
+      "agent_lines_removed": 24,
+      "user_added_per_file": {
+        "crates/ars-components/tests/proptest_state_machines/input.rs": 7,
+        "spec/components/input/pin-input.md": 6
+      },
+      "user_removed_per_file": {
+        "spec/components/input/pin-input.md": 6
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 228,
+      "user_lines_removed": 8,
+      "agent_lines_added": 8510,
+      "agent_lines_removed": 32,
+      "user_added_per_file": {
+        "crates/ars-components/src/input/number_input/mod.rs": 55,
+        "crates/ars-components/src/input/password_input/mod.rs": 49,
+        "crates/ars-components/src/input/pin_input/mod.rs": 82,
+        "crates/ars-components/src/input/search_input/mod.rs": 42
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/input/number_input/mod.rs": 3,
+        "crates/ars-components/src/input/password_input/mod.rs": 2,
+        "crates/ars-components/src/input/pin_input/mod.rs": 3
+      }
+    }
+  ]
+}
