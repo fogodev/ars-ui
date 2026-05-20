@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3c5b7702920a",
+  "strategy": "manual-commit",
+  "branch": "t3code/e1654fe1",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/input/number_input/mod.rs",
+    "crates/ars-components/src/input/password_input/mod.rs",
+    "crates/ars-components/src/input/pin_input/mod.rs",
+    "crates/ars-components/src/input/search_input/mod.rs",
+    "spec/components/input/number-input.md",
+    "spec/components/input/password-input.md",
+    "spec/components/input/pin-input.md",
+    "spec/components/input/search-input.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/3c/5b7702920a/0/metadata.json",
+      "transcript": "/3c/5b7702920a/0/full.jsonl",
+      "content_hash": "/3c/5b7702920a/0/content_hash.txt",
+      "prompt": "/3c/5b7702920a/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 110,
+    "cache_creation_tokens": 61738,
+    "cache_read_tokens": 51499687,
+    "output_tokens": 42288,
+    "api_call_count": 90
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3c5b7702920a",
+  "session_id": "b939c529-fda9-4daf-8309-cf7be7c57583",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-20T16:59:29.768941Z",
+  "branch": "t3code/e1654fe1",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/input/password_input/mod.rs",
+    "crates/ars-components/src/input/search_input/mod.rs",
+    "crates/ars-components/src/input/number_input/mod.rs",
+    "crates/ars-components/src/input/pin_input/mod.rs",
+    "spec/components/input/password-input.md",
+    "spec/components/input/search-input.md",
+    "spec/components/input/number-input.md",
+    "spec/components/input/pin-input.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "416afa44dd06",
+  "checkpoint_transcript_start": 860,
+  "transcript_lines_at_start": 860,
+  "token_usage": {
+    "input_tokens": 110,
+    "cache_creation_tokens": 61738,
+    "cache_read_tokens": 51499687,
+    "output_tokens": 42288,
+    "api_call_count": 90
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "summary": {
+    "intent": "Address 5 Codex review findings (P1/P2) across 4 input components: PasswordInput, SearchInput, NumberInput, and PinInput — fixing missing prop-sync events, a stepping baseline bug, a roving tabindex accessibility issue, and a readonly guard gap.",
+    "outcome": "All 5 findings fixed across all affected components (not just the flagged ones), 18 new tests added (1959 total passing), clippy clean, all 10 xci-fast gates passed, specs updated, and changes committed.",
+    "learnings": {
+      "repo": [
+        "The codebase uses a state-machine pattern with `Event`, `Context`, and `transition` functions per input component — each component lives in its own mod.rs under crates/ars-components/src/input/<component>/mod.rs.",
+        "Prop-sync is implemented via `on_props_changed`/`SetProps`/`SetValue` event arms in the transition match — this pattern is required for controlled-mode correctness and was systematically missing from multiple components.",
+        "Snapshot tests are used for HTML output verification; insta snapshots must be explicitly accepted with a CLI command when intentional changes are made.",
+        "The xci-fast gate is the final CI check — 10 gates that must all pass before committing.",
+        "Specs live under spec/components/input/ as markdown files and must be kept in sync with implementation event sets.",
+        "PinInput uses roving tabindex for keyboard navigation — the invariant is that cell 0 always holds tabindex=0 when no cell is focused, preventing keyboard users from being stranded."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/input/number_input/mod.rs",
+          "finding": "Stepping from an empty value with default min=-∞ produced -inf; fix uses 0.0 clamped to [min, max] as the baseline when value is None."
+        },
+        {
+          "path": "crates/ars-components/src/input/pin_input/mod.rs",
+          "finding": "Event::Clear was not guarded by the readonly check — added Clear to the readonly early-return guard alongside other mutation events."
+        },
+        {
+          "path": "crates/ars-components/src/input/pin_input/mod.rs",
+          "finding": "input_attrs tabindex logic: when focused_index is None, cell 0 must return tabindex=0 (not -1) to preserve keyboard reachability."
+        },
+        {
+          "path": "crates/ars-components/src/input/password_input/mod.rs",
+          "finding": "Context::has_description was initialized false with no event to flip it; fixed by adding Event::SetHasDescription(bool) and the corresponding transition arm."
+        }
+      ],
+      "workflow": [
+        "Codex review findings should be treated as a complete class fix — if a pattern is broken in the flagged component, audit all sibling components for the same defect rather than fixing only the reported instance.",
+        "Running tests synchronously (direct cargo test invocation) was more reliable than background task polling for getting immediate pass/fail feedback.",
+        "Clippy must be run after all edits are complete — lint errors (unused variables, redundant patterns) accumulated across the multi-file edit session and were cleaned up in a single pass at the end.",
+        "Snapshot diffs should be diffed and verified before accepting — confirmed only the intended tabindex change (cell 0: -1 → 0 when unfocused) appeared before running the accept command."
+      ]
+    },
+    "friction": [
+      "Test output required multiple bash invocation attempts (background task polling, then direct synchronous run) before results were reliably readable — the async task output mechanism added friction to the tight edit-compile-test loop.",
+      "Clippy lint errors accumulated silently across the multi-file editing session and only surfaced at the final clippy run, requiring a cleanup pass over multiple files."
+    ],
+    "open_items": [
+      "Codex flagged only PasswordInput for missing prop-sync events but the same gap existed in SearchInput, NumberInput, and PinInput — worth verifying no other components outside the input/ directory share this class of defect.",
+      "The has_description context flag pattern (initialized false, flipped by event) may exist in other components beyond PasswordInput — a systematic audit of Context structs for similar unflippable boolean fields could be worthwhile."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-20T16:59:03.041032Z",
+    "agent_lines": 739,
+    "agent_removed": 25,
+    "human_added": 4,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 743,
+    "total_lines_changed": 772,
+    "agent_percentage": 98.96373056994818,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
