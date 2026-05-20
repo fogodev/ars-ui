@@ -190,6 +190,15 @@ pub enum Event {
         dy: f64,
     },
 
+    /// Keyboard nudge requested a position move by normalized deltas.
+    KeyboardMove {
+        /// Horizontal delta.
+        dx: f64,
+
+        /// Vertical delta.
+        dy: f64,
+    },
+
     /// Drag ended.
     DragEnd,
 
@@ -655,6 +664,9 @@ fn resize_rect(
         } else {
             new_h = new_w / ratio;
         }
+
+        new_w = new_w.clamp(props.min_size.0, props.max_size.0);
+        new_h = new_h.clamp(props.min_size.1, props.max_size.1);
     }
 
     if matches!(
@@ -693,6 +705,31 @@ fn close_plan() -> TransitionPlan<Machine> {
             ctx.pre_maximize_size = None;
         })
         .with_effect(PendingEffect::named(Effect::OpenChange))
+}
+
+fn open_controlled_plan(props: &Props) -> TransitionPlan<Machine> {
+    let initial_position = props.initial_position;
+    let initial_size = props.initial_size;
+    let persist_rect = props.persist_rect;
+
+    TransitionPlan::to(State::Idle)
+        .apply(move |ctx: &mut Context| {
+            ctx.open = true;
+            ctx.focused = false;
+            ctx.focus_visible = false;
+            ctx.minimized = false;
+            ctx.maximized = false;
+            ctx.active_resize_handle = None;
+            ctx.pre_maximize_position = None;
+            ctx.pre_maximize_size = None;
+
+            if !persist_rect {
+                ctx.position = initial_position;
+                ctx.size = initial_size;
+            }
+        })
+        .with_effect(PendingEffect::named(Effect::OpenChange))
+        .with_effect(PendingEffect::named(Effect::AllocateZIndex))
 }
 
 fn props_changed(old: &Props, new: &Props) -> bool {
@@ -757,15 +794,11 @@ impl ars_core::Machine for Machine {
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
-            (_, Event::SetControlledOpen(open)) => {
-                let open = *open;
-                Some(
-                    TransitionPlan::context_only(move |ctx: &mut Context| {
-                        ctx.open = open;
-                    })
-                    .with_effect(PendingEffect::named(Effect::OpenChange)),
-                )
-            }
+            (_, Event::SetControlledOpen(open)) if *open == ctx.open => None,
+
+            (_, Event::SetControlledOpen(true)) => Some(open_controlled_plan(props)),
+
+            (_, Event::SetControlledOpen(false)) => Some(close_plan()),
 
             (_, Event::SyncProps) => {
                 let min_size = props.min_size;
@@ -787,10 +820,13 @@ impl ars_core::Machine for Machine {
 
             (_, Event::Focus { is_keyboard }) => {
                 let is_keyboard = *is_keyboard;
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.focused = true;
-                    ctx.focus_visible = is_keyboard;
-                }))
+                Some(
+                    TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.focused = true;
+                        ctx.focus_visible = is_keyboard;
+                    })
+                    .with_effect(PendingEffect::named(Effect::AllocateZIndex)),
+                )
             }
 
             (_, Event::Blur) => Some(TransitionPlan::context_only(|ctx: &mut Context| {
@@ -822,6 +858,24 @@ impl ars_core::Machine for Machine {
                         ctx.position = snap_position(constrained, props.grid_size);
                     })
                     .with_effect(PendingEffect::named(Effect::PositionChange)),
+                )
+            }
+
+            (State::Idle, Event::KeyboardMove { dx, dy })
+                if ctx.open && props.draggable && !ctx.maximized =>
+            {
+                let dx = *dx;
+                let dy = *dy;
+                let props = props.clone();
+                Some(
+                    TransitionPlan::context_only(move |ctx: &mut Context| {
+                        let moved = (ctx.position.0 + dx, ctx.position.1 + dy);
+                        let constrained = clamp_position(moved, ctx.size, &props);
+
+                        ctx.position = snap_position(constrained, props.grid_size);
+                    })
+                    .with_effect(PendingEffect::named(Effect::PositionChange))
+                    .with_effect(PendingEffect::named(Effect::PositionChangeEnd)),
                 )
             }
 
@@ -1301,7 +1355,11 @@ impl Api<'_> {
 
     /// Dispatches minimize trigger activation.
     pub fn on_minimize_trigger_click(&self) {
-        (self.send)(Event::Minimize);
+        if self.ctx.minimized {
+            (self.send)(Event::Restore);
+        } else {
+            (self.send)(Event::Minimize);
+        }
     }
 
     /// Dispatches maximize trigger activation.
@@ -1331,12 +1389,32 @@ impl Api<'_> {
     /// Handles panel keydown and returns whether the key was consumed.
     #[must_use]
     pub fn on_keydown(&self, data: &KeyboardEventData) -> bool {
-        if data.key == KeyboardKey::Escape {
-            (self.send)(Event::CloseOnEscape);
+        match data.key {
+            KeyboardKey::Escape => {
+                (self.send)(Event::CloseOnEscape);
 
-            true
-        } else {
-            false
+                true
+            }
+
+            KeyboardKey::ArrowRight
+            | KeyboardKey::ArrowLeft
+            | KeyboardKey::ArrowDown
+            | KeyboardKey::ArrowUp => {
+                let step = if data.shift_key { 10.0 } else { 1.0 };
+                let (dx, dy) = match data.key {
+                    KeyboardKey::ArrowRight => (step, 0.0),
+                    KeyboardKey::ArrowLeft => (-step, 0.0),
+                    KeyboardKey::ArrowDown => (0.0, step),
+                    KeyboardKey::ArrowUp => (0.0, -step),
+                    _ => unreachable!("matched arrow keys above"),
+                };
+
+                (self.send)(Event::KeyboardMove { dx, dy });
+
+                true
+            }
+
+            _ => false,
         }
     }
 }
@@ -1364,6 +1442,7 @@ impl ConnectApi for Api<'_> {
 #[cfg(test)]
 mod tests {
     use alloc::{string::ToString, vec};
+    use core::cell::RefCell;
 
     use ars_core::{AriaAttr, AttrMap, CssProperty, Env, HtmlAttr, Service};
     use ars_interactions::{KeyboardEventData, KeyboardKey};
@@ -1389,6 +1468,13 @@ mod tests {
             meta_key: false,
             repeat: false,
             is_composing: false,
+        }
+    }
+
+    fn shifted_keyboard_data(key: KeyboardKey) -> KeyboardEventData {
+        KeyboardEventData {
+            shift_key: true,
+            ..keyboard_data(key)
         }
     }
 
@@ -1572,10 +1658,11 @@ mod tests {
             &Messages::default(),
         );
 
-        drop(service.send(Event::Focus { is_keyboard: true }));
+        let focus = service.send(Event::Focus { is_keyboard: true });
 
         assert!(service.context().focused);
         assert!(service.context().focus_visible);
+        assert_eq!(effect_names(&focus), vec![Effect::AllocateZIndex]);
 
         drop(service.send(Event::SetZIndex(88)));
 
@@ -1596,6 +1683,152 @@ mod tests {
 
         assert!(service.context().open);
         assert_eq!(service.context().min_size, (300.0, 200.0));
+    }
+
+    #[test]
+    fn controlled_reopen_resets_rect_unless_persisted() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(service.send(Event::DragStart));
+        drop(service.send(Event::DragMove { dx: 50.0, dy: 60.0 }));
+        drop(service.send(Event::DragEnd));
+        drop(service.send(Event::ResizeStart(ResizeHandle::SE)));
+        drop(service.send(Event::ResizeMove { dx: 20.0, dy: 30.0 }));
+        drop(service.send(Event::ResizeEnd));
+
+        let close = service.send(Event::SetControlledOpen(false));
+
+        assert_eq!(effect_names(&close), vec![Effect::OpenChange]);
+        assert!(!service.context().open);
+
+        let reopen = service.send(Event::SetControlledOpen(true));
+
+        assert!(service.context().open);
+        assert_eq!(service.context().position, (100.0, 100.0));
+        assert_eq!(service.context().size, (400.0, 300.0));
+        assert_eq!(
+            effect_names(&reopen),
+            vec![Effect::OpenChange, Effect::AllocateZIndex]
+        );
+
+        let noop = service.send(Event::SetControlledOpen(true));
+
+        assert!(!noop.state_changed);
+        assert!(!noop.context_changed);
+        assert!(noop.pending_effects.is_empty());
+
+        let mut persisted = Service::<Machine>::new(
+            Props {
+                persist_rect: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(persisted.send(Event::DragStart));
+        drop(persisted.send(Event::DragMove { dx: 40.0, dy: 30.0 }));
+        drop(persisted.send(Event::DragEnd));
+        let saved_position = persisted.context().position;
+        let saved_size = persisted.context().size;
+
+        drop(persisted.send(Event::SetControlledOpen(false)));
+        drop(persisted.send(Event::SetControlledOpen(true)));
+
+        assert_eq!(persisted.context().position, saved_position);
+        assert_eq!(persisted.context().size, saved_size);
+    }
+
+    #[test]
+    fn controlled_close_clears_active_stage_flags() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(service.send(Event::Maximize(MaximizeMetrics {
+            viewport: ViewportRect {
+                x: 0.0,
+                y: 0.0,
+                width: 900.0,
+                height: 700.0,
+            },
+        })));
+
+        assert_eq!(service.state(), &State::Maximized);
+        assert!(service.context().maximized);
+
+        drop(service.send(Event::SetControlledOpen(false)));
+
+        assert_eq!(service.state(), &State::Idle);
+        assert!(!service.context().open);
+        assert!(!service.context().maximized);
+        assert_eq!(service.context().stage(), Stage::Default);
+        assert!(service.context().pre_maximize_position.is_none());
+        assert!(service.context().pre_maximize_size.is_none());
+    }
+
+    #[test]
+    fn minimize_trigger_restores_when_minimized() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(service.send(Event::Minimize));
+
+        let sent = RefCell::new(Vec::new());
+        let send = |event| sent.borrow_mut().push(event);
+        let api = service.connect(&send);
+
+        api.on_minimize_trigger_click();
+
+        assert_eq!(sent.into_inner(), vec![Event::Restore]);
+    }
+
+    #[test]
+    fn locked_aspect_ratio_resize_stays_within_constraints() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                lock_aspect_ratio: true,
+                max_size: (500.0, 250.0),
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(service.send(Event::ResizeStart(ResizeHandle::E)));
+        drop(service.send(Event::ResizeMove { dx: 300.0, dy: 0.0 }));
+
+        assert_eq!(service.context().size, (500.0, 250.0));
+    }
+
+    #[test]
+    fn arrow_keys_nudge_focused_panel_position() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        let sent = RefCell::new(Vec::new());
+        let send = |event| sent.borrow_mut().push(event);
+        let api = service.connect(&send);
+
+        assert!(api.on_keydown(&shifted_keyboard_data(KeyboardKey::ArrowRight)));
+        assert!(api.on_keydown(&keyboard_data(KeyboardKey::ArrowUp)));
+        assert!(!api.on_keydown(&keyboard_data(KeyboardKey::Tab)));
+
+        assert_eq!(
+            sent.into_inner(),
+            vec![
+                Event::KeyboardMove { dx: 10.0, dy: 0.0 },
+                Event::KeyboardMove { dx: 0.0, dy: -1.0 }
+            ]
+        );
+
+        let move_result = service.send(Event::KeyboardMove { dx: 10.0, dy: -1.0 });
+
+        assert_eq!(service.context().position, (110.0, 99.0));
+        assert_eq!(
+            effect_names(&move_result),
+            vec![Effect::PositionChange, Effect::PositionChangeEnd]
+        );
     }
 
     #[test]
@@ -1794,7 +2027,7 @@ mod tests {
     #[test]
     fn api_handlers_dispatch_expected_events() {
         let service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
-        let events = core::cell::RefCell::new(Vec::new());
+        let events = RefCell::new(Vec::new());
         let send = |event| events.borrow_mut().push(event);
 
         let api = service.connect(&send);

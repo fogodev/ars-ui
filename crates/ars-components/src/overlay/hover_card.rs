@@ -79,6 +79,12 @@ pub enum Event {
     /// The pointer left the interactive content.
     ContentPointerLeave,
 
+    /// Focus entered the interactive content.
+    ContentFocus,
+
+    /// Focus left the interactive content.
+    ContentBlur,
+
     /// The open timer fired.
     OpenTimerFired,
 
@@ -517,6 +523,12 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
+            (State::Open, Event::ContentFocus) => {
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.focus_active = true;
+                }))
+            }
+
             (State::Open, Event::TriggerPointerLeave | Event::ContentPointerLeave) => {
                 if ctx.focus_active {
                     Some(TransitionPlan::context_only(|ctx: &mut Context| {
@@ -541,6 +553,18 @@ impl ars_core::Machine for Machine {
                 }
             }
 
+            (State::Open, Event::ContentBlur) => {
+                if ctx.hover_active {
+                    Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                        ctx.focus_active = false;
+                    }))
+                } else {
+                    Some(start_close_plan().apply(|ctx: &mut Context| {
+                        ctx.focus_active = false;
+                    }))
+                }
+            }
+
             (State::ClosePending, Event::ContentPointerEnter | Event::TriggerPointerEnter) => Some(
                 TransitionPlan::to(State::Open)
                     .apply(|ctx: &mut Context| {
@@ -549,7 +573,7 @@ impl ars_core::Machine for Machine {
                     .cancel_effect(Effect::CloseDelay),
             ),
 
-            (State::ClosePending, Event::TriggerFocus) => Some(
+            (State::ClosePending, Event::TriggerFocus | Event::ContentFocus) => Some(
                 TransitionPlan::to(State::Open)
                     .apply(|ctx: &mut Context| {
                         ctx.focus_active = true;
@@ -789,6 +813,16 @@ impl Api<'_> {
     /// Dispatches content pointer-leave.
     pub fn on_content_pointer_leave(&self) {
         (self.send)(Event::ContentPointerLeave);
+    }
+
+    /// Dispatches content focus.
+    pub fn on_content_focus(&self) {
+        (self.send)(Event::ContentFocus);
+    }
+
+    /// Dispatches content blur.
+    pub fn on_content_blur(&self) {
+        (self.send)(Event::ContentBlur);
     }
 
     /// Returns attributes for the adapter-owned positioner.
@@ -1068,6 +1102,37 @@ mod tests {
         assert_eq!(service.state(), &State::Open);
         assert!(service.context().hover_active);
         assert_eq!(enter.cancel_effects, vec![Effect::CloseDelay]);
+    }
+
+    #[test]
+    fn content_focus_cancels_close_delay_after_trigger_blur() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(service.send(Event::TriggerFocus));
+
+        let blur = service.send(Event::TriggerBlur);
+
+        assert_eq!(service.state(), &State::ClosePending);
+        assert_eq!(effect_names(&blur), vec![Effect::CloseDelay]);
+
+        let content_focus = service.send(Event::ContentFocus);
+
+        assert_eq!(service.state(), &State::Open);
+        assert!(service.context().focus_active);
+        assert_eq!(content_focus.cancel_effects, vec![Effect::CloseDelay]);
+
+        let content_blur = service.send(Event::ContentBlur);
+
+        assert_eq!(service.state(), &State::ClosePending);
+        assert!(!service.context().focus_active);
+        assert_eq!(effect_names(&content_blur), vec![Effect::CloseDelay]);
     }
 
     #[test]
