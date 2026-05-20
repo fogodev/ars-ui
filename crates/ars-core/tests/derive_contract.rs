@@ -114,6 +114,32 @@ enum AnnotatedDefaultPart {
     },
 }
 
+trait AnnotatedPartValue {
+    fn annotated_part_value() -> Self;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct GenericAnnotatedKey(&'static str);
+
+impl AnnotatedPartValue for GenericAnnotatedKey {
+    fn annotated_part_value() -> Self {
+        Self("generic-link")
+    }
+}
+
+#[derive(ComponentPart)]
+#[scope = "annotated-generic"]
+enum AnnotatedGenericPart<T>
+where
+    T: AnnotatedPartValue + 'static,
+{
+    Root,
+    Link {
+        #[part(default = T::annotated_part_value())]
+        key: T,
+    },
+}
+
 #[test]
 fn has_id_derive_exposes_spec_contract() {
     let mut props = Props {
@@ -331,6 +357,31 @@ fn component_part_derive_supports_annotated_all_defaults() {
                 key: CustomAnnotatedKey("root-link"),
             },
             AnnotatedDefaultPart::PageTrigger { page_number: 1 },
+        ]
+    );
+}
+
+#[test]
+fn component_part_derive_keeps_supertrait_bounds_for_annotated_generic_fields() {
+    let part = AnnotatedGenericPart::<GenericAnnotatedKey>::Link {
+        key: GenericAnnotatedKey("current"),
+    };
+    let clone = part.clone();
+
+    assert_eq!(part, clone);
+    assert!(format!("{clone:?}").contains("Link"));
+
+    let mut hasher = DefaultHasher::new();
+
+    clone.hash(&mut hasher);
+
+    assert_eq!(
+        AnnotatedGenericPart::<GenericAnnotatedKey>::all(),
+        vec![
+            AnnotatedGenericPart::Root,
+            AnnotatedGenericPart::Link {
+                key: GenericAnnotatedKey("generic-link"),
+            },
         ]
     );
 }

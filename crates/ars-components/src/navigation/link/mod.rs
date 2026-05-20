@@ -395,7 +395,7 @@ impl ars_core::Machine for Machine {
                 },
             )),
 
-            Event::PressEnd => Some(TransitionPlan::to(State::Focused).apply(
+            Event::PressEnd if ctx.pressed => Some(TransitionPlan::to(State::Focused).apply(
                 |ctx: &mut Context| {
                     ctx.pressed = false;
                 },
@@ -819,6 +819,28 @@ mod tests {
         assert!(!result.state_changed);
         assert!(!result.context_changed);
         assert_eq!(service.state(), &State::Idle);
+        assert!(!service.context().pressed);
+    }
+
+    #[test]
+    fn press_end_without_active_press_is_ignored() {
+        let mut service = service(props());
+
+        let result = service.send(Event::PressEnd);
+
+        assert!(!result.state_changed);
+        assert!(!result.context_changed);
+        assert_eq!(service.state(), &State::Idle);
+        assert!(!service.context().pressed);
+
+        drop(service.send(Event::Press));
+        drop(service.set_props(props().disabled(true)));
+
+        let result = service.send(Event::PressEnd);
+
+        assert!(!result.state_changed);
+        assert!(!result.context_changed);
+        assert_eq!(service.state(), &State::Pressed);
         assert!(!service.context().pressed);
     }
 

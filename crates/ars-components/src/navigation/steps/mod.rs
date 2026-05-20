@@ -869,6 +869,13 @@ fn step_change_plan(ctx: &Context, props: &Props, target: u32) -> Option<Transit
         return None;
     }
 
+    if target > current
+        && let Some(is_valid) = &props.is_step_valid
+        && !is_valid(current)
+    {
+        return None;
+    }
+
     if ctx.linear
         && matches!(target.checked_sub(current), Some(2..))
         && !can_skip_intermediate(props, current, target)
@@ -890,9 +897,9 @@ fn step_change_plan(ctx: &Context, props: &Props, target: u32) -> Option<Transit
         })
         .with_effect(PendingEffect::new(
             Effect::StepChange,
-            |ctx: &Context, props: &Props, _send| {
+            move |_ctx: &Context, props: &Props, _send| {
                 if let Some(callback) = &props.on_step_change {
-                    (callback)(*ctx.step.get());
+                    (callback)(target);
                 }
 
                 ars_core::no_cleanup()
@@ -1131,6 +1138,17 @@ mod tests {
     }
 
     #[test]
+    fn validation_blocks_direct_forward_navigation() {
+        let mut service = service(props().is_step_valid(|step| step != 0));
+
+        let result = service.send(Event::GoToStep(1));
+
+        assert!(!result.context_changed);
+        assert!(result.pending_effects.is_empty());
+        assert_eq!(*service.context().step.get(), 0);
+    }
+
+    #[test]
     fn step_change_and_complete_effects_run_callbacks() {
         let changed = Arc::new(Mutex::new(Vec::new()));
         let completed = Arc::new(Mutex::new(0usize));
@@ -1165,6 +1183,29 @@ mod tests {
 
         assert_eq!(lock(&changed).as_slice(), &[1]);
         assert_eq!(*lock(&completed), 1);
+    }
+
+    #[test]
+    fn controlled_step_change_callback_receives_requested_target() {
+        let changed = Arc::new(Mutex::new(Vec::new()));
+        let changed_clone = Arc::clone(&changed);
+        let mut service = service(
+            props()
+                .step(1)
+                .on_step_change(move |step| lock(&changed_clone).push(step)),
+        );
+
+        let result = service.send(Event::GoToStep(3));
+
+        assert_eq!(*service.context().step.get(), 1);
+
+        let send: StrongSend<Event> = Arc::new(|_| {});
+
+        for effect in result.pending_effects {
+            drop(effect.run(service.context(), service.props(), Arc::clone(&send)));
+        }
+
+        assert_eq!(lock(&changed).as_slice(), &[3]);
     }
 
     #[test]

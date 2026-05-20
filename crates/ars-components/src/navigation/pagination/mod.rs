@@ -406,9 +406,11 @@ impl ars_core::Machine for Machine {
                 page_change_plan(ctx, props, clamp_page(*page, ctx.page_count))
             }
 
-            Event::NextPage => {
-                page_change_plan(ctx, props, clamp_page(current + 1, ctx.page_count))
-            }
+            Event::NextPage => page_change_plan(
+                ctx,
+                props,
+                clamp_page(current.saturating_add(1), ctx.page_count),
+            ),
 
             Event::PrevPage => page_change_plan(
                 ctx,
@@ -434,7 +436,7 @@ impl ars_core::Machine for Machine {
                 });
 
                 if emit {
-                    plan = with_page_change_effect(plan);
+                    plan = with_page_change_effect(plan, target);
                 }
 
                 Some(plan)
@@ -719,19 +721,23 @@ fn page_change_plan(ctx: &Context, _props: &Props, target: u32) -> Option<Transi
         return None;
     }
 
-    Some(with_page_change_effect(TransitionPlan::context_only(
-        move |ctx: &mut Context| {
+    Some(with_page_change_effect(
+        TransitionPlan::context_only(move |ctx: &mut Context| {
             ctx.page.set(target);
-        },
-    )))
+        }),
+        target,
+    ))
 }
 
-fn with_page_change_effect(mut plan: TransitionPlan<Machine>) -> TransitionPlan<Machine> {
+fn with_page_change_effect(
+    mut plan: TransitionPlan<Machine>,
+    target: u32,
+) -> TransitionPlan<Machine> {
     plan = plan.with_effect(PendingEffect::new(
         Effect::PageChange,
-        |ctx: &Context, props: &Props, _send| {
+        move |_ctx: &Context, props: &Props, _send| {
             if let Some(callback) = &props.on_page_change {
-                (callback)(*ctx.page.get());
+                (callback)(target);
             }
 
             ars_core::no_cleanup()
@@ -971,6 +977,23 @@ mod tests {
     }
 
     #[test]
+    fn next_page_at_u32_max_page_count_is_noop() {
+        let mut service = service(
+            Props::new()
+                .id("pager")
+                .page(u32::MAX)
+                .total_items(u32::MAX)
+                .page_size(NonZeroU32::new(1).expect("non-zero")),
+        );
+
+        let result = service.send(Event::NextPage);
+
+        assert!(result.pending_effects.is_empty());
+        assert!(!result.context_changed);
+        assert_eq!(*service.context().page.get(), u32::MAX);
+    }
+
+    #[test]
     fn page_change_effect_runs_callback() {
         let pages = Arc::new(Mutex::new(Vec::new()));
         let pages_clone = Arc::clone(&pages);
@@ -988,6 +1011,29 @@ mod tests {
         }
 
         assert_eq!(lock(&pages).as_slice(), &[3]);
+    }
+
+    #[test]
+    fn controlled_page_change_callback_receives_requested_target() {
+        let pages = Arc::new(Mutex::new(Vec::new()));
+        let pages_clone = Arc::clone(&pages);
+        let mut service = service(
+            props()
+                .page(2)
+                .on_page_change(move |page| lock(&pages_clone).push(page)),
+        );
+
+        let result = service.send(Event::GoToPage(4));
+
+        assert_eq!(*service.context().page.get(), 2);
+
+        let send: StrongSend<Event> = Arc::new(|_| {});
+
+        for effect in result.pending_effects {
+            drop(effect.run(service.context(), service.props(), Arc::clone(&send)));
+        }
+
+        assert_eq!(lock(&pages).as_slice(), &[4]);
     }
 
     #[test]

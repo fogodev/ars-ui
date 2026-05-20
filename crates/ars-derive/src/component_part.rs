@@ -25,17 +25,21 @@ pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
 
     let defaultless_field_types = collect_defaultless_field_types(data)?;
 
-    let component_part_generics = with_field_bounds(
+    let component_part_supertrait_generics = with_field_bounds(
         &input.generics,
-        &defaultless_field_types,
+        &field_types,
         &[
             quote!(::core::clone::Clone),
             quote!(::core::fmt::Debug),
             quote!(::core::cmp::PartialEq),
             quote!(::core::cmp::Eq),
             quote!(::core::hash::Hash),
-            quote!(::core::default::Default),
         ],
+    );
+    let component_part_generics = with_field_bounds(
+        &component_part_supertrait_generics,
+        &defaultless_field_types,
+        &[quote!(::core::default::Default)],
     );
 
     let clone_generics = with_field_bounds(
