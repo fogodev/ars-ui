@@ -74,6 +74,12 @@ pub enum Event {
     /// Cancels any active debounce timer without firing the callback.
     CancelDebounce,
 
+    /// Cancels any active debounce timer and starts a fresh one with the
+    /// current `props.debounce` duration. Emitted by `on_props_changed`
+    /// when the `debounce` prop changes so the in-flight timer adopts
+    /// the new duration instead of being silently dropped.
+    RestartDebounce,
+
     /// IME composition started.
     CompositionStart,
 
@@ -487,6 +493,21 @@ impl ars_core::Machine for Machine {
                     .cancel_effect(Effect::SearchDebounce),
             ),
 
+            Event::RestartDebounce => {
+                let plan = TransitionPlan::context_only(|_ctx: &mut Context| {})
+                    .cancel_effect(Effect::SearchDebounce);
+                // Per spec §1.5: a `debounce` prop change while a timer
+                // is active must cancel the active timer AND start a
+                // fresh one carrying the new duration. If the new
+                // `debounce` is `None`, debouncing is disabled — only
+                // cancel; the next `Change` propagates immediately.
+                if props.debounce.is_some() {
+                    Some(plan.with_effect(PendingEffect::named(Effect::SearchDebounce)))
+                } else {
+                    Some(plan)
+                }
+            }
+
             Event::SetValue(value) => {
                 let value = value.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
@@ -531,12 +552,12 @@ impl ars_core::Machine for Machine {
             events.push(Event::SetValue(new.value.clone()));
         }
 
-        // Cancel any in-flight debounce timer when the `debounce` prop
-        // changes — the old timer carries the previous duration and would
-        // otherwise fire stale `DebounceExpired` against the new config.
-        // The next `Change` event starts a fresh timer with the new prop.
+        // Per spec §1.5: when `debounce` prop changes while a timer is
+        // active, cancel the active timer AND start a fresh one carrying
+        // the new duration. `RestartDebounce` does both atomically;
+        // cancelling alone would silently drop the in-flight search.
         if old.debounce != new.debounce {
-            events.push(Event::CancelDebounce);
+            events.push(Event::RestartDebounce);
         }
 
         if props_output_changed(old, new) {
@@ -1134,16 +1155,35 @@ mod tests {
     }
 
     #[test]
-    fn search_input_debounce_prop_change_cancels_active_timer() {
+    fn search_input_debounce_prop_change_cancels_and_restarts_timer() {
+        // Spec §1.5: prop change must CANCEL and RESCHEDULE so the
+        // in-flight search adopts the new duration instead of being
+        // silently dropped.
         let mut svc = service(props().debounce(Duration::from_millis(200)));
 
         drop(svc.send(Event::Change("r".to_string())));
 
-        // Service::set_props delivers events one at a time. We only want
-        // to verify the cancel event was emitted by on_props_changed.
         let result = svc.set_props(props().debounce(Duration::from_millis(500)));
 
+        // Cancel the old timer
         assert_eq!(result.cancel_effects, alloc::vec![Effect::SearchDebounce]);
+        // AND schedule a fresh one with the new duration
+        assert_eq!(result.pending_effects.len(), 1);
+        assert_eq!(result.pending_effects[0].name, Effect::SearchDebounce);
+    }
+
+    #[test]
+    fn search_input_debounce_prop_change_to_none_only_cancels() {
+        // If the new `debounce` is None, debouncing is disabled —
+        // cancel without rescheduling.
+        let mut svc = service(props().debounce(Duration::from_millis(200)));
+
+        drop(svc.send(Event::Change("r".to_string())));
+
+        let result = svc.set_props(props().no_debounce());
+
+        assert_eq!(result.cancel_effects, alloc::vec![Effect::SearchDebounce]);
+        assert!(result.pending_effects.is_empty());
     }
 
     #[test]

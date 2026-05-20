@@ -539,6 +539,12 @@ impl ars_core::Machine for Machine {
                     TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
                         ctx.focused = false;
                         ctx.focus_visible = false;
+                        // Clear `scrubbing` here: if Blur fires during an
+                        // active scrub gesture (pointer capture loss,
+                        // focus transfer), the stale flag would otherwise
+                        // leave adapters rendering drag affordances while
+                        // the FSM is in `Idle`.
+                        ctx.scrubbing = false;
 
                         if clamp_on_blur && let Some(value) = current {
                             let clamped = clamp(value, min, max);
@@ -560,14 +566,19 @@ impl ars_core::Machine for Machine {
             Event::DecrementLarge => stepped_plan(ctx, ctx.large_step, false),
 
             Event::IncrementToMax => {
-                let target = ctx.max;
+                // Pass through the same clamp + round path as every other
+                // value-mutation event so bounds with a fractional part
+                // (e.g. `max = 1.005` under `precision = 2`) round to a
+                // consistent display rather than persisting raw bound
+                // values that the rest of the machine would round away.
+                let target = round_to_precision(ctx.max, ctx.precision);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.value.set(Some(target));
                 }))
             }
 
             Event::DecrementToMin => {
-                let target = ctx.min;
+                let target = round_to_precision(ctx.min, ctx.precision);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.value.set(Some(target));
                 }))
@@ -1265,6 +1276,45 @@ mod tests {
                 "Change({non_finite:?}) must not overwrite finite value"
             );
         }
+    }
+
+    #[test]
+    fn number_input_increment_to_max_rounds_to_precision() {
+        // `1.5` is exactly representable in f64. Without round_to_precision
+        // applied, ctx.value would be 1.5; with round_half_up at 0 decimals
+        // it becomes 2.0 — proving the rounding path is wired through.
+        let mut svc = service(props().min(0.0).max(1.5).precision(0));
+
+        drop(svc.send(Event::IncrementToMax));
+
+        assert_eq!(svc.context().value.get(), &Some(2.0));
+    }
+
+    #[test]
+    fn number_input_decrement_to_min_rounds_to_precision() {
+        // `-1.5` is exactly representable. With round_half_up (away from
+        // zero) at 0 decimals it becomes -2.0.
+        let mut svc = service(props().min(-1.5).max(0.0).precision(0));
+
+        drop(svc.send(Event::DecrementToMin));
+
+        assert_eq!(svc.context().value.get(), &Some(-2.0));
+    }
+
+    #[test]
+    fn number_input_blur_clears_scrubbing_marker() {
+        // Blur during an active scrub gesture (e.g. pointer-capture loss)
+        // must reset `ctx.scrubbing` so adapters don't keep rendering
+        // drag affordances while the FSM is back in Idle.
+        let mut svc = service(bounded_props().default_value(10.0));
+
+        drop(svc.send(Event::StartScrub));
+        assert!(svc.context().scrubbing);
+
+        drop(svc.send(Event::Blur));
+
+        assert_eq!(svc.state(), &State::Idle);
+        assert!(!svc.context().scrubbing);
     }
 
     #[test]

@@ -52,6 +52,11 @@ pub enum Event {
     DebounceExpired,
     /// Cancels any active debounce timer without firing the callback.
     CancelDebounce,
+    /// Cancels any active debounce timer and schedules a fresh one with
+    /// the current `props.debounce` duration. Emitted by `on_props_changed`
+    /// when the `debounce` prop changes so an in-flight search adopts the
+    /// new duration instead of being silently dropped.
+    RestartDebounce,
     /// IME composition started.
     CompositionStart,
     /// IME composition ended.

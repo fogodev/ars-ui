@@ -664,13 +664,21 @@ impl ars_core::Machine for Machine {
 
                     values[index] = String::new();
 
-                    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                        if !ctx.value.is_controlled() {
-                            ctx.value.set(values);
-                        }
+                    // Deleting a filled cell in-place must transition out
+                    // of `State::Completed` so that `data-ars-state` (and
+                    // adapters that switch on `state()`) reflect that the
+                    // pin is no longer complete. We re-enter `Focused`
+                    // on the same cell.
+                    Some(TransitionPlan::to(State::Focused { index }).apply(
+                        move |ctx: &mut Context| {
+                            if !ctx.value.is_controlled() {
+                                ctx.value.set(values);
+                            }
 
-                        ctx.complete = false;
-                    }))
+                            ctx.focused_index = Some(index);
+                            ctx.complete = false;
+                        },
+                    ))
                 }
             }
 
@@ -809,12 +817,34 @@ impl ars_core::Machine for Machine {
             (_, Event::SetValue(value)) => {
                 let value = value.clone();
                 let length = ctx.length;
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                let focused_index = ctx.focused_index;
+
+                // Pre-compute the new completeness so we can pick the
+                // correct target state. Without this, dropping from a
+                // complete controlled value to an incomplete one leaves
+                // the FSM in `State::Completed` even though
+                // `ctx.complete = false`.
+                let new_complete = match &value {
+                    Some(v) => {
+                        let mut probe = v.clone();
+                        probe.resize(length, String::new());
+                        length > 0 && probe.iter().all(|cell| !cell.is_empty())
+                    }
+                    None => ctx.complete,
+                };
+
+                let target = match (focused_index, new_complete) {
+                    (Some(index), _) => State::Focused { index },
+                    (None, true) => State::Completed,
+                    (None, false) => State::Idle,
+                };
+
+                Some(TransitionPlan::to(target).apply(move |ctx: &mut Context| {
                     if let Some(mut value) = value {
                         value.resize(length, String::new());
                         ctx.value.set(value.clone());
-                        ctx.value.sync_controlled(Some(value.clone()));
-                        ctx.complete = length > 0 && value.iter().all(|cell| !cell.is_empty());
+                        ctx.value.sync_controlled(Some(value));
+                        ctx.complete = new_complete;
                     } else {
                         ctx.value.sync_controlled(None);
                     }
@@ -823,8 +853,25 @@ impl ars_core::Machine for Machine {
 
             (_, Event::SetProps) => {
                 let props = props.clone();
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let new_length = props.length;
+                let new_length = props.length;
+
+                // Pre-compute the post-SetProps target state. SetProps used
+                // to be `context_only`, which left the FSM in
+                // `State::Focused { index }` even when the new length
+                // shrank `focused_index` out of bounds — producing
+                // contradictory `state() == Focused` with no focused cell.
+                let mut probe_values = ctx.value.get().clone();
+                probe_values.resize(new_length, String::new());
+                let new_complete =
+                    new_length > 0 && probe_values.iter().all(|cell| !cell.is_empty());
+                let new_focused_index = ctx.focused_index.filter(|&idx| idx < new_length);
+                let target = match (new_focused_index, new_complete) {
+                    (Some(index), _) => State::Focused { index },
+                    (None, true) => State::Completed,
+                    (None, false) => State::Idle,
+                };
+
+                Some(TransitionPlan::to(target).apply(move |ctx: &mut Context| {
                     if new_length != ctx.length {
                         // Resize the value vector. In controlled mode we
                         // must also push the resized vector through the
@@ -1793,6 +1840,91 @@ mod tests {
 
         let api = svc.connect(&|_| {});
         assert_eq!(api.hidden_input_attrs().get(&HtmlAttr::Value), Some("12"));
+    }
+
+    #[test]
+    fn pin_input_delete_filled_cell_transitions_out_of_completed_state() {
+        let mut svc =
+            service(props().default_value(vec!["1".into(), "2".into(), "3".into(), "4".into()]));
+
+        assert_eq!(svc.state(), &State::Completed);
+        assert!(svc.context().complete);
+
+        drop(svc.send(Event::Focus {
+            index: 3,
+            is_keyboard: false,
+        }));
+
+        // Delete a filled cell IN-PLACE (cell is non-empty, so we don't
+        // move to a previous cell). The FSM must leave Completed even
+        // though we stay focused on the same index.
+        drop(svc.send(Event::DeleteChar { index: 3 }));
+
+        assert_eq!(svc.state(), &State::Focused { index: 3 });
+        assert!(!svc.context().complete);
+        assert_eq!(svc.context().value.get()[3], "");
+    }
+
+    #[test]
+    fn pin_input_set_value_transitions_state_when_completeness_drops() {
+        // Controlled mode: parent syncs a complete value, then a partial
+        // one. The FSM must transition out of Completed when the new
+        // value is incomplete, otherwise `data-ars-state` lies.
+        let mut svc = service(props().value(vec!["1".into(), "2".into(), "3".into(), "4".into()]));
+
+        assert_eq!(svc.state(), &State::Completed);
+
+        drop(svc.send(Event::SetValue(Some(vec![
+            "1".into(),
+            "2".into(),
+            String::new(),
+            String::new(),
+        ]))));
+
+        assert_eq!(svc.state(), &State::Idle);
+        assert!(!svc.context().complete);
+    }
+
+    #[test]
+    fn pin_input_set_value_transitions_to_completed_when_value_becomes_full() {
+        let mut svc = service(props().value(vec![
+            "1".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ]));
+
+        assert_eq!(svc.state(), &State::Idle);
+
+        drop(svc.send(Event::SetValue(Some(vec![
+            "1".into(),
+            "2".into(),
+            "3".into(),
+            "4".into(),
+        ]))));
+
+        assert_eq!(svc.state(), &State::Completed);
+        assert!(svc.context().complete);
+    }
+
+    #[test]
+    fn pin_input_set_props_transitions_state_when_focus_invalidated() {
+        // Length shrinks below the focused index — state was Focused{3},
+        // new state must drop to Idle (no longer focused on any valid
+        // cell). Without the transition, `data-ars-state` stays
+        // `"focused"` despite `focused_index = None`.
+        let mut svc = service(props().length(4));
+
+        drop(svc.send(Event::Focus {
+            index: 3,
+            is_keyboard: false,
+        }));
+        assert_eq!(svc.state(), &State::Focused { index: 3 });
+
+        drop(svc.set_props(props().length(2)));
+
+        assert_eq!(svc.state(), &State::Idle);
+        assert_eq!(svc.context().focused_index, None);
     }
 
     #[test]
