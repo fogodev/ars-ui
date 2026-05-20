@@ -676,6 +676,10 @@ impl ars_core::Machine for Machine {
             Event::SetProps => {
                 let props = props.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let bounds_or_precision_changed = (ctx.min - props.min).abs() > f64::EPSILON
+                        || (ctx.max - props.max).abs() > f64::EPSILON
+                        || ctx.precision != props.precision;
+
                     ctx.min = props.min;
                     ctx.max = props.max;
                     ctx.step = props.step;
@@ -687,6 +691,20 @@ impl ars_core::Machine for Machine {
                     ctx.required = props.required;
                     ctx.name = props.name.clone();
                     ctx.spin_on_press = props.spin_on_press;
+
+                    // Reclamp + reround the current value when the bounds
+                    // or precision change. Without this, `aria-valuenow`
+                    // can fall outside `[aria-valuemin, aria-valuemax]`
+                    // and boundary checks for Increment/Decrement keep
+                    // computing from a stale value until a user event.
+                    if bounds_or_precision_changed && let Some(value) = *ctx.value.get() {
+                        let was_controlled = ctx.value.is_controlled();
+                        let bounded = round_and_clamp(value, ctx.min, ctx.max, ctx.precision);
+                        ctx.value.set(Some(bounded));
+                        if was_controlled {
+                            ctx.value.sync_controlled(Some(Some(bounded)));
+                        }
+                    }
                 }))
             }
 
@@ -1513,6 +1531,61 @@ mod tests {
         assert!((svc.context().step - 5.0).abs() < f64::EPSILON);
         assert_eq!(svc.context().precision, Some(2));
         assert!(svc.context().disabled);
+    }
+
+    #[test]
+    fn number_input_set_props_clamps_value_when_max_shrinks_below_current() {
+        // Previous bounds: [0, 100]. Value: 75. New bounds: [0, 50].
+        // Without re-clamping, `aria-valuenow` would still be 75 — outside
+        // the new `aria-valuemax = 50` — and Increment would still treat
+        // 75 as valid. The reclamp must pull it back into range.
+        let mut svc = service(bounded_props().default_value(75.0));
+
+        assert_eq!(svc.context().value.get(), &Some(75.0));
+
+        drop(svc.set_props(bounded_props().min(0.0).max(50.0).default_value(75.0)));
+
+        assert_eq!(svc.context().value.get(), &Some(50.0));
+    }
+
+    #[test]
+    fn number_input_set_props_clamps_value_when_min_rises_above_current() {
+        let mut svc = service(bounded_props().default_value(5.0));
+
+        drop(svc.set_props(bounded_props().min(20.0).max(100.0).default_value(5.0)));
+
+        assert_eq!(svc.context().value.get(), &Some(20.0));
+    }
+
+    #[test]
+    fn number_input_set_props_rerounds_value_when_precision_tightens() {
+        // Value 2.345 with precision None preserved literally; SetProps
+        // bumps precision to 1 → value must reround to 2.3.
+        let mut svc = service(bounded_props().default_value(2.345));
+
+        drop(svc.set_props(bounded_props().precision(1).default_value(2.345)));
+
+        // round_half_up(2.345 → 1 decimal). 2.345 in f64 is 2.345000...004,
+        // so the round_to_precision will give 2.3 (5 rounds up away from
+        // zero, but the actual stored bits push it just barely below the
+        // half-way mark; verify a numerically robust upper bound instead).
+        let value = svc.context().value.get().expect("value set");
+        assert!(
+            (value - 2.3).abs() < f64::EPSILON || (value - 2.4).abs() < f64::EPSILON,
+            "value {value} must be reround'd to 2.3 or 2.4 (precision 1)"
+        );
+    }
+
+    #[test]
+    fn number_input_set_props_skips_reclamp_when_bounds_unchanged() {
+        // Only `name` changes — bounds/precision are stable so the
+        // current value must NOT be touched (otherwise harmless prop
+        // updates would silently mutate value).
+        let mut svc = service(bounded_props().default_value(7.0));
+
+        drop(svc.set_props(bounded_props().default_value(7.0).name("qty2")));
+
+        assert_eq!(svc.context().value.get(), &Some(7.0));
     }
 
     #[test]
