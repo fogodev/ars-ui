@@ -1,0 +1,107 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "14d4d99ec9f3",
+  "session_id": "c1afe54f-0983-4579-91b3-27bd3bf95b73",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-20T02:48:08.672798Z",
+  "branch": "t3code/49f3737d",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "f7a15b0a2def",
+  "token_usage": {
+    "input_tokens": 680,
+    "cache_creation_tokens": 6240089,
+    "cache_read_tokens": 251856660,
+    "output_tokens": 339144,
+    "api_call_count": 512
+  },
+  "session_metrics": {
+    "turn_count": 8
+  },
+  "summary": {
+    "intent": "Implement Task #286 — the framework-agnostic Table state machine (agnostic core) for the ars-ui component library, covering selection, sort, expansion, grid focus, column resize, and virtual-scroll ARIA metadata.",
+    "outcome": "Full implementation delivered across mod.rs (~1843 LOC), tests.rs (133+ tests, 37 snapshot fixtures), spec-conformance, and proptest invariants. Seven rounds of Codex review were completed with 30+ findings addressed; PR #651 is open and awaiting the pass-8 verdict.",
+    "learnings": {
+      "repo": [
+        "Tabs (`crates/ars-components/src/navigation/tabs/`) is the canonical structural template for complex state machines — Machine impl, TransitionPlan::context_only, ConnectApi, Part enum, Bindable controlled/uncontrolled, and SyncProps all follow its patterns.",
+        "`ars_core::NoEffect` is used when the machine produces no DOM effects; adapters read `ctx.focused_cell`/`focused_row`/`focused_col` and apply focus directly, keeping the agnostic core DOM-free.",
+        "`selection::State::toggle` requires a `Collection` generic the Table machine doesn't own — toggle must be computed locally via `is_selected + select/deselect`.",
+        "`Bindable::set()` on a controlled Bindable does NOT change what `get()` returns; `selection_state.selected_keys` must always be re-synced from `get()` after any `set()` or `sync_controlled()` call.",
+        "`Set::All` with `SelectAllMode::AllData` must be preserved on individual deselect — the adapter owns exclusion tracking via §5.2 BulkSelection. Only `AllVisible` materializes to `Multiple(ctx.rows)` on deselect/toggle.",
+        "`Direction::Auto` must never be stored in `ctx.dir`; it must be resolved to Ltr/Rtl via `ctx.locale.direction()` at `init` and in the `SetDirection` transition.",
+        "Non-finite widths (NaN, ±∞) must be rejected in the `ColumnResize` transition guard before clamping to `min_column_width`.",
+        "`Part::ColumnHeader` needs a `sortable: bool` field so the `ConnectApi::part_attrs` dispatcher can honor caller intent rather than hardcoding sortable=true.",
+        "The `post-implementation-audit` skill is mandatory before user review per CLAUDE.md step 7; the `waiting-for-codex-review` skill and Codex inline-reply+resolve loop is mandatory per step 12.",
+        "`cargo xci-fast` is the pre-push gate (10 sequential checks); `cargo insta test --unreferenced=reject` must pass so no orphaned snapshot fixtures remain.",
+        "Spec drifts discovered during implementation must be fixed in the same PR — the CLAUDE.md rule is 'resolve spec/code mismatch in the same task'.",
+        "Crate-level lcov line coverage is the governing threshold (≥90%), not file-level branch coverage — file-level can dip below 90 as long as the crate aggregate stays above.",
+        "`SyncControlledSortDescriptor` wraps its payload as `Option<Option<SortDescriptor<String>>>` — outer `None` exits controlled mode, inner `None` clears the sort; this differs from the other sync events."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "line": 1,
+          "end_line": 1843,
+          "finding": "New file: complete Table agnostic core — State, Event (30+ variants), Context (20+ fields), Props, Messages, Machine impl (init/transition/connect), Part enum with ComponentPart derive, and Api with all *_attrs and keyboard helpers."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/tests.rs",
+          "line": 1,
+          "end_line": 1990,
+          "finding": "New file: 133 unit+snapshot tests including all 46 named tests from the issue, 7 Codex-pass-1 regression guards, 6 pass-2, 2 pass-3, 10 pass-4, 5 pass-5, 2 pass-6, and 6 pass-7 regression guards."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/data_display.rs",
+          "line": 1,
+          "end_line": 30,
+          "finding": "New file: `table_anatomy_matches_spec` asserts all 15 Part variants map to correct `data-ars-part` strings via `assert_anatomy`. Needed `Part::ColumnHeader { sortable: bool, header: String }` after Codex finding Td6C."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/data_display.rs",
+          "finding": "Extended with `proptest_table_event_sequences_preserve_invariants` (1000 cases, #[ignore]): asserts selection ⊆ enabled rows, expansion ⊆ rows, column_widths ≥ min, focus in bounds when virtualizing."
+        },
+        {
+          "path": "spec/components/data-display/table.md",
+          "finding": "11 spec drifts resolved in the same PR: missing Context fields, FocusCell row-index hard-coded to 0, build_sort_announcement referencing undeclared locale and wrong field name, Scrolling state mention, DeselectAll/ToggleRow missing disallow_empty_selection guards, SyncControlledSortDescriptor payload type mismatch, SetIsSorting not in events table."
+        }
+      ],
+      "workflow": [
+        "TDD was enforced throughout: write failing tests (red), implement fix, verify green, then run xci-fast before every push.",
+        "Codex review requires: post inline reply to each thread citing commit SHA and the regression test that locks the fix, resolve the thread via GraphQL, re-trigger `@codex review`, then restart the background poller.",
+        "Background polling scripts are fragile — they can be wiped between sessions; always re-verify PR state directly with `gh pr view` when a poller notification arrives with a failed/unexpected exit code.",
+        "Rebasing against main before force-pushing is required; merge conflicts in `spec_conformance.rs` (main added `layout` module while branch added `data_display`) must be resolved by keeping both module registrations.",
+        "Snapshot fixtures must be accepted with `cargo insta accept` after a test run creates them; running with `--unreferenced=reject` guards against orphaned fixtures.",
+        "Coverage threshold is checked at crate level, not file level — file-level branch coverage can sag as long as the crate-level lcov line total stays above 90%.",
+        "When a `socket connection was closed unexpectedly` API error interrupts a plan write, the plan write must be re-executed immediately before exiting plan mode."
+      ]
+    },
+    "friction": [
+      "API socket error during plan writing (between research and write phases) caused a gap in the session that required the user to prompt 'Where is the plan?' before proceeding.",
+      "Background polling scripts (bash `until` loops checking `gh pr view`) were wiped between session restarts, requiring re-creation from scratch each time — exit code 127 on script not found.",
+      "`selection::State::toggle` requires a `Collection` generic the Table machine doesn't own, forcing manual toggle computation via `is_selected + select/deselect` rather than delegating to the library.",
+      "Seven rounds of Codex review with 30+ findings — primarily around controlled-Bindable semantics (`set()` vs `get()` invariant), `Set::All` materialization semantics, and `Direction::Auto` resolution.",
+      "Clippy warnings (unused `mut`, path qualification, collapsible `if`) blocked `cargo xci-fast` on multiple passes, requiring iterative fix-and-rerun cycles.",
+      "File-level branch coverage near the 90% threshold required adding targeted coverage-backfill tests on two separate occasions to stay above the gate.",
+      "Rebase conflicts in `crates/ars-components/tests/spec_conformance.rs` required manual merge (main added `layout`, branch added `data_display`).",
+      "`Part::ColumnResizeHandle { column: String }` required careful handling in the `part_attrs` dispatcher because the current-width must be looked up from `ctx.column_widths` rather than hardcoded."
+    ],
+    "open_items": [
+      "`ScrollToRow(Key)` event and full `ars-collections::Virtualizer` integration deferred to a follow-up issue — requires widening `type Effect` from `NoEffect` to a typed enum.",
+      "`BulkSelection` exclusion-set wrapper (§5.2) is adapter/application code; not implemented in the agnostic core. The core preserves `Set::All` for `AllData` mode; adapter owns exclusion tracking.",
+      "`on_load_more: Option<Callback<()>>` callback is adapter-only and was explicitly not stored in the core.",
+      "Codex pass 7 was addressed (4 findings: mode-tighten selection normalization, NaN width guard, resize-handle width lookup, `select_all_mode` demotion in SyncProps), committed, pushed, and replied — but pass 8 had not yet been triggered at session end.",
+      "The `snapshot-reviewed` PR label must be re-confirmed present since each push with new snapshot fixtures requires it per CLAUDE.md."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
