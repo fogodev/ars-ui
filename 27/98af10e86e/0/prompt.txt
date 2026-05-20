@@ -1,0 +1,11 @@
+<task-notification>
+<task-id>bbjc2bpr9</task-id>
+<tool-use-id>toolu_0156u7os7FS3mxTgYHU2MxVU</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson--t3-worktrees-ars-ui-t3code-e1654fe1/270f9a2c-fc05-4cde-bf21-f8dc22087b0e/tasks/bbjc2bpr9.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll Codex pass 8" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+Stop polling in the background, do the polling in the foreground, because you keep losing the poll on new reviews, they were received 4 minutes ago
