@@ -597,6 +597,20 @@ fn clamp_position(position: (f64, f64), size: (f64, f64), props: &Props) -> (f64
     }
 }
 
+fn normalize_bounds_axis(min: f64, max: f64) -> (f64, f64) {
+    let min = if min.is_nan() { 0.0 } else { min };
+    let max = if max.is_nan() { min } else { max };
+
+    if min <= max { (min, max) } else { (max, min) }
+}
+
+fn normalize_size_bounds(min_size: (f64, f64), max_size: (f64, f64)) -> ((f64, f64), (f64, f64)) {
+    let (min_w, max_w) = normalize_bounds_axis(min_size.0, max_size.0);
+    let (min_h, max_h) = normalize_bounds_axis(min_size.1, max_size.1);
+
+    ((min_w, min_h), (max_w, max_h))
+}
+
 fn resize_rect(
     position: (f64, f64),
     size: (f64, f64),
@@ -656,8 +670,10 @@ fn resize_rect(
         }
     }
 
-    new_w = new_w.clamp(props.min_size.0, props.max_size.0);
-    new_h = new_h.clamp(props.min_size.1, props.max_size.1);
+    let (min_size, max_size) = normalize_size_bounds(props.min_size, props.max_size);
+
+    new_w = new_w.clamp(min_size.0, max_size.0);
+    new_h = new_h.clamp(min_size.1, max_size.1);
 
     if props.lock_aspect_ratio {
         let ratio = props.initial_size.0 / props.initial_size.1;
@@ -668,8 +684,8 @@ fn resize_rect(
             new_h = new_w / ratio;
         }
 
-        new_w = new_w.clamp(props.min_size.0, props.max_size.0);
-        new_h = new_h.clamp(props.min_size.1, props.max_size.1);
+        new_w = new_w.clamp(min_size.0, max_size.0);
+        new_h = new_h.clamp(min_size.1, max_size.1);
     }
 
     if matches!(
@@ -821,8 +837,7 @@ impl ars_core::Machine for Machine {
             (_, Event::SetControlledOpen(false)) => Some(close_plan(ctx.stage() != Stage::Default)),
 
             (_, Event::SyncProps) => {
-                let min_size = props.min_size;
-                let max_size = props.max_size;
+                let (min_size, max_size) = normalize_size_bounds(props.min_size, props.max_size);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.min_size = min_size;
                     ctx.max_size = max_size;
@@ -837,6 +852,8 @@ impl ars_core::Machine for Machine {
                     ctx.z_index = Some(z_index);
                 }))
             }
+
+            (_, Event::Focus { .. }) if !ctx.open => None,
 
             (_, Event::Focus { is_keyboard }) => {
                 let is_keyboard = *is_keyboard;
@@ -1981,6 +1998,57 @@ mod tests {
 
         assert!(service.context().open);
         assert_eq!(service.context().min_size, (300.0, 200.0));
+    }
+
+    #[test]
+    fn closed_focus_does_not_allocate_z_index() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                default_open: false,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+        let before = service.context().clone();
+
+        let focus = service.send(Event::Focus { is_keyboard: true });
+
+        assert_eq!(service.context(), &before);
+        assert!(!focus.state_changed);
+        assert!(effect_names(&focus).is_empty());
+    }
+
+    #[test]
+    fn invalid_size_bounds_are_normalized_before_clamping() {
+        let mut inverted = Service::<Machine>::new(
+            Props {
+                min_size: (500.0, 400.0),
+                max_size: (250.0, 200.0),
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(inverted.send(Event::ResizeStart(ResizeHandle::SE)));
+        let resize = inverted.send(Event::ResizeMove {
+            dx: -1_000.0,
+            dy: -1_000.0,
+        });
+
+        assert_eq!(inverted.context().size, (250.0, 200.0));
+        assert_eq!(effect_names(&resize), vec![Effect::SizeChange]);
+
+        inverted.set_props(Props {
+            min_size: (f64::NAN, 350.0),
+            max_size: (450.0, f64::NAN),
+            ..test_props()
+        });
+
+        assert_eq!(inverted.context().min_size, (0.0, 350.0));
+        assert_eq!(inverted.context().max_size, (450.0, 350.0));
+        assert_eq!(inverted.context().size, (250.0, 350.0));
     }
 
     #[test]

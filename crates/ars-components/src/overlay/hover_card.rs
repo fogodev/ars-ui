@@ -317,6 +317,21 @@ fn open_plan(cancel: Option<Effect>) -> TransitionPlan<Machine> {
     plan
 }
 
+fn controlled_open_request_plan(cancel: Option<Effect>) -> TransitionPlan<Machine> {
+    let mut plan = TransitionPlan::to(State::Closed)
+        .apply(|ctx: &mut Context| {
+            ctx.hover_active = false;
+            ctx.focus_active = false;
+        })
+        .with_effect(PendingEffect::named(Effect::OpenChange));
+
+    if let Some(effect) = cancel {
+        plan = plan.cancel_effect(effect);
+    }
+
+    plan
+}
+
 fn close_plan(cancel: Option<Effect>) -> TransitionPlan<Machine> {
     let mut plan = TransitionPlan::to(State::Closed)
         .apply(|ctx: &mut Context| {
@@ -522,10 +537,18 @@ impl ars_core::Machine for Machine {
                 Event::TriggerKeyDown(KeyboardKey::Enter | KeyboardKey::Space),
             ) => {
                 let cancel = matches!(state, State::OpenPending).then_some(Effect::OpenDelay);
+                if props.open == Some(false) {
+                    return Some(controlled_open_request_plan(cancel));
+                }
                 Some(open_plan(cancel))
             }
 
-            (State::OpenPending, Event::OpenTimerFired) => Some(open_plan(Some(Effect::OpenDelay))),
+            (State::OpenPending, Event::OpenTimerFired) => {
+                if props.open == Some(false) {
+                    return Some(controlled_open_request_plan(Some(Effect::OpenDelay)));
+                }
+                Some(open_plan(Some(Effect::OpenDelay)))
+            }
 
             (State::OpenPending, Event::TriggerFocus) => {
                 Some(TransitionPlan::context_only(|ctx: &mut Context| {
@@ -636,6 +659,9 @@ impl ars_core::Machine for Machine {
             ),
 
             (State::ClosePending, Event::CloseTimerFired) => {
+                if props.open == Some(true) {
+                    return Some(controlled_close_request_plan(Some(Effect::CloseDelay)));
+                }
                 Some(close_plan(Some(Effect::CloseDelay)))
             }
 
@@ -652,6 +678,10 @@ impl ars_core::Machine for Machine {
                     State::ClosePending => Some(Effect::CloseDelay),
                     State::Closed | State::Open => None,
                 };
+
+                if props.open == Some(false) {
+                    return Some(controlled_open_request_plan(cancel));
+                }
 
                 Some(open_plan(cancel))
             }
@@ -1411,6 +1441,54 @@ mod tests {
         assert!(!service.context().hover_active);
         assert!(!service.context().focus_active);
         assert_eq!(effect_names(&close), vec![Effect::OpenChange]);
+    }
+
+    #[test]
+    fn controlled_false_open_timer_requests_without_opening() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                open: Some(false),
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(service.send(Event::TriggerPointerEnter));
+
+        let timer = service.send(Event::OpenTimerFired);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+        assert_eq!(timer.cancel_effects, vec![Effect::OpenDelay]);
+        assert_eq!(effect_names(&timer), vec![Effect::OpenChange]);
+
+        let key = service.send(Event::TriggerKeyDown(KeyboardKey::Enter));
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+        assert_eq!(effect_names(&key), vec![Effect::OpenChange]);
+    }
+
+    #[test]
+    fn controlled_true_close_timer_requests_without_closing() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                open: Some(true),
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(service.send(Event::TriggerPointerLeave));
+
+        let timer = service.send(Event::CloseTimerFired);
+
+        assert_eq!(service.state(), &State::Open);
+        assert!(service.context().open);
+        assert_eq!(timer.cancel_effects, vec![Effect::CloseDelay]);
+        assert_eq!(effect_names(&timer), vec![Effect::OpenChange]);
     }
 
     #[test]
