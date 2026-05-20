@@ -24,13 +24,14 @@ and provides navigation between them.
 
 ### 1.2 Events
 
-| Event                        | Payload              | Description                            |
-| ---------------------------- | -------------------- | -------------------------------------- |
-| `GoToStep(u32)`              | step index (0-based) | Navigate to a specific step directly.  |
-| `NextStep`                   | —                    | Advance to step + 1.                   |
-| `PrevStep`                   | —                    | Go back to step - 1.                   |
-| `CompleteStep(u32)`          | step index           | Mark a step as `Complete`.             |
-| `SetStatus { step, status }` | `u32`, `Status`      | Explicitly set the status of any step. |
+| Event                        | Payload              | Description                                |
+| ---------------------------- | -------------------- | ------------------------------------------ |
+| `GoToStep(u32)`              | step index (0-based) | Navigate to a specific step directly.      |
+| `NextStep`                   | —                    | Advance to step + 1.                       |
+| `PrevStep`                   | —                    | Go back to step - 1.                       |
+| `CompleteStep(u32)`          | step index           | Mark a step as `Complete`.                 |
+| `SetStatus { step, status }` | `u32`, `Status`      | Explicitly set the status of any step.     |
+| `SyncProps`                  | —                    | Synchronize controlled props into context. |
 
 ### 1.3 Context
 
@@ -100,8 +101,10 @@ pub struct Props {
     /// Per-step skip predicate. When `Some`, allows the user to skip ahead past
     /// a step without completing it. Return `true` if the step is skippable.
     pub is_step_skippable: Option<Callback<dyn Fn(u32) -> bool + Send + Sync>>,
+    /// Callback fired after the current step changes.
+    pub on_step_change: Option<Callback<dyn Fn(u32) + Send + Sync>>,
     /// Callback fired when all steps are completed (the user advances past the last step).
-    pub on_complete: Option<Callback<()>>,
+    pub on_complete: Option<Callback<dyn Fn() + Send + Sync>>,
     /// Visual stacking axis.
     pub orientation: Orientation,
 }
@@ -117,6 +120,7 @@ impl Default for Props {
             linear: false,
             is_step_valid: None,
             is_step_skippable: None,
+            on_step_change: None,
             on_complete: None,
             orientation: Orientation::Horizontal,
         }
@@ -155,6 +159,17 @@ pub enum Event {
         /// New status.
         status: Status,
     },
+    /// Synchronize controlled props into context.
+    SyncProps,
+}
+
+/// Effects for the `Steps` component.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Effect {
+    /// The active step changed.
+    StepChange,
+    /// The user advanced past the final step.
+    Complete,
 }
 
 /// Machine for the `Steps` component.
@@ -198,7 +213,7 @@ impl ars_core::Machine for Machine {
         _state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match event {
             Event::GoToStep(target) => {
@@ -225,12 +240,14 @@ impl ars_core::Machine for Machine {
                             *s = Status::Complete;
                         }
                     }
-                    // Update status of the new current step.
-                    if let Some(s) = ctx.statuses.get_mut(target as usize) {
-                        *s = Status::Current;
-                    }
+                    normalize_current_status(&mut ctx.statuses, target);
                     ctx.step.set(target);
-                }))
+                }).with_effect(PendingEffect::new(Effect::StepChange, |ctx, props, _send| {
+                    if let Some(ref cb) = props.on_step_change {
+                        cb(*ctx.step.get());
+                    }
+                    no_cleanup()
+                })))
             }
             Event::NextStep => {
                 let current = *ctx.step.get();
@@ -249,9 +266,9 @@ impl ars_core::Machine for Machine {
                         if let Some(s) = ctx.statuses.get_mut(current as usize) {
                             *s = Status::Complete;
                         }
-                    }).with_effect(PendingEffect::new("on-complete", |_ctx, props, _send| {
+                    }).with_effect(PendingEffect::new(Effect::Complete, |_ctx, props, _send| {
                         if let Some(ref cb) = props.on_complete {
-                            cb.call(());
+                            cb();
                         }
                         no_cleanup()
                     })));
@@ -261,11 +278,14 @@ impl ars_core::Machine for Machine {
                     if let Some(s) = ctx.statuses.get_mut(current as usize) {
                         *s = Status::Complete;
                     }
-                    if let Some(s) = ctx.statuses.get_mut(next as usize) {
-                        *s = Status::Current;
-                    }
+                    normalize_current_status(&mut ctx.statuses, next);
                     ctx.step.set(next);
-                }))
+                }).with_effect(PendingEffect::new(Effect::StepChange, |ctx, props, _send| {
+                    if let Some(ref cb) = props.on_step_change {
+                        cb(*ctx.step.get());
+                    }
+                    no_cleanup()
+                })))
             }
             Event::PrevStep => {
                 let current = *ctx.step.get();
@@ -276,11 +296,14 @@ impl ars_core::Machine for Machine {
                         // Going backward leaves the step as Incomplete (not wiping Complete).
                         *s = Status::Incomplete;
                     }
-                    if let Some(s) = ctx.statuses.get_mut(prev as usize) {
-                        *s = Status::Current;
-                    }
+                    normalize_current_status(&mut ctx.statuses, prev);
                     ctx.step.set(prev);
-                }))
+                }).with_effect(PendingEffect::new(Effect::StepChange, |ctx, props, _send| {
+                    if let Some(ref cb) = props.on_step_change {
+                        cb(*ctx.step.get());
+                    }
+                    no_cleanup()
+                })))
             }
             Event::CompleteStep(idx) => {
                 let idx = *idx as usize;
@@ -291,12 +314,33 @@ impl ars_core::Machine for Machine {
                 }))
             }
             Event::SetStatus { step, status } => {
-                let idx    = *step as usize;
+                let step_index = *step;
+                let idx    = step_index as usize;
                 let status = status.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
                     if let Some(s) = ctx.statuses.get_mut(idx) {
                         *s = status;
                     }
+                    if status == Status::Current {
+                        ctx.step.set(step_index);
+                        normalize_current_status(&mut ctx.statuses, step_index);
+                    }
+                }))
+            }
+            Event::SyncProps => {
+                let count = props.count;
+                let controlled = props.step.map(|step| step.min(count.get().saturating_sub(1)));
+                let target = controlled.unwrap_or_else(|| (*ctx.step.get()).min(count.get().saturating_sub(1)));
+                let statuses = normalized_statuses(props.statuses.clone(), count, target);
+                let linear = props.linear;
+                let orientation = props.orientation;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.count = count;
+                    ctx.step.sync_controlled(controlled);
+                    ctx.step.set(target);
+                    ctx.statuses = statuses;
+                    ctx.linear = linear;
+                    ctx.orientation = orientation;
                 }))
             }
         }
@@ -517,6 +561,11 @@ impl<'a> Api<'a> {
     /// Handle click event for the "next step" trigger button.
     pub fn on_next_trigger_click(&self) {
         if !self.is_last_step() { (self.send)(Event::NextStep); }
+    }
+
+    /// Handle direct step selection.
+    pub fn on_item_click(&self, index: u32) {
+        (self.send)(Event::GoToStep(index));
     }
 }
 

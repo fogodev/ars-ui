@@ -1,0 +1,55 @@
+---
+source: crates/ars-components/src/navigation/steps.rs
+expression: snapshot_attrs(&api.separator_attrs(0))
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-completed",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-index",
+            ),
+            String(
+                "0",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "separator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "steps",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "separator",
+            ),
+        ),
+    ],
+    styles: [],
+}

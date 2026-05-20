@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/navigation/steps.rs
+expression: snapshot_attrs(&api.root_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-orientation",
+            ),
+            String(
+                "vertical",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "steps",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Steps",
+            ),
+        ),
+    ],
+    styles: [],
+}

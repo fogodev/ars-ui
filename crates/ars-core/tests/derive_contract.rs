@@ -63,6 +63,9 @@ where
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 struct CustomDefaultKey(&'static str);
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct CustomAnnotatedKey(&'static str);
+
 #[derive(ComponentPart)]
 #[scope = "named"]
 enum NamedPart {
@@ -95,6 +98,20 @@ enum OrderedPart {
 enum GroupPart {
     Group,
     GroupItem { index: usize },
+}
+
+#[derive(ComponentPart)]
+#[scope = "annotated"]
+enum AnnotatedDefaultPart {
+    Root,
+    Link {
+        #[part(default = CustomAnnotatedKey("root-link"))]
+        key: CustomAnnotatedKey,
+    },
+    PageTrigger {
+        #[part(default = 1)]
+        page_number: u32,
+    },
 }
 
 #[test]
@@ -301,6 +318,20 @@ fn component_part_derive_uses_first_unit_variant_as_root() {
     assert_eq!(
         GroupPart::all(),
         vec![GroupPart::Group, GroupPart::GroupItem { index: 0 }]
+    );
+}
+
+#[test]
+fn component_part_derive_supports_annotated_all_defaults() {
+    assert_eq!(
+        AnnotatedDefaultPart::all(),
+        vec![
+            AnnotatedDefaultPart::Root,
+            AnnotatedDefaultPart::Link {
+                key: CustomAnnotatedKey("root-link"),
+            },
+            AnnotatedDefaultPart::PageTrigger { page_number: 1 },
+        ]
     );
 }
 

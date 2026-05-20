@@ -1,0 +1,75 @@
+---
+source: crates/ars-components/src/navigation/link.rs
+expression: snapshot_attrs(&attrs)
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-external",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "link",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "idle",
+            ),
+        ),
+        (
+            Aria(
+                Current,
+            ),
+            String(
+                "page",
+            ),
+        ),
+        (
+            Aria(
+                Description,
+            ),
+            String(
+                "opens in new tab",
+            ),
+        ),
+        (
+            Href,
+            String(
+                "https://example.com/docs",
+            ),
+        ),
+        (
+            Rel,
+            String(
+                "noopener noreferrer",
+            ),
+        ),
+        (
+            Target,
+            String(
+                "_blank",
+            ),
+        ),
+    ],
+    styles: [],
+}

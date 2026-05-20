@@ -10,7 +10,7 @@ source_foundation: foundation/08-adapter-leptos.md
 
 ## 1. Purpose and Adapter Scope
 
-This spec maps the core [`Link`](../../components/navigation/link.md) contract onto a Leptos 0.8.x component. The adapter preserves anchor-first semantics, router interception, current-item semantics, external-link security repair, and non-anchor fallback semantics when consumers intentionally opt out of `<a>`.
+This spec maps the core [`Link`](../../components/navigation/link.md) contract onto a Leptos 0.8.x component. The adapter preserves anchor-first semantics, router interception, current-item semantics, core-owned external-link security repair, and non-anchor fallback semantics when consumers intentionally opt out of `<a>`.
 
 ## 2. Public Adapter API
 
@@ -33,7 +33,7 @@ The adapter renders a native anchor by default. `Target::Route` stays progressiv
 - Props parity: full parity with the core target, current-item, disabled, locale, and message contract.
 - State parity: full parity with focused, pressed, and disabled link behavior.
 - Part parity: full parity with the single `Root` part.
-- Adapter additions: explicit router interception, automatic external-link `rel` repair, and non-anchor semantic repair rules.
+- Adapter additions: explicit router interception and non-anchor semantic repair rules. External-link target/`rel` repair is emitted by `api.root_attrs()`.
 
 ## 4. Part Mapping
 
@@ -43,11 +43,11 @@ The adapter renders a native anchor by default. `Target::Route` stays progressiv
 
 ## 5. Attr Merge and Ownership Rules
 
-| Target node | Core attrs                                                                      | Adapter-owned attrs                                                                               | Consumer attrs                         | Merge order                                                                                                             | Ownership notes                      |
-| ----------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| `Root`      | `href`, `target`, `rel`, `aria-current`, `aria-disabled`, scope and state attrs | router click interception, external-link security repair, non-anchor `role` and `tabindex` repair | decoration attrs and trailing handlers | required navigation and security attrs win; handlers compose adapter before consumer when preventing invalid navigation | root remains the semantic link owner |
+| Target node | Core attrs                                                                      | Adapter-owned attrs                                                | Consumer attrs                         | Merge order                                                                                                             | Ownership notes                      |
+| ----------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| `Root`      | `href`, `target`, `rel`, `aria-current`, `aria-disabled`, scope and state attrs | router click interception, non-anchor `role` and `tabindex` repair | decoration attrs and trailing handlers | required navigation and security attrs win; handlers compose adapter before consumer when preventing invalid navigation | root remains the semantic link owner |
 
-- When `target="_blank"` and `rel` is absent, the adapter must append `noopener noreferrer`.
+- When `target="_blank"` and `rel` is absent, the core attrs include `noopener noreferrer`.
 - When rendering a non-anchor host, the adapter must add `role="link"` and keyboard activation repair.
 - Consumers must not remove `aria-current` or `aria-disabled` once emitted by the adapter.
 
@@ -57,10 +57,10 @@ The adapter renders a native anchor by default. `Target::Route` stays progressiv
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop                          | Mode       | Sync trigger              | Machine event / update path | Visible effect                                 | Notes                         |
-| ------------------------------------- | ---------- | ------------------------- | --------------------------- | ---------------------------------------------- | ----------------------------- |
-| `disabled`                            | controlled | signal change after mount | `SetDisabled`               | updates disabled attrs and blocks activation   | only reactive prop by default |
-| `href`, `target`, `rel`, `is_current` | controlled | rerender with new props   | machine or render rebuild   | updates destination and current-item semantics | no shadow state               |
+| Adapter prop                          | Mode       | Sync trigger              | Machine event / update path   | Visible effect                                 | Notes                         |
+| ------------------------------------- | ---------- | ------------------------- | ----------------------------- | ---------------------------------------------- | ----------------------------- |
+| `disabled`                            | controlled | signal change after mount | `SyncProps`                   | updates disabled attrs and blocks activation   | only reactive prop by default |
+| `href`, `target`, `rel`, `is_current` | controlled | rerender with new props   | `SyncProps` or render rebuild | updates destination and current-item semantics | no shadow state               |
 
 | UI event                  | Preconditions             | Machine event / callback path                | Ordering notes                                                      | Notes                                   |
 | ------------------------- | ------------------------- | -------------------------------------------- | ------------------------------------------------------------------- | --------------------------------------- |
@@ -114,7 +114,7 @@ Each `Link` instance owns one semantic root. Server and client must preserve the
 
 ## 15. Performance Constraints
 
-- Avoid recomputing external-link security repair in multiple code paths; derive it once per render.
+- Do not recompute external-link security repair in adapter code; read the repaired attrs from `api.root_attrs()`.
 - Do not attach non-anchor keyboard repair listeners to native anchors.
 - Keep router comparison instance-local and avoid global polling.
 
@@ -210,7 +210,7 @@ view! {
 ## 28. Parity Summary and Intentional Deviations
 
 - Matches the core link contract without intentional adapter divergence.
-- Promotes router interception, progressive enhancement, external-link security repair, and non-anchor semantic repair into explicit Leptos-facing rules.
+- Promotes router interception, progressive enhancement, core-owned external-link security repair, and non-anchor semantic repair into explicit Leptos-facing rules.
 
 ## 29. Test Scenarios
 

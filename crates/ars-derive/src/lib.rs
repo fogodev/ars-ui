@@ -67,6 +67,9 @@ pub fn derive_has_id(input: TokenStream) -> TokenStream {
 /// - Unit, tuple, and struct variants are supported. Variants with fields
 ///   receive generated `Clone`, `Debug`, `PartialEq`, `Eq`, and `Hash`
 ///   implementations with the necessary field bounds.
+/// - Fields may use `#[part(default = expr)]` to control the value used for
+///   that field in `ComponentPart::all()`. Fields without that annotation use
+///   `Default::default()` and therefore require a `Default` bound.
 ///
 /// # Generated names
 ///
@@ -86,13 +89,16 @@ pub fn derive_has_id(input: TokenStream) -> TokenStream {
 ///     List,
 ///     Tab,
 ///     CloseTrigger,
-///     Panel,
+///     Panel {
+///         #[part(default = String::from("example-panel"))]
+///         id: String,
+///     },
 /// }
 ///
 /// assert_eq!(TabsPart::scope(), "tabs");
 /// assert_eq!(TabsPart::CloseTrigger.name(), "close-trigger");
 /// ```
-#[proc_macro_derive(ComponentPart, attributes(scope))]
+#[proc_macro_derive(ComponentPart, attributes(scope, part))]
 pub fn derive_component_part(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 

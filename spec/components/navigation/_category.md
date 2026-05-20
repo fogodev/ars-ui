@@ -113,10 +113,10 @@ pub fn item_attrs(&self, item_id: &str) -> AttrMap {
 | `Accordion`   | `Idle`                       | `value: Bindable<BTreeSet<Key>>`, `multiple`, `collapsible`, `orientation`                                                                        | Open item IDs                          |
 | `Tabs`        | `Idle`, `Focused { tab }`    | `value: Bindable<String>`, `activation_mode`, `dir`, `loop_focus`                                                                                 | Selected tab ID                        |
 | `TreeView`    | `Idle`, `Focused`            | `items: TreeCollection<TreeItem>`, `selected: Bindable<selection::Set>`, `expanded: Bindable<BTreeSet<Key>>`, `selection_state: selection::State` | Tree data + selected + expanded        |
-| `Pagination`  | `Idle`                       | `page: Bindable<u32>`, `page_size`, `total_items`, `sibling_count`, `page_count`                                                                  | Current page number                    |
+| `Pagination`  | `Idle`                       | `page: Bindable<u32>`, `page_size`, `total_items`, `sibling_count`, `boundary_count`, `page_count`                                                | Current page number                    |
 | `Steps`       | `Idle`                       | `step: Bindable<u32>`, `count`, `statuses: Vec<steps::Status>`, `linear`, `orientation`                                                           | Current step index + per-step statuses |
-| `Breadcrumbs` | (no machine)                 | (stateless — Props only: `separator`, `dir`, `nav_label`)                                                                                         | (stateless)                            |
-| `Link`        | `Idle`, `Focused`, `Pressed` | `href`, `target`, `rel`, `is_current: Option<AriaCurrent>`, `disabled`, `focus_visible`                                                           | (stateless — no bindable value)        |
+| `Breadcrumbs` | (no machine)                 | (stateless — Props plus `ItemDef { label, href, current }`)                                                                                       | (stateless)                            |
+| `Link`        | `Idle`, `Focused`, `Pressed` | `href: Target`, `target`, `rel`, `is_current: Option<AriaCurrent>`, `disabled`, `focus_visible`, `pressed`                                        | (stateless — no bindable value)        |
 
 All seven components expose their parts through consistent data attributes:
 

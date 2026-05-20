@@ -67,9 +67,9 @@ The adapter owns repeated item rendering, step-status projection, current-conten
 
 | Adapter prop                           | Mode       | Sync trigger              | Machine event / update path | Visible effect                                                 | Notes                                            |
 | -------------------------------------- | ---------- | ------------------------- | --------------------------- | -------------------------------------------------------------- | ------------------------------------------------ |
-| `step`                                 | controlled | signal change after mount | `GoToStep`                  | updates current item, content, and edge-trigger disabled state | no controlled/uncontrolled switching after mount |
-| `statuses`                             | controlled | rerender with new props   | core prop rebuild           | updates item and separator state                               | index alignment must stay stable                 |
-| `linear`, `orientation`, `interactive` | controlled | rerender with new props   | core prop rebuild           | updates navigation guards and semantics                        | no shadow state                                  |
+| `step`                                 | controlled | signal change after mount | `SyncProps` or `GoToStep`   | updates current item, content, and edge-trigger disabled state | no controlled/uncontrolled switching after mount |
+| `statuses`                             | controlled | rerender with new props   | `SyncProps`                 | updates item and separator state                               | index alignment must stay stable                 |
+| `linear`, `orientation`, `interactive` | controlled | rerender with new props   | `SyncProps` or render-local | updates navigation guards and semantics                        | no shadow state                                  |
 
 | UI event                | Preconditions                              | Machine event / callback path | Ordering notes                                                    | Notes                                                |
 | ----------------------- | ------------------------------------------ | ----------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------- |

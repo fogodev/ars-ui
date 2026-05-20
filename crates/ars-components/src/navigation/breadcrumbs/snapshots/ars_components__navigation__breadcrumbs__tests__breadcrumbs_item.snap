@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/navigation/breadcrumbs.rs
+expression: snapshot_attrs(&api.item_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "breadcrumbs",
+            ),
+        ),
+    ],
+    styles: [],
+}

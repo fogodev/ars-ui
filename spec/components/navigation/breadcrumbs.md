@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: []
 references:
-  react-aria: Breadcrumbs
+    react-aria: Breadcrumbs
 ---
 
 # Breadcrumbs
@@ -22,14 +22,15 @@ DOM props.
 ### 1.1 Props
 
 ```rust
-use ars_i18n::Direction;
+use ars_core::{Direction, SafeUrl};
+use crate::navigation::link::AriaCurrent;
 
 /// The type of separator to use between breadcrumb items.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Separator {
     /// "/" character (default).
     Slash,
-    /// "›" or similar chevron character.
+    /// ">" or similar chevron character.
     Chevron,
     /// Custom string, e.g. "•" or a locale-specific separator.
     Custom(String),
@@ -40,10 +41,21 @@ impl Separator {
     pub fn as_str(&self) -> &str {
         match self {
             Self::Slash         => "/",
-            Self::Chevron       => "›",
+            Self::Chevron       => ">",
             Self::Custom(s)     => s.as_str(),
         }
     }
+}
+
+/// Consumer-provided breadcrumb item metadata.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ItemDef {
+    /// Visible item label.
+    pub label: String,
+    /// Optional safe navigation target. Current items typically omit it.
+    pub href: Option<SafeUrl>,
+    /// Optional current-item semantic override.
+    pub current: Option<AriaCurrent>,
 }
 
 /// Props for the `Breadcrumbs` component.
@@ -88,7 +100,7 @@ pub enum Part {
     Root,
     List,
     Item,
-    Link { href: String },
+    Link { href: SafeUrl },
     CurrentPage,
     Separator,
 }
@@ -143,12 +155,13 @@ impl Api {
     /// Attrs for a navigation link (`<a>`).
     ///
     /// `href` — the target URL for this crumb.
-    pub fn link_attrs(&self, href: &str) -> AttrMap {
+    pub fn link_attrs(&self, href: &SafeUrl) -> AttrMap {
         let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Link { href: Default::default() }.data_attrs();
+        let [(scope_attr, scope_val), (part_attr, part_val)] =
+            Part::Link { href: SafeUrl::from_static("/") }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Href, href);
+        attrs.set(HtmlAttr::Href, sanitize_url(href.as_str()));
         attrs
     }
 
