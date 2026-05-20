@@ -1,0 +1,37 @@
+---
+source: crates/ars-components/src/data_display/table/tests.rs
+expression: snapshot_attrs(&attrs)
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "table",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "table",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "table",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "grid",
+            ),
+        ),
+    ],
+    styles: [],
+}

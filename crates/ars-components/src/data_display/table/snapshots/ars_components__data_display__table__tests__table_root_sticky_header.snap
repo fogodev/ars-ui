@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/data_display/table/tests.rs
+expression: snapshot_attrs(&root)
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "table",
+            ),
+        ),
+        (
+            Data(
+                "ars-sticky-header",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+    ],
+    styles: [],
+}

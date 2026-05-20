@@ -1,0 +1,55 @@
+---
+source: crates/ars-components/src/data_display/table/tests.rs
+expression: snapshot_attrs(&trigger)
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-expanded",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "expand-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "table",
+            ),
+        ),
+        (
+            Aria(
+                Expanded,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Controls,
+            ),
+            String(
+                "table-expanded-r1",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

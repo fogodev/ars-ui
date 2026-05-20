@@ -1,0 +1,53 @@
+---
+source: crates/ars-components/src/data_display/table/tests.rs
+expression: snapshot_attrs(&attrs)
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "table",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "table",
+            ),
+        ),
+        (
+            Aria(
+                ColCount,
+            ),
+            String(
+                "8",
+            ),
+        ),
+        (
+            Aria(
+                RowCount,
+            ),
+            String(
+                "1500",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "table",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "table",
+            ),
+        ),
+    ],
+    styles: [],
+}

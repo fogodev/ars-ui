@@ -1,0 +1,53 @@
+---
+source: crates/ars-components/src/data_display/table/tests.rs
+expression: snapshot_attrs(&attrs)
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "column-resize-handle",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "table",
+            ),
+        ),
+        (
+            Aria(
+                Orientation,
+            ),
+            String(
+                "vertical",
+            ),
+        ),
+        (
+            Aria(
+                ValueNow,
+            ),
+            String(
+                "120",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "separator",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

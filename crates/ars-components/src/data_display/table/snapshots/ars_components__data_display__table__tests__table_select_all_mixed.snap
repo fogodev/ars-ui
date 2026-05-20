@@ -1,0 +1,55 @@
+---
+source: crates/ars-components/src/data_display/table/tests.rs
+expression: snapshot_attrs(&attrs)
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-indeterminate",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "select-all-checkbox",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "table",
+            ),
+        ),
+        (
+            Aria(
+                Checked,
+            ),
+            String(
+                "mixed",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Select all 3 rows",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "checkbox",
+            ),
+        ),
+    ],
+    styles: [],
+}
