@@ -425,17 +425,28 @@ impl ars_core::Machine for Machine {
                 let is_current = props.is_current;
                 let disabled = props.disabled;
 
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.href = href;
-                    ctx.target = target;
-                    ctx.rel = rel;
-                    ctx.is_current = is_current;
-                    ctx.disabled = disabled;
-
-                    if disabled {
-                        ctx.pressed = false;
-                    }
-                }))
+                if disabled {
+                    Some(
+                        TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
+                            ctx.href = href;
+                            ctx.target = target;
+                            ctx.rel = rel;
+                            ctx.is_current = is_current;
+                            ctx.disabled = disabled;
+                            ctx.focused = false;
+                            ctx.focus_visible = false;
+                            ctx.pressed = false;
+                        }),
+                    )
+                } else {
+                    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.href = href;
+                        ctx.target = target;
+                        ctx.rel = rel;
+                        ctx.is_current = is_current;
+                        ctx.disabled = disabled;
+                    }))
+                }
             }
 
             _ => None,
@@ -840,7 +851,7 @@ mod tests {
 
         assert!(!result.state_changed);
         assert!(!result.context_changed);
-        assert_eq!(service.state(), &State::Pressed);
+        assert_eq!(service.state(), &State::Idle);
         assert!(!service.context().pressed);
     }
 
@@ -875,6 +886,28 @@ mod tests {
         assert_eq!(service.context().is_current, Some(AriaCurrent::Step));
         assert!(service.context().disabled);
         assert!(!service.context().pressed);
+    }
+
+    #[test]
+    fn disabling_focused_or_pressed_link_resets_interaction_state() {
+        let mut service = service(props());
+
+        drop(service.send(Event::Focus { is_keyboard: true }));
+        drop(service.send(Event::Press));
+
+        drop(service.set_props(props().disabled(true)));
+
+        assert_eq!(service.state(), &State::Idle);
+        assert!(service.context().disabled);
+        assert!(!service.context().focused);
+        assert!(!service.context().focus_visible);
+        assert!(!service.context().pressed);
+
+        let attrs = service.connect(&|_| {}).root_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Data("ars-state")), Some("idle"));
+        assert!(attrs.get(&HtmlAttr::Data("ars-focus-visible")).is_none());
+        assert!(attrs.get(&HtmlAttr::Data("ars-pressed")).is_none());
     }
 
     #[test]

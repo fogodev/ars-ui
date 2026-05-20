@@ -757,7 +757,7 @@ fn page_range(
 
     let current = clamp_page(current_page, total);
 
-    let boundary = boundary_count.max(1);
+    let boundary = boundary_count;
 
     let siblings = sibling_count;
 
@@ -771,12 +771,27 @@ fn page_range(
     }
 
     let left_boundary_end = boundary.min(total);
-    let right_boundary_start = total.saturating_sub(boundary).saturating_add(1).max(1);
+    let right_boundary_start = if boundary == 0 {
+        total
+    } else {
+        total.saturating_sub(boundary).saturating_add(1).max(1)
+    };
 
-    let sibling_start = current.saturating_sub(siblings).max(left_boundary_end + 1);
+    let middle_min = left_boundary_end.saturating_add(1);
+    let middle_max = if boundary == 0 {
+        total
+    } else {
+        right_boundary_start.saturating_sub(1)
+    };
+
+    let sibling_start = current
+        .saturating_sub(siblings)
+        .max(middle_min)
+        .min(middle_max);
     let sibling_end = current
         .saturating_add(siblings)
-        .min(right_boundary_start.saturating_sub(1));
+        .min(middle_max)
+        .max(sibling_start);
 
     let mut pages = Vec::new();
 
@@ -784,10 +799,10 @@ fn page_range(
         pages.push(Some(page));
     }
 
-    if sibling_start > left_boundary_end + 1 {
+    if sibling_start > middle_min {
         pages.push(None);
     } else {
-        for page in left_boundary_end + 1..sibling_start {
+        for page in middle_min..sibling_start {
             pages.push(Some(page));
         }
     }
@@ -796,17 +811,19 @@ fn page_range(
         pages.push(Some(page));
     }
 
-    if sibling_end + 1 < right_boundary_start {
+    if sibling_end < middle_max {
         pages.push(None);
     } else {
-        for page in sibling_end + 1..right_boundary_start {
+        for page in sibling_end.saturating_add(1)..=middle_max {
             pages.push(Some(page));
         }
     }
 
-    for page in right_boundary_start..=total {
-        if pages.last() != Some(&Some(page)) {
-            pages.push(Some(page));
+    if boundary > 0 {
+        for page in right_boundary_start..=total {
+            if pages.last() != Some(&Some(page)) {
+                pages.push(Some(page));
+            }
         }
     }
 
@@ -904,6 +921,15 @@ mod tests {
                 Some(10),
             ]
         );
+    }
+
+    #[test]
+    fn page_range_honors_zero_boundary_count() {
+        let range = page_range(5, 10, 1, 0);
+
+        assert_eq!(range, vec![None, Some(4), Some(5), Some(6), None]);
+        assert!(!range.contains(&Some(1)));
+        assert!(!range.contains(&Some(10)));
     }
 
     #[test]

@@ -292,6 +292,9 @@ pub struct Context {
     /// Per-step statuses.
     pub statuses: Vec<Status>,
 
+    /// Last status prop seen by sync, used to preserve runtime progress across unrelated prop changes.
+    pub statuses_prop: Option<Vec<Status>>,
+
     /// Whether linear mode is enabled.
     pub linear: bool,
 
@@ -395,6 +398,7 @@ impl ars_core::Machine for Machine {
                 step,
                 count,
                 statuses: normalized_statuses(props.statuses.clone(), count, initial),
+                statuses_prop: props.statuses.clone(),
                 linear: props.linear,
                 orientation: props.orientation,
                 ids: ComponentIds::from_id(&props.id),
@@ -492,7 +496,12 @@ impl ars_core::Machine for Machine {
                 let count = props.count;
                 let controlled = props.step.map(|step| clamp_step(step, count));
                 let target = controlled.unwrap_or_else(|| clamp_step(*ctx.step.get(), count));
-                let statuses = normalized_statuses(props.statuses.clone(), count, target);
+                let statuses_prop = props.statuses.clone();
+                let statuses = if statuses_prop == ctx.statuses_prop {
+                    normalized_statuses(Some(ctx.statuses.clone()), count, target)
+                } else {
+                    normalized_statuses(statuses_prop.clone(), count, target)
+                };
                 let linear = props.linear;
                 let orientation = props.orientation;
 
@@ -501,6 +510,7 @@ impl ars_core::Machine for Machine {
                     ctx.step.sync_controlled(controlled);
                     ctx.step.set(target);
                     ctx.statuses = statuses;
+                    ctx.statuses_prop = statuses_prop;
                     ctx.linear = linear;
                     ctx.orientation = orientation;
                 }))
@@ -1091,6 +1101,25 @@ mod tests {
         assert_eq!(*service.context().step.get(), 3);
         assert_eq!(service.context().statuses[1], Status::Incomplete);
         assert_eq!(service.context().statuses[3], Status::Current);
+    }
+
+    #[test]
+    fn sync_props_preserves_runtime_statuses_when_status_prop_is_unchanged() {
+        let mut service = service(props().default_step(0));
+
+        drop(service.send(Event::NextStep));
+        drop(service.send(Event::SetStatus {
+            step: 2,
+            status: Status::Error,
+        }));
+
+        drop(service.set_props(props().default_step(0).orientation(Orientation::Vertical)));
+
+        assert_eq!(*service.context().step.get(), 1);
+        assert_eq!(service.context().statuses[0], Status::Complete);
+        assert_eq!(service.context().statuses[1], Status::Current);
+        assert_eq!(service.context().statuses[2], Status::Error);
+        assert_eq!(service.context().orientation, Orientation::Vertical);
     }
 
     #[test]
