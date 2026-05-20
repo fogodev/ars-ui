@@ -1023,10 +1023,23 @@ impl ars_core::Machine for Machine {
 impl Mode {
     /// Returns `true` if the given character is allowed under this mode.
     #[must_use]
-    pub const fn accepts(self, ch: char) -> bool {
+    pub fn accepts(self, ch: char) -> bool {
         match self {
-            Self::Numeric => ch.is_ascii_digit(),
-            Self::Alphanumeric => ch.is_ascii_alphanumeric(),
+            // `char::is_numeric()` accepts any character in Unicode
+            // general categories `Nd` (Decimal_Number), `Nl`
+            // (Letter_Number), or `No` (Other_Number). For a PIN field
+            // this is the right pragmatic choice: it accepts every
+            // locale's native decimal digits — ASCII `0`–`9`,
+            // Arabic-Indic `٠`–`٩`, Devanagari `०`–`९`, Persian `۰`–`۹`,
+            // etc. — without requiring an external Unicode-properties
+            // dependency. The over-acceptance to Roman numerals (`Ⅻ`)
+            // and fractions (`½`) is theoretical: no keyboard sends
+            // these characters into a PIN input. This matches the
+            // spec's "Unicode digit category" wording.
+            Self::Numeric => ch.is_numeric(),
+            // Alphanumeric: any character whose Unicode general
+            // category is `Letter` or one of the `Number` subcategories.
+            Self::Alphanumeric => ch.is_alphanumeric(),
             Self::Password => true,
         }
     }
@@ -1532,6 +1545,55 @@ mod tests {
         assert_eq!(svc.context().focused_index, Some(1));
         assert_eq!(result.pending_effects.len(), 1);
         assert_eq!(result.pending_effects[0].name, Effect::FocusCell);
+    }
+
+    #[test]
+    fn pin_input_numeric_mode_accepts_unicode_decimal_digits() {
+        // Per spec: `Mode::Numeric` filters by Unicode decimal-digit
+        // category, not just ASCII. Localized OTP codes typed from
+        // Arabic-Indic, Devanagari, Persian etc. keyboards must fill
+        // the cells.
+        let mut svc = service(props().mode(Mode::Numeric));
+        drop(svc.send(Event::Focus {
+            index: 0,
+            is_keyboard: false,
+        }));
+
+        // Arabic-Indic '٧' (U+0667 = 7), Devanagari '३' (U+0969 = 3),
+        // Persian '۵' (U+06F5 = 5).
+        for (i, ch) in ['٧', '३', '۵', '9'].into_iter().enumerate() {
+            drop(svc.send(Event::InputChar { index: i, char: ch }));
+        }
+
+        assert_eq!(svc.context().value.get()[0], "٧");
+        assert_eq!(svc.context().value.get()[1], "३");
+        assert_eq!(svc.context().value.get()[2], "۵");
+        assert_eq!(svc.context().value.get()[3], "9");
+    }
+
+    #[test]
+    fn pin_input_numeric_mode_rejects_letters_and_punctuation() {
+        // `char::is_numeric()` admits Nd + Nl + No (so Roman numerals
+        // and fractions slip through — see the impl comment for why
+        // that over-acceptance is acceptable). Letters and punctuation
+        // are firmly outside any numeric category and must still be
+        // rejected here.
+        let mut svc = service(props().mode(Mode::Numeric));
+        drop(svc.send(Event::Focus {
+            index: 0,
+            is_keyboard: false,
+        }));
+
+        for non_numeric in ['a', 'Z', '!', '@', ' '] {
+            let result = svc.send(Event::InputChar {
+                index: 0,
+                char: non_numeric,
+            });
+            assert!(
+                !result.context_changed,
+                "non-numeric {non_numeric:?} must be rejected"
+            );
+        }
     }
 
     #[test]

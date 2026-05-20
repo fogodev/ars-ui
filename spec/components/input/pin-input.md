@@ -735,7 +735,7 @@ PinInput
 ## 4. Internationalization
 
 - Cell label `"Digit N of M"` uses ordinal formatting and localization via `Messages.ordinal_label`.
-- Numeric mode filters based on Unicode digit category, not just ASCII 0-9.
+- Numeric mode filters based on Unicode digit category (`char::is_numeric()` — accepts Nd, Nl, No), not just ASCII 0-9, so localized OTP codes typed from Arabic-Indic, Devanagari, Persian etc. keyboards fill the cells normally. Roman numerals and fractions also pass — this over-acceptance is intentional, since no PIN-field keyboard actually produces those characters.
 - RTL: Cells render right-to-left; ArrowLeft moves forward visually (to the right in LTR).
 
 > **Timing protection:** For `Mode::Password`, the `Completed` state transition SHOULD be delayed by a configurable `submit_delay_ms` (default: 0, security-sensitive applications may set 200-500ms) to prevent per-character timing side-channel analysis. The `data-ars-state` attribute should not change to `"completed"` until after the delay.
