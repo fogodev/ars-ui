@@ -54,6 +54,13 @@ pub enum Event {
     /// The component lost focus.
     Blur,
 
+    /// The input value changed (user typing). Adapters forward each
+    /// native `input` event through this event so the machine can keep
+    /// `ctx.value` in sync — without it, toggling visibility re-renders
+    /// the stale init-time value and the user's typed password is lost
+    /// in uncontrolled mode.
+    Change(String),
+
     /// Synchronize the externally controlled value prop.
     ///
     /// `Some` switches the component to controlled mode and pushes the new
@@ -408,6 +415,24 @@ impl ars_core::Machine for Machine {
                 },
             )),
 
+            Event::Change(value) => {
+                if ctx.disabled || ctx.readonly {
+                    return None;
+                }
+
+                let value = value.clone();
+                Some(ars_core::TransitionPlan::context_only(
+                    move |ctx: &mut Context| {
+                        // Only mutate the internal value when uncontrolled.
+                        // Controlled mode pushes value via on_props_changed
+                        // → SetValue so the parent stays the source of truth.
+                        if !ctx.value.is_controlled() {
+                            ctx.value.set(value);
+                        }
+                    },
+                ))
+            }
+
             Event::SetValue(value) => {
                 let value = value.clone();
                 Some(ars_core::TransitionPlan::context_only(
@@ -710,6 +735,12 @@ impl Api<'_> {
     /// Sends [`Event::Focus`] for input focus.
     pub fn on_input_focus(&self, is_keyboard: bool) {
         (self.send)(Event::Focus { is_keyboard });
+    }
+
+    /// Sends [`Event::Blur`] for input blur.
+    /// Sends [`Event::Change`] for native input value changes.
+    pub fn on_input_change(&self, value: String) {
+        (self.send)(Event::Change(value));
     }
 
     /// Sends [`Event::Blur`] for input blur.
@@ -1080,6 +1111,51 @@ mod tests {
         assert!(input.contains(&HtmlAttr::Disabled));
         assert!(input.contains(&HtmlAttr::ReadOnly));
         assert!(toggle.contains(&HtmlAttr::Disabled));
+    }
+
+    #[test]
+    fn password_input_change_preserves_typed_value_across_visibility_toggle() {
+        // Without an Event::Change path, typing in uncontrolled mode is
+        // not captured in ctx.value, so clicking the visibility toggle
+        // (which triggers re-render with ctx.value) erases the user's
+        // typed password.
+        let mut service = service(props());
+
+        drop(service.send(Event::Change("hunter2".to_string())));
+        assert_eq!(service.context().value.get(), "hunter2");
+
+        drop(service.send(Event::ToggleVisibility));
+
+        // The value must still be there after toggle — adapters re-render
+        // from ctx.value and the typed input must survive.
+        assert_eq!(service.context().value.get(), "hunter2");
+
+        let api = service.connect(&|_| {});
+        assert_eq!(api.input_attrs().get(&HtmlAttr::Value), Some("hunter2"));
+    }
+
+    #[test]
+    fn password_input_change_noops_in_controlled_mode() {
+        // In controlled mode, the parent owns the value. Internal Change
+        // must not leak ahead of the controlled slot.
+        let mut service = service(props().value("from-parent"));
+
+        drop(service.send(Event::Change("local-edit".to_string())));
+
+        // `get()` still returns the controlled value.
+        assert_eq!(service.context().value.get(), "from-parent");
+    }
+
+    #[test]
+    fn password_input_change_blocked_when_disabled_or_readonly() {
+        for p in [props().disabled(true), props().readonly(true)] {
+            let mut service = service(p.default_value("before"));
+
+            let result = service.send(Event::Change("after".to_string()));
+
+            assert!(!result.context_changed);
+            assert_eq!(service.context().value.get(), "before");
+        }
     }
 
     #[test]

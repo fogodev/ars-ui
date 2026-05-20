@@ -723,6 +723,7 @@ fn arb_pin_input_props() -> impl Strategy<Value = pin_input::Props> {
                 blur_on_complete: false,
                 auto_submit,
                 on_value_complete: None,
+                dir: Direction::Ltr,
             },
         )
 }

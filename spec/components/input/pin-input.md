@@ -56,9 +56,17 @@ pub enum Event {
         /// The character that was input.
         char: char,
     },
-    /// A character was deleted from a cell.
+    /// Backspace semantics: clear the cell's character and, if the cell
+    /// was already empty, move focus to the previous cell and clear that.
     DeleteChar {
         /// The index of the cell that was deleted.
+        index: usize,
+    },
+    /// Forward-delete semantics: clear the cell's character without
+    /// navigating. Delete on an empty cell is a no-op (it must not
+    /// erase the previous cell's content the way Backspace can).
+    ClearCell {
+        /// The index of the cell whose character should be cleared.
         index: usize,
     },
     /// Text was pasted.

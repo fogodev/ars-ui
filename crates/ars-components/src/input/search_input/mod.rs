@@ -123,6 +123,16 @@ pub struct Context {
     /// Whether the component is loading.
     pub loading: bool,
 
+    /// Whether a debounce timer is currently pending in the adapter.
+    ///
+    /// Set `true` by [`Event::Change`] when a `SearchDebounce` effect is
+    /// scheduled; cleared by [`Event::DebounceExpired`],
+    /// [`Event::CancelDebounce`], [`Event::Clear`], and [`Event::Submit`].
+    /// Used by [`Event::RestartDebounce`] to avoid scheduling a stray
+    /// timer when the `debounce` prop changes without a search in
+    /// flight.
+    pub debounce_pending: bool,
+
     /// The `name` attribute used for form submission.
     pub name: Option<String>,
 
@@ -368,6 +378,7 @@ impl ars_core::Machine for Machine {
                 focused: false,
                 focus_visible: false,
                 loading: false,
+                debounce_pending: false,
                 name: props.name.clone(),
                 placeholder: props.placeholder.clone(),
                 is_composing: false,
@@ -388,12 +399,19 @@ impl ars_core::Machine for Machine {
         match event {
             Event::Focus { is_keyboard } => {
                 let is_keyboard = *is_keyboard;
-                Some(
-                    TransitionPlan::to(State::Focused).apply(move |ctx: &mut Context| {
-                        ctx.focused = true;
-                        ctx.focus_visible = is_keyboard;
-                    }),
-                )
+                // Preserve `State::Searching` when a search is already in
+                // flight (`loading = true`). Forcing Focused here would
+                // drop `data-ars-state="searching"` and break any
+                // loading-indicator wiring that switches on state alone.
+                let target = if ctx.loading {
+                    State::Searching
+                } else {
+                    State::Focused
+                };
+                Some(TransitionPlan::to(target).apply(move |ctx: &mut Context| {
+                    ctx.focused = true;
+                    ctx.focus_visible = is_keyboard;
+                }))
             }
 
             Event::Blur => {
@@ -422,6 +440,10 @@ impl ars_core::Machine for Machine {
                     if !ctx.value.is_controlled() {
                         ctx.value.set(next_value);
                     }
+                    // Track the new debounce timer (or its absence) so
+                    // `RestartDebounce` knows whether a search is in
+                    // flight on subsequent prop changes.
+                    ctx.debounce_pending = schedule_debounce;
                 });
 
                 let plan = plan.cancel_effect(Effect::SearchDebounce);
@@ -443,6 +465,7 @@ impl ars_core::Machine for Machine {
                         if !ctx.value.is_controlled() {
                             ctx.value.set(String::new());
                         }
+                        ctx.debounce_pending = false;
                     })
                     .cancel_effect(Effect::SearchDebounce),
                 )
@@ -457,6 +480,7 @@ impl ars_core::Machine for Machine {
                     TransitionPlan::to(State::Searching)
                         .apply(|ctx: &mut Context| {
                             ctx.loading = true;
+                            ctx.debounce_pending = false;
                         })
                         .cancel_effect(Effect::SearchDebounce),
                 )
@@ -486,22 +510,30 @@ impl ars_core::Machine for Machine {
                 ctx.is_composing = false;
             })),
 
-            Event::DebounceExpired => None,
+            Event::DebounceExpired => Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                ctx.debounce_pending = false;
+            })),
 
             Event::CancelDebounce => Some(
-                TransitionPlan::context_only(|_ctx: &mut Context| {})
-                    .cancel_effect(Effect::SearchDebounce),
+                TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.debounce_pending = false;
+                })
+                .cancel_effect(Effect::SearchDebounce),
             ),
 
             Event::RestartDebounce => {
-                let plan = TransitionPlan::context_only(|_ctx: &mut Context| {})
-                    .cancel_effect(Effect::SearchDebounce);
-                // Per spec §1.5: a `debounce` prop change while a timer
-                // is active must cancel the active timer AND start a
-                // fresh one carrying the new duration. If the new
-                // `debounce` is `None`, debouncing is disabled — only
-                // cancel; the next `Change` propagates immediately.
-                if props.debounce.is_some() {
+                // Per spec §1.5: cancel + reschedule applies only when a
+                // timer is currently in flight. If no `Change` ever
+                // scheduled one, restarting would fabricate a fresh
+                // `DebounceExpired` against an unchanged value and fire
+                // unsolicited search callbacks.
+                let was_pending = ctx.debounce_pending;
+                let has_debounce_prop = props.debounce.is_some();
+                let plan = TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.debounce_pending = was_pending && has_debounce_prop;
+                })
+                .cancel_effect(Effect::SearchDebounce);
+                if was_pending && has_debounce_prop {
                     Some(plan.with_effect(PendingEffect::named(Effect::SearchDebounce)))
                 } else {
                     Some(plan)
@@ -769,7 +801,10 @@ impl Api<'_> {
             attrs.set_style(CssProperty::Display, "none");
         }
 
-        if self.ctx.disabled {
+        // Disable when `readonly` is true too: the transition arm ignores
+        // `Event::Clear` in readonly mode, so an apparently interactive
+        // clear button that always no-ops would mislead users and AT.
+        if self.ctx.disabled || self.ctx.readonly {
             attrs.set_bool(HtmlAttr::Disabled, true);
         }
 
@@ -1152,6 +1187,56 @@ mod tests {
 
         assert!(!result.state_changed);
         assert_eq!(result.cancel_effects, alloc::vec![Effect::SearchDebounce]);
+    }
+
+    #[test]
+    fn search_input_debounce_prop_change_skips_restart_when_no_timer_active() {
+        // RestartDebounce must NOT schedule a fresh timer when no
+        // `Change` has scheduled one yet — otherwise a plain prop tweak
+        // would fabricate an unsolicited `DebounceExpired` against an
+        // unchanged value.
+        let mut svc = service(props().debounce(Duration::from_millis(200)));
+
+        // No `Change` sent, so no timer is in flight.
+        assert!(!svc.context().debounce_pending);
+
+        let result = svc.set_props(props().debounce(Duration::from_millis(500)));
+
+        assert!(result.pending_effects.is_empty());
+    }
+
+    #[test]
+    fn search_input_focus_during_loading_preserves_searching_state() {
+        // When a search is in flight (loading=true) and the user clicks
+        // back into the input, state must stay `Searching` — switching
+        // to `Focused` would clear `data-ars-state="searching"` and any
+        // loading-indicator wiring keyed on state.
+        let mut svc = service(props());
+
+        drop(svc.send(Event::SetSearching(true)));
+        assert_eq!(svc.state(), &State::Searching);
+
+        drop(svc.send(Event::Focus { is_keyboard: false }));
+
+        assert_eq!(svc.state(), &State::Searching);
+        assert!(svc.context().focused);
+        assert!(svc.context().loading);
+    }
+
+    #[test]
+    fn search_input_clear_trigger_disabled_when_readonly() {
+        let svc = service(props().readonly(true));
+        // Need a non-empty value so the trigger isn't `display:none`.
+        let mut svc = svc;
+        drop(svc.send(Event::Change("q".to_string())));
+        // Readonly blocks Change too — use SetValue to populate via the
+        // controlled path so the trigger is actually visible.
+        drop(svc.send(Event::SetValue(Some("q".to_string()))));
+        let api = svc.connect(&|_| {});
+
+        let attrs = api.clear_trigger_attrs();
+
+        assert!(attrs.contains(&HtmlAttr::Disabled));
     }
 
     #[test]

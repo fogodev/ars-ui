@@ -21,14 +21,6 @@ AttrMap {
             ),
         ),
         (
-            Aria(
-                Hidden,
-            ),
-            String(
-                "true",
-            ),
-        ),
-        (
             TabIndex,
             String(
                 "-1",

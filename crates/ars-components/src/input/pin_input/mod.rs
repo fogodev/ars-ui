@@ -16,8 +16,8 @@ use core::fmt::{self, Debug, Display};
 
 use ars_core::{
     AriaAttr, AttrMap, Bindable, Callback, ComponentIds, ComponentMessages, ComponentPart,
-    ConnectApi, Env, HtmlAttr, KeyboardKey, Locale, MessageFn, PendingEffect, TransitionPlan,
-    no_cleanup,
+    ConnectApi, Direction, Env, HtmlAttr, KeyboardKey, Locale, MessageFn, PendingEffect,
+    TransitionPlan, no_cleanup,
 };
 use ars_interactions::KeyboardEventData;
 
@@ -71,9 +71,21 @@ pub enum Event {
         char: char,
     },
 
-    /// A character was deleted from a specific cell.
+    /// Backspace semantics: clear the cell's character and, if the cell
+    /// was already empty, move focus to the previous cell and clear that
+    /// one. Emitted by Backspace keydown on a cell.
     DeleteChar {
         /// The index of the cell whose character should be deleted.
+        index: usize,
+    },
+
+    /// Forward-delete semantics: clear the cell's character without
+    /// navigating. Emitted by Delete keydown on a cell — Delete should
+    /// never delete the *previous* cell's content the way Backspace
+    /// does, otherwise pressing Delete on an empty non-first cell would
+    /// erase an unrelated digit.
+    ClearCell {
+        /// The index of the cell whose character should be cleared.
         index: usize,
     },
 
@@ -173,6 +185,11 @@ pub struct Context {
     /// Whether a Description part is rendered (gates `aria-describedby`).
     pub has_description: bool,
 
+    /// The text direction for the group. Used by `on_cell_keydown` to
+    /// reverse `ArrowLeft`/`ArrowRight` navigation in RTL locales so
+    /// arrow keys move in the visually-expected direction.
+    pub dir: Direction,
+
     /// Resolved locale for i18n.
     pub locale: Locale,
 
@@ -241,6 +258,10 @@ pub struct Props {
     /// Callback fired when all cells are filled. The argument is the
     /// concatenated string formed by joining every cell value left-to-right.
     pub on_value_complete: Option<Callback<dyn Fn(String) + Send + Sync>>,
+
+    /// Text direction for the group. Drives RTL-aware arrow-key navigation
+    /// in `on_cell_keydown`.
+    pub dir: Direction,
 }
 
 impl Default for Props {
@@ -264,6 +285,7 @@ impl Default for Props {
             blur_on_complete: false,
             auto_submit: false,
             on_value_complete: None,
+            dir: Direction::Ltr,
         }
     }
 }
@@ -410,6 +432,13 @@ impl Props {
         self.on_value_complete = Some(callback.into());
         self
     }
+
+    /// Sets [`dir`](Self::dir).
+    #[must_use]
+    pub const fn dir(mut self, value: Direction) -> Self {
+        self.dir = value;
+        self
+    }
 }
 
 /// Type alias for the [`Messages::ordinal_label`] message closure.
@@ -507,6 +536,7 @@ impl ars_core::Machine for Machine {
                 blur_on_complete: props.blur_on_complete,
                 is_composing: false,
                 has_description: false,
+                dir: props.dir,
                 locale: env.locale.clone(),
                 messages: messages.clone(),
                 ids: ComponentIds::from_id(&props.id),
@@ -524,6 +554,7 @@ impl ars_core::Machine for Machine {
             match event {
                 Event::InputChar { .. }
                 | Event::DeleteChar { .. }
+                | Event::ClearCell { .. }
                 | Event::Paste(_)
                 | Event::Clear => return None,
                 _ => {}
@@ -534,6 +565,7 @@ impl ars_core::Machine for Machine {
             match event {
                 Event::InputChar { .. }
                 | Event::DeleteChar { .. }
+                | Event::ClearCell { .. }
                 | Event::Paste(_)
                 | Event::Clear => {
                     return None;
@@ -680,6 +712,34 @@ impl ars_core::Machine for Machine {
                         },
                     ))
                 }
+            }
+
+            (_, Event::ClearCell { index }) => {
+                let index = *index;
+
+                if index >= ctx.length || ctx.value.get()[index].is_empty() {
+                    // Nothing to clear — Delete on an empty cell is a
+                    // no-op (importantly, it must NOT navigate back like
+                    // Backspace does, or pressing Delete on cell 2 with
+                    // cell 2 empty would erase cell 1).
+                    return None;
+                }
+
+                let mut values = ctx.value.get().clone();
+                values[index] = String::new();
+
+                // Clearing a filled cell must leave State::Completed if
+                // we were in it (the pin is no longer complete) — mirror
+                // the in-place DeleteChar transition.
+                Some(TransitionPlan::to(State::Focused { index }).apply(
+                    move |ctx: &mut Context| {
+                        if !ctx.value.is_controlled() {
+                            ctx.value.set(values);
+                        }
+                        ctx.focused_index = Some(index);
+                        ctx.complete = false;
+                    },
+                ))
             }
 
             (_, Event::Paste(text)) => {
@@ -909,6 +969,7 @@ impl ars_core::Machine for Machine {
                     ctx.name = props.name.clone();
                     ctx.select_on_focus = props.select_on_focus;
                     ctx.blur_on_complete = props.blur_on_complete;
+                    ctx.dir = props.dir;
                     ctx.complete =
                         ctx.length > 0 && ctx.value.get().iter().all(|cell| !cell.is_empty());
                 }))
@@ -991,6 +1052,7 @@ fn props_output_changed(old: &Props, new: &Props) -> bool {
         || old.readonly != new.readonly
         || old.select_on_focus != new.select_on_focus
         || old.blur_on_complete != new.blur_on_complete
+        || old.dir != new.dir
 }
 
 fn value_complete_effect(joined: String) -> PendingEffect<Machine> {
@@ -1217,12 +1279,15 @@ impl Api<'_> {
 
         let combined = self.ctx.value.get().join("");
 
+        // `aria-hidden` is intentionally NOT set on this element: an
+        // `<input type="hidden">` is already excluded from the accessibility
+        // tree by virtue of its element type, and adding `aria-hidden`
+        // produces invalid markup that strict a11y validators flag.
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Type, "hidden")
             .set(HtmlAttr::Value, combined)
-            .set(HtmlAttr::Aria(AriaAttr::Hidden), "true")
             .set(HtmlAttr::TabIndex, "-1");
 
         if let Some(name) = &self.ctx.name {
@@ -1305,10 +1370,33 @@ impl Api<'_> {
             return false;
         }
 
+        // RTL reverses the visual direction of arrow-key navigation:
+        // ArrowRight should move toward earlier cells (visually left),
+        // ArrowLeft toward later cells (visually right). Without this,
+        // Hebrew/Arabic users get inverted navigation.
+        let is_rtl = self.ctx.dir == Direction::Rtl;
+
         let event = match data.key {
-            KeyboardKey::ArrowLeft => Event::FocusPrev,
-            KeyboardKey::ArrowRight => Event::FocusNext,
-            KeyboardKey::Backspace | KeyboardKey::Delete => Event::DeleteChar { index },
+            KeyboardKey::ArrowLeft => {
+                if is_rtl {
+                    Event::FocusNext
+                } else {
+                    Event::FocusPrev
+                }
+            }
+            KeyboardKey::ArrowRight => {
+                if is_rtl {
+                    Event::FocusPrev
+                } else {
+                    Event::FocusNext
+                }
+            }
+            // Backspace = clear current OR navigate-to-prev on empty cell.
+            // Delete = clear current cell only, never navigate (so Delete
+            // on an empty non-first cell is a no-op instead of erasing
+            // the previous digit).
+            KeyboardKey::Backspace => Event::DeleteChar { index },
+            KeyboardKey::Delete => Event::ClearCell { index },
             _ => return false,
         };
 
@@ -2035,7 +2123,10 @@ mod tests {
 
         assert_eq!(attrs.get(&HtmlAttr::Type), Some("hidden"));
         assert_eq!(attrs.get(&HtmlAttr::Value), Some("1234"));
-        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Hidden)), Some("true"));
+        // `aria-hidden` is intentionally omitted — `<input type="hidden">`
+        // is already invisible to AT by element type and the attribute is
+        // invalid markup on hidden inputs.
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Hidden)), None);
     }
 
     #[test]
@@ -2118,7 +2209,7 @@ mod tests {
     }
 
     #[test]
-    fn pin_input_keydown_emits_arrow_and_backspace_events() {
+    fn pin_input_keydown_distinguishes_backspace_from_delete() {
         let received = core::cell::RefCell::new(Vec::<Event>::new());
         let send = |event: Event| {
             received.borrow_mut().push(event);
@@ -2138,8 +2229,68 @@ mod tests {
         assert_eq!(events.len(), 4);
         assert_eq!(events[0], Event::FocusPrev);
         assert_eq!(events[1], Event::FocusNext);
+        // Backspace = DeleteChar (clears or navigates-to-prev on empty).
         assert_eq!(events[2], Event::DeleteChar { index: 2 });
-        assert_eq!(events[3], Event::DeleteChar { index: 2 });
+        // Delete = ClearCell (clears current only, no navigation).
+        assert_eq!(events[3], Event::ClearCell { index: 2 });
+    }
+
+    #[test]
+    fn pin_input_keydown_in_rtl_reverses_arrow_navigation() {
+        let received = core::cell::RefCell::new(Vec::<Event>::new());
+        let send = |event: Event| {
+            received.borrow_mut().push(event);
+        };
+
+        let svc = service(props().dir(Direction::Rtl));
+
+        let api = svc.connect(&send);
+
+        // In RTL: visual-left = next cell, visual-right = previous cell.
+        assert!(api.on_cell_keydown(1, &keyboard_event(KeyboardKey::ArrowLeft, false)));
+        assert!(api.on_cell_keydown(1, &keyboard_event(KeyboardKey::ArrowRight, false)));
+
+        let events = received.borrow();
+        assert_eq!(events[0], Event::FocusNext);
+        assert_eq!(events[1], Event::FocusPrev);
+    }
+
+    #[test]
+    fn pin_input_clear_cell_on_filled_clears_without_navigation() {
+        let mut svc =
+            service(props().default_value(vec!["1".into(), "2".into(), "3".into(), "4".into()]));
+        drop(svc.send(Event::Focus {
+            index: 2,
+            is_keyboard: false,
+        }));
+
+        drop(svc.send(Event::ClearCell { index: 2 }));
+
+        assert_eq!(svc.context().value.get()[2], "");
+        // Index 1 (the previous cell) must be untouched — that's the key
+        // distinction from Backspace.
+        assert_eq!(svc.context().value.get()[1], "2");
+        assert_eq!(svc.state(), &State::Focused { index: 2 });
+    }
+
+    #[test]
+    fn pin_input_clear_cell_on_empty_cell_is_noop() {
+        let mut svc = service(props().default_value(vec![
+            "1".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ]));
+        drop(svc.send(Event::Focus {
+            index: 2,
+            is_keyboard: false,
+        }));
+
+        let result = svc.send(Event::ClearCell { index: 2 });
+
+        // Delete on an empty non-first cell must NOT erase cell 1.
+        assert!(!result.context_changed);
+        assert_eq!(svc.context().value.get()[0], "1");
     }
 
     #[test]

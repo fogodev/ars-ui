@@ -547,10 +547,10 @@ impl ars_core::Machine for Machine {
                         ctx.scrubbing = false;
 
                         if clamp_on_blur && let Some(value) = current {
-                            let clamped = clamp(value, min, max);
+                            let bounded = round_and_clamp(value, min, max, precision);
 
-                            if (clamped - value).abs() > f64::EPSILON {
-                                ctx.value.set(Some(round_to_precision(clamped, precision)));
+                            if (bounded - value).abs() > f64::EPSILON {
+                                ctx.value.set(Some(bounded));
                             }
                         }
                     }),
@@ -566,26 +566,26 @@ impl ars_core::Machine for Machine {
             Event::DecrementLarge => stepped_plan(ctx, ctx.large_step, false),
 
             Event::IncrementToMax => {
-                // Pass through the same clamp + round path as every other
-                // value-mutation event so bounds with a fractional part
-                // (e.g. `max = 1.005` under `precision = 2`) round to a
-                // consistent display rather than persisting raw bound
-                // values that the rest of the machine would round away.
-                let target = round_to_precision(ctx.max, ctx.precision);
+                // Pass through the same clamp + round pipeline so bounds
+                // with a fractional part round consistently AND stay
+                // inside `[min, max]` afterwards. Without the second
+                // clamp, `max = 1.5, precision = 0` would round up to
+                // `2.0` and leave `aria-valuenow > aria-valuemax`.
+                let target = round_and_clamp(ctx.max, ctx.min, ctx.max, ctx.precision);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.value.set(Some(target));
                 }))
             }
 
             Event::DecrementToMin => {
-                let target = round_to_precision(ctx.min, ctx.precision);
+                let target = round_and_clamp(ctx.min, ctx.min, ctx.max, ctx.precision);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.value.set(Some(target));
                 }))
             }
 
             Event::SetValue(value) => {
-                let value = round_to_precision(clamp(*value, ctx.min, ctx.max), ctx.precision);
+                let value = round_and_clamp(*value, ctx.min, ctx.max, ctx.precision);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.value.set(Some(value));
                 }))
@@ -617,10 +617,8 @@ impl ars_core::Machine for Machine {
             Event::Scrub(delta) if matches!(state, State::Scrubbing) => {
                 let current = ctx.value.get().unwrap_or(0.0);
 
-                let next = round_to_precision(
-                    clamp(current + delta * ctx.step, ctx.min, ctx.max),
-                    ctx.precision,
-                );
+                let next =
+                    round_and_clamp(current + delta * ctx.step, ctx.min, ctx.max, ctx.precision);
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.value.set(Some(next));
@@ -756,6 +754,20 @@ const fn clamp(value: f64, min: f64, max: f64) -> f64 {
     if lower < max { lower } else { max }
 }
 
+/// Combined clamp + round-half-up pipeline used by every value-mutating
+/// transition. Order matters and **must terminate with a clamp**: rounding
+/// can push a bound-value across the bound itself (e.g. `max = 1.5` under
+/// `precision = 0` rounds up to `2.0`, which would otherwise leave
+/// `aria-valuenow > aria-valuemax`), so the final clamp pulls the value
+/// back into `[min, max]`.
+fn round_and_clamp(value: f64, min: f64, max: f64, precision: Option<u32>) -> f64 {
+    clamp(
+        round_to_precision(clamp(value, min, max), precision),
+        min,
+        max,
+    )
+}
+
 fn props_output_changed(old: &Props, new: &Props) -> bool {
     (old.min - new.min).abs() > f64::EPSILON
         || (old.max - new.max).abs() > f64::EPSILON
@@ -776,7 +788,7 @@ fn props_output_changed(old: &Props, new: &Props) -> bool {
 fn stepped_plan(ctx: &Context, step: f64, up: bool) -> Option<TransitionPlan<Machine>> {
     let current = ctx.value.get().unwrap_or_else(|| baseline(ctx));
     let raw = if up { current + step } else { current - step };
-    let next = round_to_precision(clamp(raw, ctx.min, ctx.max), ctx.precision);
+    let next = round_and_clamp(raw, ctx.min, ctx.max, ctx.precision);
 
     Some(TransitionPlan::context_only(move |ctx: &mut Context| {
         ctx.value.set(Some(next));
@@ -1279,26 +1291,46 @@ mod tests {
     }
 
     #[test]
-    fn number_input_increment_to_max_rounds_to_precision() {
-        // `1.5` is exactly representable in f64. Without round_to_precision
-        // applied, ctx.value would be 1.5; with round_half_up at 0 decimals
-        // it becomes 2.0 — proving the rounding path is wired through.
+    fn number_input_increment_to_max_rounds_and_stays_within_bounds() {
+        // `1.5` is exactly representable. Round_half_up at 0 decimals gives
+        // 2.0 — which would EXCEED `max = 1.5`. The final clamp in
+        // `round_and_clamp` pulls the result back to 1.5, preserving the
+        // bound contract.
         let mut svc = service(props().min(0.0).max(1.5).precision(0));
 
         drop(svc.send(Event::IncrementToMax));
 
-        assert_eq!(svc.context().value.get(), &Some(2.0));
+        let value = svc.context().value.get().expect("value set");
+        assert!(value <= 1.5, "stored value {value} must not exceed max");
+        assert_eq!(svc.context().value.get(), &Some(1.5));
     }
 
     #[test]
-    fn number_input_decrement_to_min_rounds_to_precision() {
-        // `-1.5` is exactly representable. With round_half_up (away from
-        // zero) at 0 decimals it becomes -2.0.
+    fn number_input_decrement_to_min_rounds_and_stays_within_bounds() {
+        // `-1.5` rounded to 0 decimals would be -2.0, which would violate
+        // `min = -1.5`. The clamp pulls it back.
         let mut svc = service(props().min(-1.5).max(0.0).precision(0));
 
         drop(svc.send(Event::DecrementToMin));
 
-        assert_eq!(svc.context().value.get(), &Some(-2.0));
+        let value = svc.context().value.get().expect("value set");
+        assert!(value >= -1.5, "stored value {value} must not undercut min");
+        assert_eq!(svc.context().value.get(), &Some(-1.5));
+    }
+
+    #[test]
+    fn number_input_stepped_plan_clamps_after_rounding() {
+        // Step from below the max, then verify rounding never pushes
+        // ctx.value past the configured bound.
+        let mut svc = service(props().min(0.0).max(1.5).step(0.5).precision(0));
+
+        drop(svc.send(Event::Increment));
+        drop(svc.send(Event::Increment));
+        drop(svc.send(Event::Increment));
+        drop(svc.send(Event::Increment));
+
+        let value = svc.context().value.get().expect("value set");
+        assert!(value <= 1.5, "stepped value {value} must respect max");
     }
 
     #[test]
