@@ -713,6 +713,15 @@ fn close_plan(stage_changed: bool) -> TransitionPlan<Machine> {
     plan
 }
 
+fn controlled_close_request_plan() -> TransitionPlan<Machine> {
+    TransitionPlan::context_only(|ctx: &mut Context| {
+        ctx.focused = false;
+        ctx.focus_visible = false;
+        ctx.active_resize_handle = None;
+    })
+    .with_effect(PendingEffect::named(Effect::OpenChange))
+}
+
 fn open_controlled_plan(props: &Props) -> TransitionPlan<Machine> {
     let initial_position = props.initial_position;
     let initial_size = props.initial_size;
@@ -956,7 +965,9 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            (State::Idle, Event::Maximize(metrics)) if ctx.open && props.maximizable => {
+            (State::Idle | State::Minimized, Event::Maximize(metrics))
+                if ctx.open && props.maximizable =>
+            {
                 let metrics = *metrics;
                 Some(stage_plan(State::Maximized, move |ctx| {
                     ctx.pre_maximize_position = Some(ctx.position);
@@ -984,12 +995,22 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            (_, Event::Close) if props.closable => Some(close_plan(ctx.stage() != Stage::Default)),
+            (_, Event::Close) if props.closable => {
+                if props.open == Some(true) {
+                    Some(controlled_close_request_plan())
+                } else {
+                    Some(close_plan(ctx.stage() != Stage::Default))
+                }
+            }
 
             (State::Idle | State::Minimized | State::Maximized, Event::CloseOnEscape)
                 if props.close_on_escape =>
             {
-                Some(close_plan(ctx.stage() != Stage::Default))
+                if props.open == Some(true) {
+                    Some(controlled_close_request_plan())
+                } else {
+                    Some(close_plan(ctx.stage() != Stage::Default))
+                }
             }
 
             _ => None,
@@ -1769,6 +1790,58 @@ mod tests {
             effect_names(&close_maximized),
             vec![Effect::OpenChange, Effect::StageChange]
         );
+    }
+
+    #[test]
+    fn controlled_close_request_preserves_open_state_until_prop_sync() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                open: Some(true),
+                close_on_escape: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(service.send(Event::Minimize));
+
+        let close = service.send(Event::Close);
+
+        assert_eq!(service.state(), &State::Minimized);
+        assert!(service.context().open);
+        assert_eq!(service.context().stage(), Stage::Minimized);
+        assert_eq!(effect_names(&close), vec![Effect::OpenChange]);
+
+        let escape = service.send(Event::CloseOnEscape);
+
+        assert_eq!(service.state(), &State::Minimized);
+        assert!(service.context().open);
+        assert_eq!(service.context().stage(), Stage::Minimized);
+        assert_eq!(effect_names(&escape), vec![Effect::OpenChange]);
+    }
+
+    #[test]
+    fn maximize_from_minimized_uses_supplied_viewport_metrics() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(service.send(Event::Minimize));
+
+        let maximize = service.send(Event::Maximize(MaximizeMetrics {
+            viewport: ViewportRect {
+                x: 5.0,
+                y: 10.0,
+                width: 700.0,
+                height: 500.0,
+            },
+        }));
+
+        assert_eq!(service.state(), &State::Maximized);
+        assert_eq!(service.context().stage(), Stage::Maximized);
+        assert_eq!(service.context().position, (5.0, 10.0));
+        assert_eq!(service.context().size, (700.0, 500.0));
+        assert_eq!(effect_names(&maximize), vec![Effect::StageChange]);
     }
 
     #[test]

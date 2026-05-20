@@ -61,6 +61,8 @@ pub enum Event {
     CloseOnEscape,
     /// The title element mounts.
     TitleMount,
+    /// The title element unmounts.
+    TitleUnmount,
     /// Adapter reported measured placement state.
     PositioningUpdate(PositioningSnapshot),
     /// Adapter supplied an allocated overlay z-index.
@@ -320,6 +322,10 @@ impl ars_core::Machine for Machine {
             (_, Event::TitleMount) => {
                 Some(TransitionPlan::context_only(|ctx| { ctx.has_title = true; }))
             }
+            // Title element unmounted — fall back to aria-label (any state)
+            (_, Event::TitleUnmount) => {
+                Some(TransitionPlan::context_only(|ctx| { ctx.has_title = false; }))
+            }
             _ => None,
         }
     }
@@ -457,6 +463,9 @@ impl<'a> Api<'a> {
 
     /// Call from the adapter when the HoverCard title element mounts.
     pub fn on_title_mount(&self) { (self.send)(Event::TitleMount); }
+
+    /// Call from the adapter when the HoverCard title element unmounts.
+    pub fn on_title_unmount(&self) { (self.send)(Event::TitleUnmount); }
 
     /// The attributes for the dismiss button.
     pub fn dismiss_button_attrs(&self) -> AttrMap {

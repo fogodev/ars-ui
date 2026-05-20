@@ -335,6 +335,21 @@ fn close_plan(cancel: Option<Effect>) -> TransitionPlan<Machine> {
     plan
 }
 
+fn controlled_close_request_plan(cancel: Option<Effect>) -> TransitionPlan<Machine> {
+    let mut plan = TransitionPlan::to(State::Open)
+        .apply(|ctx: &mut Context| {
+            ctx.hover_active = false;
+            ctx.focus_active = false;
+        })
+        .with_effect(PendingEffect::named(Effect::OpenChange));
+
+    if let Some(effect) = cancel {
+        plan = plan.cancel_effect(effect);
+    }
+
+    plan
+}
+
 fn cancel_pending_open_plan() -> TransitionPlan<Machine> {
     TransitionPlan::to(State::Closed)
         .apply(|ctx: &mut Context| {
@@ -642,16 +657,30 @@ impl ars_core::Machine for Machine {
                     State::Open | State::Closed => None,
                 };
 
+                if props.open == Some(true) {
+                    return Some(controlled_close_request_plan(cancel));
+                }
+
                 Some(close_plan(cancel))
             }
 
-            (State::OpenPending, Event::CloseOnEscape) => Some(cancel_pending_open_plan()),
+            (State::OpenPending, Event::CloseOnEscape) => {
+                if props.open == Some(true) {
+                    Some(controlled_close_request_plan(Some(Effect::OpenDelay)))
+                } else {
+                    Some(cancel_pending_open_plan())
+                }
+            }
 
             (State::Open | State::ClosePending, Event::CloseOnEscape) => {
                 let cancel = match state {
                     State::ClosePending => Some(Effect::CloseDelay),
                     State::Closed | State::OpenPending | State::Open => None,
                 };
+
+                if props.open == Some(true) {
+                    return Some(controlled_close_request_plan(cancel));
+                }
 
                 Some(close_plan(cancel))
             }
@@ -1327,6 +1356,29 @@ mod tests {
             effect_names(&controlled_open),
             vec![Effect::OpenChange, Effect::AllocateZIndex]
         );
+    }
+
+    #[test]
+    fn controlled_close_request_preserves_open_state_until_prop_sync() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                open: Some(true),
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(service.send(Event::TriggerPointerEnter));
+        drop(service.send(Event::TriggerFocus));
+
+        let close = service.send(Event::Close);
+
+        assert_eq!(service.state(), &State::Open);
+        assert!(service.context().open);
+        assert!(!service.context().hover_active);
+        assert!(!service.context().focus_active);
+        assert_eq!(effect_names(&close), vec![Effect::OpenChange]);
     }
 
     #[test]
