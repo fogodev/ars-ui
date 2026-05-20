@@ -6,6 +6,12 @@ pub mod positioning;
 /// Dialog machine.
 pub mod dialog;
 
+/// Floating panel machine.
+pub mod floating_panel;
+
+/// Hover card machine.
+pub mod hover_card;
+
 /// Popover machine.
 pub mod popover;
 

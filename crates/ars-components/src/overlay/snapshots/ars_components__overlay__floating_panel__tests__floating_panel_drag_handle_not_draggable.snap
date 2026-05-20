@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/overlay/floating_panel.rs
+expression: "snapshot_attrs(&not_draggable.connect(&|_| {}).drag_handle_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "drag-handle",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "floating-panel",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Move panel",
+            ),
+        ),
+    ],
+    styles: [],
+}

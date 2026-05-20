@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/overlay/hover_card.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).dismiss_button_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "dismiss-button",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "hover-card",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Dismiss hover card",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

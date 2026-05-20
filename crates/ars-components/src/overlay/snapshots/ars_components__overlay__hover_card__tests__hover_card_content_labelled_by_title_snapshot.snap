@@ -1,0 +1,59 @@
+---
+source: crates/ars-components/src/overlay/hover_card.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).content_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "content",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "hover-card",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "open",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "hover-card-title",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "hover-card-content",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "dialog",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}

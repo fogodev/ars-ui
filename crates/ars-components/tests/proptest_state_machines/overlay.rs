@@ -2,7 +2,7 @@ use core::time::Duration;
 
 use ars_a11y::FocusTarget;
 use ars_components::overlay::{
-    dialog, popover,
+    dialog, floating_panel, hover_card, popover,
     positioning::{ArrowOffset, Offset, Placement, PositioningOptions, PositioningSnapshot},
     presence,
     toast::{manager as toast_manager, single as toast_single},
@@ -23,6 +23,130 @@ fn arb_presence_props() -> impl Strategy<Value = presence::Props> {
             reduce_motion,
         },
     )
+}
+
+fn arb_hover_card_event() -> impl Strategy<Value = hover_card::Event> {
+    prop_oneof![
+        Just(hover_card::Event::TriggerPointerEnter),
+        Just(hover_card::Event::TriggerPointerLeave),
+        Just(hover_card::Event::TriggerFocus),
+        Just(hover_card::Event::TriggerBlur),
+        Just(hover_card::Event::ContentPointerEnter),
+        Just(hover_card::Event::ContentPointerLeave),
+        Just(hover_card::Event::OpenTimerFired),
+        Just(hover_card::Event::CloseTimerFired),
+        Just(hover_card::Event::CloseOnEscape),
+        Just(hover_card::Event::TitleMount),
+        Just(hover_card::Event::Open),
+        Just(hover_card::Event::Close),
+        any::<bool>().prop_map(hover_card::Event::SetControlledOpen),
+        (0..=4_000u32).prop_map(hover_card::Event::SetZIndex),
+    ]
+}
+
+fn arb_resize_handle() -> impl Strategy<Value = floating_panel::ResizeHandle> {
+    prop_oneof![
+        Just(floating_panel::ResizeHandle::N),
+        Just(floating_panel::ResizeHandle::S),
+        Just(floating_panel::ResizeHandle::E),
+        Just(floating_panel::ResizeHandle::W),
+        Just(floating_panel::ResizeHandle::NE),
+        Just(floating_panel::ResizeHandle::NW),
+        Just(floating_panel::ResizeHandle::SE),
+        Just(floating_panel::ResizeHandle::SW),
+    ]
+}
+
+fn arb_floating_panel_event() -> impl Strategy<Value = floating_panel::Event> {
+    prop_oneof![
+        Just(floating_panel::Event::DragStart),
+        (-500.0f64..=500.0, -500.0f64..=500.0)
+            .prop_map(|(dx, dy)| { floating_panel::Event::DragMove { dx, dy } }),
+        Just(floating_panel::Event::DragEnd),
+        arb_resize_handle().prop_map(floating_panel::Event::ResizeStart),
+        (-500.0f64..=500.0, -500.0f64..=500.0)
+            .prop_map(|(dx, dy)| { floating_panel::Event::ResizeMove { dx, dy } }),
+        Just(floating_panel::Event::ResizeEnd),
+        Just(floating_panel::Event::Minimize),
+        Just(floating_panel::Event::Maximize(
+            floating_panel::MaximizeMetrics {
+                viewport: floating_panel::ViewportRect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 1024.0,
+                    height: 768.0,
+                },
+            }
+        )),
+        Just(floating_panel::Event::Restore),
+        Just(floating_panel::Event::Close),
+        Just(floating_panel::Event::BringToFront),
+        any::<bool>().prop_map(|is_keyboard| floating_panel::Event::Focus { is_keyboard }),
+        Just(floating_panel::Event::Blur),
+        Just(floating_panel::Event::CloseOnEscape),
+        (0..=4_000u32).prop_map(floating_panel::Event::SetZIndex),
+        any::<bool>().prop_map(floating_panel::Event::SetControlledOpen),
+    ]
+}
+
+proptest! {
+    #![proptest_config(super::common::proptest_config())]
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_hover_card_closed_state_never_reports_open(
+        events in prop::collection::vec(arb_hover_card_event(), 0..128),
+    ) {
+        let mut service = Service::<hover_card::Machine>::new(
+            hover_card::Props {
+                id: "hover-card-proptest".to_string(),
+                ..hover_card::Props::default()
+            },
+            &Env::default(),
+            &hover_card::Messages::default(),
+        );
+
+        for event in events {
+            drop(service.send(event));
+
+            if matches!(service.state(), hover_card::State::Closed) {
+                let api = service.connect(&|_| ());
+
+                prop_assert!(!service.context().open);
+                prop_assert!(!api.is_open());
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_floating_panel_stage_flags_are_mutually_exclusive_and_size_is_clamped(
+        events in prop::collection::vec(arb_floating_panel_event(), 0..128),
+    ) {
+        let mut service = Service::<floating_panel::Machine>::new(
+            floating_panel::Props {
+                id: "floating-panel-proptest".to_string(),
+                ..floating_panel::Props::default()
+            },
+            &Env::default(),
+            &floating_panel::Messages::default(),
+        );
+
+        for event in events {
+            drop(service.send(event));
+
+            let ctx = service.context();
+
+            prop_assert!(
+                !(ctx.minimized && ctx.maximized),
+                "minimized and maximized flags must be mutually exclusive: {ctx:?}",
+            );
+            prop_assert!(ctx.size.0 >= ctx.min_size.0);
+            prop_assert!(ctx.size.1 >= ctx.min_size.1);
+            prop_assert!(ctx.size.0 <= ctx.max_size.0);
+            prop_assert!(ctx.size.1 <= ctx.max_size.1);
+        }
+    }
 }
 
 fn arb_presence_event() -> impl Strategy<Value = presence::Event> {
