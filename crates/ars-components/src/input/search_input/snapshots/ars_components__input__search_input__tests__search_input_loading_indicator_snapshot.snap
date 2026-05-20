@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/input/search_input/mod.rs
+expression: snapshot_attrs(&api.loading_indicator_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "loading-indicator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "search-input",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}

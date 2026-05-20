@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/input/number_input/mod.rs
+expression: snapshot_attrs(&api.root_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-focus-visible",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "number-input",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "focused",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "num",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,71 @@
+---
+source: crates/ars-components/src/input/pin_input/mod.rs
+expression: snapshot_attrs(&api.input_attrs(0))
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-index",
+            ),
+            String(
+                "0",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "pin-input",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Digit 1 of 4",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "pin-input-0",
+            ),
+        ),
+        (
+            InputMode,
+            String(
+                "numeric",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+        (
+            MaxLength,
+            String(
+                "1",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "text",
+            ),
+        ),
+    ],
+    styles: [],
+}

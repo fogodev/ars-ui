@@ -1,0 +1,45 @@
+---
+source: crates/ars-components/src/input/search_input/mod.rs
+expression: snapshot_attrs(&api.clear_trigger_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "clear-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "search-input",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Clear search",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

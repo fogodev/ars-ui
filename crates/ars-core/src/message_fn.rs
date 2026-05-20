@@ -152,6 +152,18 @@ impl<F: Fn(&str, usize, usize, &Locale) -> String + Send + Sync + 'static> From<
     }
 }
 
+/// `From` impl for `MessageFn<dyn Fn(usize, usize, &Locale) -> String + Send + Sync>`.
+///
+/// Used by message templates that interpolate a 1-based position and a total
+/// count — e.g. `pin_input::Messages::ordinal_label`'s `"Digit {n} of {total}"`.
+impl<F: Fn(usize, usize, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(usize, usize, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
 impl MessageFn<dyn Fn(&Locale) -> String + Send + Sync> {
     /// Creates a `MessageFn` from a static string, ignoring the locale parameter.
     ///

@@ -1,0 +1,51 @@
+---
+source: crates/ars-components/src/input/search_input/mod.rs
+expression: snapshot_attrs(&api.input_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "search-input",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "search-label",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "search-input",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "search",
+            ),
+        ),
+        (
+            Value,
+            String(
+                "",
+            ),
+        ),
+    ],
+    styles: [],
+}

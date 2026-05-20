@@ -56,17 +56,23 @@ pub enum Event {
         /// The character that was input.
         char: char,
     },
-    /// A character was deleted from a cell.
+    /// Backspace semantics: clear the cell's character and, if the cell
+    /// was already empty, move focus to the previous cell and clear that.
     DeleteChar {
         /// The index of the cell that was deleted.
+        index: usize,
+    },
+    /// Forward-delete semantics: clear the cell's character without
+    /// navigating. Delete on an empty cell is a no-op (it must not
+    /// erase the previous cell's content the way Backspace can).
+    ClearCell {
+        /// The index of the cell whose character should be cleared.
         index: usize,
     },
     /// Text was pasted.
     Paste(String),
     /// All cells were cleared.
     Clear,
-    /// Pin entry is complete.
-    Complete(String),
     /// Focus the next cell.
     FocusNext,
     /// Focus the previous cell.
@@ -75,6 +81,15 @@ pub enum Event {
     CompositionStart,
     /// IME composition ended.
     CompositionEnd,
+    /// Synchronize the externally controlled value prop. The new value is
+    /// resized to `length` before being stored.
+    SetValue(Option<Vec<String>>),
+    /// Synchronize output-affecting props stored in `Context` when
+    /// `Service::set_props` reports a change; resizes the cell vector when
+    /// `length` changes.
+    SetProps,
+    /// Track whether a `Description` part is rendered (gates `aria-describedby`).
+    SetHasDescription(bool),
 }
 ```
 
@@ -179,7 +194,11 @@ pub struct Props {
     /// When true, automatically fires `on_value_complete` when all digits are entered.
     pub auto_submit: bool,
     /// Callback fired when all slots are filled.
-    pub on_value_complete: Option<Callback<dyn Fn(&str) + Send + Sync>>,
+    ///
+    /// The argument is the joined cell values. `String` (not `&str`) is used
+    /// because the workspace `Callback<dyn Fn(Args) -> Out + Send + Sync>`
+    /// requires `Args: 'static`, which a borrowed `&str` cannot satisfy.
+    pub on_value_complete: Option<Callback<dyn Fn(String) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -287,7 +306,17 @@ impl ars_core::Machine for Machine {
         if ctx.disabled {
             match event {
                 Event::InputChar { .. } | Event::DeleteChar { .. }
-                | Event::Paste(_) | Event::Clear | Event::Complete(_) => return None,
+                | Event::Paste(_) | Event::Clear => return None,
+                _ => {}
+            }
+        }
+
+        // Readonly guard — Clear is value-mutating and must be blocked
+        // alongside the per-cell input events to preserve readonly semantics.
+        if props.readonly {
+            match event {
+                Event::InputChar { .. } | Event::DeleteChar { .. }
+                | Event::Paste(_) | Event::Clear => return None,
                 _ => {}
             }
         }
@@ -683,7 +712,7 @@ PinInput
 | `autocomplete` | Input   | `"one-time-code"` when `otp=true`                       |
 | `inputmode`    | Input   | `"numeric"` (Numeric), `"text"` (Alphanumeric/Password) |
 | `aria-invalid` | Input   | Present when group is invalid                           |
-| `tabindex`     | Input   | Roving: focused cell `0`, all others `-1`               |
+| `tabindex`     | Input   | Roving: focused cell `0`, all others `-1`. When no cell is focused (initial state, post-blur), the first cell falls back to `tabindex="0"` so keyboard users can enter the group. |
 
 ### 3.2 Keyboard Interaction
 
@@ -706,14 +735,14 @@ PinInput
 ## 4. Internationalization
 
 - Cell label `"Digit N of M"` uses ordinal formatting and localization via `Messages.ordinal_label`.
-- Numeric mode filters based on Unicode digit category, not just ASCII 0-9.
+- Numeric mode filters based on Unicode digit category (`char::is_numeric()` — accepts Nd, Nl, No), not just ASCII 0-9, so localized OTP codes typed from Arabic-Indic, Devanagari, Persian etc. keyboards fill the cells normally. Roman numerals and fractions also pass — this over-acceptance is intentional, since no PIN-field keyboard actually produces those characters.
 - RTL: Cells render right-to-left; ArrowLeft moves forward visually (to the right in LTR).
 
 > **Timing protection:** For `Mode::Password`, the `Completed` state transition SHOULD be delayed by a configurable `submit_delay_ms` (default: 0, security-sensitive applications may set 200-500ms) to prevent per-character timing side-channel analysis. The `data-ars-state` attribute should not change to `"completed"` until after the delay.
 
 ## 5. Form Integration
 
-- **Hidden input**: A single `<input type="hidden">` via `HiddenInput` submits the concatenated pin value. The `name` attribute comes from context.
+- **Hidden input**: A single `<input type="hidden">` via `HiddenInput` submits the concatenated pin value. The `name` attribute comes from context. The native `required` attribute is intentionally **not** set on the hidden input: browser constraint validation skips `type="hidden"` elements, so a `required` here is a silent no-op that misleads adapters. Required-state semantics are exposed via `aria-required="true"` on every visible cell instead; adapters that need to enforce required PIN entry at form-submit time must implement custom validation.
 - **Validation states**: `aria-invalid="true"` on each cell input when `invalid=true`. The `ErrorMessage` part is linked via `aria-describedby` on the Root.
 - **Error message association**: The group Root element can reference Description and ErrorMessage via `aria-describedby`.
 - **Reset behavior**: On form reset, the adapter restores all cells to `default_value` and transitions to Idle.
@@ -763,12 +792,12 @@ PinInput
 
 ### 6.3 Events
 
-| Callback      | ars-ui                                   | Ark UI               | Radix UI             | Notes                                |
-| ------------- | ---------------------------------------- | -------------------- | -------------------- | ------------------------------------ |
-| Value changed | `InputChar`/`DeleteChar`                 | `onValueChange`      | `onValueChange`      | Full parity                          |
-| Completed     | `Complete(String)` / `on_value_complete` | `onValueComplete`    | `onAutoSubmit`       | Full parity                          |
-| Invalid input | via `Mode` filtering                     | `onValueInvalid`     | --                   | Ark parity (ars-ui silently rejects) |
-| Paste         | `Paste(String)`                          | (handled internally) | (handled internally) | Full parity                          |
+| Callback      | ars-ui                           | Ark UI               | Radix UI             | Notes                                                                 |
+| ------------- | -------------------------------- | -------------------- | -------------------- | --------------------------------------------------------------------- |
+| Value changed | `InputChar`/`DeleteChar`         | `onValueChange`      | `onValueChange`      | Full parity                                                           |
+| Completed     | `Effect::ValueComplete` callback | `onValueComplete`    | `onAutoSubmit`       | The machine fires `Effect::ValueComplete` when `auto_submit` is true. |
+| Invalid input | via `Mode` filtering             | `onValueInvalid`     | --                   | Ark parity (ars-ui silently rejects)                                  |
+| Paste         | `Paste(String)`                  | (handled internally) | (handled internally) | Full parity                                                           |
 
 **Gaps:** None.
 

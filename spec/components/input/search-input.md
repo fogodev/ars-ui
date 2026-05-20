@@ -52,10 +52,22 @@ pub enum Event {
     DebounceExpired,
     /// Cancels any active debounce timer without firing the callback.
     CancelDebounce,
+    /// Cancels any active debounce timer and schedules a fresh one with
+    /// the current `props.debounce` duration. Emitted by `on_props_changed`
+    /// when the `debounce` prop changes so an in-flight search adopts the
+    /// new duration instead of being silently dropped.
+    RestartDebounce,
     /// IME composition started.
     CompositionStart,
     /// IME composition ended.
     CompositionEnd,
+    /// Synchronize the externally controlled value prop.
+    SetValue(Option<String>),
+    /// Synchronize output-affecting props stored in `Context` when
+    /// `Service::set_props` reports a change.
+    SetProps,
+    /// Track whether a `Description` part is rendered (gates `aria-describedby`).
+    SetHasDescription(bool),
 }
 ```
 
@@ -121,11 +133,13 @@ pub struct Props {
     pub name: Option<String>,
     /// The ID of the form element the input is associated with.
     pub form: Option<String>,
-    /// Optional debounce duration in milliseconds for search-as-you-type.
+    /// Optional debounce interval for search-as-you-type.
     /// When set, `Event::Change` values are debounced — the machine waits
-    /// this many ms after the last keystroke before propagating the change
+    /// this long after the last keystroke before propagating the change
     /// to the `on_change` callback. Set to `None` (default) for immediate.
-    pub debounce_ms: Option<u32>,
+    /// `core::time::Duration` matches the workspace convention used by
+    /// `tooltip::Props::open_delay` and `toast::Props::duration`.
+    pub debounce: Option<core::time::Duration>,
 }
 
 impl Default for Props {
@@ -135,7 +149,7 @@ impl Default for Props {
             value: None, default_value: String::new(),
             disabled: false, readonly: false, invalid: false, required: false,
             placeholder: None, name: None, form: None,
-            debounce_ms: None,
+            debounce: None,
         }
     }
 }
@@ -167,13 +181,13 @@ impl ComponentMessages for Messages {}
 
 The debounce timer is a `PendingEffect` managed by the state machine, not a simple adapter-side `setTimeout`. This ensures the timer lifecycle is tied to the machine's effect system and properly cleaned up on unmount or state changes.
 
-- **On `Event::Change`**: The machine cancels any existing debounce timer effect and starts a new one with the configured `debounce_ms` duration.
+- **On `Event::Change`**: The machine cancels any existing debounce timer effect and starts a new one with the configured `debounce` interval.
 - **On timer expiration**: The effect fires `Event::DebounceExpired`, which triggers the `on_change` callback with the current `ctx.value`.
 - **Rapid inputs**: Each new `Event::Change` resets the timer, ensuring only the final value after the user stops typing triggers the callback.
 - **`Event::Submit`**: Cancels any pending debounce timer and fires the callback immediately (explicit submit should not be delayed).
 - **`Event::Clear`**: Cancels any pending debounce timer and fires the callback immediately with an empty string.
 
-**Props change (`debounce_ms` mutation)**: When the `debounce_ms` prop changes while a debounce timer is active, the machine cancels the active timer and starts a fresh one with the new duration. A `debounce_ms` value of `Some(0)` is treated as `Some(1)` to prevent microtask-level race conditions.
+**Props change (`debounce` mutation)**: When the `debounce` prop changes while a debounce timer is active, the machine cancels the active timer and starts a fresh one with the new duration. A zero `Duration` is treated as a one-millisecond debounce to prevent microtask-level race conditions.
 
 ### 1.6 Full Machine Implementation
 
@@ -556,7 +570,7 @@ When the user triggers the clear action:
 
 1. Any pending debounce timer is immediately cancelled.
 2. `on_change("")` is emitted synchronously — bypasses debounce delay entirely.
-3. A `debounce_ms` value of `Some(0)` is treated as `Some(1)` to prevent microtask-level race conditions.
+3. A `debounce` value of `Some(Duration::ZERO)` is treated as `Some(Duration::from_millis(1))` to prevent microtask-level race conditions.
 
 ## 5. Form Integration
 
@@ -585,7 +599,7 @@ When the user triggers the clear action:
 | Placeholder      | `placeholder: Option<String>` | `placeholder`  | Full parity        |
 | Form name        | `name: Option<String>`        | `name`         | Full parity        |
 | Form ID          | `form: Option<String>`        | `form`         | Full parity        |
-| Debounce         | `debounce_ms: Option<u32>`    | --             | ars-ui enhancement |
+| Debounce         | `debounce: Option<Duration>`  | --             | ars-ui enhancement |
 
 **Gaps:** None.
 

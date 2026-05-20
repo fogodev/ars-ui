@@ -1,0 +1,53 @@
+---
+source: crates/ars-components/src/input/search_input/mod.rs
+expression: snapshot_attrs(&api.root_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-focus-visible",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "search-input",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "focused",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "search",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "search",
+            ),
+        ),
+    ],
+    styles: [],
+}

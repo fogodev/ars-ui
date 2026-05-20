@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/input/search_input/mod.rs
+expression: snapshot_attrs(&api.submit_trigger_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "submit-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "search-input",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Submit search",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

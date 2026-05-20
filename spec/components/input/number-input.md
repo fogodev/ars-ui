@@ -68,25 +68,32 @@ pub enum Event {
     CompositionStart,
     /// The component ended a composition session.
     CompositionEnd,
+    /// Synchronize the externally controlled value prop. `Some` enters
+    /// controlled mode without clamp/round; `None` returns to uncontrolled.
+    /// Use [`Event::SetValue`] for programmatic value setting that should be
+    /// clamped + rounded.
+    SyncValue(Option<f64>),
+    /// Synchronize output-affecting props stored in `Context` when
+    /// `Service::set_props` reports a change.
+    SetProps,
+    /// Track whether a `Description` part is rendered (gates `aria-describedby`).
+    SetHasDescription(bool),
 }
 ```
 
 ### 1.3 Context
 
 ```rust
-/// Fine-grained formatting options for NumberInput display value.
-pub struct FormatOptions {
-    /// Minimum fraction digits to display. Default: 0.
-    pub minimum_fraction_digits: Option<u8>,
-    /// Maximum fraction digits to display. Default: locale-dependent.
-    pub maximum_fraction_digits: Option<u8>,
-    /// Whether to use grouping separators (e.g., 1,000). Default: true.
-    pub use_grouping: Option<bool>,
-    /// Currency code (ISO 4217) if formatting as currency. e.g., "USD".
-    pub currency: Option<String>,
-    /// Currency display style: "symbol" ($), "code" (USD), "name" (US Dollar).
-    pub currency_display: Option<String>,
-}
+/// Locale-aware formatting and parsing options.
+///
+/// NumberInput unifies on the workspace-wide `ars_i18n::number::FormatOptions`
+/// (see `crates/ars-i18n/src/number/mod.rs`) so all locale-aware number
+/// formatting and parsing flow through a single source of truth — `Style`
+/// (Decimal/Percent/Currency/Unit), `min_integer_digits`, `min_fraction_digits`,
+/// `max_fraction_digits`, `use_grouping`, `sign_display`, `rounding_mode`.
+/// Currency formatting is expressed via `Style::Currency(CurrencyCode)` instead
+/// of separate `currency` + `currency_display` fields.
+pub type FormatOptions = ars_i18n::number::FormatOptions;
 
 /// The context of the NumberInput component.
 #[derive(Clone, Debug, PartialEq)]
@@ -245,6 +252,16 @@ fn round_to_precision(value: f64, precision: Option<u32>) -> f64 {
 | `1.005` | 2         | `1.01` | Half-up at 3rd decimal     |
 
 **Application Order**: Precision rounding is applied AFTER clamping to min/max but BEFORE storing in Context.
+
+### 1.5.1 Stepping baseline when `value == None`
+
+`Increment` / `Decrement` / `IncrementLarge` / `DecrementLarge` MUST use a **finite baseline** when no current value is set:
+
+1. If `[min, max]` contains `0.0`, the baseline is `0.0`.
+2. Otherwise the baseline is the nearer finite bound (positive `min`, or negative `max`).
+3. With the default props (`min = f64::NEG_INFINITY`, `max = f64::INFINITY`), the baseline is `0.0`.
+
+This prevents `unwrap_or(min)` from producing `-∞` when the field is empty under the default configuration, which would propagate non-finite values into `ctx.value` and `aria-valuenow`.
 
 ### 1.6 Full Machine Implementation
 

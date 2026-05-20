@@ -49,6 +49,19 @@ pub enum Event {
     },
     /// Focus lost.
     Blur,
+    /// The input value changed (user typing). Adapters forward each native
+    /// `input` event through this event so the machine keeps `ctx.value`
+    /// in sync — without it, toggling visibility re-renders the stale
+    /// init-time value and the typed password is lost in uncontrolled mode.
+    Change(String),
+    /// Synchronize the externally controlled value prop. `Some` enters
+    /// controlled mode and pushes the value; `None` returns to uncontrolled.
+    SetValue(Option<String>),
+    /// Synchronize output-affecting props stored in `Context` when
+    /// `Service::set_props` reports a change.
+    SetProps,
+    /// Track whether a `Description` part is rendered (gates `aria-describedby`).
+    SetHasDescription(bool),
 }
 ```
 

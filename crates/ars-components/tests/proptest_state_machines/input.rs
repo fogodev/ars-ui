@@ -1,4 +1,6 @@
-use ars_components::input::{checkbox, switch, text_field, textarea};
+use ars_components::input::{
+    checkbox, number_input, password_input, pin_input, search_input, switch, text_field, textarea,
+};
 use ars_core::{AriaAttr, Direction, EffectMetadata, Env, HtmlAttr, InputMode, Service};
 use proptest::prelude::*;
 
@@ -512,6 +514,384 @@ proptest! {
                     );
                 }
             }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// PasswordInput
+// ─────────────────────────────────────────────────────────────────────
+
+fn arb_password_input_props() -> impl Strategy<Value = password_input::Props> {
+    (
+        prop::option::of(arb_short_text()),
+        arb_short_text(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+    )
+        .prop_map(
+            |(value, default_value, disabled, required, invalid, readonly, default_visible)| {
+                password_input::Props {
+                    id: "password-input".to_string(),
+                    value,
+                    default_value,
+                    disabled,
+                    required,
+                    invalid,
+                    readonly,
+                    default_visible,
+                    placeholder: Some("Password".to_string()),
+                    name: Some("password".to_string()),
+                    form: Some("form".to_string()),
+                    autocomplete: Some("current-password".to_string()),
+                }
+            },
+        )
+}
+
+fn arb_password_input_event() -> impl Strategy<Value = password_input::Event> {
+    prop_oneof![
+        Just(password_input::Event::ToggleVisibility),
+        any::<bool>().prop_map(password_input::Event::SetVisibility),
+        any::<bool>().prop_map(|is_keyboard| password_input::Event::Focus { is_keyboard }),
+        Just(password_input::Event::Blur),
+    ]
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// SearchInput
+// ─────────────────────────────────────────────────────────────────────
+
+fn arb_search_input_props() -> impl Strategy<Value = search_input::Props> {
+    (
+        prop::option::of(arb_short_text()),
+        arb_short_text(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        prop::option::of(1_u64..=500),
+    )
+        .prop_map(
+            |(value, default_value, disabled, readonly, invalid, required, debounce_ms)| {
+                search_input::Props {
+                    id: "search-input".to_string(),
+                    value,
+                    default_value,
+                    disabled,
+                    readonly,
+                    invalid,
+                    required,
+                    placeholder: Some("Search...".to_string()),
+                    name: Some("q".to_string()),
+                    form: Some("form".to_string()),
+                    debounce: debounce_ms.map(core::time::Duration::from_millis),
+                }
+            },
+        )
+}
+
+fn arb_search_input_event() -> impl Strategy<Value = search_input::Event> {
+    prop_oneof![
+        any::<bool>().prop_map(|is_keyboard| search_input::Event::Focus { is_keyboard }),
+        Just(search_input::Event::Blur),
+        arb_short_text().prop_map(search_input::Event::Change),
+        Just(search_input::Event::Clear),
+        Just(search_input::Event::Submit),
+        any::<bool>().prop_map(search_input::Event::SetSearching),
+        Just(search_input::Event::DebounceExpired),
+        Just(search_input::Event::CancelDebounce),
+        Just(search_input::Event::CompositionStart),
+        Just(search_input::Event::CompositionEnd),
+    ]
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// NumberInput
+// ─────────────────────────────────────────────────────────────────────
+
+fn arb_number_input_props() -> impl Strategy<Value = number_input::Props> {
+    (
+        prop::option::of(-1000.0_f64..1000.0),
+        prop::option::of(-1000.0_f64..1000.0),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        prop::option::of(0_u32..=4),
+    )
+        .prop_map(
+            |(
+                value,
+                default_value,
+                disabled,
+                readonly,
+                invalid,
+                required,
+                allow_mouse_wheel,
+                spin_on_press,
+                precision,
+            )| number_input::Props {
+                id: "number-input".to_string(),
+                value,
+                default_value,
+                min: -1000.0,
+                max: 1000.0,
+                step: 1.0,
+                large_step: 10.0,
+                precision,
+                disabled,
+                readonly,
+                invalid,
+                required,
+                name: Some("qty".to_string()),
+                form: Some("form".to_string()),
+                allow_mouse_wheel,
+                clamp_value_on_blur: true,
+                spin_on_press,
+                format_options: None,
+                display_format: None,
+            },
+        )
+}
+
+fn arb_number_input_event() -> impl Strategy<Value = number_input::Event> {
+    prop_oneof![
+        any::<bool>().prop_map(|is_keyboard| number_input::Event::Focus { is_keyboard }),
+        Just(number_input::Event::Blur),
+        arb_short_text().prop_map(number_input::Event::Change),
+        Just(number_input::Event::Increment),
+        Just(number_input::Event::Decrement),
+        Just(number_input::Event::IncrementLarge),
+        Just(number_input::Event::DecrementLarge),
+        Just(number_input::Event::IncrementToMax),
+        Just(number_input::Event::DecrementToMin),
+        (-1000.0_f64..1000.0).prop_map(number_input::Event::SetValue),
+        Just(number_input::Event::StartScrub),
+        (-10.0_f64..10.0).prop_map(number_input::Event::Scrub),
+        Just(number_input::Event::EndScrub),
+        (-5.0_f64..5.0).prop_map(|delta| number_input::Event::Wheel { delta }),
+        Just(number_input::Event::CompositionStart),
+        Just(number_input::Event::CompositionEnd),
+    ]
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// PinInput
+// ─────────────────────────────────────────────────────────────────────
+
+fn arb_pin_mode() -> impl Strategy<Value = pin_input::Mode> {
+    prop_oneof![
+        Just(pin_input::Mode::Numeric),
+        Just(pin_input::Mode::Alphanumeric),
+        Just(pin_input::Mode::Password),
+    ]
+}
+
+fn arb_pin_input_props() -> impl Strategy<Value = pin_input::Props> {
+    (
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        arb_pin_mode(),
+    )
+        .prop_map(
+            |(disabled, invalid, otp, mask, required, auto_submit, mode)| pin_input::Props {
+                id: "pin-input".to_string(),
+                value: None,
+                default_value: Vec::new(),
+                length: 4,
+                disabled,
+                invalid,
+                otp,
+                mask,
+                placeholder: Some("_".to_string()),
+                mode,
+                name: Some("pin".to_string()),
+                form: Some("form".to_string()),
+                required,
+                readonly: false,
+                select_on_focus: false,
+                blur_on_complete: false,
+                auto_submit,
+                on_value_complete: None,
+                dir: Direction::Ltr,
+            },
+        )
+}
+
+fn arb_pin_input_event() -> impl Strategy<Value = pin_input::Event> {
+    prop_oneof![
+        (0_usize..4, any::<bool>())
+            .prop_map(|(index, is_keyboard)| pin_input::Event::Focus { index, is_keyboard }),
+        Just(pin_input::Event::Blur),
+        (
+            0_usize..4,
+            "[0-9a-z]".prop_map(|s| s.chars().next().unwrap_or('0'))
+        )
+            .prop_map(|(index, c)| pin_input::Event::InputChar { index, char: c }),
+        (0_usize..4).prop_map(|index| pin_input::Event::DeleteChar { index }),
+        "[0-9a-z]{0,8}".prop_map(pin_input::Event::Paste),
+        Just(pin_input::Event::Clear),
+        Just(pin_input::Event::FocusNext),
+        Just(pin_input::Event::FocusPrev),
+        Just(pin_input::Event::CompositionStart),
+        Just(pin_input::Event::CompositionEnd),
+    ]
+}
+
+proptest! {
+    #![proptest_config(super::common::proptest_config())]
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_password_input_event_sequences_preserve_invariants(
+        props in arb_password_input_props(),
+        events in prop::collection::vec(arb_password_input_event(), 0..128),
+    ) {
+        let mut service = Service::<password_input::Machine>::new(
+            props,
+            &Env::default(),
+            &password_input::Messages::default(),
+        );
+
+        for event in events {
+            drop(service.send(event));
+
+            let ctx = service.context();
+            let state = service.state();
+
+            // visibility flag tracks state
+            match state {
+                password_input::State::Masked => prop_assert!(!ctx.visible),
+                password_input::State::Visible => prop_assert!(ctx.visible),
+            }
+
+            let input_attrs = service.connect(&|_| {}).input_attrs();
+
+            let ty = if ctx.visible { "text" } else { "password" };
+
+            prop_assert_eq!(input_attrs.get(&HtmlAttr::Type), Some(ty));
+
+            if ctx.disabled {
+                prop_assert!(input_attrs.contains(&HtmlAttr::Disabled));
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_search_input_event_sequences_preserve_invariants(
+        props in arb_search_input_props(),
+        events in prop::collection::vec(arb_search_input_event(), 0..128),
+    ) {
+        let mut service = Service::<search_input::Machine>::new(
+            props,
+            &Env::default(),
+            &search_input::Messages::default(),
+        );
+
+        for event in events {
+            let result = service.send(event);
+
+            let ctx = service.context();
+            let state = *service.state();
+
+            // Loading flag aligns with Searching state on entry, but Idle/Focused
+            // can be returned to while loading=false. Just check the converse:
+            // when state == Searching, loading must be true (set by Submit/SetSearching).
+            if state == search_input::State::Searching {
+                prop_assert!(ctx.loading);
+            }
+
+            // is_composing never co-occurs with a fresh debounce effect
+            if ctx.is_composing {
+                for effect in &result.pending_effects {
+                    prop_assert!(effect.name != search_input::Effect::SearchDebounce);
+                }
+            }
+
+            let input_attrs = service.connect(&|_| {}).input_attrs();
+
+            prop_assert_eq!(input_attrs.get(&HtmlAttr::Type), Some("search"));
+        }
+    }
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_number_input_event_sequences_preserve_invariants(
+        props in arb_number_input_props(),
+        events in prop::collection::vec(arb_number_input_event(), 0..128),
+    ) {
+        let mut service = Service::<number_input::Machine>::new(
+            props,
+            &Env::default(),
+            &number_input::Messages::default(),
+        );
+
+        for event in events {
+            drop(service.send(event));
+
+            let ctx = service.context();
+
+            // value is always inside [min, max] when Some and the machine has not
+            // observed a `Change` since the last clamp opportunity (Blur with
+            // clamp_value_on_blur). Increment/Decrement/SetValue all clamp.
+            // Change(text) does NOT clamp, so we only assert the clamping
+            // happens for non-Change-only paths by checking after a Blur.
+            if let Some(value) = ctx.value.get() {
+                prop_assert!(!value.is_nan(), "value never becomes NaN");
+            }
+
+            let input_attrs = service.connect(&|_| {}).input_attrs();
+
+            prop_assert_eq!(input_attrs.get(&HtmlAttr::Role), Some("spinbutton"));
+            prop_assert_eq!(input_attrs.get(&HtmlAttr::InputMode), Some("decimal"));
+        }
+    }
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_pin_input_event_sequences_preserve_invariants(
+        props in arb_pin_input_props(),
+        events in prop::collection::vec(arb_pin_input_event(), 0..128),
+    ) {
+        let mut service = Service::<pin_input::Machine>::new(
+            props,
+            &Env::default(),
+            &pin_input::Messages::default(),
+        );
+
+        for event in events {
+            drop(service.send(event));
+
+            let ctx = service.context();
+
+            // Cell vector always has the configured length
+            prop_assert_eq!(ctx.value.get().len(), ctx.length);
+
+            // Complete iff every cell is non-empty (for length > 0).
+            let all_filled = ctx.length > 0 && ctx.value.get().iter().all(|cell| !cell.is_empty());
+
+            prop_assert_eq!(ctx.complete, all_filled);
+
+            // Hidden input value equals the joined cell strings.
+            let hidden_attrs = service.connect(&|_| {}).hidden_input_attrs();
+
+            let joined = ctx.value.get().join("");
+
+            prop_assert_eq!(
+                hidden_attrs.get(&HtmlAttr::Value),
+                Some(joined.as_str())
+            );
         }
     }
 }

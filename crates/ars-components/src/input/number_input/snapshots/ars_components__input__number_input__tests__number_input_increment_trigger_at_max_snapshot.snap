@@ -1,0 +1,51 @@
+---
+source: crates/ars-components/src/input/number_input/mod.rs
+expression: snapshot_attrs(&api.increment_trigger_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "increment-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "number-input",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Increment",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+        (
+            Disabled,
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}
