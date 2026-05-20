@@ -682,6 +682,38 @@ fn restrict_selection_to_rows(set: &selection::Set, rows: &[Key]) -> selection::
     }
 }
 
+/// Tightens a [`selection::Set`] against a new [`selection::Mode`]:
+///
+/// * `Mode::None` → always `Set::Empty`.
+/// * `Mode::Single` → at most one element. `Set::All` is dropped to
+///   `Set::Empty` because Single mode cannot represent the dataset.
+/// * `Mode::Multiple` → unchanged.
+///
+/// Used by `SyncProps` so a `Multiple → Single/None` prop transition
+/// can't leave the table reporting selection invalid for its new mode.
+fn normalize_selection_for_mode(set: selection::Set, mode: selection::Mode) -> selection::Set {
+    match mode {
+        selection::Mode::None => selection::Set::Empty,
+        selection::Mode::Multiple => set,
+        selection::Mode::Single => match set {
+            selection::Set::Single(key) => selection::Set::Single(key),
+            selection::Set::Multiple(mut keys) => {
+                if let Some(first) = keys.iter().next().cloned() {
+                    keys.remove(&first);
+                    selection::Set::Single(first)
+                } else {
+                    selection::Set::Empty
+                }
+            }
+            // `Empty`, `All`, and any future non-exhaustive variants
+            // all collapse to `Empty` under Single mode — `All` cannot
+            // be represented and the empty case is its own normalized
+            // form.
+            _ => selection::Set::Empty,
+        },
+    }
+}
+
 /// Materializes [`selection::Set::All`] against the registered row set
 /// so that `selection::State::deselect` (which is a no-op on `Set::All`)
 /// can subsequently drop individual keys. Used by [`Event::ToggleRow`]
@@ -1341,8 +1373,15 @@ impl ars_core::Machine for Machine {
 
             // ── Column resize ────────────────────────────────────────
             Event::ColumnResize { column, width } => {
-                let min = ctx.min_column_width;
+                // Reject non-finite widths (`NaN`, `+/-Infinity`) so we
+                // never serialize them into `aria-valuenow` and never
+                // propagate the invalid value through subsequent
+                // keyboard-resize math.
+                if !width.is_finite() {
+                    return None;
+                }
 
+                let min = ctx.min_column_width;
                 let clamped = if *width < min { min } else { *width };
                 let column = column.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
@@ -1400,7 +1439,7 @@ impl ars_core::Machine for Machine {
                     ctx.interactive = new_interactive;
                     ctx.sticky_header = new_sticky_header;
                     ctx.escape_key_behavior = new_escape_key_behavior;
-                    ctx.select_all_mode = new_select_all_mode;
+                    ctx.select_all_mode = new_select_all_mode.clone();
                     ctx.min_column_width = new_min_column_width;
                     ctx.column_resize_step = new_column_resize_step;
 
@@ -1430,11 +1469,43 @@ impl ars_core::Machine for Machine {
                     //     user-visible selection. Skip the pruning write
                     //     and let the parent pass a clean value next render.
                     if !ctx.selected_rows.is_controlled() {
-                        let pruned_selection = prune_selection_against(
-                            &ctx.selected_rows.get().clone(),
-                            &new_disabled,
-                        );
-                        ctx.selected_rows.set(pruned_selection);
+                        let current_selection = ctx.selected_rows.get().clone();
+
+                        // 1. Prune disabled keys.
+                        let pruned = prune_selection_against(&current_selection, &new_disabled);
+
+                        // 2. Normalize against the new `selection_mode`.
+                        //    Mode::None must hold an empty selection;
+                        //    Mode::Single must hold at most one key.
+                        let mode_normalized =
+                            normalize_selection_for_mode(pruned, new_selection_mode);
+
+                        // 3. Demote `Set::All` to `Multiple(ctx.rows)`
+                        //    when select_all_mode is no longer AllData —
+                        //    Set::All only carries the dataset-wide
+                        //    semantic under AllData, and AllVisible /
+                        //    None can't represent "every unloaded row".
+                        let select_all_normalized = match (&mode_normalized, &new_select_all_mode) {
+                            (selection::Set::All, SelectAllMode::AllVisible)
+                            | (selection::Set::All, SelectAllMode::None) => {
+                                let visible: BTreeSet<Key> = ctx
+                                    .rows
+                                    .iter()
+                                    .filter(|k| !new_disabled.contains(k))
+                                    .cloned()
+                                    .collect();
+                                match visible.len() {
+                                    0 => selection::Set::Empty,
+                                    1 => {
+                                        selection::Set::Single(visible.into_iter().next().unwrap())
+                                    }
+                                    _ => selection::Set::Multiple(visible),
+                                }
+                            }
+                            _ => mode_normalized,
+                        };
+
+                        ctx.selected_rows.set(select_all_normalized);
                     }
                     if !ctx.expanded_rows.is_controlled() {
                         let pruned_expansion: BTreeSet<Key> = ctx
@@ -2525,7 +2596,22 @@ impl<'a> ConnectApi for Api<'a> {
             Part::RowCheckbox { key } => self.row_checkbox_attrs(key),
             Part::ExpandTrigger { key } => self.expand_trigger_attrs(key),
             Part::ExpandedContent { key } => self.expanded_content_attrs(key),
-            Part::ColumnResizeHandle { column } => self.column_resize_handle_attrs(column, 0.0),
+            Part::ColumnResizeHandle { column } => {
+                // Source the width from `ctx.column_widths` so the
+                // dispatcher reports the cached value. Adapters with
+                // their own width snapshot should call
+                // `column_resize_handle_attrs(column, current_width)`
+                // directly; this fallback uses `min_column_width` when
+                // no cache entry exists so `aria-valuenow` stays a
+                // valid numeric value.
+                let current_width = self
+                    .ctx
+                    .column_widths
+                    .get(column)
+                    .copied()
+                    .unwrap_or(self.ctx.min_column_width);
+                self.column_resize_handle_attrs(column, current_width)
+            }
         }
     }
 }

@@ -3346,3 +3346,176 @@ fn codex_round6_set_direction_auto_via_props_change() {
         "Context::dir must always be a concrete Direction (Ltr or Rtl), never Auto",
     );
 }
+
+// ────────────────────────────────────────────────────────────────────
+// 24. Codex review pass 7 (PR #651) — SyncProps normalization, resize
+//      handle width sourcing, non-finite width rejection.
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn codex_round7_sync_props_normalizes_selection_when_mode_tightens_to_single() {
+    // Codex P1 (thread PRRT_kwDORp4enM6DWPqw).
+    // Multi-row selection must be trimmed when props transition
+    // `Mode::Multiple → Mode::Single` — otherwise API surfaces a
+    // selection state that's invalid for the active mode until the
+    // next user-driven selection event.
+    let mut starting = BTreeSet::new();
+    starting.insert(key("r1"));
+    starting.insert(key("r2"));
+    starting.insert(key("r3"));
+    let mut service = service_with_rows(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            default_selected_rows: selection::Set::Multiple(starting),
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    assert_eq!(service.context().selected_rows.get().len(), 3);
+
+    let new_props = Props {
+        selection_mode: selection::Mode::Single,
+        ..test_props()
+    };
+    drop(service.set_props(new_props));
+
+    let sel = service.context().selected_rows.get().clone();
+    assert!(
+        sel.len() <= 1,
+        "Mode::Single must hold at most one selected row after SyncProps, got {sel:?}",
+    );
+    assert_eq!(
+        &service.context().selection_state.selected_keys,
+        &sel,
+        "selection_state must follow the normalized selection",
+    );
+}
+
+#[test]
+fn codex_round7_sync_props_clears_selection_when_mode_becomes_none() {
+    // Same root cause, harder constraint: `Mode::None` must hold an
+    // empty selection.
+    let mut starting = BTreeSet::new();
+    starting.insert(key("r1"));
+    starting.insert(key("r2"));
+    let mut service = service_with_rows(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            default_selected_rows: selection::Set::Multiple(starting),
+            ..test_props()
+        },
+        &[key("r1"), key("r2")],
+    );
+    assert!(!service.context().selected_rows.get().is_empty());
+
+    let new_props = Props {
+        selection_mode: selection::Mode::None,
+        ..test_props()
+    };
+    drop(service.set_props(new_props));
+
+    assert!(
+        service.context().selected_rows.get().is_empty(),
+        "Mode::None must clear selection on SyncProps",
+    );
+}
+
+#[test]
+fn codex_round7_part_attrs_resize_handle_uses_cached_width() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DWPq0).
+    // `part_attrs(Part::ColumnResizeHandle)` must reflect the cached
+    // width from `ctx.column_widths`, not a hard-coded 0.
+    let mut service = service_with_rows(test_props(), &[]);
+    drop(service.send(Event::ColumnResize {
+        column: "name".to_string(),
+        width: 180.0,
+    }));
+
+    let attrs = service
+        .connect(&|_| {})
+        .part_attrs(Part::ColumnResizeHandle {
+            column: "name".to_string(),
+        });
+
+    assert_eq!(
+        attrs
+            .get(&HtmlAttr::Aria(AriaAttr::ValueNow))
+            .map(ToString::to_string),
+        Some("180".to_string()),
+        "part_attrs dispatcher must source the cached width from ctx.column_widths",
+    );
+}
+
+#[test]
+fn codex_round7_column_resize_rejects_nan_width() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DWPq5).
+    // NaN / non-finite widths must be rejected so `aria-valuenow` never
+    // serializes to "NaN" and the cached width never carries an invalid
+    // numeric value through subsequent keyboard-resize math.
+    let mut service = service_with_rows(test_props(), &[]);
+
+    let result = service.send(Event::ColumnResize {
+        column: "name".to_string(),
+        width: f64::NAN,
+    });
+
+    assert!(
+        !result.context_changed,
+        "NaN width must be rejected by the ColumnResize transition",
+    );
+    assert!(
+        !service.context().column_widths.contains_key("name"),
+        "Rejected resize must not store the column entry",
+    );
+}
+
+#[test]
+fn codex_round7_column_resize_rejects_infinite_width() {
+    let mut service = service_with_rows(test_props(), &[]);
+
+    let result = service.send(Event::ColumnResize {
+        column: "name".to_string(),
+        width: f64::INFINITY,
+    });
+
+    assert!(!result.context_changed, "infinite width must be rejected");
+}
+
+#[test]
+fn codex_round7_sync_props_demotes_set_all_when_mode_leaves_all_data() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DWPq7).
+    // `Set::All` is only valid for `SelectAllMode::AllData`. After a
+    // prop transition that switches the mode (e.g. AllData →
+    // AllVisible), `SyncProps` must materialize `Set::All` into
+    // `Multiple(ctx.rows)` so `all_selected` / `is_row_selected` agree
+    // with the AllVisible semantics enforced elsewhere.
+    let mut service = service_with_rows(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            select_all_mode: SelectAllMode::AllData { total_count: 3 },
+            ..test_props()
+        },
+        &[key("r1"), key("r2"), key("r3")],
+    );
+    drop(service.send(Event::SelectAll));
+    assert!(matches!(
+        service.context().selected_rows.get(),
+        selection::Set::All
+    ));
+
+    let new_props = Props {
+        selection_mode: selection::Mode::Multiple,
+        select_all_mode: SelectAllMode::AllVisible,
+        ..test_props()
+    };
+    drop(service.set_props(new_props));
+
+    let sel = service.context().selected_rows.get().clone();
+    assert!(
+        !matches!(sel, selection::Set::All),
+        "leaving AllData mode must demote Set::All to Multiple(ctx.rows), got {sel:?}",
+    );
+    assert!(sel.contains(&key("r1")));
+    assert!(sel.contains(&key("r2")));
+    assert!(sel.contains(&key("r3")));
+}
