@@ -1,0 +1,90 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "61e162a58029",
+  "session_id": "b939c529-fda9-4daf-8309-cf7be7c57583",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-20T19:37:29.083158Z",
+  "branch": "t3code/e1654fe1",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/input/pin_input/mod.rs",
+    "spec/components/input/pin-input.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "0a39a84b38da",
+  "checkpoint_transcript_start": 1783,
+  "transcript_lines_at_start": 1783,
+  "token_usage": {
+    "input_tokens": 32,
+    "cache_creation_tokens": 751847,
+    "cache_read_tokens": 16123810,
+    "output_tokens": 13737,
+    "api_call_count": 22
+  },
+  "session_metrics": {
+    "turn_count": 9
+  },
+  "summary": {
+    "intent": "Monitor for new code reviews autonomously and address a P2 finding about Unicode digit handling in the PinInput component's Numeric mode.",
+    "outcome": "Fixed `Mode::Numeric` to use `char::is_numeric()` instead of `is_ascii_digit()` to correctly accept Unicode decimal digits (Arabic-Indic, Devanagari, etc.), added tests, updated spec, and pushed as round 6.",
+    "learnings": {
+      "repo": [
+        "PinInput component lives at crates/ars-components/src/input/pin_input/mod.rs",
+        "Spec files are colocated at spec/components/input/pin-input.md",
+        "CI pipeline uses an 'xci-fast' command before committing and pushing",
+        "Test suite runs ~1990 tests; this change added 2 new tests",
+        "Commits follow a round-numbered scheme (e.g. 'round 6')",
+        "Worktrees are managed under /Users/ericson/.t3/worktrees/ars-ui/"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/input/pin_input/mod.rs",
+          "finding": "Mode::accepts was previously a const fn; switching to char::is_numeric() makes it non-const because is_numeric() is not const-stable"
+        },
+        {
+          "path": "crates/ars-components/src/input/pin_input/mod.rs",
+          "finding": "char::to_digit(10).is_some() is ASCII-only in Rust stdlib despite appearances — it does not cover Unicode decimal digits like Arabic-Indic or Devanagari"
+        },
+        {
+          "path": "crates/ars-components/src/input/pin_input/mod.rs",
+          "finding": "char::is_numeric() was chosen over icu_properties for Unicode digit acceptance; it over-accepts Roman numerals/fractions but those are unreachable from PIN-field keyboards"
+        }
+      ],
+      "workflow": [
+        "Completion notifications from background tasks were silently dropping, requiring manual polling to check review status",
+        "Codex review threads can be fetched directly to surface unresolved findings without waiting for notifications"
+      ]
+    },
+    "friction": [
+      "Task completion notifications were silently dropping, causing the user to have to manually prompt the assistant after 20+ minutes of missed reviews",
+      "char::to_digit(10) appeared to be a correct Unicode solution but turned out to be ASCII-only, requiring a second fix iteration",
+      "No icu_properties or dedicated Unicode digit utility was available in the codebase, limiting options for a precise fix"
+    ],
+    "open_items": [
+      "char::is_numeric() over-accepts Roman numerals and vulgar fractions (e.g. '½', 'Ⅳ') — accepted as theoretical non-issue for PIN fields but could be revisited if stricter Unicode Nd (decimal digit) category conformance is required",
+      "Silent notification dropping from background task completions should be investigated to prevent recurrence"
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-20T19:37:12.168565Z",
+    "agent_lines": 66,
+    "agent_removed": 4,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 66,
+    "total_lines_changed": 70,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
