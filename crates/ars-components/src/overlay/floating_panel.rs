@@ -708,7 +708,7 @@ fn resize_rect(
 fn stage_plan(target: State, f: impl FnOnce(&mut Context) + 'static) -> TransitionPlan<Machine> {
     TransitionPlan::to(target)
         .apply(f)
-        .with_effect(PendingEffect::named(Effect::StageChange))
+        .with_effect(stage_change_effect())
 }
 
 fn close_plan(stage_changed: bool) -> TransitionPlan<Machine> {
@@ -728,19 +728,26 @@ fn close_plan(stage_changed: bool) -> TransitionPlan<Machine> {
         .with_effect(PendingEffect::named(Effect::ReleaseZIndex));
 
     if stage_changed {
-        plan = plan.with_effect(PendingEffect::named(Effect::StageChange));
+        plan = plan.with_effect(stage_change_effect());
     }
 
     plan
 }
 
-fn controlled_close_request_plan() -> TransitionPlan<Machine> {
-    TransitionPlan::context_only(|ctx: &mut Context| {
+fn controlled_close_request_plan(target: Option<State>) -> TransitionPlan<Machine> {
+    let mut plan = if let Some(target) = target {
+        TransitionPlan::to(target)
+    } else {
+        TransitionPlan::new()
+    };
+
+    plan = plan.apply(|ctx: &mut Context| {
         ctx.focused = false;
         ctx.focus_visible = false;
         ctx.active_resize_handle = None;
-    })
-    .with_effect(open_change_effect(false))
+    });
+
+    plan.with_effect(open_change_effect(false))
 }
 
 fn open_controlled_plan(props: &Props) -> TransitionPlan<Machine> {
@@ -779,6 +786,78 @@ fn open_change_effect(open: bool) -> PendingEffect<Machine> {
             no_cleanup()
         },
     )
+}
+
+fn position_change_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(
+        Effect::PositionChange,
+        move |ctx: &Context, props: &Props, _send| {
+            if let Some(cb) = &props.on_position_change {
+                cb(ctx.position);
+            }
+
+            no_cleanup()
+        },
+    )
+}
+
+fn position_change_end_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(
+        Effect::PositionChangeEnd,
+        move |ctx: &Context, props: &Props, _send| {
+            if let Some(cb) = &props.on_position_change_end {
+                cb(ctx.position);
+            }
+
+            no_cleanup()
+        },
+    )
+}
+
+fn size_change_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(
+        Effect::SizeChange,
+        move |ctx: &Context, props: &Props, _send| {
+            if let Some(cb) = &props.on_size_change {
+                cb(ctx.size);
+            }
+
+            no_cleanup()
+        },
+    )
+}
+
+fn size_change_end_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(
+        Effect::SizeChangeEnd,
+        move |ctx: &Context, props: &Props, _send| {
+            if let Some(cb) = &props.on_size_change_end {
+                cb(ctx.size);
+            }
+
+            no_cleanup()
+        },
+    )
+}
+
+fn stage_change_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(
+        Effect::StageChange,
+        move |ctx: &Context, props: &Props, _send| {
+            if let Some(cb) = &props.on_stage_change {
+                cb(ctx.stage());
+            }
+
+            no_cleanup()
+        },
+    )
+}
+
+const fn controlled_close_target(state: State) -> Option<State> {
+    match state {
+        State::Moving | State::Resizing { .. } => Some(State::Idle),
+        State::Idle | State::Minimized | State::Maximized => None,
+    }
 }
 
 fn props_changed(old: &Props, new: &Props) -> bool {
@@ -907,7 +986,7 @@ impl ars_core::Machine for Machine {
 
                         ctx.position = snap_position(constrained, props.grid_size);
                     })
-                    .with_effect(PendingEffect::named(Effect::PositionChange)),
+                    .with_effect(position_change_effect()),
                 )
             }
 
@@ -924,15 +1003,14 @@ impl ars_core::Machine for Machine {
 
                         ctx.position = snap_position(constrained, props.grid_size);
                     })
-                    .with_effect(PendingEffect::named(Effect::PositionChange))
-                    .with_effect(PendingEffect::named(Effect::PositionChangeEnd)),
+                    .with_effect(position_change_effect())
+                    .with_effect(position_change_end_effect()),
                 )
             }
 
-            (State::Moving, Event::DragEnd) => Some(
-                TransitionPlan::to(State::Idle)
-                    .with_effect(PendingEffect::named(Effect::PositionChangeEnd)),
-            ),
+            (State::Moving, Event::DragEnd) => {
+                Some(TransitionPlan::to(State::Idle).with_effect(position_change_end_effect()))
+            }
 
             (State::Idle, Event::ResizeStart(handle))
                 if ctx.open && props.resizable && !ctx.maximized =>
@@ -955,10 +1033,10 @@ impl ars_core::Machine for Machine {
                         let (position, size) =
                             resize_rect(ctx.position, ctx.size, handle, dx, dy, &props);
 
-                        ctx.position = position;
+                        ctx.position = clamp_position(position, size, &props);
                         ctx.size = size;
                     })
-                    .with_effect(PendingEffect::named(Effect::SizeChange)),
+                    .with_effect(size_change_effect()),
                 )
             }
 
@@ -967,7 +1045,7 @@ impl ars_core::Machine for Machine {
                     .apply(|ctx: &mut Context| {
                         ctx.active_resize_handle = None;
                     })
-                    .with_effect(PendingEffect::named(Effect::SizeChangeEnd)),
+                    .with_effect(size_change_end_effect()),
             ),
 
             (State::Idle, Event::Minimize) if ctx.open && props.minimizable => {
@@ -1034,19 +1112,21 @@ impl ars_core::Machine for Machine {
                 if !ctx.open {
                     None
                 } else if props.open == Some(true) {
-                    Some(controlled_close_request_plan())
+                    Some(controlled_close_request_plan(controlled_close_target(
+                        *state,
+                    )))
                 } else {
                     Some(close_plan(ctx.stage() != Stage::Default))
                 }
             }
 
-            (State::Idle | State::Minimized | State::Maximized, Event::CloseOnEscape)
-                if props.close_on_escape =>
-            {
+            (_, Event::CloseOnEscape) if props.close_on_escape => {
                 if !ctx.open {
                     None
                 } else if props.open == Some(true) {
-                    Some(controlled_close_request_plan())
+                    Some(controlled_close_request_plan(controlled_close_target(
+                        *state,
+                    )))
                 } else {
                     Some(close_plan(ctx.stage() != Stage::Default))
                 }
@@ -1491,14 +1571,7 @@ impl Api<'_> {
     #[must_use]
     pub fn on_keydown(&self, data: &KeyboardEventData) -> bool {
         match data.key {
-            KeyboardKey::Escape
-                if self.ctx.open
-                    && self.props.close_on_escape
-                    && matches!(
-                        self.state,
-                        State::Idle | State::Minimized | State::Maximized
-                    ) =>
-            {
+            KeyboardKey::Escape if self.ctx.open && self.props.close_on_escape => {
                 (self.send)(Event::CloseOnEscape);
 
                 true
@@ -2090,6 +2163,219 @@ mod tests {
     }
 
     #[test]
+    fn resize_respects_viewport_constraints_when_overflow_is_disabled() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                allow_overflow: false,
+                constrain_to_viewport: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(service.send(Event::ResizeStart(ResizeHandle::N)));
+
+        let resize = service.send(Event::ResizeMove {
+            dx: 0.0,
+            dy: -150.0,
+        });
+
+        assert_eq!(
+            service.state(),
+            &State::Resizing {
+                handle: ResizeHandle::N
+            }
+        );
+        assert_eq!(service.context().position, (100.0, 0.0));
+        assert_eq!(service.context().size, (400.0, 450.0));
+        assert_eq!(effect_names(&resize), vec![Effect::SizeChange]);
+    }
+
+    #[test]
+    fn move_resize_and_stage_effects_invoke_registered_callbacks() {
+        let positions = Arc::new(Mutex::new(Vec::new()));
+        let position_ends = Arc::new(Mutex::new(Vec::new()));
+        let sizes = Arc::new(Mutex::new(Vec::new()));
+        let size_ends = Arc::new(Mutex::new(Vec::new()));
+        let stages = Arc::new(Mutex::new(Vec::new()));
+
+        let captured_positions = Arc::clone(&positions);
+        let captured_position_ends = Arc::clone(&position_ends);
+        let captured_sizes = Arc::clone(&sizes);
+        let captured_size_ends = Arc::clone(&size_ends);
+        let captured_stages = Arc::clone(&stages);
+
+        let mut service = Service::<Machine>::new(
+            Props {
+                on_position_change: Some(callback(move |position| {
+                    captured_positions
+                        .lock()
+                        .expect("position callback state should not be poisoned")
+                        .push(position);
+                })),
+                on_position_change_end: Some(callback(move |position| {
+                    captured_position_ends
+                        .lock()
+                        .expect("position-end callback state should not be poisoned")
+                        .push(position);
+                })),
+                on_size_change: Some(callback(move |size| {
+                    captured_sizes
+                        .lock()
+                        .expect("size callback state should not be poisoned")
+                        .push(size);
+                })),
+                on_size_change_end: Some(callback(move |size| {
+                    captured_size_ends
+                        .lock()
+                        .expect("size-end callback state should not be poisoned")
+                        .push(size);
+                })),
+                on_stage_change: Some(callback(move |stage| {
+                    captured_stages
+                        .lock()
+                        .expect("stage callback state should not be poisoned")
+                        .push(stage);
+                })),
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(service.send(Event::DragStart));
+        let mut drag_move = service.send(Event::DragMove { dx: 10.0, dy: 5.0 });
+        let effect = drag_move
+            .pending_effects
+            .pop()
+            .expect("drag move should emit position-change effect");
+        let send: StrongSend<Event> = Arc::new(|_| {});
+        drop(effect.run(service.context(), service.props(), send));
+
+        let mut drag_end = service.send(Event::DragEnd);
+        let effect = drag_end
+            .pending_effects
+            .pop()
+            .expect("drag end should emit position-change-end effect");
+        let send: StrongSend<Event> = Arc::new(|_| {});
+        drop(effect.run(service.context(), service.props(), send));
+
+        drop(service.send(Event::ResizeStart(ResizeHandle::SE)));
+        let mut resize_move = service.send(Event::ResizeMove { dx: 20.0, dy: 30.0 });
+        let effect = resize_move
+            .pending_effects
+            .pop()
+            .expect("resize move should emit size-change effect");
+        let send: StrongSend<Event> = Arc::new(|_| {});
+        drop(effect.run(service.context(), service.props(), send));
+
+        let mut resize_end = service.send(Event::ResizeEnd);
+        let effect = resize_end
+            .pending_effects
+            .pop()
+            .expect("resize end should emit size-change-end effect");
+        let send: StrongSend<Event> = Arc::new(|_| {});
+        drop(effect.run(service.context(), service.props(), send));
+
+        let mut minimize = service.send(Event::Minimize);
+        let effect = minimize
+            .pending_effects
+            .pop()
+            .expect("minimize should emit stage-change effect");
+        let send: StrongSend<Event> = Arc::new(|_| {});
+        drop(effect.run(service.context(), service.props(), send));
+
+        assert_eq!(
+            positions
+                .lock()
+                .expect("position callback state should not be poisoned")
+                .as_slice(),
+            &[(110.0, 105.0)]
+        );
+        assert_eq!(
+            position_ends
+                .lock()
+                .expect("position-end callback state should not be poisoned")
+                .as_slice(),
+            &[(110.0, 105.0)]
+        );
+        assert_eq!(
+            sizes
+                .lock()
+                .expect("size callback state should not be poisoned")
+                .as_slice(),
+            &[(420.0, 330.0)]
+        );
+        assert_eq!(
+            size_ends
+                .lock()
+                .expect("size-end callback state should not be poisoned")
+                .as_slice(),
+            &[(420.0, 330.0)]
+        );
+        assert_eq!(
+            stages
+                .lock()
+                .expect("stage callback state should not be poisoned")
+                .as_slice(),
+            &[Stage::Minimized]
+        );
+    }
+
+    #[test]
+    fn move_resize_and_stage_effects_are_noops_without_callbacks() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(service.send(Event::DragStart));
+        let mut drag_move = service.send(Event::DragMove { dx: 10.0, dy: 5.0 });
+        let effect = drag_move
+            .pending_effects
+            .pop()
+            .expect("drag move should emit position-change effect");
+        let send: StrongSend<Event> = Arc::new(|_| {});
+        drop(effect.run(service.context(), service.props(), send));
+
+        let mut drag_end = service.send(Event::DragEnd);
+        let effect = drag_end
+            .pending_effects
+            .pop()
+            .expect("drag end should emit position-change-end effect");
+        let send: StrongSend<Event> = Arc::new(|_| {});
+        drop(effect.run(service.context(), service.props(), send));
+
+        drop(service.send(Event::ResizeStart(ResizeHandle::SE)));
+        let mut resize_move = service.send(Event::ResizeMove { dx: 20.0, dy: 30.0 });
+        let effect = resize_move
+            .pending_effects
+            .pop()
+            .expect("resize move should emit size-change effect");
+        let send: StrongSend<Event> = Arc::new(|_| {});
+        drop(effect.run(service.context(), service.props(), send));
+
+        let mut resize_end = service.send(Event::ResizeEnd);
+        let effect = resize_end
+            .pending_effects
+            .pop()
+            .expect("resize end should emit size-change-end effect");
+        let send: StrongSend<Event> = Arc::new(|_| {});
+        drop(effect.run(service.context(), service.props(), send));
+
+        let mut minimize = service.send(Event::Minimize);
+        let effect = minimize
+            .pending_effects
+            .pop()
+            .expect("minimize should emit stage-change effect");
+        let send: StrongSend<Event> = Arc::new(|_| {});
+        drop(effect.run(service.context(), service.props(), send));
+
+        assert_eq!(service.context().position, (110.0, 105.0));
+        assert_eq!(service.context().size, (420.0, 330.0));
+        assert_eq!(service.context().stage(), Stage::Minimized);
+    }
+
+    #[test]
     fn controlled_reopen_resets_rect_unless_persisted() {
         let mut service =
             Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
@@ -2333,6 +2619,52 @@ mod tests {
 
         assert!(!maximized_api.on_keydown(&keyboard_data(KeyboardKey::ArrowRight)));
         assert!(maximized_events.into_inner().is_empty());
+    }
+
+    #[test]
+    fn escape_closes_during_drag_and_resize_states() {
+        let mut moving =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(moving.send(Event::DragStart));
+
+        let moving_events = RefCell::new(Vec::new());
+        let send = |event| moving_events.borrow_mut().push(event);
+        let moving_api = moving.connect(&send);
+
+        assert!(moving_api.on_keydown(&keyboard_data(KeyboardKey::Escape)));
+        assert_eq!(moving_events.into_inner(), vec![Event::CloseOnEscape]);
+
+        let moving_close = moving.send(Event::CloseOnEscape);
+
+        assert_eq!(moving.state(), &State::Idle);
+        assert!(!moving.context().open);
+        assert_eq!(
+            effect_names(&moving_close),
+            vec![Effect::OpenChange, Effect::ReleaseZIndex]
+        );
+
+        let mut resizing =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(resizing.send(Event::ResizeStart(ResizeHandle::SE)));
+
+        let resizing_events = RefCell::new(Vec::new());
+        let send = |event| resizing_events.borrow_mut().push(event);
+        let resizing_api = resizing.connect(&send);
+
+        assert!(resizing_api.on_keydown(&keyboard_data(KeyboardKey::Escape)));
+        assert_eq!(resizing_events.into_inner(), vec![Event::CloseOnEscape]);
+
+        let resizing_close = resizing.send(Event::CloseOnEscape);
+
+        assert_eq!(resizing.state(), &State::Idle);
+        assert!(!resizing.context().open);
+        assert!(resizing.context().active_resize_handle.is_none());
+        assert_eq!(
+            effect_names(&resizing_close),
+            vec![Effect::OpenChange, Effect::ReleaseZIndex]
+        );
     }
 
     #[test]

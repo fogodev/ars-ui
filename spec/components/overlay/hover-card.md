@@ -78,7 +78,26 @@ pub enum Event {
 }
 ```
 
-### 1.3 Context
+### 1.3 Effects
+
+```rust
+/// Typed identifier for every named effect intent emitted by HoverCard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter starts the hover open-delay timer.
+    OpenDelay,
+    /// Adapter starts the close-delay timer.
+    CloseDelay,
+    /// Adapter invokes `Props::on_open_change` with the requested open state.
+    OpenChange,
+    /// Adapter allocates a z-index and dispatches `Event::SetZIndex`.
+    AllocateZIndex,
+    /// Adapter releases the previously allocated z-index claim.
+    ReleaseZIndex,
+}
+```
+
+### 1.4 Context
 
 ```rust
 /// The context of the hover card.
@@ -122,7 +141,7 @@ pub struct Context {
 }
 ```
 
-### 1.4 Props
+### 1.5 Props
 
 ```rust
 /// The props of the hover card.
@@ -168,7 +187,7 @@ impl Default for Props {
 }
 ```
 
-### 1.5 Safe Area (Hover Bridge)
+### 1.6 Safe Area (Hover Bridge)
 
 When the pointer moves from the trigger to the floating content, it must cross a gap (the offset
 distance). Without a safe area, leaving the trigger's bounding box starts the close delay, and
@@ -205,7 +224,7 @@ remains open.
 > **Tooltip**: The same safe-area algorithm applies to interactive `Tooltip`s (`interactive: true`).
 > Non-interactive `Tooltip`s do not need a safe area since their content is not a pointer target.
 
-### 1.6 Full Machine Implementation
+### 1.7 Full Machine Implementation
 
 ```rust
 /// The machine of the hover card.
@@ -234,6 +253,7 @@ impl ars_core::Machine for Machine {
             open_delay: props.open_delay,
             close_delay: props.close_delay,
             positioning: props.positioning.clone(),
+            current_placement: props.positioning.placement,
             ids,
             trigger_id,
             content_id,
@@ -243,6 +263,7 @@ impl ars_core::Machine for Machine {
             focus_active: false,
             locale,
             messages,
+            z_index: None,
         })
     }
 
@@ -341,7 +362,7 @@ impl ars_core::Machine for Machine {
 }
 ```
 
-### 1.7 Connect / API
+### 1.8 Connect / API
 
 ```rust
 #[derive(ComponentPart)]

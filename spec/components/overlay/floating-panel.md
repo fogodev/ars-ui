@@ -174,6 +174,8 @@ pub enum Effect {
     StageChange,
     /// Adapter allocates a z-index and dispatches `Event::SetZIndex`.
     AllocateZIndex,
+    /// Adapter releases the currently allocated z-index, if any.
+    ReleaseZIndex,
 }
 ```
 
