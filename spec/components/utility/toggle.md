@@ -52,6 +52,7 @@ pub enum State {
 | `Focus`       | `is_keyboard: bool` | Focus received.           |
 | `Blur`        | —                   | Focus lost.               |
 | `SetDisabled` | `bool`              | Sync disabled from props. |
+| `SetValue`    | `Option<bool>`      | Sync controlled value.    |
 
 ```rust
 /// The events for the `Toggle` component.
@@ -72,6 +73,8 @@ pub enum Event {
     Blur,
     /// Sync disabled state from props.
     SetDisabled(bool),
+    /// Synchronize the externally controlled pressed prop.
+    SetValue(Option<bool>),
 }
 ```
 
@@ -96,7 +99,7 @@ pub struct Context {
 
 ```rust
 /// Props for the `Toggle` component.
-#[derive(Clone, Debug, PartialEq, HasId)]
+#[derive(Clone, Debug, Default, PartialEq, HasId)]
 pub struct Props {
     /// Component instance ID.
     pub id: String,
@@ -106,8 +109,7 @@ pub struct Props {
     pub default_pressed: bool,
     /// Whether the component is disabled.
     pub disabled: bool,
-    /// Callback invoked when the pressed state changes.
-    /// When the pressed state changes, invoke `on_change` with the new pressed value.
+    /// Callback invoked when user intent requests a new pressed state.
     pub on_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
 }
 ```
@@ -123,12 +125,20 @@ pub struct Machine;
 pub struct Messages;
 impl ComponentMessages for Messages {}
 
+/// Typed effect intents emitted by the toggle machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter invokes [`Props::on_change`] with the requested pressed value.
+    PressedChange,
+}
+
 impl ars_core::Machine for Machine {
     type State = State;
     type Event = Event;
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Props, _env: &Env, _messages: &Messages) -> (State, Context) {
@@ -144,32 +154,39 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // Disabled guard: blocks value-changing events but allows Focus/Blur
-        // so the toggle remains discoverable by screen readers.
-        if ctx.disabled && !matches!(event, Event::Focus { .. } | Event::Blur | Event::SetDisabled(_)) {
+        // Disabled guard blocks user value-changing events but still allows
+        // focus and prop-sync events.
+        if ctx.disabled && matches!(event, Event::Toggle | Event::TurnOn | Event::TurnOff) {
             return None;
         }
 
         match event {
+            Event::SetValue(value) => {
+                let value = *value;
+                if let Some(value) = value {
+                    Some(TransitionPlan::to(if value { State::On } else { State::Off }).apply(move |ctx| {
+                        ctx.pressed.set(value);
+                        ctx.pressed.sync_controlled(Some(value));
+                    }))
+                } else {
+                    Some(TransitionPlan::context_only(|ctx| {
+                        ctx.pressed.sync_controlled(None);
+                    }))
+                }
+            }
             Event::Toggle => {
-                let next = match state {
-                    State::Off => State::On,
-                    State::On => State::Off,
-                };
-                let new_val = next == State::On;
-                Some(TransitionPlan::to(next).apply(move |ctx| {
-                    ctx.pressed.set(new_val);
-                }))
+                let next = !ctx.pressed.get();
+                value_change_plan(props, next)
             }
             Event::TurnOn => {
                 if *state == State::On { return None; }
-                Some(TransitionPlan::to(State::On).apply(|ctx| { ctx.pressed.set(true); }))
+                value_change_plan(props, true)
             }
             Event::TurnOff => {
                 if *state == State::Off { return None; }
-                Some(TransitionPlan::to(State::Off).apply(|ctx| { ctx.pressed.set(false); }))
+                value_change_plan(props, false)
             }
             Event::Focus { is_keyboard } => {
                 let is_kb = *is_keyboard;
@@ -196,10 +213,8 @@ impl ars_core::Machine for Machine {
         if new.disabled != old.disabled {
             events.push(Event::SetDisabled(new.disabled));
         }
-        match (old.pressed, new.pressed) {
-            (Some(false) | None, Some(true)) => events.push(Event::TurnOn),
-            (Some(true), Some(false)) => events.push(Event::TurnOff),
-            _ => {}
+        if new.pressed != old.pressed {
+            events.push(Event::SetValue(new.pressed));
         }
         events
     }
@@ -243,9 +258,11 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
         p.set(scope_attr, scope_val);
         p.set(part_attr, part_val);
+        p.set(HtmlAttr::Id, self.props.id.as_str());
         p.set(HtmlAttr::Data("ars-state"), if self.is_pressed() { "on" } else { "off" });
         p.set(HtmlAttr::Aria(AriaAttr::Pressed), if self.is_pressed() { "true" } else { "false" });
         p.set(HtmlAttr::Type, "button");
+        p.set(HtmlAttr::TabIndex, "0");
         if self.ctx.disabled {
             // Use aria-disabled instead of the HTML disabled attribute so the
             // toggle remains focusable and discoverable by screen readers.

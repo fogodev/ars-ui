@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/utility/toggle.rs
+expression: "snapshot_attrs(&off.connect(&|_| {}).indicator_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "indicator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toggle",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "off",
+            ),
+        ),
+    ],
+    styles: [],
+}

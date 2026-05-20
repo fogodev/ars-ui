@@ -5,7 +5,7 @@
 
 #[cfg(feature = "i18n")]
 use ars_components::utility::highlight;
-use ars_components::utility::{download_trigger, group};
+use ars_components::utility::{download_trigger, group, swap, toggle};
 
 use super::helper::assert_anatomy;
 
@@ -24,6 +24,29 @@ fn download_trigger_anatomy_matches_spec() {
     assert_anatomy(
         "download-trigger",
         &[(download_trigger::Part::Root, "root")],
+    );
+}
+
+#[test]
+fn toggle_anatomy_matches_spec() {
+    assert_anatomy(
+        "toggle",
+        &[
+            (toggle::Part::Root, "root"),
+            (toggle::Part::Indicator, "indicator"),
+        ],
+    );
+}
+
+#[test]
+fn swap_anatomy_matches_spec() {
+    assert_anatomy(
+        "swap",
+        &[
+            (swap::Part::Root, "root"),
+            (swap::Part::OnContent, "on-content"),
+            (swap::Part::OffContent, "off-content"),
+        ],
     );
 }
 

@@ -64,6 +64,12 @@ pub mod landmark;
 /// Separator component (stateless attribute mapper).
 pub mod separator;
 
+/// `Swap` component machine.
+pub mod swap;
+
+/// `Toggle` component machine.
+pub mod toggle;
+
 /// `VisuallyHidden` component (stateless attribute mapper).
 pub mod visually_hidden;
 

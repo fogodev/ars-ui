@@ -83,8 +83,7 @@ pub struct Props {
     pub label: Option<String>,
     /// The animation style for the swap transition (see section 6).
     pub animation: Animation,
-    /// Callback invoked when the checked state changes.
-    /// Adapters invoke this with the new checked value after a Toggle, SetOn, or SetOff transition.
+    /// Callback invoked when user intent requests a new checked state.
     pub on_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
 }
 ```
@@ -114,6 +113,8 @@ pub enum Event {
     SetOff,
     /// Update disabled state from props.
     SetDisabled(bool),
+    /// Synchronize the externally controlled checked prop.
+    SetValue(Option<bool>),
     /// Focus received.
     Focus {
         /// True if the focus was initiated by a keyboard.
@@ -126,6 +127,13 @@ pub enum Event {
 /// The machine for the `Swap` component.
 pub struct Machine;
 
+/// Typed effect intents emitted by the swap machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter invokes [`Props::on_change`] with the requested checked value.
+    Change,
+}
+
 impl ars_core::Machine for Machine {
     type State   = State;
     type Event   = Event;
@@ -133,6 +141,7 @@ impl ars_core::Machine for Machine {
     type Props   = Props;
     type Api<'a> = Api<'a>;
     type Messages = Messages;
+    type Effect = Effect;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(&props.id);
@@ -157,31 +166,39 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // Standard disabled guard: allow Focus/Blur for screen reader discoverability,
-        // and SetDisabled so props sync always applies.
-        if ctx.disabled && !matches!(event, Event::Focus { .. } | Event::Blur | Event::SetDisabled(_)) {
+        // Disabled guard blocks user value-changing events but still allows
+        // focus and prop-sync events.
+        if ctx.disabled && matches!(event, Event::Toggle | Event::SetOn | Event::SetOff) {
             return None;
         }
 
         match event {
+            Event::SetValue(value) => {
+                let value = *value;
+                if let Some(value) = value {
+                    Some(TransitionPlan::to(if value { State::On } else { State::Off }).apply(move |ctx| {
+                        ctx.checked.set(value);
+                        ctx.checked.sync_controlled(Some(value));
+                    }))
+                } else {
+                    Some(TransitionPlan::context_only(|ctx| {
+                        ctx.checked.sync_controlled(None);
+                    }))
+                }
+            }
             Event::Toggle => {
                 let next = !ctx.checked.get();
-                let next_state = if next { State::On } else { State::Off };
-                Some(TransitionPlan::to(next_state).apply(move |ctx| {
-                    ctx.checked.set(next);
-                }))
+                value_change_plan(props, next)
             }
             Event::SetOn => {
-                Some(TransitionPlan::to(State::On).apply(|ctx| {
-                    ctx.checked.set(true);
-                }))
+                if *state == State::On { return None; }
+                value_change_plan(props, true)
             }
             Event::SetOff => {
-                Some(TransitionPlan::to(State::Off).apply(|ctx| {
-                    ctx.checked.set(false);
-                }))
+                if *state == State::Off { return None; }
+                value_change_plan(props, false)
             }
             Event::SetDisabled(disabled) => {
                 let disabled = *disabled;
@@ -205,13 +222,8 @@ impl ars_core::Machine for Machine {
 
     fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
         let mut events = Vec::new();
-        // Sync controlled checked state.
         if old.checked != new.checked {
-            match new.checked {
-                Some(true)  => events.push(Event::SetOn),
-                Some(false) => events.push(Event::SetOff),
-                None        => {} // Switching to uncontrolled; no event needed.
-            }
+            events.push(Event::SetValue(new.checked));
         }
         // Sync disabled state.
         if old.disabled != new.disabled {
@@ -343,6 +355,15 @@ impl<'a> Api<'a> {
             _ => {}
         }
     }
+
+    /// Handle root click activation.
+    pub fn on_root_click(&self) { (self.send)(Event::Toggle); }
+
+    /// Handle focus entering the root element.
+    pub fn on_root_focus(&self, is_keyboard: bool) { (self.send)(Event::Focus { is_keyboard }); }
+
+    /// Handle focus leaving the root element.
+    pub fn on_root_blur(&self) { (self.send)(Event::Blur); }
 }
 
 impl ConnectApi for Api<'_> {
@@ -468,7 +489,7 @@ Adapters MAY expose `data-ars-hover` and `data-ars-active` on the root element v
 
 ## 6. Swap Transition Pattern
 
-`Swap` is a transition pattern for swapping between two content slots. Only one slot is rendered at a time (not both with a visibility toggle) — the inactive slot is fully unmounted when animations are not running.
+`Swap` is a transition pattern for swapping between two content slots. The agnostic core marks the inactive content with `hidden` and `aria-hidden="true"`; adapters may additionally unmount inactive content when no exit animation is running.
 
 **Anatomy (clarified):**
 
@@ -480,13 +501,13 @@ Swap              root container
 
 **Props:**
 
-| Prop              | Type                                           | Description                                                             |
-| ----------------- | ---------------------------------------------- | ----------------------------------------------------------------------- |
-| `checked`         | `Option<bool>`                                 | Controlled checked state. When `Some`, the component is controlled.     |
-| `default_checked` | `bool`                                         | Default checked state for uncontrolled mode.                            |
-| `animation`       | `Animation`                                    | The animation style for the swap transition.                            |
-| `on_change`       | `Option<Callback<dyn Fn(bool) + Send + Sync>>` | Fires when swap transition completes. Payload is the new checked value. |
-| `disabled`        | `bool`                                         | When true, interaction is disabled.                                     |
+| Prop              | Type                                           | Description                                                         |
+| ----------------- | ---------------------------------------------- | ------------------------------------------------------------------- |
+| `checked`         | `Option<bool>`                                 | Controlled checked state. When `Some`, the component is controlled. |
+| `default_checked` | `bool`                                         | Default checked state for uncontrolled mode.                        |
+| `animation`       | `Animation`                                    | The animation style for the swap transition.                        |
+| `on_change`       | `Option<Callback<dyn Fn(bool) + Send + Sync>>` | Fires when user intent requests a new checked value.                |
+| `disabled`        | `bool`                                         | When true, interaction is disabled.                                 |
 
 **`Animation` enum:**
 
@@ -508,9 +529,9 @@ pub enum Animation {
 
 **Rendering behavior:**
 
-- Only one of `SwapOn` or `SwapOff` is rendered in the DOM at any time. The inactive slot is not present in the DOM (unlike a visibility toggle which hides both).
-- When `animation` is not `None`, the outgoing slot exits via `Presence` and the incoming slot enters via `Presence`, using CSS classes derived from the `Animation` variant.
-- The `on_change` callback fires after the transition animation completes (or immediately if `animation` is `None`).
+- The agnostic core exposes both `OnContent` and `OffContent` attributes and marks the inactive slot with `hidden` and `aria-hidden="true"`.
+- Adapter render paths SHOULD unmount inactive content when no exit animation is running, and MAY keep the outgoing slot mounted while a `Presence` exit animation completes.
+- The agnostic core emits the `on_change` pending effect for the requested checked value. Adapter animation wiring owns any Presence cleanup and render timing.
 
 ## 7. Library Parity
 

@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/utility/swap.rs
+expression: "snapshot_attrs(&off.connect(&|_| {}).off_content_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "off-content",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "swap",
+            ),
+        ),
+    ],
+    styles: [],
+}
