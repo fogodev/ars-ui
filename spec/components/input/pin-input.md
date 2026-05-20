@@ -65,8 +65,6 @@ pub enum Event {
     Paste(String),
     /// All cells were cleared.
     Clear,
-    /// Pin entry is complete.
-    Complete(String),
     /// Focus the next cell.
     FocusNext,
     /// Focus the previous cell.
@@ -179,7 +177,11 @@ pub struct Props {
     /// When true, automatically fires `on_value_complete` when all digits are entered.
     pub auto_submit: bool,
     /// Callback fired when all slots are filled.
-    pub on_value_complete: Option<Callback<dyn Fn(&str) + Send + Sync>>,
+    ///
+    /// The argument is the joined cell values. `String` (not `&str`) is used
+    /// because the workspace `Callback<dyn Fn(Args) -> Out + Send + Sync>`
+    /// requires `Args: 'static`, which a borrowed `&str` cannot satisfy.
+    pub on_value_complete: Option<Callback<dyn Fn(String) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -287,7 +289,7 @@ impl ars_core::Machine for Machine {
         if ctx.disabled {
             match event {
                 Event::InputChar { .. } | Event::DeleteChar { .. }
-                | Event::Paste(_) | Event::Clear | Event::Complete(_) => return None,
+                | Event::Paste(_) | Event::Clear => return None,
                 _ => {}
             }
         }
@@ -763,12 +765,12 @@ PinInput
 
 ### 6.3 Events
 
-| Callback      | ars-ui                                   | Ark UI               | Radix UI             | Notes                                |
-| ------------- | ---------------------------------------- | -------------------- | -------------------- | ------------------------------------ |
-| Value changed | `InputChar`/`DeleteChar`                 | `onValueChange`      | `onValueChange`      | Full parity                          |
-| Completed     | `Complete(String)` / `on_value_complete` | `onValueComplete`    | `onAutoSubmit`       | Full parity                          |
-| Invalid input | via `Mode` filtering                     | `onValueInvalid`     | --                   | Ark parity (ars-ui silently rejects) |
-| Paste         | `Paste(String)`                          | (handled internally) | (handled internally) | Full parity                          |
+| Callback      | ars-ui                           | Ark UI               | Radix UI             | Notes                                                                 |
+| ------------- | -------------------------------- | -------------------- | -------------------- | --------------------------------------------------------------------- |
+| Value changed | `InputChar`/`DeleteChar`         | `onValueChange`      | `onValueChange`      | Full parity                                                           |
+| Completed     | `Effect::ValueComplete` callback | `onValueComplete`    | `onAutoSubmit`       | The machine fires `Effect::ValueComplete` when `auto_submit` is true. |
+| Invalid input | via `Mode` filtering             | `onValueInvalid`     | --                   | Ark parity (ars-ui silently rejects)                                  |
+| Paste         | `Paste(String)`                  | (handled internally) | (handled internally) | Full parity                                                           |
 
 **Gaps:** None.
 

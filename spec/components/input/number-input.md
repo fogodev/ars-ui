@@ -74,19 +74,16 @@ pub enum Event {
 ### 1.3 Context
 
 ```rust
-/// Fine-grained formatting options for NumberInput display value.
-pub struct FormatOptions {
-    /// Minimum fraction digits to display. Default: 0.
-    pub minimum_fraction_digits: Option<u8>,
-    /// Maximum fraction digits to display. Default: locale-dependent.
-    pub maximum_fraction_digits: Option<u8>,
-    /// Whether to use grouping separators (e.g., 1,000). Default: true.
-    pub use_grouping: Option<bool>,
-    /// Currency code (ISO 4217) if formatting as currency. e.g., "USD".
-    pub currency: Option<String>,
-    /// Currency display style: "symbol" ($), "code" (USD), "name" (US Dollar).
-    pub currency_display: Option<String>,
-}
+/// Locale-aware formatting and parsing options.
+///
+/// NumberInput unifies on the workspace-wide `ars_i18n::number::FormatOptions`
+/// (see `crates/ars-i18n/src/number/mod.rs`) so all locale-aware number
+/// formatting and parsing flow through a single source of truth — `Style`
+/// (Decimal/Percent/Currency/Unit), `min_integer_digits`, `min_fraction_digits`,
+/// `max_fraction_digits`, `use_grouping`, `sign_display`, `rounding_mode`.
+/// Currency formatting is expressed via `Style::Currency(CurrencyCode)` instead
+/// of separate `currency` + `currency_display` fields.
+pub type FormatOptions = ars_i18n::number::FormatOptions;
 
 /// The context of the NumberInput component.
 #[derive(Clone, Debug, PartialEq)]
