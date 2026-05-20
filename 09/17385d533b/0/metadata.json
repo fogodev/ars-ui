@@ -1,0 +1,100 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "0917385d533b",
+  "session_id": "b939c529-fda9-4daf-8309-cf7be7c57583",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-20T17:27:15.881411Z",
+  "branch": "t3code/e1654fe1",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/input/pin_input/mod.rs",
+    "crates/ars-components/src/input/search_input/mod.rs",
+    "crates/ars-components/src/input/number_input/mod.rs",
+    "crates/ars-components/src/input/password_input/mod.rs",
+    "spec/components/input/pin-input.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "be886b8c3b22",
+  "checkpoint_transcript_start": 1167,
+  "transcript_lines_at_start": 1167,
+  "token_usage": {
+    "input_tokens": 46,
+    "cache_creation_tokens": 609553,
+    "cache_read_tokens": 21762043,
+    "output_tokens": 20138,
+    "api_call_count": 36
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "summary": {
+    "intent": "Fix 8 code review findings (2 P1, 6 P2) from a Codex review pass on input components in the ars-ui codebase.",
+    "outcome": "All 8 fixes implemented across PinInput, SearchInput, NumberInput, and PasswordInput components; 7 new tests added; all 1966 tests pass; snapshots updated; commit pushed.",
+    "learnings": {
+      "repo": [
+        "PinInput uses a hidden input for form submission; native `required` on the hidden input is ineffective for validation — `aria-required` must be set on each visible cell input instead.",
+        "The codebase uses `sync_controlled` (not just `set`) to properly handle controlled value paths in PinInput SetProps.",
+        "SearchInput has a CancelDebounce message that must be explicitly emitted; it was previously a no-op.",
+        "The project uses xci-fast as a pre-push gate with 10 checks; all must be green before pushing.",
+        "Snapshot tests capture attribute presence (e.g., Required boolean) and need to be accepted after intentional changes."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/input/pin_input/mod.rs",
+          "finding": "SetProps must call sync_controlled (not just set) to keep controlled value in sync on resize; focused_index must be nulled out when it falls out of range after length shrink."
+        },
+        {
+          "path": "crates/ars-components/src/input/pin_input/mod.rs",
+          "finding": "required attribute should be on cell inputs as aria-required, not on the hidden input, because hidden inputs are skipped by native browser validation."
+        },
+        {
+          "path": "crates/ars-components/src/input/search_input/mod.rs",
+          "finding": "CancelDebounce must emit cancel_effect; on_props_changed must emit CancelDebounce when the debounce prop changes to cancel any active timer."
+        },
+        {
+          "path": "crates/ars-components/src/input/number_input/mod.rs",
+          "finding": "Change handler must guard with is_finite() to reject NaN and Inf values; native required attr must be set alongside aria-required."
+        },
+        {
+          "path": "crates/ars-components/src/input/password_input/mod.rs",
+          "finding": "Native required attribute was missing from the input element; must be set alongside aria-required."
+        }
+      ],
+      "workflow": [
+        "Poll script correctly detected review completion and wrote verdict, but the completion notification to the assistant was silently dropped — a known best-effort delivery limitation of the polling skill.",
+        "Snapshots should be verified for scope (only expected changes) before accepting, to catch unintended regressions.",
+        "Batching related fixes by component (then running a single full test pass) is more efficient than test-after-each-fix."
+      ]
+    },
+    "friction": [
+      "Poll script notification delivery is best-effort and silently dropped the completion event, requiring the user to manually flag that reviews were ready.",
+      "Required attribute handling differs between visible and hidden inputs, requiring separate logic paths that are non-obvious."
+    ],
+    "open_items": [
+      "Spec documentation was updated for PinInput only; SearchInput, NumberInput, and PasswordInput spec files may also need updates to document the required attribute and debounce cancellation behavior changes.",
+      "The polling/notification reliability issue was not fixed — it remains a known best-effort gap in the review workflow."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-20T17:26:55.095794Z",
+    "agent_lines": 196,
+    "agent_removed": 13,
+    "human_added": 12,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 208,
+    "total_lines_changed": 227,
+    "agent_percentage": 92.07048458149781,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}

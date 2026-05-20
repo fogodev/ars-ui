@@ -1,0 +1,11 @@
+<task-notification>
+<task-id>b6cecigpr</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson--t3-worktrees-ars-ui-t3code-e1654fe1/94dde86e-a074-44ee-98d9-95b190d89e51/tasks/b6cecigpr.output</output-file>
+<status>completed</status>
+<summary>Background command "Resume poll loop for next Codex pass" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+You have new reviews already, seems that you poll is broken
