@@ -955,8 +955,15 @@ impl Api<'_> {
             );
 
         if let Some(value) = self.ctx.value.get() {
-            attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), value.to_string());
+            // The visible `value` attribute carries the raw text the
+            // user typed (so mid-typing edits are not lost). The ARIA
+            // `aria-valuenow` MUST stay inside `[aria-valuemin,
+            // aria-valuemax]` to satisfy the spinbutton contract — a
+            // user typing `999` with `max=100` must not expose
+            // `aria-valuenow="999"` to assistive tech.
             attrs.set(HtmlAttr::Value, value.to_string());
+            let bounded = clamp(*value, self.ctx.min, self.ctx.max);
+            attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), bounded.to_string());
         }
 
         if self.ctx.min.is_finite() {
@@ -1083,8 +1090,18 @@ impl Api<'_> {
     /// Handles normalized keydown data on the input element.
     ///
     /// Returns `true` when the key was handled by the core machine.
+    /// In `disabled` / `readonly` modes the transition arms drop these
+    /// events, so the method also returns `false` there — otherwise
+    /// adapters would suppress native key behavior on a false positive.
     pub fn on_input_keydown(&self, data: &KeyboardEventData) -> bool {
         if data.is_composing {
+            return false;
+        }
+
+        // Arrow / Page / Home / End all hit the disabled-or-readonly
+        // guard in `transition` — short-circuit here so the return
+        // value reflects what the machine actually does.
+        if self.ctx.disabled || self.ctx.readonly {
             return false;
         }
 
@@ -1289,6 +1306,55 @@ mod tests {
         drop(svc.send(Event::Change("abc".to_string())));
 
         assert_eq!(svc.context().value.get(), &Some(7.0));
+    }
+
+    #[test]
+    fn number_input_aria_valuenow_is_clamped_when_typed_value_out_of_range() {
+        // User typing '999' into a [0, 100] spinbutton must NOT expose
+        // `aria-valuenow=999 > aria-valuemax=100`. The visible `value`
+        // attribute keeps the raw text so mid-typing edits are visible,
+        // but `aria-valuenow` is bounded.
+        let mut svc = service(bounded_props().default_value(50.0));
+
+        drop(svc.send(Event::Change("999".to_string())));
+
+        let api = svc.connect(&|_| {});
+        let attrs = api.input_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Value), Some("999"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("100"));
+    }
+
+    #[test]
+    fn number_input_keydown_returns_false_when_disabled() {
+        let svc = service(bounded_props().disabled(true));
+        let api = svc.connect(&|_| {});
+
+        for key in [
+            KeyboardKey::ArrowUp,
+            KeyboardKey::ArrowDown,
+            KeyboardKey::PageUp,
+            KeyboardKey::PageDown,
+            KeyboardKey::Home,
+            KeyboardKey::End,
+        ] {
+            let data = keyboard_event(key, false);
+            assert!(
+                !api.on_input_keydown(&data),
+                "disabled machine must not claim {key:?} as handled"
+            );
+        }
+    }
+
+    #[test]
+    fn number_input_keydown_returns_false_when_readonly() {
+        let svc = service(bounded_props().readonly(true));
+        let api = svc.connect(&|_| {});
+
+        for key in [KeyboardKey::ArrowUp, KeyboardKey::Home] {
+            let data = keyboard_event(key, false);
+            assert!(!api.on_input_keydown(&data));
+        }
     }
 
     #[test]

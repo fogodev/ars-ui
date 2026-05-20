@@ -994,12 +994,18 @@ impl ars_core::Machine for Machine {
 
         let mut events = Vec::new();
 
-        if old.value != new.value {
-            events.push(Event::SetValue(new.value.clone()));
-        }
-
+        // Order matters: SetProps MUST run before SetValue when both
+        // are emitted in the same cycle. SetValue's resize uses
+        // `ctx.length`, so if `length` and `value` change together
+        // (4-cell → 6-cell + new 6-cell value), running SetValue first
+        // would truncate the new value against the old length, then
+        // SetProps would lock in the truncated vector.
         if props_output_changed(old, new) {
             events.push(Event::SetProps);
+        }
+
+        if old.value != new.value {
+            events.push(Event::SetValue(new.value.clone()));
         }
 
         events
@@ -1378,6 +1384,11 @@ impl Api<'_> {
     /// Handles normalized keydown data on a single cell.
     ///
     /// Returns `true` when the key was handled by the core machine.
+    /// In `disabled` / `readonly` modes the destructive events
+    /// (`Backspace`, `Delete`) are dropped by the machine — so the
+    /// method also returns `false` for those keys in those modes,
+    /// otherwise adapters would suppress native key behavior on a
+    /// false positive.
     pub fn on_cell_keydown(&self, index: usize, data: &KeyboardEventData) -> bool {
         if data.is_composing {
             return false;
@@ -1407,9 +1418,21 @@ impl Api<'_> {
             // Backspace = clear current OR navigate-to-prev on empty cell.
             // Delete = clear current cell only, never navigate (so Delete
             // on an empty non-first cell is a no-op instead of erasing
-            // the previous digit).
-            KeyboardKey::Backspace => Event::DeleteChar { index },
-            KeyboardKey::Delete => Event::ClearCell { index },
+            // the previous digit). Both go through the disabled/readonly
+            // guard in `transition`, so report `false` here when the
+            // machine would drop them.
+            KeyboardKey::Backspace => {
+                if self.ctx.disabled || self.props.readonly {
+                    return false;
+                }
+                Event::DeleteChar { index }
+            }
+            KeyboardKey::Delete => {
+                if self.ctx.disabled || self.props.readonly {
+                    return false;
+                }
+                Event::ClearCell { index }
+            }
             _ => return false,
         };
 
@@ -2353,6 +2376,63 @@ mod tests {
         // Delete on an empty non-first cell must NOT erase cell 1.
         assert!(!result.context_changed);
         assert_eq!(svc.context().value.get()[0], "1");
+    }
+
+    #[test]
+    fn pin_input_keydown_returns_false_when_readonly_drops_destructive_keys() {
+        // Backspace/Delete are dropped by the readonly guard, so the
+        // method must report `false` for them — otherwise adapters
+        // would `preventDefault()` based on a falsely-reported "handled".
+        let svc = service(props().readonly(true));
+        let api = svc.connect(&|_| {});
+
+        for key in [KeyboardKey::Backspace, KeyboardKey::Delete] {
+            let data = keyboard_event(key, false);
+            assert!(
+                !api.on_cell_keydown(0, &data),
+                "readonly must not claim {key:?} as handled"
+            );
+        }
+    }
+
+    #[test]
+    fn pin_input_keydown_returns_false_when_disabled_drops_destructive_keys() {
+        let svc = service(props().disabled(true));
+        let api = svc.connect(&|_| {});
+
+        for key in [KeyboardKey::Backspace, KeyboardKey::Delete] {
+            let data = keyboard_event(key, false);
+            assert!(!api.on_cell_keydown(0, &data));
+        }
+    }
+
+    #[test]
+    fn pin_input_set_props_with_simultaneous_length_and_value_preserves_full_value() {
+        // Bug guard: when `length` and `value` both change in one
+        // set_props cycle, SetProps must run before SetValue so
+        // SetValue's resize uses the NEW length and doesn't truncate
+        // a freshly-provided larger value.
+        let mut svc =
+            service(
+                props()
+                    .length(4)
+                    .value(vec!["1".into(), "2".into(), "3".into(), "4".into()]),
+            );
+
+        // Bump length to 6 AND push a 6-cell value in the same cycle.
+        drop(svc.set_props(props().length(6).value(vec![
+            "1".into(),
+            "2".into(),
+            "3".into(),
+            "4".into(),
+            "5".into(),
+            "6".into(),
+        ])));
+
+        assert_eq!(svc.context().length, 6);
+        assert_eq!(svc.context().value.get().len(), 6);
+        assert_eq!(svc.context().value.get()[4], "5");
+        assert_eq!(svc.context().value.get()[5], "6");
     }
 
     #[test]
