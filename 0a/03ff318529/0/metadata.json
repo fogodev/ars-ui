@@ -1,0 +1,116 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "0a03ff318529",
+  "session_id": "c1afe54f-0983-4579-91b3-27bd3bf95b73",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-20T02:24:08.654613Z",
+  "branch": "t3code/49f3737d",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "412a6f60d8b8",
+  "token_usage": {
+    "input_tokens": 629,
+    "cache_creation_tokens": 6202679,
+    "cache_read_tokens": 227024132,
+    "output_tokens": 322181,
+    "api_call_count": 480
+  },
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "summary": {
+    "intent": "Implement task #286 — a framework-agnostic state machine (Table agnostic core) for the Table data-display component in the ars-ui Rust library, including spec drift fixes, full test coverage, and a mandatory Codex review loop until 👍 approval.",
+    "outcome": "Implementation completed: ~1843 LOC state machine with 133 tests and 37 snapshot fixtures. Six rounds of Codex review addressed 28 findings; all threads replied, resolved, and rebased. Final push for the last finding (SetDirection Auto resolution) was in progress at transcript end.",
+    "learnings": {
+      "repo": [
+        "Tabs (`crates/ars-components/src/navigation/tabs/`) is the canonical structural template for complex stateful components — same Machine/State/Context/Props/Api/ConnectApi layout.",
+        "`Bindable<T>::set()` on a controlled Bindable does NOT change what `get()` returns; internal state (e.g., selection_state.selected_keys) must always be re-synced from `get()` after any `sync_controlled` call.",
+        "`selection::State::toggle` requires a Collection generic that the agnostic Table core doesn't own — toggle must be computed manually via `is_selected + select/deselect`.",
+        "`Set::All` cannot be individually deselected without materialization; `AllVisible` materializes to `Multiple(ctx.rows)` on individual deselect, while `AllData` preserves `Set::All` — BulkSelection handles exclusions at adapter layer (§5.2).",
+        "Non-sortable column headers MUST omit `aria-sort` entirely per §3.4.2 — setting `aria-sort='none'` unconditionally is a spec bug (named test locks this).",
+        "`Direction::Auto` must be resolved to a concrete direction via `locale.direction()` at both `init` time and `SetDirection` time — storing Auto in ctx breaks RTL detection.",
+        "`on_props_changed` must be overridden explicitly to dispatch `SyncProps`/`SyncControlled*`/`SetDirection` events — the framework default is a no-op and prop changes won't propagate otherwise.",
+        "Spec/code drift must be resolved in the same PR per CLAUDE.md; this component had 11+ internal spec inconsistencies that were fixed alongside the code.",
+        "Proptest suites are marked `#[ignore = 'proptest — nightly extended-proptest job']` by workspace convention; they run in a separate nightly job, not normal CI.",
+        "90% line coverage is the crate-level xci-fast threshold; file-level branch coverage can dip below if crate-level passes.",
+        "The `snapshot-reviewed` label is required on PRs creating `.snap` files. Codex review is triggered via `@codex review` comment; CLAUDE.md mandates waiting for 👍 before merge.",
+        "is_sorting should be adapter-controlled via a dedicated `SetIsSorting(bool)` event rather than set implicitly inside SortColumn — SortColumn runs before async sort resolves, leaving the flag stuck."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "SetDirection arm must resolve Direction::Auto via ctx.locale.direction() before storing — auto stored in ctx silently breaks on_cell_keydown's RTL detection which checks == Direction::Rtl."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "is_row_selected must short-circuit to false for disabled keys even when selection is Set::All; all_selected/some_selected must also filter disabled_keys — otherwise disabled rows appear selected."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "SyncProps must walk column_widths and re-clamp every entry when min_column_width changes — only clamping new ColumnResize events leaves previously-written widths stale."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "Part::ColumnHeader needs a `sortable: bool` field so ConnectApi::part_attrs honors caller intent rather than hardcoding sortable=true for every column header dispatch."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "SyncControlledSortDescriptor payload must be Option<Option<SortDescriptor<String>>> — the outer None exits controlled mode entirely; Option<SortDescriptor> alone can only change the value, not toggle controlled state."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "SetRows must rebase focused_cell even when focused_row is None — focused_cell.row_index can go out of bounds after rows are removed regardless of whether focused_row was set."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "table_attrs must emit aria-multiselectable='true' when interactive && selection_mode == Multiple per ARIA grid spec."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/mod.rs",
+          "finding": "ConnectApi::part_attrs for Part::SelectAllCheckbox must build Vec<&Key> from ctx.rows — passing an empty slice always reports zero selected rows regardless of actual selection state."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/data_display.rs",
+          "finding": "Part::ColumnHeader anatomy entry requires sortable: bool field; spec_conformance test must pass sortable: false to exercise the correct non-sortable anatomy path."
+        }
+      ],
+      "workflow": [
+        "Write failing tests first (TDD red) for every Codex finding before implementing — provides regression guard and validates understanding of the bug before touching production code.",
+        "Run cargo fmt before xci-fast on every push — formatter failures block the gate and are easy to overlook after edits.",
+        "Commit before rebasing when main has advanced — commit first, then rebase, then force-push the rebased branch.",
+        "Background polling scripts in /tmp are fragile across context windows — always re-verify PR state directly with gh CLI when a poller exits with code 127.",
+        "Resolve all Codex threads (not just reply) before re-triggering with @codex review — unresolved threads from prior passes reappear in the next summary.",
+        "Post-implementation audit catches real drift even after careful spec reading — Phase 1 found 11 items, Phases 2–3 found another 5.",
+        "cargo insta test --unreferenced=reject is the correct gate for snapshot hygiene; it catches leftover .snap files from deleted tests.",
+        "Batching task tracking (one TaskCreate per Codex finding, TaskUpdate on resolution) keeps a multi-round review loop organized without polluting the main context."
+      ]
+    },
+    "friction": [
+      "API socket error ('socket connection was closed unexpectedly') interrupted plan writing mid-draft, requiring a user prompt to resume and rewrite.",
+      "Context/rate limit hit mid-session ('You've hit your limit'), requiring a second 'continue from where you left off' prompt from the user.",
+      "Background polling scripts in /tmp were wiped between turns (exit code 127) twice, requiring manual PR state re-verification and script recreation each time.",
+      "Six rounds of Codex review with 28 compounding findings — each round introduced edge cases exposed by previous fixes (e.g., AllData/AllVisible semantics changed the materialize contract, breaking round-2 toggle tests).",
+      "selection::State::toggle requires a Collection generic the agnostic Table core doesn't own — toggle had to be reimplemented manually via is_selected + select/deselect.",
+      "Clippy repeatedly flagged *id derefs, unused mut, and needless_if patterns requiring extra cleanup passes after each major edit round."
+    ],
+    "open_items": [
+      "ScrollToRow(Key) event and full Virtualizer integration are explicitly deferred — requires widening Effect from NoEffect to a typed enum and pulling in ars-collections::Virtualizer plumbing.",
+      "BulkSelection exclusion-set wrapper (§5.2) is intentionally excluded — it is adapter/application code layered on top of Set::All; the agnostic core does not model it.",
+      "on_load_more: Option<Callback<()>> callback is adapter-only and not stored in the core — adapter PRs must wire it.",
+      "The final Codex finding (T49S — SetDirection(Auto) resolution) was implemented and all 133 tests passed, but the commit/push/thread-resolve cycle was still in progress at transcript end.",
+      "File-level branch coverage on table/mod.rs sits at ~89-90% (at or just below threshold) — keyboard navigation helpers and AllData guard branches are the main uncovered paths.",
+      "PR body must include 'Closes #286' and the snapshot-reviewed label must be confirmed applied before merge — both were noted in the plan but not explicitly verified as done."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
