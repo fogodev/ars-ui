@@ -571,6 +571,15 @@ impl ars_core::Machine for Machine {
             Event::DecrementLarge => stepped_plan(ctx, ctx.large_step, false),
 
             Event::IncrementToMax => {
+                // No-op when `max` is not finite: with default props
+                // (`max = +∞`) this event would store `+inf` in
+                // ctx.value and serialize as `"inf"` into the visible
+                // `value` attribute and `aria-valuenow`, violating the
+                // spinbutton contract. Storing the bound is only safe
+                // when the bound is itself a finite number.
+                if !ctx.max.is_finite() {
+                    return None;
+                }
                 // Pass through the same clamp + round pipeline so bounds
                 // with a fractional part round consistently AND stay
                 // inside `[min, max]` afterwards. Without the second
@@ -583,6 +592,9 @@ impl ars_core::Machine for Machine {
             }
 
             Event::DecrementToMin => {
+                if !ctx.min.is_finite() {
+                    return None;
+                }
                 let target = round_and_clamp(ctx.min, ctx.min, ctx.max, ctx.precision);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.value.set(Some(target));
@@ -669,11 +681,26 @@ impl ars_core::Machine for Machine {
             Event::SyncValue(value) => {
                 let value = *value;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    if let Some(v) = value {
-                        ctx.value.set(Some(v));
-                        ctx.value.sync_controlled(Some(Some(v)));
-                    } else {
-                        ctx.value.sync_controlled(None);
+                    match value {
+                        // Reject non-finite controlled values for the
+                        // same reason `Change` rejects them: storing
+                        // `NaN`/`±Inf` produces `"NaN"`/`"inf"` in the
+                        // visible `value` attribute (`aria-valuenow` is
+                        // clamped separately in `input_attrs`), which
+                        // violates the spinbutton contract. The previous
+                        // valid value is retained; a parent passing
+                        // non-finite is treated as a no-op sync.
+                        Some(v) if v.is_finite() => {
+                            ctx.value.set(Some(v));
+                            ctx.value.sync_controlled(Some(Some(v)));
+                        }
+                        Some(_non_finite) => {
+                            // Intentionally dropped; do not write `NaN`
+                            // or `±Inf` into the controlled slot.
+                        }
+                        None => {
+                            ctx.value.sync_controlled(None);
+                        }
                     }
                 }))
             }
@@ -761,6 +788,14 @@ impl ars_core::Machine for Machine {
     }
 }
 
+/// Maximum precision honoured by [`round_to_precision`]. Caps at the f64
+/// significant-digit budget (~15–17 decimal digits); higher precisions
+/// cannot be represented anyway, and crucially this cap also prevents
+/// the `as i32` cast below from wrapping for arbitrary `u32` inputs and
+/// keeps `10.0_f64.powi(p)` finite (`powi(p > 308)` saturates to `+inf`,
+/// which would collapse the rounding math).
+const MAX_PRECISION: u32 = 15;
+
 /// Round-half-up: ties move away from zero.
 ///
 /// Banker's rounding (`f64::round_ties_even`) is unsuitable for interactive UI
@@ -770,6 +805,11 @@ fn round_to_precision(value: f64, precision: Option<u32>) -> f64 {
     let Some(p) = precision else {
         return value;
     };
+
+    // Cap precision before casting to i32: large `u32` values would
+    // wrap negative through `as i32`, and `10.0_f64.powi(p)` saturates
+    // to `+inf` for any `p > 308`. Both cases poison the rounding math.
+    let p = p.min(MAX_PRECISION);
 
     let factor = 10_f64.powi(p as i32);
 
@@ -1607,6 +1647,88 @@ mod tests {
         assert!((svc.context().step - 5.0).abs() < f64::EPSILON);
         assert_eq!(svc.context().precision, Some(2));
         assert!(svc.context().disabled);
+    }
+
+    #[test]
+    fn number_input_increment_to_max_no_op_when_max_infinite() {
+        // Default props: max = +∞. IncrementToMax used to write +inf
+        // into ctx.value, producing `"inf"` in the visible value and
+        // `aria-valuenow`. The arm must no-op when max is not finite.
+        let mut svc = service(props().default_value(5.0));
+
+        let result = svc.send(Event::IncrementToMax);
+
+        assert!(!result.context_changed);
+        assert_eq!(svc.context().value.get(), &Some(5.0));
+    }
+
+    #[test]
+    fn number_input_decrement_to_min_no_op_when_min_infinite() {
+        let mut svc = service(props().default_value(5.0));
+
+        let result = svc.send(Event::DecrementToMin);
+
+        assert!(!result.context_changed);
+        assert_eq!(svc.context().value.get(), &Some(5.0));
+    }
+
+    #[test]
+    fn number_input_increment_to_max_still_works_when_max_finite() {
+        // Sanity check: the no-op guard only kicks in for non-finite
+        // bounds; finite bounds must still jump-to-max.
+        let mut svc = service(bounded_props().default_value(5.0));
+
+        drop(svc.send(Event::IncrementToMax));
+
+        assert_eq!(svc.context().value.get(), &Some(100.0));
+    }
+
+    #[test]
+    fn number_input_sync_value_rejects_non_finite_controlled_value() {
+        // SyncValue is the controlled-prop sync entry point. NaN/Inf
+        // would serialize as `"NaN"`/`"inf"` into the visible input
+        // attribute — same defect class `Change` already guards against.
+        let mut svc = service(bounded_props().value(10.0));
+        assert_eq!(svc.context().value.get(), &Some(10.0));
+
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            drop(svc.send(Event::SyncValue(Some(bad))));
+            assert_eq!(
+                svc.context().value.get(),
+                &Some(10.0),
+                "non-finite {bad:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn number_input_sync_value_accepts_finite_value_and_drops_none() {
+        let mut svc = service(bounded_props().value(10.0));
+
+        drop(svc.send(Event::SyncValue(Some(42.0))));
+        assert_eq!(svc.context().value.get(), &Some(42.0));
+        assert!(svc.context().value.is_controlled());
+
+        drop(svc.send(Event::SyncValue(None)));
+        assert!(!svc.context().value.is_controlled());
+    }
+
+    #[test]
+    fn number_input_precision_caps_at_max_precision() {
+        // Without capping, `precision = u32::MAX` would wrap to a
+        // negative `i32` and `10.0_f64.powi(neg)` would produce a
+        // tiny fraction, scrambling the rounding math. Verify the
+        // cap clamps to MAX_PRECISION (~15 decimals).
+        let mut svc = service(bounded_props().precision(u32::MAX).default_value(0.0));
+
+        drop(svc.send(Event::SetValue(1.5)));
+
+        // Should still produce a finite, sensible result close to 1.5
+        // (1.5 itself if precision is capped where it can preserve
+        // the value, or a small rounding artefact).
+        let value = svc.context().value.get().expect("value set");
+        assert!(value.is_finite(), "value {value} must be finite");
+        assert!((value - 1.5).abs() < 1.0, "value {value} must be near 1.5");
     }
 
     #[test]
