@@ -285,6 +285,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Role, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Pressed), if self.is_on() { "true" } else { "false" });
         attrs.set(HtmlAttr::TabIndex, "0");
@@ -301,21 +302,14 @@ impl<'a> Api<'a> {
             attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
         }
 
-        // Apply accessible label. When Props::label is set, use it as a stable
-        // label. Otherwise, fall back to the state-specific Messages label so
-        // screen readers announce whether the swap is currently on or off.
-        if let Some(label) = &self.props.label {
-            if !label.is_empty() {
-                attrs.set(HtmlAttr::Aria(AriaAttr::Label), label.as_str());
-            }
-        } else {
-            let label = if self.is_on() {
-                (self.ctx.messages.on_label)(&self.ctx.locale)
-            } else {
-                (self.ctx.messages.off_label)(&self.ctx.locale)
-            };
-            attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
-        }
+        // Apply a stable accessible label. `aria-pressed` communicates state.
+        let label = self
+            .props
+            .label
+            .as_deref()
+            .filter(|label| !label.is_empty())
+            .map_or_else(|| (self.ctx.messages.label)(&self.ctx.locale), ToOwned::to_owned);
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
 
         attrs
     }
@@ -349,10 +343,19 @@ impl<'a> Api<'a> {
     }
 
     /// Handle keydown events on the root element.
-    pub fn on_keydown(&self, data: &KeyboardEventData) {
+    ///
+    /// Returns `true` when adapters should prevent the native synthesized click.
+    pub fn on_keydown(&self, data: &KeyboardEventData) -> bool {
+        if data.repeat {
+            return false;
+        }
+
         match data.key {
-            KeyboardKey::Enter | KeyboardKey::Space => (self.send)(Event::Toggle),
-            _ => {}
+            KeyboardKey::Enter | KeyboardKey::Space => {
+                (self.send)(Event::Toggle);
+                true
+            }
+            _ => false,
         }
     }
 
@@ -408,7 +411,8 @@ Swap
   focus was received via keyboard.
 - **Labelling**: Consumers should provide an accessible label via `aria-label` or
   `aria-labelledby` on the root element describing what the swap controls (e.g.,
-  "Toggle dark mode").
+  "Toggle dark mode"). The accessible name must remain stable across pressed states;
+  `aria-pressed` communicates the current on/off state.
 - Swap MUST meet the minimum 44x44 CSS pixel touch target size (see foundation/03-accessibility.md §7.1.1).
 
 #### 3.1.1 Forced Colors Mode
@@ -430,7 +434,9 @@ In `@media (forced-colors: active)`, custom colors are stripped. The on/off stat
 | ----------------- | ----------------- |
 | `Enter` / `Space` | Toggle the state. |
 
-This matches the WAI-ARIA button pattern.
+Repeated keydown events MUST be ignored. When the typed keydown handler returns
+`true`, adapters MUST prevent the browser default so native button roots do not
+also synthesize a click for the same activation.
 
 ## 4. Internationalization
 
@@ -439,24 +445,25 @@ This matches the WAI-ARIA button pattern.
 ```rust
 /// The messages for the `Swap` component.
 ///
-/// `on_label` and `off_label` serve two purposes:
-/// 1. When `Props::label` is `None`, they are used as the root element's `aria-label`,
-///    toggling based on the current state so screen readers announce the active state.
-/// 2. Adapters may also render them as optional VisuallyHidden content inside
-///    the on/off content slots for additional state-specific announcements.
+/// `label` is the stable root accessible-name fallback when `Props::label` is
+/// `None`. `on_label` and `off_label` are state-specific messages that adapters
+/// may render as optional visually hidden content inside the on/off content slots.
 #[derive(Clone, Debug)]
 pub struct Messages {
+    /// Stable fallback label for the root control.
+    pub label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+
     /// State-specific label for the "on" state (e.g., "Dark mode enabled").
-    /// Used as `aria-label` fallback on root when `Props::label` is `None`.
     pub on_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+
     /// State-specific label for the "off" state (e.g., "Light mode enabled").
-    /// Used as `aria-label` fallback on root when `Props::label` is `None`.
     pub off_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
 }
 
 impl Default for Messages {
     fn default() -> Self {
         Self {
+            label: MessageFn::static_str("Toggle"),
             on_label: MessageFn::static_str("On"),
             off_label: MessageFn::static_str("Off"),
         }

@@ -33,7 +33,7 @@ AttrMap {
                 Label,
             ),
             String(
-                "Off",
+                "Toggle",
             ),
         ),
         (
@@ -60,6 +60,12 @@ AttrMap {
             TabIndex,
             String(
                 "0",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
             ),
         ),
     ],

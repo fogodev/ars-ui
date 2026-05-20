@@ -192,6 +192,9 @@ impl Props {
 /// The messages for the `Swap` component.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
+    /// Stable fallback accessible label for the root control.
+    pub label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+
     /// State-specific label for the on state.
     pub on_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
 
@@ -202,6 +205,7 @@ pub struct Messages {
 impl Default for Messages {
     fn default() -> Self {
         Self {
+            label: MessageFn::static_str("Toggle"),
             on_label: MessageFn::static_str("On"),
             off_label: MessageFn::static_str("Off"),
         }
@@ -375,6 +379,7 @@ impl Api<'_> {
             .set(HtmlAttr::Id, self.ctx.ids.id())
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
+            .set(HtmlAttr::Type, "button")
             .set(HtmlAttr::Role, "button")
             .set(HtmlAttr::Aria(AriaAttr::Pressed), self.aria_pressed())
             .set(HtmlAttr::TabIndex, "0")
@@ -390,13 +395,13 @@ impl Api<'_> {
             attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
         }
 
-        if let Some(label) = &self.props.label {
-            if !label.is_empty() {
-                attrs.set(HtmlAttr::Aria(AriaAttr::Label), label.clone());
-            }
-        } else {
-            attrs.set(HtmlAttr::Aria(AriaAttr::Label), self.current_label());
-        }
+        let label = self
+            .props
+            .label
+            .as_deref()
+            .filter(|label| !label.is_empty())
+            .map_or_else(|| self.control_label(), ToOwned::to_owned);
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
 
         attrs
     }
@@ -451,9 +456,19 @@ impl Api<'_> {
     }
 
     /// Handles keyboard activation for the root.
-    pub fn on_keydown(&self, data: &KeyboardEventData) {
+    ///
+    /// Returns `true` when the key was handled so adapters can prevent the
+    /// native synthesized click for button roots.
+    pub fn on_keydown(&self, data: &KeyboardEventData) -> bool {
+        if data.repeat {
+            return false;
+        }
+
         if matches!(data.key, KeyboardKey::Enter | KeyboardKey::Space) {
             (self.send)(Event::Toggle);
+            true
+        } else {
+            false
         }
     }
 
@@ -465,12 +480,8 @@ impl Api<'_> {
         if self.is_on() { "true" } else { "false" }
     }
 
-    fn current_label(&self) -> String {
-        if self.is_on() {
-            (self.ctx.messages.on_label)(&self.ctx.locale)
-        } else {
-            (self.ctx.messages.off_label)(&self.ctx.locale)
-        }
+    fn control_label(&self) -> String {
+        (self.ctx.messages.label)(&self.ctx.locale)
     }
 }
 
@@ -564,6 +575,13 @@ mod tests {
             meta_key: false,
             repeat: false,
             is_composing: false,
+        }
+    }
+
+    fn repeated_key_data(key: KeyboardKey) -> KeyboardEventData {
+        KeyboardEventData {
+            repeat: true,
+            ..key_data(key)
         }
     }
 
@@ -781,6 +799,16 @@ mod tests {
     }
 
     #[test]
+    fn swap_default_messages_expose_stable_and_state_specific_labels() {
+        let messages = Messages::default();
+        let locale = Locale::parse("en-US").expect("en-US must parse");
+
+        assert_eq!((messages.label)(&locale), "Toggle");
+        assert_eq!((messages.on_label)(&locale), "On");
+        assert_eq!((messages.off_label)(&locale), "Off");
+    }
+
+    #[test]
     fn swap_part_attrs_dispatches_all_parts() {
         let service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
 
@@ -829,11 +857,29 @@ mod tests {
 
         let api = service.connect(&send);
 
-        api.on_keydown(&key_data(KeyboardKey::Enter));
-        api.on_keydown(&key_data(KeyboardKey::Space));
-        api.on_keydown(&key_data(KeyboardKey::Escape));
+        assert!(api.on_keydown(&key_data(KeyboardKey::Enter)));
+        assert!(api.on_keydown(&key_data(KeyboardKey::Space)));
+        assert!(!api.on_keydown(&key_data(KeyboardKey::Escape)));
+        assert!(!api.on_keydown(&repeated_key_data(KeyboardKey::Space)));
 
         assert_eq!(*sent.lock().unwrap(), vec![Event::Toggle, Event::Toggle]);
+    }
+
+    #[test]
+    fn swap_keyboard_handler_reports_handled_activation_for_default_prevention() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let captured_sent = Arc::clone(&sent);
+        let send = move |event| {
+            captured_sent.lock().unwrap().push(event);
+        };
+
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        let api = service.connect(&send);
+
+        assert!(api.on_keydown(&key_data(KeyboardKey::Space)));
+
+        assert_eq!(*sent.lock().unwrap(), vec![Event::Toggle]);
     }
 
     #[test]
@@ -850,8 +896,54 @@ mod tests {
         assert_eq!(attrs.get(&HtmlAttr::Data("ars-state")), Some("off"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Pressed)), Some("false"));
         assert_eq!(attrs.get(&HtmlAttr::TabIndex), Some("0"));
+        assert_eq!(attrs.get(&HtmlAttr::Type), Some("button"));
         assert_eq!(attrs.get(&HtmlAttr::Role), Some("button"));
-        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Label)), Some("Off"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Label)), Some("Toggle"));
+    }
+
+    #[test]
+    fn swap_fallback_accessible_label_stays_stable_across_pressed_state() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        let off_label = service
+            .connect(&|_| {})
+            .root_attrs()
+            .get(&HtmlAttr::Aria(AriaAttr::Label))
+            .map(str::to_owned);
+
+        drop(service.send(Event::Toggle));
+
+        let on_label = service
+            .connect(&|_| {})
+            .root_attrs()
+            .get(&HtmlAttr::Aria(AriaAttr::Label))
+            .map(str::to_owned);
+
+        assert_eq!(off_label.as_deref(), Some("Toggle"));
+        assert_eq!(on_label.as_deref(), Some("Toggle"));
+    }
+
+    #[test]
+    fn swap_empty_prop_label_uses_custom_message_fallback() {
+        let service = Service::<Machine>::new(
+            Props {
+                label: Some(String::new()),
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages {
+                label: MessageFn::static_str("Swap theme"),
+                ..Messages::default()
+            },
+        );
+
+        let attrs = service.connect(&|_| {}).root_attrs();
+
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::Label)),
+            Some("Swap theme")
+        );
     }
 
     #[test]
