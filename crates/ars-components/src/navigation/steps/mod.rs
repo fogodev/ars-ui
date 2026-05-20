@@ -430,21 +430,18 @@ impl ars_core::Machine for Machine {
 
                 if next >= ctx.count.get() {
                     return Some(
-                        TransitionPlan::context_only(move |ctx: &mut Context| {
-                            if let Some(status) = ctx.statuses.get_mut(current as usize) {
-                                *status = Status::Complete;
-                            }
-                        })
-                        .with_effect(PendingEffect::new(
-                            Effect::Complete,
-                            |_ctx: &Context, props: &Props, _send| {
-                                if let Some(callback) = &props.on_complete {
-                                    (callback)();
-                                }
+                        TransitionPlan::context_only(|_ctx: &mut Context| {}).with_effect(
+                            PendingEffect::new(
+                                Effect::Complete,
+                                |_ctx: &Context, props: &Props, _send| {
+                                    if let Some(callback) = &props.on_complete {
+                                        (callback)();
+                                    }
 
-                                ars_core::no_cleanup()
-                            },
-                        )),
+                                    ars_core::no_cleanup()
+                                },
+                            ),
+                        ),
                     );
                 }
 
@@ -462,7 +459,7 @@ impl ars_core::Machine for Machine {
             Event::CompleteStep(step) => {
                 let step = *step;
 
-                if step >= ctx.count.get() {
+                if step >= ctx.count.get() || step == *ctx.step.get() {
                     return None;
                 }
 
@@ -476,19 +473,24 @@ impl ars_core::Machine for Machine {
                 let step = *step;
                 let status = *status;
 
-                if step >= ctx.count.get() {
+                if step >= ctx.count.get()
+                    || (status == Status::Current && ctx.step.is_controlled())
+                    || (status != Status::Current && step == *ctx.step.get())
+                {
                     return None;
                 }
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    if let Some(slot) = ctx.statuses.get_mut(step as usize) {
-                        *slot = status;
-                    }
-
                     if status == Status::Current {
+                        if let Some(slot) = ctx.statuses.get_mut(step as usize) {
+                            *slot = status;
+                        }
+
                         ctx.step.set(step);
 
                         normalize_current_status(&mut ctx.statuses, step);
+                    } else if let Some(slot) = ctx.statuses.get_mut(step as usize) {
+                        *slot = status;
                     }
                 }))
             }
@@ -893,8 +895,14 @@ fn step_change_plan(ctx: &Context, props: &Props, target: u32) -> Option<Transit
         return None;
     }
 
+    let controlled = ctx.step.is_controlled();
+
     Some(
         TransitionPlan::context_only(move |ctx: &mut Context| {
+            if controlled {
+                return;
+            }
+
             if matches!(target.cmp(&current), Ordering::Greater)
                 && let Some(status) = ctx.statuses.get_mut(current as usize)
             {
@@ -1055,6 +1063,30 @@ mod tests {
     }
 
     #[test]
+    fn controlled_navigation_keeps_statuses_aligned_until_prop_sync() {
+        let mut service = service(props().step(1));
+
+        drop(service.send(Event::NextStep));
+
+        assert_eq!(*service.context().step.get(), 1);
+        assert_eq!(service.context().statuses[1], Status::Current);
+        assert_eq!(
+            service
+                .context()
+                .statuses
+                .iter()
+                .filter(|status| **status == Status::Current)
+                .count(),
+            1
+        );
+
+        drop(service.set_props(props().step(2)));
+
+        assert_eq!(*service.context().step.get(), 2);
+        assert_eq!(service.context().statuses[2], Status::Current);
+    }
+
+    #[test]
     fn current_and_out_of_range_navigation_are_noops() {
         let mut service = service(props().default_step(1));
 
@@ -1100,6 +1132,45 @@ mod tests {
 
         assert_eq!(*service.context().step.get(), 3);
         assert_eq!(service.context().statuses[1], Status::Incomplete);
+        assert_eq!(service.context().statuses[3], Status::Current);
+    }
+
+    #[test]
+    fn controlled_set_status_current_keeps_statuses_aligned() {
+        let mut service = service(props().step(1));
+
+        let result = service.send(Event::SetStatus {
+            step: 3,
+            status: Status::Current,
+        });
+
+        assert!(!result.context_changed);
+        assert_eq!(*service.context().step.get(), 1);
+        assert_eq!(service.context().statuses[1], Status::Current);
+        assert_eq!(service.context().statuses[3], Status::Incomplete);
+    }
+
+    #[test]
+    fn completing_current_step_preserves_current_status() {
+        let mut service = service(props().default_step(3));
+
+        drop(service.send(Event::NextStep));
+
+        assert_eq!(*service.context().step.get(), 3);
+        assert_eq!(service.context().statuses[3], Status::Current);
+        assert_eq!(
+            service
+                .context()
+                .statuses
+                .iter()
+                .filter(|status| **status == Status::Current)
+                .count(),
+            1
+        );
+
+        drop(service.send(Event::CompleteStep(3)));
+
+        assert_eq!(*service.context().step.get(), 3);
         assert_eq!(service.context().statuses[3], Status::Current);
     }
 
